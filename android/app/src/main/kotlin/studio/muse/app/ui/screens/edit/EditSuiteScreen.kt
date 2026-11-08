@@ -126,8 +126,8 @@ fun editableTakes(takes: List<Take>): List<TakeChoice> = takes.filter { it.kind 
 fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onOpen: (String) -> Unit) {
     val c = LocalContainer.current
     val state by c.repo.state.collectAsState()
-    // "Recreate an edit" shows in demo mode only until the analysis service lands (its recipe is a stand-in for now).
-    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate.takeIf { c.repo.demo })
+    // "Recreate an edit": WS1's /v1/recreate/references (demo mode: FakeMuseApi's).
+    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate)
 }
 
 @Composable

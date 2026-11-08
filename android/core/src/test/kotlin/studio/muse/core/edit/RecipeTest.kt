@@ -5,40 +5,58 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/** WS1's `muse.recipe/1`, read from the server's own fixture (server/api/test/fixtures/recipe-v1.json, copied as a resource). */
 class RecipeTest {
-    private val json = """
-        {"version":1,"title":"Café trend","durationSec":8.0,"future":"ignored",
-         "slots":[{"startSec":0,"endSec":2.0,"shotSize":"Close-up","confidence":0.9},
-                  {"startSec":2.0,"endSec":5.0,"move":"Push in","confidence":0.5,"extra":{"x":1}},
-                  {"startSec":5.0,"endSec":8.0}],
-         "texts":[{"startSec":0,"endSec":2,"text":"POV","position":"Top"},{"startSec":1,"endSec":2}],
-         "transitions":[{"atSec":2.0,"kind":"Whip","confidence":0.8},{"atSec":5.0}],
-         "grade":{"name":"Warm film","swatches":["#1a1a1a","#f0e0c0"],"confidence":0.4},
-         "beats":{"bpm":120,"beats":[0.5,1.0,1.5,2.02,2.5,4.0],"strong":[2.02]}}
-    """.trimIndent()
+    private val fixture = RecipeTest::class.java.getResource("/recipe-v1.json")!!.readText()
 
-    @Test fun `reads the plan's fields leniently`() {
-        val r = RecipeJson.parse(json)
+    @Test fun `reads a whole reference from the server's fixture`() {
+        val ref = RecipeJson.reference(fixture)
+        assertEquals("rx_example", ref.id)
+        assertEquals("ready", ref.state)
+        val r = ref.recipe!!
+        assertEquals("Tuff edit", r.title)
+        assertEquals(4.4, r.durationSec, 1e-9)
         assertEquals(3, r.slots.size)
-        assertEquals("Push in", r.slots[1].move)
-        assertEquals(1.0, r.slots[2].confidence, 0.0) // missing → certain
-        assertEquals(1, r.texts.size) // a text without words is dropped
-        assertEquals(2, r.transitions.size); assertNull(r.transitions[1].kind) // a kind that couldn't be told stays null
-        assertEquals(listOf(2.0, 5.0), r.cuts)
-        assertEquals(120.0, r.beats!!.bpm!!, 0.0)
+        assertEquals(listOf(1.5, 2.667), r.cuts)
+        assertEquals("Close-up", r.slots[1].shotSize)
+        assertEquals("Eye level", r.slots[1].angle)
+        assertEquals("Zoom in", r.slots[1].move)
+        assertEquals("Pan", r.slots[0].move)
+        assertNull(r.slots[0].brief) // no brief yet
+        assertTrue(r.slots[1].brief!!.startsWith("She flips her hair in a studio"))
+        assertEquals(listOf("Cut", "Crossfade", "Flash"), r.transitions.map { it.kind })
+        assertEquals("TUFF", r.texts.single().text)
+        assertEquals("Lower third", r.texts.single().position)
+        assertEquals("Teal & orange", r.grade!!.name)
+        assertEquals(5, r.grade!!.swatches.size)
+        assertEquals(60.1, r.beats!!.bpm!!, 1e-9)
+        assertEquals("Original sound, 60 BPM", r.sound)
+        assertEquals("Body poses", r.gaps.single().what)
+        assertEquals("Three beats: a pan, a push-in, a still with a caption.", r.summary)
     }
 
-    @Test fun `pacing, beat sync and what to check`() {
-        val r = RecipeJson.parse(json)
-        assertEquals(8.0 / 3, r.averageShotSec, 1e-9)
-        assertEquals(15.0, r.cutsPerMinute, 1e-9)
-        assertEquals(0.5, r.cutsOnBeat()!!, 1e-9) // 2.0 is 0.02 from a beat; 5.0 is 1 s off
-        assertEquals(3, r.lowConfidence()) // the 0.5 slot, the 0.4 grade and the unknown transition
+    @Test fun `an analysis in progress, a failure, and unknown transitions`() {
+        val running = RecipeJson.reference("""{"id":"rx1","name":"Clip","state":"analyzing","progress":45,"phase":"Listening for the beat"}""")
+        assertEquals("Listening for the beat", running.phase)
+        assertNull(running.recipe)
+        val failed = RecipeJson.reference("""{"id":"rx2","name":"Clip","state":"failed","error":"The analysis didn’t finish: bad file"}""")
+        assertEquals("failed", failed.state)
+        val r = RecipeJson.parse("""{"schema":"muse.recipe/1","source":{"durationSec":4},"slots":[{"id":"s1","startSec":0,"endSec":2,"confidence":0.5},{"id":"s2","startSec":2,"endSec":4}],
+            "transitions":[{"atSec":2,"kind":"unknown","confidence":0.3}],"text":[{"id":"x1","startSec":0,"endSec":1,"words":null,"box":{"x":0,"y":0.05,"w":1,"h":0.1}}]}""")
+        assertNull(r.transitions.single().kind)
+        assertEquals("Top", r.texts.single().position)
+        assertEquals(2, r.lowConfidence()) // the 0.5 slot and the unknown transition
+    }
+
+    @Test fun `pacing, beat sync and percentages`() {
+        val r = RecipeJson.reference(fixture).recipe!!
+        assertEquals(4.4 / 3, r.averageShotSec, 1e-9)
+        assertEquals(2 * 60.0 / 4.4, r.cutsPerMinute, 1e-9)
         assertEquals("92%", RecipeConfidence.percent(.92))
         assertNull(r.copy(beats = null).cutsOnBeat())
     }
 
     @Test fun `a recipe without shots is refused`() {
-        assertTrue(runCatching { RecipeJson.parse("""{"slots":[]}""") }.isFailure)
+        assertTrue(runCatching { RecipeJson.parse("""{"schema":"muse.recipe/1","slots":[]}""") }.isFailure)
     }
 }

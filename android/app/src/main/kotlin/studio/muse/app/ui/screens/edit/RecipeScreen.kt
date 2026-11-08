@@ -46,7 +46,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import studio.muse.app.data.FakeRecipes
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.components.Bar
 import studio.muse.app.ui.components.T
@@ -60,9 +59,10 @@ import studio.muse.core.edit.RecipeConfidence
 import studio.muse.core.edit.RecipeSlot
 
 // "Recreate this edit" (plans/recreate-edit.md, APPROVED), build phase 1 on Android: pick a reference video and see its
-// recipe. The analysis is WS1's server service; until it lands the recipe comes from [FakeRecipes] and the entry shows in
-// demo mode only, so nobody sees a made-up recipe for their own video. Building your version (cast, fill, assemble) is
-// phase 2.
+// recipe. The video is uploaded to the studio (the editor's upload), WS1's server analyses it
+// (`POST /v1/recreate/references`, then `GET …/{id}` until it is ready; plans/api.md) and [RecipeJson] reads the
+// `muse.recipe/1` it returns. Demo mode runs the same flow on FakeMuseApi. Building your version (cast, fill, assemble)
+// comes next.
 
 /** Where the reference is in its analysis. */
 sealed interface RecipePhase {
@@ -75,25 +75,44 @@ sealed interface RecipePhase {
 
 data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName: String? = null)
 
-/** The screen: the picker, the (fake, for now) analysis, then the recipe. */
+/** The screen: the picker, the upload and the server's analysis, then the recipe. */
 @Composable
 fun RecipeScreen(onBack: () -> Unit) {
     val c = LocalContainer.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     var ui by remember { mutableStateOf(RecipeUi()) }
     var picked by remember { mutableStateOf<Uri?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) picked = uri }
     BackHandler(onBack = onBack)
     LaunchedEffect(picked) {
         val uri = picked ?: return@LaunchedEffect
-        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "Your reference"
-        // The steps the analysis reports (plans/recreate-edit.md §2); a stand-in until the service lands.
-        for ((i, step) in listOf("Finding the cuts", "Reading the beats", "Reading the text", "Working out each shot").withIndex()) {
-            ui = RecipeUi(RecipePhase.Analysing((i + 1) / 5f, step), name)
-            delay(600)
+        val name = c.media?.displayName(uri)?.substringBeforeLast('.')?.take(80) ?: "Your reference"
+        ui = RecipeUi(RecipePhase.Analysing(0f, "Uploading the video"), name)
+        ui = runCatching {
+            val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val f = java.io.File(context.cacheDir, "reference_${System.currentTimeMillis()}.mp4")
+                (context.contentResolver.openInputStream(uri) ?: error("Couldn't read that video")).use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+                f
+            }
+            val mime = context.contentResolver.getType(uri)?.takeIf { it.startsWith("video/") } ?: "video/mp4"
+            val uploadId = try {
+                c.repo.api.uploadEditorFile(file, mime) { p -> ui = RecipeUi(RecipePhase.Analysing(p * .2f, "Uploading the video"), name) }
+            } finally { file.delete() }
+            var ref = c.repo.api.createReference(uploadId, name)
+            while (ref.state == "analyzing") {
+                ui = RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, ref.phase?.takeIf { it != "Waiting" } ?: "Waiting for its turn"), ref.name)
+                delay(1500)
+                ref = c.repo.api.reference(ref.id)
+            }
+            val recipe = ref.recipe
+            if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe), ref.name)
+            else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish."), ref.name)
+        }.getOrElse { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't read that video · try another"), name)
         }
-        ui = RecipeUi(RecipePhase.Ready(FakeRecipes.cafeTrend()), name)
     }
-    RecipeContent(ui, onBack = onBack, onPick = { if (c.repo.demo) pick.launch("video/*") })
+    RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") })
 }
 
 /** The screen as a function of [ui] (screenshots render it). */
@@ -157,6 +176,7 @@ private fun RecipeBody(r: Recipe, name: String?, wide: Boolean, onPick: () -> Un
     // The summary: what the reference is, in one line of value pairs, and what needs a look.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         T(r.title ?: name ?: "Your reference", m.scale.title, m.t.ink, maxLines = 2)
+        r.summary?.takeIf { it != r.title }?.let { T(it, m.scale.body, m.t.ink) } // Claude's line, once it has read the contact sheet
         T(listOfNotNull(suiteTime(r.durationSec), "${r.slots.size} shots", r.beats?.bpm?.let { "${it.toInt()} BPM" }).joinToString(" · "), m.scale.body.tabular(), m.t.ink2())
         val low = r.lowConfidence()
         T(if (low == 0) "Every part was read with confidence." else "$low ${if (low == 1) "part needs" else "parts need"} a look: marked Check below.", m.scale.caption, m.t.muted)
@@ -174,6 +194,9 @@ private fun RecipeBody(r: Recipe, name: String?, wide: Boolean, onPick: () -> Un
             T(s, m.scale.body, m.t.ink)
             T("Your version is timed to its beats. Attach it with Use this sound when you post.", m.scale.caption, m.t.muted)
         }
+    }
+    if (r.gaps.isNotEmpty()) Section("Not recreated yet") {
+        r.gaps.forEach { g -> T(listOfNotNull(g.what, g.note).joinToString(": "), m.scale.body, m.t.ink2()) }
     }
     Secondary("Pick another video", onPick)
 }
