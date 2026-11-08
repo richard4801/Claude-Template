@@ -211,6 +211,13 @@ interface MuseApi {
     suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): SuiteMediaRef =
         throw ApiException("unsupported", "Uploading files needs the studio server")
 
+    // Recreate this edit (workstream 1, plans/api.md "Recreate this edit"). Defaults: a server without it.
+    /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */
+    suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference =
+        throw ApiException("not_found", "This studio server can't read edits yet")
+    /** The reference's state and step while it is analysed, and its recipe once ready. */
+    suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")
     suspend fun createSuiteLocation(req: SuiteLocationCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have locations yet")

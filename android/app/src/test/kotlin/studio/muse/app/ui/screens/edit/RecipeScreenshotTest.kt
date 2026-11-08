@@ -64,6 +64,17 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/recipe_${theme}_$state.png")
     }
 
+    @Test fun `demo mode runs the server's flow, create then the analysis steps then the recipe`() = kotlinx.coroutines.runBlocking {
+        val api = studio.muse.app.data.FakeMuseApi(kotlinx.coroutines.MainScope(), null, speed = 0.0, genDelayMs = 0)
+        var ref = api.createReference("up_1", "Café trend")
+        assertEquals("analyzing", ref.state)
+        val phases = mutableListOf<String?>()
+        while (ref.state == "analyzing") { ref = api.reference(ref.id); phases += ref.phase }
+        assertEquals("ready", ref.state)
+        assertTrue("Listening for the beat" in phases)
+        assertEquals(7, ref.recipe!!.slots.size)
+    }
+
     @Test fun `the stand-in recipe reads like the plan`() {
         val r = FakeRecipes.cafeTrend()
         assertEquals(7, r.slots.size)

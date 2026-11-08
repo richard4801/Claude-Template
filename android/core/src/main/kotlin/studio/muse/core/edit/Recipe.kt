@@ -11,10 +11,9 @@ import kotlin.math.roundToInt
 
 /*
  * "Recreate this edit" (plans/recreate-edit.md, APPROVED), build phase 1: a reference video broken into its edit recipe.
- * The fields follow the plan's list (slots with their shot brief, rig, move, speed and transform; text; transitions; the
- * grade; the beat map; the sound). WS1 owns the server's `recipe` schema; until it lands this is read leniently (unknown
- * fields ignored, missing optional ones null) so switching to the server's exact names is a mapping in [RecipeJson] only.
- * Every element carries its confidence, 0–1.
+ * [RecipeJson] reads WS1's `muse.recipe/1` (plans/api.md "Recreate this edit"; the fixture
+ * server/api/test/fixtures/recipe-v1.json) into this view model: ids become words ("cu" → "Close-up", "zoom_in" →
+ * "Zoom in"), unknown fields are ignored and missing optional ones stay null. Every element carries its confidence, 0–1.
  */
 
 /** One shot of the reference: where it sits, what it shows and how the camera moves. */
@@ -34,6 +33,8 @@ data class RecipeSlot(
     /** Zoom, shake or push in post ("Zoom 1.0 → 1.2", "Shake"); null = none. */
     val transform: String? = null,
     val confidence: Double = 1.0,
+    /** The body pose was read (keypoints only, never the reference's pixels): it guides a generated shot. */
+    val poseRead: Boolean = false,
 ) {
     val lengthSec: Double get() = (endSec - startSec).coerceAtLeast(0.0)
 }
@@ -58,6 +59,21 @@ data class RecipeTransition(val atSec: Double, val kind: String?, val confidence
 /** The grade, as the Look it becomes: a name and its palette, darkest first ("#RRGGBB"). */
 data class RecipeGrade(val name: String, val swatches: List<String> = emptyList(), val confidence: Double = 1.0)
 
+/** Something in the reference MUSE can't recreate yet. */
+data class RecipeGap(val what: String, val note: String? = null, val atSec: Double? = null)
+
+/** The analysis around a recipe (`Reference`): its state and step while it runs, its recipe once ready. */
+data class RecipeReference(
+    val id: String,
+    val name: String,
+    /** "analyzing" | "ready" | "failed" | "expired". */
+    val state: String,
+    val progress: Int = 0,
+    val phase: String? = null,
+    val error: String? = null,
+    val recipe: Recipe? = null,
+)
+
 /** The sound's beat map: tempo, every beat and the strong ones (seconds). */
 data class RecipeBeats(val bpm: Double?, val beats: List<Double> = emptyList(), val strong: List<Double> = emptyList(), val confidence: Double = 1.0)
 
@@ -72,6 +88,10 @@ data class Recipe(
     val beats: RecipeBeats? = null,
     /** The sound to attach when posting ("Use this sound"); its name when known. */
     val sound: String? = null,
+    /** Claude's one-line summary of the edit, once it has read the contact sheet. */
+    val summary: String? = null,
+    /** What MUSE can't recreate yet ("Body poses · Not read yet"). */
+    val gaps: List<RecipeGap> = emptyList(),
 ) {
     /** The cut points between shots. */
     val cuts: List<Double> get() = slots.drop(1).map { it.startSec }
@@ -102,44 +122,113 @@ object RecipeConfidence {
     fun percent(c: Double): String = "${(c.coerceIn(0.0, 1.0) * 100).roundToInt()}%"
 }
 
-/** The recipe's JSON, read leniently (see the file comment). */
+/** WS1's `muse.recipe/1` and its `Reference`, read into [Recipe] (see the file comment). */
 object RecipeJson {
+    /** A text item whose words weren't read (they stay null until OCR is approved). */
+    const val UNREAD_WORDS = "Text, words not read yet"
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parse(text: String): Recipe = parse(json.parseToJsonElement(text))
+    /** A `GET /v1/recreate/references/{id}` response (or a bare recipe, which reads as a ready reference). */
+    fun reference(text: String): RecipeReference = reference(json.parseToJsonElement(text))
 
-    fun parse(el: JsonElement): Recipe {
-        val o = el as? JsonObject ?: throw IllegalArgumentException("recipe is not an object")
-        val slots = o.arr("slots").mapNotNull { (it as? JsonObject)?.slot() }
-        require(slots.isNotEmpty()) { "recipe has no slots" }
-        return Recipe(
-            version = o.num("version")?.toInt() ?: 1,
-            title = o.str("title"),
-            durationSec = o.num("durationSec") ?: slots.maxOf { it.endSec },
-            slots = slots,
-            texts = o.arr("texts").mapNotNull { (it as? JsonObject)?.text() },
-            transitions = o.arr("transitions").mapNotNull { t ->
-                (t as? JsonObject)?.let { RecipeTransition(it.num("atSec") ?: return@mapNotNull null, it.str("kind"), it.num("confidence") ?: 1.0) }
-            },
-            grade = o.obj("grade")?.let { g -> g.str("name")?.let { RecipeGrade(it, g.arr("swatches").mapNotNull { s -> (s as? JsonPrimitive)?.content }, g.num("confidence") ?: 1.0) } },
-            beats = o.obj("beats")?.let { b -> RecipeBeats(b.num("bpm"), b.nums("beats"), b.nums("strong"), b.num("confidence") ?: 1.0) },
-            sound = o.str("sound"),
+    fun reference(el: JsonElement): RecipeReference {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("reference is not an object")
+        if (o.str("schema") != null) return RecipeReference(o.str("id") ?: "", o.str("summary") ?: "Reference", "ready", 100, recipe = parse(o))
+        val name = o.str("name") ?: "Reference"
+        return RecipeReference(
+            id = o.str("id") ?: "", name = name, state = o.str("state") ?: "analyzing", progress = o.num("progress")?.toInt() ?: 0,
+            phase = o.str("phase"), error = o.str("error"), recipe = o.obj("recipe")?.let { parse(it, name) },
         )
     }
 
-    private fun JsonObject.slot(): RecipeSlot? = RecipeSlot(
-        startSec = num("startSec") ?: return null, endSec = num("endSec") ?: return null,
-        shotSize = str("shotSize"), angle = str("angle"), brief = str("brief"), move = str("move"), speed = str("speed"), transform = str("transform"),
-        confidence = num("confidence") ?: 1.0,
-    )
+    fun parse(text: String): Recipe = parse(json.parseToJsonElement(text))
 
-    private fun JsonObject.text(): RecipeText? = RecipeText(
-        startSec = num("startSec") ?: return null, endSec = num("endSec") ?: return null, text = str("text") ?: return null,
-        position = str("position"), style = str("style"), animation = str("animation"), confidence = num("confidence") ?: 1.0,
-    )
+    fun parse(el: JsonElement, title: String? = null): Recipe {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("recipe is not an object")
+        val slots = o.arr("slots").mapNotNull { (it as? JsonObject)?.slot() }.sortedBy { it.startSec }
+        require(slots.isNotEmpty()) { "recipe has no slots" }
+        val sound = o.obj("sound")
+        return Recipe(
+            version = o.str("schema")?.substringAfterLast('/')?.toIntOrNull() ?: 1,
+            title = title ?: o.str("summary"),
+            durationSec = o.obj("source")?.num("durationSec") ?: slots.maxOf { it.endSec },
+            slots = slots,
+            texts = o.arr("text").mapNotNull { (it as? JsonObject)?.text() },
+            transitions = o.arr("transitions").mapNotNull { t ->
+                (t as? JsonObject)?.let { RecipeTransition(it.num("atSec") ?: return@mapNotNull null, transitionKind(it.str("kind")), it.num("confidence") ?: 1.0) }
+            },
+            grade = o.obj("grade")?.let { g ->
+                val sw = g.arr("swatches").mapNotNull { s -> (s as? JsonPrimitive)?.takeIf { it.isString }?.content }
+                RecipeGrade(g.obj("look")?.str("label") ?: "Its own grade", sw, g.num("confidence") ?: 1.0)
+            },
+            beats = sound?.let { b -> RecipeBeats(b.num("bpm"), b.nums("beats"), b.nums("strong"), b.num("confidence") ?: 1.0) },
+            sound = when {
+                sound != null -> "Original sound" + (sound.num("bpm")?.let { ", ${it.roundToInt()} BPM" } ?: "")
+                o.obj("source")?.bool("hasAudio") == false -> null
+                else -> null
+            },
+            summary = o.str("summary"),
+            gaps = o.arr("gaps").mapNotNull { (it as? JsonObject)?.let { g -> g.str("what")?.let { w -> RecipeGap(w, g.str("note"), g.num("atSec")) } } },
+        )
+    }
+
+    private fun JsonObject.slot(): RecipeSlot? {
+        val brief = obj("brief"); val rig = obj("rig"); val cam = obj("camera"); val speed = obj("speed")
+        val action = listOfNotNull(brief?.str("subject"), brief?.str("action")).joinToString(" ").ifBlank { null }
+        val where = brief?.str("location")?.let { "in $it" }
+        val line = listOfNotNull(action, where).joinToString(" ").ifBlank { null }?.replaceFirstChar { it.uppercase() }
+        val motion = cam?.str("motion")
+        val shake = (cam?.num("shake") ?: 0.0) > 0.15
+        return RecipeSlot(
+            startSec = num("startSec") ?: return null, endSec = num("endSec") ?: return null,
+            shotSize = (brief?.str("shotSize") ?: rig?.str("shotSize"))?.let(::shotSizeLabel),
+            angle = (brief?.str("angle") ?: rig?.str("height"))?.let(::angleLabel),
+            brief = listOfNotNull(line, brief?.str("notes")?.replaceFirstChar { it.uppercase() }).joinToString(". ").ifBlank { null },
+            move = motion?.takeIf { it != "static" && it != "shake" }?.let(::words),
+            speed = speed?.str("ramp")?.takeIf { it != "none" }?.let { when (it) { "speed_up" -> "Speeds up"; "slow_down" -> "Slows down"; "freeze" -> "Freeze"; else -> "Speed ramp" } },
+            transform = if (shake || motion == "shake") "Shake" else null,
+            confidence = num("confidence") ?: 1.0,
+            poseRead = obj("pose")?.str("status") == "done",
+        )
+    }
+
+    private fun JsonObject.text(): RecipeText? {
+        val box = obj("box")
+        val cy = box?.let { (it.num("y") ?: 0.0) + (it.num("h") ?: 0.0) / 2 }
+        val font = when (str("fontId")) { "serif" -> "Serif"; "rounded" -> "Rounded sans"; "condensed" -> "Condensed sans"; "mono" -> "Monospaced"; "marker" -> "Marker"; null -> null; else -> "Sans" }
+        val anim = listOfNotNull(str("animIn")?.takeIf { it != "cut" }?.let { words(it) + " in" }, str("animOut")?.takeIf { it != "cut" }?.let { words(it) + " out" }).joinToString(", ").ifBlank { null }
+        return RecipeText(
+            startSec = num("startSec") ?: return null, endSec = num("endSec") ?: return null,
+            // Words stay null until OCR is approved (Claude reads them from the contact sheet).
+            text = str("words") ?: UNREAD_WORDS,
+            position = cy?.let { if (it < .34) "Top" else if (it < .62) "Middle" else "Lower third" },
+            style = listOfNotNull(font, str("color")?.let(::colorName)).joinToString(", ").ifBlank { null },
+            animation = anim,
+            confidence = num("confidence") ?: 1.0,
+        )
+    }
+
+    /** `cut`… → "Cut"; `unknown` → null (flagged). */
+    private fun transitionKind(k: String?): String? = when (k) { null, "unknown" -> null; "crossfade" -> "Crossfade"; else -> words(k) }
+
+    private fun shotSizeLabel(id: String): String = when (id) {
+        "ecu" -> "Extreme close-up"; "cu" -> "Close-up"; "mcu" -> "Medium close-up"; "ms", "medium", "mid" -> "Medium"
+        "mws", "cowboy", "mls" -> "Medium wide"; "ws", "wide", "ls", "full" -> "Wide"; "ews", "els" -> "Extreme wide"; else -> words(id)
+    }
+
+    private fun angleLabel(id: String): String = when (id) {
+        "eye" -> "Eye level"; "low" -> "Low angle"; "high" -> "High angle"; "overhead", "top" -> "Overhead"; "ground" -> "Ground level"
+        "dutch" -> "Dutch angle"; else -> words(id)
+    }
+
+    private fun colorName(hex: String): String = when (hex.uppercase()) { "#FFFFFF" -> "white"; "#000000" -> "black"; else -> hex.uppercase() }
+
+    /** `zoom_in` → "Zoom in". */
+    private fun words(id: String): String = id.replace('_', ' ').replaceFirstChar { it.uppercase() }
 
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
     private fun JsonObject.num(k: String): Double? = (this[k] as? JsonPrimitive)?.doubleOrNull
+    private fun JsonObject.bool(k: String): Boolean? = (this[k] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
     private fun JsonObject.obj(k: String): JsonObject? = this[k] as? JsonObject
     private fun JsonObject.arr(k: String): List<JsonElement> = (this[k] as? JsonArray).orEmpty()
     private fun JsonObject.nums(k: String): List<Double> = arr(k).mapNotNull { (it as? JsonPrimitive)?.doubleOrNull }
