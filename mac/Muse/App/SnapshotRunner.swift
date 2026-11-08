@@ -25,6 +25,8 @@ enum SnapshotRunner {
         var rigPanelOnScreen = false
         /// The Edit suite hides its media panel and inspector (the `_collapsed` layout shots).
         var editCollapsed = false
+        /// Recreate's cost line and its primary (window space), for the fit check (SnapshotFrame).
+        var recreateFrames: [String: CGRect] = [:]
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
@@ -144,6 +146,7 @@ enum SnapshotRunner {
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
+            await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
@@ -317,6 +320,100 @@ enum SnapshotRunner {
         store.themeID = .a
     }
 
+    // MARK: Recreate this edit
+
+    /// Recipe (shot 2 selected) and Compare (after Build) on demo mode's reference, at 1280 × 800 in the four themes
+    /// (`mac_<theme>_recreate_recipe.png`, `…_recreate_compare.png`), and the Look swatches as analysed and as shown
+    /// (`mac_recreate_swatches.png`). Fit check lines: every probed label drawn in full, and the total and Build both on
+    /// screen, side by side (owner note 2); the shown swatches 3–5, calm and ordered by tone (owner note 1).
+    private static func recreateShots(_ store: AppStore, dir: URL) async {
+        var lines: [String] = []
+        defer {
+            let f = dir.appendingPathComponent("fit-check.txt")
+            let before = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
+            try? (before + lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: f, atomically: true, encoding: .utf8)
+        }
+        guard let w = mainWindow else {
+            lines.append("CUT recreate not drawn (no window)")
+            return
+        }
+        let original = w.frame
+        func check(_ screen: String, _ theme: ThemeID, beside: Bool, primary: String = "build") {
+            w.contentView?.layoutSubtreeIfNeeded()
+            let content = w.contentView?.bounds.size ?? .zero
+            let label = "recreate_\(screen) 1280x800 \(theme.rawValue)"
+            let keys = beside ? ["cost", primary] : [primary]
+            for k in keys {
+                guard let f = state.recreateFrames[k], f.width > 0 else {
+                    lines.append("CUT \(label) \(k) not drawn")
+                    continue
+                }
+                let inside = f.minX >= 0 && f.minY >= 0 && f.maxX <= content.width + 0.5 && f.maxY <= content.height + 0.5
+                lines.append("\(inside ? "FITS" : "CUT") \(label) \(k) \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)) in \(Int(content.width))x\(Int(content.height))")
+            }
+            if beside, let c = state.recreateFrames["cost"], let b = state.recreateFrames["build"] {
+                let gap = b.minX - c.maxX
+                let sameRow = c.maxY > b.minY && c.minY < b.maxY
+                lines.append("\(gap >= 0 && gap <= 24 && sameRow ? "FITS" : "CUT") \(label) cost beside build (gap \(Int(gap)) pt)")
+            }
+            let cut = truncatedLabels()
+            if cut.isEmpty {
+                lines.append("FITS \(label) (\(fitProbes.count) labels)")
+            } else {
+                lines.append(contentsOf: cut.map { "CUT \(label) \($0)" })
+            }
+        }
+        for theme in [ThemeID.c, .a, .b, .d] {
+            NSLog("[snapshot] recreate %@", theme.rawValue)
+            store.themeID = theme
+            w.setFrame(NSRect(x: original.minX, y: original.maxY - 800, width: 1280, height: 800), display: true)
+            store.openEdit(takeId: nil)
+            store.openRecreate()
+            try? await Task.sleep(for: .seconds(1))
+            let refs = (try? await store.recreateAPI.listReferences()) ?? []
+            guard let ref = refs.first else {
+                lines.append("CUT recreate no demo reference")
+                break
+            }
+            await store.openRecreateReference(ref.id)
+            store.selectRecreateSlot(1)
+            try? await Task.sleep(for: .seconds(2))
+            check("recipe", theme, beside: true)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe.png"))
+            // The panel scrolled to the Look (owner note 1: the swatches as the Recipe shows them).
+            state.scrollTo = "recreate.look"
+            try? await Task.sleep(for: .seconds(1))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe_look.png"))
+            state.scrollTo = nil
+            await store.buildRecreate()
+            store.selectRecreateSlot(1)
+            try? await Task.sleep(for: .seconds(2))
+            check("compare", theme, beside: false, primary: "open")
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_compare.png"))
+            store.closeRecreate()
+            try? await Task.sleep(for: .seconds(0.5))
+        }
+        // The swatches (owner note 1): the analysis's palette, then the strip the Recipe shows.
+        if let ref = try? await FakeRecreateAPI().listReferences().first, let raw = ref.recipe?.grade?.swatches {
+            let soft = RecreateSwatches.soften(raw)
+            let maxSat = soft.map(RecreateSwatches.saturation).max() ?? 1
+            let lum = soft.map(RecreateSwatches.luminance)
+            let ok = (RecreateSwatches.minCount...RecreateSwatches.maxCount).contains(soft.count) && maxSat <= RecreateSwatches.maxSaturation && lum == lum.sorted()
+            lines.append("\(ok ? "FITS" : "CUT") recreate_swatches \(soft.count) swatches, max saturation \(String(format: "%.2f", maxSat)), dark to light: \(soft.joined(separator: " "))")
+            let r = ImageRenderer(content: RecreateSwatchSheet(raw: raw, soft: soft))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mac_recreate_swatches.png"))
+            }
+        } else {
+            lines.append("CUT recreate_swatches no fixture")
+        }
+        w.setFrame(original, display: true)
+        store.themeID = .a
+        store.closeRecreate()
+        try? await Task.sleep(for: .seconds(1))
+    }
+
     // MARK: Scroll check (CI): every main page and Settings pane must scroll with a real scroll event
 
     /// Writes `scroll-check.txt`: one line per page, `MOVED`, `FITS` (nothing to scroll) or `STUCK` (scrollable but a
@@ -481,4 +578,34 @@ struct SnapshotOverlay: View {
         }
     }
 
+}
+
+/// Review mode: the Look swatches as the analysis reports them and as the Recipe shows them (mac_recreate_swatches.png).
+struct RecreateSwatchSheet: View {
+    var raw: [String]
+    var soft: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            row("As analysed", raw)
+            row("As shown in the Recipe", soft)
+        }
+        .padding(24)
+        .frame(width: 640)
+        .background(Color(hex: 0xF3F0EA))
+    }
+
+    private func row(_ title: String, _ list: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: 0x23262A))
+            HStack(spacing: 0) { ForEach(list.indices, id: \.self) { i in Color(swatch: list[i]) } }
+                .frame(height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            HStack(spacing: 0) {
+                ForEach(list.indices, id: \.self) { i in
+                    Text(list[i]).font(.system(size: 11).monospacedDigit()).foregroundStyle(Color(hex: 0x5E5C57)).frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
 }

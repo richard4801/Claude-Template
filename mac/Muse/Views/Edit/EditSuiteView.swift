@@ -26,6 +26,8 @@ struct EditSuiteView: View {
                     Text("Opening the video…").font(t.body(13)).foregroundStyle(t.muted)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if store.recreate.open {
+                RecreateView()
             } else {
                 EditSuiteHome { openId = $0 }
             }
@@ -68,7 +70,10 @@ struct EditSuiteHome: View {
         let edits = takes.filter(\.isEdit)
         let renders = takes.filter { !$0.isEdit }
         Page {
-            PageHeader(eyebrow: "Edit suite", title: "Edit")
+            PageHeader(eyebrow: "Edit suite", title: "Edit") {
+                // "Recreate this edit" (plans/recreate): opens its start page; nothing is uploaded until a video is chosen.
+                SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
+            }
             if takes.isEmpty {
                 Note("Make a video in the Video suite first; its takes show up here to edit.")
                     .padding(.top, 12)

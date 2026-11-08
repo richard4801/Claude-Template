@@ -197,6 +197,7 @@ enum PhosphorMap {
         "frame-corners",
         "gauge",
         "google-logo",
+        "hammer",
         "hard-drives",
         "heart",
         "house",

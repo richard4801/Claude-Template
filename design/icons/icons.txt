@@ -261,3 +261,5 @@ magnifying-glass-minus
 magnifying-glass-plus
 lock
 lock-open
+# Recreate this edit (plans/recreate)
+hammer
