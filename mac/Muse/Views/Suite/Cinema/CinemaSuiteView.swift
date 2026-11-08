@@ -32,7 +32,6 @@ struct CinemaSuiteView: View {
     var body: some View {
         let t = shell.room()
         let s = store.suite
-        let _ = SnapshotRunner.noteSuiteBody(pickerOpen: s.picker != nil) // review mode only: did the body see the picker?
         GeometryReader { g in
             let railW: CGFloat = g.size.width >= 1150 ? 260 : 228
             HStack(spacing: 0) {
@@ -54,17 +53,10 @@ struct CinemaSuiteView: View {
         .padding([.top, .trailing, .bottom], 8)
         .environment(\.theme, t)
         .environment(\.colorScheme, .dark)
-        .overlay {
-            // Build step 3: the rig panel in the room's style (the old picker shell elsewhere).
-            if s.picker != nil {
-                CinemaRigPanel()
-                    .transition(.identity) // no fade: a quick re-open lost the insert half the time
-                    .padding([.top, .trailing, .bottom], 8)
-                    .environment(\.theme, shell.room())
-                    .environment(\.colorScheme, .dark)
-            }
-            if s.browserOpen { ToolBrowser().transition(.opacity) }
-        }
+        // The rig panel and the tool browser in their own view (CinemaOverlays), which reads the picker itself. Hung off
+        // this body they could miss an update: after Photo, Shot and the panel opened in one tick left this body stale
+        // (CI: the picker set, this body's last run saw it closed, the panel never inserted), while child views updated.
+        .overlay { CinemaOverlays(roomTheme: shell.room()) }
         .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
@@ -693,5 +685,27 @@ struct CinemaEngineList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+
+/// The rig panel and the tool browser over the room. Its own view so it re-renders whenever the picker or the browser
+/// changes, whatever else changed in the same update (see CinemaSuiteView).
+struct CinemaOverlays: View {
+    @Environment(AppStore.self) private var store
+    var roomTheme: Theme
+
+    var body: some View {
+        let open = store.suite.picker != nil
+        let _ = SnapshotRunner.noteSuiteBody(pickerOpen: open) // review mode only: did this view see the picker?
+        ZStack {
+            if open {
+                CinemaRigPanel()
+                    .padding([.top, .trailing, .bottom], 8)
+                    .environment(\.theme, roomTheme)
+                    .environment(\.colorScheme, .dark)
+            }
+            if store.suite.browserOpen { ToolBrowser().transition(.opacity) }
+        }
     }
 }
