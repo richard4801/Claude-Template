@@ -1,0 +1,3 @@
+p1080 rc=0 wall=193.6s out=[1080 1920 120] clip=5.0s gpuSecPerSec=38.72
+p2k rc=0 wall=198.8s out=[1440 2560 120] clip=5.0s gpuSecPerSec=39.76
+p4k rc=0 wall=383.6s out=[2160 3840 120] clip=5.0s gpuSecPerSec=76.72

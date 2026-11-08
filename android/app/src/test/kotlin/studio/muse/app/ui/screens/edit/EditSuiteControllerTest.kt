@@ -63,6 +63,22 @@ class EditSuiteControllerTest {
     private fun EditSuiteController.p() = project!!
 
     /** Remove background (workstream 1): an alpha matte on the clip, and tap to keep with its own price and points. */
+    @Test fun removeBackgroundWaitsWhileTheServerSaysItIsComingSoon() = runTest {
+        var runs = 0; var estimates = 0
+        val b = object : EditBackend by StubBackend() {
+            override suspend fun matteUnavailable() = "Coming soon"
+            override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> { if (kind == "matte") estimates++; return EditorEstimate(kind, 0.02) to null }
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> { runs++; return null to "no" }
+        }
+        val c = controller(b)
+        c.act(EditAction.EffectsTab("Mask")); advanceUntilIdle()
+        assertEquals("Coming soon", c.ui.value.matteOff)
+        c.act(EditAction.RemoveBackground); c.act(EditAction.TapToKeep(true)); advanceUntilIdle()
+        assertEquals(0, runs); assertEquals(0, estimates) // nothing priced, nothing run
+        assertEquals(null, c.ui.value.keep)
+        assertEquals(null, c.p().mainClips.first().alphaMatte)
+    }
+
     @Test fun removeBackgroundSetsAnAlphaMatte() = runTest {
         val arrived = ArrayList<String>()
         val b = object : EditBackend by StubBackend() {

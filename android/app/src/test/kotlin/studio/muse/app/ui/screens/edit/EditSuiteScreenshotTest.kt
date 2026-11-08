@@ -58,7 +58,9 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // inspector hidden.
                 "tablet", "tablet_captions", "tablet_portrait", "tablet_collapsed",
                 // Remove background → tap what to keep (workstream 1's tracked cut-out), phone and tablet.
-                "keep", "tablet_keep").map { arrayOf<Any>(t, it) }
+                "keep", "tablet_keep",
+                // The cut-out isn't live yet (the server's matte.available is false): "Coming soon".
+                "matte_soon").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -136,6 +138,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
             "editor", "editor_360", "tablet", "tablet_portrait" -> ui = ui.copy(selectedId = "c2")
             "tablet_captions" -> ui = ui.copy(panel = Panel.CAPTIONS, ai = mapOf("silences" to AiTask("silences", price = "Free")))
             "tablet_collapsed" -> ui = ui.copy(selectedId = "c2", inspectorHidden = true)
+            "matte_soon" -> ui = ui.copy(panel = Panel.EFFECTS, effectsTab = "Mask", selectedId = "c2", matteOff = "Coming soon")
             "keep", "tablet_keep" -> ui = ui.copy(panel = Panel.EFFECTS, effectsTab = "Mask", selectedId = "c2",
                 keep = KeepUi(listOf(KeepTap(.48, .34, 6.6), KeepTap(.52, .62, 6.6), KeepTap(.84, .5, 6.6, keep = false))),
                 ai = mapOf("matte" to AiTask("matte", price = "about $0.03"), "matte_keep" to AiTask("matte_keep", price = "about $0.04")))

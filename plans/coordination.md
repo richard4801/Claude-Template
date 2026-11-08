@@ -236,3 +236,26 @@ Known gaps (the coordinator's list; each workstream audits its area for more):
    - Then about $0.25 of calibration runs, approved as part of "I approve all".
 6. **Upscale:** an end-to-end check.
 7. **Composer bug at about 1000 px** (coordination item 8), if still open.
+
+Release 1 additions (2026-11-08):
+- **The owner said YES:** the AI Suite features from the approved plan go into the current Suite, in its style, on Mac and Android:
+  - saved rigs;
+  - Reuse settings;
+  - Vary;
+  - Use as start frame;
+  - the results feed beside the composer;
+  - compare.
+- **Also in Release 1:**
+  - the Recreate Cast step;
+  - Claude in Recreate (needs the server's "recreate" context);
+  - Android timeline track mute/hide;
+  - the Android audit fixes (Fix shot regenerates, the past references list, the analysis checklist, the real expiry, Recipes `available`, See rule, Cut silences).
+- **Out of Release 1:** the Android tablet media rail (the toolbar's Add stays) and a bundled music library (not agreed).
+
+## Real editor AI ON (2026-11-08, the owner: "Yes, switch on")
+- EDITOR_AI_PROVIDER=replicate was set on Railway after the guardrails shipped (3efe17f): kill switch, $5/day cap per studio, markup ×2, pinned versions.
+- **Who pays:**
+  - The provider is Replicate (the same account and token as the video renders), so the real cost lands on the owner's Replicate bill.
+  - Members pay from their MUSE studio balance: estimate → hold → settle at cost × 2.
+- **Calibration:** about $0.25 via WS1.
+- **To turn it off:** the owner's switch in Settings, or PATCH /v1/editor/settings {paidHelpers:"off"}. Emergency: EDITOR_AI_PROVIDER=mock plus a redeploy.

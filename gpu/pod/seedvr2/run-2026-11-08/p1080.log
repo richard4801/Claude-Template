@@ -1,0 +1,102 @@
+/workspace/SeedVR2/src/common/config.py:25: UserWarning: register_new_resolver() is deprecated and will be removed in a future release.
+Use register_resolver() instead.
+See https://github.com/hydra-ecosystem/omegaconf/issues/426 for migration instructions.
+
+  OmegaConf.register_new_resolver("eval", eval)
+📊 Initial CUDA memory: 78.67GB free / 79.18GB total
+⚠️  SeedVR2 optimizations check: SageAttention ❌ | Flash Attention ❌ | Triton ✅
+💡 Optional: pip install sageattention flash-attn
+🔧 Conv3d workaround active: PyTorch 2.11.0, cuDNN 91900 (fixing VAE 3x memory bug)
+ 
+ 
+   ███████╗███████╗███████╗██████╗ ██╗   ██╗██████╗     ██████╗       ███████╗
+   ██╔════╝██╔════╝██╔════╝██╔══██╗██║   ██║██╔══██╗    ╚════██╗      ██╔════╝
+   ███████╗█████╗  █████╗  ██║  ██║██║   ██║██████╔╝     █████╔╝      ███████╗
+   ╚════██║██╔══╝  ██╔══╝  ██║  ██║╚██╗ ██╔╝██╔══██╗    ██╔═══╝       ╚════██║
+   ███████║███████╗███████╗██████╔╝ ╚████╔╝ ██║  ██║    ███████╗  ██╗ ███████║
+   ╚══════╝╚══════╝╚══════╝╚═════╝   ╚═══╝  ╚═╝  ╚═╝    ╚══════╝  ╚═╝ ╚══════╝
+   💻 CLI · v2.5.24                           © ByteDance Seed · NumZ · AInVFX
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 
+[11:36:46.332] 🔧 Validating seedvr2_ema_3b_fp16.safetensors...
+[11:36:56.312] 🔧 Validating ema_vae_fp16.safetensors...
+[11:36:57.127] 🎬 Processing video: in.mp4
+[11:36:57.127] ℹ️   Auto-detected output format: mp4
+[11:36:57.642] 🏃 Creating new runner: DiT=seedvr2_ema_3b_fp16.safetensors, VAE=ema_vae_fp16.safetensors
+[11:36:57.695] 🚀 Creating DiT model structure on meta device
+[11:36:57.852] 🎨 Creating VAE model structure on meta device
+[11:36:58.155]  
+[11:36:58.155] 🎬 Starting upscaling generation...
+[11:36:58.155] 🎬   Input: 120 frames, 432x768px → Padded: 1088x1920px → Output: 1080x1920px (shortest edge: 1080px)
+[11:36:58.155] 🎬   Batch size: 21, Seed: 42, Channels: RGB
+[11:36:58.155]  
+[11:36:58.155]  ━━━━━━━━ Phase 1: VAE encoding ━━━━━━━━
+[11:36:58.155]  
+[11:36:58.155] 💡 Tip: For 120 frames, batch_size=117 matches video length optimally
+[11:36:58.155] 💡   Matching batch_size to shot length improves temporal coherence
+[11:36:58.155]  
+[11:36:58.155] 🎨 Materializing VAE weights to CUDA:0: /workspace/SeedVR2/models/SEEDVR2/ema_vae_fp16.safetensors
+[11:36:58.369] 🎨 Encoding batch 1/6
+[11:36:58.403] 📹   Sequence of 21 frames
+[11:37:02.376] 🎨 Encoding batch 2/6
+[11:37:02.393] 📹   Sequence of 21 frames
+[11:37:05.367] 🎨 Encoding batch 3/6
+[11:37:05.386] 📹   Sequence of 21 frames
+[11:37:08.421] 🎨 Encoding batch 4/6
+[11:37:08.465] 📹   Sequence of 21 frames
+[11:37:11.434] 🎨 Encoding batch 5/6
+[11:37:11.457] 📹   Sequence of 21 frames
+[11:37:14.430] 🎨 Encoding batch 6/6
+[11:37:14.448] 📹   Sequence of 15 frames
+[11:37:14.448] 📹   Padding batch: 2 frames added (15 → 17) to meet 4n+1 constraint
+[11:37:16.926]  
+[11:37:16.926]  ━━━━━━━━ Phase 2: DiT upscaling ━━━━━━━━
+[11:37:16.927] 🚀 Materializing DiT weights to CUDA:0: /workspace/SeedVR2/models/SEEDVR2/seedvr2_ema_3b_fp16.safetensors
+[11:37:18.261] 🎬 Upscaling batch 1/6
+EulerSampler:   0%|          | 0/1 [00:00<?, ?it/s]EulerSampler: 100%|██████████| 1/1 [00:10<00:00, 10.34s/it]EulerSampler: 100%|██████████| 1/1 [00:10<00:00, 10.34s/it]
+[11:37:28.618] 🎬 Upscaling batch 2/6
+EulerSampler:   0%|          | 0/1 [00:00<?, ?it/s]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.59s/it]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.59s/it]
+[11:37:30.209] 🎬 Upscaling batch 3/6
+EulerSampler:   0%|          | 0/1 [00:00<?, ?it/s]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.58s/it]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.58s/it]
+[11:37:31.796] 🎬 Upscaling batch 4/6
+EulerSampler:   0%|          | 0/1 [00:00<?, ?it/s]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.59s/it]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.59s/it]
+[11:37:33.394] 🎬 Upscaling batch 5/6
+EulerSampler:   0%|          | 0/1 [00:00<?, ?it/s]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.59s/it]EulerSampler: 100%|██████████| 1/1 [00:01<00:00,  1.59s/it]
+[11:37:34.987] 🎬 Upscaling batch 6/6
+EulerSampler:   0%|          | 0/1 [00:00<?, ?it/s]EulerSampler: 100%|██████████| 1/1 [00:02<00:00,  2.52s/it]EulerSampler: 100%|██████████| 1/1 [00:02<00:00,  2.52s/it]
+[11:37:41.361]  
+[11:37:41.361]  ━━━━━━━━ Phase 3: VAE decoding ━━━━━━━━
+[11:37:41.361] 🔧 Pre-allocating output tensor: 120 frames, 1080x1920px, RGB (1.39GB)
+[11:37:41.362] 🎨 Decoding batch 1/6
+[11:37:48.061] 🎨 Decoding batch 2/6
+[11:37:54.575] 🎨 Decoding batch 3/6
+[11:38:00.968] 🎨 Decoding batch 4/6
+[11:38:07.477] 🎨 Decoding batch 5/6
+[11:38:13.957] 🎨 Decoding batch 6/6
+[11:38:19.262]  
+[11:38:19.262]  ━━━━━━━━ Phase 4: Post-processing ━━━━━━━━
+[11:38:19.262] 📹 Post-processing batch 1/6
+[11:38:20.037] 📹   Applying LAB perceptual color transfer
+[11:38:20.366] 📹 Post-processing batch 2/6
+[11:38:20.899] 📹   Applying LAB perceptual color transfer
+[11:38:21.008] 📹 Post-processing batch 3/6
+[11:38:21.591] 📹   Applying LAB perceptual color transfer
+[11:38:21.700] 📹 Post-processing batch 4/6
+[11:38:22.209] 📹   Applying LAB perceptual color transfer
+[11:38:22.318] 📹 Post-processing batch 5/6
+[11:38:22.793] 📹   Applying LAB perceptual color transfer
+[11:38:22.902] 📹 Post-processing batch 6/6
+[11:38:23.301] 📹   Applying LAB perceptual color transfer
+[11:38:23.379] 🎬 Output assembled: 120 frames (122 computed with 2 padding removed), Resolution: 1080x1920px, Channels: RGB
+[11:38:26.257] 📂 Output saved to: /workspace/seedvr2-measure/out/p1080.mp4
+[11:38:26.257]  
+[11:38:26.257] ✅ All upscaling processes completed successfully in 99.93s
+[11:38:26.257] ⚡ Average FPS: 1.20 frames/sec
+[11:38:26.257] 🧹 Process 294 terminating - VRAM will be automatically freed
+[11:38:26.257]  
+[11:38:26.257]  ────────────────────────
+[11:38:26.257] 💬 Questions? Updates? Watch, star & sponsor if you can!
+[11:38:26.257] 🎬 https://www.youtube.com/@AInVFX
+[11:38:26.257] ⭐💝 https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler
+memory.used [MiB]
+0 MiB

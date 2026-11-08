@@ -78,6 +78,8 @@ interface EditBackend {
     suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?>
     /** A helper's result added an asset the device doesn't have yet (background removal's matte): fetch [url] for it. */
     fun assetArrived(assetId: String, url: String) {}
+    /** Null while background removal can run; otherwise the plain line to show instead ("Coming soon"). */
+    suspend fun matteUnavailable(): String? = null
 }
 
 /** Everything the editor can be asked to do (one sealed list, so the screen is a pure function of state + [act]). */
@@ -390,8 +392,8 @@ class EditSuiteController(
             is EditAction.SetTransform -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { withTransform(it, a.transform) } } }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
             is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
-            EditAction.RemoveBackground -> removeBackground(u, null)
-            is EditAction.TapToKeep -> {
+            EditAction.RemoveBackground -> if (u.matteOff == null) removeBackground(u, null)
+            is EditAction.TapToKeep -> if (u.matteOff == null || !a.on) {
                 if (u.playing && a.on) act(EditAction.PlayPause) // taps go on a paused frame
                 _ui.update { it.copy(keep = if (a.on) KeepUi() else null) }
             }
@@ -414,7 +416,7 @@ class EditSuiteController(
                 val tr = u.activeClip?.transitionIn
                 if (change { SuiteOps.transitionAll(it, tr) }) say(if (tr == null) "Cuts on every clip" else "Applied to all cuts")
             }
-            is EditAction.EffectsTab -> { _ui.update { it.copy(effectsTab = a.tab) }; if (a.tab == "Mask") estimate("matte") }
+            is EditAction.EffectsTab -> { _ui.update { it.copy(effectsTab = a.tab) }; if (a.tab == "Mask") matteTab() }
 
             is EditAction.Volume -> { val c = soundClip(u) ?: return; change(a.done) { p -> p.updateItem(c.id) { setVolume(it, SuiteOps.dbToGain(a.db).coerceIn(0.0, 2.0)) } } }
             is EditAction.Fades -> { val c = soundClip(u) ?: return; change(a.done) { p -> p.updateItem(c.id) { setFades(it, a.inSec, a.outSec) } } }
@@ -488,9 +490,25 @@ class EditSuiteController(
         when (panel) {
             Panel.CAPTIONS -> { if (_ui.value.captionTrack == null) estimate("captions"); estimate("cuts", silenceOnly()) }
             Panel.AUDIO -> { estimate("denoise"); if (SuiteOps.musicTrack(project ?: return) != null) estimate("beats", source = musicSource()) }
-            Panel.EFFECTS -> if (_ui.value.effectsTab == "Mask") estimate("matte")
+            Panel.EFFECTS -> if (_ui.value.effectsTab == "Mask") matteTab()
             Panel.SPEED -> _ui.update { it.copy(speedCurveTab = it.activeClip?.speedCurve != null) }
             else -> {}
+        }
+    }
+
+    private var matteChecked = false
+
+    /**
+     * The Mask tab: whether background removal can run (asked once), then its price. While the server says it can't
+     * (the cut-out is still the mock), Remove background and Tap to keep read "Coming soon" and nothing is priced.
+     */
+    private fun matteTab() {
+        if (matteChecked) { if (_ui.value.matteOff == null) estimate("matte"); return }
+        matteChecked = true
+        scope.launch {
+            val off = backend.matteUnavailable()
+            _ui.update { it.copy(matteOff = off, keep = if (off != null) null else it.keep) }
+            if (off == null) estimate("matte")
         }
     }
 
