@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -105,8 +106,9 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val wide = maxWidth >= 720.dp
                 Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = if (wide) 32.dp else 16.dp, vertical = 8.dp)
-                        .let { if (wide) it.widthIn(max = 960.dp) else it },
+                    // A readable measure on a tablet: at most 880 dp, centred.
+                    Modifier.align(Alignment.TopCenter).let { if (wide) it.widthIn(max = 880.dp) else it }.fillMaxWidth().fillMaxHeight()
+                        .verticalScroll(rememberScrollState()).padding(horizontal = if (wide) 32.dp else 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
                     when (val ph = ui.phase) {
@@ -208,7 +210,7 @@ private fun RecipeStrip(r: Recipe) {
         }
         r.slots.forEachIndexed { i, s ->
             val l = x(s.startSec) + (if (i == 0) 0f else 1.dp.toPx()); val rr = x(s.endSec) - 1.dp.toPx()
-            drawRoundRect(if (i % 2 == 0) m.t.surface2 else m.t.line, Offset(l, top), Size((rr - l).coerceAtLeast(1f), h), CornerRadius(3.dp.toPx()))
+            drawRoundRect(m.t.ink.copy(alpha = if (i % 2 == 0) .14f else .26f), Offset(l, top), Size((rr - l).coerceAtLeast(1f), h), CornerRadius(3.dp.toPx()))
             if (s.confidence < RecipeConfidence.LOW) drawRect(m.t.warn, Offset(l, size.height - 3.dp.toPx()), Size((rr - l).coerceAtLeast(1f), 3.dp.toPx()))
         }
         r.transitions.filter { it.kind != null && it.kind != "Cut" }.forEach { t ->
@@ -260,7 +262,7 @@ private fun TransitionSection(r: Recipe) = Section("Transitions") {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             T(suiteTime(t.atSec), m.scale.caption.tabular(), m.t.muted, Modifier.width(52.dp), maxLines = 1)
             T(t.kind ?: "Not recognised", m.scale.label, if (t.kind == null) m.t.muted else m.t.ink, Modifier.weight(1f), maxLines = 1)
-            Confidence(if (t.kind == null) 0.0 else t.confidence)
+            if (t.kind == null) T("Check", m.scale.caption, m.t.warn, maxLines = 1) else Confidence(t.confidence)
         }
     }
 }
