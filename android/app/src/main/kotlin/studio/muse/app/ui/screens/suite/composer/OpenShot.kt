@@ -5,7 +5,7 @@ import studio.muse.app.ui.Nav
 import studio.muse.app.ui.Routes
 
 /**
- * "Make a video" (Home, Queue, Library, a model's profile) opens the AI Suite on Shot, with that character picked when there
+ * "New shot" (Home, Queue, Library; "Shot" on a model's profile) opens the AI Suite on Shot, with that character picked when there
  * is one (owner, 2026-11-08: the Suite covers the old Source → Direct flow, as on the Mac). The prompt and chips stay;
  * a character token naming someone else gives way, as for [openPhoto].
  */

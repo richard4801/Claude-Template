@@ -146,7 +146,7 @@ fun ProfileContent(s: ProfileState, a: ProfileActions) {
             ProfileExtras(s.lora, s.connected, a.lora, a.accounts, Modifier.padding(horizontal = MuseSpace.gutter))
         }
         ActionDock {
-            PrimaryButton("Make a video", a.video, Modifier.weight(1f))
+            PrimaryButton("Shot", a.video, Modifier.weight(1f))
             SecondaryButton("Photo", a.shoot, icon = "camera")
         }
     }

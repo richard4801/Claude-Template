@@ -290,7 +290,7 @@ fun GalleryScreen() {
                 ErrorState("Can't load your renders", s.error ?: "", onAction = { vm.retry() })
             } else if (list.isEmpty()) item(key = "empty", contentType = "note") {
                 if (s.tab == "final") EmptyState("Nothing approved yet", "Approve a take you want to keep and it moves here.", "Show test renders", { vm.tab("tests") }, primary = false)
-                else EmptyState("No test renders yet", "Videos and photos you make land here first. Approve the ones you keep.", "Make a video", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) })
+                else EmptyState("No test renders yet", "Videos and photos you make land here first. Approve the ones you keep.", "New shot", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) })
             } else {
                 itemsIndexed(rows, key = { _, row -> row.first().id }, contentType = { _, _ -> "row" }) { r, row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
