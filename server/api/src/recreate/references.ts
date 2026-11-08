@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips as clipsTable, models, suiteLocations, uploads } from '../db/schema.js';
+import { clips as clipsTable, models, studioSettings, suiteLocations, uploads } from '../db/schema.js';
 import { EDITOR_LIMITS } from '../editor/service.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
@@ -29,7 +29,7 @@ import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
 import { rendersOf, type RenderState } from '../editor/renders.js';
 import type { EditProject } from '../editor/model.js';
-import { checkInfo, FALLBACK, linkError, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
+import { assertPublicHost, checkInfo, FALLBACK, linkError, linkFor, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
@@ -115,7 +115,8 @@ export type RecipeSource = { recipeId: string; slotId?: string; textId?: string;
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
 
 const CreateBody = z.union([
-  z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional() }).strict(),
+  /** `sourceUrl`: the link a device fetched this file from (the studio's link rules apply; keeps the link for caching and "Use this sound"). */
+  z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional(), sourceUrl: z.string().trim().min(8).max(500).optional() }).strict(),
   z.object({ url: z.string().trim().min(8).max(500), name: z.string().trim().max(80).optional() }).strict(),
 ]);
 const PatchBody = z.object({ keep: z.boolean().optional(), name: z.string().trim().max(80).optional() }).strict();
@@ -192,10 +193,19 @@ export class RecreateReferences {
     const info = await this.withLocal(up.storageKey, f => probe(c.FFPROBE_PATH, f)).catch(() => null);
     if (!info?.width) throw badRequest('That file isn’t a video MUSE can read');
     if (info.duration > MAX_REFERENCE_SEC + 0.5) throw badRequest(`References can be up to ${MAX_REFERENCE_SEC} s for now (this one is ${Math.round(info.duration)} s)`);
+    // Fetched on the device from a link: the studio's link rules and the size cap still apply; the link is kept.
+    let sourceUrl: string | null = null;
+    if ('sourceUrl' in b && b.sourceUrl) {
+      sourceUrl = linkFor(b.sourceUrl, { strict: await this.strictLinks(u.studioId) }).url;
+      const bytes = up.bytes ?? (await this.ctx.storage.head(up.storageKey))?.size ?? 0;
+      if (bytes > this.maxLinkBytes) throw linkError('link_too_big', `This video is too big (${Math.round(bytes / 1048576)} MB; the limit is ${Math.round(this.maxLinkBytes / 1048576)} MB)`);
+      const hit = await this.cachedLink(u, sourceUrl);
+      if (hit) return { ...this.view(hit), cached: true };
+    }
     const now = Date.now();
     const [r] = await this.ctx.db.insert(recreateReferences).values({
       id: uid('rx'), studioId: u.studioId, userId: u.id, name: b.name || 'Reference', uploadId: up.id, storageKey: up.storageKey, durationSec: Math.round(info.duration * 1000) / 1000,
-      state: 'analyzing', phase: 'Waiting', createdAt: now, expiresAt: now + KEEP_DAYS * DAY,
+      state: 'analyzing', phase: 'Waiting', createdAt: now, expiresAt: now + KEEP_DAYS * DAY, ...(sourceUrl ? { sourceUrl } : {}),
     }).returning();
     this.enqueue(r!.id);
     this.emit(r!);
@@ -220,6 +230,46 @@ export class RecreateReferences {
   }
   private get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
   private get maxLinkBytes() { return this.ctx.config.RECREATE_LINK_MAX_MB * 1048576; }
+  /** The host check for "other" links (tests replace it). */
+  publicHost = (url: string) => assertPublicHost(url);
+  /** Why a server-side fetch failed: the platform and yt-dlp's failure in a word, never the link. */
+  private logLinkFailure(platform: string, step: 'info' | 'download', e: unknown) {
+    const err = e as ApiError & { failure?: string };
+    this.ctx.log?.warn({ platform, step, code: err?.code ?? 'error', failure: err?.failure ?? 'other' }, 'recreate link fetch failed');
+  }
+  /** The studio's "Strict link rules" (default on). */
+  async strictLinks(studioId: string) {
+    const [s] = await this.ctx.db.select({ v: studioSettings.recreateStrictLinks }).from(studioSettings).where(eq(studioSettings.studioId, studioId));
+    return s?.v ?? true;
+  }
+  /** GET /v1/recreate/settings: the link rules, for the apps to apply on the device too. */
+  async settings(u: AuthUser) {
+    const strict = await this.strictLinks(u.studioId);
+    return { strictLinks: strict, platforms: strict ? ['tiktok', 'instagram', 'youtube'] : ['any'], tiktokDownloadsOff: strict ? 'refuse' : 'allow',
+      maxSec: MAX_REFERENCE_SEC, maxMb: this.ctx.config.RECREATE_LINK_MAX_MB, serverFetch: this.ctx.config.RECREATE_LINKS, cookies: false, canEdit: u.role === 'owner' };
+  }
+  /** PATCH /v1/recreate/settings {strictLinks} (owner). */
+  async patchSettings(u: AuthUser, body: unknown) {
+    if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can change this');
+    const b = parse(z.object({ strictLinks: z.boolean() }).strict(), body);
+    await this.ctx.db.insert(studioSettings).values({ studioId: u.studioId, recreateStrictLinks: b.strictLinks })
+      .onConflictDoUpdate({ target: studioSettings.studioId, set: { recreateStrictLinks: b.strictLinks } });
+    const out = await this.settings(u);
+    this.ctx.hub.emit(u.studioId, { type: 'recreate', settings: { ...out, canEdit: undefined } });
+    return out;
+  }
+  /** POST /v1/recreate/links/check {url}: before a device downloads, the link under the studio's rules, and this member's reference from it if there is one. */
+  async checkLink(u: AuthUser, body: unknown) {
+    const b = parse(z.object({ url: z.string().trim().min(8).max(500) }).strict(), body);
+    try {
+      const n = linkFor(b.url, { strict: await this.strictLinks(u.studioId) });
+      const hit = await this.cachedLink(u, n.url);
+      return { allowed: true, url: n.url, platform: n.platform, ...(hit ? { cached: this.view(hit) } : {}) };
+    } catch (e) {
+      if (e instanceof ApiError) return { allowed: false, code: e.code, reason: e.message };
+      throw e;
+    }
+  }
   /** The member's own live reference from the same link (fetched once; deleted or expired ones don't count). */
   private async cachedLink(u: AuthUser, url: string) {
     const [r] = await this.ctx.db.select().from(recreateReferences).where(and(eq(recreateReferences.studioId, u.studioId), eq(recreateReferences.userId, u.id),
@@ -234,15 +284,18 @@ export class RecreateReferences {
    */
   private async createFromLink(u: AuthUser, b: { url: string; name?: string }) {
     if (!this.ctx.config.RECREATE_LINKS) throw linkError('link_blocked', FALLBACK);
-    const n = normalizeLink(b.url);
+    const strict = await this.strictLinks(u.studioId);
+    const n = linkFor(b.url, { strict });
     const hit = await this.cachedLink(u, n.url);
     if (hit) return { ...this.view(hit), cached: true };
-    const info = await this.serial(() => this.links.info(n.url));
+    if (n.platform === 'other') await this.publicHost(n.url);
+    const info = await this.serial(() => this.links.info(n.url)).catch(e => { this.logLinkFailure(n.platform, 'info', e); throw e; });
     let url = n.url;
-    try { if (info.webpage_url) url = normalizeLink(info.webpage_url).url; } catch { /* keep the pasted form */ }
+    try { if (info.webpage_url) url = linkFor(info.webpage_url, { strict }).url; } catch { /* keep the pasted form */ }
     if (url !== n.url) { const again = await this.cachedLink(u, url); if (again) return { ...this.view(again), cached: true }; }
     checkInfo(info, { maxSec: MAX_REFERENCE_SEC, maxBytes: this.maxLinkBytes });
-    if (n.platform === 'tiktok') {
+    // Strict rules honour TikTok's "downloads off"; the owner can switch that off ("Strict link rules").
+    if (n.platform === 'tiktok' && strict) {
       const html = await this.serial(() => this.fetchPage(url)).catch(e => { throw e instanceof ApiError ? e : linkError('link_blocked', FALLBACK); });
       if (tiktokDownloadsOff(html) === true) throw linkError('link_downloads_off', 'The creator turned downloads off for this video, so MUSE won’t fetch it. Use another video, or ask the creator');
     }
@@ -266,7 +319,8 @@ export class RecreateReferences {
       if (!obj) throw linkError('link_blocked', FALLBACK);
       const infoFile = path.join(dir, 'info.json');
       await pipeline(obj.body as NodeJS.ReadableStream, fs.createWriteStream(infoFile));
-      const file = await this.serial(() => this.links.download(infoFile, dir, { maxBytes: this.maxLinkBytes, ffmpeg: this.ctx.config.FFMPEG_PATH }));
+      const file = await this.serial(() => this.links.download(infoFile, dir, { maxBytes: this.maxLinkBytes, ffmpeg: this.ctx.config.FFMPEG_PATH }))
+        .catch(e => { this.logLinkFailure(r.sourceUrl ? linkFor(r.sourceUrl, { strict: false }).platform : 'other', 'download', e); throw e; });
       const info = await probe(this.ctx.config.FFPROBE_PATH, file).catch(() => null);
       if (!info?.width) throw linkError('link_blocked', FALLBACK);
       if (info.duration > MAX_REFERENCE_SEC + 0.5) throw linkError('too_long', `References can be up to ${MAX_REFERENCE_SEC} s for now (this one is ${Math.round(info.duration)} s)`, 400);

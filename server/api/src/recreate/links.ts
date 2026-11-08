@@ -7,11 +7,14 @@
 // - the file goes into the ordinary reference pipeline (private rx/ storage, deleted after 30 days).
 // The resolver is yt-dlp, pinned in the Dockerfile. Tests replay recorded-shape fixtures through a fake binary.
 import { execFile } from 'node:child_process';
+import dns from 'node:dns/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ApiError } from '../errors.js';
 
 export type Platform = 'tiktok' | 'instagram' | 'youtube';
+/** With "Strict link rules" off (the owner's setting), any public link yt-dlp reads is accepted: platform "other". */
+export type AnyPlatform = Platform | 'other';
 export const FALLBACK = 'Couldn’t fetch this link — save the video and drop the file in';
 
 /** What the apps show: every code but too_long ends in the same fallback (drop the saved file in). */
@@ -43,6 +46,26 @@ export function normalizeLink(raw: string): { url: string; platform: Platform } 
     return { platform: 'youtube', url: `https://www.youtube.com/watch?v=${seg[0]}` };
   }
   throw linkError('link_unsupported', 'MUSE can fetch TikTok, Instagram Reel and YouTube Shorts links. For anything else, save the video and drop the file in');
+}
+
+/**
+ * A link under the studio's rules: strict (the default) takes only TikTok, Instagram Reels and YouTube; with strict
+ * off, any other public web link too (https or http on the standard ports, a public host name: no addresses, no
+ * localhost or internal names, so the server can't be pointed at its own network), without tracking parameters.
+ */
+export function linkFor(raw: string, o: { strict: boolean }): { url: string; platform: AnyPlatform } {
+  try { return normalizeLink(raw); } catch (e) { if (o.strict) throw e; }
+  let u: URL;
+  try { u = new URL(raw.trim()); } catch { throw linkError('link_unsupported', 'That isn’t a link MUSE can read'); }
+  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password || (u.port && u.port !== '443' && u.port !== '80'))
+    throw linkError('link_unsupported', 'That isn’t a link MUSE can read');
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  const ip = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':') || /^\[/.test(host);
+  const internal = !host.includes('.') || /(^|\.)(localhost|local|internal|intranet|lan|home|corp|localdomain|test|invalid|example)$/.test(host) || /\.railway\.internal$/.test(host);
+  if (ip || internal) throw linkError('link_unsupported', 'MUSE only fetches public web links');
+  u.hash = '';
+  for (const k of [...u.searchParams.keys()]) if (/^(utm_|fbclid|gclid|igsh|si$|feature$|ref$|_r$)/i.test(k)) u.searchParams.delete(k);
+  return { url: u.toString(), platform: 'other' };
 }
 
 /** The fields of yt-dlp's info JSON this file reads. */
@@ -83,8 +106,39 @@ export function tiktokDownloadsOff(html: string): boolean | null {
   return known.some(f => f === false || (typeof f === 'number' && f !== 0));
 }
 
+/** The host's addresses are all public (a public name can still point inside: checked right before fetching). */
+export async function assertPublicHost(url: string, lookup: (h: string) => Promise<{ address: string }[]> = h => dns.lookup(h, { all: true })) {
+  const host = new URL(url).hostname;
+  const addrs = await lookup(host).catch(() => { throw linkError('link_unsupported', 'MUSE couldn’t find that site'); });
+  const priv = (a: string) => /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(a)
+    || /^(::1?$|f[cd]|fe[89ab]|::ffff:(10|127|169\.254|192\.168)\.)/i.test(a);
+  if (!addrs.length || addrs.some(x => priv(x.address))) throw linkError('link_unsupported', 'MUSE only fetches public web links');
+}
+
+/** Why yt-dlp failed, in a word, for the server log (never the link): the platform's wall, not the user's mistake. */
+export type LinkFailure = 'bot_check' | 'login' | 'rate_limited' | 'forbidden' | 'not_found' | 'geo' | 'timeout' | 'private' | 'age' | 'too_big' | 'unsupported' | 'no_ytdlp' | 'other';
+export function failureOf(stderr: string): LinkFailure {
+  const s = stderr.toLowerCase();
+  if (/not a bot|confirm you.?re not a robot|captcha/.test(s)) return 'bot_check';
+  if (/unsupported url/.test(s)) return 'unsupported';
+  if (/age[- ]restricted|confirm your age|inappropriate for some users|age limit/.test(s)) return 'age';
+  if (/private|members[- ]only|subscriber|join this channel|premium/.test(s)) return 'private';
+  if (/429|too many requests|rate[- ]limit/.test(s)) return 'rate_limited';
+  if (/sign in|log ?in|login required|cookies/.test(s)) return 'login';
+  if (/403|forbidden/.test(s)) return 'forbidden';
+  if (/not available in your country|geo[- ]?restrict/.test(s)) return 'geo';
+  if (/404|not found|unavailable|removed|does not exist|deleted/.test(s)) return 'not_found';
+  if (/max[- ]?filesize|larger than max-filesize|file is larger/.test(s)) return 'too_big';
+  if (/timed out|timeout/.test(s)) return 'timeout';
+  return 'other';
+}
+
 /** yt-dlp's error text → the code the apps show (private, sign-in and age walls are refusals; the rest is "blocked"). */
 export function errorFor(stderr: string): ApiError {
+  const e = errorCode(stderr);
+  return Object.assign(e, { failure: failureOf(stderr) });
+}
+function errorCode(stderr: string): ApiError {
   const s = stderr.toLowerCase();
   if (/unsupported url/.test(s)) return linkError('link_unsupported', 'MUSE can’t fetch from that link. Save the video and drop the file in');
   if (/private|members[- ]only|subscriber|join this channel|premium/.test(s)) return linkError('link_private', 'This video isn’t public, so MUSE won’t fetch it. Save it yourself and drop the file in');
@@ -115,7 +169,7 @@ function run(bin: string, args: string[], timeoutMs: number): Promise<string> {
     execFile(bin, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { PATH: process.env.PATH ?? '', HOME: process.env.TMPDIR ?? '/tmp', LANG: 'C.UTF-8' } }, (err, out, errOut) => {
       if (err) {
         const e = err as NodeJS.ErrnoException & { killed?: boolean };
-        if (e.code === 'ENOENT') return reject(linkError('link_blocked', FALLBACK));
+        if (e.code === 'ENOENT') return reject(Object.assign(linkError('link_blocked', FALLBACK), { failure: 'no_ytdlp' }));
         return reject(errorFor(`${String(errOut ?? '')}\n${e.killed ? 'timed out' : ''}`));
       }
       resolve(String(out));
