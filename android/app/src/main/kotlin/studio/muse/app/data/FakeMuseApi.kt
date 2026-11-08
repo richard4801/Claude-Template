@@ -2,6 +2,7 @@ package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
+import studio.muse.core.edit.RecreateReplaceResult
 import studio.muse.core.edit.RecreateMatch
 import studio.muse.core.edit.RecreateApplyResult
 import studio.muse.core.edit.RecreateFillStart
@@ -1260,6 +1261,13 @@ class FakeMuseApi(
         if ((made[slotId] ?: 2) < 2) throw ApiException("already_filled", "This shot is already being made")
         made[slotId] = 0
         RecreateFillStart(slotId, "job_rx_$slotId")
+    }
+    /** Demo: Fix shot swaps the clip in place (a running fill's job is refused, as on the server). */
+    override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = lock.withLock {
+        val all = recreateSlots(id)
+        if (slotId !in all) throw ApiException("slot_not_in_edit", "This shot isn't in the edit any more · rebuild the edit")
+        if (take.startsWith("job_rx_") && (recreateMade[id]?.get(slotId) ?: 0) < 2) throw ApiException("job_not_done", "This shot is still being made")
+        RecreateReplaceResult(sessionId, (baseRevision ?: 0) + 1, slotId, "Fixed shot ${all.indexOf(slotId) + 1}")
     }
     override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = lock.withLock {
         val all = recreateSlots(id)

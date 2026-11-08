@@ -271,6 +271,13 @@ interface MuseApi {
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
         throw ApiException("not_found", "This studio server can't build recipes yet")
+    /**
+     * Fix shot (WS1 a7302fb): swaps one shot's clip in the built edit for [take] (a take id, or a finished fill's job id),
+     * keeping its timing, transition, ramp, camera moves and look, and the owner's other edits. 409 slot_not_in_edit:
+     * rebuild the edit instead.
+     */
+    suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?): studio.muse.core.edit.RecreateReplaceResult =
+        throw ApiException("not_found", "This studio server can't fix one shot yet")
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")

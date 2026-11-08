@@ -80,6 +80,14 @@ class RecreateBuildTest {
             model.confirmBuild().join()
             withTimeout(5_000) { while (model.ui.value.mode != RecreateMode.Compare) delay(5) }
             assertEquals("ready", model.ui.value.slotFill("s5")?.state)
+            assertTrue(model.ui.value.fixing.isEmpty())
+
+            // Fix shot with one of your takes: swapped into the built edit in place (one undoable change), no rebuild.
+            val rev = model.ui.value.builtRevision
+            model.useTake("s4", RecreateTakeChoice("t_mine", "Window light", 3.0))
+            withTimeout(5_000) { while (model.ui.value.builtRevision == rev) delay(5) }
+            assertEquals("Shot 4 is swapped in the edit", model.ui.value.message)
+            assertEquals(RecreateMode.Compare, model.ui.value.mode)
             assertEquals(RecreateMode.Compare, model.ui.value.mode)
             assertTrue(model.ui.value.remake.isEmpty())
             assertEquals(before, api.balance())

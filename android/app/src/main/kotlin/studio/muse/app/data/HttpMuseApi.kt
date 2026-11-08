@@ -209,6 +209,7 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/fill") suspend fun fillReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/slots/{slot}/replace") suspend fun replaceRecipeSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     // AI suite · Photo tool (workstream 3)
@@ -512,6 +513,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
     override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
         studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = studio.muse.core.edit.RecreateJson.replace(call {
+        replaceRecipeSlot(rx(id), shotId(slotId), buildJsonObject {
+            put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId)); put("take", kotlinx.serialization.json.JsonPrimitive(take))
+            if (baseRevision != null) put("baseRevision", kotlinx.serialization.json.JsonPrimitive(baseRevision))
+            put("device", kotlinx.serialization.json.JsonPrimitive("android"))
+        })
+    })
     override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = studio.muse.core.edit.RecreateJson.apply(call {
         applyRecipe(rx(id), buildJsonObject {
             put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId))
