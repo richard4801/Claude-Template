@@ -1138,7 +1138,7 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 | `PATCH /v1/suite/rigs/{id} {name?, rig?}` | → `RigView`. Your own rig, or any rig in the studio for the owner. Anyone else's reads as `404`. `rig` replaces the whole rig. |
 | `DELETE /v1/suite/rigs/{id}` | → `204`, with the same permissions as PATCH. |
 | `PATCH /v1/models/{id} {defaultRig: Rig \| null}` | The model's **default rig**, returned as `Model.defaultRig`. `null` or `{}` clears it. Anyone in the studio can set it, like the model's other fields. |
-| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=` | → `{items: FeedItem[], nextCursor: string \| null}`. See below. |
+| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=&collection=` | → `{queued?: QueuedShot[], items: FeedItem[], nextCursor: string \| null}`. See below, and "Library collections and the Suite queue". |
 
 **The feed (`GET /v1/suite/feed`)**
 - **Order:** newest first.
@@ -1156,6 +1156,44 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 - When a model is @-mentioned, the composer fills only the rig rows still on Auto from her `defaultRig`, then shows "Applied <name>'s rig · Undo".
 - It never overwrites a row the user set. With two @ models in the prompt, nothing applies automatically.
 - `moves` in a default rig are added as `#` chips only if the prompt has no move yet.
+
+### Library collections and the Suite queue (build step 3, 2026-11-08; `plans/ai-suite-design.md` "Refinements" 1 and 6)
+Migration **0020** (`library_collections_suite_queue`): the `library_collections`, `library_collection_items` and `suite_queue` tables. Code: `suite/collections.ts`, `suite/queue.ts`; tests `test/suite-library.test.ts`.
+
+**Library collections.** Named groups of the studio's takes and photos (any `takes` row). Everyone in the studio sees them, like the library. The one who made a collection, or the owner, renames it, deletes it and changes what's in it; anyone else gets `403 not_yours`.
+
+| Call | Notes |
+|---|---|
+| `GET /v1/library/collections` | → `Collection[]`, most recently changed first. |
+| `POST /v1/library/collections {name, takeIds?}` | → `Collection & {takeIds}`. `name` is 1–60 characters. Up to 200 collections per studio (`409 too_many_collections`). |
+| `GET /v1/library/collections/{id}` | → `Collection & {takeIds}` (newest added first). |
+| `PATCH /v1/library/collections/{id} {name}` | Rename. |
+| `DELETE /v1/library/collections/{id}` | → 204. The takes and photos stay in the library. |
+| `POST /v1/library/collections/{id}/items {takeIds}` | Add (each once; up to 200 per call, 2,000 per collection: `409 collection_full`). An id that isn't the studio's → `400 takeIds: no take or photo …`. → `Collection & {takeIds}`. |
+| `POST /v1/library/collections/{id}/items/remove {takeIds}` | Remove. → `Collection & {takeIds}`. |
+| `GET /v1/library/takes/{takeId}/collections` | → `Collection[]` the take or photo is in (its detail sheet). |
+| `GET /v1/suite/feed?collection={id}` | The feed of that collection: its takes and photos only (no pending jobs, no queue), with the usual filters and paging. An unknown collection → `400`. |
+
+```
+Collection { id, name, userId, mine, canEdit, count /* takes and photos that still exist */, cover: ImageRef | null /* the newest item's thumb */, createdAt, updatedAt }
+```
+Event `collection`: `{collection}` (created or changed) or `{deleted: id}`, to the whole studio.
+
+**The Suite queue.** A shot saved to run later. Queuing checks the shot and prices it, but holds nothing. **Run · $cost** prices it again and goes through the normal estimate → confirm → hold path. Each member sees their own queue; the owner sees the studio's.
+
+| Call | Notes |
+|---|---|
+| `POST /v1/suite/queue {…the body of POST /v1/suite/shots}` | Checked and priced like `…/shots/estimate` (same errors, `nothing_fits` included); nothing held. `queue` and `dryRun` are ignored. Up to 50 per member (`409 queue_full`). → `QueuedShot`. |
+| `GET /v1/suite/queue` | → `QueuedShot[]`, newest first. |
+| `POST /v1/suite/queue/{id}/estimate` | Today's price → `QueuedShot & {estimateView /* the shot estimate, as …/shots/estimate returns it */, changed}`. The stored price is updated. Show it, then confirm. |
+| `POST /v1/suite/queue/{id}/run {confirm: true}` | Runs it exactly as `POST /v1/suite/shots` would (caps, hold, job); the queue entry is removed. → `{queuedId, job}`. `400` without `confirm: true`. |
+| `DELETE /v1/suite/queue/{id}` | Discard → 204 (nothing was held). |
+
+```
+QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, buttonLabel: "Run · $0.40", prompt?, draft?, createdAt }
+```
+- **In the feed:** the first page of `GET /v1/suite/feed` (no cursor, no collection) carries `queued: QueuedShot[]` above `items` (the "Queued" group), filtered by `tool`, `model` and `status` (`queued`).
+- Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
 ## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
 A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.

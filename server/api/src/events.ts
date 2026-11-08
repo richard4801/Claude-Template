@@ -7,6 +7,7 @@ export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfi
   | 'edit' /* Edit sessions shared with Claude (workstream 3) */
   | 'promptScript' // prompt scripts (workstream 4)
   | 'recreate' // Recreate this edit: references and their recipes (workstream 1)
+  | 'collection' | 'queue' // Library collections and the Suite queue (workstream 1)
   ;
 export type ApiEvent = { type: EventType; [k: string]: unknown };
 export type Viewer = { userId: string; studioId: string; role: 'owner' | 'member' };

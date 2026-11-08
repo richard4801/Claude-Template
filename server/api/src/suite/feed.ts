@@ -8,6 +8,8 @@ import type { AuthUser, Ctx } from '../ctx.js';
 import { jobs, models, takes } from '../db/schema.js';
 import { badRequest } from '../errors.js';
 import { aspectOf, draftSummary, TOOLS, type Draft, type Tool } from './drafts.js';
+import { listQueue } from './queue.js';
+import { libraryCollectionItems, libraryCollections } from './schema.js';
 
 export const FEED_PAGE = 30;
 export const FEED_PAGE_MAX = 60;
@@ -24,6 +26,8 @@ const list = <T extends string>(all: readonly T[]) => z.string().max(200).option
 });
 const Query = z.object({
   tool: list(TOOLS), status: list(FEED_STATUSES), model: z.string().max(80).optional(),
+  /** Library collections (workstream 1): only that collection's takes and photos. */
+  collection: z.string().max(80).optional(),
   cursor: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(FEED_PAGE_MAX).optional(),
 });
 
@@ -52,10 +56,15 @@ export type FeedItem = Record<string, unknown> & { id: string; createdAt: number
 export async function feed(ctx: Ctx, u: AuthUser, query: unknown) {
   const q = Query.safeParse(query ?? {});
   if (!q.success) throw badRequest(`Invalid feed query: ${q.error.issues[0]?.path.join('.')} ${q.error.issues[0]?.message}`);
-  const { tool, status, model } = q.data;
+  const { tool, status, model, collection } = q.data;
   const limit = q.data.limit ?? FEED_PAGE;
   const cursor = q.data.cursor ? decodeCursor(q.data.cursor) : null;
-  const wantPending = PENDING.filter(s => !status || status.includes(s));
+  if (collection) {
+    const [c] = await ctx.db.select({ id: libraryCollections.id }).from(libraryCollections).where(and(eq(libraryCollections.id, collection), eq(libraryCollections.studioId, u.studioId)));
+    if (!c) throw badRequest('collection: no such collection');
+  }
+  // A collection holds finished takes and photos only.
+  const wantPending = collection ? [] : PENDING.filter(s => !status || status.includes(s));
   const wantDone = !status || status.includes('done');
   const pub = ctx.config.PUBLIC_URL ?? '';
 
@@ -68,6 +77,7 @@ export async function feed(ctx: Ctx, u: AuthUser, query: unknown) {
       .from(takes).leftJoin(jobs, eq(takes.jobId, jobs.id)).leftJoin(models, eq(takes.modelId, models.id)).where(and(
         eq(takes.studioId, u.studioId), inArray(takes.kind, ['take', 'shot']), or(isNull(takes.jobId), isNull(jobs.hiddenAt)),
         model ? eq(takes.modelId, model) : undefined, tool ? inArray(takeTool, tool) : undefined, after(takes, cursor),
+        collection ? inArray(takes.id, ctx.db.select({ id: libraryCollectionItems.takeId }).from(libraryCollectionItems).where(eq(libraryCollectionItems.collectionId, collection))) : undefined,
       )).orderBy(desc(takes.createdAt), desc(takes.id)).limit(limit + 1) : Promise.resolve([]),
   ]);
 
@@ -78,7 +88,10 @@ export async function feed(ctx: Ctx, u: AuthUser, query: unknown) {
   const page = items.slice(0, limit);
   const more = items.length > limit;
   const last = page.at(-1);
-  return { items: page, nextCursor: more && last ? encodeCursor(last.createdAt, last.id) : null };
+  // The Suite queue (shots saved to run later) sits above the first page.
+  const queued = !cursor && !collection && (!status || status.includes('queued')) ? (await listQueue(ctx, u))
+    .filter(x => (!tool || tool.includes(x.tool as Tool)) && (!model || x.modelId === model)) : undefined;
+  return { ...(queued ? { queued } : {}), items: page, nextCursor: more && last ? encodeCursor(last.createdAt, last.id) : null };
 }
 
 const toolOfJob = (j: typeof jobs.$inferSelect): Tool => (j.draft?.tool ?? (j.request.engine === 'upscale' ? 'upscale'
