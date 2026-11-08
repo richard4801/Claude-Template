@@ -208,21 +208,34 @@ extension SnapshotRunner {
             guard store.screen == .edit else { return false }
             return await ax.find(editorMarker)
         }
-        for _ in 0..<700 {
+        // Depth first: the controls a press reveals (a tab's panel, captions mode's hook templates) are used before anything
+        // else, newest group first, so a later mode switch can't hide them before they are reached.
+        var groups: [[String]] = []
+        var lastSeen = Set<String>()
+        for _ in 0..<900 {
             let scan = await ax.controls()
             let inSheet = scan.inSheet
-            var pick: AXWalker.Control?
-            for c in scan.controls {
+            func usable(_ c: AXWalker.Control) -> Bool {
                 let key = (inSheet ? "sheet:" : "") + c.key
-                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) || (!inSheet && chrome.contains(c.key)) { continue }
+                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) || (!inSheet && chrome.contains(c.key)) { return false }
                 if deny.contains(c.label) || (inSheet && denyInSheet.contains(c.label)) || c.isMenu {
                     skipped.insert(c.key)
                     note("SKIP \(c.role) \(c.label)")
-                    continue
+                    return false
                 }
-                pick = c
-                break
+                return true
             }
+            let keys = scan.controls.map(\.key)
+            let fresh = keys.filter { !lastSeen.contains($0) }
+            if !lastSeen.isEmpty, !fresh.isEmpty { groups.append(fresh) }
+            lastSeen = Set(keys)
+            var pick: AXWalker.Control?
+            while pick == nil, let g = groups.last {
+                let want = Set(g)
+                pick = scan.controls.first { want.contains($0.key) && usable($0) }
+                if pick == nil { groups.removeLast() }
+            }
+            if pick == nil { pick = scan.controls.first(where: usable) }
             guard let c = pick else {
                 if inSheet {
                     note("CLOSE sheet")
@@ -257,6 +270,8 @@ extension SnapshotRunner {
         }
         note("CONTROLS pressed \(presses), sliders nudged \(nudges), skipped \(skipped.count), left the editor via \(left.count)")
         if presses + nudges < 40 { note("FAIL controls: only \(presses + nudges) controls found") }
+        // The owner's crashes must stay covered: the hook templates (exclusivity, 2026-11-08).
+        if !used.contains(where: { $0.contains("Add hook") }) { note("FAIL controls: no hook template was pressed (Hook ideas → Add hook …)") }
         if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
         store.openEdit(takeId: nil)
         try? await Task.sleep(for: .seconds(1))
