@@ -18,6 +18,9 @@ import { timeline } from '../editor/model.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
+import { learningOf } from '../editor/learn.js';
+import { pinnedDirectives, provenStart } from './playbook.js';
+import { checkInfo, FALLBACK, linkError, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
@@ -35,11 +38,16 @@ export type FillState = {
   jobs?: Record<string, { jobId: string; estimate?: number; at: number }>;
   /** The last assembly: where, which take per slot, which project item came from which recipe element, and the score. */
   applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore };
+  /** Gap keys already reported to the learning editor for this reference (each once). */
+  gapsReported?: string[];
 };
 export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
 
-const CreateBody = z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional() }).strict();
+const CreateBody = z.union([
+  z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional() }).strict(),
+  z.object({ url: z.string().trim().min(8).max(500), name: z.string().trim().max(80).optional() }).strict(),
+]);
 const PatchBody = z.object({ keep: z.boolean().optional(), name: z.string().trim().max(80).optional() }).strict();
 const parse = <T>(s: z.ZodType<T>, body: unknown): T => {
   const r = s.safeParse(body ?? {});
@@ -71,6 +79,7 @@ export class RecreateReferences {
       userId: r.userId, keep: r.keep, createdAt: r.createdAt, expiresAt: r.keep ? null : r.expiresAt,
       // Authenticated (the reference stays private): the side-by-side player and its poster.
       videoUrl: r.storageKey ? `${base}/video` : undefined, posterUrl: sheet ? `${base}/poster` : undefined,
+      source: r.sourceUrl ? 'link' as const : 'file' as const, sourceUrl: r.sourceUrl ?? undefined, errorCode: r.errorCode ?? undefined,
       recipe: recipe ? { ...recipe, id: r.id, origin: recipe.origin ?? 'reference', referenceId: r.id, createdAt: r.createdAt,
         slots: recipe.slots.map(sl => { const job = r.fill?.jobs?.[sl.id];
           return { ...sl, thumbUrl: sheet ? `${base}/slots/${sl.id}/thumb` : undefined, ...(job ? { fill: { jobId: job.jobId } } : {}) }; }),
@@ -104,6 +113,7 @@ export class RecreateReferences {
     await this.resume();
     void this.sweep();
     const b = parse(CreateBody, body);
+    if ('url' in b) return this.createFromLink(u, b);
     const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, b.uploadId), eq(uploads.studioId, u.studioId)));
     if (!up) throw notFound('Upload');
     if (!up.contentType.startsWith('video/')) throw badRequest('uploadId: must be a video');
@@ -120,6 +130,89 @@ export class RecreateReferences {
     this.enqueue(r!.id);
     this.emit(r!);
     return this.view(r!);
+  }
+
+  // ------------------------------------------------------------------ links (plans/research/platform-download-rules.md)
+  /** The link resolver (yt-dlp; tests replace it). */
+  resolver: Resolver | null = null;
+  /** Reads a public page (TikTok's downloads setting); tests replace it. No cookies, no sign-in. */
+  fetchPage = async (url: string) => {
+    const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36', 'accept-language': 'en' }, redirect: 'follow', signal: AbortSignal.timeout(20_000) });
+    if (!r.ok) throw linkError('link_blocked', FALLBACK);
+    return r.text();
+  };
+  private linkChain: Promise<unknown> = Promise.resolve();
+  /** One platform request at a time across the server. */
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const p = this.linkChain.then(fn, fn);
+    this.linkChain = p.catch(() => undefined);
+    return p;
+  }
+  private get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
+  private get maxLinkBytes() { return this.ctx.config.RECREATE_LINK_MAX_MB * 1048576; }
+  /** The member's own live reference from the same link (fetched once; deleted or expired ones don't count). */
+  private async cachedLink(u: AuthUser, url: string) {
+    const [r] = await this.ctx.db.select().from(recreateReferences).where(and(eq(recreateReferences.studioId, u.studioId), eq(recreateReferences.userId, u.id),
+      eq(recreateReferences.sourceUrl, url), isNull(recreateReferences.deletedAt), inArray(recreateReferences.state, ['analyzing', 'ready']))).orderBy(desc(recreateReferences.createdAt)).limit(1);
+    return r && (r.storageKey || r.state === 'analyzing') ? r : null;
+  }
+
+  /**
+   * A reference from a public link: the metadata is read and checked (public, not age-gated, the creator allows
+   * downloads, ≤ 60 s, under the size cap) before anything is downloaded; the download and the analysis run in the
+   * queue. The same link again (by this member) returns the reference already made (`cached: true`).
+   */
+  private async createFromLink(u: AuthUser, b: { url: string; name?: string }) {
+    if (!this.ctx.config.RECREATE_LINKS) throw linkError('link_blocked', FALLBACK);
+    const n = normalizeLink(b.url);
+    const hit = await this.cachedLink(u, n.url);
+    if (hit) return { ...this.view(hit), cached: true };
+    const info = await this.serial(() => this.links.info(n.url));
+    let url = n.url;
+    try { if (info.webpage_url) url = normalizeLink(info.webpage_url).url; } catch { /* keep the pasted form */ }
+    if (url !== n.url) { const again = await this.cachedLink(u, url); if (again) return { ...this.view(again), cached: true }; }
+    checkInfo(info, { maxSec: MAX_REFERENCE_SEC, maxBytes: this.maxLinkBytes });
+    if (n.platform === 'tiktok') {
+      const html = await this.serial(() => this.fetchPage(url)).catch(e => { throw e instanceof ApiError ? e : linkError('link_blocked', FALLBACK); });
+      if (tiktokDownloadsOff(html) === true) throw linkError('link_downloads_off', 'The creator turned downloads off for this video, so MUSE won’t fetch it. Use another video, or ask the creator');
+    }
+    const now = Date.now(), id = uid('rx');
+    // The metadata, for the download (no second page request); deleted once the video is stored.
+    await this.ctx.storage.put(`rx/${u.studioId}/${id}/info.json`, Buffer.from(JSON.stringify(info)), 'application/json');
+    const [r] = await this.ctx.db.insert(recreateReferences).values({
+      id, studioId: u.studioId, userId: u.id, name: b.name || (info.title ?? '').trim().slice(0, 80) || 'Reference', uploadId: null, storageKey: null, sourceUrl: url,
+      durationSec: info.duration != null ? Math.round(info.duration * 1000) / 1000 : null, state: 'analyzing', phase: 'Fetching the video', createdAt: now, expiresAt: now + KEEP_DAYS * DAY,
+    }).returning();
+    this.enqueue(r!.id);
+    this.emit(r!);
+    return this.view(r!);
+  }
+
+  /** Downloads a link's video into private storage (rx/…/source.mp4) and checks it; the reference fails with a code when it can't. */
+  private async fetchLinkVideo(r: Row, set: (v: Partial<Row>) => Promise<void>): Promise<Row | null> {
+    const infoKey = `rx/${r.studioId}/${r.id}/info.json`, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rxlink-'));
+    try {
+      const obj = await this.ctx.storage.get(infoKey);
+      if (!obj) throw linkError('link_blocked', FALLBACK);
+      const infoFile = path.join(dir, 'info.json');
+      await pipeline(obj.body as NodeJS.ReadableStream, fs.createWriteStream(infoFile));
+      const file = await this.serial(() => this.links.download(infoFile, dir, { maxBytes: this.maxLinkBytes, ffmpeg: this.ctx.config.FFMPEG_PATH }));
+      const info = await probe(this.ctx.config.FFPROBE_PATH, file).catch(() => null);
+      if (!info?.width) throw linkError('link_blocked', FALLBACK);
+      if (info.duration > MAX_REFERENCE_SEC + 0.5) throw linkError('too_long', `References can be up to ${MAX_REFERENCE_SEC} s for now (this one is ${Math.round(info.duration)} s)`, 400);
+      const key = `rx/${r.studioId}/${r.id}/source.mp4`, size = fs.statSync(file).size;
+      await this.ctx.storage.putStream(key, fs.createReadStream(file), 'video/mp4', size);
+      const [n] = await this.ctx.db.update(recreateReferences).set({ storageKey: key, durationSec: Math.round(info.duration * 1000) / 1000, phase: 'Fetched' })
+        .where(eq(recreateReferences.id, r.id)).returning();
+      return n ?? null;
+    } catch (e) {
+      const err = e instanceof ApiError ? e : linkError('link_blocked', FALLBACK);
+      await set({ state: 'failed', phase: 'Failed', error: err.message, errorCode: err.code });
+      return null;
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      await this.ctx.storage.delete(infoKey).catch(() => undefined);
+    }
   }
 
   async patch(u: AuthUser, id: string, body: unknown) {
@@ -244,7 +337,9 @@ export class RecreateReferences {
     const b = parse(z.object({
       sessionId: z.string().min(1), baseRevision: z.number().int().min(0).optional(),
       slots: z.record(z.string(), z.string().min(1).max(80)),
-      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional() }).strict().optional(),
+      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional() }).strict().optional(),
+      /** A proven recipe of the studio's to start from (its look fills in when the reference's can't be mapped); false = none; omitted = the nearest that fits. */
+      startFrom: z.union([z.string().min(1).max(80), z.literal(false)]).optional(),
     }).strict(), body);
     const { r, recipe } = await this.ready(u, id);
     const svc = editSessionsOf(this.ctx);
@@ -268,19 +363,58 @@ export class RecreateReferences {
       if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
       takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
     }
-    const out = buildProject(recipe, s.takeId, takes, (b.options ?? {}) as AssembleOptions);
+    // The playbook (workstream 3's learning editor): the owner's pinned rules shape the plan. Claude can't override them;
+    // the owner's own explicit options in the app can.
+    const pb = await pinnedDirectives(this.ctx, u);
+    const fromRules: AssembleOptions = { ...pb.directives };
+    const opts: AssembleOptions = o.by === 'claude' ? { ...(b.options ?? {}), ...fromRules } : { ...fromRules, ...(b.options ?? {}) };
+    const start = b.startFrom === false ? null : await this.startFrom(u, r.id, b.startFrom);
+    const ownLookUsable = !!recipe.grade.look && recipe.grade.look.distance < 0.4;
+    if (start?.look && !ownLookUsable && opts.look !== false) opts.fallbackLook = start.look;
+    const out = buildProject(recipe, s.takeId, takes, opts);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
     const label = `Recreated “${r.name}”`;
+    // Which recipe element each item came from: on the op, so the owner's later corrections carry it (workstream 3).
+    const sources = sourcesOf(recipe, out.project, r.id, takes);
     const res = o.by === 'claude'
       ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [
           { op: 'replace', path: '/canvas', value: out.project.canvas }, { op: 'replace', path: '/assets', value: out.project.assets },
-          { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label })
-      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label });
+          { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label, meta: { sources } })
+      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label }, { meta: { sources } });
     const fresh = await this.row(u, id);
-    const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, (b.options ?? {}) as AssembleOptions);
-    const sources = sourcesOf(recipe, out.project, r.id, takes);
-    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match } });
-    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources };
+    const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, opts);
+    const gapsReported = await this.reportGaps(u, r, recipe, fresh.fill?.gapsReported ?? []);
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match }, gapsReported });
+    const borrowed = opts.fallbackLook && start ? ['look'] : [];
+    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources,
+      playbook: { followed: pb.followed, followYourself: pb.toFollow },
+      startedFrom: start ? { recipeId: start.recipeId, name: start.name, distance: start.distance, borrowed } : null };
+  }
+
+  /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */
+  private async startFrom(u: AuthUser, referenceId: string, id?: string) {
+    if (!id) return provenStart(this.ctx, u, referenceId);
+    const e = await learningOf(this.ctx).recipe(u, id) as { id: string; name: string; recipe?: Recipe };
+    const look = e.recipe?.grade?.look;
+    return { recipeId: e.id, name: e.name, distance: 0, look: look?.id ? { id: look.id, label: look.label } : null };
+  }
+
+  /**
+   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freeze
+   * frames and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
+   */
+  private async reportGaps(u: AuthUser, r: Row, recipe: Recipe, done: string[]) {
+    if (u.role !== 'owner') return done;
+    const found: { key: string; kind: string; what: string; note: string }[] = [];
+    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze');
+    if (freeze.length) found.push({ key: 'speed:freeze-frame', kind: 'effect', what: 'Freeze frame', note: `“${r.name}”: ${freeze.map(x => x.id).join(', ')}` });
+    const flashes = recipe.transitions.filter(t => t.from === t.to && t.kind === 'flash');
+    if (flashes.length) found.push({ key: 'effect:flash-in-shot', kind: 'effect', what: 'A white flash inside a shot', note: `“${r.name}” at ${flashes.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
+    const out = [...done];
+    for (const g of found.filter(x => !done.includes(x.key))) {
+      try { await learningOf(this.ctx).addGap(u, g); out.push(g.key); } catch { /* the gap list is best effort */ }
+    }
+    return out;
   }
 
   /** One slot's thumbnail, cropped from the contact sheet (PNG). `slotId` null = the poster (the first slot). */
@@ -320,11 +454,18 @@ export class RecreateReferences {
   }
   private async analyze(id: string) {
     const db = this.ctx.db, c = this.ctx.config;
-    const [r] = await db.select().from(recreateReferences).where(eq(recreateReferences.id, id));
-    if (!r || r.state !== 'analyzing' || !r.storageKey) return;
+    let [r] = await db.select().from(recreateReferences).where(eq(recreateReferences.id, id));
+    if (!r || r.state !== 'analyzing') return;
     const set = async (v: Partial<Row>) => { const [n] = await db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id)).returning(); if (n) this.emit(n); };
+    if (!r.storageKey) {
+      if (!r.sourceUrl) return;
+      const got = await this.fetchLinkVideo(r, set);
+      if (!got?.storageKey) return;
+      r = got;
+    }
+    const storageKey = r.storageKey!;
     try {
-      const out = await this.withLocal(r.storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH, ...(c.TESSERACT_PATH ? { tesseract: c.TESSERACT_PATH } : {}),
+      const out = await this.withLocal(storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH, ...(c.TESSERACT_PATH ? { tesseract: c.TESSERACT_PATH } : {}),
         ...(c.RECREATE_POSE ? { pose: { minFreeMb: c.RECREATE_POSE_MIN_FREE_MB } } : {}) }, f, {
         maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }),
       }));
@@ -367,6 +508,7 @@ export class RecreateReferences {
   }
   private async purge(r: Row) {
     const st = this.ctx.storage;
+    if (r.sourceUrl) await st.delete(`rx/${r.studioId}/${r.id}/info.json`).catch(() => undefined);
     if (r.contactSheetKey) await st.delete(r.contactSheetKey).catch(() => undefined);
     if (r.storageKey) {
       await st.delete(r.storageKey).catch(() => undefined);

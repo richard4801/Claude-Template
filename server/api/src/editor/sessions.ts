@@ -157,11 +157,11 @@ export class EditSessions {
     return { revision: r.session.revision, entry: r.entry ? this.entryView(r.entry) : null };
   }
   /** Replaces the whole project (an app's Reset / reload); undoable. */
-  async reset(u: AuthUser, id: string, b: { baseRevision?: unknown; project?: unknown; device?: unknown; label?: unknown }) {
+  async reset(u: AuthUser, id: string, b: { baseRevision?: unknown; project?: unknown; device?: unknown; label?: unknown }, o: { meta?: Record<string, unknown> } = {} /* workstream 1: Recreate's sources, server-side only */) {
     const s = await this.row(u, id), base = this.revOf(b);
     if (base !== s.revision) throw await this.stale(id, base);
     const next = this.check(b.project as M.EditProject, s.takeId);
-    const r = await this.commit(s, next, { author: this.author(b.device), kind: 'reset', label: typeof b.label === 'string' && b.label ? b.label : 'Reset' });
+    const r = await this.commit(s, next, { author: this.author(b.device), kind: 'reset', label: typeof b.label === 'string' && b.label ? b.label : 'Reset', ...(o.meta ? { meta: o.meta } : {}) });
     return { revision: r.session.revision, entry: r.entry ? this.entryView(r.entry) : null };
   }
   /** Claude's ops (MCP apply_edit_ops): applied, validated, committed as one undoable change. */
@@ -171,6 +171,8 @@ export class EditSessions {
     this.limit(id);
     const { project, labels } = applyOps(s.project as M.EditProject, b.ops as EditOp[]);
     this.check(project, s.takeId);
+    // workstream 1: the owner's pinned playbook rules (no ramps, cuts only, …) hold for every change of Claude's.
+    await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, project);
     const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · '), ...(b.meta ? { meta: b.meta } : {}) }); // label: a tool's own name for the change (workstream 1)
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project) };
   }

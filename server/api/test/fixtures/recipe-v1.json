@@ -11,6 +11,9 @@
   "expiresAt": 1769817600000,
   "videoUrl": "https://api.example/v1/recreate/references/rx_example/video",
   "posterUrl": "https://api.example/v1/recreate/references/rx_example/poster",
+  "source": "link",
+  "sourceUrl": "https://www.tiktok.com/@muse.studio/video/7431234567890123456",
+  "errorCode": null,
   "recipe": {
     "schema": "muse.recipe/1",
     "analyzer": {

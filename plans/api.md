@@ -1147,6 +1147,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 | | |
 |---|---|
 | `POST /v1/recreate/references {uploadId, name?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). |
+| `POST /v1/recreate/references {url, name?}` | A **public** TikTok, Instagram Reel or YouTube link (see "From a link" below). → `Reference` with `source: "link"`, `state: "analyzing"`, `phase: "Fetching the video"`. The same link again, from the same member, → that member's existing reference with `cached: true`. Refusals come before anything is downloaded (codes below). |
 | `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
 | `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
 | `PATCH /v1/recreate/references/{id} {keep?, name?}` | `keep: true` stops the 30-day deletion (`expiresAt: null`). |
@@ -1156,6 +1157,22 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 | `GET /v1/recreate/references/{id}/poster` | → PNG: the first slot's keyframe (cropped from the contact sheet). |
 | `GET /v1/recreate/references/{id}/slots/{slotId}/thumb` | → PNG: that slot's keyframe. |
 | `GET /v1/recreate/references/{id}/fill` | → `{referenceId, slots: SlotFill[], applied?, match?}`, see below. |
+
+**From a link** (migration **0018**, `src/recreate/links.ts`, `test/recreate-links.test.ts`). The owner chose to keep link fetching after reading the platforms' terms, and the risk is theirs (`plans/research/platform-download-rules.md`). Guardrails:
+- **Public only.**
+  - MUSE never uses sign-ins or cookies. yt-dlp runs with `--ignore-config --no-cookies --no-cookies-from-browser` and none of the server's environment.
+  - Private, members-only, sign-in-walled and age-restricted videos are refused (`link_private`).
+- **The creator's setting.** For TikTok, MUSE reads the video's public page. If the creator turned downloads off (`downloadSetting` ≠ 0, or an explicit false), the video is refused (`link_downloads_off`). A page MUSE can't read counts as a blocked fetch; a page that doesn't say is treated as allowed.
+- **One fetch per link.**
+  - The metadata is read once, and the download reuses it (`--load-info-json`). TikTok's page is the one extra read.
+  - No lists, no live streams, no crawling. Platform requests run one at a time across the server.
+  - A link is cached by its normalized form (`https`, no tracking parameters, short links resolved to the video's own link), per member.
+- **Before the download:** duration ≤ 60 s (`too_long`, `400`) and size ≤ `RECREATE_LINK_MAX_MB` (80) (`link_too_big`). Both are checked again on the file.
+- **Storage.** The file is stored privately at `rx/{studio}/{id}/source.mp4` (not served by `/uploads`) and deleted after 30 days like any reference. The metadata is deleted as soon as the file is stored.
+- **Blocked** (a server address the platform blocks, 403, sign-in wall, rate limit, timeout, removed video): `link_blocked` (`502`) with the message "Couldn't fetch this link — save the video and drop the file in". The apps show it and offer the file drop. If the download itself is blocked, the reference turns `failed` with `errorCode: "link_blocked"`.
+- **Codes:** `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (all `422`) · `link_blocked` (`502`) · `too_long` (`400`).
+- **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
+- **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 from PyPI (sha256-checked at build) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
 **Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
 
@@ -1294,7 +1311,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
 - `text`: 1 for read words, 0.6 for "Text"; `ramps`: the share of ramped slots filled; `grade`: 1 − the Look's distance (0 when off or too far).
 - `overall` = 0.25 cuts + 0.35 shots + 0.15 text + 0.1 ramps + 0.15 grade.
 
-**Sources:** apply also returns `sources: {itemId: {recipeId, slotId? , transitionAt?, textId?}}`, which recipe element each item came from, for workstream 3's corrections log (passed to `edit_ops.meta` once it exists).
+**Sources:** apply also returns `sources: {itemId: {recipeId, slotId?, transitionAt?, textId?}}`, which recipe element each item came from. They are stored in the op's `meta.sources` for workstream 3's corrections log.
 
 **Applying a recipe:**
 - **Values:** each slot's value is a take, or a finished job (its first take is used). A slot whose job hasn't finished is listed in `waiting`.
@@ -1321,7 +1338,32 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the Suite job;
   - Claude then passes the job id to `apply_recipe`.
 
-`playbook_read` and `playbook_add` come with WS3's learning storage.
+- `playbook_read(recipeId?, referenceId?, takeId?, area?)` (edit:read): the learning editor's context (workstream 3, "Learning editor"). It holds the playbook (pinned first, ≤ 25), the 3 nearest proven recipes with their Posts performance, 10 corrections, 8 lessons and 5 gaps.
+- `playbook_add(text, area?, evidence?)` (edit:write): Claude's rule arrives unpinned; the owner pins, edits or deletes it.
+- `report_gap(key, kind, what, note?)` (edit:write): an effect, transition or font MUSE can't recreate yet, e.g. `effect:lens-flare`.
+
+**Claude follows the playbook** (workstream 1, `src/recreate/playbook.ts`, `test/playbook.test.ts`):
+- **Directives.** The owner's *pinned* rules that say one plain, checkable thing become directives. A rule with a qualifier, like "Never put text over her face", is never turned into a blanket ban; Claude gets it in `followYourself` and applies it itself.
+
+  | Pinned rule (examples) | Directive |
+  |---|---|
+  | "No speed ramps", "Avoid slow-mo", "Keep normal speed" | no new speed curves |
+  | "No camera moves", "No zooms", "Keep the camera still" | no new x/y/scale/rotation keyframes |
+  | "No text", "Never use captions on my reels" | no new text or caption items |
+  | "No looks", "No LUTs", "Keep the natural colours" | no new or changed looks |
+  | "Hard cuts only", "No transitions" | no transitions |
+  | "Keep transitions under 0.25 s" | transitions at most that long |
+- **Every change of Claude's** (`applyClaude`: `apply_edit_ops`, `apply_recipe`, any patch) is checked against the directives, by what it adds or alters. A change that breaks one is refused with `409 playbook_rule`, which names the rule. Changes the owner makes in the apps are never checked.
+- **`open_edit`** returns `playbook {note, enforced, followYourself, otherRules, lessons}`. `analyze_reference` returns it too, with `startFrom`.
+- **`apply_recipe` / `POST …/apply`:**
+  - The directives shape the plan: transitions dropped or shortened, no camera keyframes, no ramps, no text, no Look.
+  - For Claude the rules win over its `options`; in the app the owner's explicit `options` win.
+  - The response adds `playbook {followed, followYourself}` and `startedFrom {recipeId, name, distance, borrowed[]} | null`.
+  - New body fields: `options.transitions`, and `startFrom: recipeId | false`.
+- **Starting from a proven recipe.** The nearest of the studio's own posted edits (`origin: "edit"`, at least one post, distance ≤ 0.6) is the default start. When the reference's own look can't be mapped (distance ≥ 0.4), the start recipe's palette grades the edit.
+- **Gaps.** What the editor can't rebuild is logged once per reference: `speed:freeze-frame` and `effect:flash-in-shot`. Unknown transitions and unread words are already counted from the recipe's own gaps. Claude logs anything else with `report_gap`.
+
+Applying a recipe stores `meta: {sources}` on the edit op, from Claude or from the app. The owner's later corrections to those items then carry `context.source`.
 
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.

@@ -118,13 +118,15 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'open_edit', title: 'Open an edit', scope: 'edit:write',
-    description: 'Opens the live edit session for a take (the same one the owner sees in the MUSE Edit suite; created if there is none). Returns the session id, its revision and a summary of the project. Your changes appear live in the owner\'s apps with a "Claude" badge and can be undone.',
+    description: 'Opens the live edit session for a take (the same one the owner sees in the MUSE Edit suite; created if there is none). Returns the session id, its revision, a summary of the project and the studio\'s playbook: follow the owner\'s pinned rules (changes that break an enforced one are refused). Your changes appear live in the owner\'s apps with a "Claude" badge and can be undone.',
     inputSchema: obj({ takeId: str('A take or edited-version id from list_takes'), fresh: bool('Start a new session from the take even if one is open') }, ['takeId']),
     run: async (env, a) => {
       const v = await editSessionsOf(env.ctx).open(env.user, { takeId: a.takeId, fresh: a.fresh, device: undefined });
       const s = await editSessionsOf(env.ctx).row(env.user, v.id);
       await editSessionsOf(env.ctx).log(s, 'Opened the edit');
-      return { sessionId: v.id, revision: v.revision, online: v.online, summary: summary(v.project) };
+      // workstream 1: the studio's playbook, read before every edit (pinned rules are enforced on apply_edit_ops).
+      const playbook = await (await import('../recreate/playbook.js')).playbookBrief(env.ctx, env.user, { takeId: String(a.takeId) });
+      return { sessionId: v.id, revision: v.revision, online: v.online, summary: summary(v.project), ...(playbook ? { playbook } : {}) };
     },
   },
   {

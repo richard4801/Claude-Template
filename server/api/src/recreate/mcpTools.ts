@@ -4,8 +4,10 @@
 import { ApiError, badRequest } from '../errors.js';
 import { withImage, type EditTool, type ToolEnv } from '../editor/mcpTools.js';
 import { editSessionsOf } from '../editor/sessions.js';
+import { learningOf } from '../editor/learn.js';
 import type { Recipe } from './analyze.js';
 import { recreateOf } from './references.js';
+import { playbookBrief, provenStart } from './playbook.js';
 
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const bool = (d: string) => ({ type: 'boolean', description: d });
@@ -33,17 +35,20 @@ const rx = (env: ToolEnv) => {
 export const RECREATE_TOOLS: EditTool[] = [
   {
     name: 'analyze_reference', title: 'Analyse a reference edit (free)', scope: 'edit:write',
-    description: 'Turns a reference video (an upload in the studio, up to 60 s) into its edit recipe: shots and cut times, transitions, camera moves, speed ramps, action peaks, beats, on-screen text, the grade. Free (server CPU). Waits up to a minute; returns the referenceId and a summary. Then call get_recipe to see the contact sheet and write each slot\'s brief with set_slot_briefs.',
-    inputSchema: obj({ uploadId: str('A video upload id (up_…)'), name: str('A short name for it', 80) }, ['uploadId']),
+    description: 'Turns a reference video (an upload in the studio, or a public TikTok, Instagram Reel or YouTube Shorts link; up to 60 s) into its edit recipe. A link that can\'t be fetched (private, age-restricted, downloads turned off by the creator, or blocked) is refused with a code: ask the owner to save the video and drop the file in. The recipe has: shots and cut times, transitions, camera moves, speed ramps, action peaks, beats, on-screen text, the grade. Free (server CPU). Waits up to a minute; returns the referenceId, a summary, the studio\'s playbook (follow the owner\'s pinned rules) and startFrom: the studio\'s own posted edit closest to it, when one fits (apply_recipe starts from it unless you pass startFrom: false). Then call get_recipe to see the contact sheet and write each slot\'s brief with set_slot_briefs. Anything in the reference MUSE can\'t rebuild (an effect, a transition, a font): log it with report_gap.',
+    inputSchema: obj({ uploadId: str('A video upload id (up_…)'), url: str('Or a public TikTok, Instagram Reel or YouTube Shorts link', 500), name: str('A short name for it', 80) }),
     run: async (env, a) => {
       const svc = rx(env);
-      const r = await svc.create(env.user, { uploadId: need(a, 'uploadId'), ...(typeof a.name === 'string' ? { name: a.name } : {}) });
+      const src = typeof a.url === 'string' && a.url ? { url: a.url } : { uploadId: need(a, 'uploadId') };
+      const r = await svc.create(env.user, { ...src, ...(typeof a.name === 'string' ? { name: a.name } : {}) });
       const t0 = Date.now();
       for (;;) {
         const row = await svc.row(env.user, r.id);
         if (row.state !== 'analyzing') {
           const v = svc.view(row);
-          return { referenceId: r.id, state: v.state, ...(v.error ? { error: v.error } : {}), ...(v.recipe ? { summary: recipeSummary(v.recipe as Recipe) } : {}) };
+          // Before building: the playbook, and the studio's own proven edit to start from when one is close.
+          const extra = v.state === 'ready' ? { playbook: await playbookBrief(env.ctx, env.user, { referenceId: r.id }), startFrom: await provenStart(env.ctx, env.user, r.id) } : {};
+          return { referenceId: r.id, state: v.state, ...(v.error ? { error: v.error } : {}), ...(v.recipe ? { summary: recipeSummary(v.recipe as Recipe) } : {}), ...extra };
         }
         if (Date.now() - t0 > 60_000) return { referenceId: r.id, state: 'analyzing', message: 'Still analysing; call get_recipe in a moment.' };
         await new Promise(res => setTimeout(res, 250));
@@ -80,12 +85,13 @@ export const RECREATE_TOOLS: EditTool[] = [
   },
   {
     name: 'apply_recipe', title: 'Build the edit from the recipe', scope: 'edit:write',
-    description: 'Builds the edit in an edit session (open_edit) from the recipe: each slot gets its take (or a finished fill_slot job id), cut to the reference\'s timing, with its transition, speed ramp, camera move as keyframes, the text items and the Look. One undoable change. Slots without a take are left out (listed in missing). options: {camera, speed, text, look} (all true by default).',
+    description: 'Builds the edit in an edit session (open_edit) from the recipe: each slot gets its take (or a finished fill_slot job id), cut to the reference\'s timing, with its transition, speed ramp, camera move as keyframes, the text items and the Look. One undoable change. Slots without a take are left out (listed in missing). options: {camera, speed, text, look, transitions} (all true by default). The owner\'s pinned playbook rules win over your options (returned as playbook.followed; playbook.followYourself lists pinned rules for you to apply). startFrom: a proven recipe id, or false; by default the nearest that fits lends its look when the reference\'s can\'t be mapped.',
     inputSchema: obj({ referenceId: RID, sessionId: str('Edit session id (es_…), from open_edit'), slots: { type: 'object', description: 'slotId → takeId or a finished job id' },
-      baseRevision: { type: 'number' }, options: { type: 'object', description: '{camera?, speed?, text?, look?}' } }, ['referenceId', 'sessionId', 'slots']),
+      baseRevision: { type: 'number' }, options: { type: 'object', description: '{camera?, speed?, text?, look?, transitions?}' },
+      startFrom: { description: 'A proven recipe id from the library, or false for none', anyOf: [{ type: 'string' }, { type: 'boolean' }] } }, ['referenceId', 'sessionId', 'slots']),
     run: async (env, a) => {
       const out = await rx(env).apply(env.user, need(a, 'referenceId'), { sessionId: need(a, 'sessionId'), slots: a.slots, ...(typeof a.baseRevision === 'number' ? { baseRevision: a.baseRevision } : {}),
-        ...(a.options ? { options: a.options } : {}) }, { by: 'claude' });
+        ...(a.options ? { options: a.options } : {}), ...(a.startFrom !== undefined ? { startFrom: a.startFrom } : {}) }, { by: 'claude' });
       const s = await editSessionsOf(env.ctx).row(env.user, out.sessionId);
       if (out.missing.length) await editSessionsOf(env.ctx).log(s, `${out.missing.length} slot${out.missing.length === 1 ? '' : 's'} still to fill: ${out.missing.join(', ')}`);
       return { ...out, applied: true };
@@ -110,5 +116,29 @@ export const RECREATE_TOOLS: EditTool[] = [
       const p = await sess.askOwner(s, { kind: 'recreate_fill', label, estimateUsd: usd, args: { referenceId: need(a, 'referenceId'), slotId: e.slotId, body } });
       return { waitingForOwner: true, pendingId: p.id, estimateUsd: usd, message: 'The owner has been asked in the MUSE app. When the job is done, use its job id for this slot in apply_recipe.' };
     },
+  },
+  // The playbook (workstream 3's learning editor, src/editor/learn.ts): read it before building, add what you learned.
+  {
+    name: 'playbook_read', title: 'Read the studio\'s editing playbook', scope: 'edit:read', readOnly: true, idempotent: true,
+    description: 'The studio\'s editing playbook before you build an edit: its rules (pinned first, at most 25), the 3 nearest proven recipes with how their posts performed, the latest corrections the owner made to your edits, lessons, and the top gaps. Pass the recipe, reference or take at hand to get the nearest recipes; area narrows the rules (e.g. text, pacing, look).',
+    inputSchema: obj({ recipeId: str('A recipe id'), referenceId: str('A reference id (rx_…)'), takeId: str('A take id'), area: str('Narrow the rules to one area', 40) }),
+    run: async (env, a) => {
+      rx(env);
+      const o: { recipeId?: string; referenceId?: string; takeId?: string; area?: string } = {};
+      for (const k of ['recipeId', 'referenceId', 'takeId', 'area'] as const) if (typeof a[k] === 'string' && a[k]) o[k] = a[k] as string;
+      return learningOf(env.ctx).context(env.user, o);
+    },
+  },
+  {
+    name: 'playbook_add', title: 'Add a rule to the playbook', scope: 'edit:write',
+    description: 'Adds a rule you learned (≤ 300 characters, one plain sentence, e.g. "Captions sit above the lower third on talking shots"), with its evidence: [{kind: correction|post|recipe|note, id?, note}]. Your rules arrive unpinned; the owner pins, edits or deletes them.',
+    inputSchema: obj({ text: str('The rule', 300), area: str('Its area (e.g. text, pacing, look)', 40), evidence: { type: 'array', description: '[{kind, id?, note}]' } }, ['text']),
+    run: async (env, a) => { rx(env); return learningOf(env.ctx).addRule(env.user, { text: a.text, area: a.area, evidence: a.evidence }, 'claude'); },
+  },
+  {
+    name: 'report_gap', title: 'Report something MUSE can\'t do yet', scope: 'edit:write',
+    description: 'Records a gap: an effect, transition or font in a reference that MUSE can\'t recreate. key is stable and specific (e.g. "effect:lens-flare", "transition:page-curl"); gaps are counted across references to decide what to build.',
+    inputSchema: obj({ key: str('A stable key, kind:name', 80), kind: str('transition | effect | text | font | motion | other'), what: str('What it is, in a few words', 120), note: str('Where you saw it', 300) }, ['key', 'kind', 'what']),
+    run: async (env, a) => { rx(env); return learningOf(env.ctx).addGap(env.user, { key: a.key, kind: a.kind, what: a.what, note: a.note }); },
   },
 ];
