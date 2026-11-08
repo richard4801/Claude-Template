@@ -94,6 +94,8 @@ final class ClaudeCodeService: ObservableObject {
                                 blender: { [weak self] in await self?.blenderServer() },
                                 onEvent: { sink.yield(($0, $1, $2)) }, onState: { stateSink.yield($0) })
         self.relay = relay
+        let base = baseURL
+        Task { await relay.setAssetBase(base) } // phone turns' image links, when relative
         loops = [
             Task { [weak self] in
                 for await (tid, turn, e) in events {
@@ -274,9 +276,9 @@ final class ClaudeCodeService: ObservableObject {
     }
 
     /// A turn typed on this Mac (queued behind the thread's running turn).
-    func send(threadId: String, text: String) {
+    func send(threadId: String, text: String, files: [ClaudeAttachmentFile] = []) {
         guard let relay else { return }
-        Task { await relay.submit(threadId: threadId, text: text) }
+        Task { await relay.submit(threadId: threadId, text: text, files: files) }
     }
 
     /// Stop: this Mac's run of the thread, or (a turn running elsewhere) ask the server to stop it.

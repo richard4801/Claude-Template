@@ -104,7 +104,9 @@ public enum SuiteAssistClaude {
             s.body = keyword([("cinema", "cinema_digital"), ("film", "film_35"), ("phone", "phone"), ("selfie", "phone"), ("vlog", "vlog")], cam.bodies, "cinema_digital")
             s.lens = keyword([("anamorphic", "anamorphic"), ("vintage", "warm_vintage"), ("dream", "halation")], cam.lenses, cinematic ? "anamorphic" : "clean")
             let steps = ComposerCatalog.focalSteps(cam)
-            s.focalMm = (basis.contains("close") ? 85 : basis.contains("wide") ? 24 : 35).nearest(in: steps)
+            var mm = 35
+            if basis.contains("close") { mm = 85 } else if basis.contains("wide") { mm = 24 }
+            s.focalMm = mm.nearest(in: steps)
             s.aperture = find(cam.apertures, "f2.8")
             s.height = keyword([("low angle", "low"), ("overhead", "overhead"), ("high angle", "high")], cam.heights, "eye")
             s.shotSize = keyword([("close", "cu"), ("wide", "ls"), ("full body", "full")], cam.shotSizes, "ms")
@@ -126,8 +128,10 @@ public enum SuiteAssistClaude {
         out.settings = s
         // One #move that suits the words (none in a still).
         if tool != .photo {
-            let move = [("orbit", "orbit_left"), ("handheld", "handheld"), ("follow", "follow"), ("crane", "crane_up"), ("push", "dolly_in"), ("dolly", "dolly_in")]
-                .first(where: { hay.contains($0.0) })?.1 ?? (cinematic ? "dolly_in" : "micro_push")
+            let moveWords: [(String, String)] = [("orbit", "orbit_left"), ("handheld", "handheld"), ("follow", "follow"), ("crane", "crane_up"),
+                                                 ("push", "dolly_in"), ("dolly", "dolly_in")]
+            var move = cinematic ? "dolly_in" : "micro_push"
+            if let hit = moveWords.first(where: { hay.contains($0.0) }) { move = hit.1 }
             if let m = cam.move(move) { tokens = tokens.addMove(m, intensity: 40, catalog: cam).0 }
         }
         out.tokens = tokens

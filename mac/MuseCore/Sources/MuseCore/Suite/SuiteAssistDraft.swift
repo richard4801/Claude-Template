@@ -247,12 +247,14 @@ public enum SuiteAssistDraft {
         if textOnly(a.tokens) != textOnly(b.tokens) { out.append("Prompt") }
         if a.tokens.moves.compactMap(\.move) != b.tokens.moves.compactMap(\.move) { out.append("Moves") }
         let sa = a.settings, sb = b.settings
-        if [sa.body, sa.lens, sa.aperture, sa.height, sa.shotSize] != [sb.body, sb.lens, sb.aperture, sb.height, sb.shotSize] || sa.focalMm != sb.focalMm {
-            out.append("Camera")
-        }
+        let rigA: [String?] = [sa.body, sa.lens, sa.aperture, sa.height, sa.shotSize]
+        let rigB: [String?] = [sb.body, sb.lens, sb.aperture, sb.height, sb.shotSize]
+        if rigA != rigB || sa.focalMm != sb.focalMm { out.append("Camera") }
         if sa.lighting != sb.lighting { out.append("Light") }
         if sa.palette != sb.palette || sa.stock != sb.stock || sa.gradeLook != sb.gradeLook { out.append("Look") }
-        if [sa.genre, sa.era, sa.tempo, sa.format] != [sb.genre, sb.era, sb.tempo, sb.format] { out.append("Style") }
+        let styleA: [String?] = [sa.genre, sa.era, sa.tempo, sa.format]
+        let styleB: [String?] = [sb.genre, sb.era, sb.tempo, sb.format]
+        if styleA != styleB { out.append("Style") }
         if a.quality != b.quality { out.append("Quality") }
         if a.aspect != b.aspect { out.append("Shape") }
         if a.duration != b.duration { out.append("Length") }
