@@ -268,7 +268,8 @@ final class SuiteAssistTests: XCTestCase {
         XCTAssertNil(declined.jobId)
         await expectError("not_found") { _ = try await a.answerSuitePending(assistId: made.id, pendingId: p.id, approve: true) }
 
-        let again = try XCTUnwrap(try await a.demoClaudeAssist(id: made.id, draft: nil, generate: true).waiting)
+        let assisted = try await a.demoClaudeAssist(id: made.id, draft: nil, generate: true)
+        let again = try XCTUnwrap(assisted.waiting)
         let done = try await a.answerSuitePending(assistId: made.id, pendingId: again.id, approve: true)
         XCTAssertEqual(done.status, "done")
         let jobId = try XCTUnwrap(done.jobId)
