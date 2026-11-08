@@ -1385,6 +1385,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - A take shorter than its slot plays slower to fill it.
 - **Transitions:** crossfade → `fade`, fade → `black`, flash → `white`, whip → `whip`, zoom → `zoom`, glitch → `glitch`. Cuts and unknown transitions get none.
 - **Speed ramps** become a custom `speedCurve`, and the source range is chosen so the clip still plays for exactly the slot's length.
+- **Action peaks** (plan §3, `options.peaks`, on by default): each take starts where its own strongest action peak, found free with `find_action_peaks`'s detector and cached per take, plays at the moment of the slot's strongest peak. The cuts don't move. A peak that would push the range past the take's end falls back to the next one, else the take starts at 0. A note says where each take starts.
 - **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
 - **Text items** go on a text track. Text whose words weren't read says "Text".
 - **The Look:** the nearest palette's LUT at 0.8, when its distance is under 0.4.

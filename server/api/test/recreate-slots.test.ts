@@ -14,7 +14,7 @@ import { paletteIds } from '../src/editor/photo.js';
 import { editSessionsOf } from '../src/editor/sessions.js';
 import type { Recipe } from '../src/recreate/analyze.js';
 import { lutFor } from '../src/suite/looks.js';
-import { buildProject, editorTransition } from '../src/recreate/assemble.js';
+import { buildProject, editorTransition, peakInPoint } from '../src/recreate/assemble.js';
 import { RECREATE_TOOLS } from '../src/recreate/mcpTools.js';
 import { BriefSchema, matchSlots, promptSource, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
 import { putObject } from '../src/storage/objects.js';
@@ -99,6 +99,35 @@ describe('Recreate · assembly under playbook directives (unit)', () => {
     expect((M.mainTrack(buildProject(far, 'take_src', takes).project).items[0] as M.VideoClip).look).toBeUndefined();
     const borrowed = buildProject(far, 'take_src', takes, { fallbackLook: { id: 'golden_warmth' } });
     expect((M.mainTrack(borrowed.project).items[0] as M.VideoClip).look?.lut).toBe(lutFor('palettes', 'golden_warmth')); // its pack twin
+  });
+});
+
+describe('Recreate · action peaks line up (unit)', () => {
+  const slot = { ...RECIPE.slots[0]!, peaks: [{ t: 0.5, strength: 1 }, { t: 0.2, strength: 0.3 }] };
+  it('the take starts where its strongest usable peak plays at the slot\'s peak moment', () => {
+    const take = { ...TAKE('tA'), durationSec: 3, peaks: [{ t: 2.0, strength: 0.9 }, { t: 0.3, strength: 0.5 }] };
+    expect(peakInPoint(slot, take, { outSec: 1, speed: 1 }, 0)).toBe(1.5); // 2.0 − 0.5
+    expect(peakInPoint(slot, take, { outSec: 1, speed: 1 }, 0.2)).toBe(1.3); // half a transition in: the moment is 0.7 s into the clip
+    // A peak too late to keep the whole range inside the take falls back to the next one that fits, else 0.
+    expect(peakInPoint(slot, { ...take, peaks: [{ t: 2.9, strength: 1 }, { t: 0.9, strength: 0.2 }] }, { outSec: 1, speed: 1 }, 0)).toBe(0.4);
+    expect(peakInPoint(slot, { ...take, peaks: [{ t: 0.1, strength: 1 }] }, { outSec: 1, speed: 1 }, 0)).toBe(0);
+    expect(peakInPoint(slot, { ...take, peaks: [] }, { outSec: 1, speed: 1 }, 0)).toBe(0);
+    expect(peakInPoint({ ...slot, peaks: [] }, take, { outSec: 1, speed: 1 }, 0)).toBe(0);
+    // A take that already plays slower to fill the slot has no room to move.
+    expect(peakInPoint(slot, take, { outSec: 1, speed: 0.8 }, 0)).toBe(0);
+  });
+  it('in the built edit: the clip starts at that in-point and keeps its length; off with peaks: false', () => {
+    const recipe = { ...RECIPE, slots: RECIPE.slots.map((x, i) => (i === 0 ? { ...x, peaks: [{ t: 0.5, strength: 1 }] } : x)) };
+    const takes = { s1: { ...TAKE('tA', 4), peaks: [{ t: 2.5, strength: 1 }] }, s2: TAKE('tB'), s3: TAKE('tC') };
+    const on = buildProject(recipe, 'take_src', takes);
+    const c1 = M.mainTrack(on.project).items[0] as M.VideoClip;
+    expect(c1.inSec).toBe(2);
+    const off = buildProject(recipe, 'take_src', takes, { peaks: false });
+    const d1 = M.mainTrack(off.project).items[0] as M.VideoClip;
+    expect(d1.inSec).toBe(0);
+    expect(c1.outSec - c1.inSec).toBeCloseTo(d1.outSec - d1.inSec, 4);
+    expect(M.timeline(on.project).map(x => x.startSec)).toEqual(M.timeline(off.project).map(x => x.startSec)); // the cuts don't move
+    expect(on.notes.some(n => /s1: starts 2.00 s into the take/.test(n))).toBe(true);
   });
 });
 

@@ -15,6 +15,7 @@ import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
 import { timeline } from '../editor/model.js';
+import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, promptSource, shotRequestFor, withBriefs, type Candidate } from './slots.js';
@@ -342,7 +343,8 @@ export class RecreateReferences {
     const b = parse(z.object({
       sessionId: z.string().min(1), baseRevision: z.number().int().min(0).optional(),
       slots: z.record(z.string(), z.string().min(1).max(80)),
-      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional() }).strict().optional(),
+      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional(),
+        peaks: z.boolean().optional() }).strict().optional(),
       /** A proven recipe of the studio's to start from (its look fills in when the reference's can't be mapped); false = none; omitted = the nearest that fits. */
       startFrom: z.union([z.string().min(1).max(80), z.literal(false)]).optional(),
     }).strict(), body);
@@ -367,6 +369,13 @@ export class RecreateReferences {
       if (!t) throw badRequest(`slots.${slotId}: no video take or job ${v}`);
       if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
       takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
+    }
+    // The takes' action peaks (free, server CPU; cached per take), to line them up with the reference's.
+    if (b.options?.peaks !== false) {
+      for (const info of Object.values(takes)) {
+        const row = info && byId.get(info.id);
+        if (info && row?.mediaKey) info.peaks = await this.takePeaks(row.id, row.mediaKey).catch(() => []);
+      }
     }
     // The playbook (workstream 3's learning editor): the owner's pinned rules shape the plan. Claude can't override them;
     // the owner's own explicit options in the app can.
@@ -394,6 +403,19 @@ export class RecreateReferences {
     return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources,
       playbook: { followed: pb.followed, followYourself: pb.toFollow },
       startedFrom: start ? { recipeId: start.recipeId, name: start.name, distance: start.distance, borrowed } : null };
+  }
+
+  private peakCache = new Map<string, { t: number; strength: number }[]>();
+  /** A take's action peaks (the find_action_peaks detector), cached by take and media. */
+  private async takePeaks(takeId: string, key: string) {
+    const k = `${takeId}:${key}`, hit = this.peakCache.get(k);
+    if (hit) return hit;
+    const c = this.ctx.config;
+    const peaks = await this.withLocal(key, async f => findPeaks(await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, f, { maxSec: 120 })));
+    const out = peaks.map(p => ({ t: Math.round(p.t * 1000) / 1000, strength: p.strength }));
+    this.peakCache.set(k, out);
+    if (this.peakCache.size > 500) this.peakCache.delete(this.peakCache.keys().next().value!);
+    return out;
   }
 
   /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */
