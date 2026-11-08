@@ -1,6 +1,6 @@
 // Recreate this edit (workstream 1, migrations 0015, 0016, 0018): a reference video and its recipe. The video is the studio's
 // private upload, used only for analysis; it is deleted after 30 days unless kept (`keep`).
-import { bigint, boolean, doublePrecision, index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
+import { bigint, boolean, doublePrecision, index, integer, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 
 export const recreateReferences = pgTable('recreate_references', {
   id: text('id').primaryKey(),
@@ -22,6 +22,8 @@ export const recreateReferences = pgTable('recreate_references', {
   /** A reference fetched from a link (migration 0018): the normalized link, and the error code when the fetch failed. */
   sourceUrl: text('source_url'),
   errorCode: text('error_code'),
+  /** Analysis runs started (migration 0024): one that is still "analyzing" after a restart took the server down. */
+  analyzeAttempts: integer('analyze_attempts').notNull().default(0),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   deletedAt: bigint('deleted_at', { mode: 'number' }),

@@ -20,6 +20,8 @@ public protocol RecreateAPI: Sendable {
     /// `POST /v1/recreate/links/check {url}`: the link under the studio's rules before a device downloads it.
     func checkLink(_ url: String) async throws -> RecreateLinkCheck
     func deleteReference(_ id: String) async throws
+    /// A failed reference read again (POST …/retry → `analyzing`). 409 not_failed / video_gone.
+    func retryReference(_ id: String) async throws -> RecreateReference
     func fill(_ id: String) async throws -> RecreateFill
     /// Scores the studio's takes against each slot (free); the fill then says which slots are matched and which to generate.
     func matchSlots(_ id: String, modelId: String?) async throws
@@ -423,6 +425,9 @@ extension HTTPMuseAPI: RecreateAPI {
         try await suiteCall("PATCH", "v1/recreate/references/\(try RecreateIds.check(id))", body: try JSONEncoder().encode(PatchBody(keep: keep, name: name)))
     }
     public func deleteReference(_ id: String) async throws { try await suiteSend("DELETE", "v1/recreate/references/\(try RecreateIds.check(id))") }
+    public func retryReference(_ id: String) async throws -> RecreateReference {
+        try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/retry", body: Data("{}".utf8))
+    }
     public func fill(_ id: String) async throws -> RecreateFill { try await suiteCall("GET", "v1/recreate/references/\(try RecreateIds.check(id))/fill") }
     public func matchSlots(_ id: String, modelId: String?) async throws {
         let _: JSONValue = try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/match", body: try JSONEncoder().encode(MatchBody(modelId: modelId)))
@@ -575,6 +580,16 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         }
     }
     public func deleteReference(_ id: String) async throws { with { refs.removeAll { $0.id == id } } }
+    public func retryReference(_ id: String) async throws -> RecreateReference {
+        try with {
+            guard let i = refs.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }
+            guard refs[i].state == "failed" else { throw ApiError("not_failed", "This video isn’t stuck") }
+            refs[i].state = "ready"
+            refs[i].error = nil
+            refs[i].errorCode = nil
+            return refs[i]
+        }
+    }
     /// Review mode: every theme starts from the same fill (nothing made yet).
     public func forgetMade() { with { made = [:] } }
 

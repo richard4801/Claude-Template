@@ -2,7 +2,7 @@
 // gap G4). The tracker finds a caption once its strokes are near-white or near-black, so a fade is found late and its
 // start isn't seen. Around each item's in and out times, a few frames are read and the contrast inside its box is
 // measured: a gradual rise is a fade, the box's right half appearing well after its left a typewriter, else a cut.
-import { grabFrame, type Rgb } from './frames.js';
+import { readWindow, type Rgb } from './frames.js';
 import type { TextItem } from './text.js';
 
 /** Items looked at (each costs ~16 frame reads). */
@@ -38,20 +38,31 @@ export function classifyIn(series: number[], left: number[], right: number[]): M
 }
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
-/** Each item's animation in and out (the first MAX_MOTION_ITEMS); others keep "cut". */
-export async function textMotions(ffmpeg: string, input: string, items: TextItem[], src: { width: number; height: number; durationSec: number }): Promise<TextItem[]> {
+/**
+ * Each item's animation in and out (the first MAX_MOTION_ITEMS); others keep "cut". Memory (workstream 1, the 512 MB
+ * box): each window is one ffmpeg pipe read in order, never parallel decodes; `stop` is asked before each item and
+ * ends the step early (the rest keep "cut") when memory is short.
+ */
+export async function textMotions(ffmpeg: string, input: string, items: TextItem[], src: { width: number; height: number; durationSec: number }, o: { stop?: () => boolean } = {}): Promise<TextItem[]> {
   const w = Math.min(W, src.width - (src.width % 2)), h = Math.max(2, Math.round(w * src.height / src.width / 2) * 2);
-  const at = async (t: number) => grabFrame(ffmpeg, input, Math.max(0, Math.min(src.durationSec - 0.04, t)), w, h).catch(() => null);
+  const clampT = (t: number) => Math.max(0, Math.min(src.durationSec - 0.04, t));
+  /** The frames at `ts` (each clamped into the video), from one window read. */
+  const at = async (ts: number[]): Promise<(Rgb | null)[]> => {
+    const cs = ts.map(clampT), start = Math.min(...cs), count = Math.round((Math.max(...cs) - start) / STEP) + 1;
+    const fs = await readWindow(ffmpeg, input, start, count, 1 / STEP, w, h).catch(() => [] as Rgb[]);
+    return cs.map(t => fs[Math.round((t - start) / STEP)] ?? null);
+  };
   const out: TextItem[] = [];
+  let stopped = false;
   for (const [i, it] of items.entries()) {
-    if (i >= MAX_MOTION_ITEMS) { out.push(it); continue; }
+    if (i >= MAX_MOTION_ITEMS || stopped || (stopped = !!o.stop?.())) { out.push(it); continue; }
     try {
       // In: from before it was found to a little after; the tracker's start is when it was already readable.
       const tin: number[] = []; for (let t = it.startSec - BEFORE; t <= it.startSec + AFTER + 1e-6; t += STEP) tin.push(t);
-      const fin = await Promise.all(tin.map(at));
+      const fin = await at(tin);
       // Out: mirrored (fully on → gone), read backwards so the same rule applies.
       const tout: number[] = []; for (let t = it.endSec + BEFORE; t >= it.endSec - AFTER - 1e-6; t -= STEP) tout.push(t);
-      const fout = await Promise.all(tout.map(at));
+      const fout = await at(tout);
       const ok = (fs: (Rgb | null)[]) => fs.every(Boolean) ? fs as Rgb[] : null;
       const a = ok(fin), b = ok(fout);
       const m = (fs: Rgb[]) => classifyIn(fs.map(f => contrast(f, it.box)), fs.map(f => contrast(f, it.box, 'left')), fs.map(f => contrast(f, it.box, 'right')));

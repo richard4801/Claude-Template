@@ -568,7 +568,8 @@ struct SetupChipRow: View {
             break
         }
         // @locations count against the References limit too.
-        let refs = ComposerLocations.used(d.tokens, slots: store.suite.composerSlots.slots)
+        // Claude's reference images (pose, style, location, outfit) count too: they go with the shot.
+        let refs = ComposerLocations.used(d.tokens, slots: store.suite.composerSlots.slots) + store.suite.claude.references.count
         let sum = ComposerCatalog.summary(chip, s, cat, refs: refs, refsMax: SlotKind.image.capacity(store.composerInputs))
         return (sum.value.replacingOccurrences(of: ", ", with: " · "), sum.auto)
     }
@@ -759,6 +760,8 @@ struct ComposerPromptBar: View {
             if store.isComingSoon(draft.tool) {
                 comingSoon
             } else {
+                // Claude's reference images, right over the prompt they go with, each removable.
+                if !store.suite.claude.references.isEmpty { SuiteClaudeReferenceChips() }
                 promptArea
                 if let p = currentProblem {
                     Label(p, ph: "exclamationmark.triangle").font(t.scale.caption.font).foregroundStyle(t.warn)

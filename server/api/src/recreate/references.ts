@@ -20,6 +20,10 @@ import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
 import { clipLength, timeline } from '../editor/model.js';
+import * as EM from '../editor/model.js';
+import { FILTERS } from '../editor/presets.js';
+import { LOOK_IDS } from '../editor/lookpack.js';
+import { paletteIds } from '../editor/photo.js';
 import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { poseSimilarity, readPoseTracks, type PoseTrack } from './poseTrack.js';
@@ -33,6 +37,8 @@ import { assertPublicHost, checkInfo, FALLBACK, linkError, linkFor, normalizeLin
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
+/** Analysis runs before a reference fails for good: the second one is lite (workstream 1, the 512 MB box). */
+export const MAX_ANALYZE_ATTEMPTS = 2;
 /** Matching by movement: at most this many takes are read for poses per match, over their first seconds. */
 export const POSE_MATCH_TAKES = 8, POSE_TAKE_SEC = 6;
 export const KEEP_DAYS = 30;
@@ -133,13 +139,48 @@ export class RecreateReferences {
   private resumed = false;
   constructor(private ctx: Ctx) {}
 
-  /** After a restart: analyses that were running start again (once, on first use). */
+  /**
+   * After a restart (at startup, else on first use): analyses that were running start again. One that had already
+   * started was running when the server went down (most likely out of memory, killed without a log): it runs again
+   * once in lite mode (required steps only); after a second such stop it fails with Retry (workstream 1).
+   */
   private async resume() {
     if (this.resumed) return;
     this.resumed = true;
-    const rows = await this.ctx.db.select({ id: recreateReferences.id }).from(recreateReferences).where(eq(recreateReferences.state, 'analyzing'));
-    for (const r of rows) if (!this.queue.includes(r.id)) this.enqueue(r.id);
+    const rows = await this.ctx.db.select({ id: recreateReferences.id, attempts: recreateReferences.analyzeAttempts }).from(recreateReferences)
+      .where(and(eq(recreateReferences.state, 'analyzing'), isNull(recreateReferences.deletedAt)));
+    for (const r of rows) {
+      if (r.attempts >= MAX_ANALYZE_ATTEMPTS) {
+        const [n] = await this.ctx.db.update(recreateReferences).set({ state: 'failed', phase: 'Failed', errorCode: 'analysis_crashed',
+          error: 'The analysis stopped the server twice · tap Retry for a lighter analysis' }).where(eq(recreateReferences.id, r.id)).returning();
+        if (n) this.emit(n);
+        this.ctx.log?.warn({ referenceId: r.id, attempts: r.attempts }, 'recreate analysis crashed twice: failed');
+        continue;
+      }
+      if (r.attempts > 0) this.ctx.log?.warn({ referenceId: r.id, attempts: r.attempts }, 'recreate analysis was running when the server stopped: resuming lite');
+      if (!this.queue.includes(r.id)) this.enqueue(r.id);
+    }
   }
+  /** At server start (app.ts): picks up analyses a crash or deploy left running. */
+  async startup() { await this.resume(); }
+
+  /**
+   * POST /v1/recreate/references/{id}/retry: a failed analysis runs again (the video is kept, or the link fetched
+   * again). After a crash it runs lite (required steps only).
+   */
+  async retry(u: AuthUser, id: string) {
+    const r = await this.row(u, id);
+    if (r.state !== 'failed') throw new ApiError(409, 'not_failed', 'Only a failed analysis can be retried');
+    if (!r.storageKey && !r.sourceUrl) throw new ApiError(409, 'video_gone', 'The video is gone · add the reference again');
+    const [n] = await this.ctx.db.update(recreateReferences).set({ state: 'analyzing', progress: 0, phase: 'Waiting', error: null, errorCode: null,
+      analyzeAttempts: r.errorCode === 'analysis_crashed' ? MAX_ANALYZE_ATTEMPTS - 1 : 0 }).where(and(eq(recreateReferences.id, r.id), eq(recreateReferences.state, 'failed'))).returning();
+    if (!n) throw new ApiError(409, 'not_failed', 'Only a failed analysis can be retried');
+    this.emit(n);
+    if (!this.queue.includes(n.id)) this.enqueue(n.id);
+    return this.view(n);
+  }
+  /** True while an analysis decodes video: other heavy reads (a take's poses) wait their turn by skipping. */
+  private heavyBusy = false;
 
   view(r: Row) {
     const base = `${this.ctx.config.PUBLIC_URL ?? ''}/v1/recreate/references/${r.id}`;
@@ -223,17 +264,18 @@ export class RecreateReferences {
   };
   private linkChain: Promise<unknown> = Promise.resolve();
   /** One platform request at a time across the server. */
-  private serial<T>(fn: () => Promise<T>): Promise<T> {
+  /** Also used by imports (src/imports/service.ts): one platform request at a time across the server. */
+  serial<T>(fn: () => Promise<T>): Promise<T> {
     const p = this.linkChain.then(fn, fn);
     this.linkChain = p.catch(() => undefined);
     return p;
   }
-  private get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
+  get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
   private get maxLinkBytes() { return this.ctx.config.RECREATE_LINK_MAX_MB * 1048576; }
   /** The host check for "other" links (tests replace it). */
   publicHost = (url: string) => assertPublicHost(url);
   /** Why a server-side fetch failed: the platform and yt-dlp's failure in a word, never the link. */
-  private logLinkFailure(platform: string, step: 'info' | 'download', e: unknown) {
+  logLinkFailure(platform: string, step: 'info' | 'download', e: unknown) {
     const err = e as ApiError & { failure?: string };
     this.ctx.log?.warn({ platform, step, code: err?.code ?? 'error', failure: err?.failure ?? 'other' }, 'recreate link fetch failed');
   }
@@ -441,6 +483,7 @@ export class RecreateReferences {
   private async takeTrack(t: typeof takesTable.$inferSelect): Promise<PoseTrack | null> {
     const k = `${t.id}:${t.mediaKey}`;
     if (this.trackCache.has(k)) return this.trackCache.get(k)!;
+    if (this.heavyBusy) return null; // an analysis is decoding: match without poses this time (not cached)
     const c = this.ctx.config;
     const w = Number(t.media?.width) || 720, h = Number(t.media?.height) || 1280, d = Number(t.media?.durationSec) || POSE_TAKE_SEC;
     const run = await this.withLocal(t.mediaKey!, f => readPoseTracks({ ffmpeg: c.FFMPEG_PATH, minFreeMb: c.RECREATE_POSE_MIN_FREE_MB }, f, [{ startSec: 0, endSec: Math.min(d, POSE_TAKE_SEC) }],
@@ -727,6 +770,13 @@ export class RecreateReferences {
     if (Object.keys(baked).length) opts.baked = baked;
     const out = buildProject(recipe, s.takeId, takes, opts);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
+    // Workstream 1: a built edit the editor would refuse never reaches the owner as a validator path.
+    if (out.durationSec < EM.LIMITS.minOutputSec) throw new ApiError(400, 'edit_too_short', 'Give more shots a take: the edit would be shorter than half a second');
+    try { EM.validate(out.project, FILTERS, LOOK_IDS, paletteIds()); } catch (e) {
+      if (!(e instanceof EM.EditProblem)) throw e;
+      this.ctx.log?.error({ referenceId: r.id, problem: e.message, slots: Object.keys(takes).length }, 'recreate apply built an invalid project');
+      throw new ApiError(422, 'edit_invalid', 'MUSE couldn’t put this edit together · try Build again, or leave out a shot (we’ve logged it)');
+    }
     const { baked: _b, ...optsKept } = opts;
     const label = `Recreated “${r.name}”`;
     // Which recipe element each item came from: on the op, so the owner's later corrections carry it (workstream 3).
@@ -961,8 +1011,11 @@ export class RecreateReferences {
   private async analyze(id: string) {
     const db = this.ctx.db, c = this.ctx.config;
     let [r] = await db.select().from(recreateReferences).where(eq(recreateReferences.id, id));
-    if (!r || r.state !== 'analyzing') return;
+    if (!r || r.state !== 'analyzing' || r.deletedAt) return;
     const set = async (v: Partial<Row>) => { const [n] = await db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id)).returning(); if (n) this.emit(n); };
+    // Counted before any heavy work: if the server dies during it, the restart knows (resume()).
+    const attempts = r.analyzeAttempts + 1, lite = attempts >= MAX_ANALYZE_ATTEMPTS;
+    await set({ analyzeAttempts: attempts, ...(lite ? { phase: 'Starting again (a lighter analysis)' } : {}) });
     if (!r.storageKey) {
       if (!r.sourceUrl) return;
       const got = await this.fetchLinkVideo(r, set);
@@ -970,11 +1023,13 @@ export class RecreateReferences {
       r = got;
     }
     const storageKey = r.storageKey!;
+    this.heavyBusy = true;
     try {
       const out = await this.withLocal(storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH, ...(c.TESSERACT_PATH ? { tesseract: c.TESSERACT_PATH } : {}),
         ...(c.RECREATE_POSE ? { pose: { minFreeMb: c.RECREATE_POSE_MIN_FREE_MB } } : {}) }, f, {
-        maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }),
+        maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }), lite,
       }));
+      if (out.recipe.analyzer.skipped?.length) this.ctx.log?.warn({ referenceId: r.id, skipped: out.recipe.analyzer.skipped }, 'recreate analysis skipped optional steps');
       // The pose child's peak memory, for sizing the instance (plans/recreate-edit.md "Pose").
       if (out.recipe.analyzer.pose) this.ctx.log?.info({ referenceId: r.id, pose: out.recipe.analyzer.pose }, 'recreate pose');
       // Per-frame poses (keypoints only), private next to the reference and deleted with it; read when matching takes.
@@ -991,11 +1046,11 @@ export class RecreateReferences {
       }
     } catch (e) {
       await set({ state: 'failed', phase: 'Failed', error: `The analysis didn’t finish: ${(e as Error).message.slice(0, 200)}` });
-    }
+    } finally { this.heavyBusy = false; }
   }
 
+  /** The stored video as a local file for ffmpeg (streamed to disk, never held in memory; also from S3, so each of the many reads is local). */
   private async withLocal<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
-    if (this.ctx.storage.kind === 's3') return fn(await this.ctx.storage.presignGet(key, 900));
     const obj = await this.ctx.storage.get(key);
     if (!obj) throw new Error('media missing');
     const file = path.join(os.tmpdir(), `${uid('rxin')}${path.extname(key) || '.mp4'}`);
@@ -1095,7 +1150,8 @@ export function sourcesOf(recipe: Recipe, project: import('../editor/model.js').
     out[it.id] = { recipeId, slotId: s.id, ...(tr ? { transitionAt: tr.atSec } : {}) };
   });
   // Text items keep the recipe's order (x1, x2, …).
-  (project.tracks.find(t => t.kind === 'text')?.items ?? []).forEach((it, i) => { out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; });
+  // Text items are x1, x2, … in the recipe's order, spread over one or more text tracks (packText).
+  for (const it of project.tracks.filter(t => t.kind === 'text').flatMap(t => t.items)) { const i = Number(/^x(\d+)$/.exec(it.id)?.[1] ?? 0) - 1; out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; }
   return out;
 }
 

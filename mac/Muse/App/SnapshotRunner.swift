@@ -284,6 +284,10 @@ enum SnapshotRunner {
                             let drawn = state.composerFrames["claude panel"] != nil
                             lines.append("\(drawn && filled ? "FITS" : "CUT") \(label) Claude panel \(drawn ? "drawn" : "not drawn"), composer \(filled ? "filled" : "not filled"), \(c.demoLines.count) lines, \(c.rejected.count) refused, revision \(c.revision)")
                             if name == "composer_claude_ask" {
+                                // Claude's references are where the owner looks: chips over the prompt, counted in References.
+                                let chips = state.composerFrames["claude references"]
+                                let onScreen = chips.map { $0.minY >= 0 && $0.maxY <= content.height + 0.5 && $0.maxX <= content.width + 0.5 } ?? false
+                                lines.append("\(!c.references.isEmpty && onScreen ? "FITS" : "CUT") \(label) reference chips over the prompt: \(c.references.map(\.title).joined(separator: ", ")) \(chips.map { "at \(Int($0.minX)),\(Int($0.minY))" } ?? "not drawn")")
                                 lines.append("\(c.ask != nil && !c.confirmOpen ? "FITS" : "CUT") \(label) Claude's ask waits for the owner (\(c.ask.map { Pricing.money($0.estimateUsd) } ?? "none"), confirmation \(c.confirmOpen ? "open" : "closed"))")
                             }
                             if name == "composer_claude_attach" {
@@ -351,6 +355,7 @@ enum SnapshotRunner {
         // Claude's ask from the review shots is declined (it was never approved), and the panel closed.
         if store.suite.claude.ask != nil { store.answerSuiteAsk(approve: false) }
         store.suite.claude.attachments = []
+        store.suite.claude.references = []
         store.suite.claude.open = false
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))

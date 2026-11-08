@@ -116,6 +116,13 @@ final class StudioTests: XCTestCase {
             XCTAssertNotNil(ApiError.friendly(code), code)
         }
         XCTAssertEqual(ApiError("http_429", "Server error 429").friendlyMessage, ApiError("rate_limited", "").friendlyMessage)
+        // A server restart reads in plain words, and is retried quietly (never "Server error 502").
+        XCTAssertEqual(ApiError("http_502", ApiError.plainHTTP(502)).friendlyMessage, "MUSE’s server is restarting. Try again in a minute.")
+        XCTAssertFalse(ApiError("http_503", "Server error 503").friendlyMessage.contains("Server error"))
+        XCTAssertTrue(ApiError("http_504", "").isTransient)
+        XCTAssertTrue(ApiError("offline", "").isTransient)
+        XCTAssertFalse(ApiError("http_404", "").isTransient)
+        XCTAssertFalse(ApiError.plainHTTP(500).contains("500"))
         XCTAssertEqual(ApiError("bad_request", "They have 250 unused tokens (13 more are on hold for running jobs)").friendlyMessage,
                        "They have $2.50 unused credit ($0.13 more are on hold for running jobs)")
         XCTAssertEqual(ApiError("bad_request", "The owner's wallet is the studio balance; send tokens to members only").friendlyMessage,

@@ -35,6 +35,7 @@ import { EngineHealth } from './services/engines.js';
 import { SuiteService } from './suite/service.js';
 import { registerSuiteRoutes } from './routes/suite.js';
 import { registerProviderRoutes } from './routes/providers.js'; // WS5: bring your own provider
+import { registerImportRoutes } from './routes/imports.js'; // WS12: import a video from a link
 import { recreateOf } from './recreate/references.js';
 
 declare module 'fastify' {
@@ -153,6 +154,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerVersionRoutes(app, ctx);
   await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)
   await registerProviderRoutes(app, ctx); // WS5: bring your own provider
+  await registerImportRoutes(app, ctx); // WS12: import a video from a link
   await registerCameraRoutes(app, ctx); // workstream 2: camera sessions, Direct with Claude, Blender relay, MCP server
   await registerEditorAiRoutes(app, ctx); // Editor v2 (workstream 3)
 
@@ -166,6 +168,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     // Recreate (workstream 1): expired references lose their video on a timer, not only when someone lists them.
     const sweep = () => { void recreateOf(ctx).sweep(Date.now(), true).catch(e => ctx.log?.warn({ err: String(e) }, 'recreate sweep')); };
     const first = setTimeout(sweep, 60_000); first.unref?.(); timers.add(first);
+    // Recreate (workstream 1): analyses a crash or deploy left "analyzing" resume (lite after a crash) or fail with Retry.
+    const resume = setTimeout(() => { void recreateOf(ctx).startup().catch(e => ctx.log?.warn({ err: String(e) }, 'recreate resume')); }, 2_000);
+    resume.unref?.(); timers.add(resume);
     recreateSweep = setInterval(sweep, 3_600_000);
     recreateSweep.unref?.();
   }

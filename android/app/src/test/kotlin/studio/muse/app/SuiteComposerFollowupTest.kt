@@ -369,7 +369,7 @@ class SuiteComposerFollowupTest {
         assertEquals(owner.tier("standard")!!.slotsFor("ltx-2.3"), d.inputsFor(owner))
         val shown = ToolSlots.of(ComposerTool.SHOT, d.inputsFor(owner), InputSlots())
         assertEquals(listOf("character", "start", "end"), shown.map { it.kind })
-        assertTrue(d.engineLabel(owner).endsWith("· 1080p"))
+        assertTrue(d.engineLabel(owner).endsWith(", 1080p")) // shared copy with the Mac: "LTX-2.3 Pro, 1080p"
         val r = d.request(InputSlots(), d.inputsFor(owner), RecastDraft())
         assertEquals("ltx-2.3", r.engineModel); assertEquals("1080p", r.resolution)
         // A quality whose engines don't include it goes back to Auto; so does a member's catalog (no engines).

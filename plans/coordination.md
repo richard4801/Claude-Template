@@ -277,3 +277,17 @@ Release 1 additions (2026-11-08):
 - **WS6, Mac:** owner model picker in the Suite; remove "+ Select → New video"; Settings redesign (mock first, the owner approves); outfit full view. session_01Py2rxqPqvWiWuiv6U5c2wr, branch claude/muse-mac-r2.
 - **WS7, Android:** the same as WS6 for Android. session_01Py2rxngd8dggBVUEdbnrKE, branch claude/muse-android-r2.
 - WS1–WS4 finish their in-flight work (Claude in the Suite, attachments, the device link-fetch fixes), then stop. The owner deletes the old sessions when everything is done.
+
+## Edit parity (owner, 2026-11-08): "not every feature on the edit actually works… grab CapCut, see every feature, nothing must be missing"
+- **WS8, Android Edit:** fix the reported bugs (thumbnail play icon; timeline scrubbing and start position; separate audio lane), audit every control, then a parity inventory in plans/edit-parity.md. session_01Py2rxmaRnqc2HBmNzZqzt3, branch claude/muse-android-edit.
+- **WS9, Mac Edit:** audit every control (project, preview and export), fix placeholders, and add the Mac column to the parity doc. session_01Py2rxoyr17gkJgGcBWUuy9, branch claude/muse-mac-edit.
+- **The owner prioritises the parity gaps before they're built.** Functionality is rebuilt in MUSE's own design; licensed content (music, stickers, effect and template packs) is listed separately.
+
+## Claude chat polish (owner, 2026-11-08): "same behaviour as a regular Claude app"
+- **The asks:** bubbles; tool chips; markdown rendered properly (no raw asterisks); no internal leaks; a growing composer; keyboard-safe; plus whatever else a good chat needs.
+- **WS10, Android:** session_01Py2rxndMvVe4pcHym1etXT, branch claude/muse-android-chat.
+- **WS11, Mac:** session_01Py2rxocJTVPKL6rpkkyqtE, branch claude/muse-mac-chat. It takes over ClaudeChatView after WS2's phase B.
+
+## Import a video from a link (owner, 2026-11-08), for character swap and edit
+- **WS12, server:** session_01Py2rxoqyyhZ1HMNrW8hBys, branch claude/muse-link-import. General link check, link settings, and POST /v1/imports.
+- **Apps:** WS6 (Mac) and WS7 (Android) build it, reusing the on-device fetch. Entry points: Swap source "Paste a link", Library "Import from link", the Edit media bin, and Android Share.

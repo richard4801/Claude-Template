@@ -25,12 +25,15 @@ struct RecreateView: View {
                         } else if ref.failedFetchingLink {
                             RecreateLinkFailed(reference: ref)
                         } else if ref.isFailed {
-                            ErrorState("The analysis didn’t finish", ref.error ?? "This video couldn’t be read. Try another one.",
-                                       actionTitle: "Back to references") { store.leaveRecreateReference() }
+                            VStack(alignment: .leading, spacing: Space.s3) {
+                                ErrorState("The analysis didn’t finish", ref.error ?? "This video couldn’t be read. Try again, or try another one.",
+                                           actionTitle: "Retry") { store.retryRecreateReference() }
+                                RButton("Back to references", kind: .plain, small: true) { store.leaveRecreateReference() }
+                            }
                                 .padding(Space.s6)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         } else {
-                            RecreateAnalysing(reference: ref)
+                            RecreateAnalysing(reference: ref, reconnecting: rs.reconnecting, lost: rs.pollLost) { store.pollRecreateReference(ref.id) }
                         }
                     } else {
                         RecreateStart()
@@ -522,6 +525,11 @@ struct RecreateLinkFailed: View {
 struct RecreateAnalysing: View {
     @Environment(\.theme) private var t
     var reference: RecreateReference
+    /// The server isn't answering for now (it restarted): retrying quietly.
+    var reconnecting = false
+    /// Retrying gave up: plain words and Try again.
+    var lost: String?
+    var retry: () -> Void = {}
 
     var body: some View {
         let current = RecreateText.analysisStep(phase: reference.phase, state: reference.state)
@@ -529,6 +537,15 @@ struct RecreateAnalysing: View {
             VStack(alignment: .leading, spacing: Space.s2) {
                 Text("Reading the reference").scaled(t.scale.title, t.roles.ink)
                 Text("About a minute. You can leave this page; it carries on.").scaled(t.scale.body, t.roles.ink2)
+            }
+            if let lost {
+                InlineNotice(lost, tone: .caution, actionTitle: "Try again", action: retry).frame(maxWidth: 520)
+            } else if reconnecting {
+                HStack(spacing: Space.s2) {
+                    ProgressView().controlSize(.small)
+                    Text("Reconnecting…").scaled(t.scale.caption, t.roles.ink2)
+                }
+                .accessibilityElement(children: .combine)
             }
             HStack(spacing: Space.s3) {
                 RProgress(value: (reference.progress ?? 0) / 100).frame(width: 360)

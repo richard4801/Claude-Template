@@ -879,6 +879,27 @@ public typealias UploadProgress = @Sendable (Double) -> Void
 // MARK: - Friendly errors
 
 extension ApiError {
+    /// Plain words for an HTTP status the server sent without its own message (never "Server error 502").
+    public static func plainHTTP(_ status: Int) -> String {
+        switch status {
+        case 502, 503, 504: return "MUSE’s server is restarting. Try again in a minute."
+        case 500...599: return "Something went wrong on MUSE’s server. Try again in a minute."
+        case 401: return "Your session has ended. Sign in again."
+        case 403: return "You don’t have access to that."
+        case 404: return "That isn’t there any more."
+        case 408: return "That took too long. Try again."
+        case 409: return "That changed in the meantime. Try again."
+        case 413: return "That file is too big."
+        case 429: return "Too many tries. Wait a minute, then try again."
+        default: return "Something went wrong. Try again."
+        }
+    }
+
+    /// A blip worth retrying quietly: the server restarting (502/503/504), no connection, or a request that timed out.
+    public var isTransient: Bool {
+        ["http_502", "http_503", "http_504", "offline", "timeout", "still_working"].contains(code)
+    }
+
     /// Server codes that end the session: the app goes back to sign-in.
     public var endsSession: Bool { code == "unauthorized" || code == "account_disabled" }
 
@@ -929,6 +950,8 @@ extension ApiError {
         case "provider_rate_limited": return "Busy right now · you weren't charged. Try again in a minute."
         case "provider_out_of_credit": return MemberText.ownerTold
         case "upscale_unavailable": return "Upscale is coming soon"
+        case "http_502", "http_503", "http_504": return ApiError.plainHTTP(503)
+        case "http_500": return ApiError.plainHTTP(500)
         case "model_archived": return "This model is archived · restore her in Settings → Archived models"
         // Retired codes from older servers, in member-safe words.
         case "owner_balance_low", "balance_unavailable", "topup_unavailable": return MemberText.wentWrong

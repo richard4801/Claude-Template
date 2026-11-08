@@ -83,6 +83,8 @@ class PhotoUi(
     val error: String?,
     val busy: Boolean,
     val setCount: (Int) -> Unit,
+    /** Owner only (WS7): pin an image model, null = the studio's. */
+    val setImageModel: (String?) -> Unit = {},
     val generate: () -> Unit,
 ) {
     /** The notes the estimate gave ("Movement doesn’t apply to photos", "The preset sets its own camera and light"). */
@@ -106,7 +108,7 @@ fun rememberPhotoTool(d: ComposerDraft): PhotoUi? {
         value = store.estimate(req)
     }.value
     val problem = PhotoComposer.problem(d, p, busy).takeIf { d.characterId != null }
-    return PhotoUi(p, req, est.first?.let { PhotoComposer.asEstimate(it) }, est.first, problem ?: est.second, busy, store::setCount) {
+    return PhotoUi(p, req, est.first?.let { PhotoComposer.asEstimate(it) }, est.first, problem ?: est.second, busy, store::setCount, store::setImageModel) {
         val r = req ?: return@PhotoUi
         scope.launch { store.generate(r)?.firstOrNull()?.let { nav.go(Routes.result(it.id)) } }
     }

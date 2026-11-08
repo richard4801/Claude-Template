@@ -19,6 +19,8 @@ import java.io.File
  */
 suspend fun referenceFromLink(
     api: MuseApi, fetcher: LinkFetcher?, url: String, name: String?, cacheDir: File,
+    /** The phone's upload, for Try again after a server restart (made again from it, not uploaded twice). */
+    onUploaded: (String) -> Unit = {},
     onStep: (Float, String) -> Unit = { _, _ -> },
 ): RecipeReference {
     onStep(.02f, "Checking the link")
@@ -33,6 +35,7 @@ suspend fun referenceFromLink(
         when (val got = fetcher.fetch(check.url, rules, File(cacheDir, "links"))) {
             is DeviceFetch.Got -> try {
                 val uploadId = api.uploadEditorFile(got.file, "video/mp4") { p -> onStep(.05f + p * .15f, "Uploading the video") }
+                onUploaded(uploadId)
                 val title = name ?: got.title.take(80).ifBlank { null }
                 // A server without `sourceUrl` yet refuses the field: the reference is still made, as a file.
                 return try { api.createReference(uploadId, title, sourceUrl = url) }

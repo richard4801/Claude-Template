@@ -32,6 +32,8 @@ data class PhotoRequest(
     val title: String? = null,
     /** AI suite (build step 2): the composer's full draft, stored on every still for "Reuse settings". */
     val draft: SuiteDraft? = null,
+    /** WS5/WS7: owner only (403 for members), the image model for this run: "owner/name" or a custom `c_…`. Null = the studio's photo model. */
+    val imageModel: String? = null,
 )
 
 /** The preset a Photo estimate ran with (a photo template). */

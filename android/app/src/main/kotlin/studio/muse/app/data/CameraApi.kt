@@ -215,8 +215,8 @@ class HttpCameraApi(baseUrl: String, private val client: OkHttpClient, private v
 
     private fun errorOf(code: Int, text: String?): ApiException {
         val err = runCatching { json.decodeFromString(ErrorBody.serializer(), text ?: "") }.getOrNull()
-        val c = err?.code ?: when (code) { 401 -> "unauthorized"; 429 -> "rate_limited"; else -> "http_$code" }
-        return ApiException(c, err?.error ?: "Server error $code")
+        val c = err?.code ?: ErrorText.codeOf(code)
+        return ApiException(c, err?.error?.takeIf { it.isNotBlank() } ?: ErrorText.http(code))
     }
 
     private suspend fun <T> get(path: String, out: KSerializer<T>): T = send("GET", path, null, out)!!

@@ -29,6 +29,8 @@ data class PhotoDraft(
     val product: ImageRef? = null,
     /** An upload in progress: "product" or "ref". */
     val uploading: String? = null,
+    /** Owner only (WS5/WS7): the image model for this run ("owner/name" or a custom `c_…`); null = the studio's photo model. */
+    val imageModel: String? = null,
 ) {
     val canAddRef: Boolean get() = refs.size < ShootRef.MAX
 }
@@ -63,6 +65,7 @@ object PhotoComposer {
             references = p.refs.take(ShootRef.MAX).ifEmpty { null }, title = d.title.trim().ifBlank { null },
             // Reuse settings: the composer as it was, stored on every still.
             draft = ComposerDrafts.draft(d, photoCount = p.count, presetId = p.presetId),
+            imageModel = p.imageModel,
         )
     }
 
@@ -157,6 +160,8 @@ class PhotoStore(private val c: AppContainer) {
     fun removeRef(i: Int) = draft.update { d -> d.copy(refs = d.refs.filterIndexed { k, _ -> k != i }) }
     fun clearProduct() = draft.update { it.copy(product = null) }
     fun setCount(n: Int) = draft.update { it.copy(count = n.coerceIn(1, PhotoRules.MAX_COUNT)) }
+    /** Owner only: pin an image model for the next runs (null = the studio's photo model). */
+    fun setImageModel(id: String?) = draft.update { it.copy(imageModel = id) }
     /** Picks a photo preset; picking the same one again clears it. */
     fun pickPreset(id: String?) = draft.update { it.copy(presetId = if (id == it.presetId) null else id) }
     /** The prompt was backspaced to empty (owner decision 2026-11-08): the photo preset is unselected. */
