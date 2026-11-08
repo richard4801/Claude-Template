@@ -254,21 +254,21 @@ enum EditV2Engine {
         return Built(composition: comp, videoComposition: vc, audioMix: mix, plan: plan)
     }
 
-    /// The filler's video track (a 1 s black 16 × 16 H.264 file made once in the temporary folder), when it could be made.
+    /// The filler's video track (a black 64 × 64 H.264 file made once in the temporary folder), when it could be made.
     nonisolated(unsafe) private static var fillerTrack: AVAssetTrack?
 
     /// Makes (once) and loads the filler track.
     @discardableResult
     static func filler() async -> AVAssetTrack? {
         if let f = fillerTrack { return f }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-filler.mp4")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-filler-64.mp4")
         if !FileManager.default.fileExists(atPath: url.path) {
             let tmp = url.deletingLastPathComponent().appendingPathComponent("MUSE-edit-filler-\(UUID().uuidString).mp4")
             do {
                 let writer = try AVAssetWriter(outputURL: tmp, fileType: .mp4)
-                let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 16, AVVideoHeightKey: 16])
+                let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64])
                 let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: 16, kCVPixelBufferHeightKey as String: 16])
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64])
                 writer.add(input)
                 guard writer.startWriting() else { return nil }
                 writer.startSession(atSourceTime: .zero)
@@ -279,7 +279,7 @@ enum EditV2Engine {
                     CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
                     guard let pb else { break }
                     CVPixelBufferLockBaseAddress(pb, [])
-                    if let base = CVPixelBufferGetBaseAddress(pb) { memset(base, 0, CVPixelBufferGetBytesPerRow(pb) * 16) }
+                    if let base = CVPixelBufferGetBaseAddress(pb) { memset(base, 0, CVPixelBufferGetBytesPerRow(pb) * 64) }
                     CVPixelBufferUnlockBaseAddress(pb, [])
                     adaptor.append(pb, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: 1))
                 }

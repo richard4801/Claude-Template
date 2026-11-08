@@ -52,13 +52,23 @@ extension SnapshotRunner {
     @MainActor
     static func previewPixel(_ s: EditSuiteSession, at t: Double, _ x: Double = 0.5, _ y: Double = 0.5) async -> (r: Int, g: Int, b: Int)? {
         for _ in 0..<80 where !s.previewIsCurrent { try? await Task.sleep(for: .milliseconds(100)) }
-        guard s.previewIsCurrent, let item = s.player.currentItem else { return nil }
+        guard s.previewIsCurrent, let item = s.player.currentItem else {
+            lastProbeError = "preview not rebuilt (\(s.lastError ?? "no error"))"
+            return nil
+        }
         let gen = AVAssetImageGenerator(asset: item.asset)
         gen.videoComposition = item.videoComposition
         gen.requestedTimeToleranceBefore = .zero
         gen.requestedTimeToleranceAfter = .zero
-        guard let cg = try? await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)).image else { return nil }
-        return pixel(cg, x, y)
+        do {
+            let cg = try await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)).image
+            lastProbeError = nil
+            return pixel(cg, x, y)
+        } catch {
+            let tracks = (try? await item.asset.loadTracks(withMediaType: .video).count) ?? -1
+            lastProbeError = "frame grab failed: \(error.localizedDescription) (\(tracks) video tracks)"
+            return nil
+        }
     }
 
     /// The preview's frame size (the canvas), or nil.
@@ -71,7 +81,9 @@ extension SnapshotRunner {
     static func isRed(_ p: (r: Int, g: Int, b: Int)?) -> Bool { p.map { $0.r > 150 && $0.g < 90 && $0.b < 90 } ?? false }
     static func isBlue(_ p: (r: Int, g: Int, b: Int)?) -> Bool { p.map { $0.b > 150 && $0.r < 90 } ?? false }
     static func isBlack(_ p: (r: Int, g: Int, b: Int)?) -> Bool { p.map { $0.r < 25 && $0.g < 25 && $0.b < 25 } ?? false }
-    static func describe(_ p: (r: Int, g: Int, b: Int)?) -> String { p.map { "rgb(\($0.r), \($0.g), \($0.b))" } ?? "no frame" }
+    static func describe(_ p: (r: Int, g: Int, b: Int)?) -> String { p.map { "rgb(\($0.r), \($0.g), \($0.b))" } ?? "no frame: \(lastProbeError ?? "?")" }
+    /// Why the last preview probe got no frame.
+    nonisolated(unsafe) static var lastProbeError: String?
 
     @MainActor
     static func operations(_ s: EditSuiteSession, blue: Take, log: OpsLog) async {
