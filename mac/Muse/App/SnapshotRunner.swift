@@ -227,8 +227,15 @@ enum SnapshotRunner {
     /// Soft Tactile first. Rendered from the window's own drawing (`mac_editaudit_<theme>_<w>x<h>.png`), so a window larger
     /// than the runner's screen still comes out whole.
     private static func editLayoutShots(_ store: AppStore, dir: URL) async {
-        guard let take = store.takes.first(where: { $0.id == "rx_zero" }) ?? store.takes.first(where: { $0.kind == "take" && $0.videoUrl != nil }),
-              let w = mainWindow else { return }
+        // editCheck removes its rx_* takes when it ends; its MP4s stay in the temporary folder. Use its 15 s stereo take.
+        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        guard FileManager.default.fileExists(atPath: long.path), let w = mainWindow else { return }
+        let raw: [String: Any] = ["id": "rx_layout", "kind": "take", "title": "Living room dance", "videoUrl": long.absoluteString,
+                                  "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
+        guard let data = try? JSONSerialization.data(withJSONObject: raw), let take = try? JSONDecoder().decode(Take.self, from: data) else { return }
+        store.takes.removeAll { $0.id == take.id }
+        store.takes.insert(take, at: 0)
+        defer { store.takes.removeAll { $0.id == take.id } }
         let original = w.frame
         let sizes: [(Int, Int)] = [(1280, 800), (1440, 900), (1470, 882)]
         for theme in [ThemeID.c, .a, .b, .d] {
