@@ -260,17 +260,18 @@ export class RecreateReferences {
   };
   private linkChain: Promise<unknown> = Promise.resolve();
   /** One platform request at a time across the server. */
-  private serial<T>(fn: () => Promise<T>): Promise<T> {
+  /** Also used by imports (src/imports/service.ts): one platform request at a time across the server. */
+  serial<T>(fn: () => Promise<T>): Promise<T> {
     const p = this.linkChain.then(fn, fn);
     this.linkChain = p.catch(() => undefined);
     return p;
   }
-  private get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
+  get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
   private get maxLinkBytes() { return this.ctx.config.RECREATE_LINK_MAX_MB * 1048576; }
   /** The host check for "other" links (tests replace it). */
   publicHost = (url: string) => assertPublicHost(url);
   /** Why a server-side fetch failed: the platform and yt-dlp's failure in a word, never the link. */
-  private logLinkFailure(platform: string, step: 'info' | 'download', e: unknown) {
+  logLinkFailure(platform: string, step: 'info' | 'download', e: unknown) {
     const err = e as ApiError & { failure?: string };
     this.ctx.log?.warn({ platform, step, code: err?.code ?? 'error', failure: err?.failure ?? 'other' }, 'recreate link fetch failed');
   }
