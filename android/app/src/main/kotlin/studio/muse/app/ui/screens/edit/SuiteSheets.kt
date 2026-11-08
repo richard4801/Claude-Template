@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -112,7 +113,7 @@ fun SuiteSheet(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction)
  * section grid, scrolling inside the inspector.
  */
 @Composable
-fun PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction) -> Unit) {
+fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction) -> Unit) {
     run {
         when (panel) {
             Panel.EDIT -> EditBody(ui, act)

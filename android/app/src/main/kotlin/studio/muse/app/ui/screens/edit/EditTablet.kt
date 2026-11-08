@@ -150,13 +150,13 @@ private fun Quiet(label: String, icon: String, enabled: Boolean = true, onClick:
 
 /** One segmented control (the shape, the safe area): text segments in a soft track, the picked one raised. */
 @Composable
-private fun Segmented(labels: List<String>, selected: Int, what: String, onPick: (Int) -> Unit) {
+private fun Segmented(labels: List<String>, picked: Int, what: String, onPick: (Int) -> Unit) {
     val m = muse
     val outer = RoundedCornerShape(if (m.isA) 0.dp else 10.dp)
     val inner = RoundedCornerShape(if (m.isA) 0.dp else 8.dp)
     Row(Modifier.height(36.dp).clip(outer).background(m.t.surface2).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
         labels.forEachIndexed { i, l ->
-            val on = i == selected
+            val on = i == picked
             Box(
                 Modifier.fillMaxHeight().widthIn(min = 48.dp).clip(inner).background(if (on) m.t.surface else m.t.surface2)
                     .let { if (on && m.isD) it.border(1.5.dp, m.t.line, inner) else it }
