@@ -83,6 +83,8 @@ class RecreateActions(
     /** G2: how a shot to make is made ("swap" | "generate"), and whether a swap keeps the reference's setting. */
     val onMethod: (String, String) -> Unit = { _, _ -> },
     val onKeepBackground: (String, Boolean) -> Unit = { _, _ -> },
+    /** "Use your own setting": a studio location for the shot, or null for the place in its brief. */
+    val onLocation: (String, String?) -> Unit = { _, _ -> },
     val onExport: () -> Unit = {},
     /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
     val onClaude: (() -> Unit)? = null,
@@ -564,6 +566,16 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
                     }
                     studio.muse.app.ui.components.Toggle(keep, { acts.onKeepBackground(s.id, !keep) })
                 }
+                // Use your own setting: pick one of the studio's locations (free), or let the brief's place choose; a
+                // background made from the brief is priced into the shot.
+                if (!keep) {
+                    val picked = ui.locations[s.id]
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        studio.muse.app.ui.screens.edit.learn.LearnChip("From the brief", on = picked == null) { if (picked != null) acts.onLocation(s.id, null) }
+                        ui.places.forEach { p -> studio.muse.app.ui.screens.edit.learn.LearnChip(p.name, on = picked == p.id) { if (picked != p.id) acts.onLocation(s.id, p.id) } }
+                    }
+                    e.background?.let { T(it.line, m.scale.caption, m.roles.ink2) }
+                }
             }
             if (method == "generate" && e?.promptFrom != null && e.promptFrom != "brief") T("Write a brief for this shot first for a closer match.", m.scale.caption, m.roles.ink2)
         }
@@ -751,6 +763,8 @@ private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?) {
                 if (it.method == "swap") "Swapped into the reference, ${suiteTime(it.segmentStart ?: slot?.startSec ?: 0.0)}–${suiteTime(it.segmentEnd ?: slot?.endSec ?: 0.0)}"
                 else RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds)
             }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
+            // Use your own setting: the background's part of the price (a plate made from the brief), or the location used.
+            if (problem == null) e?.background?.let { T(it.line, m.scale.caption.tabular(), m.roles.ink2, maxLines = 2) }
         }
     }
 }

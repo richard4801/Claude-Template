@@ -67,8 +67,26 @@ data class RecreateSlotEstimate(
     val slotId: String, val amount: Double, val seconds: Double, val problem: String? = null,
     val method: String = "generate", val keepBackground: Boolean = true, val segmentStart: Double? = null, val segmentEnd: Double? = null,
     val swapUnavailable: String? = null, val buttonLabel: String? = null, val promptFrom: String? = null,
+    /** "Use your own setting" (a swap with keepBackground false): where the background comes from, and its part of the price. */
+    val background: RecreateBackground? = null, val swapUsd: Double? = null, val backgroundUsd: Double? = null,
 ) {
     val ok: Boolean get() = problem == null
+}
+
+/**
+ * The background a swap uses for "Use your own setting": one of the studio's locations ([source] "location", free; [matched]
+ * when the brief's place named it), or a plate made from the brief's setting ([source] "generated", [usd] added to the
+ * price, free when [reused]).
+ */
+data class RecreateBackground(val source: String, val locationId: String? = null, val name: String? = null, val matched: Boolean = false,
+    val setting: String? = null, val usd: Double = 0.0, val reused: Boolean = false) {
+    /** Plain words for the shot's card. */
+    val line: String get() = when {
+        source == "location" && matched -> "Background: ${name ?: "your location"}, from the brief"
+        source == "location" -> "Background: ${name ?: "your location"}"
+        reused -> "Background: made from the brief earlier, free"
+        else -> String.format(java.util.Locale.ROOT, "A background is made from the brief · $%.2f", usd)
+    }
 }
 
 /** `POST …/slots/{slotId}/fill`: the Suite job making the shot. */
@@ -171,7 +189,12 @@ object RecreateJson {
         return RecreateSlotEstimate(o.str("slotId") ?: "", e.num("estimate") ?: 0.0, e.num("seconds") ?: 0.0, problem,
             method = o.str("method") ?: e.str("method") ?: "generate", keepBackground = (o["keepBackground"] as? JsonPrimitive)?.booleanOrNull ?: true,
             segmentStart = seg?.num("startSec"), segmentEnd = seg?.num("endSec"), swapUnavailable = o.str("swapUnavailable"),
-            buttonLabel = e.str("buttonLabel"), promptFrom = o.str("promptFrom"))
+            buttonLabel = e.str("buttonLabel"), promptFrom = o.str("promptFrom"),
+            background = o.obj("background")?.let { b ->
+                RecreateBackground(b.str("source") ?: "generated", b.str("locationId"), b.str("name"), (b["matched"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                    b.str("setting"), b.num("usd") ?: 0.0, (b["reused"] as? JsonPrimitive)?.booleanOrNull ?: false)
+            },
+            swapUsd = e.num("swapUsd"), backgroundUsd = e.num("backgroundUsd"))
     }
 
     fun fillStart(el: JsonElement): RecreateFillStart {

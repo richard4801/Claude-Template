@@ -210,4 +210,25 @@ class RecreateBuildTest {
         model.closeExport()
         assertNull(model.ui.value.export)
     }
+
+    @Test fun useYourOwnSettingPricesABackgroundOrUsesAStudioLocation() = runBlocking {
+        val api = FakeMuseApi(MainScope(), null, speed = 0.0, genDelayMs = 0)
+        val ref = ready(api)
+        api.createSuiteLocation(studio.muse.app.data.SuiteLocationCreate("Café counter", studio.muse.app.data.ImageRef.asset("g_tq")))
+        val model = RecreateBuildModel(api, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default), RecreateBuildUi(ref.id, ref.recipe!!, ref.name), defaultModelId = { "m_demo" }, pollMs = 5)
+        model.load()
+        val slot = model.ui.value.toGenerate.first()
+        assertEquals(FakeMuseApi.RECREATE_SWAP_PRICE, model.ui.value.estimates[slot]!!.amount, 1e-9)
+        model.setKeepBackground(slot, false)
+        var e = model.ui.value.estimates[slot]!!
+        assertEquals(FakeMuseApi.RECREATE_SWAP_PRICE + FakeMuseApi.RECREATE_PLATE_PRICE, e.amount, 1e-9) // a background made from the brief, priced in
+        assertEquals("A background is made from the brief · $0.06", e.background!!.line)
+        val place = model.ui.value.places.first { it.name == "Café counter" }
+        model.setLocation(slot, place.id)
+        e = model.ui.value.estimates[slot]!!
+        assertEquals(FakeMuseApi.RECREATE_SWAP_PRICE, e.amount, 1e-9) // a studio location is free
+        assertEquals(place.id, e.background!!.locationId)
+        model.setLocation(slot, null)
+        assertEquals("generated", model.ui.value.estimates[slot]!!.background!!.source)
+    }
 }

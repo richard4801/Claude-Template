@@ -2,6 +2,7 @@ package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
+import studio.muse.core.edit.RecreateBackground
 import studio.muse.core.edit.RecreateRender
 import studio.muse.core.edit.RecreateUseSound
 import studio.muse.core.edit.RecreateReplaceResult
@@ -1253,15 +1254,24 @@ class FakeMuseApi(
         })
     }
     /** Demo (G2): swap by default (your model into the reference's own segment, $0.41), or a new shot ($0.64). */
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) = lock.withLock {
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) = lock.withLock {
         recreateSlots(id)
         val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
         if (method == "generate") RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)), method = "generate",
             buttonLabel = "Generate · ${maxOf(2.0, kotlin.math.ceil(slot.lengthSec)).toInt()} s · ${RecreateText.money(RECREATE_PRICE)}")
-        else RecreateSlotEstimate(slotId, RECREATE_SWAP_PRICE, slot.lengthSec, method = "swap", keepBackground = keepBackground ?: true,
-            segmentStart = slot.startSec, segmentEnd = slot.endSec, buttonLabel = "Swap in · ${String.format(java.util.Locale.ROOT, "%.1f", slot.lengthSec)} s · ${RecreateText.money(RECREATE_SWAP_PRICE)}")
+        else {
+            // "Use your own setting": a studio location is free; otherwise a background is made from the brief ($0.06, added in).
+            val own = keepBackground == false
+            val place = if (own && locationId != null) suite.locations.firstOrNull { it.id == locationId } else null
+            val bg = if (!own) null else if (place != null) RecreateBackground("location", place.id, place.name)
+                else RecreateBackground("generated", setting = "From the brief", usd = RECREATE_PLATE_PRICE)
+            val total = RECREATE_SWAP_PRICE + (bg?.usd ?: 0.0)
+            RecreateSlotEstimate(slotId, total, slot.lengthSec, method = "swap", keepBackground = keepBackground ?: true,
+                segmentStart = slot.startSec, segmentEnd = slot.endSec, buttonLabel = "Swap in · ${String.format(java.util.Locale.ROOT, "%.1f", slot.lengthSec)} s · ${RecreateText.money(total)}",
+                background = bg, swapUsd = if (bg != null && bg.usd > 0) RECREATE_SWAP_PRICE else null, backgroundUsd = bg?.usd?.takeIf { it > 0 })
+        }
     }
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) = lock.withLock {
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
         // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").
@@ -1673,6 +1683,8 @@ class FakeMuseApi(
         const val RECREATE_PRICE = 0.64
         /** Demo: a swap into the reference's own shot (never charged). */
         const val RECREATE_SWAP_PRICE = 0.41
+        /** Demo: a background made from the brief for "Use your own setting". */
+        const val RECREATE_PLATE_PRICE = 0.06
         /** `request.engine` of an Upscale job (the server's). */
         const val UPSCALE_ENGINE = "upscale"
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */
