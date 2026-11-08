@@ -236,6 +236,8 @@ const Env = z.object({
   /** Claude API key for the in-app Direct with Claude chat. Unset: the chat answers director_unavailable. */
   ANTHROPIC_API_KEY: str(),
   DIRECTOR_MODEL: z.string().default('claude-opus-5-5'),
+  /** workstream 1 (G8): the model that writes Recreate shot briefs on the server (opt-in, priced, in the editor's daily cap). */
+  RECREATE_BRIEF_MODEL: z.string().default('claude-sonnet-5-5'),
   DIRECTOR_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
   DIRECTOR_MAX_TOKENS: num(32000),
   /** Most model turns (tool rounds) in one chat message. */

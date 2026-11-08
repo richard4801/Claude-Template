@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { studioSettings, takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -31,7 +31,7 @@ const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', briefs: 'Writing the briefs' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
@@ -328,7 +328,8 @@ export class EditorAiService {
   }
   async list(u: AuthUser, q: { kind?: string; takeId?: string; uploadId?: string; limit?: string }) {
     const conds = [eq(editorJobs.studioId, u.studioId), eq(editorJobs.userId, u.id)];
-    if (q.kind) conds.push(eq(editorJobs.kind, q.kind as EditorJobKind));
+    // Recreate's shot briefs (G8) count in the day's spend but aren't editor jobs the apps show.
+    conds.push(q.kind ? eq(editorJobs.kind, q.kind as EditorJobKind) : ne(editorJobs.kind, 'briefs'));
     if (q.takeId) conds.push(sql`${editorJobs.source}->>'takeId' = ${q.takeId}`);
     if (q.uploadId) conds.push(sql`${editorJobs.source}->>'uploadId' = ${q.uploadId}`);
     const lim = Math.min(100, Math.max(1, Number(q.limit) || 50));
@@ -371,8 +372,8 @@ export class EditorAiService {
       .where(and(eq(editorJobs.studioId, studioId), sql`${editorJobs.createdAt} >= ${since}`));
     return Math.round(rows.reduce((a, r) => a + (r.state === 'done' ? Number(r.cost ?? 0) : r.state === 'running' ? Number(r.estimate ?? 0) : 0), 0) * 10000) / 10000;
   }
-  /** A paid helper may start: the owner's switch is on and the day's cap has room. */
-  private async allowPaid(studioId: string, usd: number) {
+  /** A paid helper may start: the owner's switch is on and the day's cap has room (also Recreate's shot briefs). */
+  async allowPaid(studioId: string, usd: number) {
     const c = await this.controls(studioId);
     if (c.off) throw new ApiError(503, 'editor_paid_off', 'AI editing helpers are switched off for now · the owner can switch them back on');
     const today = await this.todayUsd(studioId);
