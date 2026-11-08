@@ -1209,7 +1209,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 **Endpoints**
 | | |
 |---|---|
-| `POST /v1/recreate/references {uploadId, name?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). |
+| `POST /v1/recreate/references {uploadId, name?, sourceUrl?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). **`sourceUrl`** is set when the device fetched the video from a link (Release 1 fix: platforms block server addresses). The studio's link rules apply to it (`link_unsupported`), and so does the size cap (`link_too_big`). It's kept on the reference for caching and "Use this sound". The same link again from the same member → that member's reference, with `cached: true`. |
 | `POST /v1/recreate/references {url, name?}` | A **public** TikTok, Instagram Reel or YouTube link (see "From a link" below). → `Reference` with `source: "link"`, `state: "analyzing"`, `phase: "Fetching the video"`. The same link again, from the same member, → that member's existing reference with `cached: true`. Refusals come before anything is downloaded (codes below). |
 | `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
 | `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
@@ -1235,6 +1235,17 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 - **Storage.** The file is stored privately at `rx/{studio}/{id}/source.mp4` (not served by `/uploads`) and deleted after 30 days like any reference. The metadata is deleted as soon as the file is stored.
 - **Blocked** (a server address the platform blocks, 403, sign-in wall, rate limit, timeout, removed video): `link_blocked` (`502`) with the message "Couldn't fetch this link — save the video and drop the file in". The apps show it and offer the file drop. If the download itself is blocked, the reference turns `failed` with `errorCode: "link_blocked"`.
 - **Codes:** `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (all `422`) · `link_blocked` (`502`) · `too_long` (`400`).
+
+**Fetching on the device, and "Strict link rules"** (Release 1 fix, migration **0021**). Platforms answer server addresses with sign-in or bot checks (YouTube: "Sign in to confirm you're not a bot"), so the apps download the video themselves. Then they upload it with `sourceUrl`. The server fetch stays as a fallback.
+
+| Call | Notes |
+|---|---|
+| `GET /v1/recreate/settings` | → `{strictLinks, platforms: ["tiktok","instagram","youtube"] \| ["any"], tiktokDownloadsOff: "refuse"\|"allow", maxSec: 60, maxMb, serverFetch, cookies: false, canEdit}`. These are the rules the apps apply on the device too. |
+| `PATCH /v1/recreate/settings {strictLinks}` | Owner only (`403 owner_only`). **On (default):** only TikTok, Instagram Reels and YouTube; TikTok's "downloads off" is refused. **Off:** any public web link yt-dlp reads (platform `"other"`, tracking parameters removed), and TikTok's setting isn't refused. Either way: no cookies or logins, 60 s, and the size cap. Event `recreate` `{settings}`. |
+| `POST /v1/recreate/links/check {url}` | Before a device downloads: → `{allowed: true, url /* normalized */, platform: "tiktok"\|"instagram"\|"youtube"\|"other", cached?: Reference}` or `{allowed: false, code, reason}`. `cached` is this member's live reference from that link: use it and skip the download. |
+
+- **Public hosts only (strict off).** A link must be https/http on the standard ports, with a public host name. No addresses, no localhost or internal names, no user:password. On the server, the name must also resolve only to public addresses before yt-dlp runs.
+- **Why a server fetch failed** is logged as `recreate link fetch failed {platform, step, code, failure}`. `failure` is one of `bot_check` · `login` · `rate_limited` · `forbidden` · `not_found` · `geo` · `timeout` · `private` · `age` · `too_big` · `unsupported` · `no_ytdlp` · `other`. The link itself is never logged.
 - **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
 - **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 and yt-dlp-ejs 0.8.0 from PyPI (both sha256-checked at build, unpacked to /opt/yt-dlp/lib) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 

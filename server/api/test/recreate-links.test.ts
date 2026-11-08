@@ -8,7 +8,8 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { recreateReferences } from '../src/recreate/schema.js';
-import { BASE_ARGS, checkInfo, errorFor, FALLBACK, normalizeLink, tiktokDownloadsOff, ytDlp } from '../src/recreate/links.js';
+import { assertPublicHost, BASE_ARGS, checkInfo, errorFor, failureOf, FALLBACK, linkFor, normalizeLink, tiktokDownloadsOff, ytDlp } from '../src/recreate/links.js';
+import { putObject } from '../src/storage/objects.js';
 import { recreateOf } from '../src/recreate/references.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 import { hasFfmpeg, makeReference } from './recreate-fixture.js';
@@ -94,14 +95,40 @@ if (args.includes('--dump-single-json')) {
   return { bin, calls };
 }
 
+describe('Link rules and failures (unit, Release 1 fix)', () => {
+  it('strict takes the three platforms only; with strict off any public web link, tracking removed, never an inside address', () => {
+    expect(() => linkFor('https://vimeo.com/123456', { strict: true })).toThrow(/TikTok, Instagram Reel and YouTube/);
+    expect(linkFor('https://youtu.be/AbCdEfGhIjK', { strict: false })).toEqual({ platform: 'youtube', url: 'https://www.youtube.com/watch?v=AbCdEfGhIjK' });
+    expect(linkFor('https://vimeo.com/123456?utm_source=x&fbclid=y&t=5#top', { strict: false })).toEqual({ platform: 'other', url: 'https://vimeo.com/123456?t=5' });
+    for (const bad of ['http://localhost/v.mp4', 'http://127.0.0.1/v', 'http://10.0.0.5/v', 'http://[::1]/v', 'http://api.railway.internal/v', 'http://server/v',
+      'https://example.com:8443/v', 'https://user:pw@vimeo.com/1', 'ftp://vimeo.com/1', 'http://printer.local/v'])
+      expect(() => linkFor(bad, { strict: false }), bad).toThrow();
+  });
+  it('a public name pointing inside is refused before anything is fetched', async () => {
+    await expect(assertPublicHost('https://vimeo.com/1', async () => [{ address: '151.101.0.217' }])).resolves.toBeUndefined();
+    for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '172.20.0.1', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', 'fe80::1'])
+      await expect(assertPublicHost('https://evil.example.org/1', async () => [{ address: ip }]), ip).rejects.toMatchObject({ code: 'link_unsupported' });
+  });
+  it('yt-dlp failures in a word for the log; YouTube\'s bot check is "bot_check" (platforms block server addresses)', () => {
+    expect(failureOf('ERROR: [youtube] AbCdEfGhIjK: Sign in to confirm you’re not a bot. Use --cookies-from-browser')).toBe('bot_check');
+    expect(failureOf("ERROR: [youtube] x: Sign in to confirm you're not a bot")).toBe('bot_check');
+    expect(failureOf('ERROR: [Instagram] C9x: Requested content is not available, rate-limit reached or login required')).toBe('rate_limited');
+    expect(failureOf('ERROR: [TikTok] 743: HTTP Error 403: Forbidden')).toBe('forbidden');
+    expect(failureOf('ERROR: [youtube] x: Private video')).toBe('private');
+    expect(failureOf('ERROR: [youtube] x: Video unavailable. This video has been removed')).toBe('not_found');
+    expect(failureOf('timed out')).toBe('timeout');
+    expect(errorFor("ERROR: [youtube] x: Sign in to confirm you're not a bot")).toMatchObject({ code: 'link_blocked', failure: 'bot_check' });
+  });
+});
+
 describe.skipIf(!hasFfmpeg)('Recreate · references from links (fake yt-dlp, no platform calls)', () => {
-  let a: Awaited<ReturnType<typeof makeApp>>, member: Client, other: Client, dir: string, fake: ReturnType<typeof fakeYtDlp>;
+  let a: Awaited<ReturnType<typeof makeApp>>, owner: Client, member: Client, other: Client, dir: string, fake: ReturnType<typeof fakeYtDlp>;
   const pages: string[] = [];
   beforeAll(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-links-'));
     fake = fakeYtDlp(dir, makeReference(dir));
     a = await makeApp({ YTDLP_PATH: fake.bin, RECREATE_POSE: 'false' });
-    ({ members: [member, other] } = await people(a, 2) as any);
+    ({ owner, members: [member, other] } = await people(a, 2) as any);
     recreateOf(a.ctx).fetchPage = async url => { pages.push(url); return fx(url.endsWith('7431234567890123456') || url.endsWith('7431234567890000003') ? 'tiktok-page-downloads-on.html' : 'tiktok-page-downloads-off.html'); };
   });
   afterAll(async () => { await a?.close(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -190,6 +217,61 @@ describe.skipIf(!hasFfmpeg)('Recreate · references from links (fake yt-dlp, no 
     expect(fake.calls().length).toBeGreaterThan(before);
     await recreateOf(a.ctx).idle();
   }, 60_000);
+
+  it('"Strict link rules": on by default, the owner turns it off; the apps read the same rules for fetching on the device', async () => {
+    const st = (await member.req('GET', '/v1/recreate/settings')).body;
+    expect(st).toMatchObject({ strictLinks: true, platforms: ['tiktok', 'instagram', 'youtube'], tiktokDownloadsOff: 'refuse', maxSec: 60, cookies: false, canEdit: false });
+    expect((await member.req('PATCH', '/v1/recreate/settings', { strictLinks: false })).status).toBe(403);
+    // The check before a device downloads: under strict rules another site is refused with the reason; the member's own reference comes back.
+    const no = (await member.req('POST', '/v1/recreate/links/check', { url: 'https://vimeo.com/123456' })).body;
+    expect(no).toMatchObject({ allowed: false, code: 'link_unsupported' });
+    const hit = (await member.req('POST', '/v1/recreate/links/check', { url: 'https://www.tiktok.com/@Muse.Studio/video/7431234567890123456?is_from_webapp=1' })).body;
+    expect(hit).toMatchObject({ allowed: true, platform: 'tiktok', url: 'https://www.tiktok.com/@muse.studio/video/7431234567890123456' });
+    expect(hit.cached?.state).toBe('ready');
+    // Off: other public links are allowed, and TikTok's downloads-off isn't refused (no cookies, 60 s and the size cap stay).
+    const off = await owner.req('PATCH', '/v1/recreate/settings', { strictLinks: false });
+    expect(off.body).toMatchObject({ strictLinks: false, platforms: ['any'], tiktokDownloadsOff: 'allow', canEdit: true });
+    expect((await member.req('POST', '/v1/recreate/links/check', { url: 'https://vimeo.com/123456?utm_source=x' })).body).toMatchObject({ allowed: true, platform: 'other', url: 'https://vimeo.com/123456' });
+    expect((await member.req('POST', '/v1/recreate/links/check', { url: 'http://127.0.0.1/v' })).body).toMatchObject({ allowed: false });
+    recreateOf(a.ctx).fetchPage = async () => fx('tiktok-page-downloads-off.html');
+    const t = await member.req('POST', '/v1/recreate/references', { url: 'https://www.tiktok.com/@muse.studio/video/7431234567890000003' });
+    expect(t.status, JSON.stringify(t.body)).toBe(200); // not refused for downloads-off now
+    await recreateOf(a.ctx).idle();
+    // Another site goes to yt-dlp after the address check (this fake knows no such video: refused as unsupported).
+    const svc = recreateOf(a.ctx), checked: string[] = [];
+    svc.publicHost = async url => { checked.push(url); };
+    const v = await member.req('POST', '/v1/recreate/references', { url: 'https://vimeo.com/123456' });
+    expect(v.body.code).toBe('link_unsupported');
+    expect(checked).toEqual(['https://vimeo.com/123456']);
+    expect(fake.calls().at(-1)!.args.at(-1)).toBe('https://vimeo.com/123456');
+    svc.publicHost = url => assertPublicHost(url);
+    await owner.req('PATCH', '/v1/recreate/settings', { strictLinks: true });
+  }, 60_000);
+
+  it('a video the device fetched: uploaded with its link, which is checked, kept (caching, "Use this sound") and size-capped', async () => {
+    const studioId = (await a.ctx.db.select().from(recreateReferences))[0]!.studioId;
+    const up = async (key: string) => {
+      await putObject(a.ctx, { key, body: fs.readFileSync(path.join(dir, 'ref.mp4')), studioId, kind: 'clip', contentType: 'video/mp4' });
+      return ((await a.ctx.db.execute((await import('drizzle-orm')).sql`select id from uploads where storage_key = ${key}`)) as any).rows[0].id as string;
+    };
+    const link = 'https://www.instagram.com/reel/C9xDevice01/?igsh=abc';
+    const r = await member.req('POST', '/v1/recreate/references', { uploadId: await up('u/rx/device1.mp4'), sourceUrl: link });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ state: 'analyzing', sourceUrl: 'https://www.instagram.com/reel/C9xDevice01/' });
+    expect((await ready(member, r.body.id)).state).toBe('ready');
+    expect(fake.calls().some(c => c.args.includes('https://www.instagram.com/reel/C9xDevice01/'))).toBe(false); // nothing fetched on the server
+    // Known by its link now (the device can skip the download next time), and the same link again is the same reference.
+    expect((await member.req('POST', '/v1/recreate/links/check', { url: link })).body.cached.id).toBe(r.body.id);
+    const again = await member.req('POST', '/v1/recreate/references', { uploadId: await up('u/rx/device2.mp4'), sourceUrl: link });
+    expect(again.body).toMatchObject({ id: r.body.id, cached: true });
+    // The rules apply to the link; the size cap to the file.
+    expect((await member.req('POST', '/v1/recreate/references', { uploadId: await up('u/rx/device3.mp4'), sourceUrl: 'https://vimeo.com/1234' })).body.code).toBe('link_unsupported');
+    const mb = a.ctx.config.RECREATE_LINK_MAX_MB;
+    (a.ctx.config as any).RECREATE_LINK_MAX_MB = 0.001;
+    try {
+      expect((await member.req('POST', '/v1/recreate/references', { uploadId: await up('u/rx/device4.mp4'), sourceUrl: 'https://youtube.com/shorts/ZyXwVuTsRqP' })).body.code).toBe('link_too_big');
+    } finally { (a.ctx.config as any).RECREATE_LINK_MAX_MB = mb; }
+  }, 90_000);
 
   it('a missing resolver is a blocked fetch, not a crash', async () => {
     const svc = recreateOf(a.ctx);
