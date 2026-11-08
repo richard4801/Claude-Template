@@ -1435,6 +1435,20 @@ Prod's first real run was killed mid-analysis (512 MB box). The text-motion step
 - **After a crash.** At startup, references still `analyzing` resume. One that had started (`analyze_attempts` ≥ 1) runs again **lite**, required steps only (`analyzer.lite: true`). After a second stop it fails with `errorCode: "analysis_crashed"`.
 - **`POST /v1/recreate/references/{id}/retry`** reruns any failed reference whose video or link is still there (409 `not_failed` or `video_gone` otherwise). After `analysis_crashed` the rerun is lite. Apps: show Retry on a failed reference.
 
+### Built edits are always valid (workstream 1, 2026-11-08)
+`buildProject` always produces a project the editor accepts. A property test (`test/recreate-assemble-valid.test.ts`) runs 400 random recipes plus the owner's 7-shot, 182 BPM case.
+- **Captions on screen together** go on their own text tracks (`text`, `text2`, … at most 4). If all four are busy, a caption starts when one frees, or is left out (with a note).
+- **Transitions** are at most half of each clip beside them, else a cut.
+- **One-frame shots** play their 0.1 s of source faster, keeping their length on screen.
+- **Long speed curves** are thinned to 16 points.
+- **A take too short even at 0.1×** ends with its source; it never reads past the end.
+
+`apply` checks the project before saving it:
+- **400 `edit_too_short`** when the filled shots make less than 0.5 s.
+- **422 `edit_invalid`** with a plain message; the rule broken is logged, never shown.
+
+Apps: show `error` as is.
+
 ### Recreate this edit · slots and assembly (phase 3)
 Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
 
