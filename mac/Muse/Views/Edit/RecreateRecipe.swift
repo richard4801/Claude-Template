@@ -332,12 +332,11 @@ struct RecreateCompare: View {
     /// "Already in the shot: shot 2's camera, speed and look (swapped into the reference shot)."
     private var bakedLine: String? {
         let rs = store.recreate
-        let parts = rs.slots.compactMap { s -> String? in
-            guard let b = rs.baked[s.id], !b.isEmpty else { return nil }
-            return "\(rs.shotName(s.id).lowercased())’s \(RecreateBaked.words(b))"
-        }
-        guard !parts.isEmpty else { return nil }
-        return "Already in the shot: " + parts.joined(separator: "; ") + ". They come from the reference itself, so they match."
+        let shots = rs.slots.enumerated().filter { !(rs.baked[$0.element.id] ?? []).isEmpty }
+        guard let first = shots.first else { return nil }
+        let names = shots.map { "\($0.offset + 1)" }
+        let which = names.count == 1 ? "shot \(names[0])" : "shots \(names.dropLast().joined(separator: ", ")) and \(names.last!)"
+        return "Already in the shot: \(which) \(names.count == 1 ? "keeps" : "keep") the reference’s own \(RecreateBaked.words(rs.baked[first.element.id] ?? []))."
     }
 
     private func metric(_ name: String, _ v: Double?, big: Bool = false) -> some View {
@@ -463,14 +462,15 @@ struct RecreateLanes: View {
     private func tag(_ s: Recipe.Slot) -> String {
         let rs = store.recreate
         if scores, let sc = rs.score(s.id) { return RecreateText.percent(sc) }
-        if rs.fillErrors[s.id] != nil { return "Didn’t generate" }
-        if rs.generatingSlots.contains(s.id) { return "Generating" }
+        let swap = (rs.slotFill(s.id)?.method ?? rs.estimateInfo[s.id]?.method) == "swap"
+        if rs.fillErrors[s.id] != nil { return swap ? "Swap didn’t work" : "Didn’t generate" }
+        if rs.generatingSlots.contains(s.id) { return swap ? "Swapping in" : "Generating" }
         guard let state = rs.slotFill(s.id)?.state else { return "…" }
         switch state {
         case "matched": return "Yours"
-        case "ready": return "Ready"
-        case "to_generate": return rs.estimateErrors[s.id] != nil ? "Can’t be made" : "To generate"
-        case "generating": return "Generating"
+        case "ready": return swap ? "Swapped in" : "Ready"
+        case "to_generate": return rs.estimateErrors[s.id] != nil ? "Can’t be made" : (swap ? "To swap in" : "To generate")
+        case "generating": return swap ? "Swapping in" : "Generating"
         default: return "To fill"
         }
     }

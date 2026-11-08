@@ -18,25 +18,35 @@ struct RecreateCastRow: View {
         let lead = store.recreateLead
         let cast = store.suiteCharacters
         VStack(alignment: .leading, spacing: Space.s2) {
-            Text("Lead").scaled(t.scale.label, t.roles.ink)
             HStack(spacing: Space.s3) {
-                MuseImage(ref: lead?.cover)
-                    .frame(width: 32, height: 40)
-                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(lead?.name ?? "No model yet").scaled(t.scale.label, t.roles.ink).lineLimit(1).fitProbe("lead name")
-                    Text(lead == nil ? "Make a model to cast in the new shots." : "The new shots are made with this model.")
-                        .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-                }
+                Text(rs.castOpen ? "Choose the lead" : "Lead").scaled(t.scale.label, t.roles.ink)
                 Spacer(minLength: Space.s2)
-                if !cast.isEmpty {
-                    SuiteToolButton(title: rs.castOpen ? "Done" : "Change", plain: true) { rs.castOpen.toggle() }
-                        .accessibilityLabel(rs.castOpen ? "Done choosing the lead" : "Change the lead")
+                if rs.castOpen {
+                    SuiteToolButton(title: "Done", plain: true) { rs.castOpen = false }
+                        .accessibilityLabel("Done choosing the lead")
                         .background(SnapshotFrame(key: "cast"))
                 }
             }
-            .accessibilityElement(children: .contain)
-            if rs.castOpen {
+            // Chosen: one row. Choosing: only the list (the lead marked), never both.
+            if !rs.castOpen {
+                HStack(spacing: Space.s3) {
+                    MuseImage(ref: lead?.cover)
+                        .frame(width: 32, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(lead?.name ?? "No model yet").scaled(t.scale.label, t.roles.ink).lineLimit(1).fitProbe("lead name")
+                        Text(lead == nil ? "Make a model to cast in the new shots." : "The new shots are made with this model.")
+                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: Space.s2)
+                    if !cast.isEmpty {
+                        SuiteToolButton(title: "Change", plain: true) { rs.castOpen = true }
+                            .accessibilityLabel("Change the lead")
+                            .background(SnapshotFrame(key: "cast"))
+                    }
+                }
+                .accessibilityElement(children: .contain)
+            } else {
                 VStack(spacing: 0) {
                     ForEach(cast) { m in
                         Button {
