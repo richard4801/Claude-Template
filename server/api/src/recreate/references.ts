@@ -20,6 +20,7 @@ import { editSessionsOf } from '../editor/sessions.js';
 import { clipLength, timeline } from '../editor/model.js';
 import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
+import { poseSimilarity, readPoseTracks, type PoseTrack } from './poseTrack.js';
 import { BAKED_ELEMENTS, buildProject, peakInPoint, rangeFor, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, promptSource, shotRequestFor, swapDirection, swapSegment, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
@@ -30,6 +31,8 @@ import { checkInfo, FALLBACK, linkError, normalizeLink, tiktokDownloadsOff, ytDl
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
+/** Matching by movement: at most this many takes are read for poses per match, over their first seconds. */
+export const POSE_MATCH_TAKES = 8, POSE_TAKE_SEC = 6;
 export const KEEP_DAYS = 30;
 const DAY = 86_400_000;
 
@@ -288,18 +291,65 @@ export class RecreateReferences {
 
   /** The studio's video takes that could fill each slot, scored, plus a suggested assignment (each take once). */
   async match(u: AuthUser, id: string, body: unknown) {
-    const b = parse(z.object({ modelId: z.string().max(80).optional(), top: z.number().int().min(1).max(10).optional(), minScore: z.number().min(0).max(1).optional() }).strict(), body);
-    const { recipe } = await this.ready(u, id);
+    const b = parse(z.object({ modelId: z.string().max(80).optional(), top: z.number().int().min(1).max(10).optional(), minScore: z.number().min(0).max(1).optional(),
+      /** Compare movement with the takes' poses (default true; the first time reads up to POSE_MATCH_TAKES takes, free CPU). */
+      poses: z.boolean().optional() }).strict(), body);
+    const { r: ref, recipe } = await this.ready(u, id);
     const rows = await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.studioId, u.studioId), eq(takesTable.kind, 'take'))).orderBy(desc(takesTable.createdAt)).limit(300);
     const cands: Candidate[] = rows.filter(t => t.mediaKey && Number(t.media?.durationSec) > 0).map(t => ({
       id: t.id, modelId: t.modelId, durationSec: Number(t.media!.durationSec), width: Number(t.media?.width) || 0, height: Number(t.media?.height) || 0,
       status: t.status, createdAt: t.createdAt, draft: t.draft ?? null, title: t.title,
     }));
-    const m = matchSlots(recipe, cands, { leadModelId: b.modelId, top: b.top, minScore: b.minScore });
+    const pose = b.poses === false ? undefined : await this.poseScores(u, ref, recipe, cands, rows, b.modelId).catch(e => { this.ctx.log?.warn({ err: String(e) }, 'recreate pose match'); return undefined; });
+    const m = matchSlots(recipe, cands, { leadModelId: b.modelId, top: b.top, minScore: b.minScore, pose });
     const r = await this.row(u, id);
     const matched = Object.fromEntries(m.slots.filter(x => x.suggestion).map(x => [x.slotId, { takeId: x.suggestion!.takeId, score: x.suggestion!.score, reasons: x.suggestion!.reasons }]));
     await this.saveFill(r, { ...(r.fill ?? {}), matched, toGenerate: m.slots.filter(x => x.toGenerate).map(x => x.slotId) });
     return m;
+  }
+  private posesKey = (r: Pick<Row, 'studioId' | 'id'>) => `rx/${r.studioId}/${r.id}/poses.json`;
+  /**
+   * Pose similarity per slot and take (the per-frame movement), for the takes that already score best on everything
+   * else (at most POSE_MATCH_TAKES, each read once at 10 fps over its first seconds and cached with the take's media).
+   */
+  private async poseScores(u: AuthUser, r: Row, recipe: Recipe, cands: Candidate[], rows: (typeof takesTable.$inferSelect)[], leadModelId?: string) {
+    if (!this.ctx.config.RECREATE_POSE) return undefined;
+    const obj = await this.ctx.storage.get(this.posesKey(r)).catch(() => null);
+    if (!obj) return undefined;
+    const chunks: Buffer[] = []; for await (const c of obj.body as AsyncIterable<Buffer>) chunks.push(Buffer.from(c));
+    const shots = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { slots: Record<string, PoseTrack | null> }).slots;
+    // Only shots where someone was seen most of the time.
+    const withTrack = recipe.slots.filter(s => { const t = shots[s.id]; return !!t && t.frames.filter(Boolean).length >= 0.3 * t.frames.length; });
+    if (!withTrack.length) return undefined;
+    // The best few takes on everything else, across the slots that have movement to compare.
+    const base = matchSlots({ ...recipe, slots: withTrack }, cands, { leadModelId, top: 4, minScore: 0 });
+    const pick = [...new Set(base.slots.flatMap(s => s.candidates.map(c => c.takeId)))].slice(0, POSE_MATCH_TAKES);
+    const out: Record<string, Record<string, { score: number; coverage: number }>> = {};
+    for (const takeId of pick) {
+      const row = rows.find(t => t.id === takeId);
+      if (!row?.mediaKey) continue;
+      const track = await this.takeTrack(row);
+      if (!track) continue;
+      for (const s of withTrack) {
+        const sim = poseSimilarity(shots[s.id]!, track, s.durationSec);
+        if (sim) (out[s.id] ??= {})[takeId] = sim;
+      }
+    }
+    return out;
+  }
+  private trackCache = new Map<string, PoseTrack | null>();
+  /** A take's poses at 10 fps over its first POSE_TAKE_SEC seconds (cached by take and media). */
+  private async takeTrack(t: typeof takesTable.$inferSelect): Promise<PoseTrack | null> {
+    const k = `${t.id}:${t.mediaKey}`;
+    if (this.trackCache.has(k)) return this.trackCache.get(k)!;
+    const c = this.ctx.config;
+    const w = Number(t.media?.width) || 720, h = Number(t.media?.height) || 1280, d = Number(t.media?.durationSec) || POSE_TAKE_SEC;
+    const run = await this.withLocal(t.mediaKey!, f => readPoseTracks({ ffmpeg: c.FFMPEG_PATH, minFreeMb: c.RECREATE_POSE_MIN_FREE_MB }, f, [{ startSec: 0, endSec: Math.min(d, POSE_TAKE_SEC) }],
+      { width: w, height: h, fps: 10 }, { maxFrames: POSE_TAKE_SEC * 10 }));
+    const track = 'tracks' in run ? run.tracks[0] ?? null : null;
+    if ('tracks' in run || run.skipped !== 'memory') this.trackCache.set(k, track); // short of memory: try again next time
+    if (this.trackCache.size > 300) this.trackCache.delete(this.trackCache.keys().next().value!);
+    return track;
   }
   private async saveFill(r: Row, fill: FillState) {
     await this.ctx.db.update(recreateReferences).set({ fill }).where(eq(recreateReferences.id, r.id));
@@ -763,6 +813,8 @@ export class RecreateReferences {
       }));
       // The pose child's peak memory, for sizing the instance (plans/recreate-edit.md "Pose").
       if (out.recipe.analyzer.pose) this.ctx.log?.info({ referenceId: r.id, pose: out.recipe.analyzer.pose }, 'recreate pose');
+      // Per-frame poses (keypoints only), private next to the reference and deleted with it; read when matching takes.
+      if (out.poseTracks) await this.ctx.storage.put(this.posesKey(r), Buffer.from(JSON.stringify({ v: 1, slots: Object.fromEntries(out.recipe.slots.map((s, i) => [s.id, out.poseTracks![i] ?? null])) })), 'application/json');
       let sheet: string | null = null;
       if (out.contactSheetPng) {
         sheet = `rx/${r.studioId}/${r.id}/contact.png`;
@@ -805,6 +857,7 @@ export class RecreateReferences {
     // The swap segments (G2): the reference's pixels, so they go with it. The swapped takes are the studio's own.
     for (const j of Object.values(r.fill?.jobs ?? {})) if (j.clipId && j.clipKey) await this.dropClip(j.clipId, j.clipKey);
     if (r.contactSheetKey) await st.delete(r.contactSheetKey).catch(() => undefined);
+    await st.delete(this.posesKey(r)).catch(() => undefined);
     if (r.storageKey) {
       await st.delete(r.storageKey).catch(() => undefined);
       if (r.uploadId) await this.ctx.db.delete(uploads).where(eq(uploads.id, r.uploadId));

@@ -42,7 +42,7 @@ const category = (moveId?: string) => MOVES.find(m => m.id === moveId)?.category
  * How well a take fits a slot, 0–1, with the reasons: long enough, the right shape, the same move, the same framing
  * and angle (from the take's draft), the chosen lead, kept takes first. Claude makes the final choice.
  */
-export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadModelId?: string } = {}): Scored {
+export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadModelId?: string; pose?: { score: number } } = {}): Scored {
   const reasons: string[] = [];
   let s = 0, w = 0;
   const add = (weight: number, v: number, why?: string) => { s += weight * v; w += weight; if (why) reasons.push(why); };
@@ -61,6 +61,8 @@ export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadMod
   }
   if (slot.brief?.angle && rig.height) add(1, rig.height === slot.brief.angle ? 1 : 0.3, rig.height === slot.brief.angle ? `same angle (${rig.height})` : undefined);
   if (o.leadModelId) add(3, t.modelId === o.leadModelId ? 1 : 0, t.modelId === o.leadModelId ? 'your lead' : undefined);
+  // The per-frame movement against the shot's (when both were read): the strongest single sign that a take fits.
+  if (o.pose) add(3, o.pose.score, o.pose.score >= 0.6 ? `moves alike (${Math.round(o.pose.score * 100)}%)` : undefined);
   if (t.status === 'final') add(0.5, 1, 'kept');
   return { takeId: t.id, score: Math.round((s / Math.max(w, 1)) * 1000) / 1000, reasons };
 }
@@ -69,9 +71,11 @@ export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadMod
  * The best takes for every slot (top `top` each), and a suggested assignment: best first, each take used once, a slot
  * left "to generate" when nothing scores at least `minScore`.
  */
-export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?: string; top?: number; minScore?: number } = {}) {
+export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?: string; top?: number; minScore?: number;
+  /** Pose similarity per slot and take (references.ts reads it for the best few takes). */
+  pose?: Record<string, Record<string, { score: number }>> } = {}) {
   const top = o.top ?? 3, min = o.minScore ?? 0.6;
-  const per = recipe.slots.map(slot => ({ slot, list: takes.map(t => scoreTake(slot, recipe.source.aspect, t, o)).sort((a, b) => b.score - a.score) }));
+  const per = recipe.slots.map(slot => ({ slot, list: takes.map(t => scoreTake(slot, recipe.source.aspect, t, { leadModelId: o.leadModelId, pose: o.pose?.[slot.id]?.[t.id] })).sort((a, b) => b.score - a.score) }));
   const pairs = per.flatMap(p => p.list.map(c => ({ slotId: p.slot.id, ...c }))).sort((a, b) => b.score - a.score);
   const assigned: Record<string, string> = {}, usedTakes = new Set<string>();
   for (const p of pairs) {
