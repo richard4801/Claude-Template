@@ -6,10 +6,19 @@ public protocol RecreateAPI: Sendable {
     func reference(_ id: String) async throws -> RecreateReference
     /// Uploads the video (≤ 60 s) and starts its analysis; returns the reference in `analyzing`.
     func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference
+    /// A video this Mac fetched from a link (RecreateDeviceFetch), uploaded like a dropped file with the link it came from
+    /// (`sourceUrl`, optional: a server that doesn't take it yet gets the file alone).
+    func createReference(file: URL, contentType: String, name: String?, sourceUrl: String?, progress: UploadProgress?) async throws -> RecreateReference
     /// A public TikTok, Instagram Reel or YouTube link: the server fetches it (`source: "link"`, phase "Fetching the
     /// video"), or returns the member's reference from the same link (`cached: true`). Refusals throw `link_*` / `too_long`.
     func createReference(link: String, name: String?) async throws -> RecreateReference
     func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference
+    /// `GET /v1/recreate/settings`: the studio's link rules (strict, platforms, caps), applied on the device too.
+    func linkSettings() async throws -> RecreateLinkSettings
+    /// `PATCH /v1/recreate/settings {strictLinks}` (owner only): "Strict link rules".
+    func setStrictLinks(_ on: Bool) async throws -> RecreateLinkSettings
+    /// `POST /v1/recreate/links/check {url}`: the link under the studio's rules before a device downloads it.
+    func checkLink(_ url: String) async throws -> RecreateLinkCheck
     func deleteReference(_ id: String) async throws
     func fill(_ id: String) async throws -> RecreateFill
     /// Scores the studio's takes against each slot (free); the fill then says which slots are matched and which to generate.
@@ -358,10 +367,17 @@ public enum RecreateIds {
     }
 }
 
+public extension RecreateAPI {
+    /// Without `sourceUrl` support: the file alone.
+    func createReference(file: URL, contentType: String, name: String?, sourceUrl: String?, progress: UploadProgress?) async throws -> RecreateReference {
+        try await createReference(file: file, contentType: contentType, name: name, progress: progress)
+    }
+}
+
 // MARK: HTTP
 
 extension HTTPMuseAPI: RecreateAPI {
-    private struct CreateBody: Encodable { var uploadId: String; var name: String? }
+    private struct CreateBody: Encodable { var uploadId: String; var name: String?; var sourceUrl: String? = nil }
     private struct LinkBody: Encodable { var url: String; var name: String? }
     private struct PatchBody: Encodable { var keep: Bool?; var name: String? }
     private struct SlotBody: Encodable { var modelId: String; var quality: String?; var method: String?; var keepBackground: Bool?; var outfitId: String?; var locationId: String?; var maxUsd: Double? }
@@ -373,10 +389,29 @@ extension HTTPMuseAPI: RecreateAPI {
         let uploadId = try await uploadVideoForAnalysis(file, contentType: contentType, progress: progress)
         return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(CreateBody(uploadId: uploadId, name: name)))
     }
+    public func createReference(file: URL, contentType: String, name: String?, sourceUrl: String?, progress: UploadProgress?) async throws -> RecreateReference {
+        let uploadId = try await uploadVideoForAnalysis(file, contentType: contentType, progress: progress)
+        guard let sourceUrl, !sourceUrl.isEmpty else {
+            return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(CreateBody(uploadId: uploadId, name: name)))
+        }
+        do {
+            return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(CreateBody(uploadId: uploadId, name: name, sourceUrl: sourceUrl)))
+        } catch let e as ApiError where e.code == "bad_request" {
+            // A server whose body is strict and doesn't know `sourceUrl` yet: the same upload, without it.
+            return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(CreateBody(uploadId: uploadId, name: name)))
+        }
+    }
     public func createReference(link: String, name: String?) async throws -> RecreateReference {
         let url = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { throw ApiError("link_unsupported", "Paste a link first") }
         return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(LinkBody(url: url, name: name)))
+    }
+    public func linkSettings() async throws -> RecreateLinkSettings { try await suiteCall("GET", "v1/recreate/settings") }
+    public func setStrictLinks(_ on: Bool) async throws -> RecreateLinkSettings {
+        try await suiteCall("PATCH", "v1/recreate/settings", body: try JSONEncoder().encode(["strictLinks": on]))
+    }
+    public func checkLink(_ url: String) async throws -> RecreateLinkCheck {
+        try await suiteCall("POST", "v1/recreate/links/check", body: try JSONEncoder().encode(["url": url.trimmingCharacters(in: .whitespacesAndNewlines)]))
     }
     public func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference {
         try await suiteCall("PATCH", "v1/recreate/references/\(try RecreateIds.check(id))", body: try JSONEncoder().encode(PatchBody(keep: keep, name: name)))
@@ -536,6 +571,35 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     public func deleteReference(_ id: String) async throws { with { refs.removeAll { $0.id == id } } }
     /// Review mode: every theme starts from the same fill (nothing made yet).
     public func forgetMade() { with { made = [:] } }
+
+    /// Demo mode's link rules: strict, the owner may change them.
+    private var strictLinks = true
+    public func linkSettings() async throws -> RecreateLinkSettings { with { RecreateLinkSettings(strictLinks: strictLinks, canEdit: true) } }
+    public func setStrictLinks(_ on: Bool) async throws -> RecreateLinkSettings {
+        with {
+            strictLinks = on
+            return RecreateLinkSettings(strictLinks: on, canEdit: true)
+        }
+    }
+    /// Demo mode's check: TikTok, Instagram and YouTube links (any https link with strict off) are allowed, the
+    /// member's reference from the same link comes back as `cached`, and the refusal words ("private", "too-long"…) are
+    /// refused as `createReference(link:)` refuses them.
+    public func checkLink(_ url: String) async throws -> RecreateLinkCheck {
+        let link = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let strict = with { strictLinks }
+        let known = RecreateLinks.platform(link)
+        guard known != nil || (!strict && link.lowercased().hasPrefix("https://")) else {
+            return RecreateLinkCheck(allowed: false, code: "link_unsupported", reason: RecreateLinks.message(code: "link_unsupported", message: nil))
+        }
+        let low = link.lowercased()
+        for (word, code) in [("private", "link_private"), ("downloads-off", "link_downloads_off"), ("too-big", "link_too_big"), ("too-long", "too_long"), ("blocked", "link_blocked")]
+        where low.contains(word) {
+            return RecreateLinkCheck(allowed: false, code: code, reason: RecreateLinks.message(code: code, message: nil))
+        }
+        let platform = known?.lowercased() ?? "other"
+        let hit = with { refs.first { $0.sourceUrl == link } }
+        return RecreateLinkCheck(allowed: true, url: link, platform: platform, cached: hit)
+    }
 
     public static func demoJobId(_ slotId: String) -> String { "job_rx_\(slotId)" }
 

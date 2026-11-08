@@ -515,6 +515,18 @@ enum SnapshotRunner {
             store.openRecreate()
             try? await Task.sleep(for: .seconds(1))
             if theme == .c {
+                // A link being fetched on this Mac (faked: review mode never runs the download): the progress line and Stop.
+                store.recreate.fetchingLink = true
+                store.recreate.linkStatus = RecreateDeviceFetch.statusLine(fetched: 0.42)
+                store.recreate.linkProgress = 0.42
+                try? await Task.sleep(for: .seconds(0.6))
+                onScreen("linkFetching", "recreate_fetching 1280x800 c")
+                check("fetching", theme, beside: false, primary: "linkFetching")
+                capture(dir.appendingPathComponent("mac_c_recreate_fetching.png"))
+                store.recreate.fetchingLink = false
+                store.recreate.linkStatus = nil
+                store.recreate.linkProgress = nil
+                try? await Task.sleep(for: .seconds(0.3))
                 // Paste a link (Release 1 gap 3): demo mode's private link is refused, with the file offered right there.
                 // Pasted into the empty field: fetched at once.
                 store.recreate.linkText = "https://www.tiktok.com/@muse.demo/video/7400000000000000002-private"

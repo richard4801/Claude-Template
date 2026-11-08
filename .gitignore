@@ -1,3 +1,6 @@
 # Generated test videos (contain third-party footage; keep local only)
 test_outputs/
 __pycache__/
+
+# Release APKs built for download (WS4), not committed
+release/*.apk

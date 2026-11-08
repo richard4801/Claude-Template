@@ -223,6 +223,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         onBriefs = model::askBriefs, onBriefsCancel = model::cancelBriefs, onBriefsConfirm = { scope.launch { model.writeBriefs() } },
         onMethod = { s, m -> scope.launch { model.setMethod(s, m) } }, onKeepBackground = { s, k -> scope.launch { model.setKeepBackground(s, k) } },
         onLocation = { s, l -> scope.launch { model.setLocation(s, l) } },
+        onConfirmTick = model::toggleConfirmShot,
         onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,

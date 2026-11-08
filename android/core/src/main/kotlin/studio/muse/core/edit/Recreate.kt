@@ -238,18 +238,22 @@ object RecreateText {
      * "1 from your takes, 2 to generate · $1.28 in all", from the fill (never hard-coded). [prices] (slotId → amount, from
      * the slot estimates) replace the fill's own figures; [unavailable] slots couldn't be priced and are left out.
      */
-    fun makingSummary(fill: RecreateFill, prices: Map<String, Double> = emptyMap(), unavailable: Set<String> = emptySet(), generating: Set<String> = emptySet()): String {
+    /** [methods] (slotId → "swap" | "generate") override the fill's own: swaps are counted as "N to swap in". */
+    fun makingSummary(fill: RecreateFill, prices: Map<String, Double> = emptyMap(), unavailable: Set<String> = emptySet(), generating: Set<String> = emptySet(),
+        methods: Map<String, String> = emptyMap()): String {
         fun state(s: RecreateSlotFill) = if (s.slotId in generating) "generating" else s.state
         val yours = fill.slots.count { state(it) == "matched" }
         val made = fill.slots.count { state(it) == "ready" }
         val generate = fill.slots.count { state(it) == "to_generate" && it.slotId !in unavailable }
+        val swap = fill.slots.count { state(it) == "to_generate" && it.slotId !in unavailable && (methods[it.slotId] ?: it.method) == "swap" }
         val cant = fill.slots.count { state(it) == "to_generate" && it.slotId in unavailable }
         val making = fill.slots.count { state(it) == "generating" }
         val empty = fill.slots.size - yours - made - generate - cant - making
         val parts = buildList {
             if (yours > 0) add("$yours from your takes")
             if (made > 0) add("$made generated")
-            if (generate > 0) add("$generate to generate")
+            if (swap > 0) add("$swap to swap in")
+            if (generate - swap > 0) add("${generate - swap} to generate")
             if (making > 0) add("$making generating")
             if (cant > 0) add("$cant can’t be made")
             if (empty > 0) add("$empty to fill")
