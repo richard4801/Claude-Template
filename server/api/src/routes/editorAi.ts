@@ -13,6 +13,8 @@ import { LOOK_DIR } from '../editor/photo.js';
 import { uid } from '../lib/util.js';
 import { editorAi } from '../editor/service.js';
 import { registerEditSessionRoutes } from '../editor/sessionRoutes.js';
+import { editSessionsOf } from '../editor/sessions.js';
+import { repairSourceMatteVersions } from '../editor/repair.js';
 import { registerLearnRoutes } from '../editor/learnRoutes.js';
 import { EDIT_TOOLS } from '../editor/mcpTools.js';
 import * as mcpTools from '../mcp/tools.js';
@@ -29,6 +31,10 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
   // Claude's editing tools on MUSE's MCP server: workstream 2's registry (mcp/tools.ts registerMcpTools) when it exists.
   const register = (mcpTools as { registerMcpTools?: (tools: unknown[]) => void }).registerMcpTools;
   if (register) register(EDIT_TOOLS);
+  // One-off repair (WS3, 2026-11-08): cut-outs whose matte was the source itself (the mock before 06ec12c). Counts only.
+  ctx.later(() => void Promise.all([editSessionsOf(ctx).repairSourceMattes(), repairSourceMatteVersions(ctx)])
+    .then(([sessions, versions]) => { if (sessions || versions) ctx.log.info({ sessions, versions }, 'removed cut-outs whose matte was the source (one-off repair)'); })
+    .catch(e => ctx.log.warn({ err: (e as Error).message }, 'matte repair failed')), 0);
   ctx.later(() => void svc.recover().then(n => { if (n) ctx.log.info({ n }, 'editor jobs interrupted by the restart were failed and released'); }).catch(e => ctx.log.warn({ err: (e as Error).message }, 'editor recover failed')), 0);
 
   app.get('/v1/editor/features', async () => svc.features());
