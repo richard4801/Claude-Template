@@ -182,6 +182,10 @@ const Env = z.object({
   /** Body poses for Recreate this edit (MoveNet in a child process, about 150 MB while it runs); skipped below this much free memory. */
   RECREATE_POSE: bool(true),
   RECREATE_POSE_MIN_FREE_MB: num(200),
+  /** References from a link (TikTok, Instagram Reels, YouTube Shorts) through yt-dlp (pinned in the Dockerfile); off = files only. */
+  RECREATE_LINKS: bool(true),
+  YTDLP_PATH: z.string().default('yt-dlp'),
+  RECREATE_LINK_MAX_MB: num(80),
 
   // Images
   /** Unset: "replicate" when REPLICATE_API_TOKEN is set, else "simulated". */

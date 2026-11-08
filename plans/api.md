@@ -1147,6 +1147,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 | | |
 |---|---|
 | `POST /v1/recreate/references {uploadId, name?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). |
+| `POST /v1/recreate/references {url, name?}` | A **public** TikTok, Instagram Reel or YouTube link (see "From a link" below). → `Reference` with `source: "link"`, `state: "analyzing"`, `phase: "Fetching the video"`. The same link again, from the same member, → that member's existing reference with `cached: true`. Refusals come before anything is downloaded (codes below). |
 | `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
 | `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
 | `PATCH /v1/recreate/references/{id} {keep?, name?}` | `keep: true` stops the 30-day deletion (`expiresAt: null`). |
@@ -1156,6 +1157,22 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 | `GET /v1/recreate/references/{id}/poster` | → PNG: the first slot's keyframe (cropped from the contact sheet). |
 | `GET /v1/recreate/references/{id}/slots/{slotId}/thumb` | → PNG: that slot's keyframe. |
 | `GET /v1/recreate/references/{id}/fill` | → `{referenceId, slots: SlotFill[], applied?, match?}`, see below. |
+
+**From a link** (migration **0018**, `src/recreate/links.ts`, `test/recreate-links.test.ts`). The owner chose to keep link fetching after reading the platforms' terms, and the risk is theirs (`plans/research/platform-download-rules.md`). Guardrails:
+- **Public only.**
+  - MUSE never uses sign-ins or cookies. yt-dlp runs with `--ignore-config --no-cookies --no-cookies-from-browser` and none of the server's environment.
+  - Private, members-only, sign-in-walled and age-restricted videos are refused (`link_private`).
+- **The creator's setting.** For TikTok, MUSE reads the video's public page. If the creator turned downloads off (`downloadSetting` ≠ 0, or an explicit false), the video is refused (`link_downloads_off`). A page MUSE can't read counts as a blocked fetch; a page that doesn't say is treated as allowed.
+- **One fetch per link.**
+  - The metadata is read once, and the download reuses it (`--load-info-json`). TikTok's page is the one extra read.
+  - No lists, no live streams, no crawling. Platform requests run one at a time across the server.
+  - A link is cached by its normalized form (`https`, no tracking parameters, short links resolved to the video's own link), per member.
+- **Before the download:** duration ≤ 60 s (`too_long`, `400`) and size ≤ `RECREATE_LINK_MAX_MB` (80) (`link_too_big`). Both are checked again on the file.
+- **Storage.** The file is stored privately at `rx/{studio}/{id}/source.mp4` (not served by `/uploads`) and deleted after 30 days like any reference. The metadata is deleted as soon as the file is stored.
+- **Blocked** (a server address the platform blocks, 403, sign-in wall, rate limit, timeout, removed video): `link_blocked` (`502`) with the message "Couldn't fetch this link — save the video and drop the file in". The apps show it and offer the file drop. If the download itself is blocked, the reference turns `failed` with `errorCode: "link_blocked"`.
+- **Codes:** `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (all `422`) · `link_blocked` (`502`) · `too_long` (`400`).
+- **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
+- **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 from PyPI (sha256-checked at build) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
 **Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
 
