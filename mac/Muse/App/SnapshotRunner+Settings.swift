@@ -34,6 +34,7 @@ extension SnapshotRunner {
             ("studio", SettingsMockState(section: .studio)),
             ("members", SettingsMockState(section: .members)),
             ("spending", SettingsMockState(section: .spending)),
+            ("spending_models", SettingsMockState(section: .spending, modelsOnly: true)),
             ("providers_empty", SettingsMockState(section: .providers, providers: "empty")),
             ("providers_add", SettingsMockState(section: .providers, providers: "add")),
             ("providers_nokeys", SettingsMockState(section: .providers, providers: "nokeys")),

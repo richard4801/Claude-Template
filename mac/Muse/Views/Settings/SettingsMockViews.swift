@@ -42,6 +42,8 @@ struct SettingsMockState {
     var member = false
     /// Providers: "empty" (nothing connected), "add" (the add-key form), "models" (connected, its model list).
     var providers = "models"
+    /// AI & spending scrolled to its Default models (the shot shows that part).
+    var modelsOnly = false
 }
 
 struct SettingsMockView: View {
@@ -83,7 +85,8 @@ struct SettingsMockView: View {
         case .account: MockAccount(member: state.member)
         case .studio: MockStudio(member: state.member)
         case .members: MockMembers()
-        case .spending: MockSpending(member: state.member)
+        case .spending:
+            if state.modelsOnly { MockDefaultModels() } else { MockSpending(member: state.member) }
         case .providers: MockProviders(mode: state.providers)
         case .apps: MockApps()
         case .advanced: MockAdvanced()
@@ -246,16 +249,7 @@ private struct MockSpending: View {
             SettingRow("Captions, background removal and voice clean-up", hint: "Off: hidden in Edit and nothing is charged. $2.00 a day at most, $0.40 used today.") {
                 RSwitch(label: "AI editing helpers", isOn: .constant(true))
             }
-            SectionTitle("Models") {
-                Text("All running").scaled(t.scale.caption, t.roles.positive)
-            }
-            SettingRow("Draft", hint: "Members see the quality, never the model") { RowValue("MiniMax H3 Lite, 768p") }
-            SettingRow("Standard") { RowValue("MiniMax H3, 768p") }
-            SettingRow("HD") { RowValue("MiniMax H3 on Higgsfield, 2K") }
-            SettingRow("Cinema") { RowValue("Kling 4.0, 1080p") }
-            SettingRow("Photos") { RowValue("FLUX.2 [pro]") }
-            disclosure("Our own GPUs", "2 at once, off after 15 idle minutes")
-            disclosure("Price corrections", "Every engine at its listed price")
+            MockDefaultModels()
         }
     }
 
@@ -264,6 +258,46 @@ private struct MockSpending: View {
             Text(label).scaled(t.scale.caption, t.roles.ink2)
             Text(value).monospacedDigit().scaled(t.scale.title, t.roles.ink)
         }
+    }
+}
+
+/// Default models (owner request 2026-11-08: "anywhere I generate images or video, let me pick the model"): one row per
+/// purpose, Auto or a model. Each screen's Model pill starts from these; picking there changes only that run.
+private struct MockDefaultModels: View {
+    @Environment(\.theme) private var t
+
+    static let rows: [(String, String, String?)] = [
+        ("Shots on Draft", "MiniMax H3 Lite, 768p", "Members see the quality, never the model"),
+        ("Shots on Standard", "Auto", nil),
+        ("Shots on HD", "MiniMax H3 on Higgsfield, 2K", nil),
+        ("Shots on Cinema", "Kling 4.0, 1080p", nil),
+        ("Photos", "FLUX.2 [pro]", "Photo tool, model photos and outfits"),
+        ("Character swap", "Auto", nil),
+        ("Recast", "Kling O1 Edit, 1080p", nil),
+        ("Extend", "Auto", nil),
+        ("Upscale", "SeedVR2", nil),
+        ("Remove background", "Auto", "Edit's AI helpers"),
+        ("Captions", "Auto", nil),
+    ]
+
+    var body: some View {
+        SectionTitle("Default models") {
+            Text("All running").scaled(t.scale.caption, t.roles.positive)
+        }
+        Text("What each kind of work uses unless you pick a model on the screen itself. Auto lets MUSE choose.")
+            .scaled(t.scale.caption, t.roles.ink2).padding(.bottom, Space.s2)
+        ForEach(Self.rows, id: \.0) { row in
+            SettingRow(row.0, hint: row.2) {
+                HStack(spacing: Space.s1) {
+                    Text(row.1).scaled(t.scale.body, row.1 == "Auto" ? t.roles.ink2 : t.roles.ink)
+                    Ph("chevron.down", 10).foregroundStyle(t.roles.ink2)
+                }
+                .padding(.horizontal, Space.s3).frame(height: 30)
+                .overlay(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).strokeBorder(t.roles.hairline, lineWidth: 1))
+            }
+        }
+        disclosure("Our own GPUs", "2 at once, off after 15 idle minutes")
+        disclosure("Price corrections", "Every model at its listed price")
     }
 
     private func disclosure(_ title: String, _ summary: String) -> some View {
