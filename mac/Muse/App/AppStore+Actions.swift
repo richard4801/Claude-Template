@@ -299,6 +299,8 @@ extension AppStore {
     }
 
     func retake(_ t: Take) {
+        // A Suite take: its exact composer comes back (Reuse settings, plans/ai-suite-design.md).
+        if reuseSettings(t) { return }
         if t.isVideo, let j = job(for: t) {
             loadIntoStudio(j)
         } else if t.isVideo {

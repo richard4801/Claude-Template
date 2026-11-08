@@ -214,6 +214,8 @@ enum SnapshotRunner {
                         NSLog("[snapshot] fit %@ %dx%d %@", name, width, height, theme.rawValue)
                         store.suite.picker = nil
                         store.suite.browserOpen = false
+                        store.suite.feedOpen = false
+                        store.suite.compareIds = []
                         state.generateFrame = nil
                         state.generateLabel = nil
                         show()
@@ -244,6 +246,20 @@ enum SnapshotRunner {
         }
         // 1000 × 700 and 960 × 640: the owner's window was about 1000 pt wide (coordination item 8).
         await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620), (1000, 700), (960, 640)], screens)
+        // The results feed beside the composer and two takes compared (plans/ai-suite-design.md, Release 1), with the
+        // Setup rail's Rigs row, in the four themes.
+        let feedScreens: [(String, @MainActor () -> Void)] = [
+            ("composer_feed", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true }),
+            ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
+                store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
+        ]
+        await run([.c, .a, .b, .d], [(1280, 800), (1000, 700)], feedScreens)
+        // The last screen was the comparison: two takes were on screen (the demo has video takes).
+        let compared = store.suiteComparing.count
+        lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
+        store.suite.compareIds = []
+        store.suite.feedOpen = false
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
