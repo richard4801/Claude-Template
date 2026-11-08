@@ -49,10 +49,10 @@ struct EditSuiteCaptionsMode: View {
                                         disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
                         if session.isRunning(.captions) {
                             ProgressView().controlSize(.small)
-                            Text(session.jobs[.captions]?.phase ?? "").font(t.body(12)).foregroundStyle(t.muted)
+                            Text(session.jobs[.captions]?.phase ?? "").font(t.scale.caption.font).foregroundStyle(t.muted)
                         }
                         Spacer()
-                        Text(session.estimateLabel(.captions) ?? "").font(t.mono(11)).foregroundStyle(t.muted)
+                        Text(session.estimateLabel(.captions) ?? "").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.muted)
                     }
                     .task { await session.loadEstimate(.captions) }
                 } else {
@@ -60,7 +60,7 @@ struct EditSuiteCaptionsMode: View {
                         ForEach(words) { w in
                             wordView(w)
                             if let gap = w.pauseAfter, w.kept {
-                                Text("▪ \(String(format: "%.1f", gap)) s").font(t.mono(10.5)).foregroundStyle(t.muted)
+                                Text("\(String(format: "%.1f", gap)) s").font(t.scale.micro.font).monospacedDigit().foregroundStyle(t.muted)
                                     .padding(.horizontal, 5).frame(height: 22).background(t.surface2)
                                     .accessibilityLabel(String(format: "Pause, %.1f seconds", gap))
                             }
@@ -173,7 +173,7 @@ struct EditSuiteCaptionsMode: View {
                     session.togglePlay()
                 }
                 Text("\(EditSuite.clockTenths(session.playhead)) / \(EditSuite.clockTenths(session.duration))")
-                    .font(t.mono(12)).foregroundStyle(Color(hex: 0xE7E1D6)).monospacedDigit()
+                    .font(t.scale.caption.font).foregroundStyle(Color(hex: 0xE7E1D6)).monospacedDigit()
             }
             .frame(height: 44)
         }

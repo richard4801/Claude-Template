@@ -11,6 +11,7 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { takes, uploads, users } from '../src/db/schema.js';
+import { recreateReferences } from '../src/recreate/schema.js';
 import * as M from '../src/editor/model.js';
 import { LOOK_IDS } from '../src/editor/lookpack.js';
 import { paletteIds } from '../src/editor/photo.js';
@@ -123,7 +124,71 @@ describe.skipIf(!hasFfmpeg)('Recreate · end to end on real video (local files, 
     const { recipe: again } = await analyzeReference({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, out);
     expect(again.slots).toHaveLength(4);
     again.slots.slice(1).forEach((s, i) => expect(Math.abs(s.startSec - slots[i + 1]!.startSec), `cut ${i + 1}`).toBeLessThanOrEqual(1 / FPS + 0.001));
+    ctx = { refId: ref.id, sessionId: session.id, durationSec: ref.recipe.source.durationSec, cuts: slots.slice(1).map(s => s.startSec) };
   }, 180_000);
+
+  let ctx: { refId: string; sessionId: string; durationSec: number; cuts: number[] };
+  const bytesOf = async (url: string) => {
+    const r = await a.app.inject({ method: 'GET', url: new URL(url, 'http://x').pathname + new URL(url, 'http://x').search, headers: { authorization: `Bearer ${owner.token}` } });
+    expect(r.statusCode, r.body.slice(0, 200)).toBe(200);
+    return r.rawPayload;
+  };
+
+  it('the server renders the built edit for Compare: same cuts and length as the reference (preview size)', async () => {
+    const first = (await owner.req('POST', `/v1/edit-sessions/${ctx.sessionId}/preview`, {})).body;
+    expect(first).toMatchObject({ sessionId: ctx.sessionId, state: 'rendering' });
+    const ready = await until(async () => { const r = (await owner.req('GET', `/v1/edit-sessions/${ctx.sessionId}/preview`)).body; return r.state === 'ready' || r.state === 'failed' ? r : null; }, 120_000);
+    expect(ready, JSON.stringify(ready)).toMatchObject({ state: 'ready', revision: first.revision, unsupported: [] });
+    expect(Math.max(ready.width, ready.height)).toBeLessThanOrEqual(720);
+    // Asking again for the same revision doesn't render again.
+    expect((await owner.req('POST', `/v1/edit-sessions/${ctx.sessionId}/preview`, {})).body.state).toBe('ready');
+    const file = path.join(dir, 'preview.mp4');
+    fs.writeFileSync(file, await bytesOf(ready.url));
+    const info = await probe('ffprobe', file);
+    expect(Math.abs(info.duration - ctx.durationSec)).toBeLessThanOrEqual(0.1);
+    const { recipe } = await analyzeReference({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, file);
+    recipe.slots.slice(1).forEach((s, i) => expect(Math.abs(s.startSec - ctx.cuts[i]!)).toBeLessThanOrEqual(1 / FPS + 0.001));
+  }, 180_000);
+
+  it('export: with the reference\'s sound as a guide, or silent, as long as the reference; how to post with the original sound', async () => {
+    const start = (sound: string) => owner.req('POST', `/v1/recreate/references/${ctx.refId}/export`, { sessionId: ctx.sessionId, sound });
+    const wait = (sound: string) => until(async () => { const r = (await owner.req('GET', `/v1/recreate/references/${ctx.refId}/export?sessionId=${ctx.sessionId}&sound=${sound}`)).body; return r.state === 'ready' || r.state === 'failed' ? r : null; }, 120_000);
+    const g = (await start('guide')).body;
+    expect(g).toMatchObject({ state: 'rendering', sound: 'guide', useThisSound: { platform: null, title: 'Post with the original sound', startAtSec: 0 } });
+    expect(g.useThisSound.steps.length).toBeGreaterThan(1);
+    expect(g.useThisSound.note).toMatch(/as a guide/);
+    const gr = await wait('guide');
+    expect(gr.state, JSON.stringify(gr)).toBe('ready');
+    expect(gr.width).toBe(1080); // the canvas's own size (export quality)
+    const gf = path.join(dir, 'export-guide.mp4');
+    fs.writeFileSync(gf, await bytesOf(gr.url));
+    const gi = await probe('ffprobe', gf);
+    expect(Math.abs(gi.duration - ctx.durationSec)).toBeLessThanOrEqual(0.1);
+    expect(gi.audioCodec).toBeTruthy(); // the reference's clicks
+    const sr = (await start('silent')).body;
+    expect(sr.useThisSound.note).toMatch(/silent/);
+    const sw = await wait('silent');
+    const sf = path.join(dir, 'export-silent.mp4');
+    fs.writeFileSync(sf, await bytesOf(sw.url));
+    const si = await probe('ffprobe', sf);
+    expect(si.audioCodec).toBeFalsy();
+    expect(Math.abs(si.duration - ctx.durationSec)).toBeLessThanOrEqual(0.1);
+    // A link reference's reminder names its platform.
+    const { useThisSound } = await import('../src/recreate/references.js');
+    expect(useThisSound('https://www.tiktok.com/@muse.studio/video/7431234567890123456', 'guide', 4).steps[1]).toMatch(/Use this sound/);
+    expect(useThisSound('https://www.instagram.com/reel/C9xYz12AbC/', 'silent', 4).platform).toBe('instagram');
+  }, 240_000);
+
+  it('no guide without the reference\'s video (after 30 days); deleting the reference removes its exports', async () => {
+    const [row] = await a.ctx.db.select().from(recreateReferences).where(eq(recreateReferences.id, ctx.refId));
+    const keys = (row!.fill?.exports ?? []) as string[];
+    expect(keys).toHaveLength(2);
+    for (const k of keys) expect(await a.ctx.storage.head(k)).toBeTruthy();
+    await a.ctx.db.update(recreateReferences).set({ storageKey: null }).where(eq(recreateReferences.id, ctx.refId));
+    const r = await owner.req('POST', `/v1/recreate/references/${ctx.refId}/export`, { sessionId: ctx.sessionId, sound: 'guide' });
+    expect(r).toMatchObject({ status: 409, body: { code: 'no_reference_sound' } });
+    await a.ctx.db.update(recreateReferences).set({ storageKey: row!.storageKey }).where(eq(recreateReferences.id, ctx.refId));
+  });
 
   it('the reference file is untouched and private; only the API serves it', async () => {
     const list = (await owner.req('GET', '/v1/recreate/references')).body;
@@ -132,5 +197,9 @@ describe.skipIf(!hasFfmpeg)('Recreate · end to end on real video (local files, 
     expect(v.statusCode).toBe(200);
     expect(v.rawPayload.equals(fs.readFileSync(refFile))).toBe(true);
     execFileSync('ffprobe', ['-v', 'error', refFile]); // still a valid file
+    const [row] = await a.ctx.db.select().from(recreateReferences).where(eq(recreateReferences.id, list[0].id));
+    const keys = (row!.fill?.exports ?? []) as string[];
+    expect((await owner.req('DELETE', `/v1/recreate/references/${list[0].id}`)).status).toBe(204);
+    for (const k of keys) { expect(await a.ctx.storage.head(k)).toBeNull(); expect(await a.ctx.storage.head(`${k}.json`)).toBeNull(); }
   });
 });

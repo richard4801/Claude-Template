@@ -124,3 +124,57 @@ Mocks: plans/recreate/ on claude/muse-mcp-bridge @4c2f3f9 (Recipe and Compare). 
 
 ## Link fetching: the owner chose "Keep link fetching" (2026-11-08)
 See plans/research/platform-download-rules.md for the guardrails.
+
+## Server audit against this plan (WS1, 2026-11-08, Release 1)
+
+**Built** (all in plans/api.md, "Recreate this edit"):
+- **The reference:**
+  - From a file, or a public link (TikTok, Reels, Shorts) with the guardrails in plans/research/platform-download-rules.md.
+  - Stored privately and deleted after 30 days.
+- **The analysis:**
+  - Cuts and flashes, frame-accurate.
+  - Beats, with half and double tempo fixed.
+  - Action peaks; speed ramps and freezes; camera pan, tilt, zoom and shake as keys.
+  - Transitions: cut, flash, whip, zoom, fade, crossfade, unknown.
+  - Text: region, timing, colour, and words by OCR.
+  - The grade, as swatches → the nearest palette → a LUT.
+  - The contact sheet, and pose keypoints (MoveNet).
+- **Building:**
+  - Briefs, the matcher, the fill request with its price, and the Suite job.
+  - Assembly into an edit session (cuts on the reference, ramps, camera keys, text, Look) and the match score per element.
+  - The sources fed to the corrections log, and the playbook's pinned rules enforced on Claude's changes.
+- **Compare and export:**
+  - The server renders the built edit for Compare.
+  - Export with the reference's sound as a guide, or silent, plus the "Use this sound" steps.
+- **Claude:** analyze_reference, get_recipe, set_slot_briefs, match_slots, apply_recipe, fill_slot, playbook_read, playbook_add and report_gap.
+- **The learning editor:** a new recreate starts from the nearest proven recipe.
+
+**Fixed in this audit:** generating a missing shot whose slot had no brief sent an empty prompt.
+- Its words now come from the reference's summary, else a neutral line. The framing and move still apply.
+- The estimate says where the words came from (`promptFrom: "brief" | "summary" | "default"`), so the apps can suggest writing a brief first.
+
+**Gaps against this plan** (agreed scope not yet built on the server):
+
+| # | Plan | Gap | Who | Size |
+|---|---|---|---|---|
+| G1 | §3 "cuts and action peaks snap to the sound's beat map" | **Done.** Each take starts where its own strongest action peak plays at the slot's strongest peak (free, cached per take); the cuts don't move. | WS1 | — |
+| G2 | §3 "pose is guided by the skeleton" | Slots have keypoints, but the Suite shot request has no pose input, and no current video provider takes one. Needs a provider that accepts a pose or control input, and the owner's OK on its price. | WS1, plus an owner decision | Open |
+| G3 | §4 "Fix this slot re-picks or regenerates that slot" | **Done (server).** `POST …/slots/{slotId}/replace {sessionId, take}` swaps one clip in place as one undoable change, keeping hand edits; Claude has `replace_slot`. Buttons: WS2/WS4. | WS1 (server), WS2/WS4 (button) | — |
+| G4 | §2 Text "animation in/out; fonts matched to the nearest" | **Done.** Around each caption's in and out times, the contrast inside its box is measured every 0.1 s: a gradual rise is a fade, the right half arriving well after the left a typewriter, else a cut (first 20 items). The font is the editor face whose rendering of the read words best overlaps the OCR crop (all six faces tested, light and dark); a near tie stays "sans". | WS1 | — |
+| G5 | §2 "ramps and freezes" | **Done.** The analysis records where the longest freeze is; the built edit plays it at the editor's slowest speed (0.1×) for its length. | WS1 | — |
+| G6 | §2 Transitions "glitch" | **Done.** A burst of 3+ hard changes in under 0.6 s is a glitch. Before, it was missed by both the cut and the fade finders, so the two shots merged into one. A glitch that returns to the same shot is an effect inside it (an editor gap, like a flash). The server render still draws `glitch` as a pixelate, which reads back as a crossfade. | WS1 | — |
+| G7 | Release 1 #4 "Claude button on the Recreate screens" | Claude chat threads accept only `camera` or `edit` contexts, and the API fallback works only in Camera. Recreate's tools are on the MCP server already. | WS2 (threads), WS1 (on request) | — |
+| G8 | §6 "Claude's reading of the contact sheet … or a few cents on the API fallback" | Without the owner's Claude, slots get no briefs. There is no server-side briefing (that would be paid API use). The fill prompt now falls back to the summary or a default (above). | Owner decision on spend | — |
+
+## Owner decisions (2026-11-08)
+- **Pose-guided generation (G2):** Wan 2.2 Animate, driven by a stick-figure video rendered from per-frame keypoints (never the reference's pixels). Priced at cost ×2, confirmed per shot. One paid test (~$0.58) in the owner's Release 1 test.
+- **Server-written shot briefs (G8):** yes, on Sonnet. Opt-in per reference, price shown and confirmed, ×2. About $0.10–0.20 per reference to members.
+- **Pose-guided generation, revised (owner, 2026-11-08):** for an exact movement swap, Wan 2.2 Animate is driven by **the reference video's segment itself** (motion input only) plus our model's image, replacing the earlier stick-figure plan and the "never the reference's pixels" rule for motion input.
+  - The output shows only our model.
+  - The segment is sent per slot and trimmed to the slot's length.
+  - Storage is unchanged: private, deleted after 30 days.
+  - The price is confirmed per shot.
+- **Pose-guided generation, final (owner, 2026-11-08):** missing shots are filled with the existing H3 Edit swap (the Suite's "Swaps her into every frame of the whole clip"), driven by the reference's slot segment.
+  - Same pricing and approval as the Suite; runs on RunPod, with the Replicate swap as fallback.
+  - Per-slot option: keep the original background, or use the owner's setting.
+  - Wan Animate is dropped.

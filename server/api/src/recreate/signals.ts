@@ -68,7 +68,7 @@ export function motionTracker() {
 }
 
 export type Shot = { startSec: number; endSec: number; startFrame: number; endFrame: number };
-export type Gradual = { atSec: number; startFrame: number; endFrame: number; kind: 'fade' | 'crossfade' };
+export type Gradual = { atSec: number; startFrame: number; endFrame: number; kind: 'fade' | 'crossfade' | 'glitch' };
 
 const histL1 = (a: Float32Array, b: Float32Array) => { let d = 0; for (let i = 0; i < a.length; i++) d += Math.abs(a[i]! - b[i]!); return d / 2; };
 
@@ -100,6 +100,31 @@ export function findGradual(m: MotionFrames, cuts: Cut[], g: Global[]): Gradual[
     const lum = Array.from(m.luma.slice(a, b + 1));
     const dark = Math.min(...lum) < 0.06 || Math.max(...lum) > 0.96;
     out.push({ atSec: round3((a + b) / 2 / m.fps), startFrame: a, endFrame: b, kind: dark ? 'fade' : 'crossfade' });
+  }
+  return out;
+}
+
+/**
+ * Glitch transitions (G6): a burst of hard changes, at least 3 frames in under 0.6 s where both the histogram and the
+ * pixels jump (the picture flickers between the shots, torn or colour-split), that isn't a single cut or a flash.
+ * Neither findCuts (spikes up to 2 frames wide) nor findGradual (no hard steps) takes these, so without this the two
+ * shots merged into one. A burst that ends on the picture it started from is a glitch inside a shot.
+ */
+export function findGlitches(m: MotionFrames, o: { minHard?: number; maxSec?: number } = {}): (Gradual & { inShot: boolean })[] {
+  const n = m.histDist.length, minHard = o.minHard ?? 3, maxLen = Math.round((o.maxSec ?? 0.6) * m.fps);
+  const hard = (k: number) => k > 0 && k < n && m.histDist[k]! >= 0.35 && m.energy[k]! >= 0.05;
+  const out: (Gradual & { inShot: boolean })[] = [];
+  let k = 1;
+  while (k < n) {
+    if (!hard(k)) { k++; continue; }
+    // One quiet frame between hard ones is bridged (a held glitch frame).
+    let end = k, count = 1;
+    for (let j = k + 1; j < n; j++) { if (hard(j)) { end = j; count++; } else if (!hard(j + 1)) break; } // the whole run, then judged
+    const a = k - 1, b = end;
+    k = end + 1;
+    if (count < minHard || b - a > maxLen) continue;
+    const inShot = histL1(m.hists[a]!, m.hists[b]!) < 0.3;
+    out.push({ atSec: round3((a + b) / 2 / m.fps), startFrame: a, endFrame: b, kind: 'glitch', inShot });
   }
   return out;
 }
@@ -171,7 +196,9 @@ export function cameraOf(shot: Shot, g: Global[], fps: number, skip: Set<number>
   return { motion, shake: round3(shake), keys, confidence };
 }
 
-export type Speed = { ramp: 'none' | 'speed_up' | 'slow_down' | 'freeze' | 'mixed'; curve: { t: number; speed: number }[]; confidence: number };
+export type Speed = { ramp: 'none' | 'speed_up' | 'slow_down' | 'freeze' | 'mixed'; curve: { t: number; speed: number }[]; confidence: number;
+  /** Where the longest freeze is (seconds from the shot's start), when `ramp` is "freeze". */
+  freeze?: { t: number; durationSec: number } };
 
 /**
  * A shot's playback speed, estimated from how much the picture changes per frame (relative to the shot's own median):
@@ -193,11 +220,13 @@ export function speedOf(shot: Shot, m: MotionFrames): Speed {
   const mean = (xs: number[]) => xs.reduce((x, y) => x + y, 0) / Math.max(1, xs.length);
   const first = mean(e.slice(0, third)), last = mean(e.slice(-third));
   const moving = med > 0.01;
-  let frozen = 0, run = 0;
-  for (const v of e) { run = v < 0.0015 ? run + 1 : 0; frozen = Math.max(frozen, run); }
+  let frozen = 0, run = 0, frozenEnd = 0;
+  e.forEach((v, i) => { run = v < 0.0015 ? run + 1 : 0; if (run > frozen) { frozen = run; frozenEnd = i; } });
   const ramp: Speed['ramp'] = moving && frozen >= Math.round(m.fps * 0.3) ? 'freeze'
     : moving && last > first * 2 ? 'speed_up' : moving && first > last * 2 ? 'slow_down' : 'none';
-  return { ramp, curve, confidence: moving ? 0.55 : 0.35 };
+  // The run of identical frames: the frame before it is the one held (difference i is frame i+1 against frame i).
+  const freeze = ramp === 'freeze' ? { t: round3((frozenEnd - frozen + 1) / m.fps), durationSec: round3(frozen / m.fps) } : undefined;
+  return { ramp, curve, confidence: moving ? 0.55 : 0.35, ...(freeze ? { freeze } : {}) };
 }
 
 export type Transition = { atSec: number; kind: 'cut' | 'flash' | 'whip' | 'zoom' | 'fade' | 'crossfade' | 'glitch' | 'unknown'; durationSec: number; confidence: number };

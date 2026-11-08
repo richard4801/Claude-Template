@@ -14,12 +14,15 @@ import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
-import { timeline } from '../editor/model.js';
+import { clipLength, timeline } from '../editor/model.js';
+import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
-import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
-import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
+import { buildProject, peakInPoint, rangeFor, type AssembleOptions, type TakeInfo } from './assemble.js';
+import { BriefSchema, matchSlots, promptSource, shotRequestFor, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
+import { rendersOf, type RenderState } from '../editor/renders.js';
+import type { EditProject } from '../editor/model.js';
 import { checkInfo, FALLBACK, linkError, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
 import { recreateReferences } from './schema.js';
 
@@ -40,6 +43,8 @@ export type FillState = {
   applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore };
   /** Gap keys already reported to the learning editor for this reference (each once). */
   gapsReported?: string[];
+  /** Exports made from this reference (storage keys), deleted with it. */
+  exports?: string[];
 };
 export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
@@ -317,7 +322,8 @@ export class RecreateReferences {
   async estimateSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
     const { request } = this.fillRequest(recipe, r, slotId, body);
-    return { slotId, request, estimate: await this.ctx.suite.estimate(u, request) };
+    // promptFrom: "brief", or "summary"/"default" while the slot has no brief yet (the apps suggest writing one).
+    return { slotId, request, promptFrom: promptSource(recipe, recipe.slots.find(x => x.id === slotId)!), estimate: await this.ctx.suite.estimate(u, request) };
   }
   /** Fills a slot with a new Suite shot: an ordinary job, held and priced like any shot (the caller confirmed the price). */
   async fillSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
@@ -337,7 +343,8 @@ export class RecreateReferences {
     const b = parse(z.object({
       sessionId: z.string().min(1), baseRevision: z.number().int().min(0).optional(),
       slots: z.record(z.string(), z.string().min(1).max(80)),
-      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional() }).strict().optional(),
+      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional(),
+        peaks: z.boolean().optional() }).strict().optional(),
       /** A proven recipe of the studio's to start from (its look fills in when the reference's can't be mapped); false = none; omitted = the nearest that fits. */
       startFrom: z.union([z.string().min(1).max(80), z.literal(false)]).optional(),
     }).strict(), body);
@@ -362,6 +369,13 @@ export class RecreateReferences {
       if (!t) throw badRequest(`slots.${slotId}: no video take or job ${v}`);
       if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
       takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
+    }
+    // The takes' action peaks (free, server CPU; cached per take), to line them up with the reference's.
+    if (b.options?.peaks !== false) {
+      for (const info of Object.values(takes)) {
+        const row = info && byId.get(info.id);
+        if (info && row?.mediaKey) info.peaks = await this.takePeaks(row.id, row.mediaKey).catch(() => []);
+      }
     }
     // The playbook (workstream 3's learning editor): the owner's pinned rules shape the plan. Claude can't override them;
     // the owner's own explicit options in the app can.
@@ -391,6 +405,69 @@ export class RecreateReferences {
       startedFrom: start ? { recipeId: start.recipeId, name: start.name, distance: start.distance, borrowed } : null };
   }
 
+  private peakCache = new Map<string, { t: number; strength: number }[]>();
+  /** A take's action peaks (the find_action_peaks detector), cached by take and media. */
+  private async takePeaks(takeId: string, key: string) {
+    const k = `${takeId}:${key}`, hit = this.peakCache.get(k);
+    if (hit) return hit;
+    const c = this.ctx.config;
+    const peaks = await this.withLocal(key, async f => findPeaks(await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, f, { maxSec: 120 })));
+    const out = peaks.map(p => ({ t: Math.round(p.t * 1000) / 1000, strength: p.strength }));
+    this.peakCache.set(k, out);
+    if (this.peakCache.size > 500) this.peakCache.delete(this.peakCache.keys().next().value!);
+    return out;
+  }
+
+  /**
+   * "Fix this shot" (plan §4): one slot's clip in the built edit gets another take (or a finished fill job), in place,
+   * as one undoable change. Its place and length on the timeline, transition, ramp, camera keys and look stay; the new
+   * take starts where its action peak lines up. Later hand edits elsewhere are kept.
+   */
+  async replaceSlot(u: AuthUser, id: string, slotId: string, body: unknown, o: { by: 'claude' | 'app'; device?: string } = { by: 'app' }) {
+    const b = parse(z.object({ sessionId: z.string().min(1), take: z.string().min(1).max(80), baseRevision: z.number().int().min(0).optional() }).strict(), body);
+    const { r, recipe } = await this.ready(u, id);
+    const slot = recipe.slots.find(x => x.id === slotId);
+    if (!slot) throw notFound('Slot');
+    const svc = editSessionsOf(this.ctx);
+    const s = await svc.row(u, b.sessionId);
+    const applied = r.fill?.applied;
+    if (!applied || applied.sessionId !== s.id) throw new ApiError(409, 'not_built_here', 'Build the edit from this reference in this session first');
+    const itemId = Object.entries(applied.sources ?? {}).find(([, src]) => src.slotId === slotId)?.[0];
+    const p = structuredClone(s.project) as unknown as EditProject;
+    const ti = p.tracks.findIndex(t => t.kind === 'main'), ii = ti < 0 ? -1 : p.tracks[ti]!.items.findIndex(x => (x as { id: string }).id === itemId);
+    if (!itemId || ii < 0) throw new ApiError(409, 'slot_not_in_edit', `Shot ${slotId} isn’t in the edit any more · rebuild the edit to put it back`);
+    // The take: a take id, or a finished job's first take.
+    let t = (await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.id, b.take), eq(takesTable.studioId, u.studioId), eq(takesTable.kind, 'take'))))[0];
+    if (!t) {
+      const [job] = await this.ctx.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(and(eq(jobs.id, b.take), eq(jobs.studioId, u.studioId)));
+      if (job && job.state !== 'done') throw new ApiError(409, 'job_not_done', 'That shot is still being made · try again when it’s done');
+      if (job) t = (await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.jobId, job.id), eq(takesTable.studioId, u.studioId)))).sort((x, y) => x.index - y.index)[0];
+    }
+    if (!t) throw badRequest(`take: no video take or job ${b.take}`);
+    if (!t.mediaKey) throw badRequest('take: it has no video yet');
+    const info: TakeInfo = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true,
+      peaks: await this.takePeaks(t.id, t.mediaKey).catch(() => []) };
+    const old = p.tracks[ti]!.items[ii] as import('../editor/model.js').VideoClip;
+    let asset = p.assets.find(a => a.take === t!.id);
+    if (!asset) { asset = { id: `a${p.assets.length + 1}`, kind: 'video', take: t.id, durationSec: info.durationSec, width: info.width, height: info.height, hasAudio: true }; p.assets.push(asset); }
+    // The same length on the timeline, from the new take (slower if it is too short), starting at its action peak.
+    const len = clipLength(old);
+    const range = rangeFor(0, len, info.durationSec, old.speedCurve);
+    const off = old.transitionIn ? old.transitionIn.durationSec / 2 : 0;
+    const inSec = peakInPoint(slot, info, range, off);
+    const next: import('../editor/model.js').VideoClip = { ...old, asset: asset.id, inSec, outSec: Math.round((inSec + range.outSec) * 10000) / 10000, speed: range.speed };
+    if (range.curve) next.speedCurve = range.curve; else delete next.speedCurve;
+    delete next.audioAsset; delete next.alphaMatte; delete next.chroma;
+    p.tracks[ti]!.items[ii] = next;
+    const label = `Replaced shot ${slotId} in “${r.name}”`, sources = { [old.id]: { recipeId: r.id, slotId } };
+    const res = o.by === 'claude'
+      ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [{ op: 'replace', path: '/assets', value: p.assets }, { op: 'replace', path: `/tracks/${ti}/items/${ii}`, value: next }] }], label, meta: { sources } })
+      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: p, device: o.device, label }, { meta: { sources } });
+    const fresh = await this.row(u, id);
+    if (fresh.fill?.applied) await this.saveFill(fresh, { ...fresh.fill, applied: { ...fresh.fill.applied, revision: res.revision, slots: { ...fresh.fill.applied.slots, [slotId]: t.id } } });
+    return { sessionId: s.id, revision: res.revision, slotId, itemId: old.id, takeId: t.id, inSec, label, ...(range.speed < 1 ? { note: `The take is shorter than the shot, so it plays at ${Math.round(range.speed * 100)}%` } : {}) };
+  }
+
   /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */
   private async startFrom(u: AuthUser, referenceId: string, id?: string) {
     if (!id) return provenStart(this.ctx, u, referenceId);
@@ -400,21 +477,80 @@ export class RecreateReferences {
   }
 
   /**
-   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freeze
-   * frames and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
+   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freezes
+   * without a known place, and flashes and glitches inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
    */
   private async reportGaps(u: AuthUser, r: Row, recipe: Recipe, done: string[]) {
     if (u.role !== 'owner') return done;
     const found: { key: string; kind: string; what: string; note: string }[] = [];
-    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze');
+    // Freezes are rebuilt as a 0.1× hold (G5); only those without a known place are a gap.
+    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze' && !sl.speed.freeze);
     if (freeze.length) found.push({ key: 'speed:freeze-frame', kind: 'effect', what: 'Freeze frame', note: `“${r.name}”: ${freeze.map(x => x.id).join(', ')}` });
     const flashes = recipe.transitions.filter(t => t.from === t.to && t.kind === 'flash');
     if (flashes.length) found.push({ key: 'effect:flash-in-shot', kind: 'effect', what: 'A white flash inside a shot', note: `“${r.name}” at ${flashes.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
+    const glitches = recipe.transitions.filter(t => t.from === t.to && t.kind === 'glitch');
+    if (glitches.length) found.push({ key: 'effect:glitch-in-shot', kind: 'effect', what: 'A glitch inside a shot', note: `“${r.name}” at ${glitches.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
     const out = [...done];
     for (const g of found.filter(x => !done.includes(x.key))) {
       try { await learningOf(this.ctx).addGap(u, g); out.push(g.key); } catch { /* the gap list is best effort */ }
     }
     return out;
+  }
+
+  // ------------------------------------------------------------------ export (plan step 7, Release 1)
+  private exportKey = (r: Row, sessionId: string, revision: number, sound: ExportSound) => `rx/${r.studioId}/${r.id}/export-${sessionId}-r${revision}-${sound}.mp4`;
+  private exportView(r: Row, sessionId: string, sound: ExportSound, st: RenderState | null, revision: number) {
+    const recipe = r.recipe as Recipe;
+    const q = `sessionId=${encodeURIComponent(sessionId)}&sound=${sound}&revision=${revision}`;
+    return {
+      referenceId: r.id, sessionId, revision, sound, state: st?.state ?? 'none',
+      ...(st?.state === 'ready' ? { url: `${this.ctx.config.PUBLIC_URL ?? ''}/v1/recreate/references/${r.id}/export.mp4?${q}`, durationSec: st.durationSec, width: st.width, height: st.height, unsupported: st.unsupported ?? [] } : {}),
+      ...(st?.error ? { error: st.error } : {}),
+      useThisSound: useThisSound(r.sourceUrl, sound, recipe.source.durationSec),
+    };
+  }
+  private exportBody(body: unknown) {
+    const b = parse(z.object({ sessionId: z.string().min(1).max(80), sound: z.enum(['guide', 'silent']).optional(), revision: z.coerce.number().int().min(0).optional() }).strict(), body);
+    return { ...b, sound: (b.sound ?? 'guide') as ExportSound };
+  }
+  /**
+   * Renders the built edit (the session's current revision) for posting, as long as the reference: with the
+   * reference's sound as a guide track, or silent. Either way the response says how to post with the original sound.
+   */
+  async exportEdit(u: AuthUser, id: string, body: unknown) {
+    const b = this.exportBody(body);
+    const { r, recipe } = await this.ready(u, id);
+    const s = await editSessionsOf(this.ctx).row(u, b.sessionId);
+    if (b.sound === 'guide' && (!r.storageKey || !recipe.source.hasAudio))
+      throw new ApiError(409, 'no_reference_sound', r.storageKey ? 'The reference has no sound · export it silent' : 'The reference’s video is gone (deleted after 30 days) · export it silent and add the sound when you post');
+    const key = this.exportKey(r, s.id, s.revision, b.sound);
+    const have = await rendersOf(this.ctx).state(key);
+    if (have && have.state !== 'failed') return this.exportView(r, s.id, b.sound, have, s.revision);
+    const fresh = await this.row(u, id);
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), exports: [...new Set([...(fresh.fill?.exports ?? []), key])].slice(-20) });
+    const st = rendersOf(this.ctx).start(r.studioId, key, s.revision, s.project as unknown as EditProject, {
+      quality: 'export', durationSec: recipe.source.durationSec, ...(b.sound === 'guide' ? { guideKey: r.storageKey! } : { audio: 'none' as const }),
+    }, async done => {
+      const now = await this.ctx.db.select().from(recreateReferences).where(eq(recreateReferences.id, r.id)).then(x => x[0]);
+      if (now) void this.ctx.hub.emit(now.studioId, v => (v.userId === now.userId || v.role === 'owner' ? { type: 'recreate', export: this.exportView(now, s.id, b.sound, done, s.revision) } : null));
+    });
+    return this.exportView(r, s.id, b.sound, st, s.revision);
+  }
+  /** An export's state (no render started); `revision` defaults to the session's current one. */
+  async exportState(u: AuthUser, id: string, query: unknown) {
+    const b = this.exportBody(query);
+    const r = await this.row(u, id);
+    const s = await editSessionsOf(this.ctx).row(u, b.sessionId);
+    const rev = b.revision ?? s.revision;
+    return this.exportView(r, s.id, b.sound, await rendersOf(this.ctx).state(this.exportKey(r, s.id, rev, b.sound)), rev);
+  }
+  async exportFile(u: AuthUser, id: string, query: unknown) {
+    const b = this.exportBody(query);
+    const r = await this.row(u, id);
+    const s = await editSessionsOf(this.ctx).row(u, b.sessionId);
+    const f = await rendersOf(this.ctx).serve(this.exportKey(r, s.id, b.revision ?? s.revision, b.sound));
+    if (!f) throw notFound('Export');
+    return f;
   }
 
   /** One slot's thumbnail, cropped from the contact sheet (PNG). `slotId` null = the poster (the first slot). */
@@ -509,6 +645,7 @@ export class RecreateReferences {
   private async purge(r: Row) {
     const st = this.ctx.storage;
     if (r.sourceUrl) await st.delete(`rx/${r.studioId}/${r.id}/info.json`).catch(() => undefined);
+    for (const k of r.fill?.exports ?? []) await rendersOf(this.ctx).remove(k);
     if (r.contactSheetKey) await st.delete(r.contactSheetKey).catch(() => undefined);
     if (r.storageKey) {
       await st.delete(r.storageKey).catch(() => undefined);
@@ -531,7 +668,7 @@ export function matchScore(recipe: Recipe, project: import('../editor/model.js')
   const coverage = used.length / Math.max(1, recipe.slots.length);
   const cuts = (cutErr.length ? cutErr.reduce((a, e) => a + Math.max(0, 1 - e / (2 * frame)), 0) / cutErr.length : 1) * coverage;
   const text = !recipe.text.length ? 1 : o.text === false ? 0 : recipe.text.reduce((a, x) => a + (x.words ? 1 : 0.6), 0) / recipe.text.length;
-  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && s.speed.ramp !== 'freeze');
+  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && (s.speed.ramp !== 'freeze' || s.speed.freeze));
   const ramps = !ramped.length ? 1 : o.speed === false ? 0 : ramped.filter(s => takes[s.id]).length / ramped.length;
   const look = recipe.grade.look;
   const grade = !look ? 0.5 : o.look === false || look.distance >= 0.4 ? 0 : Math.max(0, 1 - look.distance);
@@ -562,4 +699,26 @@ export function sourcesOf(recipe: Recipe, project: import('../editor/model.js').
   // Text items keep the recipe's order (x1, x2, …).
   (project.tracks.find(t => t.kind === 'text')?.items ?? []).forEach((it, i) => { out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; });
   return out;
+}
+
+export type ExportSound = 'guide' | 'silent';
+/**
+ * How to post the export with the reference's original sound (the platform's "Use this sound"), so the post carries
+ * the sound properly instead of a copy of it. Platform from the reference's link; general steps for a file.
+ */
+export function useThisSound(sourceUrl: string | null | undefined, sound: ExportSound, durationSec: number) {
+  let platform: 'tiktok' | 'instagram' | 'youtube' | null = null;
+  try { if (sourceUrl) platform = normalizeLink(sourceUrl).platform; } catch { /* a file reference */ }
+  const steps = platform === 'tiktok' ? ['Open the reference on TikTok', 'Tap the sound at the bottom, then “Use this sound”', 'Add this video, with the sound starting at 0:00']
+    : platform === 'instagram' ? ['Open the reference reel on Instagram', 'Tap the audio name, then “Use audio”', 'Add this video, with the audio starting at 0:00']
+    : platform === 'youtube' ? ['Open the reference Short on YouTube', 'Tap “Remix”, then “Use sound”', 'Add this video, with the sound starting at 0:00']
+    : ['Find the reference’s sound on the platform you post to', 'Use it as your post’s sound, starting at 0:00', 'Add this video'];
+  return {
+    platform, ...(sourceUrl ? { sourceUrl } : {}), startAtSec: 0, durationSec,
+    title: 'Post with the original sound',
+    steps,
+    note: sound === 'guide'
+      ? 'The sound in this export is the reference’s, as a guide for the timing. Post with the platform’s own sound (above) rather than this copy: reused audio can be muted or flagged.'
+      : 'This export is silent and timed to the reference’s sound: add the sound when you post (above).',
+  };
 }
