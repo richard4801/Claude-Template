@@ -125,3 +125,40 @@ export function shotRequestFor(recipe: Recipe, slot: Slot, o: { modelId: string;
     draft: { v: 1, tool: 'shot', quality: o.quality, aspect: recipe.source.aspect, duration: seconds, takes: 1, rig: slot.rig ?? {}, recreate: { slotId: slot.id } },
   };
 }
+
+// ------------------------------------------------------------------ G2: swap the model into the reference's own shot
+/** The longest segment the swap engines take (seconds). */
+export const SWAP_MAX_SEC = 15;
+/**
+ * The part of the reference a swap fill uses: the slot, plus half of each neighbouring transition (the clip overlaps
+ * its neighbours there), widened evenly to the engine's minimum length within the reference.
+ */
+export function swapSegment(recipe: Recipe, slot: Slot, minSec = 2): { startSec: number; endSec: number } {
+  const half = (t: Recipe['transitions'][number] | undefined) => (t && t.kind !== 'cut' && t.kind !== 'unknown' ? (t.durationSec || 0.2) / 2 : 0);
+  const into = recipe.transitions.find(t => t.to === slot.id && t.from !== t.to);
+  const out = recipe.transitions.find(t => t.from === slot.id && t.from !== t.to);
+  const total = recipe.source.durationSec;
+  let a = Math.max(0, slot.startSec - half(into)), b = Math.min(total, slot.endSec + half(out));
+  const want = Math.min(Math.max(minSec, b - a), total, SWAP_MAX_SEC);
+  if (b - a > want) b = a + want; // a slot longer than the engine takes: its start
+  const grow = want - (b - a);
+  if (grow > 0) {
+    a = Math.max(0, a - grow / 2); b = Math.min(total, a + want); a = Math.max(0, b - want);
+  }
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  return { startSec: r3(a), endSec: r3(b) };
+}
+
+/**
+ * The swap's direction: the creator's burned-in captions come out (our own editable text goes on top), and with "Use
+ * your own setting" the slot's brief names the new place.
+ */
+export function swapDirection(slot: Slot, keepBackground: boolean): string {
+  const lines = ['Remove every caption, sticker, watermark and piece of on-screen text from the video; no text anywhere in the result.'];
+  if (!keepBackground) {
+    const b = slot.brief ?? {};
+    const where = [b.location, b.notes].map(x => (x ?? '').trim()).filter(Boolean).join(', ');
+    lines.push(`New setting: ${where || 'a clean, bright everyday room that suits the moment'}.`);
+  }
+  return lines.join(' ').slice(0, 500);
+}

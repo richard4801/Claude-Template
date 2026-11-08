@@ -8,7 +8,10 @@ import { pipeline } from 'node:stream/promises';
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { uploads } from '../db/schema.js';
+import { clips as clipsTable, models, uploads } from '../db/schema.js';
+import * as P from '../pricing.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
@@ -17,8 +20,8 @@ import { editSessionsOf } from '../editor/sessions.js';
 import { clipLength, timeline } from '../editor/model.js';
 import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
-import { buildProject, peakInPoint, rangeFor, type AssembleOptions, type TakeInfo } from './assemble.js';
-import { BriefSchema, matchSlots, promptSource, shotRequestFor, withBriefs, type Candidate } from './slots.js';
+import { BAKED_ELEMENTS, buildProject, peakInPoint, rangeFor, type AssembleOptions, type TakeInfo } from './assemble.js';
+import { BriefSchema, matchSlots, promptSource, shotRequestFor, swapDirection, swapSegment, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
 import { rendersOf, type RenderState } from '../editor/renders.js';
@@ -37,15 +40,30 @@ export type FillState = {
   /** The last match: the suggested take per slot, with its score and reasons. */
   matched?: Record<string, { takeId: string; score: number; reasons: string[] }>;
   toGenerate?: string[];
-  /** Slots being filled by a Suite shot. */
-  jobs?: Record<string, { jobId: string; estimate?: number; at: number }>;
+  /**
+   * Slots being filled: by a Suite shot (method "generate"), or by swapping the model into the reference's own segment
+   * (method "swap", G2: the segment's place in the reference, and the private segment clip deleted with the reference).
+   */
+  jobs?: Record<string, { jobId: string; estimate?: number; at: number; method?: 'swap' | 'generate'; segment?: { startSec: number; endSec: number }; clipId?: string; clipKey?: string }>;
   /** The last assembly: where, which take per slot, which project item came from which recipe element, and the score. */
-  applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore };
+  applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore;
+    /** Swapped slots and what their pixels already carry from the reference (not applied again). */
+    baked?: Record<string, string[]> };
   /** Gap keys already reported to the learning editor for this reference (each once). */
   gapsReported?: string[];
   /** Exports made from this reference (storage keys), deleted with it. */
   exports?: string[];
 };
+const FillBody = z.object({
+  modelId: z.string().min(1).max(80), quality: z.enum(['draft', 'standard', 'hd', 'cinema']).default('standard'),
+  /** G2: "swap" (default when possible) puts the model into the reference's own segment; "generate" makes a new shot. */
+  method: z.enum(['swap', 'generate']).optional(),
+  outfitId: z.string().max(80).optional(),
+  /** Swap: keep the reference's setting (default), or "Use your own setting" from the slot's brief (needs Edit). */
+  keepBackground: z.boolean().default(true),
+}).strict();
+type FillBody = z.infer<typeof FillBody>;
+const run = promisify(execFile);
 export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
 
@@ -302,8 +320,11 @@ export class RecreateReferences {
       if (job) {
         const st = js.find(x => x.id === job.jobId)?.state;
         const take = ts.filter(x => x.jobId === job.jobId).sort((a, b) => a.index - b.index)[0];
-        if (st === 'done' && take) return { slotId: sl.id, state: 'ready' as const, takeId: take.id, jobId: job.jobId, reason: 'Generated for this slot' };
-        if (st !== 'failed') return { slotId: sl.id, state: 'generating' as const, jobId: job.jobId, ...(job.estimate != null ? { estimate: { amount: job.estimate, label: `about $${job.estimate.toFixed(2)}` } } : {}) };
+        const method = job.method ?? 'generate';
+        if (st === 'done' && take) return { slotId: sl.id, state: 'ready' as const, takeId: take.id, jobId: job.jobId, method, reason: method === 'swap' ? 'Your model in the reference’s own shot' : 'Generated for this slot' };
+        if (st !== 'failed') return { slotId: sl.id, state: 'generating' as const, jobId: job.jobId, method, ...(job.estimate != null ? { estimate: { amount: job.estimate, label: `about $${job.estimate.toFixed(2)}` } } : {}) };
+        // A failed swap (refunded): offer a generated shot instead, at its own price.
+        if (method === 'swap') return { slotId: sl.id, state: 'to_generate' as const, reason: 'The swap didn’t work and you weren’t charged · generate this shot instead', fallback: 'generate' as const, failedJobId: job.jobId };
       }
       if (m) return { slotId: sl.id, state: 'matched' as const, takeId: m.takeId, score: m.score, reason: m.reasons.join(', ') };
       if (f.toGenerate?.includes(sl.id)) return { slotId: sl.id, state: 'to_generate' as const, reason: 'None of your takes fits this shot' };
@@ -313,26 +334,131 @@ export class RecreateReferences {
   }
 
   private fillRequest(recipe: Recipe, r: Row, slotId: string, body: unknown) {
-    const b = parse(z.object({ modelId: z.string().min(1).max(80), quality: z.enum(['draft', 'standard', 'hd', 'cinema']).default('standard') }).strict(), body);
+    const b = parse(FillBody, body) as FillBody;
     const slot = recipe.slots.find(s => s.id === slotId);
     if (!slot) throw notFound('Slot');
-    return { slot, request: shotRequestFor(recipe, slot, { modelId: b.modelId, quality: b.quality ?? 'standard', referenceName: r.name }) };
+    return { slot, b, request: shotRequestFor(recipe, slot, { modelId: b.modelId, quality: b.quality ?? 'standard', referenceName: r.name }) };
   }
-  /** The price of filling a slot with a new Suite shot (nothing is held). */
+
+  /**
+   * G2: the engines that can swap the model into the reference's segment, in order: Edit (our pods), then the hosted
+   * swap. Your own setting needs Edit (the hosted swap keeps the clip's background).
+   */
+  private swapEngines(keepBackground: boolean): ('h3' | 'replicate')[] {
+    const out: ('h3' | 'replicate')[] = [];
+    if (this.ctx.jobs.capabilities().includes('h3')) out.push('h3');
+    if (keepBackground && this.ctx.replicate.configured) out.push('replicate');
+    return out;
+  }
+  /** Why a slot can't be swapped (null when it can). */
+  private swapBlocked(r: Row, keepBackground: boolean) {
+    if (!r.storageKey) return 'The reference’s video is gone (deleted after 30 days), so its shots can’t be swapped · generate them instead';
+    if (!this.swapEngines(keepBackground).length) return keepBackground ? 'Swapping isn’t available right now · generate this shot instead' : 'Your own setting needs Edit, which isn’t available right now · keep the reference’s setting, or generate this shot';
+    return null;
+  }
+  /** The swap job for a slot on one engine: the Jobs request (without its clip), the segment and the price. */
+  private swapPlan(recipe: Recipe, r: Row, slot: Recipe['slots'][number], b: FillBody, engine: 'h3' | 'replicate') {
+    const seg = swapSegment(recipe, slot, engine === 'replicate' ? P.REPLICATE_MIN_SEC : 2);
+    const seconds = Math.round((seg.endSec - seg.startSec) * 1000) / 1000;
+    const quality = b.quality === 'cinema' ? 'hd' : b.quality;
+    const rr: P.RenderReq = engine === 'replicate'
+      ? { engine, quality, takes: 1, clipSeconds: seconds, pricePerSec: this.ctx.jobs.qualityPrice(quality) }
+      : { engine, use: 'full', steps: P.STEPS_DEFAULT, takes: 1, clipSeconds: seconds };
+    const cost = Math.round(P.totalCost(rr) * 100) / 100;
+    const request = {
+      title: `${r.name || 'Recreate'} · ${slot.id}`, modelId: b.modelId, outfitId: b.outfitId ?? '', engine, takes: 1, use: 'full' as const, steps: P.STEPS_DEFAULT,
+      ...(engine === 'replicate' ? { quality } : {}),
+      // Recreate puts the reference's sound under the whole edit, so the swap's own sound isn't kept.
+      keepAudio: false, background: b.keepBackground ? 'keep' as const : 'photo' as const, direction: swapDirection(slot, b.keepBackground),
+      speaking: !!recipe.source.hasAudio, clipSeconds: seconds,
+      draft: { v: 1, tool: 'swap', quality, aspect: recipe.source.aspect, duration: seconds, takes: 1, recreate: { slotId: slot.id, method: 'swap' } },
+    };
+    const estimate = { method: 'swap' as const, label: P.engineLabel(rr), seconds, takes: 1, estimate: cost, priceLine: `about ${P.money(cost)} · ${seconds.toFixed(1)} s`,
+      buttonLabel: `Swap in · ${seconds.toFixed(1)} s · ${P.money(cost)}`, ok: true, warnings: b.quality === 'cinema' && engine === 'replicate' ? ['Swap tops out at HD'] : [] };
+    return { engine, segment: seg, request, estimate, rr };
+  }
+  private async checkModel(u: AuthUser, modelId: string) {
+    const [m] = await this.ctx.db.select({ id: models.id, archivedAt: models.archivedAt }).from(models).where(and(eq(models.id, modelId), eq(models.studioId, u.studioId)));
+    if (!m) throw notFound('Model');
+    if (m.archivedAt) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
+  }
+  /** "swap" when the reference's segment can be swapped (the default), else "generate"; a swap asked for and blocked is refused. */
+  private methodFor(r: Row, b: FillBody): { method: 'swap' | 'generate'; blocked: string | null } {
+    const blocked = this.swapBlocked(r, b.keepBackground);
+    if (b.method === 'generate') return { method: 'generate', blocked };
+    if (blocked && b.method === 'swap') throw new ApiError(409, 'swap_unavailable', blocked);
+    return { method: blocked ? 'generate' : 'swap', blocked };
+  }
+
+  /**
+   * The price of filling a slot (nothing is held). By default the model is swapped into the reference's own segment of
+   * that shot (method "swap", G2); "generate" makes a new Suite shot from the brief.
+   */
   async estimateSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
-    const { request } = this.fillRequest(recipe, r, slotId, body);
+    const { slot, b, request } = this.fillRequest(recipe, r, slotId, body);
+    const { method, blocked } = this.methodFor(r, b);
+    if (method === 'swap') {
+      await this.checkModel(u, b.modelId);
+      const plan = this.swapPlan(recipe, r, slot, b, this.swapEngines(b.keepBackground)[0]!);
+      return { slotId, method, keepBackground: b.keepBackground, segment: plan.segment, baked: [...BAKED_ELEMENTS], request: plan.request, estimate: plan.estimate };
+    }
     // promptFrom: "brief", or "summary"/"default" while the slot has no brief yet (the apps suggest writing one).
-    return { slotId, request, promptFrom: promptSource(recipe, recipe.slots.find(x => x.id === slotId)!), estimate: await this.ctx.suite.estimate(u, request) };
+    return { slotId, method, ...(blocked ? { swapUnavailable: blocked } : {}), request, promptFrom: promptSource(recipe, slot), estimate: await this.ctx.suite.estimate(u, request) };
   }
-  /** Fills a slot with a new Suite shot: an ordinary job, held and priced like any shot (the caller confirmed the price). */
+  /**
+   * Fills a slot (the caller confirmed the price): a swap job on the reference's segment (Edit, else the hosted swap),
+   * or a new Suite shot. Either is an ordinary job, held and priced like any other.
+   */
   async fillSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
-    const { request } = this.fillRequest(recipe, r, slotId, body);
+    const { slot, b, request } = this.fillRequest(recipe, r, slotId, body);
+    const { method } = this.methodFor(r, b);
+    if (method === 'swap') return this.fillBySwap(u, r, recipe, slot, b);
     const job = await this.ctx.suite.create(u, request) as { id: string; cost?: number };
     const fresh = await this.row(u, id);
-    await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slotId]: { jobId: job.id, estimate: job.cost, at: Date.now() } } });
-    return { slotId, job };
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slotId]: { jobId: job.id, estimate: job.cost, at: Date.now(), method: 'generate' } } });
+    return { slotId, method, job };
+  }
+  private async fillBySwap(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], b: FillBody) {
+    await this.checkModel(u, b.modelId);
+    let last: unknown = null;
+    for (const engine of this.swapEngines(b.keepBackground)) {
+      const plan = this.swapPlan(recipe, r, slot, b, engine);
+      const clip = await this.segmentClip(u, r, recipe, slot.id, plan.segment);
+      try {
+        const job = await this.ctx.jobs.create(u, { ...plan.request, clipId: clip.id }) as { id: string; cost?: number };
+        const fresh = await this.row(u, r.id);
+        await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slot.id]: {
+          jobId: job.id, estimate: job.cost, at: Date.now(), method: 'swap', segment: plan.segment, clipId: clip.id, clipKey: clip.key } } });
+        return { slotId: slot.id, method: 'swap' as const, segment: plan.segment, job };
+      } catch (e) {
+        await this.dropClip(clip.id, clip.key);
+        // Edit not available right now: try the hosted swap. Anything else (a cap, the wallet) stops here.
+        if (e instanceof ApiError && e.code === 'engine_unavailable') { last = e; continue; }
+        throw e;
+      }
+    }
+    throw last ?? new ApiError(409, 'swap_unavailable', 'Swapping isn’t available right now · generate this shot instead');
+  }
+  /** The reference's segment as a private clip (rx/…, deleted with the reference): video only, cut frame-exact. */
+  private async segmentClip(u: AuthUser, r: Row, recipe: Recipe, slotId: string, seg: { startSec: number; endSec: number }) {
+    if (!r.storageKey) throw new ApiError(409, 'swap_unavailable', 'The reference’s video is gone (deleted after 30 days) · generate this shot instead');
+    const c = this.ctx.config, id = uid('clip'), key = `rx/${r.studioId}/${r.id}/swap-${slotId}-${id}.mp4`;
+    const out = path.join(os.tmpdir(), `${id}.mp4`), len = seg.endSec - seg.startSec;
+    try {
+      await this.withLocal(r.storageKey, f => run(c.FFMPEG_PATH, ['-y', '-v', 'error', '-ss', String(seg.startSec), '-i', f, '-t', String(len), '-an',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out], { timeout: 120_000 }));
+      await this.ctx.storage.put(key, fs.readFileSync(out), 'video/mp4');
+    } finally { fs.rmSync(out, { force: true }); }
+    const s = recipe.source;
+    await this.ctx.db.insert(clipsTable).values({ id, studioId: u.studioId, name: `${r.name || 'Reference'} · ${slotId}`, durationSec: Math.round(len * 1000) / 1000,
+      width: s.width || 1080, height: s.height || 1920, fps: s.fps || 30, meta: { recreate: r.id, slotId, people: 1 }, checks: [], storageKey: key, createdBy: u.id, createdAt: Date.now() });
+    return { id, key };
+  }
+  private async dropClip(id: string, key: string) {
+    await this.ctx.storage.delete(key).catch(() => undefined);
+    await this.ctx.db.delete(clipsTable).where(eq(clipsTable.id, id)).catch(() => undefined);
   }
 
   /**
@@ -370,6 +496,8 @@ export class RecreateReferences {
       if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
       takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
     }
+    // G2: slots whose take is this reference's own swap for that slot carry its camera, speed and look already.
+    const baked = bakedSlots(r.fill ?? {}, Object.fromEntries(Object.entries(takes).map(([k, t]) => [k, t && byId.get(t.id)?.jobId])));
     // The takes' action peaks (free, server CPU; cached per take), to line them up with the reference's.
     if (b.options?.peaks !== false) {
       for (const info of Object.values(takes)) {
@@ -385,6 +513,7 @@ export class RecreateReferences {
     const start = b.startFrom === false ? null : await this.startFrom(u, r.id, b.startFrom);
     const ownLookUsable = !!recipe.grade.look && recipe.grade.look.distance < 0.4;
     if (start?.look && !ownLookUsable && opts.look !== false) opts.fallbackLook = start.look;
+    if (Object.keys(baked).length) opts.baked = baked;
     const out = buildProject(recipe, s.takeId, takes, opts);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
     const label = `Recreated “${r.name}”`;
@@ -398,9 +527,11 @@ export class RecreateReferences {
     const fresh = await this.row(u, id);
     const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, opts);
     const gapsReported = await this.reportGaps(u, r, recipe, fresh.fill?.gapsReported ?? []);
-    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match }, gapsReported });
+    const bakedView = Object.fromEntries(Object.keys(baked).map(k => [k, [...BAKED_ELEMENTS]]));
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match,
+      ...(Object.keys(bakedView).length ? { baked: bakedView } : {}) }, gapsReported });
     const borrowed = opts.fallbackLook && start ? ['look'] : [];
-    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources,
+    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources, baked: bakedView,
       playbook: { followed: pb.followed, followYourself: pb.toFollow },
       startedFrom: start ? { recipeId: start.recipeId, name: start.name, distance: start.distance, borrowed } : null };
   }
@@ -450,13 +581,33 @@ export class RecreateReferences {
     const old = p.tracks[ti]!.items[ii] as import('../editor/model.js').VideoClip;
     let asset = p.assets.find(a => a.take === t!.id);
     if (!asset) { asset = { id: `a${p.assets.length + 1}`, kind: 'video', take: t.id, durationSec: info.durationSec, width: info.width, height: info.height, hasAudio: true }; p.assets.push(asset); }
-    // The same length on the timeline, from the new take (slower if it is too short), starting at its action peak.
     const len = clipLength(old);
-    const range = rangeFor(0, len, info.durationSec, old.speedCurve);
     const off = old.transitionIn ? old.transitionIn.durationSec / 2 : 0;
-    const inSec = peakInPoint(slot, info, range, off);
-    const next: import('../editor/model.js').VideoClip = { ...old, asset: asset.id, inSec, outSec: Math.round((inSec + range.outSec) * 10000) / 10000, speed: range.speed };
-    if (range.curve) next.speedCurve = range.curve; else delete next.speedCurve;
+    const swap = bakedSlots(r.fill ?? {}, { [slotId]: t.jobId })[slotId];
+    const wasBaked = !!applied.baked?.[slotId];
+    let next: import('../editor/model.js').VideoClip, inSec: number, range: { outSec: number; speed: number; curve?: import('../editor/model.js').SpeedCurve };
+    if (swap) {
+      // G2: the reference's own shot with the model in it: from the matching moment at 1×, nothing applied again.
+      inSec = Math.round(Math.max(0, Math.min(slot.startSec - off - swap.startSec, info.durationSec - 0.05)) * 10000) / 10000;
+      range = rangeFor(inSec, len, info.durationSec);
+      next = { ...old, asset: asset.id, inSec, outSec: range.outSec, speed: range.speed };
+      delete next.speedCurve; delete next.keyframes; delete next.look;
+    } else if (wasBaked) {
+      // A swapped shot replaced by an ordinary take: the reference's camera, speed and look come back, as a build would.
+      const used = Object.fromEntries(Object.keys(applied.slots).map(k => [k, info]));
+      const built = buildProject(recipe, s.takeId, used, { peaks: true })
+        .project.tracks[0]!.items[recipe.slots.filter(x => applied.slots[x.id]).findIndex(x => x.id === slotId)] as import('../editor/model.js').VideoClip | undefined;
+      inSec = built?.inSec ?? 0;
+      range = { outSec: (built?.outSec ?? len) - inSec, speed: built?.speed ?? 1, ...(built?.speedCurve ? { curve: built.speedCurve } : {}) };
+      next = { ...old, asset: asset.id, inSec, outSec: built?.outSec ?? len, speed: range.speed };
+      for (const k of ['speedCurve', 'keyframes', 'look'] as const) { if (built?.[k]) (next as Record<string, unknown>)[k] = built[k]; else delete next[k]; }
+    } else {
+      // The same length on the timeline, from the new take (slower if it is too short), starting at its action peak.
+      range = rangeFor(0, len, info.durationSec, old.speedCurve);
+      inSec = peakInPoint(slot, info, range, off);
+      next = { ...old, asset: asset.id, inSec, outSec: Math.round((inSec + range.outSec) * 10000) / 10000, speed: range.speed };
+      if (range.curve) next.speedCurve = range.curve; else delete next.speedCurve;
+    }
     delete next.audioAsset; delete next.alphaMatte; delete next.chroma;
     p.tracks[ti]!.items[ii] = next;
     const label = `Replaced shot ${slotId} in “${r.name}”`, sources = { [old.id]: { recipeId: r.id, slotId } };
@@ -464,8 +615,13 @@ export class RecreateReferences {
       ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [{ op: 'replace', path: '/assets', value: p.assets }, { op: 'replace', path: `/tracks/${ti}/items/${ii}`, value: next }] }], label, meta: { sources } })
       : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: p, device: o.device, label }, { meta: { sources } });
     const fresh = await this.row(u, id);
-    if (fresh.fill?.applied) await this.saveFill(fresh, { ...fresh.fill, applied: { ...fresh.fill.applied, revision: res.revision, slots: { ...fresh.fill.applied.slots, [slotId]: t.id } } });
-    return { sessionId: s.id, revision: res.revision, slotId, itemId: old.id, takeId: t.id, inSec, label, ...(range.speed < 1 ? { note: `The take is shorter than the shot, so it plays at ${Math.round(range.speed * 100)}%` } : {}) };
+    if (fresh.fill?.applied) {
+      const { [slotId]: _gone, ...rest } = fresh.fill.applied.baked ?? {};
+      const bakedNow = swap ? { ...rest, [slotId]: [...BAKED_ELEMENTS] } : rest;
+      await this.saveFill(fresh, { ...fresh.fill, applied: { ...fresh.fill.applied, revision: res.revision, slots: { ...fresh.fill.applied.slots, [slotId]: t.id }, baked: bakedNow } });
+    }
+    return { sessionId: s.id, revision: res.revision, slotId, itemId: old.id, takeId: t.id, inSec, label, ...(swap ? { baked: [...BAKED_ELEMENTS] } : {}),
+      ...(range.speed < 1 ? { note: `The take is shorter than the shot, so it plays at ${Math.round(range.speed * 100)}%` } : {}) };
   }
 
   /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */
@@ -646,6 +802,8 @@ export class RecreateReferences {
     const st = this.ctx.storage;
     if (r.sourceUrl) await st.delete(`rx/${r.studioId}/${r.id}/info.json`).catch(() => undefined);
     for (const k of r.fill?.exports ?? []) await rendersOf(this.ctx).remove(k);
+    // The swap segments (G2): the reference's pixels, so they go with it. The swapped takes are the studio's own.
+    for (const j of Object.values(r.fill?.jobs ?? {})) if (j.clipId && j.clipKey) await this.dropClip(j.clipId, j.clipKey);
     if (r.contactSheetKey) await st.delete(r.contactSheetKey).catch(() => undefined);
     if (r.storageKey) {
       await st.delete(r.storageKey).catch(() => undefined);
@@ -668,20 +826,36 @@ export function matchScore(recipe: Recipe, project: import('../editor/model.js')
   const coverage = used.length / Math.max(1, recipe.slots.length);
   const cuts = (cutErr.length ? cutErr.reduce((a, e) => a + Math.max(0, 1 - e / (2 * frame)), 0) / cutErr.length : 1) * coverage;
   const text = !recipe.text.length ? 1 : o.text === false ? 0 : recipe.text.reduce((a, x) => a + (x.words ? 1 : 0.6), 0) / recipe.text.length;
+  // G2: a swapped slot's pixels are the reference's own (its ramp and grade included), so those count as matched.
+  const baked = (id: string) => !!o.baked?.[id];
   const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && (s.speed.ramp !== 'freeze' || s.speed.freeze));
-  const ramps = !ramped.length ? 1 : o.speed === false ? 0 : ramped.filter(s => takes[s.id]).length / ramped.length;
+  const ramps = !ramped.length ? 1 : ramped.filter(s => takes[s.id] && (baked(s.id) || o.speed !== false)).length / ramped.length;
   const look = recipe.grade.look;
-  const grade = !look ? 0.5 : o.look === false || look.distance >= 0.4 ? 0 : Math.max(0, 1 - look.distance);
+  const grade0 = !look ? 0.5 : o.look === false || look.distance >= 0.4 ? 0 : Math.max(0, 1 - look.distance);
+  const grade = used.length ? used.reduce((a, s) => a + (baked(s.id) ? 1 : grade0), 0) / used.length : grade0;
   const perSlot = recipe.slots.map(s => {
     const t = takes[s.id];
     if (!t) return { slotId: s.id, score: 0 };
     const m = fill.matched?.[s.id];
     const generated = !!fill.jobs?.[s.id];
-    return { slotId: s.id, score: r2(m && m.takeId === t.id ? m.score : generated ? 0.85 : 0.6) };
+    return { slotId: s.id, score: r2(baked(s.id) ? 0.95 : m && m.takeId === t.id ? m.score : generated ? 0.85 : 0.6) };
   });
   const shots = perSlot.reduce((a, x) => a + x.score, 0) / Math.max(1, perSlot.length);
   const overall = 0.25 * cuts + 0.35 * shots + 0.15 * text + 0.1 * ramps + 0.15 * grade;
   return { overall: r2(overall), cuts: r2(cuts), text: r2(text), ramps: r2(ramps), grade: r2(grade), shots: r2(shots), perSlot };
+}
+
+/**
+ * G2: the slots whose take is this reference's own swap job for that slot, with where the segment starts in the
+ * reference (`jobOf`: each slot's take's job).
+ */
+export function bakedSlots(fill: FillState, jobOf: Record<string, string | null | undefined>): Record<string, { startSec: number }> {
+  const out: Record<string, { startSec: number }> = {};
+  for (const [slotId, jobId] of Object.entries(jobOf)) {
+    const j = fill.jobs?.[slotId];
+    if (jobId && j?.method === 'swap' && j.jobId === jobId && j.segment) out[slotId] = { startSec: j.segment.startSec };
+  }
+  return out;
 }
 
 /** Which recipe element each item of the assembled project came from (for workstream 3's corrections log). */

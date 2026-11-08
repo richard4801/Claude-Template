@@ -25,7 +25,15 @@ export type AssembleOptions = {
   peaks?: boolean;
   /** A palette to grade with when the reference's own look is too far to map (from a proven recipe). */
   fallbackLook?: { id: string; label?: string };
+  /**
+   * Slots filled by swapping the model into the reference's own segment (G2): the segment's start in the reference
+   * (seconds). The creator's zoom, shake, speed and grade are already in those pixels, so they aren't applied again:
+   * the clip plays at 1× from the matching moment, with only the cut and the transitions.
+   */
+  baked?: Record<string, { startSec: number }>;
 };
+/** What a swapped slot already carries from the reference (recorded with the build, and matched in the score). */
+export const BAKED_ELEMENTS = ['camera', 'speed', 'look'] as const;
 
 const CANVAS: Record<string, [number, number]> = { '9:16': [1080, 1920], '16:9': [1920, 1080], '1:1': [1080, 1080], '4:5': [1080, 1350], '3:4': [1080, 1440], '4:3': [1440, 1080], '21:9': [2520, 1080] };
 const r4 = (x: number) => Math.round(x * 10000) / 10000;
@@ -122,6 +130,15 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
     const into = i > 0 ? editorTransition(trIn(s.id, used[i - 1]!.id)) : undefined;
     const next = used[i + 1] ? editorTransition(trIn(used[i + 1]!.id, s.id)) : undefined;
     const len = s.durationSec + (into ? into.durationSec / 2 : 0) + (next ? next.durationSec / 2 : 0);
+    const baked = o.baked?.[s.id];
+    if (baked) {
+      // The reference's own shot with our model in it: start at the moment this clip begins in the reference, 1×.
+      const inSec = r4(clamp(s.startSec - (into ? into.durationSec / 2 : 0) - baked.startSec, 0, Math.max(0, t.durationSec - 0.05)));
+      const r = rangeFor(inSec, len, t.durationSec);
+      notes.push(`${s.id}: swapped into the reference’s own shot, so its camera, speed and look are already in the picture`);
+      if (r.speed < 1) notes.push(`${s.id}: the swap is shorter than the slot, so it plays at ${Math.round(r.speed * 100)}%`);
+      return { id: `c${i + 1}`, asset: assetOf(t).id, inSec, outSec: r.outSec, speed: r.speed, ...(into ? { transitionIn: into } : {}) };
+    }
     const curve = o.speed !== false && s.speed.ramp !== 'none' && s.speed.ramp !== 'freeze' && s.speed.curve.length >= 2
       ? { preset: 'custom' as const, points: s.speed.curve.map(p => [r4(clamp(p.t / Math.max(s.durationSec, 0.001), 0, 1)), r4(clamp(p.speed, 0.25, 4))] as [number, number]) }
       : undefined;
