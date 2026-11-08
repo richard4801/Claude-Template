@@ -72,10 +72,21 @@ final class RecreateState {
     var built: RecreateBuiltPreview?
     var loadingBuilt = false
 
+    /// How each shot is made (G2): "swap" | "generate" picked here (nil = the server's default, swap), the swaps that use
+    /// your own setting instead of the reference's, and each slot's full estimate (method, button label, swap notes).
+    var methods: [String: String] = [:]
+    var ownSetting: Set<String> = []
+    var estimateInfo: [String: RecreateSlotEstimate] = [:]
+    /// Swapped shots that already carry the reference's camera, speed and look (slotId → parts): "Already in the shot".
+    var baked: [String: [String]] = [:]
+
     /// "Fix shot N" in Compare: the shot the sheet is open for, what it is doing, its price and any problem.
     var fixSlot: String?
     var fixBusy: String?
     var fixEstimate: ShotEstimate?
+    /// The priced method (sent explicitly with the fill), and why a swap fell back to generate.
+    var fixMethod: String?
+    var fixSwapNote: String?
     var fixError: String?
     /// The shot isn't in the edit any more (slot_not_in_edit): the sheet offers "Rebuild the edit".
     var fixNeedsRebuild = false
@@ -173,6 +184,10 @@ final class RecreateState {
         fixError = nil
         fixNeedsRebuild = false
         demoSwaps = [:]
+        methods = [:]
+        ownSetting = []
+        estimateInfo = [:]
+        baked = [:]
         claudeAsk = nil
         claudeRevision = nil
     }
@@ -332,11 +347,20 @@ extension AppStore {
                 continue
             }
             if wasMaking.contains(s.slotId), !recreate.startingFills.contains("\(new.referenceId)/\(s.slotId)") {
-                recreate.fillErrors[s.slotId] = "This shot didn’t generate. You weren’t charged for it."
+                recreate.fillErrors[s.slotId] = s.fallback == "generate"
+                    ? (s.reason ?? "The swap didn’t work and you weren’t charged · generate this shot instead")
+                    : "This shot didn’t generate. You weren’t charged for it."
+            }
+            // A failed swap is offered as generate, priced on its own (the next price asks for generate).
+            if s.fallback == "generate", recreate.methods[s.slotId] == nil || recreate.methods[s.slotId] == "swap" {
+                recreate.methods[s.slotId] = "generate"
+                recreate.estimates[s.slotId] = nil
+                recreate.estimateInfo[s.slotId] = nil
             }
             if let p = recreate.picks[s.slotId] { f.slots[i] = p }
         }
         recreate.fill = f
+        if !new.baked.isEmpty { recreate.baked = new.baked }
     }
 
     /// A video chosen or dropped on the start page: uploaded (≤ 60 s) and analysed. Demo mode analyses the sample at once.
@@ -495,11 +519,13 @@ extension AppStore {
             return
         }
         let api = recreateAPI
+        let opts = Dictionary(uniqueKeysWithValues: todo.map { ($0, recreateFillOptions($0)) })
         var got: [String: Result<RecreateSlotEstimate, Error>] = [:]
         await withTaskGroup(of: (String, Result<RecreateSlotEstimate, Error>).self) { g in
             for s in todo {
+                let o = opts[s] ?? RecreateFillOptions()
                 g.addTask {
-                    do { return (s, .success(try await api.estimateSlot(id, slotId: s, modelId: model, quality: nil))) } catch { return (s, .failure(error)) }
+                    do { return (s, .success(try await api.estimateSlot(id, slotId: s, modelId: model, quality: nil, options: o))) } catch { return (s, .failure(error)) }
                 }
             }
             for await (s, r) in g { got[s] = r }
@@ -509,17 +535,45 @@ extension AppStore {
             switch r {
             case .success(let e):
                 recreate.estimates[s] = e.estimate
+                recreate.estimateInfo[s] = e
                 recreate.estimateErrors[s] = e.estimate.problem.map { p in (p.hasSuffix(".") ? p : p + ".") + " Use one of your takes for this shot." }
             case .failure(let err):
                 recreate.estimates[s] = nil
+                recreate.estimateInfo[s] = nil
                 recreate.estimateErrors[s] = Self.recreatePriceProblem(err)
             }
         }
     }
 
+    /// How a slot is made (G2): the method picked here (else generate after a failed swap, else the server's default:
+    /// swap), and "Use your own setting" for a swap. No outfit is sent: the Cast step picks the lead only.
+    func recreateFillOptions(_ slotId: String) -> RecreateFillOptions {
+        let fell = recreate.slotFill(slotId)?.fallback == "generate"
+        let method = recreate.methods[slotId] ?? (fell ? "generate" : nil)
+        return RecreateFillOptions(method: method, keepBackground: method == "generate" ? nil : (recreate.ownSetting.contains(slotId) ? false : nil))
+    }
+
+    /// "Swap into the reference shot" / "Generate a new shot": the slot is priced again (nothing is held).
+    func setRecreateMethod(_ slotId: String, _ method: String) {
+        recreate.methods[slotId] = method
+        recreate.estimates[slotId] = nil
+        recreate.estimateInfo[slotId] = nil
+        recreate.estimateErrors[slotId] = nil
+        if let id = recreate.reference?.id { Task { await priceRecreateSlots(id) } }
+    }
+
+    /// "Keep the reference's setting" (on) / "Use your own setting" (off) for a swap: priced again.
+    func setRecreateKeepSetting(_ slotId: String, _ keep: Bool) {
+        if keep { recreate.ownSetting.remove(slotId) } else { recreate.ownSetting.insert(slotId) }
+        recreate.estimates[slotId] = nil
+        recreate.estimateInfo[slotId] = nil
+        if let id = recreate.reference?.id { Task { await priceRecreateSlots(id) } }
+    }
+
     private static func recreatePriceProblem(_ error: Error) -> String {
         guard let e = error as? ApiError else { return "This shot couldn’t be priced. Check the connection and try again." }
         switch e.code {
+        case "swap_unavailable": return "Swapping can’t run for this shot right now. Generate a new shot instead, or use one of your takes."
         case "nothing_fits": return "This shot can’t be made at this length and quality. Use one of your takes for it."
         case "engine_unavailable": return "New shots can’t be made right now. Use one of your takes for this shot."
         default: return e.friendlyMessage
@@ -567,6 +621,14 @@ extension AppStore {
             return
         }
         for s in confirmed { recreate.startingFills.insert("\(id)/\(s)") }
+        // Each shot is made the way it was priced and confirmed (the estimate's method, sent explicitly).
+        var opts: [String: RecreateFillOptions] = [:]
+        for s in confirmed {
+            var o = recreateFillOptions(s)
+            if let m = recreate.estimateInfo[s]?.method { o.method = m }
+            opts[s] = o
+        }
+        let fillOpts = opts
         Task { [weak self] in
             guard let self else { return }
             let api = self.recreateAPI
@@ -576,17 +638,22 @@ extension AppStore {
                 defer { self.recreate.startingFills.remove("\(id)/\(s)") }
                 if let state = current?.slots.first(where: { $0.slotId == s })?.state, state != "to_generate" { continue }
                 do {
-                    let started = try await api.fillSlot(id, slotId: s, modelId: model, quality: nil)
+                    let started = try await api.fillSlot(id, slotId: s, modelId: model, quality: nil, options: fillOpts[s] ?? RecreateFillOptions())
                     if !self.isDemo { self.upsert(started.job) }
                     self.recreate.fillErrors[s] = nil
                     if self.recreate.reference?.id == id, var f = self.recreate.fill, let i = f.slots.firstIndex(where: { $0.slotId == s }) {
                         f.slots[i].state = "generating"
                         f.slots[i].jobId = started.job.id
+                        f.slots[i].method = started.method ?? fillOpts[s]?.method
                         self.recreate.fill = f
                     }
                 } catch {
                     if self.recreate.reference?.id == id {
-                        self.recreate.fillErrors[s] = "This shot didn’t start: \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)"
+                        let e = error as? ApiError
+                        self.recreate.fillErrors[s] = e?.code == "swap_unavailable"
+                            ? "Swapping can’t run for this shot right now. Generate a new shot instead (it’s priced first)."
+                            : "This shot didn’t start: \(e?.friendlyMessage ?? error.localizedDescription)"
+                        if e?.code == "swap_unavailable" { self.recreate.methods[s] = "generate" }
                     }
                 }
             }
@@ -668,6 +735,7 @@ extension AppStore {
             }
             let result = try await recreateAPI.apply(ref.id, RecreateApplyRequest(sessionId: sessionId, baseRevision: revision, slots: slots, device: "mac"))
             recreate.match = result.match ?? recreate.match
+            recreate.baked = result.baked ?? [:]
             recreate.builtTakeId = baseTake
             recreate.sessionId = isDemo ? nil : sessionId
             if !isDemo { recreate.claudeSessionId = sessionId }
@@ -700,6 +768,8 @@ extension AppStore {
         recreate.fixSlot = recreate.slots[i].id
         recreate.fixBusy = nil
         recreate.fixEstimate = nil
+        recreate.fixMethod = nil
+        recreate.fixSwapNote = nil
         recreate.fixError = nil
         recreate.fixNeedsRebuild = false
     }
@@ -725,6 +795,8 @@ extension AppStore {
             let r = try await recreateAPI.replaceSlot(ref.id, slotId: slotId, sessionId: sid, take: take, baseRevision: nil)
             guard recreate.reference?.id == ref.id else { return nil }
             if isDemo, let t = r.takeId { recreate.demoSwaps[slotId] = t }
+            // A swapped take is baked in; any other take brings the reference's camera, speed and look back.
+            recreate.baked[slotId] = r.baked.flatMap { $0.isEmpty ? nil : $0 }
             if recreate.fixSlot == slotId { recreate.fixSlot = nil }
             showToast(r.note ?? "\(recreate.shotName(slotId)) replaced. Undo it in the editor’s history.")
             await loadRecreateBuilt()
@@ -764,11 +836,13 @@ extension AppStore {
         recreate.fixBusy = "Pricing the shot"
         defer { recreate.fixBusy = nil }
         do {
-            let e = try await recreateAPI.estimateSlot(ref.id, slotId: slot, modelId: model, quality: nil)
+            let e = try await recreateAPI.estimateSlot(ref.id, slotId: slot, modelId: model, quality: nil, options: recreateFillOptions(slot))
             if let p = e.estimate.problem {
                 recreate.fixError = p
             } else {
                 recreate.fixEstimate = e.estimate
+                recreate.fixMethod = e.method
+                recreate.fixSwapNote = e.swapUnavailable
             }
         } catch {
             recreate.fixError = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
@@ -779,6 +853,9 @@ extension AppStore {
     /// any shot), its fill is read every 3 s until it's ready, then it replaces the shot in the edit.
     func confirmRecreateFix() {
         guard let ref = recreate.reference, let slot = recreate.fixSlot, recreate.fixEstimate != nil, let model = recreateModelId else { return }
+        var opts = recreateFillOptions(slot)
+        if let m = recreate.fixMethod { opts.method = m }
+        let fillOpts = opts
         let id = ref.id
         recreate.fixEstimate = nil
         recreate.fixBusy = "Generating \(recreate.shotName(slot).lowercased())"
@@ -787,7 +864,7 @@ extension AppStore {
             guard let self else { return }
             let api = self.recreateAPI
             do {
-                let started = try await api.fillSlot(id, slotId: slot, modelId: model, quality: nil)
+                let started = try await api.fillSlot(id, slotId: slot, modelId: model, quality: nil, options: fillOpts)
                 if !self.isDemo { self.upsert(started.job) }
                 if !self.isDemo, let b = try? await self.api.balance() { self.balance = b }
                 var job = started.job.id
@@ -808,7 +885,7 @@ extension AppStore {
                     }
                     if s.state == "to_generate" || s.state == "empty" {
                         self.recreate.fixBusy = nil
-                        self.recreate.fixError = "\(self.recreate.shotName(slot)) didn’t generate. You weren’t charged for it."
+                        self.recreate.fixError = s.fallback == "generate" ? (s.reason ?? "The swap didn’t work and you weren’t charged · generate this shot instead") : "\(self.recreate.shotName(slot)) didn’t generate. You weren’t charged for it."
                         return
                     }
                 }

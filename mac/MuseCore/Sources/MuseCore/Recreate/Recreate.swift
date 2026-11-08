@@ -354,7 +354,37 @@ public struct RecreateFill: Codable, Hashable, Sendable {
         public var estimate: Estimate?
         /// Claude's one line on the choice, in plain words.
         public var reason: String?
+        /// swap (the model put into the reference's own shot) | generate (a new shot).
+        public var method: String?
+        /// "generate" after a swap that failed (refunded): offer generate, priced on its own.
+        public var fallback: String?
+        public var failedJobId: String?
         public var id: String { slotId }
+
+        enum CodingKeys: String, CodingKey { case slotId, state, takeId, jobId, score, estimate, reason, method, fallback, failedJobId }
+        public init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            slotId = try c.decode(String.self, forKey: .slotId)
+            state = c.o(.state) ?? "empty"
+            takeId = c.o(.takeId)
+            jobId = c.o(.jobId)
+            score = c.o(.score)
+            estimate = c.o(.estimate)
+            reason = c.o(.reason)
+            method = c.o(.method)
+            fallback = c.o(.fallback)
+            failedJobId = c.o(.failedJobId)
+        }
+    }
+
+    /// `applied.baked`: slots whose swapped shot already carries the reference's camera, speed and look.
+    public var baked: [String: [String]] {
+        guard case .object(let o)? = applied, case .object(let b)? = o["baked"] else { return [:] }
+        var out: [String: [String]] = [:]
+        for (k, v) in b {
+            if case .array(let a) = v { out[k] = a.compactMap { if case .string(let s) = $0 { return s }; return nil } }
+        }
+        return out
     }
     public var referenceId: String
     public var slots: [SlotFill]

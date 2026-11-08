@@ -136,6 +136,68 @@ struct RecreateClaudeAsk: View {
     }
 }
 
+// MARK: How a shot is made (G2)
+
+/// "Swap into the reference shot" (the default: the lead goes into the reference's own shot, which keeps its camera, speed
+/// and look) or "Generate a new shot"; with a swap, "Keep the reference's setting" on or off. Changing either prices the
+/// shot again; nothing is held.
+struct RecreateMethodPicker: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var slotId: String
+    var onChange: () -> Void = {}
+
+    var body: some View {
+        let rs = store.recreate
+        let info = rs.estimateInfo[slotId]
+        let picked = rs.methods[slotId] ?? info?.method ?? "swap"
+        VStack(alignment: .leading, spacing: Space.s1) {
+            option("swap", "Swap into the reference shot", "Keeps its camera, speed and look", on: picked == "swap")
+            option("generate", "Generate a new shot", "From this shot’s brief", on: picked == "generate")
+            if picked == "swap" {
+                Toggle(isOn: Binding(get: { !rs.ownSetting.contains(slotId) }, set: { store.setRecreateKeepSetting(slotId, $0); onChange() })) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(rs.ownSetting.contains(slotId) ? "Use your own setting" : "Keep the reference’s setting")
+                            .scaled(t.scale.caption, t.roles.ink).lineLimit(1).fitProbe("swap setting")
+                    }
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .accessibilityLabel("Keep the reference’s setting")
+                .padding(.top, Space.s1)
+            }
+            if let note = info?.swapUnavailable, !note.isEmpty {
+                Text(note).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func option(_ method: String, _ title: String, _ hint: String, on: Bool) -> some View {
+        Button {
+            guard !on else { return }
+            store.setRecreateMethod(slotId, method)
+            onChange()
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                ZStack {
+                    Circle().strokeBorder(on ? t.roles.ink : t.roles.ink2, lineWidth: 1.5).frame(width: 14, height: 14)
+                    if on { Circle().fill(t.roles.ink).frame(width: 7, height: 7) }
+                }
+                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 2 }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).scaled(t.scale.caption, t.roles.ink).lineLimit(1).fitProbe("method \(method)")
+                    Text(hint).scaled(t.scale.micro, t.roles.ink2).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
 // MARK: Fix shot N
 
 /// Compare → "Fix shot N": swap the shot in the built edit for one of your takes, or make it again (priced, then confirmed:
@@ -187,14 +249,20 @@ struct RecreateFixSheet: View {
             SuiteRule()
             VStack(alignment: .leading, spacing: Space.s2) {
                 Text("Regenerate this shot").scaled(t.scale.label, t.roles.ink)
-                Text("A new shot made with \(store.recreateLead?.shortName ?? "your model") from this shot’s brief, charged to the studio.")
+                Text("Made with \(store.recreateLead?.shortName ?? "your model"), charged to the studio once you confirm the price.")
                     .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                RecreateMethodPicker(slotId: slot) { store.recreate.fixEstimate = nil }
+                if let note = rs.fixSwapNote, !note.isEmpty {
+                    Text(note).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true)
+                }
                 if let e = rs.fixEstimate {
                     HStack(spacing: Space.s3) {
                         Text(e.priceLine).scaled(t.scale.label, t.roles.ink).monospacedDigit().lineLimit(1).fitProbe("fix price")
                         Spacer(minLength: 0)
-                        SuiteToolButton(title: "Generate · \(RecreateText.money(e.estimate))", accent: true, disabled: busy) { store.confirmRecreateFix() }
-                            .accessibilityLabel("Generate the new shot for \(RecreateText.money(e.estimate))")
+                        SuiteToolButton(title: e.buttonLabel.isEmpty ? "Generate · \(RecreateText.money(e.estimate))" : e.buttonLabel, accent: true, disabled: busy) {
+                            store.confirmRecreateFix()
+                        }
+                        .accessibilityLabel("Make the new shot for \(RecreateText.money(e.estimate))")
                     }
                 } else {
                     SuiteToolButton(title: "Price a new shot", disabled: busy) { Task { await store.priceRecreateFix() } }

@@ -191,7 +191,7 @@ final class RecreateTests: XCTestCase {
         let toMake = before.slots.filter { $0.state == "to_generate" }.map(\.slotId)
         XCTAssertEqual(toMake, ["s2", "s3"])
         var prices: [String: Double] = [:]
-        for s in toMake { prices[s] = try await api.estimateSlot(ref.id, slotId: s, modelId: "m1", quality: nil).estimate.estimate }
+        for s in toMake { prices[s] = try await api.estimateSlot(ref.id, slotId: s, modelId: "m1", quality: nil, options: RecreateFillOptions(method: "generate")).estimate.estimate }
         XCTAssertEqual(before.generateTotal(prices: prices), 1.28, accuracy: 1e-9)
         XCTAssertEqual(RecreateText.makingSummary(before, prices: prices, unavailable: ["s3"]), "1 from your takes, 1 to generate, 1 can’t be made · $0.64 in all")
         for s in toMake {
@@ -492,6 +492,76 @@ final class RecreateTests: XCTestCase {
         } catch {
             XCTFail("\(error)", file: file, line: line)
         }
+    }
+
+    // MARK: Swap fill (G2)
+
+    func testSwapEstimateAndFillDecode() throws {
+        let est = #"""
+        {"slotId":"s2","method":"swap","keepBackground":true,"segment":{"startSec":1.25,"endSec":2.92},"baked":["camera","speed","look"],"request":{},
+         "estimate":{"method":"swap","label":"Swap · 2.0 s","seconds":2,"takes":1,"estimate":0.41,"priceLine":"about $0.41 · 2.0 s","buttonLabel":"Swap in · 2.0 s · $0.41","ok":true,"warnings":[]}}
+        """#
+        let e = try JSONDecoder().decode(RecreateSlotEstimate.self, from: Data(est.utf8))
+        XCTAssertTrue(e.isSwap)
+        XCTAssertEqual(e.segment?.endSec, 2.92)
+        XCTAssertEqual(e.baked, ["camera", "speed", "look"])
+        XCTAssertEqual(e.estimate.buttonLabel, "Swap in · 2.0 s · $0.41")
+        let gen = try JSONDecoder().decode(RecreateSlotEstimate.self, from: Data(#"{"slotId":"s3","method":"generate","promptFrom":"summary","swapUnavailable":"The reference video is gone","estimate":{"estimate":0.64,"ok":true}}"#.utf8))
+        XCTAssertFalse(gen.isSwap)
+        XCTAssertEqual(gen.swapUnavailable, "The reference video is gone")
+        let fill = try JSONDecoder().decode(RecreateFill.self, from: Data(#"""
+        {"referenceId":"rx_1","slots":[{"slotId":"s2","state":"to_generate","method":"generate","fallback":"generate","failedJobId":"job_9","reason":"The swap didn’t work"},{"slotId":"s3"}],
+         "applied":{"sessionId":"es_1","baked":{"s1":["camera","speed","look"]}}}
+        """#.utf8))
+        XCTAssertEqual(fill.slots[0].fallback, "generate")
+        XCTAssertEqual(fill.slots[0].failedJobId, "job_9")
+        XCTAssertEqual(fill.slots[1].state, "empty")
+        XCTAssertEqual(fill.baked["s1"], ["camera", "speed", "look"])
+        XCTAssertEqual(RecreateBaked.words(["camera", "speed", "look"]), "camera, speed and look")
+        let apply = try JSONDecoder().decode(RecreateApplyResult.self, from: Data(#"{"sessionId":"es_1","baked":{"s2":["look"]}}"#.utf8))
+        XCTAssertEqual(apply.baked?["s2"], ["look"])
+    }
+
+    func testDemoSwapsByDefaultAndFallsBack() async throws {
+        let api = FakeRecreateAPI()
+        let swap = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil)
+        XCTAssertTrue(swap.isSwap)
+        XCTAssertEqual(swap.estimate.estimate, FakeRecreateAPI.demoSwapPrice, accuracy: 1e-9)
+        XCTAssertTrue(swap.estimate.buttonLabel.hasPrefix("Swap in"))
+        let own = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "swap", keepBackground: false))
+        XCTAssertEqual(own.keepBackground, false)
+        let gen = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "generate"))
+        XCTAssertFalse(gen.isSwap)
+        // Swap can't run: the default falls back with a reason; an explicit swap is refused.
+        api.swapAvailable = false
+        let fallback = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil)
+        XCTAssertEqual(fallback.method, "generate")
+        XCTAssertNotNil(fallback.swapUnavailable)
+        await assertCode("swap_unavailable") { _ = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "swap")) }
+        api.swapAvailable = true
+        // A swap fill: generating with its method, ready, and baked when built.
+        let started = try await api.fillSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil)
+        XCTAssertEqual(started.method, "swap")
+        XCTAssertNotNil(started.segment)
+        _ = try await api.fill("rx_demo")
+        let ready = try await api.fill("rx_demo")
+        XCTAssertEqual(ready.slots[1].state, "ready")
+        XCTAssertEqual(ready.slots[1].method, "swap")
+        let built = try await api.apply("rx_demo", RecreateApplyRequest(sessionId: "es_1", slots: ["s1": "t1", "s2": FakeRecreateAPI.demoJobId("s2")]))
+        XCTAssertEqual(built.baked?["s2"], ["camera", "speed", "look"])
+        let swapped = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: FakeRecreateAPI.demoJobId("s2"), baseRevision: nil)
+        XCTAssertEqual(swapped.baked, ["camera", "speed", "look"])
+        let plain = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: "t5", baseRevision: nil)
+        XCTAssertNil(plain.baked)
+        // A failed swap: refunded, offered as generate with the reason.
+        api.failSwaps = true
+        _ = try await api.fillSlot("rx_demo", slotId: "s3", modelId: "m1", quality: nil)
+        _ = try await api.fill("rx_demo")
+        let failed = try await api.fill("rx_demo")
+        let s3 = try XCTUnwrap(failed.slots.first { $0.slotId == "s3" })
+        XCTAssertEqual(s3.state, "to_generate")
+        XCTAssertEqual(s3.fallback, "generate")
+        XCTAssertEqual(s3.reason, FakeRecreateAPI.swapFailedReason)
     }
 
     // MARK: Claude's recreate thread (workstream 1's brief)

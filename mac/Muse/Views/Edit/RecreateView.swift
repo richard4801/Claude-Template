@@ -133,7 +133,12 @@ struct RecreateBuildConfirm: View {
     private func length(_ slotId: String) -> String? {
         let rs = store.recreate
         guard let e = rs.estimates[slotId], e.seconds > 0 else { return nil }
-        let made = "A \(Int(e.seconds.rounded())) s shot"
+        // A swap (G2): the method and the server's own line ("Swap in · 2.0 s · $0.41").
+        if rs.estimateInfo[slotId]?.isSwap == true {
+            let setting = rs.ownSetting.contains(slotId) ? ", your own setting" : ""
+            return "Swapped into the reference shot\(setting) · \(e.buttonLabel.isEmpty ? e.priceLine : e.buttonLabel)"
+        }
+        let made = "A new \(Int(e.seconds.rounded())) s shot"
         guard let slot = rs.slots.first(where: { $0.id == slotId }), slot.length < e.seconds - 0.05 else { return made }
         return "\(made), cut to \(String(format: "%.1f", slot.length)) s"
     }
