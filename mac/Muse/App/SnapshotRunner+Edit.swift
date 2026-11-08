@@ -175,7 +175,14 @@ extension SnapshotRunner {
     static func controlsCheck(_ store: AppStore, takeId: String, note: (String) -> Void) async {
         note("START controls \(takeId)")
         store.openEdit(takeId: takeId)
-        try? await Task.sleep(for: .seconds(9))
+        // Wait for the editor (its timeline ruler) up to 25 s, then say what the accessibility tree shows.
+        for _ in 0..<50 {
+            try? await Task.sleep(for: .seconds(0.5))
+            if store.screen == .edit, axFind(mainWindow?.contentView, label: "Timeline ruler") { break }
+        }
+        capture(SnapshotRunner.dir!.appendingPathComponent("mac_edit_controls_start.png"))
+        let stats = axStats(mainWindow?.contentView)
+        note("AX nodes \(stats.nodes), actionable \(stats.actionable), screen \(store.screen), editTakeId \(store.suite.editTakeId ?? "nil"), sample: \(stats.sample)")
         let deny = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
                     "Back", "Close editor", "Translate…"]
         let denyInSheet = ["Export", "Save to Library"]
@@ -268,6 +275,28 @@ extension SnapshotRunner {
         }
         if let root { walk(root, 0) }
         return out
+    }
+
+    /// How big the accessibility tree is, and a sample of roles and labels (diagnostics for the CI log).
+    static func axStats(_ root: Any?) -> (nodes: Int, actionable: Int, sample: String) {
+        var nodes = 0, act = 0
+        var sample: [String] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ x: Any, _ depth: Int) {
+            guard depth < 80 else { return }
+            let e = x as AnyObject
+            let id = ObjectIdentifier(e)
+            guard !seen.contains(id) else { return }
+            seen.insert(id)
+            nodes += 1
+            let role = (e.accessibilityRole?() ?? nil)?.rawValue ?? "-"
+            let label = (e.accessibilityLabel?() ?? nil) ?? (e.accessibilityTitle?() ?? nil) ?? ""
+            if let r = e.accessibilityRole?() ?? nil, actionable.contains(r) { act += 1 }
+            if sample.count < 25, !label.isEmpty || role != "-" { sample.append("\(role):\(label.prefix(24))") }
+            for k in (e.accessibilityChildren?() ?? nil) ?? [] { walk(k, depth + 1) }
+        }
+        if let root { walk(root, 0) }
+        return (nodes, act, sample.joined(separator: " | "))
     }
 
     /// Whether an element labelled `label` is under `root`.
