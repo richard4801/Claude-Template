@@ -93,3 +93,22 @@ Claude's model doesn't change. MUSE's memory does, and Claude reads it on every 
 ## Open items to verify before phase 4
 - Each platform's download-permission mechanism and terms for programmatic fetching (TikTok, Instagram, YouTube Shorts).
 - The share-target behaviour on Android and iOS-to-Mac.
+
+## APPROVED by the owner (2026-11-08): "Approved, build both" (this plan and the Edit layout in plans/edit-layout.md)
+Assignments:
+- **WS1, server:**
+  - the motion-peaks tool;
+  - the analysis service and the `recipe` schema (cuts, beats, peaks, ramps, camera motion, text, transitions, grade, contact-sheet shot briefs, pose skeletons);
+  - the slot matcher;
+  - the MCP tools `analyze_reference`, `get_recipe`, `apply_recipe`, `fill_slot`, `playbook_read`, `playbook_add`.
+- **WS3, after the Edit crash fix and click-through ship:** the learning editor's storage and APIs:
+  - the recipe library;
+  - the corrections log, captured from edit ops after Claude's;
+  - the playbook (owner-editable);
+  - the performance link via Posts;
+  - the gap list.
+- **WS2:** the Edit layout build. Then the Mac Recipe view and side-by-side compare inside the new layout.
+- **WS4:**
+  - Android: the Edit layout port, then the Recipe view;
+  - the phone share target (step 5, after the platform-rules check).
+- **Coordinator:** verify each platform's download-permission mechanism and terms before step 5.
