@@ -78,6 +78,8 @@ final class RecreateState {
     var ownSetting: Set<String> = []
     /// "Use your own setting": the studio location picked per shot (nil = make one from the brief).
     var locationFor: [String: String] = [:]
+    /// Shots whose fill came back with a new price or a failed background: priced and confirmed again before anything.
+    var repriced: Set<String> = []
     var estimateInfo: [String: RecreateSlotEstimate] = [:]
     /// Swapped shots that already carry the reference's camera, speed and look (slotId → parts): "Already in the shot".
     var baked: [String: [String]] = [:]
@@ -199,6 +201,7 @@ final class RecreateState {
         methods = [:]
         ownSetting = []
         locationFor = [:]
+        repriced = []
         estimateInfo = [:]
         baked = [:]
         claudeAsk = nil
@@ -667,6 +670,7 @@ extension AppStore {
                     let started = try await api.fillSlot(id, slotId: s, modelId: model, quality: nil, options: fillOpts[s] ?? RecreateFillOptions())
                     if !self.isDemo { self.upsert(started.job) }
                     self.recreate.fillErrors[s] = nil
+                    self.recreate.repriced.remove(s)
                     if self.recreate.reference?.id == id, var f = self.recreate.fill, let i = f.slots.firstIndex(where: { $0.slotId == s }) {
                         f.slots[i].state = "generating"
                         f.slots[i].jobId = started.job.id
@@ -682,6 +686,7 @@ extension AppStore {
                         case "background_failed", "price_changed":
                             // The server's own words ("you weren't charged" / the new price); priced again before any retry.
                             self.recreate.fillErrors[s] = e?.message ?? "This shot didn’t start."
+                            self.recreate.repriced.insert(s)
                             self.recreate.estimates[s] = nil
                             self.recreate.estimateInfo[s] = nil
                         default:
@@ -732,6 +737,14 @@ extension AppStore {
             recreate.buildWhenReady.remove(id)
             recreate.building = false
             let names = failed.map { recreate.shotName($0) }.joined(separator: " and ")
+            // A new price (409 price_changed) or a background that couldn't be made: the server's words, and nothing is
+            // made until the new price is seen and confirmed (Try again prices the shot and asks again).
+            if let s = failed.first(where: { recreate.repriced.contains($0) }), let why = recreate.fillErrors[s] {
+                showToast("\(recreate.shotName(s)): \(why)", action: "Review the price") { [weak self] in
+                    Task { await self?.requestRecreateBuild() }
+                }
+                return
+            }
             showToast("\(names) didn’t generate. You weren’t charged for \(failed.count == 1 ? "it" : "them"). Try again, or use one of your takes.")
             return
         }
