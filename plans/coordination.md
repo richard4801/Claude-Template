@@ -270,3 +270,9 @@ Release 1 additions (2026-11-08):
   - one "to generate" slot filled by **Swap in** with the reference's setting: check the creator's burned-in captions are gone, and that the built edit has no second zoom, ramp or look on that shot;
   - one with **Use your own setting**: once with a studio location named in the brief (free), once with a generated background plate (about +$0.06 to members). Check that H3 actually puts her in the new background, sent as the last reference image ("background", after 5 of her references). If it ignores the background reference, tell WS1.
   - "Write the shot briefs" measured on the server is about $0.02–0.03 per 5-shot reference at ×2.
+
+## Round 2 (owner, 2026-11-08): new sessions per the owner ("once their job's done, use a different session")
+- **WS5, server:** Bring your own provider (keys + model catalog). session_01Py2rxoN8RqLay22aH1cio9, branch claude/muse-providers.
+- **WS6, Mac:** owner model picker in the Suite; remove "+ Select → New video"; Settings redesign (mock first, the owner approves); outfit full view. session_01Py2rxqPqvWiWuiv6U5c2wr, branch claude/muse-mac-r2.
+- **WS7, Android:** the same as WS6 for Android. session_01Py2rxngd8dggBVUEdbnrKE, branch claude/muse-android-r2.
+- WS1–WS4 finish their in-flight work (Claude in the Suite, attachments, the device link-fetch fixes), then stop. The owner deletes the old sessions when everything is done.
