@@ -34,7 +34,11 @@ type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number;
 /** Voice processing on a clip with sound (Edit suite audio panel). */
 type Voice = { voiceEffect?: VoiceEffect; enhance?: boolean };
 export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: number; outSec: number; speed: number; speedCurve?: SpeedCurve; startSec?: number;
-  volume?: number; muted?: boolean; fadeInSec?: number; fadeOutSec?: number; audioAsset?: string; chroma?: Chroma; transitionIn?: Transition };
+  volume?: number; muted?: boolean; fadeInSec?: number; fadeOutSec?: number; audioAsset?: string; chroma?: Chroma; transitionIn?: Transition;
+  /** workstream 1: an alpha matte video (grey, white = keep) aligned with this clip's own asset, applied as its alpha. */
+  alphaMatte?: AlphaMatte };
+/** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
+export type AlphaMatte = { asset: string; invert?: boolean };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim };
 export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
   align: 'left' | 'center' | 'right'; maxWidthPct?: number; lineHeight?: number; letterSpacing?: number; uppercase?: boolean;
@@ -757,6 +761,15 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         visual(g, c, clipLength(c));
         kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']);
         if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
+        if (c.alphaMatte !== undefined) {
+          const m = c.alphaMatte as AlphaMatte;
+          if (!m || typeof m !== 'object' || typeof m.asset !== 'string') bad(`${g}.alphaMatte`, 'must be {asset, invert?}');
+          else {
+            const a = assets.get(m.asset);
+            if (!a || a.kind !== 'video') bad(`${g}.alphaMatte.asset`, 'must be a video asset');
+            if (m.invert !== undefined && typeof m.invert !== 'boolean') bad(`${g}.alphaMatte.invert`, 'true or false');
+          }
+        }
         if (c.chroma !== undefined) {
           color(`${g}.chroma.color`, c.chroma.color, false);
           num(`${g}.chroma.similarity`, c.chroma.similarity, 0, 1); num(`${g}.chroma.smoothness`, c.chroma.smoothness, 0, 1); num(`${g}.chroma.spill`, c.chroma.spill, 0, 1);

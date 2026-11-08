@@ -15,8 +15,8 @@ import { whoOf } from '../money/money.js';
 import { putFile } from '../storage/objects.js';
 import { ReplicateError } from '../replicate/client.js';
 import { CUT_DEFAULTS, suggestCuts, type CutOptions, type Word } from './cuts.js';
-import { makeProvider, rmQuiet, type EditorProvider, type Hooks } from './providers.js';
-import { mediaToolsAvailable } from '../replicate/media.js';
+import { makeProvider, rmQuiet, type EditorProvider, type Hooks, type TrackPoint } from './providers.js';
+import { mediaToolsAvailable, probe } from '../replicate/media.js';
 import { detectSilences, silenceCuts } from './silence.js';
 import { decodeMono, detectBeats } from './audio.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
@@ -28,12 +28,16 @@ export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 
 const GPU_SEC = {
   transcribe: (d: number) => 8 + 0.15 * d,
   matte: (d: number) => 10 + 4 * d,
+  track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
 const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat' };
 const LANG_RE = /^[a-z]{2}$/;
 
-export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number } & CutOptions;
+/** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
+export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
+export const MAX_KEEP_POINTS = 10;
+export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -52,6 +56,17 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
       if (!Array.isArray(o.extraFillers) || o.extraFillers.length > 50 || o.extraFillers.some((w: unknown) => typeof w !== 'string' || !w || (w as string).length > 30)) throw badRequest('options.extraFillers: up to 50 words');
       out.extraFillers = o.extraFillers;
     }
+  }
+  if (kind === 'matte' && o.points !== undefined) {
+    // workstream 1: tap to keep. The subject under the points is tracked through the clip.
+    if (!Array.isArray(o.points) || !o.points.length || o.points.length > MAX_KEEP_POINTS) throw badRequest(`options.points: 1 to ${MAX_KEEP_POINTS} points`);
+    out.points = o.points.map((q: any, i: number) => {
+      if (!q || typeof q !== 'object') throw badRequest(`options.points.${i}: {x, y, t?, keep?}`);
+      const n = (k: string, lo: number, hi: number, d?: number) => { const v = q[k] ?? d; if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) throw badRequest(`options.points.${i}.${k}: from ${lo} to ${hi}`); return Math.round(v * 10000) / 10000; };
+      if (q.keep !== undefined && typeof q.keep !== 'boolean') throw badRequest(`options.points.${i}.keep: true or false`);
+      return { x: n('x', 0, 1), y: n('y', 0, 1), t: n('t', 0, EDITOR_LIMITS.maxMatteSec, 0), keep: q.keep !== false };
+    });
+    if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
   }
   if (kind === 'denoise' && o.analyzeOnly !== undefined) { if (typeof o.analyzeOnly !== 'boolean') throw badRequest('options.analyzeOnly: true or false'); out.analyzeOnly = o.analyzeOnly; }
   return out;
@@ -104,7 +119,7 @@ export class EditorAiService {
 
   // ------------------------------------------------------------------ sources
   /** The stored media a job reads, checked against the studio. */
-  async source(u: AuthUser, s: any): Promise<{ source: EditorSource; key: string; contentType: string }> {
+  async source(u: AuthUser, s: any): Promise<{ source: EditorSource; key: string; contentType: string; size?: { width: number; height: number; fps?: number } }> {
     if (!s || typeof s !== 'object') throw badRequest('source: {takeId} or {uploadId, durationSec}');
     if (typeof s.takeId === 'string') {
       const [t] = await this.ctx.db.select().from(takes).where(and(eq(takes.id, s.takeId), eq(takes.studioId, u.studioId)));
@@ -112,7 +127,9 @@ export class EditorAiService {
       if (!t.mediaKey || !(t.kind === 'take' || (t.kind as string) === 'edit')) throw badRequest('source.takeId: must be a video take');
       const d = Number((t.media as { durationSec?: number } | null)?.durationSec ?? s.durationSec);
       if (!(d > 0)) throw badRequest('source.durationSec: unknown video length');
-      return { source: { takeId: t.id, durationSec: d }, key: t.mediaKey, contentType: String((t.media as { contentType?: string } | null)?.contentType ?? 'video/mp4') };
+      const md = (t.media ?? {}) as { width?: number; height?: number; fps?: number };
+      return { source: { takeId: t.id, durationSec: d }, key: t.mediaKey, contentType: String((t.media as { contentType?: string } | null)?.contentType ?? 'video/mp4'),
+        ...(md.width && md.height ? { size: { width: md.width, height: md.height, ...(md.fps ? { fps: md.fps } : {}) } } : {}) };
     }
     if (typeof s.uploadId === 'string') {
       const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, s.uploadId), eq(uploads.studioId, u.studioId)));
@@ -166,7 +183,10 @@ export class EditorAiService {
     let usd = 0;
     if (silenceOnly) usd = 0;
     else if (kind === 'captions' || kind === 'cuts') usd = reuse ? 0 : GPU_SEC.transcribe(d) * p.rates.transcribe;
-    else if (kind === 'matte') usd = GPU_SEC.matte(d) * p.rates.matte;
+    else if (kind === 'matte' && opts.points) {
+      if (opts.points.some(q => q.t > d)) throw badRequest(`options.points: t must be within the clip (0–${d} s)`);
+      usd = GPU_SEC.track(d) * p.rates.track;
+    } else if (kind === 'matte') usd = GPU_SEC.matte(d) * p.rates.matte;
     else if (!opts.analyzeOnly) usd = GPU_SEC.separate(d) * p.rates.separate;
     usd = usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * 10000) / 10000) : 0;
     return { kind, opts, src, reuse, usd };
@@ -176,7 +196,7 @@ export class EditorAiService {
   async start(u: AuthUser, body: any) {
     const e = await this.estimate(u, body);
     const id = uid('edj');
-    const models = e.usd === 0 ? [] : e.kind === 'matte' ? [this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
+    const models = e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     try {
@@ -200,7 +220,7 @@ export class EditorAiService {
   }
   private free() { this.running--; this.waiting.shift()?.(); }
 
-  private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource }, reuse: { words: Word[]; language: string } | null) {
+  private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource; size?: { width: number; height: number; fps?: number } }, reuse: { words: Word[]; language: string } | null) {
     const id = row.id, d = src.source.durationSec, o = row.options as JobOptions, p = this.provider;
     const hooks: Hooks = {
       cancelled: () => this.stopping.has(id),
@@ -238,11 +258,14 @@ export class EditorAiService {
         const s = suggestCuts(t.words, d, o);
         result = { ...s, words: t.words, language: t.language, options: { ...CUT_DEFAULTS, ...o }, durationSec: d };
       } else if (row.kind === 'matte' || (row.kind === 'denoise' && !o.analyzeOnly)) {
-        const out = row.kind === 'matte' ? await p.matte(url, d, hooks) : await p.separate(url, d, hooks);
-        file = out.file; gpuSec = out.gpuSec; rate = row.kind === 'matte' ? p.rates.matte : p.rates.separate;
+        const tracked = row.kind === 'matte' && !!o.points?.length;
+        const out = row.kind !== 'matte' ? await p.separate(url, d, hooks)
+          : tracked ? await p.track(url, d, await this.pixelPoints(src.key, o.points!, src.size, p.name === 'mock'), hooks) : await p.matte(url, d, hooks);
+        file = out.file; gpuSec = out.gpuSec; rate = row.kind !== 'matte' ? p.rates.separate : tracked ? p.rates.track : p.rates.matte;
         const asset = await this.store(u, src, out.file, out.contentType, row.kind === 'matte' ? 'video' : 'audio', d);
+        // workstream 1: an alpha matte (white = keep) the apps apply to the original clip; no green composite, no chroma key.
         result = row.kind === 'matte'
-          ? { asset, chroma: { color: '#00FF00', similarity: 0.4, smoothness: 0.08, spill: 0.5 } }
+          ? { asset, alpha: true, mode: tracked ? 'tracked' : 'person', ...(tracked ? { points: o.points } : {}) }
           : { asset, suggestion: noiseSuggestion((await this.transcriptFor(u, src.key, {}).catch(() => null))?.words ?? []) };
       } else {
         result = { suggestion: noiseSuggestion(reuse?.words ?? []) };
@@ -267,6 +290,14 @@ export class EditorAiService {
 
   /** The media as something ffmpeg can read: a presigned URL on R2, else a temporary copy of the local object. */
   /** The stored media as a local path (or a short-lived URL on S3) for ffmpeg; temporary copies are removed after. */
+  /** Tap points (0–1, seconds) → pixels and frame numbers of the source (workstream 1). The mock may guess the size. */
+  private async pixelPoints(key: string, points: KeepPoint[], known: { width: number; height: number; fps?: number } | undefined, mock: boolean): Promise<TrackPoint[]> {
+    const info = known ?? await this.withLocalInput(key, f => probe(this.ctx.config.FFPROBE_PATH, f)).catch(() => null);
+    const w = info?.width || (mock ? 1080 : 0), h = info?.height || (mock ? 1920 : 0), fps = info?.fps || 30;
+    if (!w || !h) throw new ReplicateError('Couldn’t read the video', 'failed');
+    return points.map(q => ({ x: q.x * (w - 1), y: q.y * (h - 1), frame: Math.round(q.t * fps), keep: q.keep }));
+  }
+
   async withLocalInput<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
     if (this.ctx.storage.kind === 's3') return fn(await this.ctx.storage.presignGet(key, 900));
     const obj = await this.ctx.storage.get(key);
