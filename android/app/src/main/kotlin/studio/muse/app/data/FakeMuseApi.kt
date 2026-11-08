@@ -97,6 +97,8 @@ class FakeMuseApi(
     override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700).also { it.suiteTurn = ::demoSuiteTurn } }
     // WS7: bring your own provider (a demo key, a sample catalog, two added models).
     override val providers: FakeProvidersApi by lazy { FakeProvidersApi(now, if (speed == 0.0) 0 else 400) }
+    // WS7: import a video from a link (TikTok, Instagram and YouTube links; the sample clip as the result).
+    override val imports: FakeImportsApi by lazy { FakeImportsApi(now) }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {
