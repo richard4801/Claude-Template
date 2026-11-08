@@ -53,21 +53,46 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
     fun dismissNotice() = _ui.update { it.copy(notice = null) }
 
     /** An image for the next message (≤ 4): shown at once from [preview], sent once [upload] gives its upload id. */
-    fun attach(preview: String, upload: suspend () -> String) {
+    fun attach(preview: String, upload: suspend () -> String) = attachAs(preview) { upload() }
+
+    /**
+     * The same, where [upload] can convert the image to JPEG first (asJpeg = true): used by "Send as JPEG" when the server
+     * refused the format.
+     */
+    fun attachAs(preview: String, upload: suspend (asJpeg: Boolean) -> String) {
         if (!_ui.value.canAttach) return
-        if (_ui.value.attachments.size >= MAX_IMAGES) { _ui.update { it.copy(notice = "Up to $MAX_IMAGES images per message") }; return }
+        if (_ui.value.attachments.size >= MAX_IMAGES) { _ui.update { it.copy(notice = LIMITS) }; return }
         val key = "att${++attachSeq}"
+        uploads[key] = upload
         _ui.update { it.copy(attachments = it.attachments + ChatAttachment(key, preview)) }
+        runUpload(key, false)
+    }
+
+    /** "Send as JPEG": the refused image, converted and uploaded again. */
+    fun sendAsJpeg(key: String) {
+        if (uploads[key] == null) return
+        _ui.update { u -> u.copy(attachments = u.attachments.map { if (it.key == key) it.copy(error = null, unsupported = false, uploadId = null) else it }) }
+        runUpload(key, true)
+    }
+
+    private fun runUpload(key: String, asJpeg: Boolean) {
+        val upload = uploads[key] ?: return
         scope.launch {
-            val r = runCatching { upload() }
+            val r = runCatching { upload(asJpeg) }
             if (r.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw r.exceptionOrNull()!!
+            val e = r.exceptionOrNull()
+            val unsupported = e is ApiException && (e.code == "unsupported_image" || e.code == "unsupported_media_type")
             _ui.update { u -> u.copy(attachments = u.attachments.map { a ->
-                if (a.key != key) a else r.fold({ a.copy(uploadId = it) }, { e -> a.copy(error = e.message ?: "Couldn't upload this image") })
+                if (a.key != key) a else r.fold({ a.copy(uploadId = it) }, { x ->
+                    a.copy(error = if (unsupported) "This image type can't be sent" else x.message ?: "Couldn't upload this image", unsupported = unsupported && !asJpeg)
+                })
             }) }
         }
     }
 
-    fun removeAttachment(key: String) = _ui.update { u -> u.copy(attachments = u.attachments.filter { it.key != key }) }
+    fun removeAttachment(key: String) { uploads.remove(key); _ui.update { u -> u.copy(attachments = u.attachments.filter { it.key != key }) } }
+
+    private val uploads = mutableMapOf<String, suspend (Boolean) -> String>()
 
     private var attachSeq = 0
 
@@ -76,13 +101,14 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
         val u = _ui.value
         val t = text.trim()
         val thread = u.thread ?: return false
-        val images = u.attachments.mapNotNull { it.uploadId }
+        val images = u.attachments.filter { it.error == null }.mapNotNull { it.uploadId }
         if (t.isEmpty() && images.isEmpty()) return false
         if (u.busy) { _ui.update { it.copy(notice = "Claude is still answering · wait or press Stop") }; return false }
         if (u.uploading) { _ui.update { it.copy(notice = "Wait for the images to finish uploading") }; return false }
-        val sent = u.attachments
+        // Images that failed stay in the composer (for "Send as JPEG" or Remove); the rest go with the message.
+        val sent = u.attachments.filter { it.error == null }
         _ui.update { it.copy(turn = LiveTurn(null, "queued", "phone", t), draft = if (text == u.draft || t == u.draft.trim()) "" else it.draft, notice = null, refusedText = null,
-            attachments = emptyList()) }
+            attachments = u.attachments.filter { a -> a.error != null }) }
         scope.launch {
             try {
                 when (val r = api().post(thread.id, t, images)) {
@@ -98,7 +124,12 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
                     ClaudeSend.Busy -> _ui.update { it.copy(turn = null, draft = it.draft.ifEmpty { t }, attachments = sent + it.attachments, notice = "Claude is still answering on your Mac") }
                 }
             } catch (e: ApiException) {
-                _ui.update { it.copy(turn = null, draft = it.draft.ifEmpty { t }, attachments = sent + it.attachments, notice = e.message) }
+                if (e.code == "unsupported_image") {
+                    // The server couldn't read one of the images: mark it (by its upload id, else every image) for "Send as JPEG".
+                    val named = sent.filter { a -> a.uploadId != null && e.message.orEmpty().contains(a.uploadId) }.map { it.key }.toSet()
+                    val marked = sent.map { a -> if (named.isEmpty() || a.key in named) a.copy(error = "This image type can't be sent", unsupported = true, uploadId = a.uploadId) else a }
+                    _ui.update { it.copy(turn = null, draft = it.draft.ifEmpty { t }, attachments = marked + it.attachments, notice = UNREADABLE) }
+                } else _ui.update { it.copy(turn = null, draft = it.draft.ifEmpty { t }, attachments = sent + it.attachments, notice = e.message) }
             }
         }
         return true
@@ -127,7 +158,7 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
         val u = _ui.value
         val thread = u.thread ?: return false
         val t = (u.refusedText ?: u.draft).trim()
-        val images = u.attachments.mapNotNull { it.uploadId }
+        val images = u.attachments.filter { it.error == null }.mapNotNull { it.uploadId }
         if ((t.isEmpty() && images.isEmpty()) || u.busy || u.uploading) return false
         _ui.update { it.copy(turn = LiveTurn(null, "running", "phone", t, api = true), draft = "", refusedText = null, refusal = null, notice = null, attachments = emptyList()) }
         apiJob = scope.launch {
@@ -141,5 +172,10 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
         return true
     }
 
-    companion object { const val MAX_IMAGES = 4 }
+    companion object {
+        const val MAX_IMAGES = 4
+        /** The attach limits, worded as on the Mac (WS2). */
+        const val LIMITS = "Up to 4 images (JPEG, PNG, WebP or HEIC), 10 MB each"
+        const val UNREADABLE = "Claude couldn't read that image. Send it as JPEG."
+    }
 }

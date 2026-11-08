@@ -134,6 +134,8 @@ class ClaudeChatActions(
     /** Attach images (the photo picker); null hides the button. */
     val attach: (() -> Unit)? = null,
     val removeAttachment: (String) -> Unit = {},
+    /** An image the server couldn't read: convert it to JPEG and upload it again. */
+    val sendAsJpeg: (String) -> Unit = {},
 )
 
 /** A store for one thread, fed by the app's live `claude` events, loaded once. */
@@ -166,18 +168,25 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(ClaudeChatStore.MAX_IMAGES)) { uris ->
         val room = (ClaudeChatStore.MAX_IMAGES - store.ui.value.attachments.size).coerceAtLeast(0)
+        if (uris.size > room) c.repo.toast(ClaudeChatStore.LIMITS)
         uris.take(room).forEach { uri ->
-            store.attach(uri.toString()) {
+            store.attachAs(uri.toString()) { asJpeg ->
                 val media = c.media ?: throw ApiException("unsupported", "Images can't be read on this device")
                 val bytes = media.bytes(uri) ?: throw ApiException("bad_request", "Couldn't read that image")
-                if (bytes.size > 10 * 1024 * 1024) throw ApiException("bad_request", "Images can be up to 10 MB")
-                c.repo.api.uploadClaudeImage(media.displayName(uri), bytes, media.mime(uri))
+                val mime = media.mime(uri).lowercase()
+                // HEIC and WebP go as JPEG up front, as on the Mac; "Send as JPEG" converts anything.
+                val convert = asJpeg || mime in ChatImages.CONVERT
+                val out = if (convert) ChatImages.toJpeg(bytes) ?: throw ApiException("bad_request", "Couldn't read that image") else bytes
+                if (out.size > ChatImages.MAX_BYTES) throw ApiException("bad_request", ClaudeChatStore.LIMITS)
+                val name = media.displayName(uri).let { n -> if (convert) n.substringBeforeLast('.') + ".jpg" else n }
+                c.repo.api.uploadClaudeImage(name, out, if (convert) "image/jpeg" else mime)
             }
         }
     }
     ClaudeChatContent(ui, title, ClaudeChatActions(
         attach = if (ui.canAttach) ({ picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) else null,
         removeAttachment = store::removeAttachment,
+        sendAsJpeg = store::sendAsJpeg,
         edit = store::edit, send = { store.send() }, stop = store::stop,
         openInClaude = { url ->
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -544,7 +553,7 @@ private fun ChatComposer(ui: ClaudeChatUi, actions: ClaudeChatActions, horizonta
         val shape = RoundedCornerShape((m.radii.container).coerceIn(8.dp, 22.dp))
         Column(Modifier.fillMaxWidth().clip(shape).background(m.roles.raised).border(1.dp, m.roles.hairline, shape)) {
             if (ui.attachments.isNotEmpty()) Row(Modifier.padding(start = MuseSpace.s3, end = MuseSpace.s3, top = MuseSpace.s3), horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                ui.attachments.forEach { a -> PickedImage(a, { actions.removeAttachment(a.key) }) }
+                ui.attachments.forEach { a -> PickedImage(a, { actions.removeAttachment(a.key) }, { actions.sendAsJpeg(a.key) }) }
             }
             val attach: @Composable () -> Unit = {
                 actions.attach?.let { pick ->
@@ -576,9 +585,10 @@ private fun ChatComposer(ui: ClaudeChatUi, actions: ClaudeChatActions, horizonta
 
 /** A picked image: its thumbnail, dimmed while it uploads, with a 48 dp remove target. */
 @Composable
-private fun PickedImage(a: ChatAttachment, onRemove: () -> Unit) {
+private fun PickedImage(a: ChatAttachment, onRemove: () -> Unit, onSendAsJpeg: () -> Unit) {
     val m = muse
     val desc = when { a.error != null -> "Image: ${ChatClean.error(a.error, "couldn't upload")}"; a.uploadId == null -> "Image, uploading"; else -> "Image" }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
     Box(Modifier.size(64.dp).semantics(mergeDescendants = true) { contentDescription = desc }) {
         RefImage(ImageRef(url = a.preview),
             Modifier.align(Alignment.BottomStart).size(56.dp).clip(RoundedCornerShape(m.radii.control)).border(1.dp, if (a.error != null) m.roles.danger else m.roles.hairline, RoundedCornerShape(m.radii.control)),
@@ -586,6 +596,10 @@ private fun PickedImage(a: ChatAttachment, onRemove: () -> Unit) {
         Box(Modifier.align(Alignment.TopEnd).size(28.dp).press(onClick = onRemove).semantics { contentDescription = "Remove image"; role = Role.Button }, contentAlignment = Alignment.Center) {
             Box(Modifier.size(22.dp).clip(CircleShape).background(m.roles.ink), contentAlignment = Alignment.Center) { Ic("x", 12.dp, m.roles.canvas) }
         }
+    }
+    // The server couldn't read this format: convert it here and send it again.
+    if (a.unsupported) Box(Modifier.heightIn(min = 48.dp).press(onClick = onSendAsJpeg).semantics { role = Role.Button; contentDescription = "Send as JPEG" },
+        contentAlignment = Alignment.Center) { T("Send as JPEG", m.scale.caption, m.roles.link, maxLines = 1) }
     }
 }
 

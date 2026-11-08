@@ -100,7 +100,8 @@ sealed interface ChatItem {
 
 /** The chat's state for one thread. */
 /** An image picked for the next message: its local [preview] and, once uploaded, its [uploadId]. */
-data class ChatAttachment(val key: String, val preview: String, val uploadId: String? = null, val error: String? = null)
+/** [unsupported]: the server refused the format (415 unsupported_image), so the chip offers "Send as JPEG". */
+data class ChatAttachment(val key: String, val preview: String, val uploadId: String? = null, val error: String? = null, val unsupported: Boolean = false)
 
 data class ClaudeChatUi(
     val contextKind: String = "camera",
@@ -124,7 +125,7 @@ data class ClaudeChatUi(
     /** Attaching images: not in Camera stage yet (the server refuses them there). */
     val canAttach get() = contextKind != "camera"
     val uploading get() = attachments.any { it.uploadId == null && it.error == null }
-    val canSend get() = loaded && thread != null && !busy && !uploading && (draft.isNotBlank() || attachments.any { it.uploadId != null })
+    val canSend get() = loaded && thread != null && !busy && !uploading && (draft.isNotBlank() || attachments.any { it.uploadId != null && it.error == null })
     val items get() = ChatReducer.items(this)
 }
 
