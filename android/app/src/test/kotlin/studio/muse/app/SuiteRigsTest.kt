@@ -99,6 +99,17 @@ class SuiteRigsTest {
         assertEquals(lens, c.suite.composer.value.settings.lens) // the user's row kept
     }
 
+    @Test fun theOwnerSwitchesPaidHelpersOffAndSetsTheLimit() = withSuite { _, fake ->
+        assertTrue(fake.editorSettings().on)
+        val off = fake.patchEditorSettings(paidHelpers = "off", cap = 3.0)
+        assertFalse(off.on); assertEquals(3.0, off.cap, 0.0)
+        val f = fake.editorFeatures()
+        assertEquals("false", (f["captions"] as kotlinx.serialization.json.JsonObject)["available"].toString())
+        val refused = runCatching { fake.startEditorJob(studio.muse.app.data.EditorJobRequest("captions", studio.muse.app.data.EditorSourceDto(takeId = "t_j1"))) }.exceptionOrNull()
+        assertEquals("editor_paid_off", (refused as studio.muse.app.data.ApiException).code)
+        assertEquals(studio.muse.app.data.EditorSettings.DEFAULT_CAP, fake.patchEditorSettings(paidHelpers = "on", resetCap = true).cap, 0.0)
+    }
+
     @Test fun theFeedLoadsAndFilters() = withSuite { c, _ ->
         assertTrue(c.suite.loadFeed(photo = false))
         assertNotNull(c.suite.feed.value)

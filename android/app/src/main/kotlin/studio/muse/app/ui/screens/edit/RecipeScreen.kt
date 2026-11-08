@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.asImageBitmap
 import studio.muse.app.ui.LocalContainer
+import studio.muse.app.ui.screens.claude.ClaudeChatSheet
 import studio.muse.app.ui.components.Bar
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.TopBar
@@ -183,6 +184,9 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     // your edit plays each shot's take.
     val local = remember(referenceId) { RecreateLocalEdit(context, c.repo.api) }
     var exportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Claude on this reference (owner only; the server answers members 403).
+    val prefs by c.prefs.collectAsState()
+    var claude by remember { mutableStateOf(false) }
     var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
     LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
         val sid = ui.builtSessionId ?: return@LaunchedEffect
@@ -209,6 +213,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,
+        onClaude = if (c.repo.demo || prefs.owner) ({ claude = true }) else null,
         onExport = model::openExport, onExportGuide = model::setExportGuide,
         onExportClose = { exportJob?.cancel(); exportJob = null; model.setExportProgress(null); model.closeExport() }, // Cancel stops a running export
         onExportRun = {
@@ -224,6 +229,9 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
             }
         },
     ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built))
+    // The chat refreshes the recipe's fill when Claude has matched or priced shots.
+    ClaudeChatSheet(open = claude, onDismiss = { claude = false; scope.launch { model.load() } },
+        contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")
 }
 
 /** Polls a reference (showing the server's step) until it is ready or failed. */

@@ -66,7 +66,7 @@ class EditSuiteControllerTest {
     @Test fun removeBackgroundWaitsWhileTheServerSaysItIsComingSoon() = runTest {
         var runs = 0; var estimates = 0
         val b = object : EditBackend by StubBackend() {
-            override suspend fun matteUnavailable() = "Coming soon"
+            override suspend fun helpersOff() = mapOf("matte" to "Coming soon")
             override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> { if (kind == "matte") estimates++; return EditorEstimate(kind, 0.02) to null }
             override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> { runs++; return null to "no" }
         }
@@ -77,6 +77,20 @@ class EditSuiteControllerTest {
         assertEquals(0, runs); assertEquals(0, estimates) // nothing priced, nothing run
         assertEquals(null, c.ui.value.keep)
         assertEquals(null, c.p().mainClips.first().alphaMatte)
+    }
+
+    @Test fun paidHelpersOffReadPlainlyAndNeverRun() = runTest {
+        var runs = 0
+        val b = object : EditBackend by StubBackend() {
+            override suspend fun helpersOff() = mapOf("captions" to "Turned off by the studio owner", "denoise" to "Turned off by the studio owner", "matte" to "Turned off by the studio owner")
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> { runs++; return null to "no" }
+        }
+        val c = controller(b)
+        c.act(EditAction.Open(Panel.CAPTIONS)); advanceUntilIdle()
+        assertEquals("Turned off by the studio owner", c.ui.value.helpersOff["captions"])
+        c.act(EditAction.AutoCaptions); c.act(EditAction.NoiseReduction(true)); c.act(EditAction.RemoveBackground); advanceUntilIdle()
+        assertEquals(0, runs)
+        assertEquals("Turned off by the studio owner", c.ui.value.message)
     }
 
     @Test fun trackHeadersMuteAndHideAsOneUndoEach() = runTest {

@@ -74,6 +74,8 @@ data class RecreateBuildUi(
     val builtRevision: Int? = null,
     /** Shots to make again ("Make a new one"): filled before, generated anew on the next Build. */
     val remake: Set<String> = emptySet(),
+    /** Shots made anew after the edit was built: swapped into it in place (Fix shot) instead of rebuilding it. */
+    val fixing: Set<String> = emptySet(),
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
@@ -261,6 +263,26 @@ class RecreateBuildModel(
         val p = s.copy(state = "matched", takeId = t.id, jobId = null, estimate = null, estimateLabel = null, score = null, reason = "You picked “${t.caption}”")
         u.copy(fill = f.copy(slots = f.slots.map { if (it.slotId == slotId) p else it }), picks = u.picks + (slotId to p),
             fillErrors = u.fillErrors - slotId, estimateErrors = u.estimateErrors - slotId)
+    }.also {
+        // Fix shot: once the edit is built, the take goes straight into it, in place (or the edit is rebuilt).
+        if (_ui.value.builtSessionId != null) scope.launch { if (!replace(slotId, t.id)) apply() }
+    }
+
+    /**
+     * Fix shot (WS1 a7302fb): swaps one shot in the built edit, keeping its timing, transition, ramp, camera moves and
+     * look and the owner's other edits. False when the shot isn't in that edit any more (the caller rebuilds it).
+     */
+    private suspend fun replace(slotId: String, take: String): Boolean {
+        val u = _ui.value
+        val sid = u.builtSessionId ?: return false
+        return try {
+            val r = api.replaceRecipeSlot(id, slotId, sid, take, u.builtRevision)
+            _ui.update { it.copy(builtRevision = r.revision ?: it.builtRevision, message = r.note ?: "${it.shotName(slotId)} is swapped in the edit") }
+            true
+        } catch (e: CancellationException) { throw e } catch (e: ApiException) {
+            if (e.code == "slot_not_in_edit" || e.code == "not_built_here") false
+            else { _ui.update { it.copy(message = e.message ?: "Couldn’t swap the shot") }; true }
+        }
     }
 
     /**
@@ -290,6 +312,8 @@ class RecreateBuildModel(
     fun confirmBuild(): Job = scope.launch {
         val confirmed = _ui.value.confirmSlots ?: return@launch
         val model = modelId()
+        // Shots made anew after a build go into that edit in place when they're ready.
+        _ui.update { u -> u.copy(fixing = if (u.builtSessionId != null) confirmed.filter { it in u.remake }.toSet() else emptySet()) }
         _ui.update { it.copy(confirmSlots = null, building = true, buildWhenReady = true, starting = if (model != null) it.starting + confirmed else it.starting) }
         if (confirmed.isEmpty() || model == null) {
             if (_ui.value.isGenerating) startWatch() else { _ui.update { it.copy(building = false) }; apply() }
@@ -340,8 +364,13 @@ class RecreateBuildModel(
             return
         }
         _ui.update { it.copy(building = false) }
-        apply()
-        _ui.update { it.copy(buildWhenReady = false) }
+        val fix = u.fixing
+        // Fix shot: only shots made anew after the build, each swapped into the edit in place; otherwise a full build.
+        val toBuild = u.toGenerate.isNotEmpty() || u.slots.any { s -> u.slotFill(s.id)?.state == "ready" && s.id !in fix && u.builtSessionId == null }
+        val swapped = fix.isNotEmpty() && u.builtSessionId != null && !toBuild &&
+            fix.all { s -> u.slotFill(s)?.jobId?.let { j -> replace(s, j) } == true }
+        if (swapped) _ui.update { it.copy(mode = RecreateMode.Compare) } else apply()
+        _ui.update { it.copy(buildWhenReady = false, fixing = emptySet()) }
     }
 
     /** Builds the edit in an edit session on the take the first shot comes from, then shows Compare. */

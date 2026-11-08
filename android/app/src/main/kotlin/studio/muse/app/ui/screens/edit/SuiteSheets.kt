@@ -323,7 +323,9 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     }
     val denoise = ui.ai["denoise"]
     val cleaned = (clip as? VideoClip)?.audioAsset != null
-    OptRow(
+    // Paid helpers off (or not available): a plain line; already cleaned audio keeps its toggle, to turn it off.
+    val denoiseOff = ui.helpersOff["denoise"]?.takeIf { !cleaned }
+    if (denoiseOff != null) ComingSoon("Noise reduction", denoiseOff) else OptRow(
         "Noise reduction",
         when { denoise?.running == true -> "Cleaning the voice · ${denoise.progress} %"; cleaned -> "Background noise removed"; else -> "Removes background noise · ${denoise?.price ?: "AI"}" },
         cleaned, { act(EditAction.NoiseReduction(!cleaned)) },
@@ -387,7 +389,7 @@ private fun CaptionsBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val ct = ui.captionTrack?.caption
     if (ct == null) {
         T("Word-timed captions from the speech, in the style you pick.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted)
-        AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
+        ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return
     }

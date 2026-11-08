@@ -260,10 +260,21 @@ private fun PlayerSurface(player: CompositionPlayer, modifier: Modifier) {
 class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700, private val onAsset: (String, String) -> Unit = { _, _ -> }) : EditBackend {
     override fun assetArrived(assetId: String, url: String) = onAsset(assetId, url)
 
-    override suspend fun matteUnavailable(): String? {
-        val m = c.repo.api.editorFeatures()?.get("matte") as? kotlinx.serialization.json.JsonObject ?: return null
-        if ((m["available"] as? kotlinx.serialization.json.JsonPrimitive)?.content != "false") return null
-        return (m["note"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() } ?: "Coming soon"
+    /**
+     * WS1 guardrails (`GET /v1/editor/features`): paid helpers switched off by the owner read "Turned off by the studio
+     * owner" (or the server's reason); a helper the server can't run yet (the cut-out on the mock) reads "Coming soon".
+     */
+    override suspend fun helpersOff(): Map<String, String> {
+        val f = c.repo.api.editorFeatures() ?: return emptyMap()
+        fun obj(k: String) = f[k] as? kotlinx.serialization.json.JsonObject
+        fun off(o: kotlinx.serialization.json.JsonObject?) = (o?.get("available") as? kotlinx.serialization.json.JsonPrimitive)?.content == "false"
+        fun note(o: kotlinx.serialization.json.JsonObject?, k: String) = (o?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+        val paid = obj("paid")
+        val paidOff = if (off(paid)) note(paid, "reason") ?: "Turned off by the studio owner" else null
+        return listOf("captions", "matte", "denoise").mapNotNull { k ->
+            val o = obj(k)
+            (paidOff ?: if (off(o)) (note(o, "note") ?: "Coming soon") else null)?.let { k to it }
+        }.toMap()
     }
 
     override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =

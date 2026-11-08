@@ -231,6 +231,11 @@ interface MuseApi {
      * runs on the mock: Remove background and Tap to keep then read "Coming soon". A server without it: all available.
      */
     suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject? = null
+    /** Owner: the paid AI editing helpers' switch and daily limit (WS1 guardrails; members get 403). */
+    suspend fun editorSettings(): EditorSettings = throw ApiException("not_found", "This studio server doesn't have AI editing settings yet")
+    /** [paidHelpers]: "on" | "off" (null = unchanged). [cap]: the daily limit in dollars; [resetCap] puts back the default ($5). */
+    suspend fun patchEditorSettings(paidHelpers: String? = null, cap: Double? = null, resetCap: Boolean = false): EditorSettings =
+        throw ApiException("not_found", "This studio server doesn't have AI editing settings yet")
     /**
      * The reference video (an authenticated route: a redirect to storage, or the bytes), saved into [into] for the
      * player, which then needs no token. False when there is none (demo mode, expired).
@@ -266,6 +271,13 @@ interface MuseApi {
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
         throw ApiException("not_found", "This studio server can't build recipes yet")
+    /**
+     * Fix shot (WS1 a7302fb): swaps one shot's clip in the built edit for [take] (a take id, or a finished fill's job id),
+     * keeping its timing, transition, ramp, camera moves and look, and the owner's other edits. 409 slot_not_in_edit:
+     * rebuild the edit instead.
+     */
+    suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?): studio.muse.core.edit.RecreateReplaceResult =
+        throw ApiException("not_found", "This studio server can't fix one shot yet")
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")

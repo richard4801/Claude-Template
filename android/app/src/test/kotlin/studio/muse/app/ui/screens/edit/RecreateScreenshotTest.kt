@@ -75,7 +75,7 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
         val ui = ui()
         compose.setContent {
             MuseTheme(ThemeId.fromKey(theme)) {
-                RecreateBuildScreen(ui, RecreateActions(), picking = if (state == "picker") "s2" else null)
+                RecreateBuildScreen(ui, RecreateActions(onClaude = {}), picking = if (state == "picker") "s2" else null)
             }
         }
         shadowOf(Looper.getMainLooper()).idle()

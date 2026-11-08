@@ -76,6 +76,8 @@ class RecreateActions(
     val onRemake: (String) -> Unit = {},
     val onCast: (String) -> Unit = {},
     val onExport: () -> Unit = {},
+    /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
+    val onClaude: (() -> Unit)? = null,
     val onExportGuide: (Boolean) -> Unit = {},
     val onExportRun: () -> Unit = {},
     val onExportClose: () -> Unit = {},
@@ -121,7 +123,7 @@ fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
 private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap?, pickTake: (String) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxSize()) {
-        Header(ui, a.onBack)
+        Header(ui, a.onBack, a.onClaude)
         LearnSegmented(listOf("Recipe", "Compare"), if (ui.mode == RecreateMode.Recipe) 0 else 1, Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
             a.onMode(if (it == 0) RecreateMode.Recipe else RecreateMode.Compare)
         }
@@ -166,7 +168,7 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
 }
 
 @Composable
-private fun Header(ui: RecreateBuildUi, onBack: () -> Unit) {
+private fun Header(ui: RecreateBuildUi, onBack: () -> Unit, onClaude: (() -> Unit)? = null) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(48.dp).press(onClick = onBack).semantics { contentDescription = "Back to references"; role = Role.Button }, contentAlignment = Alignment.Center) {
@@ -176,6 +178,8 @@ private fun Header(ui: RecreateBuildUi, onBack: () -> Unit) {
             T(ui.referenceName ?: ui.recipe.title ?: "Reference", m.scale.heading, m.roles.ink, maxLines = 1)
             T(facts(ui), m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
         }
+        // Claude runs the flow with you here (explains the recipe, matches, fixes a shot); paid steps still ask you.
+        if (onClaude != null) studio.muse.app.ui.screens.claude.ClaudeButton(onClaude)
     }
 }
 
@@ -220,7 +224,7 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
     val m = muse
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(64.dp).padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f)) { Header(ui, a.onBack) }
+            Box(Modifier.weight(1f)) { Header(ui, a.onBack, a.onClaude) }
             LearnSegmented(listOf("Recipe", "Compare"), if (ui.mode == RecreateMode.Recipe) 0 else 1, Modifier.width(240.dp)) {
                 a.onMode(if (it == 0) RecreateMode.Recipe else RecreateMode.Compare)
             }

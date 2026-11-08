@@ -70,8 +70,16 @@ data class RecreateApplyResult(
     val match: RecreateMatch? = null,
 )
 
+/** `POST …/slots/{slotId}/replace`: one shot's clip swapped in the built edit (one undoable change). */
+data class RecreateReplaceResult(val sessionId: String, val revision: Int?, val slotId: String, val label: String? = null, val note: String? = null)
+
 /** The server's JSON for the above. */
 object RecreateJson {
+    fun replace(el: JsonElement): RecreateReplaceResult {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("replace is not an object")
+        return RecreateReplaceResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, o.str("slotId") ?: "", o.str("label"), o.str("note"))
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
 
     fun fill(text: String): RecreateFill = fill(json.parseToJsonElement(text))

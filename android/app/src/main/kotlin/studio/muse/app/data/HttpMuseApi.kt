@@ -194,6 +194,8 @@ interface MuseService {
     @GET("v1/learn/recipes/nearest") suspend fun nearestRecipes(@retrofit2.http.Query("recipeId") id: String, @retrofit2.http.Query("k") k: Int): LearnNearest
     @GET("v1/learn/gaps") suspend fun learnGaps(@retrofit2.http.Query("limit") limit: Int): List<LearnGap>
     @GET("v1/editor/features") suspend fun editorFeatures(): JsonObject
+    @GET("v1/editor/settings") suspend fun editorSettings(): EditorSettings
+    @PATCH("v1/editor/settings") suspend fun patchEditorSettings(@Body r: JsonObject): EditorSettings
     @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
     // OkHttp follows the redirect to storage and drops the Authorization header on the way to another host.
     @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/video") suspend fun referenceVideo(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
@@ -207,6 +209,7 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/fill") suspend fun fillReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/slots/{slot}/replace") suspend fun replaceRecipeSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     // AI suite · Photo tool (workstream 3)
@@ -475,6 +478,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
     override suspend fun referencePoster(referenceId: String): ByteArray? =
         runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
+    override suspend fun editorSettings() = call { editorSettings() }
+    override suspend fun patchEditorSettings(paidHelpers: String?, cap: Double?, resetCap: Boolean) = call {
+        patchEditorSettings(buildJsonObject {
+            if (paidHelpers != null) put("paidHelpers", kotlinx.serialization.json.JsonPrimitive(paidHelpers))
+            if (resetCap) put("capPerDayUsd", kotlinx.serialization.json.JsonNull) else if (cap != null) put("capPerDayUsd", kotlinx.serialization.json.JsonPrimitive(cap))
+        })
+    }
     override suspend fun editorFeatures(): JsonObject? = runCatching { call { editorFeatures() } }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; null }
     override suspend fun referenceVideo(referenceId: String, into: java.io.File): Boolean = runCatching {
         val r = call { referenceVideo(rx(referenceId)) }
@@ -503,6 +513,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
     override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
         studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = studio.muse.core.edit.RecreateJson.replace(call {
+        replaceRecipeSlot(rx(id), shotId(slotId), buildJsonObject {
+            put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId)); put("take", kotlinx.serialization.json.JsonPrimitive(take))
+            if (baseRevision != null) put("baseRevision", kotlinx.serialization.json.JsonPrimitive(baseRevision))
+            put("device", kotlinx.serialization.json.JsonPrimitive("android"))
+        })
+    })
     override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = studio.muse.core.edit.RecreateJson.apply(call {
         applyRecipe(rx(id), buildJsonObject {
             put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId))
