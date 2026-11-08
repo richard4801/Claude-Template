@@ -27,6 +27,8 @@ enum SnapshotRunner {
         var editCollapsed = false
         /// Recreate's cost line and its primary (window space), for the fit check (SnapshotFrame).
         var recreateFrames: [String: CGRect] = [:]
+        /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
+        var claudeTab: Int?
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
@@ -147,6 +149,7 @@ enum SnapshotRunner {
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
+            await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
             await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
@@ -440,6 +443,111 @@ enum SnapshotRunner {
         try? await Task.sleep(for: .seconds(1))
     }
 
+    // MARK: Learning editor
+
+    /// The Playbook (Rules), its rule editor on the long learned rule (counter, evidence, Delete rule), Suggestions,
+    /// Recipes, a recipe's detail panel and the editor's Claude panel on its Playbook tab, in demo mode at 1280 × 800 in
+    /// the four themes (`mac_<theme>_learn_<screen>.png`). Fit check lines: every probed label drawn in full (CUT fails CI),
+    /// plus that each screen has its content. Nothing is changed or deleted.
+    private static func learnShots(_ store: AppStore, dir: URL) async {
+        var lines: [String] = []
+        defer {
+            let f = dir.appendingPathComponent("fit-check.txt")
+            let before = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
+            try? (before + lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: f, atomically: true, encoding: .utf8)
+        }
+        guard let w = mainWindow else {
+            lines.append("CUT learn not drawn (no window)")
+            return
+        }
+        let original = w.frame
+        func check(_ screen: String, _ theme: ThemeID, only: ((String) -> Bool)? = nil) {
+            w.contentView?.layoutSubtreeIfNeeded()
+            let label = "learn_\(screen) 1280x800 \(theme.rawValue)"
+            let cut = truncatedLabels().filter { only?($0) ?? true }
+            if cut.isEmpty {
+                lines.append("FITS \(label) (\(fitProbes.count) labels)")
+            } else {
+                lines.append(contentsOf: cut.map { "CUT \(label) \($0)" })
+            }
+        }
+        func has(_ ok: Bool, _ screen: String, _ theme: ThemeID, _ what: String) {
+            lines.append("\(ok ? "FITS" : "CUT") learn_\(screen) 1280x800 \(theme.rawValue) \(what)")
+        }
+        // The editor's Claude panel needs a video take: editCheck's 15 s take (its MP4 stays in the temporary folder).
+        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        var take: Take?
+        if FileManager.default.fileExists(atPath: long.path) {
+            let raw: [String: Any] = ["id": "rx_learn", "kind": "take", "title": "Living room dance", "videoUrl": long.absoluteString,
+                                      "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
+            if let data = try? JSONSerialization.data(withJSONObject: raw) { take = try? JSONDecoder().decode(Take.self, from: data) }
+        }
+        if let take {
+            store.takes.removeAll { $0.id == take.id }
+            store.takes.insert(take, at: 0)
+        }
+        defer { store.takes.removeAll { $0.id == "rx_learn" } }
+        for theme in [ThemeID.c, .a, .b, .d] {
+            NSLog("[snapshot] learn %@", theme.rawValue)
+            store.themeID = theme
+            w.setFrame(NSRect(x: original.minX, y: original.maxY - 800, width: 1280, height: 800), display: true)
+            store.openEdit(takeId: nil)
+            store.closeRecreate()
+            store.learn.reset()
+            store.openLearn(.playbook)
+            try? await Task.sleep(for: .seconds(2))
+            let rules = store.learn.rules ?? []
+            has(!rules.isEmpty, "playbook", theme, "\(rules.count) rules in \(LearnFilter.grouped(rules).count) areas")
+            check("playbook", theme)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_learn_playbook.png"))
+            // The rule editor on the long learned rule: its counter ("271 / 300"), evidence and "Delete rule". Closed with Cancel.
+            if let r = rules.first(where: { $0.text.count >= Learn.counterFrom }) ?? rules.first { store.startEditing(r) }
+            try? await Task.sleep(for: .seconds(1.5))
+            has(store.learn.draft != nil, "playbook_editor", theme, "editor open")
+            check("playbook_editor", theme)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_learn_playbook_editor.png"))
+            store.cancelRule()
+            store.learn.tab = .suggestions
+            try? await Task.sleep(for: .seconds(1))
+            has(!(store.learn.lessons ?? []).isEmpty, "suggestions", theme, "\(store.learn.lessons?.count ?? 0) suggestions")
+            check("suggestions", theme)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_learn_suggestions.png"))
+            store.learn.tab = .rules
+            store.openLearn(.recipes)
+            try? await Task.sleep(for: .seconds(2))
+            let recipes = store.learn.recipes ?? []
+            has(!recipes.isEmpty, "recipes", theme, "\(recipes.count) recipes, \(store.learn.gaps.count) gaps")
+            check("recipes", theme)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_learn_recipes.png"))
+            if let r = recipes.first(where: { $0.performance != nil }) ?? recipes.first { await store.selectRecipe(r.id) }
+            try? await Task.sleep(for: .seconds(1.5))
+            has(store.learn.detail?.recipe != nil, "recipe_detail", theme, "\(store.learn.detail?.name ?? "nothing") with \(store.learn.nearest.count) closest")
+            check("recipe_detail", theme)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_learn_recipe_detail.png"))
+            store.closeLearn()
+            // The editor with the Claude panel on its Playbook tab (pinned rules, "Open playbook").
+            if let take {
+                state.claudeTab = 2
+                store.openEdit(takeId: take.id)
+                try? await Task.sleep(for: .seconds(7))
+                has(!store.learn.pinned.isEmpty, "claude_tab", theme, "\(store.learn.pinned.count) pinned rules")
+                // Only this tab's own labels: the editor beside the panel is checked by editLayoutShots.
+                check("claude_tab", theme) { $0.hasPrefix("Open playbook") || $0.hasPrefix("segment Chat") || $0.hasPrefix("segment History") || $0.hasPrefix("segment Playbook") }
+                capture(dir.appendingPathComponent("mac_\(theme.rawValue)_learn_claude_tab.png"))
+                state.claudeTab = nil
+                store.openEdit(takeId: nil)
+                try? await Task.sleep(for: .seconds(1))
+            } else {
+                lines.append("CUT learn_claude_tab 1280x800 \(theme.rawValue) no test video")
+            }
+        }
+        w.setFrame(original, display: true)
+        store.themeID = .a
+        store.closeLearn()
+        store.openEdit(takeId: nil)
+        try? await Task.sleep(for: .seconds(1))
+    }
+
     // MARK: Scroll check (CI): every main page and Settings pane must scroll with a real scroll event
 
     /// Writes `scroll-check.txt`: one line per page, `MOVED`, `FITS` (nothing to scroll) or `STUCK` (scrollable but a
@@ -459,6 +567,10 @@ enum SnapshotRunner {
                                           ("members", .members), ("posts", .posts), ("templates", .templates), ("lora", .lora),
                                           ("suite", .suite), ("edit", .edit)]
         for (name, screen) in pages { await check(name) { store.go(screen) } }
+        // The learning editor's two pages (Edit → Playbook, Edit → Recipes).
+        await check("learn_playbook") { store.openEdit(takeId: nil); store.openLearn(.playbook) }
+        await check("learn_recipes") { store.openEdit(takeId: nil); store.openLearn(.recipes) }
+        store.closeLearn()
         await check("cast") { store.openProfile(SampleData.demo) }
         for section in SettingsSection.allCases { await check("settings_\(section.rawValue)") { store.openSettings(section) } }
         // The drum's scroll monitor must not outlive the picker: hover a drum, close the picker under the pointer, scroll Home.
