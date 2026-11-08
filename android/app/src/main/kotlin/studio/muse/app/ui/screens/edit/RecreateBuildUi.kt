@@ -83,7 +83,12 @@ class RecreateActions(
  * What the players can play: [reference] is the reference video saved from its authenticated route (a local file), and
  * [takeVideo] a take's video link. Without them (demo mode, screenshots) the players show the poster or stand-in tones.
  */
-class RecreateMedia(val reference: String? = null, val takeVideo: (String) -> String? = { null })
+class RecreateMedia(
+    val reference: String? = null,
+    val takeVideo: (String) -> String? = { null },
+    /** The built edit, previewed on the device (Compare); without it, your edit plays each shot's take. */
+    val edit: androidx.media3.common.Player? = null,
+)
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
 
@@ -360,7 +365,9 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
     val i = ui.slotAtTime
     val slot = ui.slots.getOrNull(i)
     val t = ui.time
+    val built = if (yours) media.edit else null
     val video: Pair<String, Double>? = if (!yours) media.reference?.let { it to t }
+        else if (built != null) null
         else slot?.let { s -> ui.slotFill(s.id)?.takeId?.let(media.takeVideo)?.let { it to (t - s.startSec).coerceAtLeast(0.0) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T(label, m.scale.label, m.roles.ink, maxLines = 1)
@@ -368,12 +375,14 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
                 when {
+                    // The real built edit: its own cuts, speed, camera moves, text and Look, on the reference's timeline.
+                    built != null -> SyncedSurface(built, t, ui.playing, muted = true, Modifier.fillMaxSize())
                     video != null -> SyncedVideo(video.first, video.second, ui.playing, muted = yours, Modifier.fillMaxSize())
                     picture != null && !yours -> Image(picture, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else -> StandIn(ui, i + (if (yours) 1 else 0), Modifier.fillMaxSize(), icon = false)
                 }
                 // The reference's own video already shows its text; elsewhere the recipe's text stands in for it.
-                if (yours || media.reference == null) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
+                if ((yours && built == null) || (!yours && media.reference == null)) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
                     val bias = when (x.position) { "Top" -> -.7f; "Middle" -> 0f; else -> .6f }
                     T(x.text, m.scale.caption.copy(fontWeight = FontWeight.Bold), Color.White, Modifier.align(androidx.compose.ui.BiasAlignment(0f, bias)).padding(horizontal = 8.dp), maxLines = 2)
                 }
@@ -398,6 +407,13 @@ private fun SyncedVideo(uri: String, sourceSec: Double, playing: Boolean, muted:
         }
     }
     androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
+    SyncedSurface(player, sourceSec, playing, muted, modifier)
+}
+
+/** A player someone else owns, held on the shared playhead like [SyncedVideo]. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun SyncedSurface(player: androidx.media3.common.Player, sourceSec: Double, playing: Boolean, muted: Boolean, modifier: Modifier) {
     androidx.compose.runtime.LaunchedEffect(player, muted) { player.volume = if (muted) 0f else 1f }
     androidx.compose.runtime.LaunchedEffect(player, playing) { player.playWhenReady = playing }
     androidx.compose.runtime.LaunchedEffect(player, sourceSec, playing) {

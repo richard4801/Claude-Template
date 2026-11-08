@@ -61,6 +61,8 @@ data class RecreateBuildUi(
     val match: RecreateMatch? = null,
     /** The take the built edit lives on (Open in the editor). */
     val builtTakeId: String? = null,
+    /** The edit session the recipe was built into (Compare previews it on the device). */
+    val builtSessionId: String? = null,
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
@@ -322,7 +324,7 @@ class RecreateBuildModel(
             val session = api.openEditSession(OpenEditSessionRequest(takeId = base, device = "android"))
             val r = api.applyRecipe(id, session.id, session.revision, slots)
             _ui.update { v ->
-                v.copy(building = false, match = r.match ?: v.match, builtTakeId = base, mode = RecreateMode.Compare,
+                v.copy(building = false, match = r.match ?: v.match, builtTakeId = base, builtSessionId = session.id, mode = RecreateMode.Compare,
                     message = r.waiting.takeIf { it.isNotEmpty() }?.let { w -> "${w.joinToString(" and ") { v.shotName(it) }} isn’t ready yet, so the edit leaves it out for now" })
             }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {

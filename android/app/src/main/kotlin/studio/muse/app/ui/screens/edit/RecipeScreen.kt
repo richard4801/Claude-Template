@@ -167,6 +167,19 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, on
         val f = java.io.File(context.cacheDir, "recreate_$referenceId.mp4")
         if ((f.length() > 0) || c.repo.api.referenceVideo(referenceId, f)) video = f.toURI().toString()
     }
+    // After Build: the real built edit, from the edit session, previewed on the device (Compare). Until it is ready,
+    // your edit plays each shot's take.
+    val local = remember(referenceId) { RecreateLocalEdit(context, c.repo.api) }
+    var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
+    LaunchedEffect(ui.builtSessionId) {
+        val sid = ui.builtSessionId ?: return@LaunchedEffect
+        if (c.repo.demo) return@LaunchedEffect // demo mode has no media to build from
+        runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        val next = local.player()
+        built?.release()
+        built = next
+    }
+    androidx.compose.runtime.DisposableEffect(referenceId) { onDispose { built?.release() } }
     // Shots being made: their progress from the studio's live jobs.
     LaunchedEffect(studio.jobs) { model.setJobProgress(studio.jobs.filter { it.running }.associate { it.id to it.progress.toInt() }) }
     // The shared playhead while playing (both players follow it).
@@ -182,7 +195,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, on
         onUseTake = model::useTake, onFix = model::fixWeakest,
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,
-    ), picture = poster, media = RecreateMedia(video) { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl })
+    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built))
 }
 
 /** Polls a reference (showing the server's step) until it is ready or failed. */
