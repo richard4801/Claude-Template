@@ -37,6 +37,8 @@ const POSTER_AT = 0.5;
 const CreateBody = z.union([
   z.object({ uploadId: z.string().min(1).max(80), sourceUrl: z.string().trim().min(8).max(500).optional(), name: z.string().trim().max(120).optional() }).strict(),
   z.object({ url: z.string().trim().min(8).max(500), name: z.string().trim().max(120).optional() }).strict(),
+  // The Mac's spelling of the server fallback: the link as `sourceUrl`, no upload.
+  z.object({ sourceUrl: z.string().trim().min(8).max(500), name: z.string().trim().max(120).optional() }).strict(),
 ]);
 const CheckBody = z.object({ url: z.string().trim().min(8).max(500), purpose: z.enum(['import', 'reference']).default('import') }).strict();
 
@@ -60,7 +62,7 @@ export class Imports {
     const out: Record<string, unknown> = {
       id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks, audio: audioView(c) ?? undefined,
       source: 'import', sourceUrl: m.sourceUrl ?? undefined, platform: m.platform ?? undefined, bytes: m.bytes,
-      posterUrl: m.posterKey ? this.url(m.posterKey) : undefined, videoUrl: c.storageKey ? this.url(c.storageKey) : undefined, videoKey: c.storageKey ?? undefined,
+      posterUrl: m.posterKey ? this.url(m.posterKey) : undefined, thumb: m.posterKey ? { url: this.url(m.posterKey) } : undefined /* ImageRef, as on takes */, videoUrl: c.storageKey ? this.url(c.storageKey) : undefined, videoKey: c.storageKey ?? undefined,
       uploadId: m.uploadId, createdBy: c.createdBy ?? undefined, createdAt: c.createdAt, ...(extra.cached ? { cached: true } : {}),
     };
     for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
@@ -136,7 +138,7 @@ export class Imports {
   // ------------------------------------------------------------------ create
   async create(u: AuthUser, body: unknown) {
     const b = parse(CreateBody, body);
-    if ('url' in b) return this.fromServerFetch(u, b);
+    if (!('uploadId' in b)) return this.fromServerFetch(u, { url: 'url' in b ? b.url : b.sourceUrl, name: b.name });
     const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, b.uploadId), eq(uploads.studioId, u.studioId)));
     if (!up) throw notFound('Upload');
     if (!up.contentType.startsWith('video/')) throw badRequest('uploadId: must be a video');

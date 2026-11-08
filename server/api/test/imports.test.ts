@@ -168,6 +168,9 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     const calls = fake.calls();
     expect(calls).toHaveLength(2); // metadata once, then the download from it
     for (const c of calls) expect(c.args).toEqual(expect.arrayContaining(['--ignore-config', '--no-cookies', '--no-cookies-from-browser', '--no-playlist']));
+    expect(r.body.thumb).toEqual({ url: r.body.posterUrl });
+    // The Mac's spelling ({sourceUrl} with no upload) is the same server fetch.
+    expect((await member.req('POST', '/v1/imports', { sourceUrl: 'https://www.tiktok.com/@muse.studio/video/7431234567890123456' })).body).toMatchObject({ id: r.body.id, cached: true });
     // Cached by link, no new fetch.
     expect((await member.req('POST', '/v1/imports', { url: 'https://m.tiktok.com/@muse.studio/video/7431234567890123456' })).body).toMatchObject({ id: r.body.id, cached: true });
     expect(fake.calls()).toHaveLength(2);
