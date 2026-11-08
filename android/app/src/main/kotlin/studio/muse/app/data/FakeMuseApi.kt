@@ -131,7 +131,7 @@ class FakeMuseApi(
         updated
     }
 
-    override suspend fun fillAngles(modelId: String): FillAnglesResponse {
+    override suspend fun fillAngles(modelId: String, imageModel: String?): FillAnglesResponse {
         val (busy, cost) = lock.withLock {
             val m = model(modelId)
             val missing = m.slots.filter { it.image == null }
@@ -682,7 +682,7 @@ class FakeMuseApi(
      * Upscale (server routes POST /v1/takes/{id}/upscale): a finished render take, a size the features price, held at
      * price × the take's seconds; `upscale_unavailable` (409) while the add-on or the size isn't available.
      */
-    override suspend fun upscale(takeId: String, size: String): Job {
+    override suspend fun upscale(takeId: String, size: String, engineModel: String?): Job {
         val job = lock.withLock {
             val t = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
             if (t.kind != "take") throw ApiException("bad_request", "Only a finished render can be upscaled")

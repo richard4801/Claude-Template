@@ -53,7 +53,7 @@ interface MuseService {
     @GET("v1/models") suspend fun models(): List<Model>
     @POST("v1/models") suspend fun createModel(@Body r: CreateModelRequest): Model
     @PUT("v1/models/{id}/slots/{slot}") suspend fun setSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: SetSlotRequest): Model
-    @POST("v1/models/{id}/fill-angles") suspend fun fillAngles(@Path("id") id: String): FillAnglesResponse
+    @POST("v1/models/{id}/fill-angles") suspend fun fillAngles(@Path("id") id: String, @Body r: FillAnglesRequest = FillAnglesRequest()): FillAnglesResponse
     @GET("v1/outfits") suspend fun outfits(): List<Outfit>
     @POST("v1/outfits") suspend fun createOutfit(@Body r: CreateOutfitRequest): Outfit
     @POST("v1/outfits/{id}/save") suspend fun saveOutfit(@Path("id") id: String): Outfit
@@ -360,7 +360,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun listModels() = shared("models") { call { models() }.map { it.abs() } }
     override suspend fun createModel(req: CreateModelRequest) = call { createModel(req) }.abs()
     override suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest) = call { setSlot(modelId, slot, req) }.abs()
-    override suspend fun fillAngles(modelId: String) = call { fillAngles(modelId) }.let { it.copy(model = it.model.abs()) }
+    override suspend fun fillAngles(modelId: String, imageModel: String?) = call { fillAngles(modelId, FillAnglesRequest(imageModel)) }.let { it.copy(model = it.model.abs()) }
     override suspend fun listOutfits() = shared("outfits") { call { outfits() }.map { it.abs() } }
     override suspend fun createOutfit(req: CreateOutfitRequest) = callLong { createOutfit(req) }.abs()
     override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }.abs()
@@ -463,7 +463,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun wallet() = shared("wallet") { call { wallet() } }
     override suspend fun studioBalance() = shared("studio-balance") { call { studioBalance() } }
     override suspend fun addTopUp(req: AddTopUpRequest) = call { addTopUp(req) }
-    override suspend fun upscale(takeId: String, size: String) = call { upscale(takeId, UpscaleRequest(size)) }
+    override suspend fun upscale(takeId: String, size: String, engineModel: String?) = call { upscale(takeId, UpscaleRequest(size, engineModel)) }
     override suspend fun listMembers() = shared("members") { call { members() } }
     override suspend fun transfer(req: TransferRequest) = call { transfer(req) }
     override suspend fun reclaim(req: ReclaimRequest) = call { reclaim(req) }

@@ -62,6 +62,8 @@ data class PickerEngine(
     val kind: String = "video",
     /** The resolution each quality's ladder runs it at (tier id → resolution id). */
     val ladderRes: Map<String, String> = emptyMap(),
+    /** WS13: the purposes it serves (empty = any). */
+    val purposes: List<String> = emptyList(),
 ) {
     val tier: String? get() = tiers.firstOrNull()
 
@@ -126,7 +128,7 @@ object ModelPicker {
         cat.engines?.let { list ->
             return list.filter { it.kind == kind }.map { e ->
                 PickerEngine(e.model, e.name.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
-                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model))
+                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes)
             }
         }
         if (kind != "video") return cat.custom.orEmpty().filter { it.kind == kind }.map { c -> customEngine(c) }
@@ -144,8 +146,10 @@ object ModelPicker {
         c.aspectRatios, c.price?.takeIf { it.basis == "per_second" }?.usd, c.inputs, custom = true, perRun = c.price?.takeIf { it.basis != "per_second" }?.usd, kind = c.kind)
 
     /** The picker's groups for a shot on [quality]: the engines on that quality's ladder first, then the rest, then "Your providers". */
-    fun groups(cat: SuiteCatalog?, quality: String, kind: String = "video"): PickerGroups {
-        val (custom, core) = engines(cat, kind).partition { it.custom }
+    fun groups(cat: SuiteCatalog?, quality: String, kind: String = "video", purpose: String? = null): PickerGroups {
+        // WS13: engines list their purposes; Talking and UGC take narrower lists than Shot. An entry without purposes fits any.
+        val fit = engines(cat, kind).filter { e -> purpose == null || e.purposes.isEmpty() || purpose in e.purposes }
+        val (custom, core) = fit.partition { it.custom }
         val (ladder, others) = core.partition { quality in it.tiers }
         // This quality's ladder in its own order; the others in quality order (Draft → Cinema).
         val ladderOrder = cat?.tier(quality)?.models.orEmpty().map { it.model }
@@ -274,4 +278,12 @@ fun PhotoModelPill(ui: ComposerUi) {
         (listOf(e.name, e.price).filter { it.isNotBlank() }.joinToString(", ") + if (e.custom) " (yours)" else "") to (e.id == p.draft.imageModel)
     }
     MenuPill("cube", cur?.name ?: "Model", "Model, only you see models", items) { i -> p.setImageModel(ordered.getOrNull(i - 1)?.id) }
+}
+
+/** WS13's purpose for a composer tool (its model list): Shot, Talking and UGC ad each have their own. */
+val ComposerTool.modelPurpose: String? get() = when (this) {
+    ComposerTool.SHOT -> "shot"; ComposerTool.TALKING -> "talking"; ComposerTool.UGC -> "ugc"
+    ComposerTool.SWAP -> "swap"; ComposerTool.RECAST -> "recast"; ComposerTool.EXTEND -> "extend"
+    ComposerTool.PHOTO -> "photo"
+    else -> null
 }

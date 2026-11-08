@@ -27,7 +27,7 @@ interface MuseApi {
     suspend fun createModel(req: CreateModelRequest): Model
     suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest): Model
     /** Generates the missing angles from the user's images ($0.02 each). Slots come back busy; a model event follows. */
-    suspend fun fillAngles(modelId: String): FillAnglesResponse
+    suspend fun fillAngles(modelId: String, imageModel: String? = null): FillAnglesResponse
     suspend fun updateModel(modelId: String, req: UpdateModelRequest): Model
     /** Deletes the model with her outfits, LoRAs, training set, accounts and unsent posts. */
     suspend fun deleteModel(modelId: String)
@@ -107,7 +107,7 @@ interface MuseApi {
     suspend fun studioBalance(): StudioBalance
     suspend fun addTopUp(req: AddTopUpRequest): StudioBalance
     /** Upscale a finished render (coming soon: the server answers upscale_unavailable). */
-    suspend fun upscale(takeId: String, size: String): Job
+    suspend fun upscale(takeId: String, size: String, engineModel: String? = null): Job
 
     // Studio settings (owner) and the image engine
     suspend fun studioSettings(): StudioSettings

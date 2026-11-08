@@ -402,7 +402,7 @@ class MuseRepository(
     suspend fun setSlot(modelId: String, slot: String, image: ImageRef?, source: String = "upload") =
         attempt { setSlot(modelId, slot, SetSlotRequest(image, source)) }?.also { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
 
-    suspend fun fillAngles(modelId: String) = attempt { fillAngles(modelId) }?.also { r ->
+    suspend fun fillAngles(modelId: String, imageModel: String? = null) = attempt { fillAngles(modelId, imageModel) }?.also { r ->
         _state.update { s -> s.copy(models = s.models.upsert(r.model) { it.id == r.model.id }) }
         refreshBalance()
     }
@@ -530,14 +530,14 @@ class MuseRepository(
         attemptInline { addTopUp(AddTopUpRequest(amountUsd, note?.trim()?.ifBlank { null })) }.also { (r, _) -> if (r != null) { _state.update { it.copy(studioBalance = r) }; refreshBalance() } }
 
     /** Upscale a finished render (POST /v1/takes/{id}/upscale): the job, followed like any render. */
-    suspend fun upscale(takeId: String, size: String) = attempt { upscale(takeId, size) }?.also { j ->
+    suspend fun upscale(takeId: String, size: String, engineModel: String? = null) = attempt { upscale(takeId, size, engineModel) }?.also { j ->
         _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
         refreshBalance()
     }
 
     /** Like [upscale], but hands back the error code and friendly text (`upscale_unavailable` greys the sheet) instead of a toast. */
-    suspend fun upscaleInline(takeId: String, size: String): Triple<Job?, String?, String?> = try {
-        val j = api.upscale(takeId, size)
+    suspend fun upscaleInline(takeId: String, size: String, engineModel: String? = null): Triple<Job?, String?, String?> = try {
+        val j = api.upscale(takeId, size, engineModel)
         _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
         refreshBalance()
         Triple(j, null, null)

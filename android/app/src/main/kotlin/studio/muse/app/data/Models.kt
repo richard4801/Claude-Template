@@ -82,6 +82,10 @@ data class CreateModelRequest(val name: String, val age: Int, val niche: String)
 @Serializable
 data class SetSlotRequest(val image: ImageRef?, val source: String = "upload")
 
+/** POST /v1/models/{id}/fill-angles (WS13, owner): the image model for the missing angles; empty body = the default. */
+@Serializable
+data class FillAnglesRequest(val imageModel: String? = null)
+
 /** Outfit set: front, ¾, side, back. mode: describe | photo | own. state: ready | generating. */
 @Serializable
 data class Outfit(
@@ -108,6 +112,8 @@ data class CreateOutfitRequest(
     val mode: String,
     val description: String = "",
     val images: List<ImageRef> = emptyList(),
+    /** WS13 (owner): the image model for the set; null = the studio's default. */
+    val imageModel: String? = null,
 )
 
 /** status: good | bad | info */
@@ -537,7 +543,7 @@ data class AddTopUpRequest(val amountUsd: Double, val note: String? = null, val 
 
 /** POST /v1/takes/{id}/upscale. */
 @Serializable
-data class UpscaleRequest(val size: String)
+data class UpscaleRequest(val size: String, /** WS13 (owner): the upscale model; null = the default. */ val engineModel: String? = null)
 
 /** GET /v1/members (owner). Caps are in USD; null caps follow the studio default. */
 @Serializable

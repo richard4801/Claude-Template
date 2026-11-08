@@ -1061,7 +1061,7 @@ private fun WideBar(ui: ComposerUi) {
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
-            val groups = ModelPicker.groups(ui.catalog, d.quality)
+            val groups = ModelPicker.groups(ui.catalog, d.quality, purpose = d.tool.modelPurpose)
             if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
                 MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }

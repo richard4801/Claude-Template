@@ -115,9 +115,12 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
         if (o.outHeight > 0 && o.outWidth.toFloat() / o.outHeight > 1.6f) c.repo.toast("Looks like a character sheet · upload separate images")
     }
 
+    /** WS7/WS13: the owner's model for the missing angles (null = the studio's default). */
+    val fillModel = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     fun fill() = viewModelScope.launch {
         val id = state.value.model?.id ?: return@launch
-        c.repo.fillAngles(id)
+        c.repo.fillAngles(id, fillModel.value)
     }
 
     fun save(celebrate: () -> Unit, onDone: () -> Unit) {
@@ -218,6 +221,8 @@ fun CharacterSheetScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                     SecondaryButton("Upload images", { pickMany.launch(img) }, Modifier.fillMaxWidth(), icon = "upload")
                     if (filled in 1..6) {
+                        val fm by vm.fillModel.collectAsState()
+                        ModelChoiceRow(studio.muse.app.data.ModelPurpose.CHARACTER, ModelPick(fm), { vm.fillModel.value = it.model })
                         val miss = 7 - filled
                         SecondaryButton("Fill $miss missing angle${if (miss > 1) "s" else ""} · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}",
                             { vm.fill() }, Modifier.fillMaxWidth())

@@ -76,7 +76,7 @@ fun rememberModelOptions(purpose: ModelPurpose): ModelsForPurpose? {
 
 /** The options as the picker groups them: on [quality]'s ladder, the others, the studio's own. */
 fun ModelsForPurpose.groups(purpose: ModelPurpose, quality: String?): PickerGroups =
-    ModelPicker.groups(SuiteCatalog(engines = models), quality ?: "", purpose.kind).let { g -> if (quality == null) PickerGroups(emptyList(), g.ladder + g.others, g.custom) else g }
+    ModelPicker.groups(SuiteCatalog(engines = models), quality ?: "", if (purpose.kind == "image") "image" else "video").let { g -> if (quality == null) PickerGroups(emptyList(), g.ladder + g.others, g.custom) else g }
 
 /** "Kling 4.0, 1080p", or "Auto" (then the studio's default, when it has one: "Auto (Kling 4.0)"). */
 fun ModelsForPurpose?.label(pick: ModelPick): String {
