@@ -217,3 +217,37 @@ Free on every provider: cuts with a transcript, silence-only cuts, beats, and th
 
 **Owner's word:**
 - [ ] The owner approves the prices, the markup and the go date. The coordinator changes the variable on Railway, and no session does.
+
+## Android distribution (owner, 2026-11-08)
+The owner couldn't get the Android upload to /get working. Decision: the owner uploads each Android build to the download page by hand, once there's a final version. The upload session (session_01Py2rxqFT9BvkxLttPb5c8Z) is no longer pending.
+
+## Release 1: complete before the owner tests (owner, 2026-11-08)
+The owner said: "I need all the features in place for me to test once... every feature we agreed on should exist on the app and working."
+The release is ready only when every agreed feature exists on both apps and works end to end. Until then, no new ideas: only agreed scope.
+
+Known gaps (the coordinator's list; each workstream audits its area for more):
+1. **Recreate, Compare:** "Your edit" plays the actual built edit, with ramps, camera keys, text and the Look, on Mac and Android. Today Mac shows a thumbnail and Android plays the raw takes.
+2. **Recreate, Export:** the sound as a guide track, plus a "post with Use this sound" reminder, or a silent export timed for the sound (plan step 7). Mac and Android.
+3. **Recreate, input on Mac:** paste a link, as well as drop or pick a file.
+4. **Recreate, Claude button:** on the Mac Recreate screens, the panel lets Claude run the flow (analyse, explain, fix a shot).
+5. **Real AI editing on:** Remove background, Pick what to keep, AI captions and voice clean-up working for real.
+   - Before the switch: a per-studio daily spend cap, a runtime kill switch and pinned model versions.
+   - Markup at cost × 2, the same as Upscale.
+   - Then about $0.25 of calibration runs, approved as part of "I approve all".
+6. **Upscale:** an end-to-end check.
+7. **Composer bug at about 1000 px** (coordination item 8), if still open.
+
+Release 1 additions (2026-11-08):
+- **The owner said YES:** the AI Suite features from the approved plan go into the current Suite, in its style, on Mac and Android:
+  - saved rigs;
+  - Reuse settings;
+  - Vary;
+  - Use as start frame;
+  - the results feed beside the composer;
+  - compare.
+- **Also in Release 1:**
+  - the Recreate Cast step;
+  - Claude in Recreate (needs the server's "recreate" context);
+  - Android timeline track mute/hide;
+  - the Android audit fixes (Fix shot regenerates, the past references list, the analysis checklist, the real expiry, Recipes `available`, See rule, Cut silences).
+- **Out of Release 1:** the Android tablet media rail (the toolbar's Add stays) and a bundled music library (not agreed).

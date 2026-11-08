@@ -8,7 +8,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { takes, uploads } from '../db/schema.js';
+import { studioSettings, takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
@@ -190,13 +190,15 @@ export class EditorAiService {
       usd = GPU_SEC.track(d) * p.rates.track;
     } else if (kind === 'matte') usd = GPU_SEC.matte(d) * p.rates.matte;
     else if (!opts.analyzeOnly) usd = GPU_SEC.separate(d) * p.rates.separate;
-    usd = usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * 10000) / 10000) : 0;
+    // workstream 1: the price is the provider's cost x EDITOR_MARKUP (the owner's choice: x 2, like Upscale).
+    usd = usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0;
     return { kind, opts, src, reuse, usd };
   }
 
   // ------------------------------------------------------------------ jobs
   async start(u: AuthUser, body: any) {
     const e = await this.estimate(u, body);
+    if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
     const models = e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
@@ -273,7 +275,7 @@ export class EditorAiService {
         result = { suggestion: noiseSuggestion(reuse?.words ?? []) };
       }
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
-      const actual = !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * 10000) / 10000) : row.estimate;
+      const actual = !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
       if (row.holdTokens || actual > 0) await this.ctx.money.settle(u.studioId, u.id, id, row.holdTokens, actual, `Editor ${row.kind}`);
       await this.patch(id, { state: 'done', progress: 100, phase: 'Done', result, cost: actual, finishedAt: Date.now() });
     } catch (e) {
@@ -363,12 +365,59 @@ export class EditorAiService {
     return this.provider.name !== 'mock' || this.ctx.config.NODE_ENV !== 'production' || !!this.ctx.config.DEV_MODE;
   }
 
-  features() {
+  // ------------------------------------------------------------------ the owner's controls (workstream 1)
+  get markup() { return this.ctx.config.EDITOR_MARKUP > 0 ? this.ctx.config.EDITOR_MARKUP : 1; }
+  private async controls(studioId: string) {
+    const [s] = await this.ctx.db.select({ off: studioSettings.editorPaidOff, cap: studioSettings.editorCapPerDay }).from(studioSettings).where(eq(studioSettings.studioId, studioId));
+    return { off: !!s?.off, capPerDayUsd: s?.cap ?? this.ctx.config.EDITOR_CAP_PER_DAY_USD };
+  }
+  /** What paid helpers have charged (done) or hold (running) for the studio since midnight UTC. */
+  async todayUsd(studioId: string, now = Date.now()) {
+    const since = now - (now % 86_400_000);
+    const rows = await this.ctx.db.select({ state: editorJobs.state, estimate: editorJobs.estimate, cost: editorJobs.cost }).from(editorJobs)
+      .where(and(eq(editorJobs.studioId, studioId), sql`${editorJobs.createdAt} >= ${since}`));
+    return Math.round(rows.reduce((a, r) => a + (r.state === 'done' ? Number(r.cost ?? 0) : r.state === 'running' ? Number(r.estimate ?? 0) : 0), 0) * 10000) / 10000;
+  }
+  /** A paid helper may start: the owner's switch is on and the day's cap has room. */
+  private async allowPaid(studioId: string, usd: number) {
+    const c = await this.controls(studioId);
+    if (c.off) throw new ApiError(503, 'editor_paid_off', 'AI editing helpers are switched off for now · the owner can switch them back on');
+    const today = await this.todayUsd(studioId);
+    if (today + usd > c.capPerDayUsd + 1e-9)
+      throw new ApiError(402, 'editor_daily_cap', `Today’s AI editing limit ($${c.capPerDayUsd.toFixed(2)}) is reached · try tomorrow, or the owner can raise it`);
+  }
+  /** The owner's view: the switch, the cap, today's spend, and the markup. */
+  async settings(u: AuthUser) {
+    if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can see this');
+    const c = await this.controls(u.studioId);
+    return { paidHelpers: c.off ? 'off' as const : 'on' as const, capPerDayUsd: c.capPerDayUsd, todayUsd: await this.todayUsd(u.studioId), markup: this.markup, provider: this.provider.name };
+  }
+  async patchSettings(u: AuthUser, body: any) {
+    if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can change this');
+    const b = body ?? {};
+    const keys = Object.keys(b).filter(k => !['paidHelpers', 'capPerDayUsd'].includes(k));
+    if (keys.length) throw badRequest(`${keys[0]}: not a setting`);
+    const set: Partial<typeof studioSettings.$inferInsert> = {};
+    if (b.paidHelpers !== undefined) { if (b.paidHelpers !== 'on' && b.paidHelpers !== 'off') throw badRequest('paidHelpers: "on" or "off"'); set.editorPaidOff = b.paidHelpers === 'off'; }
+    if (b.capPerDayUsd !== undefined) {
+      if (b.capPerDayUsd !== null && (typeof b.capPerDayUsd !== 'number' || !(b.capPerDayUsd >= 0) || b.capPerDayUsd > 1000)) throw badRequest('capPerDayUsd: from 0 to 1000, or null for the default');
+      set.editorCapPerDay = b.capPerDayUsd;
+    }
+    if (Object.keys(set).length)
+      await this.ctx.db.insert(studioSettings).values({ studioId: u.studioId, ...set }).onConflictDoUpdate({ target: studioSettings.studioId, set });
+    return this.settings(u);
+  }
+
+  async features(u?: AuthUser) {
+    const c = u ? await this.controls(u.studioId) : { off: false };
+    const paid = !c.off;
     return {
-      captions: { available: true, languages: ['auto', 'en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ja', 'ko', 'zh'] },
+      // Paid helpers are hidden while the owner has them switched off (silence cuts, beats and the voice check stay free).
+      paid: { available: paid, ...(paid ? {} : { reason: 'AI editing helpers are switched off for now' }) },
+      captions: { available: paid, languages: ['auto', 'en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ja', 'ko', 'zh'] },
       cuts: { available: true, defaults: { ...CUT_DEFAULTS } },
-      matte: { available: this.matteAvailable, maxSec: EDITOR_LIMITS.maxMatteSec },
-      denoise: { available: true },
+      matte: { available: paid && this.matteAvailable, maxSec: EDITOR_LIMITS.maxMatteSec },
+      denoise: { available: paid },
       beats: { available: true, free: true },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };

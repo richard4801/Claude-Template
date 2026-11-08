@@ -227,6 +227,11 @@ interface MuseApi {
     /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
     suspend fun referencePoster(referenceId: String): ByteArray? = null
     /**
+     * What the editor's AI helpers can do now (`GET /v1/editor/features`). `matte.available` is false while the cut-out
+     * runs on the mock: Remove background and Tap to keep then read "Coming soon". A server without it: all available.
+     */
+    suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject? = null
+    /**
      * The reference video (an authenticated route: a redirect to storage, or the bytes), saved into [into] for the
      * player, which then needs no token. False when there is none (demo mode, expired).
      */

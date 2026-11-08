@@ -37,7 +37,10 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
     .catch(e => ctx.log.warn({ err: (e as Error).message }, 'matte repair failed')), 0);
   ctx.later(() => void svc.recover().then(n => { if (n) ctx.log.info({ n }, 'editor jobs interrupted by the restart were failed and released'); }).catch(e => ctx.log.warn({ err: (e as Error).message }, 'editor recover failed')), 0);
 
-  app.get('/v1/editor/features', async () => svc.features());
+  app.get('/v1/editor/features', async req => svc.features(req.user));
+  // workstream 1: the owner's runtime switch and daily cap for paid helpers (no redeploy).
+  app.get('/v1/editor/settings', async req => svc.settings(req.user));
+  app.patch('/v1/editor/settings', async req => svc.patchSettings(req.user, req.body));
   /** Filters, caption styles and hook templates (the apps also carry these tables; this is the server's copy). */
   app.get('/v1/editor/presets', async () => ({ filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS }));
 

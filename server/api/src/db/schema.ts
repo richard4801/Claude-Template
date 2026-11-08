@@ -71,6 +71,9 @@ export const invites = pgTable('invites', {
 
 export const studioSettings = pgTable('studio_settings', {
   studioId: text('studio_id').primaryKey().references(() => studios.id),
+  /** workstream 1: the owner's runtime switch for paid AI editing helpers (no redeploy), and their daily spend cap (null = EDITOR_CAP_PER_DAY_USD). */
+  editorPaidOff: boolean('editor_paid_off').notNull().default(false),
+  editorCapPerDay: money('editor_cap_per_day'),
   imageEngine: jsonb('image_engine').$type<{ provider: string; model: string; url?: string }>(),
   capPerJob: money('cap_per_job'),
   capPerDay: money('cap_per_day'),
