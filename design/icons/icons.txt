@@ -248,3 +248,6 @@ coins
 microphone-slash
 images
 warning
+book-open-text
+push-pin
+pencil-simple
