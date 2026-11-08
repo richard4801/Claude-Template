@@ -301,8 +301,8 @@ const opsFor: Record<string, unknown[]> = {
   mask: [{ op: 'mask', itemId: 'p1', mask: { shape: 'circle', feather: 0.2 } }], transform: [{ op: 'transform', itemId: 'p1', transform: { x: 0.3 } }],
   keyframe: [{ op: 'keyframe', itemId: 'p1', prop: 'opacity', t: 1, v: 0.5, ease: 'easeOut' }], remove_keyframe: [{ op: 'remove_keyframe', itemId: 'p1', prop: 'scale', t: 0.5 }],
   volume: [{ op: 'volume', itemId: 'c1', volume: 0.6, fadeInSec: 0.5 }],
-  duck: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
-  voice: [{ op: 'voice', itemId: 'c1', effect: 'radio', enhance: true }], add_music: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 1 }],
+  duck: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
+  voice: [{ op: 'voice', itemId: 'c1', effect: 'radio', enhance: true }], add_music: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 1 }],
   ratio: [{ op: 'ratio', ratio: '1:1' }], patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
 };
 for (const n of OP_NAMES) if (n !== 'caption_style' && !opsFor[n]?.length) throw new Error(`ops fixture: no case for ${n}`);

@@ -3622,7 +3622,7 @@
    {
     "op": "add_music",
     "asset": {
-     "library": "music_x",
+     "upload": "up_music",
      "durationSec": 30
     },
     "startSec": 0
@@ -3672,7 +3672,7 @@
     {
      "id": "m1",
      "kind": "audio",
-     "library": "music_x",
+     "upload": "up_music",
      "durationSec": 30
     }
    ],
@@ -4072,7 +4072,7 @@
    {
     "op": "add_music",
     "asset": {
-     "library": "music_x",
+     "upload": "up_music",
      "durationSec": 30
     },
     "startSec": 1
@@ -4116,7 +4116,7 @@
     {
      "id": "m1",
      "kind": "audio",
-     "library": "music_x",
+     "upload": "up_music",
      "durationSec": 30
     }
    ],

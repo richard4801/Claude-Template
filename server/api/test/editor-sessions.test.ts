@@ -51,9 +51,9 @@ describe('edit ops', () => {
     keyframe: [{ op: 'keyframe', itemId: 'p1', prop: 'opacity', t: 1, v: 0.5, ease: 'easeOut' }],
     remove_keyframe: [{ op: 'remove_keyframe', itemId: 'p1', prop: 'scale', t: 0.5 }],
     volume: [{ op: 'volume', itemId: 'c1', volume: 0.6, fadeInSec: 0.5 }],
-    duck: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
+    duck: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
     voice: [{ op: 'voice', itemId: 'c1', effect: 'radio', enhance: true }],
-    add_music: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 1 }],
+    add_music: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 1 }],
     ratio: [{ op: 'ratio', ratio: '1:1' }],
     patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
   };
@@ -73,6 +73,8 @@ describe('edit ops', () => {
     expect(() => applyOps(base, [{ op: 'split', at: 0.01 }])).toThrow(/ops\.0\.split\.at/);
     expect(() => applyOps(base, [{ op: 'caption_style', preset: 'pop' }])).toThrow(/no captions yet/);
     expect(() => applyOps(base, [{ op: 'look', itemId: 'c1', look: 'nope' }])).toThrow(/look id from list_looks/);
+    // No music library yet (2026-11-08 audit): a library track would be silent in every app.
+    expect(() => applyOps(base, [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 } }])).toThrow(/no music library yet/);
   });
 });
 
