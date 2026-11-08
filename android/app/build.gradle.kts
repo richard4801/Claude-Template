@@ -23,8 +23,21 @@ android {
         buildConfigField("boolean", "DEFAULT_USE_FAKE", "false")
     }
 
+    // Release signing (WS4): the studio's release key comes from the environment, never from git. Without it the
+    // release build is signed with the debug key, so it still installs for testing (but can't update a signed install).
+    val releaseKeystore = System.getenv("MUSE_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) create("museRelease") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("MUSE_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("MUSE_KEY_ALIAS") ?: "muse"
+            keyPassword = System.getenv("MUSE_KEY_PASSWORD") ?: System.getenv("MUSE_KEYSTORE_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = if (releaseKeystore != null) signingConfigs.getByName("museRelease") else signingConfigs.getByName("debug")
             // Performance (plans/perf-audit.md "Android"): R8 shrinks and optimises the code and drops unused resources.
             isMinifyEnabled = true
             isShrinkResources = true
