@@ -458,6 +458,7 @@ enum SnapshotRunner {
                 let ok = first?.isLink == true && first?.isReady == true && again?.id == first?.id && again?.cached == true
                 lines.append("\(ok ? "FITS" : "CUT") recreate_link 1280x800 c the demo link reads at once (\(first?.id ?? "none")), again cached \(again?.cached == true)")
                 store.leaveRecreateReference()
+                store.toast = nil   // the "read this video before" toast would sit over the next shots
                 try? await Task.sleep(for: .seconds(0.5))
             }
             let refs = (try? await store.recreateAPI.listReferences()) ?? []
@@ -577,6 +578,7 @@ enum SnapshotRunner {
                         lines.append("\(code == nil && store.recreate.demoSwaps[slot] == demoTakeId && store.recreate.built?.phase == .ready ? "FITS" : "CUT") recreate_fix_replace 1280x800 c \(slot) now plays \(demoTakeId) (\(code ?? "ok"))")
                     }
                     store.closeRecreateFix()
+                    store.toast = nil
                     try? await Task.sleep(for: .seconds(0.8))
                 } else {
                     lines.append("CUT recreate_fix 1280x800 c no weakest shot after Build")

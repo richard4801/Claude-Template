@@ -20,3 +20,21 @@ Themes: `c` Soft Tactile, `a` Editorial, `b` Camera Body, `d` Creator Pop; 1280 
     tile.
   - **Fix shot 2** re-picks or regenerates the weakest shot. Export stays the one primary.
 - Anything the editor can't do yet shows in the panel as "Not supported yet", with the moment it happens.
+
+## Release 1 on the Mac (built, demo mode, Mac CI run 42492773570)
+- **Paste a link** (`built_link_c`): the start page takes a TikTok, Instagram Reel or YouTube link (field, ⌘V, or dropped),
+  as well as a dropped or chosen file anywhere on the page. Each refusal shows the server's words, with "Choose the file" beside it.
+  A link whose download is blocked later shows the same and a drop zone.
+- **Cast** (`built_cast_c`): the lead at the top of the Recipe panel; the new shots are priced and made with her, and
+  Build's confirmation names her (`built_confirm_*`).
+- **How each shot is made**: "Swap into the reference shot" (default; keeps its camera, speed and look) or "Generate a
+  new shot", with "Keep the reference's setting". A failed swap is offered as generate, priced on its own.
+- **Write the shot briefs** (`built_briefs_c`, `built_briefs_confirm_c`): under "Not described yet", priced and confirmed first.
+- **Claude** (`built_claude_c`): the editor's chat beside Recreate, on a "recreate" thread (falls back to the edit
+  session's), with Explain shot N / Fix the weakest shot / Analyse a new video. A paid step Claude asks for waits for Allow.
+- **Compare** (`built_compare_*`, `built_compare_playing_c`, `built_compare_frame_c`): "Your edit" plays the built edit:
+  the server's preview when it has one ("Preview of the cut" if it leaves something out), else rendered on the Mac with
+  the editor's engine. Swapped shots are noted as "Already in the shot".
+- **Fix shot N** (`built_fix_c`): another take, or the shot made again (priced, confirmed), swapped into the edit as one undo step.
+- **Export** (`built_export_c`): the primary after Build; the reference's sound as a guide track or silent, with the
+  "Post with the original sound" steps. The server export when there is one, else made on the Mac.
