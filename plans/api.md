@@ -1260,6 +1260,7 @@ Slot {
   pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
 }
 Transition { atSec, from, to, kind: "cut"|"flash"|"whip"|"zoom"|"fade"|"crossfade"|"glitch"|"unknown", durationSec, confidence }
+// glitch: a burst of 3+ hard changes in under 0.6 s (the picture flickering between shots). One that returns to the same shot has from = to (an effect inside the shot, logged as an editor gap).
 TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker" /* nearest editor font to the read words' shape; "sans" when unsure */, animIn: "cut"|"fade"|"typewriter"|null, animOut: "cut"|"fade"|null, animInSec?, animOutSec? /* how long the fade or typing takes */, confidence }
 ```
 **Size caps** (a recipe stays under about 256 KB): speed curves at most 48 points and camera keys at most 64 per slot (thinned, ends kept), at most 100 text items. An `unknown` transition also adds a gap.

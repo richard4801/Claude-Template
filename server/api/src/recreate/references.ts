@@ -478,7 +478,7 @@ export class RecreateReferences {
 
   /**
    * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freezes
-   * without a known place, and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
+   * without a known place, and flashes and glitches inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
    */
   private async reportGaps(u: AuthUser, r: Row, recipe: Recipe, done: string[]) {
     if (u.role !== 'owner') return done;
@@ -488,6 +488,8 @@ export class RecreateReferences {
     if (freeze.length) found.push({ key: 'speed:freeze-frame', kind: 'effect', what: 'Freeze frame', note: `“${r.name}”: ${freeze.map(x => x.id).join(', ')}` });
     const flashes = recipe.transitions.filter(t => t.from === t.to && t.kind === 'flash');
     if (flashes.length) found.push({ key: 'effect:flash-in-shot', kind: 'effect', what: 'A white flash inside a shot', note: `“${r.name}” at ${flashes.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
+    const glitches = recipe.transitions.filter(t => t.from === t.to && t.kind === 'glitch');
+    if (glitches.length) found.push({ key: 'effect:glitch-in-shot', kind: 'effect', what: 'A glitch inside a shot', note: `“${r.name}” at ${glitches.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
     const out = [...done];
     for (const g of found.filter(x => !done.includes(x.key))) {
       try { await learningOf(this.ctx).addGap(u, g); out.push(g.key); } catch { /* the gap list is best effort */ }
