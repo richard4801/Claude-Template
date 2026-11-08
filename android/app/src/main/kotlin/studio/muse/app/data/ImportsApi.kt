@@ -232,3 +232,11 @@ suspend fun importFromLink(
     ),
     onUploaded, onStep,
 )
+
+/** A video file (Share → MUSE, or picked): uploaded as a clip and imported with no link (WS12: sourceUrl is optional). */
+suspend fun importFromFile(api: MuseApi, file: java.io.File, name: String?, onStep: (Float, String) -> Unit = { _, _ -> }): ImportedVideo {
+    onStep(.02f, "Uploading the video")
+    val uploadId = api.uploadClipFile(file) { p -> onStep(.02f + p * .9f, "Uploading the video") }
+    onStep(.95f, "Saving it to your library")
+    return api.imports.fromUpload(ImportUpload(uploadId, null, name?.substringBeforeLast('.')?.take(80)?.ifBlank { null }))
+}

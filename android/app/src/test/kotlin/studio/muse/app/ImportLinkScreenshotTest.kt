@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -55,5 +56,31 @@ class ImportLinkScreenshotTest(private val theme: String, private val state: Str
             else -> compose.onNodeWithText("Pick the saved video").assertIsDisplayed()
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/import_link_${theme}_$state.png")
+    }
+}
+
+/** Share → MUSE (WS7): the chooser for a shared link and for a shared file, all four themes. PNGs: share_chooser_<theme>_<kind>.png. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
+class ShareChooserScreenshotTest(private val theme: String, private val kind: String) {
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
+        fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t -> listOf("link", "file").map { k -> arrayOf<Any>(t, k) } }
+    }
+
+    @get:Rule val compose = createComposeRule()
+
+    @Test fun capture() {
+        val item = if (kind == "link") studio.muse.app.data.SharedReference.Link("https://www.tiktok.com/@dancer/video/7301234567890")
+            else studio.muse.app.data.SharedReference.File(android.net.Uri.parse("content://media/video/1"), "video/mp4")
+        var picked = ""
+        compose.setContent { MuseTheme(ThemeId.fromKey(theme)) { studio.muse.app.ui.screens.ShareChooserContent(item, { picked = "recreate" }, { picked = "swap" }, { picked = "library" }, {}) } }
+        shadowOf(Looper.getMainLooper()).idle()
+        compose.onNodeWithText("Recreate an edit").assertIsDisplayed()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/share_chooser_${theme}_$kind.png")
+        compose.onNodeWithText("Use for swap").performClick()
+        org.junit.Assert.assertEquals("swap", picked)
     }
 }

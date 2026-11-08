@@ -76,7 +76,7 @@ sealed interface ImportPhase {
  * [onDone] gets the imported video; [onPickFile] is "Pick the saved video" when a link can't be fetched.
  */
 @Composable
-fun ImportLinkDialog(purpose: ImportPurpose, link: String? = null, onClose: () -> Unit, onPickFile: () -> Unit, onDone: (ImportedVideo) -> Unit) {
+fun ImportLinkDialog(purpose: ImportPurpose, link: String? = null, onClose: () -> Unit, onPickFile: () -> Unit, file: android.net.Uri? = null, onDone: (ImportedVideo) -> Unit) {
     val c = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -98,6 +98,25 @@ fun ImportLinkDialog(purpose: ImportPurpose, link: String? = null, onClose: () -
         }
     }
     androidx.compose.runtime.LaunchedEffect(link) { link?.let { studio.muse.core.edit.SharedLink.first(it)?.let(::start) } }
+    // A shared video file: uploaded and imported straight away (no link to check).
+    androidx.compose.runtime.LaunchedEffect(file) {
+        val uri = file ?: return@LaunchedEffect
+        val media = c.media ?: return@LaunchedEffect
+        phase = ImportPhase.Working(.02f, "Uploading the video")
+        phase = try {
+            val tmp = java.io.File(context.cacheDir, "links/shared-${System.currentTimeMillis()}.mp4").also { it.parentFile?.mkdirs() }
+            try {
+                // Streamed to a temp file (an import can be 150 MB): never held in memory.
+                val copied = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                }
+                if (copied == null || copied == 0L) throw ApiException("unreadable", "Couldn't read this video. Save it again and share it once more.")
+                ImportPhase.Done(studio.muse.app.data.importFromFile(c.repo.api, tmp, media.displayName(uri)) { p, s -> phase = ImportPhase.Working(p, s) })
+            } finally { tmp.delete() }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: ApiException) {
+            ImportPhase.Failed(e.message?.ifBlank { null } ?: "Couldn't import this video", pickFile = false)
+        }
+    }
     Dialog({ job?.cancel(); onClose() }, DialogProperties(usePlatformDefaultWidth = false)) {
         ImportLinkContent(purpose, phase, link.orEmpty(), onClose = { job?.cancel(); onClose() }, onLink = ::start, onPickFile = onPickFile,
             onAnother = { phase = ImportPhase.Enter }, onDone = onDone)
