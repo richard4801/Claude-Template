@@ -632,7 +632,7 @@ private fun PhoneBar(ui: ComposerUi) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         // Photo tool (workstream 3): one Photos 1–4 list in place of Quality and sound.
         val p = ui.photo
-        if (p != null) MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }
+        if (p != null) { MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; PhotoModelPill(ui) }
         else {
             Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }
                 .padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1057,13 +1057,13 @@ private fun WideBar(ui: ComposerUi) {
         val scroll = rememberScrollState()
         Row(Modifier.weight(1f).barScrollFade(scroll).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // Photo tool (workstream 3): one Photos 1–4 list; no Quality, Shape, Length, Sound, Speaking or Takes (stills render at the shoot's size).
-            ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; return@Row }
+            ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; PhotoModelPill(ui); return@Row }
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
-            val engines = ui.catalog?.tier(d.quality)?.models.orEmpty()
-            if (ui.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
-                val items = listOf("Auto" to (d.engineModel == null)) + engines.map { e -> (e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: "")) to (e.model == d.engineModel) }
-                MenuPill("cube", d.engineLabel(ui.catalog), "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
+            // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
+            val groups = ModelPicker.groups(ui.catalog, d.quality)
+            if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
+                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }
             // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
             if (d.tool != ComposerTool.EXTEND) {
@@ -1121,7 +1121,7 @@ private fun Pill(icon: String, label: String, value: String?, tip: String, onCli
 }
 
 @Composable
-private fun MenuPill(icon: String, label: String, tip: String, items: List<Pair<String, Boolean>>, onPick: (Int) -> Unit) {
+internal fun MenuPill(icon: String, label: String, tip: String, items: List<Pair<String, Boolean>>, onPick: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         Pill(icon, label, null, tip) { open = true }
