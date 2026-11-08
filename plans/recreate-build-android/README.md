@@ -22,3 +22,17 @@ Files: `core/.../edit/Recreate.kt`, `app/.../edit/RecreateBuild.kt` (model), `Re
 
 PNGs: `recreate_<theme>_<state>.png`, themes a–d; states recipe, confirm, generating, compare_phone, picker and the
 `_tablet` versions (1280×800).
+
+## Playback and shot progress (follow-up)
+
+- **One playhead, both players:** the timecode, a frame back, play / pause and a frame forward sit under the players, and
+  on a tablet a playhead line runs across the lanes. While playing, the selected shot follows the playhead.
+- **Reference:** its video comes from the authenticated route (`GET …/video`, redirect or bytes; OkHttp drops the token
+  on the redirect to storage). It is saved to the cache and played with Media3, kept on the shared playhead.
+- **Your edit:** shot by shot, the take each shot comes from (a matched take, or the shot generated for it), cut at the
+  reference's cuts and kept on the playhead, with the recipe's text on top. It is muted, so the reference's sound leads.
+- **Shot progress:** a shot being made shows its job's progress from the studio's live jobs ("42%" and a bar). A job
+  not listed yet (demo mode, or before its first event) shows a calm indeterminate state: a short segment drifting
+  slowly, with no spinner and no made-up percentage.
+
+New PNGs: `recreate_<theme>_waiting.png` and `_waiting_tablet.png` (indeterminate); the generating states show 42%.

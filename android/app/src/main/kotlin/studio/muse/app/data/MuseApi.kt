@@ -226,6 +226,11 @@ interface MuseApi {
     suspend fun learnGaps(limit: Int = 10): List<LearnGap> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
     /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
     suspend fun referencePoster(referenceId: String): ByteArray? = null
+    /**
+     * The reference video (an authenticated route: a redirect to storage, or the bytes), saved into [into] for the
+     * player, which then needs no token. False when there is none (demo mode, expired).
+     */
+    suspend fun referenceVideo(referenceId: String, into: java.io.File): Boolean = false
 
     // Recreate this edit (workstream 1, plans/api.md "Recreate this edit"). Defaults: a server without it.
     /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */

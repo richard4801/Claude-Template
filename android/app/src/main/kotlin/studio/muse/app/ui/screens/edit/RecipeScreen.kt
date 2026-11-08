@@ -149,10 +149,27 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, on
         RecreateBuildModel(c.repo.api, scope, RecreateBuildUi(referenceId, recipe, name, takes = takes), modelId = { c.repo.state.value.models.firstOrNull()?.id })
     }
     val ui by model.ui.collectAsState()
+    val studio by c.repo.state.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var poster by remember(referenceId) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var video by remember(referenceId) { mutableStateOf<String?>(null) }
     LaunchedEffect(referenceId) {
         if (!c.repo.demo) poster = c.repo.api.referencePoster(referenceId)?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
         model.load()
+    }
+    // The reference video, from its authenticated route into the cache (≤ 60 s), so the player needs no token.
+    LaunchedEffect(referenceId) {
+        if (c.repo.demo) return@LaunchedEffect
+        val f = java.io.File(context.cacheDir, "recreate_$referenceId.mp4")
+        if ((f.length() > 0) || c.repo.api.referenceVideo(referenceId, f)) video = f.toURI().toString()
+    }
+    // Shots being made: their progress from the studio's live jobs.
+    LaunchedEffect(studio.jobs) { model.setJobProgress(studio.jobs.filter { it.running }.associate { it.id to it.progress.toInt() }) }
+    // The shared playhead while playing (both players follow it).
+    LaunchedEffect(ui.playing) {
+        if (!ui.playing) return@LaunchedEffect
+        var last = androidx.compose.runtime.withFrameNanos { it }
+        while (true) androidx.compose.runtime.withFrameNanos { now -> model.advance((now - last) / 1e9); last = now }
     }
     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); model.consumeMessage() } }
     RecreateBuildScreen(ui, RecreateActions(
@@ -160,7 +177,8 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, on
         onBuild = { scope.launch { model.requestBuild() } }, onConfirm = { model.confirmBuild() }, onCancel = model::cancelBuild,
         onUseTake = model::useTake, onFix = model::fixWeakest,
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
-    ), picture = poster)
+        onPlay = model::togglePlay, onStep = model::step,
+    ), picture = poster, media = RecreateMedia(video) { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl })
 }
 
 /** Polls a reference (showing the server's step) until it is ready or failed. */

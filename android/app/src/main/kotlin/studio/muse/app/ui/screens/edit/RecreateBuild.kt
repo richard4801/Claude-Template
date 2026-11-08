@@ -64,7 +64,17 @@ data class RecreateBuildUi(
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
+    /** The shared playhead (seconds in the reference): the reference and your edit both follow it. */
+    val time: Double = 0.0,
+    val playing: Boolean = false,
+    /** jobId → 0–100, from the studio's live jobs, for shots being made; a job not listed shows a calm indeterminate state. */
+    val jobProgress: Map<String, Int> = emptyMap(),
 ) {
+    val duration: Double get() = recipe.durationSec.coerceAtLeast(0.1)
+    /** The shot under the playhead. */
+    val slotAtTime: Int get() = slots.indexOfLast { it.startSec <= time + 1e-6 }.coerceAtLeast(0)
+    /** A shot's job progress (0–100) while it is being made, when known. */
+    fun progress(slotId: String): Int? = slotFill(slotId)?.jobId?.let { jobProgress[it] }?.takeIf { it > 0 }
     val slots get() = recipe.slots
     fun slotFill(id: String): RecreateSlotFill? = fill?.slot(id)
     fun score(id: String): Double? = match?.perSlot?.get(id)
@@ -116,7 +126,31 @@ class RecreateBuildModel(
         if (m == RecreateMode.Compare && _ui.value.match == null) _ui.update { it.copy(message = "Compare opens once the edit is built") }
         else _ui.update { it.copy(mode = m) }
     }
-    fun select(i: Int) { if (i in _ui.value.slots.indices) _ui.update { it.copy(selected = i) } }
+    /** Selects a shot and moves the playhead to its middle. */
+    fun select(i: Int) {
+        val s = _ui.value.slots.getOrNull(i) ?: return
+        _ui.update { it.copy(selected = i, time = (s.startSec + s.endSec) / 2) }
+    }
+
+    fun togglePlay() = _ui.update { it.copy(playing = !it.playing) }
+
+    /** One frame back or forward (the reference's frame rate is taken as 30). */
+    fun step(frames: Int) = seek(_ui.value.time + frames / 30.0, stop = true)
+
+    fun seek(sec: Double, stop: Boolean = false) = _ui.update { u ->
+        val t = sec.coerceIn(0.0, u.duration)
+        u.copy(time = t, playing = if (stop) false else u.playing).let { v -> v.copy(selected = v.slotAtTime) }
+    }
+
+    /** While playing: the playhead moves on (looping at the end) and the selected shot follows it. */
+    fun advance(dtSec: Double) = _ui.update { u ->
+        if (!u.playing) return@update u
+        var t = u.time + dtSec
+        if (t >= u.duration) t = 0.0
+        u.copy(time = t).let { v -> v.copy(selected = v.slotAtTime) }
+    }
+
+    fun setJobProgress(p: Map<String, Int>) { if (p != _ui.value.jobProgress) _ui.update { it.copy(jobProgress = p) } }
 
     /** The fill; when nothing is scored yet, the takes are matched once (free) first. Then every shot to generate is priced. */
     suspend fun load() {
@@ -272,7 +306,7 @@ class RecreateBuildModel(
         val u = _ui.value
         val fill = u.fill ?: return
         if (u.building) return
-        _ui.update { it.copy(building = true) }
+        _ui.update { it.copy(building = true, playing = false) }
         val slots = buildMap {
             fill.slots.forEach { s ->
                 when (s.state) {

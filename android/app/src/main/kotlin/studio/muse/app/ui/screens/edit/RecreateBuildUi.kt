@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,13 +75,23 @@ class RecreateActions(
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
     val onFix: () -> Unit = {},
     val onOpenEditor: () -> Unit = {},
+    val onPlay: () -> Unit = {},
+    val onStep: (Int) -> Unit = {},
 )
+
+/**
+ * What the players can play: [reference] is the reference video saved from its authenticated route (a local file), and
+ * [takeVideo] a take's video link. Without them (demo mode, screenshots) the players show the poster or stand-in tones.
+ */
+class RecreateMedia(val reference: String? = null, val takeVideo: (String) -> String? = { null })
+
+private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
 
 /** The whole screen as a function of [ui] (screenshots render it). [picture]: the reference's poster, when the server has it. */
 @Composable
-fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap? = null, picking: String? = null) {
+fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap? = null, picking: String? = null, media: RecreateMedia = RecreateMedia()) {
     var pick by remember(picking) { mutableStateOf(picking) }
-    ScreenBox(statusPad = true) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media) { ScreenBox(statusPad = true) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 720.dp
             val pickTake: (String) -> Unit = { pick = it }
@@ -88,7 +99,7 @@ fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
             ui.confirmSlots?.let { BuildConfirm(ui, it, a) }
             pick?.let { s -> TakePicker(ui.takes, onPick = { t -> a.onUseTake(s, t); pick = null }, onClose = { pick = null }) }
         }
-    }
+    } }
 }
 
 // --------------------------------------------------------------------------------------------------------------- Phone
@@ -106,6 +117,10 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             if (ui.mode == RecreateMode.Recipe) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Player("Reference", ui, yours = false, picture, Modifier.fillMaxWidth(), height = 300.dp)
+                    Transport(ui, a)
+                }
                 ShotTiles(ui, scores = false, a.onSelect)
                 ui.slots.getOrNull(ui.selected)?.let { ShotPanel(ui, it, ui.selected, pickTake, a.onBuild) }
                 LearnHairline()
@@ -116,6 +131,7 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
                     Player("Reference", ui, yours = false, picture, Modifier.weight(1f), height = 300.dp)
                     Player("Your edit", ui, yours = true, null, Modifier.weight(1f), height = 300.dp)
                 }
+                Transport(ui, a)
                 ShotTiles(ui, scores = true, a.onSelect)
                 ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
             }
@@ -201,7 +217,10 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
         LearnHairline()
         Row(Modifier.weight(1f).fillMaxWidth()) {
             if (ui.mode == RecreateMode.Recipe) {
-                Box(Modifier.weight(1f).fillMaxHeight().padding(16.dp)) { Player("Reference", ui, yours = false, picture, Modifier.fillMaxSize()) }
+                Column(Modifier.weight(1f).fillMaxHeight().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Player("Reference", ui, yours = false, picture, Modifier.weight(1f))
+                    Transport(ui, a)
+                }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(m.roles.hairline))
                 Column(Modifier.width(328.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ui.slots.getOrNull(ui.selected)?.let { ShotPanel(ui, it, ui.selected, pickTake, a.onBuild) }
@@ -218,6 +237,7 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
                         Player("Reference", ui, yours = false, picture, Modifier.weight(1f).fillMaxHeight())
                         Player("Your edit", ui, yours = true, null, Modifier.weight(1f).fillMaxHeight())
                     }
+                    Transport(ui, a)
                 }
             }
         }
@@ -238,7 +258,11 @@ private fun Lanes(ui: RecreateBuildUi, scores: Boolean, onSelect: (Int) -> Unit)
                 T(label, m.scale.label, m.roles.ink, maxLines = 1)
             }
             Box(Modifier.width(1.dp).fillMaxHeight().background(m.roles.hairline))
-            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 8.dp)) { content(maxWidth) }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 8.dp)) {
+                content(maxWidth)
+                // The shared playhead, across every lane.
+                Box(Modifier.offset(x = maxWidth * (ui.time / d).toFloat() - 1.dp).width(2.dp).fillMaxHeight().background(m.roles.accent))
+            }
         }
         LearnHairline()
     }
@@ -323,27 +347,96 @@ private fun StandIn(ui: RecreateBuildUi, tone: Int, modifier: Modifier, icon: Bo
 
 private fun swatch(hex: String): Color = runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color.Gray)
 
-/** One player: its label above the picture on the viewer tone, with the recipe's text where the reference shows it. */
+/**
+ * One player: its label above the picture on the viewer tone. Both follow the shared playhead: the reference plays its
+ * video (from its authenticated route); your edit plays, shot by shot, the take each shot comes from, cut at the
+ * reference's cuts, with the recipe's text on top. Without video (demo mode), the poster or a stand-in tone.
+ * [height]: the picture area on a phone (in a scrolling page); null fills the space left (a tablet).
+ */
 @Composable
-/** [height]: the picture area on a phone (in a scrolling page); null fills the space left (a tablet). */
 private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: ImageBitmap?, modifier: Modifier, height: Dp? = null) {
     val m = muse
-    val i = ui.selected
+    val media = LocalRecreateMedia.current
+    val i = ui.slotAtTime
     val slot = ui.slots.getOrNull(i)
-    val t = slot?.let { (it.startSec + it.endSec) / 2 } ?: 0.0
+    val t = ui.time
+    val video: Pair<String, Double>? = if (!yours) media.reference?.let { it to t }
+        else slot?.let { s -> ui.slotFill(s.id)?.takeId?.let(media.takeVideo)?.let { it to (t - s.startSec).coerceAtLeast(0.0) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T(label, m.scale.label, m.roles.ink, maxLines = 1)
         Box(Modifier.fillMaxWidth().let { if (height != null) it.height(height) else it.weight(1f) }.clip(RoundedCornerShape(m.radii.container)).background(Color.Black).padding(vertical = 12.dp)
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
-                if (picture != null && !yours) Image(picture, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else StandIn(ui, i + (if (yours) 1 else 0), Modifier.fillMaxSize(), icon = false)
-                ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
+                when {
+                    video != null -> SyncedVideo(video.first, video.second, ui.playing, muted = yours, Modifier.fillMaxSize())
+                    picture != null && !yours -> Image(picture, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    else -> StandIn(ui, i + (if (yours) 1 else 0), Modifier.fillMaxSize(), icon = false)
+                }
+                // The reference's own video already shows its text; elsewhere the recipe's text stands in for it.
+                if (yours || media.reference == null) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
                     val bias = when (x.position) { "Top" -> -.7f; "Middle" -> 0f; else -> .6f }
                     T(x.text, m.scale.caption.copy(fontWeight = FontWeight.Bold), Color.White, Modifier.align(androidx.compose.ui.BiasAlignment(0f, bias)).padding(horizontal = 8.dp), maxLines = 2)
                 }
             }
         }
+    }
+}
+
+/**
+ * A video held at [sourceSec] (the shared playhead, in this video's time): it plays while [playing], and is put back on
+ * the playhead when paused or when it drifts more than a quarter second. Loops when the playhead runs past its end.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun SyncedVideo(uri: String, sourceSec: Double, playing: Boolean, muted: Boolean, modifier: Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(uri) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            prepare()
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
+    androidx.compose.runtime.LaunchedEffect(player, muted) { player.volume = if (muted) 0f else 1f }
+    androidx.compose.runtime.LaunchedEffect(player, playing) { player.playWhenReady = playing }
+    androidx.compose.runtime.LaunchedEffect(player, sourceSec, playing) {
+        val len = player.duration.takeIf { it > 0 }
+        val want = (sourceSec * 1000).toLong().let { ms -> if (len != null) ms % len else ms }
+        if (!playing || kotlin.math.abs(player.currentPosition - want) > 250) player.seekTo(want)
+    }
+    androidx.lifecycle.compose.LifecycleResumeEffect(player) { onPauseOrDispose { player.pause() } }
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            androidx.media3.ui.PlayerView(ctx).apply {
+                this.player = player
+                useController = false
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+            }
+        },
+        modifier = modifier,
+        update = { it.player = player },
+    )
+}
+
+/** The timecode, a frame back, play / pause and a frame forward, under the players. */
+@Composable
+private fun Transport(ui: RecreateBuildUi, a: RecreateActions) {
+    val m = muse
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        T("${suiteTime(ui.time)} / ${suiteTime(ui.duration)}", m.scale.label.tabular(), m.roles.ink, Modifier.weight(1f), maxLines = 1)
+        Box(Modifier.size(44.dp).press { a.onStep(-1) }.semantics { contentDescription = "Back 1 frame"; role = Role.Button }, contentAlignment = Alignment.Center) {
+            EIc("skip-back", 20.dp, m.roles.ink)
+        }
+        Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(m.roles.ink).press(onClick = a.onPlay)
+            .semantics { contentDescription = if (ui.playing) "Pause" else "Play"; role = Role.Button }, contentAlignment = Alignment.Center) {
+            EIc(if (ui.playing) "pause" else "play", 20.dp, m.roles.canvas)
+        }
+        Box(Modifier.size(44.dp).press { a.onStep(1) }.semantics { contentDescription = "Forward 1 frame"; role = Role.Button }, contentAlignment = Alignment.Center) {
+            EIc("skip-forward", 20.dp, m.roles.ink)
+        }
+        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -394,13 +487,36 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
             when {
                 state == "to_generate" && cant == null && failed == null && price != null -> T(price, m.scale.label.tabular(), m.roles.ink, maxLines = 1)
                 state == "matched" && f?.score != null -> T("${RecreateText.percent(f.score)} alike", m.scale.label.tabular(), m.roles.ink, maxLines = 1)
+                making && ui.progress(s.id) != null -> T("${ui.progress(s.id)}%", m.scale.label.tabular(), m.roles.ink, maxLines = 1)
             }
         }
         T(line, m.scale.caption, if (cant != null) m.roles.caution else m.roles.ink2)
+        if (making) ShotProgress(ui.progress(s.id))
         if (ui.fill != null && !making) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (failed != null) Quiet("Try again", enabled = !ui.buildBusy, onClick = onRetry)
             Quiet(if (state == "matched") "Pick another take" else "Use one of my takes") { pickTake(s.id) }
         }
+    }
+}
+
+/**
+ * A shot being made: its job's progress when the studio's live jobs report it; otherwise a calm indeterminate state, a
+ * short segment drifting slowly across the track (no spinner, no fake percentage).
+ */
+@Composable
+private fun ShotProgress(percent: Int?) {
+    val m = muse
+    val track = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(m.roles.raised)
+    if (percent != null) {
+        Box(track.semantics { contentDescription = "$percent% made" }) { Box(Modifier.fillMaxWidth(percent / 100f).fillMaxHeight().background(m.roles.accent)) }
+        return
+    }
+    val drift = androidx.compose.animation.core.rememberInfiniteTransition(label = "making")
+    val x by drift.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(2400, easing = androidx.compose.animation.core.LinearEasing),
+        androidx.compose.animation.core.RepeatMode.Reverse), label = "x")
+    BoxWithConstraints(track.semantics { contentDescription = "Being made" }) {
+        val w = maxWidth * .3f
+        Box(Modifier.offset(x = (maxWidth - w) * x).width(w).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(m.roles.accent.copy(alpha = .6f)))
     }
 }
 
