@@ -14,9 +14,10 @@ import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
-import { timeline } from '../editor/model.js';
+import { clipLength, timeline } from '../editor/model.js';
+import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
-import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
+import { buildProject, peakInPoint, rangeFor, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, promptSource, shotRequestFor, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
@@ -342,7 +343,8 @@ export class RecreateReferences {
     const b = parse(z.object({
       sessionId: z.string().min(1), baseRevision: z.number().int().min(0).optional(),
       slots: z.record(z.string(), z.string().min(1).max(80)),
-      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional() }).strict().optional(),
+      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional(),
+        peaks: z.boolean().optional() }).strict().optional(),
       /** A proven recipe of the studio's to start from (its look fills in when the reference's can't be mapped); false = none; omitted = the nearest that fits. */
       startFrom: z.union([z.string().min(1).max(80), z.literal(false)]).optional(),
     }).strict(), body);
@@ -367,6 +369,13 @@ export class RecreateReferences {
       if (!t) throw badRequest(`slots.${slotId}: no video take or job ${v}`);
       if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
       takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
+    }
+    // The takes' action peaks (free, server CPU; cached per take), to line them up with the reference's.
+    if (b.options?.peaks !== false) {
+      for (const info of Object.values(takes)) {
+        const row = info && byId.get(info.id);
+        if (info && row?.mediaKey) info.peaks = await this.takePeaks(row.id, row.mediaKey).catch(() => []);
+      }
     }
     // The playbook (workstream 3's learning editor): the owner's pinned rules shape the plan. Claude can't override them;
     // the owner's own explicit options in the app can.
@@ -396,6 +405,69 @@ export class RecreateReferences {
       startedFrom: start ? { recipeId: start.recipeId, name: start.name, distance: start.distance, borrowed } : null };
   }
 
+  private peakCache = new Map<string, { t: number; strength: number }[]>();
+  /** A take's action peaks (the find_action_peaks detector), cached by take and media. */
+  private async takePeaks(takeId: string, key: string) {
+    const k = `${takeId}:${key}`, hit = this.peakCache.get(k);
+    if (hit) return hit;
+    const c = this.ctx.config;
+    const peaks = await this.withLocal(key, async f => findPeaks(await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, f, { maxSec: 120 })));
+    const out = peaks.map(p => ({ t: Math.round(p.t * 1000) / 1000, strength: p.strength }));
+    this.peakCache.set(k, out);
+    if (this.peakCache.size > 500) this.peakCache.delete(this.peakCache.keys().next().value!);
+    return out;
+  }
+
+  /**
+   * "Fix this shot" (plan §4): one slot's clip in the built edit gets another take (or a finished fill job), in place,
+   * as one undoable change. Its place and length on the timeline, transition, ramp, camera keys and look stay; the new
+   * take starts where its action peak lines up. Later hand edits elsewhere are kept.
+   */
+  async replaceSlot(u: AuthUser, id: string, slotId: string, body: unknown, o: { by: 'claude' | 'app'; device?: string } = { by: 'app' }) {
+    const b = parse(z.object({ sessionId: z.string().min(1), take: z.string().min(1).max(80), baseRevision: z.number().int().min(0).optional() }).strict(), body);
+    const { r, recipe } = await this.ready(u, id);
+    const slot = recipe.slots.find(x => x.id === slotId);
+    if (!slot) throw notFound('Slot');
+    const svc = editSessionsOf(this.ctx);
+    const s = await svc.row(u, b.sessionId);
+    const applied = r.fill?.applied;
+    if (!applied || applied.sessionId !== s.id) throw new ApiError(409, 'not_built_here', 'Build the edit from this reference in this session first');
+    const itemId = Object.entries(applied.sources ?? {}).find(([, src]) => src.slotId === slotId)?.[0];
+    const p = structuredClone(s.project) as unknown as EditProject;
+    const ti = p.tracks.findIndex(t => t.kind === 'main'), ii = ti < 0 ? -1 : p.tracks[ti]!.items.findIndex(x => (x as { id: string }).id === itemId);
+    if (!itemId || ii < 0) throw new ApiError(409, 'slot_not_in_edit', `Shot ${slotId} isn’t in the edit any more · rebuild the edit to put it back`);
+    // The take: a take id, or a finished job's first take.
+    let t = (await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.id, b.take), eq(takesTable.studioId, u.studioId), eq(takesTable.kind, 'take'))))[0];
+    if (!t) {
+      const [job] = await this.ctx.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(and(eq(jobs.id, b.take), eq(jobs.studioId, u.studioId)));
+      if (job && job.state !== 'done') throw new ApiError(409, 'job_not_done', 'That shot is still being made · try again when it’s done');
+      if (job) t = (await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.jobId, job.id), eq(takesTable.studioId, u.studioId)))).sort((x, y) => x.index - y.index)[0];
+    }
+    if (!t) throw badRequest(`take: no video take or job ${b.take}`);
+    if (!t.mediaKey) throw badRequest('take: it has no video yet');
+    const info: TakeInfo = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true,
+      peaks: await this.takePeaks(t.id, t.mediaKey).catch(() => []) };
+    const old = p.tracks[ti]!.items[ii] as import('../editor/model.js').VideoClip;
+    let asset = p.assets.find(a => a.take === t!.id);
+    if (!asset) { asset = { id: `a${p.assets.length + 1}`, kind: 'video', take: t.id, durationSec: info.durationSec, width: info.width, height: info.height, hasAudio: true }; p.assets.push(asset); }
+    // The same length on the timeline, from the new take (slower if it is too short), starting at its action peak.
+    const len = clipLength(old);
+    const range = rangeFor(0, len, info.durationSec, old.speedCurve);
+    const off = old.transitionIn ? old.transitionIn.durationSec / 2 : 0;
+    const inSec = peakInPoint(slot, info, range, off);
+    const next: import('../editor/model.js').VideoClip = { ...old, asset: asset.id, inSec, outSec: Math.round((inSec + range.outSec) * 10000) / 10000, speed: range.speed };
+    if (range.curve) next.speedCurve = range.curve; else delete next.speedCurve;
+    delete next.audioAsset; delete next.alphaMatte; delete next.chroma;
+    p.tracks[ti]!.items[ii] = next;
+    const label = `Replaced shot ${slotId} in “${r.name}”`, sources = { [old.id]: { recipeId: r.id, slotId } };
+    const res = o.by === 'claude'
+      ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [{ op: 'replace', path: '/assets', value: p.assets }, { op: 'replace', path: `/tracks/${ti}/items/${ii}`, value: next }] }], label, meta: { sources } })
+      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: p, device: o.device, label }, { meta: { sources } });
+    const fresh = await this.row(u, id);
+    if (fresh.fill?.applied) await this.saveFill(fresh, { ...fresh.fill, applied: { ...fresh.fill.applied, revision: res.revision, slots: { ...fresh.fill.applied.slots, [slotId]: t.id } } });
+    return { sessionId: s.id, revision: res.revision, slotId, itemId: old.id, takeId: t.id, inSec, label, ...(range.speed < 1 ? { note: `The take is shorter than the shot, so it plays at ${Math.round(range.speed * 100)}%` } : {}) };
+  }
+
   /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */
   private async startFrom(u: AuthUser, referenceId: string, id?: string) {
     if (!id) return provenStart(this.ctx, u, referenceId);
@@ -405,13 +477,14 @@ export class RecreateReferences {
   }
 
   /**
-   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freeze
-   * frames and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
+   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freezes
+   * without a known place, and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
    */
   private async reportGaps(u: AuthUser, r: Row, recipe: Recipe, done: string[]) {
     if (u.role !== 'owner') return done;
     const found: { key: string; kind: string; what: string; note: string }[] = [];
-    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze');
+    // Freezes are rebuilt as a 0.1× hold (G5); only those without a known place are a gap.
+    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze' && !sl.speed.freeze);
     if (freeze.length) found.push({ key: 'speed:freeze-frame', kind: 'effect', what: 'Freeze frame', note: `“${r.name}”: ${freeze.map(x => x.id).join(', ')}` });
     const flashes = recipe.transitions.filter(t => t.from === t.to && t.kind === 'flash');
     if (flashes.length) found.push({ key: 'effect:flash-in-shot', kind: 'effect', what: 'A white flash inside a shot', note: `“${r.name}” at ${flashes.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
@@ -593,7 +666,7 @@ export function matchScore(recipe: Recipe, project: import('../editor/model.js')
   const coverage = used.length / Math.max(1, recipe.slots.length);
   const cuts = (cutErr.length ? cutErr.reduce((a, e) => a + Math.max(0, 1 - e / (2 * frame)), 0) / cutErr.length : 1) * coverage;
   const text = !recipe.text.length ? 1 : o.text === false ? 0 : recipe.text.reduce((a, x) => a + (x.words ? 1 : 0.6), 0) / recipe.text.length;
-  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && s.speed.ramp !== 'freeze');
+  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && (s.speed.ramp !== 'freeze' || s.speed.freeze));
   const ramps = !ramped.length ? 1 : o.speed === false ? 0 : ramped.filter(s => takes[s.id]).length / ramped.length;
   const look = recipe.grade.look;
   const grade = !look ? 0.5 : o.look === false || look.distance >= 0.4 ? 0 : Math.max(0, 1 - look.distance);

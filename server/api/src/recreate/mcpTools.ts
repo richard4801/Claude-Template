@@ -117,6 +117,12 @@ export const RECREATE_TOOLS: EditTool[] = [
       return { waitingForOwner: true, pendingId: p.id, estimateUsd: usd, message: 'The owner has been asked in the MUSE app. When the job is done, use its job id for this slot in apply_recipe.' };
     },
   },
+  {
+    name: 'replace_slot', title: 'Fix a shot', scope: 'edit:write',
+    description: 'Swaps one shot of the built edit for another take (or a finished fill_slot job id), in place, as one undoable change: its place, length, transition, ramp, camera moves and look stay, the new take starts where its action lines up, and the owner\'s other edits are kept. Use it after apply_recipe.',
+    inputSchema: obj({ referenceId: RID, slotId: str('The slot (s1, s2, …)'), sessionId: str('The edit session the edit was built in'), take: str('A take id, or a finished job id'), baseRevision: { type: 'number' } }, ['referenceId', 'slotId', 'sessionId', 'take']),
+    run: async (env, a) => rx(env).replaceSlot(env.user, need(a, 'referenceId'), need(a, 'slotId'), { sessionId: need(a, 'sessionId'), take: need(a, 'take'), ...(typeof a.baseRevision === 'number' ? { baseRevision: a.baseRevision } : {}) }, { by: 'claude' }),
+  },
   // The playbook (workstream 3's learning editor, src/editor/learn.ts): read it before building, add what you learned.
   {
     name: 'playbook_read', title: 'Read the studio\'s editing playbook', scope: 'edit:read', readOnly: true, idempotent: true,

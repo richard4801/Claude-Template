@@ -1255,7 +1255,7 @@ Slot {
   brief: {shotSize?, angle?, subject?, action?, location?, notes?} | null,
   rig: Rig | null,
   camera: {motion: "static"|"pan"|"tilt"|"zoom_in"|"zoom_out"|"shake"|"mixed", shake, keys: {t, x, y, scale}[], confidence},
-  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence},
+  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence, freeze?: {t, durationSec} /* where the longest hold is */},
   peaks: {t, strength}[],
   pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
 }
@@ -1344,6 +1344,7 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
 | `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, promptFrom: "brief"\|"summary"\|"default", estimate: ShotEstimate}`. Nothing is held. Without a brief, the prompt comes from the reference's summary, else a neutral line (`promptFrom`): suggest writing a brief first. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
 | `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/replace {sessionId, take: takeId \| jobId, baseRevision?, device?}` | **Fix this shot** (plan §4): the slot's clip in the edit built from this reference gets another take, or a finished fill job, in place, as one undoable change ("Replaced shot s2 in “name”"). Its place and length on the timeline, transition, ramp, camera keys and look stay, and the new take starts where its action peak lines up (slower if it is too short). The owner's other edits are kept. → `{sessionId, revision, slotId, itemId, takeId, inSec, label, note?}`. `409 not_built_here` (the edit wasn't built in that session), `409 slot_not_in_edit` (the shot's clip was deleted), `409 job_not_done`. Claude's tool: `replace_slot`. |
 
 **The matcher** scores each of the studio's video takes against a slot, 0–1, with reasons:
 - the length;
@@ -1385,6 +1386,8 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - A take shorter than its slot plays slower to fill it.
 - **Transitions:** crossfade → `fade`, fade → `black`, flash → `white`, whip → `whip`, zoom → `zoom`, glitch → `glitch`. Cuts and unknown transitions get none.
 - **Speed ramps** become a custom `speedCurve`, and the source range is chosen so the clip still plays for exactly the slot's length.
+- **Freezes** (`speed.freeze {t, durationSec}`, from the analysis): the clip plays at the editor's slowest, 0.1×, for the freeze's length at its moment, so the held frame barely moves. The editor has no speed 0. The cuts don't move. Only freezes without a known place are logged as a gap.
+- **Action peaks** (plan §3, `options.peaks`, on by default): each take starts where its own strongest action peak, found free with `find_action_peaks`'s detector and cached per take, plays at the moment of the slot's strongest peak. The cuts don't move. A peak that would push the range past the take's end falls back to the next one, else the take starts at 0. A note says where each take starts.
 - **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
 - **Text items** go on a text track. Text whose words weren't read says "Text".
 - **The Look:** the nearest palette's LUT at 0.8, when its distance is under 0.4.

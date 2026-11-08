@@ -5,7 +5,9 @@ import * as M from '../editor/model.js';
 import { lutFor } from '../suite/looks.js';
 import type { Recipe, RecipeTransition } from './analyze.js';
 
-export type TakeInfo = { id: string; durationSec: number; width: number; height: number; hasAudio?: boolean };
+export type TakeInfo = { id: string; durationSec: number; width: number; height: number; hasAudio?: boolean;
+  /** The take's own action peaks (source seconds), for lining them up with the slot's (find_action_peaks's detector). */
+  peaks?: { t: number; strength: number }[] };
 export type AssembleOptions = {
   /** Replay the reference's camera moves (pan, zoom, shake) as keyframes on each clip (default true). */
   camera?: boolean;
@@ -19,6 +21,8 @@ export type AssembleOptions = {
   transitions?: boolean;
   /** The longest a transition may be (seconds); longer ones are shortened. */
   maxTransitionSec?: number;
+  /** Line each take's strongest action peak up with its slot's (default true; needs the takes' peaks). */
+  peaks?: boolean;
   /** A palette to grade with when the reference's own look is too far to map (from a proven recipe). */
   fallbackLook?: { id: string; label?: string };
 };
@@ -36,7 +40,7 @@ export function editorTransition(t: RecipeTransition | undefined): M.Transition 
 }
 
 /** The source range that plays for exactly `len` seconds with this speed curve (binary search on the source length). */
-function rangeFor(inSec: number, len: number, available: number, curve?: M.SpeedCurve): { outSec: number; speed: number; curve?: M.SpeedCurve } {
+export function rangeFor(inSec: number, len: number, available: number, curve?: M.SpeedCurve): { outSec: number; speed: number; curve?: M.SpeedCurve } {
   if (!curve) {
     if (available - inSec >= len) return { outSec: r4(inSec + len), speed: 1 };
     // A take shorter than its slot plays slower to fill it.
@@ -50,6 +54,39 @@ function rangeFor(inSec: number, len: number, available: number, curve?: M.Speed
     if (M.clipLength({ inSec, outSec: inSec + mid, speedCurve: curve }) < len) lo = mid; else hi = mid;
   }
   return { outSec: r4(inSec + hi), speed: 1, curve };
+}
+
+/**
+ * A speed curve (x = fraction of the kept source) that plays at 1× except for the freeze, played at the editor's
+ * slowest speed for its length, starting `freeze.t` after the slot starts (offSec later in a clip with a transition in).
+ */
+export function freezeCurve(freeze: { t: number; durationSec: number }, lenSec: number, offSec = 0): M.SpeedCurve | undefined {
+  const a = clamp(offSec + freeze.t, 0, lenSec), d = clamp(freeze.durationSec, 0, lenSec - a), slow = M.LIMITS.minSpeed;
+  if (d < 0.1 || lenSec <= 0) return undefined;
+  const src = a + d * slow + (lenSec - a - d); // source seconds the clip uses
+  const xs = a / src, xe = (a + d * slow) / src, e = 1e-3;
+  const pts: [number, number][] = [[0, 1]];
+  if (xs > e) pts.push([r4(xs), 1]);
+  pts.push([r4(Math.min(xe - e / 2, xs + e)), slow], [r4(Math.max(xs + e, xe - e)), slow]);
+  if (xe + e < 1) pts.push([r4(Math.min(1 - e / 2, xe + e)), 1]);
+  pts.push([1, 1]);
+  const uniq = pts.filter((p, i) => i === 0 || p[0] > pts[i - 1]![0]);
+  return uniq.length >= 3 ? { preset: 'custom', points: uniq } : undefined;
+}
+
+/**
+ * Where to start a take so its strongest usable action peak plays at the moment of the slot's strongest peak: the
+ * source offset of that moment in the clip's shape (speed and ramp included), and a take peak that leaves the whole
+ * range inside the take. 0 when the slot or take has no peak, or none fits.
+ */
+export function peakInPoint(slot: Recipe['slots'][number], take: TakeInfo, range: { outSec: number; speed: number; curve?: M.SpeedCurve }, offSec: number): number {
+  const target = [...(slot.peaks ?? [])].sort((a, b) => b.strength - a.strength)[0];
+  if (!target || !take.peaks?.length || range.speed < 1) return 0;
+  const shape = { inSec: 0, outSec: range.outSec, speed: range.speed, ...(range.curve ? { speedCurve: range.curve } : {}) };
+  const at = M.clipSourceAt(shape, Math.min(offSec + target.t, M.clipLength(shape))); // source seconds from the in-point
+  const room = take.durationSec - range.outSec;
+  const fit = take.peaks.filter(p => p.t - at >= 0 && p.t - at <= room + 1e-6).sort((a, b) => b.strength - a.strength)[0];
+  return fit ? r4(fit.t - at) : 0;
 }
 
 /**
@@ -89,9 +126,16 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
       ? { preset: 'custom' as const, points: s.speed.curve.map(p => [r4(clamp(p.t / Math.max(s.durationSec, 0.001), 0, 1)), r4(clamp(p.speed, 0.25, 4))] as [number, number]) }
       : undefined;
     if (curve) { curve.points[0]![0] = 0; curve.points[curve.points.length - 1]![0] = 1; }
-    const r = rangeFor(0, len, t.durationSec, curve);
+    // A freeze: the clip slows to the editor's slowest (0.1×) for the freeze's length at its moment, so the held frame
+    // barely moves (the editor has no speed 0); the cuts don't move.
+    const held = o.speed !== false && s.speed.ramp === 'freeze' && s.speed.freeze ? freezeCurve(s.speed.freeze, len, into ? into.durationSec / 2 : 0) : undefined;
+    const r = rangeFor(0, len, t.durationSec, curve ?? held);
+    if (held && r.curve) notes.push(`${s.id}: the reference holds a frame for ${s.speed.freeze!.durationSec.toFixed(2)} s here (played at 10 %)`);
     if (r.speed < 1) notes.push(`${s.id}: the take is shorter than the slot, so it plays at ${Math.round(r.speed * 100)}%`);
-    const clip: M.VideoClip = { id: `c${i + 1}`, asset: assetOf(t).id, inSec: 0, outSec: r.outSec, speed: r.speed, ...(r.curve ? { speedCurve: r.curve } : {}),
+    // Plan §3 "action peaks snap to the beat": start the take so its own strongest peak plays when the slot's does.
+    const inSec = o.peaks === false ? 0 : peakInPoint(s, t, r, into ? into.durationSec / 2 : 0);
+    if (inSec > 0) notes.push(`${s.id}: starts ${inSec.toFixed(2)} s into the take, so its action lands on the reference's`);
+    const clip: M.VideoClip = { id: `c${i + 1}`, asset: assetOf(t).id, inSec, outSec: r4(inSec + r.outSec), speed: r.speed, ...(r.curve ? { speedCurve: r.curve } : {}),
       ...(into ? { transitionIn: into } : {}), ...(lutId ? { look: { lut: lutId, strength: 0.8 } } : {}) };
     // The reference's camera move, replayed by moving and scaling the clip (the frame stays covered).
     const keys = s.camera.keys;
