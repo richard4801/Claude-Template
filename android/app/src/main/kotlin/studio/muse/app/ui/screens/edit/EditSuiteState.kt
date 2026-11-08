@@ -154,6 +154,8 @@ data class EditSuiteUi(
     val session: SessionUi? = null,
     /** The owner's editor: the Claude button shows (dimmed until the session is there). */
     val claudeOwner: Boolean = false,
+    /** Remove background → tap what to keep (workstream 1's tracked matte): the taps so far, while it is on. */
+    val keep: KeepUi? = null,
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
 ) {
@@ -179,4 +181,12 @@ data class EditSuiteUi(
 
     val captionTrack: Track? get() = project?.tracks?.firstOrNull { it.kind == TrackKind.CAPTION && it.caption != null }
     val captionPreset: CaptionPreset? get() = captionTrack?.caption?.style?.preset
+}
+
+/** One tap on the paused picture: where (0–1 of the frame), when (source seconds of the clip) and whether to keep it. */
+data class KeepTap(val x: Double, val y: Double, val t: Double, val keep: Boolean = true)
+
+/** Tap to keep: the taps (1–10, at least one keep) and whether the next tap keeps or leaves out. */
+data class KeepUi(val taps: List<KeepTap> = emptyList(), val keepNext: Boolean = true) {
+    val ready: Boolean get() = taps.any { it.keep }
 }

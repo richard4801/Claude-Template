@@ -70,20 +70,40 @@ sealed interface RecipePhase {
     data object Pick : RecipePhase
     data class Analysing(val progress: Float, val step: String) : RecipePhase
     data class Ready(val recipe: Recipe) : RecipePhase
-    data class Failed(val message: String) : RecipePhase
+    /** [fromLink]: a link couldn't be used; the saved file is offered instead. */
+    data class Failed(val message: String, val fromLink: Boolean = false) : RecipePhase
 }
 
 data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName: String? = null)
 
 /** The screen: the picker, the upload and the server's analysis, then the recipe. */
 @Composable
-fun RecipeScreen(onBack: () -> Unit) {
+fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio.muse.app.data.SharedReference? = null) {
     val c = LocalContainer.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var ui by remember { mutableStateOf(RecipeUi()) }
-    var picked by remember { mutableStateOf<Uri?>(null) }
+    var picked by remember { mutableStateOf((shared as? studio.muse.app.data.SharedReference.File)?.uri) } // Share → MUSE: a saved video
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) picked = uri }
     BackHandler(onBack = onBack)
+    // A reference from the library (Recipes → "Use in Recreate"): its recipe straight away.
+    LaunchedEffect(referenceId) {
+        val rid = referenceId ?: return@LaunchedEffect
+        ui = RecipeUi(RecipePhase.Analysing(.5f, "Opening the reference"), null)
+        ui = runCatching { c.repo.api.reference(rid) }.fold(
+            { ref -> ref.recipe?.let { RecipeUi(RecipePhase.Ready(it), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
+            { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference"), null) })
+    }
+    // Share → MUSE: a link. The server fetches it within the platforms' rules; when it can't, its message says why and the
+    // saved file is offered instead.
+    LaunchedEffect(shared) {
+        val url = (shared as? studio.muse.app.data.SharedReference.Link)?.url ?: return@LaunchedEffect
+        val name = studio.muse.core.edit.SharedLink.name(url)
+        ui = RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), name)
+        ui = runCatching { follow(c.repo.api, c.repo.api.createReferenceFromLink(url, name)) { ui = it } }.getOrElse { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't fetch this link — save the video and drop the file in", fromLink = true), name)
+        }
+    }
     LaunchedEffect(picked) {
         val uri = picked ?: return@LaunchedEffect
         val name = c.media?.displayName(uri)?.substringBeforeLast('.')?.take(80) ?: "Your reference"
@@ -98,21 +118,26 @@ fun RecipeScreen(onBack: () -> Unit) {
             val uploadId = try {
                 c.repo.api.uploadEditorFile(file, mime) { p -> ui = RecipeUi(RecipePhase.Analysing(p * .2f, "Uploading the video"), name) }
             } finally { file.delete() }
-            var ref = c.repo.api.createReference(uploadId, name)
-            while (ref.state == "analyzing") {
-                ui = RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, ref.phase?.takeIf { it != "Waiting" } ?: "Waiting for its turn"), ref.name)
-                delay(1500)
-                ref = c.repo.api.reference(ref.id)
-            }
-            val recipe = ref.recipe
-            if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe), ref.name)
-            else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish."), ref.name)
+            follow(c.repo.api, c.repo.api.createReference(uploadId, name)) { ui = it }
         }.getOrElse { e ->
             if (e is kotlinx.coroutines.CancellationException) throw e
             RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't read that video · try another"), name)
         }
     }
     RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") })
+}
+
+/** Polls a reference (showing the server's step) until it is ready or failed. */
+private suspend fun follow(api: studio.muse.app.data.MuseApi, start: studio.muse.core.edit.RecipeReference, show: (RecipeUi) -> Unit): RecipeUi {
+    var ref = start
+    while (ref.state == "analyzing") {
+        show(RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, ref.phase?.takeIf { it != "Waiting" } ?: "Waiting for its turn"), ref.name))
+        delay(1500)
+        ref = api.reference(ref.id)
+    }
+    val recipe = ref.recipe
+    return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe), ref.name)
+    else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish.", fromLink = ref.error?.contains("link", true) == true), ref.name)
 }
 
 /** The screen as a function of [ui] (screenshots render it). */
@@ -135,7 +160,8 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
                         is RecipePhase.Analysing -> AnalysingBody(ui.referenceName, ph)
                         is RecipePhase.Failed -> {
                             T(ph.message, m.scale.body, m.t.ink)
-                            Secondary("Pick another video", onPick)
+                            // A link MUSE couldn't use: the saved video is the way in (the one action here).
+                            if (ph.fromLink) Primary("Pick the saved video", onPick) else Secondary("Pick another video", onPick)
                         }
                         is RecipePhase.Ready -> RecipeBody(ph.recipe, ui.referenceName, wide, onPick)
                     }

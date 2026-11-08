@@ -36,6 +36,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Share → MUSE (plans/recreate-edit.md): a link (TikTok, Reels, Shorts) or a saved video opens Edit → Recreate. -->
+            <intent-filter android:label="Recreate in MUSE">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter android:label="Recreate in MUSE">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
         </activity>
         <!-- Scheduled posts: a local alarm that shows the "time to post" notification. -->
         <receiver android:name=".platform.PostAlarmReceiver" android:exported="false" />

@@ -112,6 +112,15 @@ describe('Recreate · briefs, matching and the fill request (unit)', () => {
     expect(() => withBriefs(RECIPE, { s9: {} })).toThrow(/no slot s9/);
   });
 
+  it('a suggestion outside a slot\'s top few still carries its score and reasons (equal takes, each used once)', () => {
+    const four: Candidate[] = ['a', 'b', 'c', 'd'].map(id => ({ id, modelId: null, durationSec: 5, width: 720, height: 1280, status: 'final', createdAt: 1, draft: null, title: id }));
+    const recipe = { ...RECIPE, slots: [...RECIPE.slots, { ...RECIPE.slots[2]!, id: 's4' }] };
+    const m = matchSlots(recipe, four, { top: 3 });
+    expect(Object.keys(m.assignment)).toHaveLength(4);
+    for (const s of m.slots) expect(s.suggestion).toMatchObject({ takeId: s.suggested, score: expect.any(Number), reasons: expect.any(Array) });
+    expect(m.slots.some(s => !s.candidates.some(c => c.takeId === s.suggested))).toBe(true); // the case that used to crash
+  });
+
   it('scores length, shape, move, framing and the lead; each take is suggested once; nothing good = to generate', () => {
     const r = withBriefs(RECIPE, { s2: { shotSize: 'cu' } });
     const good = scoreTake(r.slots[1]!, '9:16', cand('a', { draft: { v: 1, tool: 'shot', rig: { moves: [{ id: 'zoom_in' }], shotSize: 'cu' } } as any }), { leadModelId: 'm1' });

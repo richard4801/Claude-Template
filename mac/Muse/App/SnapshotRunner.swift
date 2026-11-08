@@ -17,8 +17,6 @@ enum SnapshotRunner {
         var scrollTo: String?
         /// Generate's frame in the window (SwiftUI global space, top-left origin), for the composer fit check.
         var generateFrame: CGRect?
-        /// The cinematic Suite shows its empty state (the demo studio already has takes).
-        var cinemaEmpty = false
         /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
         var probeTick = 0
         /// The rig panel's view is on screen (its onAppear / onDisappear), for the same-tick diagnosis.
@@ -47,7 +45,7 @@ enum SnapshotRunner {
             .sorted()
     }
 
-    /// The last CinemaSuiteView body: did it see the picker open, and when (not observed: a plain static).
+    /// The last Suite body that reported (noteSuiteBody): did it see the picker open (not observed: a plain static).
     static var suiteBodySawPicker = false
     static var suiteBodyCount = 0
     static func noteSuiteBody(pickerOpen: Bool) {
@@ -232,28 +230,6 @@ enum SnapshotRunner {
             }
         }
         await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620)], screens)
-        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes.
-        let cinema: [(String, @MainActor () -> Void)] = [
-            ("cinema_shot", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store) }),
-            ("cinema_empty", { store.newSuite = true; state.cinemaEmpty = true; store.openTool(.shot); store.suite.composer.tokens = PromptTokens() }),
-            ("cinema_photo", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
-            // Build step 3: the rig panel on Style (arc carousel, era ruler, tempo) and on Camera (the drums).
-            // The picker opens a moment after the tool switch, as a person would (switching from Photo and opening the
-            // panel in the same tick sometimes drew the room without it).
-            ("cinema_rig_style", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
-                Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.style) } }),
-            ("cinema_rig_camera", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
-                Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.camera, step: "setup") } }),
-            // Diagnosis (coordinator): Photo, then Shot and the panel in the same tick. The fit check logs whether the
-            // body saw the picker and whether the panel's view appeared (PANEL lines).
-            // The original failure: the Photo screen fully drawn, then Shot and the panel in one tick.
-            ("cinema_photo_again", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
-            ("cinema_rig_sametick", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
-        ]
-        // The runner's screen clamps the window's height (the 1440 × 900 and 1280 × 800 shots are about 684 pt tall).
-        await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
-        store.newSuite = false
-        state.cinemaEmpty = false
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
@@ -322,8 +298,10 @@ enum SnapshotRunner {
 
     // MARK: Recreate this edit
 
-    /// Recipe (shot 2 selected) and Compare (after Build) on demo mode's reference, at 1280 × 800 in the four themes
-    /// (`mac_<theme>_recreate_recipe.png`, `…_recreate_compare.png`), and the Look swatches as analysed and as shown
+    /// Recipe (shot 2 selected), Build's confirmation with the estimates, the Recipe while the new shots generate, and
+    /// Compare (after they are ready and the edit is built) on demo mode's reference, at 1280 × 800 in the four themes
+    /// (`mac_<theme>_recreate_recipe.png`, `…_recreate_confirm.png`, `…_recreate_generating.png`, `…_recreate_compare.png`),
+    /// and the Look swatches as analysed and as shown
     /// (`mac_recreate_swatches.png`). Fit check lines: every probed label drawn in full, and the total and Build both on
     /// screen, side by side (owner note 2); the shown swatches 3–5, calm and ordered by tone (owner note 1).
     private static func recreateShots(_ store: AppStore, dir: URL) async {
@@ -368,6 +346,8 @@ enum SnapshotRunner {
             store.themeID = theme
             w.setFrame(NSRect(x: original.minX, y: original.maxY - 800, width: 1280, height: 800), display: true)
             store.openEdit(takeId: nil)
+            store.recreate.fake.forgetMade()
+            store.recreate.buildWhenReady = []
             store.openRecreate()
             try? await Task.sleep(for: .seconds(1))
             let refs = (try? await store.recreateAPI.listReferences()) ?? []
@@ -385,7 +365,29 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(1))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe_look.png"))
             state.scrollTo = nil
-            await store.buildRecreate()
+            // Build: the confirmation with the estimates (the demo prices each new shot at $0.64), closed with Cancel.
+            await store.requestRecreateBuild()
+            try? await Task.sleep(for: .seconds(1.5))
+            check("confirm", theme, beside: false, primary: "confirm")
+            captureWithSheet(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_confirm.png"), lines: &lines, label: "recreate_confirm \(theme.rawValue)")
+            store.recreate.askBuild = false
+            try? await Task.sleep(for: .seconds(1))
+            // The yes, in demo mode only (the fake makes nothing and charges nothing): the new shots generating on the
+            // Recipe, then ready, then the edit is built and Compare opens.
+            guard store.isDemo, store.recreateAPI is FakeRecreateAPI else {
+                lines.append("CUT recreate_generating not in demo mode (nothing is spent in review mode)")
+                break
+            }
+            store.confirmRecreateBuild()
+            store.selectRecreateSlot(1)
+            // The fake's shots are ready on the second fill after they start (the watch reads it 3 s later): shoot before.
+            try? await Task.sleep(for: .seconds(1.2))
+            let making = store.recreate.generatingSlots.count
+            lines.append("\(making > 0 ? "FITS" : "CUT") recreate_generating 1280x800 \(theme.rawValue) \(making) shots generating")
+            check("generating", theme, beside: true)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_generating.png"))
+            for _ in 0..<40 where store.recreate.mode != .compare { try? await Task.sleep(for: .seconds(0.5)) }
+            lines.append("\(store.recreate.mode == .compare ? "FITS" : "CUT") recreate_built 1280x800 \(theme.rawValue) after the new shots were ready")
             store.selectRecreateSlot(1)
             try? await Task.sleep(for: .seconds(2))
             check("compare", theme, beside: false, primary: "open")
@@ -529,6 +531,51 @@ enum SnapshotRunner {
         try? p.run()
         p.waitUntilExit()
     }
+
+    /// The window with its sheet drawn where it sits (a sheet is its own window; the screen can be smaller than the
+    /// window on CI, so the two are drawn from their views rather than from a screen grab).
+    static func captureWithSheet(_ url: URL, lines: inout [String], label: String) {
+        guard let window = mainWindow, let view = window.contentView,
+              let sheet = window.attachedSheet ?? NSApp.windows.first(where: { $0.sheetParent === window }), let sv = sheet.contentView else {
+            lines.append("CUT \(label) sheet not shown")
+            capture(url)
+            return
+        }
+        view.layoutSubtreeIfNeeded()
+        sv.layoutSubtreeIfNeeded()
+        guard let base = view.bitmapImageRepForCachingDisplay(in: view.bounds), let top = sv.bitmapImageRepForCachingDisplay(in: sv.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: base)
+        sv.cacheDisplay(in: sv.bounds, to: top)
+        let size = view.bounds.size
+        // The sheet's frame in the content view, bottom-left origin (as the bitmap is drawn).
+        let inWindow = window.convertFromScreen(sheet.frame)
+        var r = view.convert(inWindow, from: nil)
+        if view.isFlipped { r.origin.y = size.height - r.maxY }
+        guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: base.pixelsWide, pixelsHigh: base.pixelsHigh, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let ctx = NSGraphicsContext(bitmapImageRep: out) else { return }
+        out.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        base.draw(in: NSRect(origin: .zero, size: size))
+        let shape = NSBezierPath(roundedRect: r, xRadius: 10, yRadius: 10)
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 24
+        shadow.shadowOffset = NSSize(width: 0, height: -6)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.3)
+        NSGraphicsContext.saveGraphicsState()
+        shadow.set()
+        NSColor.black.setFill()
+        shape.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        shape.addClip()
+        top.draw(in: r)
+        NSGraphicsContext.restoreGraphicsState()
+        try? out.representation(using: .png, properties: [:])?.write(to: url)
+        let inside = r.minX >= 0 && r.minY >= 0 && r.maxX <= size.width + 0.5 && r.maxY <= size.height + 0.5
+        lines.append("\(inside ? "FITS" : "CUT") \(label) sheet \(Int(r.width))x\(Int(r.height)) in \(Int(size.width))x\(Int(size.height))")
+    }
+
     /// Review mode only: an uncaught Objective-C exception or a fatal signal writes its stack to the log before the app
     /// dies, so CI shows where (the macOS crash report isn't always written on the runner).
     nonisolated static func installCrashLogging() {

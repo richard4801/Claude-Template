@@ -106,19 +106,25 @@ extension RecreateText {
     /// "$1.28".
     public static func money(_ amount: Double) -> String { String(format: "$%.2f", amount) }
 
-    /// "1 from your takes, 2 to generate · $1.28 in all", from the fill (never hard-coded).
-    public static func makingSummary(_ fill: RecreateFill) -> String {
-        let yours = fill.slots.filter { $0.state == "matched" || $0.state == "ready" }.count
-        let generate = fill.slots.filter { $0.state == "to_generate" }.count
+    /// "1 from your takes, 2 to generate · $1.28 in all", from the fill (never hard-coded). `prices` (slotId → amount,
+    /// from the slot estimates) replace the fill's own figures; `unavailable` slots couldn't be priced and are left out.
+    public static func makingSummary(_ fill: RecreateFill, prices: [String: Double] = [:], unavailable: Set<String> = []) -> String {
+        let yours = fill.slots.filter { $0.state == "matched" }.count
+        let made = fill.slots.filter { $0.state == "ready" }.count
+        let generate = fill.slots.filter { $0.state == "to_generate" && !unavailable.contains($0.slotId) }.count
+        let cant = fill.slots.filter { $0.state == "to_generate" && unavailable.contains($0.slotId) }.count
         let generating = fill.slots.filter { $0.state == "generating" }.count
-        let empty = fill.slots.count - yours - generate - generating
+        let empty = fill.slots.count - yours - made - generate - cant - generating
         var parts: [String] = []
         if yours > 0 { parts.append("\(yours) from your takes") }
+        if made > 0 { parts.append("\(made) generated") }
         if generate > 0 { parts.append("\(generate) to generate") }
         if generating > 0 { parts.append("\(generating) generating") }
+        if cant > 0 { parts.append("\(cant) can’t be made") }
         if empty > 0 { parts.append("\(empty) to fill") }
         let head = parts.isEmpty ? "No shots yet" : parts.joined(separator: ", ")
-        return generate > 0 ? "\(head) · \(money(fill.toGenerateTotal)) in all" : "\(head) · nothing to pay"
+        if generate > 0 { return "\(head) · \(money(fill.generateTotal(prices: prices, unavailable: unavailable))) in all" }
+        return generating > 0 ? head : "\(head) · nothing to pay"
     }
 
     public static let approveNote = "You approve before anything is made."

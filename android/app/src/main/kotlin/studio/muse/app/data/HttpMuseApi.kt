@@ -180,6 +180,21 @@ interface MuseService {
     @POST("v1/suite/rigs") suspend fun createSuiteRig(@Body r: SuiteRigCreate): SuiteRigView
     @PATCH("v1/suite/rigs/{id}") suspend fun updateSuiteRig(@Path("id") id: String, @Body r: SuiteRigPatch): SuiteRigView
     @DELETE("v1/suite/rigs/{id}") suspend fun deleteSuiteRig(@Path("id") id: String): retrofit2.Response<Unit>
+    // The learning editor (workstream 3), owner only.
+    @GET("v1/learn/playbook") suspend fun playbook(): List<LearnRule>
+    @POST("v1/learn/playbook") suspend fun addRule(@Body r: LearnRuleRequest): LearnRule
+    @PATCH("v1/learn/playbook/{id}") suspend fun patchRule(@Path("id") id: String, @Body r: LearnRuleRequest): LearnRule
+    @DELETE("v1/learn/playbook/{id}") suspend fun deleteRule(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("v1/learn/lessons") suspend fun lessons(): List<LearnLesson>
+    @GET("v1/learn/corrections") suspend fun corrections(@retrofit2.http.Query("limit") limit: Int): List<LearnCorrection>
+    @GET("v1/learn/recipes") suspend fun recipes(@retrofit2.http.Query("q") q: String?, @retrofit2.http.Query("tags") tags: String?, @retrofit2.http.Query("origin") origin: String?): List<LearnRecipeEntry>
+    @GET("v1/learn/recipes/{id}") suspend fun recipe(@Path("id") id: String): LearnRecipeEntry
+    @PATCH("v1/learn/recipes/{id}") suspend fun patchRecipe(@Path("id") id: String, @Body r: LearnRecipePatch): LearnRecipeEntry
+    @DELETE("v1/learn/recipes/{id}") suspend fun deleteRecipe(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("v1/learn/recipes/nearest") suspend fun nearestRecipes(@retrofit2.http.Query("recipeId") id: String, @retrofit2.http.Query("k") k: Int): LearnNearest
+    @GET("v1/learn/gaps") suspend fun learnGaps(@retrofit2.http.Query("limit") limit: Int): List<LearnGap>
+    @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
+
     // Recreate this edit (workstream 1): read as JSON, then studio.muse.core.edit.RecipeJson.
     @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
@@ -436,11 +451,30 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         return p.uploadId
     }
 
+    // The learning editor (workstream 3)
+    override suspend fun playbook() = call { playbook() }
+    override suspend fun addRule(req: LearnRuleRequest) = call { addRule(req) }
+    override suspend fun patchRule(id: String, req: LearnRuleRequest) = call { patchRule(id, req) }
+    override suspend fun deleteRule(id: String) { call { deleteRule(id) } }
+    override suspend fun lessons() = call { lessons() }
+    override suspend fun corrections(limit: Int) = call { corrections(limit) }
+    override suspend fun recipes(q: String?, tags: List<String>, origin: String?) = call { recipes(q?.ifBlank { null }, tags.joinToString(",").ifBlank { null }, origin) }
+    override suspend fun recipe(id: String) = call { recipe(id) }
+    override suspend fun patchRecipe(id: String, req: LearnRecipePatch) = call { patchRecipe(id, req) }
+    override suspend fun deleteRecipe(id: String) { call { deleteRecipe(id) } }
+    override suspend fun nearestRecipes(id: String, k: Int) = call { nearestRecipes(id, k) }
+    override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
+    override suspend fun referencePoster(referenceId: String): ByteArray? =
+        runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
+
     // Recreate this edit (workstream 1)
     override suspend fun createReference(uploadId: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
         createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
+    override suspend fun createReferenceFromLink(url: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
+        createReference(buildJsonObject { put("url", kotlinx.serialization.json.JsonPrimitive(url)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
+    })
 
     // Edit sessions (workstream 3)
     override suspend fun openEditSession(req: OpenEditSessionRequest) = call { openEditSession(req) }

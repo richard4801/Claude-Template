@@ -22,7 +22,13 @@ Per plans/recreate-edit.md (APPROVED), build phase 1: pick a reference and see i
 - Demo mode runs the same flow on FakeMuseApi with `FakeRecipes.cafeTrendJson()`, in the same schema.
 - A server without these endpoints answers "This studio server can't read edits yet".
 
-**Next phases** (not built): cast and fill, assemble, the side-by-side compare, and the phone share target (waiting on the platform-rules check).
+**Share → MUSE** (built):
+- From another app's Share sheet, "Recreate in MUSE" takes either a link (TikTok, Instagram Reel or YouTube; the first link in the shared text) or a saved video, and opens Edit → Recreate with it.
+- A link goes to `POST /v1/recreate/references {url}`. The server fetches it only within the platforms' rules (plans/research/platform-download-rules.md).
+- When it can't use the link (private, downloads off, too big, blocked, too long), the screen shows the server's message and "Pick the saved video" as the one action. `share_link.png` shows fetching, and a link with downloads turned off.
+- A saved video takes the usual upload path.
+
+**Next phases** (not built): cast and fill, assemble, the side-by-side compare, .
 
 **Images:**
 - `phone_flow_c.png`: Edit home's entry, pick, analysing, recipe.

@@ -149,3 +149,23 @@ When resuming:
 - 3 · Editor engine v2 / **Edit crash fixed, ready on `claude/muse-editor-v2`** (2026-11-07). Cause (owner's crash report): the waveform reader asked AVAssetReaderTrackOutput for 2 kHz mono LPCM, which raises an uncatchable ObjC exception on real 44.1/48 kHz AAC; it now decodes at the track's native rate and channels and down-mixes in Swift (MuseCore `EditSuite.Peaks`). Also: hardening against 0/NaN/inf/missing media facts on Mac and server, single-parse LUT cache with a byte-scanner .cube fast path (3.8 s → 0.7 s for all bundled LUTs), and a CI **Edit check** (real AAC 48 kHz stereo / 44.1 kHz mono fixtures, waveforms, every Edit path). Photo tool live (prod c4c7588). Server 401 green; Android 1529 green; Mac CI green (run 42355408773, MuseCore 512, Edit check ALL DONE).
 - 4 · App-wide polish & UX audit (phase 2): **merged** into `claude/ecstatic-rubin-2egjfb` (merge 3103642, 2026-11-05). plans/ux-audit.md covers every Android and Mac screen at 360/390 dp and 1280/1440 px in all 4 themes. Our screens: Android 42 findings (37 fixed, all high/med), Mac 43 (39 fixed, all high). Workstream 1–3 findings sent to them; **workstreams 1–3: re-record your Roborazzi baselines after rebasing** (Kit.kt 48 dp targets, theme tokens, StudioParts ToolStrip). Owner decisions open: ToS/AUP links, a MUSE domain, Settings → Developer for members, Soft Tactile warning/accent contrast.
 - Flow SSE test fix (session `session_01Py2rxp7ojBd6RjykjWHCgb`): **ready to merge** from `claude/serene-davinci-z8lpff` (commit b3badf8, rebased on aac7d49; test files only, no app code). Fixes "a video job streams step progress over SSE…" in `server/api/test/flow.test.ts`, which failed under CPU load. Cause: at SPEED 2400 the 2-take job lasts ~0.5 s and the simulated GPU samples progress every 250 ms, so a few ms of delay can skip the Rendering phase entirely (the event is never sent; the app is fine). The test now runs that one job at 480×, waits (bounded) for the Rendering event, and `sse()` in `test/helpers.ts` resolves once the server has subscribed the stream instead of after a fixed 50 ms. Server build + 316 tests green on aac7d49; the video test passed 8/8 with 8 busy loops on 4 cores and 6/6 alongside two parallel full runs. Same weakness, not yet seen failing: the LoRA training test in that file (~0.5 s job).
+
+## Owner approval (2026-11-08): "I approve all"
+This covers every open item at that point:
+- **Mac Playbook and Recipes:** build directly to the approved Android design and its two notes. WS2.
+- **Remove background, option 2:** SAM 2 tap-to-keep. Show the price per use and ask before each run. WS1 server, then the Edit UI (WS3 Mac, WS4 Android).
+- **SeedVR2 on RunPod:** approved. Show the price per job, ask before each run, and cap spend (no warm idle workers). WS2.
+- **Delete the cinematic Suite code** and the "Try the new Suite" switch. Mac WS2, Android WS4.
+- **Still needs the owner's own action:**
+  - typing "Go ahead and upload" in session_01Py2rxqFT9BvkxLttPb5c8Z;
+  - a `MUSE_OWNER_TOKEN` GitHub secret for Mac auto-publish.
+
+## SeedVR2 upscale priced (2026-11-08)
+- **Measurement:** WS2 measured it for about $0.91 of the $5 cap. Details in gpu/pod/seedvr2/RESULTS.md.
+- **Owner's choice:** cost × 2.
+- **Railway UPSCALE_PRICES:**
+  - 1080p: $0.086/s (26 GPU s/s);
+  - 2K: $0.108/s (36 GPU s/s);
+  - 4K: $0.19/s (70 GPU s/s).
+- **A 5 s clip costs:** about $0.43, $0.54 or $0.95.
+- **Availability:** a size is offered only when a pod advertises the "upscale" capability.

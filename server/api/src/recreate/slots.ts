@@ -79,7 +79,11 @@ export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?
     assigned[p.slotId] = p.takeId; usedTakes.add(p.takeId);
   }
   return {
-    slots: per.map(p => ({ slotId: p.slot.id, candidates: p.list.slice(0, top), suggested: assigned[p.slot.id] ?? null, toGenerate: !assigned[p.slot.id] })),
+    // The suggestion may rank below the top few (each take is used once), so it carries its own score and reasons.
+    slots: per.map(p => {
+      const sug = assigned[p.slot.id] ? p.list.find(c => c.takeId === assigned[p.slot.id]) ?? null : null;
+      return { slotId: p.slot.id, candidates: p.list.slice(0, top), suggested: assigned[p.slot.id] ?? null, suggestion: sug, toGenerate: !assigned[p.slot.id] };
+    }),
     assignment: assigned,
   };
 }

@@ -1176,6 +1176,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 **From a link** (migration **0018**, `src/recreate/links.ts`, `test/recreate-links.test.ts`). The owner chose to keep link fetching after reading the platforms' terms, and the risk is theirs (`plans/research/platform-download-rules.md`). Guardrails:
 - **Public only.**
   - MUSE never uses sign-ins or cookies. yt-dlp runs with `--ignore-config --no-cookies --no-cookies-from-browser` and none of the server's environment.
+  - YouTube needs a JavaScript runtime. yt-dlp gets the server's own Node (`--no-js-runtimes --js-runtimes node:<node>`; only deno is on by default) and the pinned `yt-dlp-ejs` 0.8.0 scripts. `--no-remote-components` means no code is fetched at run time.
   - Private, members-only, sign-in-walled and age-restricted videos are refused (`link_private`).
 - **The creator's setting.** For TikTok, MUSE reads the video's public page. If the creator turned downloads off (`downloadSetting` ≠ 0, or an explicit false), the video is refused (`link_downloads_off`). A page MUSE can't read counts as a blocked fetch; a page that doesn't say is treated as allowed.
 - **One fetch per link.**
@@ -1187,7 +1188,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 - **Blocked** (a server address the platform blocks, 403, sign-in wall, rate limit, timeout, removed video): `link_blocked` (`502`) with the message "Couldn't fetch this link — save the video and drop the file in". The apps show it and offer the file drop. If the download itself is blocked, the reference turns `failed` with `errorCode: "link_blocked"`.
 - **Codes:** `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (all `422`) · `link_blocked` (`502`) · `too_long` (`400`).
 - **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
-- **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 from PyPI (sha256-checked at build) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
+- **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 and yt-dlp-ejs 0.8.0 from PyPI (both sha256-checked at build, unpacked to /opt/yt-dlp/lib) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
 **Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
 
@@ -1298,7 +1299,7 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
 | | |
 |---|---|
 | `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}, summary?, tags?}` | `summary` (≤ 200 chars) and `tags` (≤ 20 short lowercase words) go on the recipe. `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
-| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, toGenerate}], assignment: {slotId: takeId}}`. See the matcher below. |
+| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, suggestion: {takeId, score, reasons} | null, toGenerate}], assignment: {slotId: takeId}}`. `suggestion` is the suggested take's own score, which may rank below the top `candidates` because each take is used once. See the matcher below. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, estimate: ShotEstimate}`. Nothing is held. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
 | `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
