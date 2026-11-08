@@ -4,6 +4,7 @@ import type { Ctx } from '../ctx.js';
 import { ApiError } from '../errors.js';
 import { cameraCatalog } from '../suite/camera.js';
 import { feed } from '../suite/feed.js';
+import { registerRecreateRoutes } from './recreate.js';
 import { createLocation, deleteLocation, listLocations } from '../suite/locations.js';
 import { createRig, deleteRig, listRigs, patchRig } from '../suite/rigs.js';
 
@@ -32,6 +33,7 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/v1/suite/rigs/:id', async req => patchRig(ctx, req.user, (req.params as { id: string }).id, req.body));
   app.delete('/v1/suite/rigs/:id', async (req, reply) => { await deleteRig(ctx, req.user, (req.params as { id: string }).id); return reply.status(204).send(); });
   app.get('/v1/suite/feed', async req => feed(ctx, req.user, req.query));
+  await registerRecreateRoutes(app, ctx); // Recreate this edit (workstream 1)
   app.get('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.settingsView(req.user.studioId));
   app.patch('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.updateSettings(req.user, req.body));
 }

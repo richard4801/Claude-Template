@@ -177,6 +177,11 @@ const Env = z.object({
   REPLICATE_UNKNOWN_EST_USD: num(0.05),
   FFMPEG_PATH: z.string().default('ffmpeg'),
   FFPROBE_PATH: z.string().default('ffprobe'),
+  /** Recreate this edit reads on-screen words with it (workstream 1); empty = off, the words stay null. */
+  TESSERACT_PATH: z.string().default('tesseract'),
+  /** Body poses for Recreate this edit (MoveNet in a child process, about 150 MB while it runs); skipped below this much free memory. */
+  RECREATE_POSE: bool(true),
+  RECREATE_POSE_MIN_FREE_MB: num(200),
 
   // Images
   /** Unset: "replicate" when REPLICATE_API_TOKEN is set, else "simulated". */

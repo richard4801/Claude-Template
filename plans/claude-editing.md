@@ -42,6 +42,13 @@ Owner-only. Members never see this. Using "your own Claude" as a member feature 
   - `remove_background`
   - `detect_beats`
   - `denoise`
+- **Recreate this edit** (workstream 1, `plans/recreate-edit.md`; details in `plans/api.md` "Recreate this edit"):
+  - `analyze_reference` (free)
+  - `get_recipe` (with the contact sheet image)
+  - `set_slot_briefs`
+  - `match_slots`
+  - `apply_recipe` (one undoable change)
+  - `fill_slot`: price first; `confirm: true` asks the owner in the app
   - `find_action_peaks(sessionId, itemId?, minGapSec?, sensitivity?, max?)` (free, read-only; workstream 1, `plans/recreate-edit.md`):
     - It measures frame-difference motion energy on a 96 px grey proxy of the clip, at the source frame rate up to 30 fps.
     - It returns `peaks [{t, strength 0–1}]` in the clip's own seconds.

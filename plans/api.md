@@ -570,7 +570,7 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 **Kinds and options**
 - `captions` `{language?: "auto"|"en"|…}` → `CaptionsResult`. Word timestamps of the source's speech. Free (reused, cost 0) when the same video already has a transcript from the last 30 days in that language.
 - `cuts` `{minSilenceSec? 0.25–5 (0.7), keepPadSec? 0–0.5 (0.12), fillers? (true), repeats? (false), extraFillers?: string[] ≤ 50, fromJobId?, silenceOnly?, noiseDb? −60…−10 (−35)}` → `CutsResult`: suggested source ranges to remove (silences longer than `minSilenceSec`, keeping `keepPadSec` of each side; "um/uh/er/ah/hmm…" + `extraFillers`; a word said twice in a row). Free when a transcript exists (`fromJobId`, or the newest one of that video); otherwise it transcribes first (priced like captions). **`silenceOnly: true`** is always free and needs no transcript: the server reads the audio level (ffmpeg `silencedetect`, analysis only, nothing encoded) and returns silence cuts only (`words: []`); quieter than `noiseDb` counts as silence. The app shows the cuts and applies the accepted ones with `applyCuts(project, assetId, cuts)`.
-- `beats` (free; music or any video/audio, ≤ 10 min) → `{bpm, beats: number[], strong: number[] /* source s */, durationSec}`: beat marks for the music track (ffmpeg decode + onset/tempo analysis on the server; nothing encoded).
+- `beats` (free; music or any video/audio, ≤ 10 min) → `{bpm, beats: number[], strong: number[] /* source s */, durationSec}`: beat marks for the music track (ffmpeg decode + onset/tempo analysis on the server; nothing encoded). The tempo is checked against half, double and 3:2 readings: if the points between the grid's beats are onsets too, the faster tempo wins, up to 180 bpm (`test/beats.test.ts`: click tracks at 60–180 bpm, off-beats, music).
 - `matte` (video ≤ 120 s) → `MatteResult`: the person on pure green; the app adds the asset (usually on an overlay/PiP track) with the given `chroma`. Priced per second of video.
 - `denoise` `{analyzeOnly?}`: `analyzeOnly: true` is free and needs a transcript → `{suggestion}` from how clearly the words were heard. Otherwise → the voice alone (music and noise removed) as an audio asset + the suggestion; the app sets it as the clip's `audioAsset`.
 - Estimates: GPU seconds (captions 8 + 0.15·d, matte 10 + 4·d, voice 5 + 0.3·d, d = media seconds) × the GPU's $/s; at least $0.01. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.
@@ -1132,6 +1132,157 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 - When a model is @-mentioned, the composer fills only the rig rows still on Auto from her `defaultRig`, then shows "Applied <name>'s rig · Undo".
 - It never overwrites a row the user set. With two @ models in the prompt, nothing applies automatically.
 - `moves` in a default rig are added as `#` chips only if the prompt has no move yet.
+
+## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
+A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.
+
+**Privacy and retention:**
+- Each member sees their own references; the owner sees all of them. Another member's reference reads as `404`.
+- The contact sheet is stored under `rx/`, which is not served by `/uploads/*`. It is served only by the authenticated route below.
+- After **30 days**, unless `keep: true`, the reference video (its upload) and the contact sheet are deleted. The row turns `expired` and leaves the lists, and the recipe JSON stays, since it holds no pixels.
+- `DELETE` removes everything at once.
+- Pose keypoints are body points only; reference pixels are never stored in a recipe.
+
+**Endpoints**
+| | |
+|---|---|
+| `POST /v1/recreate/references {uploadId, name?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). |
+| `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
+| `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
+| `PATCH /v1/recreate/references/{id} {keep?, name?}` | `keep: true` stops the 30-day deletion (`expiresAt: null`). |
+| `DELETE /v1/recreate/references/{id}` | → `204`. The video, the contact sheet and the row are deleted. |
+| `GET /v1/recreate/references/{id}/contact-sheet` | → the PNG: each slot's keyframe, labelled "2 · 1.5–2.7 s". Claude writes the shot briefs from it. |
+| `GET /v1/recreate/references/{id}/video` | The reference video for the side-by-side player (authenticated): a `302` to a 1-hour link on S3, or the bytes on local storage. `404` once expired. |
+| `GET /v1/recreate/references/{id}/poster` | → PNG: the first slot's keyframe (cropped from the contact sheet). |
+| `GET /v1/recreate/references/{id}/slots/{slotId}/thumb` | → PNG: that slot's keyframe. |
+| `GET /v1/recreate/references/{id}/fill` | → `{referenceId, slots: SlotFill[], applied?, match?}`, see below. |
+
+**Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
+
+**Fixture:** `server/api/test/fixtures/recipe-v1.json` is a `GET /v1/recreate/references/{id}` response from a real analysis of the test reference (with an example brief, words and summary), for the apps' fakes. A test fails if the API sends a field the fixture lacks.
+
+`Reference`: `{id, name, state: "analyzing" | "ready" | "failed" | "expired", progress, phase, error?, durationSec, userId, keep, createdAt, expiresAt | null, videoUrl?, posterUrl?, recipe?}`.
+
+**Recipe** (`schema: "muse.recipe/1"`; every element has a `confidence` from 0 to 1; times are seconds in the reference):
+```
+Recipe {
+  schema, id, origin: "reference" | "edit", referenceId?, takeId?, versionId? /* origin "edit": workstream 3's recipeFromProject */,
+  createdAt, analyzer: {version, tookMs}, summary?, tags?: string[],
+  source: {durationSec, width, height, fps, aspect: "9:16", hasAudio},
+  sound: {bpm, beats[], strong[], confidence} | null,
+  pacing: {shots, avgShotSec, cutsPerMin, energy: {everySec, values[] /* 0–1 */}},
+  slots: Slot[], transitions: Transition[], text: TextItem[],
+  grade: {swatches: hex[5], contrast, saturation, warmth /* −1…1 */, look: {id, kind: "palette", label, distance} | null, grade: Grade, confidence},
+  contactSheet: {url, times[], tiles: {slotId, x, y, w, h /* px in the sheet */}[]} | null,
+  gaps: {key /* stable, e.g. "transition:unknown@2.40", "text:words", "pose" */, kind: "transition"|"effect"|"text"|"font"|"motion"|"other", what, atSec?, note}[]
+}
+Slot {
+  id: "s1", index, startSec, endSec, durationSec, keyframeSec, confidence, thumbUrl?, fill?: {jobId},
+  brief: {shotSize?, angle?, subject?, action?, location?, notes?} | null,
+  rig: Rig | null,
+  camera: {motion: "static"|"pan"|"tilt"|"zoom_in"|"zoom_out"|"shake"|"mixed", shake, keys: {t, x, y, scale}[], confidence},
+  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence},
+  peaks: {t, strength}[],
+  pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
+}
+Transition { atSec, from, to, kind: "cut"|"flash"|"whip"|"zoom"|"fade"|"crossfade"|"glitch"|"unknown", durationSec, confidence }
+TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker", animIn, animOut, confidence }
+```
+**Size caps** (a recipe stays under about 256 KB): speed curves at most 48 points and camera keys at most 64 per slot (thinned, ends kept), at most 100 text items. An `unknown` transition also adds a gap.
+
+How each part is found:
+- **Shots and cuts:**
+  - A hard cut is a histogram jump plus a pixel jump at most 2 frames wide, so it is frame-accurate. A one-frame flash is `kind: "flash"`.
+  - A gradual transition is a run of frames that keep changing a little and add up to a different picture: `fade` through black or white, otherwise `crossfade`. The shot boundary is its middle.
+  - Whip and zoom transitions are told apart by fast camera motion or scale change across the cut.
+- **Camera:**
+  - Global motion is found by block matching on a 96 px proxy; scale is measured against the frame 6 back.
+  - `keys` are the content's cumulative shift (`x`, `y`: + = right/down) and `scale` (> 1 = zooming in) from the slot's start, about 4 a second. The editor's transform keyframes can replay them.
+  - Frames inside transitions are skipped.
+  - `rig.moves` is the Suite move that recreates the slot, for example `pan_right` when the content slides left.
+- **Speed:** from how much the picture changes per frame against the slot's median. This is a proxy for optical flow, so `confidence` is about 0.55.
+- **Beats:** `detectBeats` on the audio. **Action peaks:** `find_action_peaks`'s detector.
+- **Text:** caption-like regions (bands of sharp edges in near-white or near-black strokes), tracked at 6 fps for their box, size, colour and in/out times.
+  - `words`: tesseract (English, in the API image) reads each item once, at its middle, from a frame up to 720 px wide: the box is cropped, scaled and cleaned up (the caption's fill kept as black on white), and up to three variants are tried until one reads with confidence ≥ 85. Words under 55 stay `null`, as do items past the first 20 and every item when `TESSERACT_PATH` is empty or tesseract is missing. Claude reads what is left from the contact sheet; the `text:words` gap says so.
+- **Grade:** k-means of the keyframes gives 5 swatches. The Suite's `swatchGrade` turns them into the look pack's `Grade` (the palette→LUT path), and `look` is the nearest existing palette.
+- **Pose:** MoveNet SinglePose Lightning (`assets/pose/`, Apache-2.0) gives 17 body keypoints at each slot's keyframe, 0–1 in the frame; points only, never pixels.
+  - `status: "done"` when the mean score is ≥ 0.25, `"none"` when no person is found, and `"pending"` when the pose wasn't read.
+  - It runs in a child process, one job at a time, and the model is loaded only for that job. At most 20 keyframes per reference.
+  - The child's peak RSS is about 125–160 MB. It is logged ("recreate pose") and recorded in `analyzer.pose {frames, ms, peakRssMb}`.
+  - When the container has less than `RECREATE_POSE_MIN_FREE_MB` (200) free, poses are skipped: `analyzer.pose {skipped: "memory"}`, the slots stay `pending`, and the `pose` gap says why.
+  - `RECREATE_POSE=false` turns poses off.
+  - The API image carries onnxruntime-node (CPU, this platform only, about 47 MB) and the 9.4 MB model.
+
+### Recreate this edit · slots and assembly (phase 3)
+Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
+
+| | |
+|---|---|
+| `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}, summary?, tags?}` | `summary` (≤ 200 chars) and `tags` (≤ 20 short lowercase words) go on the recipe. `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
+| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, toGenerate}], assignment: {slotId: takeId}}`. See the matcher below. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, estimate: ShotEstimate}`. Nothing is held. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
+| `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
+
+**The matcher** scores each of the studio's video takes against a slot, 0–1, with reasons:
+- the length;
+- the shape;
+- the move, framing and angle from the take's draft;
+- the lead model;
+- kept takes first.
+
+It suggests one take per slot, best first, using each take once. Slots where nothing scores `minScore` (default 0.6) are marked `toGenerate`. Claude or the owner makes the final choice.
+
+**The fill request** builds a Suite shot for a slot:
+- the brief becomes the prompt;
+- the reference's shape;
+- the slot's framing, angle and move;
+- whole seconds, at least the tier's minimum, because the clip is cut back to the slot;
+- `draft: {tool: "shot", recreate: {slotId}}`.
+
+Pose guidance (the slot's keypoints) joins the fill request once the Suite's shot tool takes a pose.
+
+**Fill state** (`GET …/fill`; `match` keeps its last result, `fill` its jobs):
+```
+SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", takeId?, jobId?, score?, estimate?: {amount, label}, reason? }
+```
+- `ready`: the slot's fill job is done (its first take); `generating`: the job is still running; `matched`: the last match's suggestion; `to_generate`: nothing scored enough.
+- `applied: {sessionId, revision, at, slots: {slotId: takeId}, sources, match}` after an apply.
+
+**Match score** (returned by apply as `match`, 0–1): `{overall, cuts, text, ramps, grade, shots, perSlot: [{slotId, score}]}`.
+- `cuts`: each cut's distance from the reference's (exact = 1, two frames or more = 0), times the share of slots filled.
+- `shots`: per slot, the matcher's score for its take, 0.85 for a shot generated for it, 0.6 for another take, 0 when empty.
+- `text`: 1 for read words, 0.6 for "Text"; `ramps`: the share of ramped slots filled; `grade`: 1 − the Look's distance (0 when off or too far).
+- `overall` = 0.25 cuts + 0.35 shots + 0.15 text + 0.1 ramps + 0.15 grade.
+
+**Sources:** apply also returns `sources: {itemId: {recipeId, slotId? , transitionAt?, textId?}}`, which recipe element each item came from, for workstream 3's corrections log (passed to `edit_ops.meta` once it exists).
+
+**Applying a recipe:**
+- **Values:** each slot's value is a take, or a finished job (its first take is used). A slot whose job hasn't finished is listed in `waiting`.
+- **Timing:**
+  - The cuts land on the reference's times. A clip with a transition in starts that much early, so each clip is lengthened by half of each neighbouring transition.
+  - A take shorter than its slot plays slower to fill it.
+- **Transitions:** crossfade → `fade`, fade → `black`, flash → `white`, whip → `whip`, zoom → `zoom`, glitch → `glitch`. Cuts and unknown transitions get none.
+- **Speed ramps** become a custom `speedCurve`, and the source range is chosen so the clip still plays for exactly the slot's length.
+- **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
+- **Text items** go on a text track. Text whose words weren't read says "Text".
+- **The Look:** the nearest palette's LUT at 0.8, when its distance is under 0.4.
+- **Missing slots** are left out and listed in `missing`.
+- **Revision:** `baseRevision` must be current (`409` otherwise).
+- **Who made it:** from the app it is the owner's change (a reset); from Claude's tool it is Claude's change.
+
+**Claude's tools** (owner only; MCP, in the edit scopes):
+- `analyze_reference(uploadId, name?)`: free; waits up to a minute; returns the summary.
+- `get_recipe(referenceId, contactSheet?)`: returns the contact sheet as an image block.
+- `set_slot_briefs(referenceId, slots)`.
+- `match_slots(referenceId, modelId?, top?)`.
+- `apply_recipe(referenceId, sessionId, slots, options?, baseRevision?)`.
+- `fill_slot(referenceId, slotId, modelId, sessionId, quality?, confirm?)`:
+  - without `confirm`, it returns the price;
+  - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the Suite job;
+  - Claude then passes the job id to `apply_recipe`.
+
+`playbook_read` and `playbook_add` come with WS3's learning storage.
 
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.
