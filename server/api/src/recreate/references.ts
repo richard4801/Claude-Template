@@ -20,6 +20,10 @@ import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
 import { clipLength, timeline } from '../editor/model.js';
+import * as EM from '../editor/model.js';
+import { FILTERS } from '../editor/presets.js';
+import { LOOK_IDS } from '../editor/lookpack.js';
+import { paletteIds } from '../editor/photo.js';
 import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { poseSimilarity, readPoseTracks, type PoseTrack } from './poseTrack.js';
@@ -765,6 +769,13 @@ export class RecreateReferences {
     if (Object.keys(baked).length) opts.baked = baked;
     const out = buildProject(recipe, s.takeId, takes, opts);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
+    // Workstream 1: a built edit the editor would refuse never reaches the owner as a validator path.
+    if (out.durationSec < EM.LIMITS.minOutputSec) throw new ApiError(400, 'edit_too_short', 'Give more shots a take: the edit would be shorter than half a second');
+    try { EM.validate(out.project, FILTERS, LOOK_IDS, paletteIds()); } catch (e) {
+      if (!(e instanceof EM.EditProblem)) throw e;
+      this.ctx.log?.error({ referenceId: r.id, problem: e.message, slots: Object.keys(takes).length }, 'recreate apply built an invalid project');
+      throw new ApiError(422, 'edit_invalid', 'MUSE couldn’t put this edit together · try Build again, or leave out a shot (we’ve logged it)');
+    }
     const { baked: _b, ...optsKept } = opts;
     const label = `Recreated “${r.name}”`;
     // Which recipe element each item came from: on the op, so the owner's later corrections carry it (workstream 3).
@@ -1138,7 +1149,8 @@ export function sourcesOf(recipe: Recipe, project: import('../editor/model.js').
     out[it.id] = { recipeId, slotId: s.id, ...(tr ? { transitionAt: tr.atSec } : {}) };
   });
   // Text items keep the recipe's order (x1, x2, …).
-  (project.tracks.find(t => t.kind === 'text')?.items ?? []).forEach((it, i) => { out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; });
+  // Text items are x1, x2, … in the recipe's order, spread over one or more text tracks (packText).
+  for (const it of project.tracks.filter(t => t.kind === 'text').flatMap(t => t.items)) { const i = Number(/^x(\d+)$/.exec(it.id)?.[1] ?? 0) - 1; out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; }
   return out;
 }
 
