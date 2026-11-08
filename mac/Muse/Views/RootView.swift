@@ -76,7 +76,9 @@ struct Shell: View {
         case .queue: QueueView()
         case .gallery: GalleryView()
         case .result: ResultView()
-        case .settings: SettingsView()
+        case .settings:
+            // Review mode only: the proposed Settings (plans/settings-redesign.md) for the owner's approval.
+            if let mock = SnapshotRunner.state.settingsMock { SettingsMockView(state: mock) } else { SettingsView() }
         case .credits: CreditsView()
         case .lora: LoraView()
         case .posts: PostsView()

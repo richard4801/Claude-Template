@@ -31,6 +31,8 @@ enum SnapshotRunner {
         var recreateFrames: [String: CGRect] = [:]
         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
         var claudeTab: Int?
+        /// Settings shows the proposed redesign's mock in this state (SnapshotRunner+Settings.swift).
+        var settingsMock: SettingsMockState?
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
@@ -147,6 +149,7 @@ enum SnapshotRunner {
             store.suite.picker = nil
             state.overlay = nil
             store.themeID = .a
+            await settingsMockShots(store, dir: dir)   // Settings redesign (owner 2026-11-08): before and the proposed mock
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
