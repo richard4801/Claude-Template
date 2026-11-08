@@ -42,6 +42,9 @@ struct RecreatePanel: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: Space.s4) {
+                    // The Cast step (Release 1 item E): who plays the lead in the new shots, chosen before Build.
+                    RecreateCastRow()
+                    SuiteRule()
                     if let s = rs.selected {
                         shot(s, index: rs.selectedSlot, of: rs.slots.count)
                     }

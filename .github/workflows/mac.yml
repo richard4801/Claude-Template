@@ -93,8 +93,8 @@ jobs:
           mkdir -p snapshots
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
-          for i in $(seq 1 900); do kill -0 $pid 2>/dev/null || break; sleep 1; done
-          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 900 s: stopping it"; kill $pid 2>/dev/null || true; fi
+          for i in $(seq 1 1200); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1200 s: stopping it"; kill $pid 2>/dev/null || true; fi
           wait $pid; echo "review mode exit status: $? (128+n = killed by signal n)"
           ls -la snapshots | head -100
           tail -n 40 snapshots.log || true

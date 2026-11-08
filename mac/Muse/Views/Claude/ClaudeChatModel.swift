@@ -31,8 +31,13 @@ final class ClaudeChatModel {
     }
 
     /// Called from the view's `.task(id:)`. A different context (or a restarted service) loads afresh.
-    func attach(_ service: ClaudeCodeService, contextKind: String, contextId: String) async {
-        let k = "\(ObjectIdentifier(service))|\(service.baseURL?.absoluteString ?? "demo")|\(contextKind)|\(contextId)"
+    /// What each message sent from this Mac carries in front (Recreate: a line naming the reference and the edit session).
+    @ObservationIgnored var wrapOutgoing: ((String) -> String)?
+
+    /// `fallback`: a context to use when the server doesn't accept the first one (Recreate asks for its own "recreate"
+    /// context and falls back to the edit session's "edit" thread on a server that doesn't have it yet).
+    func attach(_ service: ClaudeCodeService, contextKind: String, contextId: String, fallback: (kind: String, id: String)? = nil) async {
+        let k = "\(ObjectIdentifier(service))|\(service.baseURL?.absoluteString ?? "demo")|\(contextKind)|\(contextId)|\(fallback?.kind ?? "")|\(fallback?.id ?? "")"
         guard service.configured, k != key || thread == nil else { return }
         key = k
         self.service = service
@@ -50,7 +55,13 @@ final class ClaudeChatModel {
         loading = true
         defer { loading = false }
         do {
-            let d = try await service.openThread(contextKind: contextKind, contextId: contextId)
+            let d: ClaudeThreadDetail
+            do {
+                d = try await service.openThread(contextKind: contextKind, contextId: contextId)
+            } catch {
+                guard let fallback else { throw error }
+                d = try await service.openThread(contextKind: fallback.kind, contextId: fallback.id)
+            }
             thread = d.thread
             transcript.load(d.messages)
             remoteTurn = d.activeTurn.flatMap { $0.isOpen ? $0 : nil }
@@ -113,7 +124,14 @@ final class ClaudeChatModel {
         guard !text.isEmpty, let service, let tid = thread?.id, service.info.ready else { return }
         composer = ""
         transcript.begin(userText: text, source: "mac")
-        service.send(threadId: tid, text: text)
+        service.send(threadId: tid, text: wrapOutgoing?(text) ?? text)
+    }
+
+    /// A suggestion chip: sent as if typed (only when nothing is running).
+    func send(_ text: String) {
+        guard !busy else { return }
+        composer = text
+        send()
     }
 
     func stop() {

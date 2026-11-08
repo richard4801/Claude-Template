@@ -17,20 +17,31 @@ struct RecreateView: View {
         VStack(spacing: 0) {
             RecreateTopBar()
             SuiteRule()
-            Group {
-                if let ref = rs.reference {
-                    if ref.isReady {
-                        if rs.mode == .compare { RecreateCompare() } else { RecreateRecipe() }
-                    } else if ref.isFailed {
-                        ErrorState("The analysis didn’t finish", ref.error ?? "This video couldn’t be read. Try another one.",
-                                   actionTitle: "Back to references") { store.leaveRecreateReference() }
-                            .padding(Space.s6)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            HStack(spacing: 0) {
+                Group {
+                    if let ref = rs.reference {
+                        if ref.isReady {
+                            if rs.mode == .compare { RecreateCompare() } else { RecreateRecipe() }
+                        } else if ref.failedFetchingLink {
+                            RecreateLinkFailed(reference: ref)
+                        } else if ref.isFailed {
+                            ErrorState("The analysis didn’t finish", ref.error ?? "This video couldn’t be read. Try another one.",
+                                       actionTitle: "Back to references") { store.leaveRecreateReference() }
+                                .padding(Space.s6)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        } else {
+                            RecreateAnalysing(reference: ref)
+                        }
                     } else {
-                        RecreateAnalysing(reference: ref)
+                        RecreateStart()
                     }
-                } else {
-                    RecreateStart()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Claude runs the flow from here (owner only): the editor's own chat, with Recreate's context.
+                if rs.claudeOpen && store.isOwner {
+                    SuiteRule(vertical: true)
+                    RecreateClaudePanel()
+                        .frame(width: RecreateClaudePanel.width)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,6 +49,12 @@ struct RecreateView: View {
         .background(t.roles.canvas)
         .sheet(isPresented: Binding(get: { store.recreate.askBuild }, set: { store.recreate.askBuild = $0 })) {
             RecreateBuildConfirm()
+        }
+        .sheet(isPresented: Binding(get: { store.recreate.exportOpen }, set: { store.recreate.exportOpen = $0 })) {
+            RecreateExportSheet()
+        }
+        .sheet(item: Binding(get: { store.recreate.claudeAsk }, set: { store.recreate.claudeAsk = $0 })) { p in
+            RecreateClaudeAsk(pending: p)
         }
     }
 }
@@ -58,6 +75,17 @@ struct RecreateBuildConfirm: View {
                 .scaled(t.scale.title, t.roles.ink).lineLimit(1).fitProbe("confirm title")
             Text(message(paid: paid.count, cant: cant.count))
                 .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            if !paid.isEmpty, let lead = store.recreateLead {
+                // The Cast step's choice (Release 1 item E): who the new shots are made with.
+                HStack(spacing: Space.s3) {
+                    MuseImage(ref: lead.cover).frame(width: 28, height: 36)
+                        .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+                    Text("Lead").scaled(t.scale.caption, t.roles.ink2).fixedSize()
+                    Text(lead.name).scaled(t.scale.label, t.roles.ink).lineLimit(1).fitProbe("confirm lead")
+                    Spacer(minLength: 0)
+                }
+                .accessibilityElement(children: .combine)
+            }
             if !paid.isEmpty || !cant.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(paid, id: \.self) { s in
@@ -85,8 +113,9 @@ struct RecreateBuildConfirm: View {
         let rs = store.recreate
         let yours = rs.fill?.slots.filter { $0.state == "matched" || $0.state == "ready" }.count ?? 0
         var out: [String] = []
-        if paid == 1 { out.append("The new shot is made with your model and charged to the studio.") }
-        if paid > 1 { out.append("The \(paid) new shots are made with your model and charged to the studio.") }
+        let who = store.recreateLead?.shortName ?? "your model"
+        if paid == 1 { out.append("The new shot is made with \(who) and charged to the studio.") }
+        if paid > 1 { out.append("The \(paid) new shots are made with \(who) and charged to the studio.") }
         if yours > 0 { out.append(yours == 1 ? "1 shot comes from your takes." : "\(yours) shots come from your takes.") }
         if cant > 0 { out.append(cant == 1 ? "1 shot can’t be made and is left out." : "\(cant) shots can’t be made and are left out.") }
         if paid > 0 {
@@ -164,6 +193,7 @@ struct RecreateTopBar: View {
                 .accessibilityLabel("Recipe or compare")
                 Spacer(minLength: Space.s2)
                 if rs.mode == .recipe {
+                    claudeButton(iconOnly: true)
                     if let f = rs.fill {
                         VStack(alignment: .trailing, spacing: 0) {
                             Text(RecreateText.makingSummary(f, prices: rs.prices, unavailable: rs.unpriceable)).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
@@ -182,15 +212,31 @@ struct RecreateTopBar: View {
                     .accessibilityLabel("Build the edit")
                     .background(SnapshotFrame(key: "build"))
                 } else {
-                    SuiteToolButton(title: "Open in the editor", icon: "export", accent: true) { store.openRecreateInEditor() }
+                    SuiteToolButton(title: "Open in the editor", icon: "pencil-simple", plain: true) { store.openRecreateInEditor() }
                         .accessibilityLabel("Open in the editor")
                         .background(SnapshotFrame(key: "open"))
+                    claudeButton(iconOnly: true)
+                    // Export is the one primary after Build (plans/recreate/README.md): the sound as a guide, or silent.
+                    SuiteToolButton(title: "Export", icon: "export", accent: true) { store.openRecreateExport() }
+                        .accessibilityLabel("Export")
+                        .background(SnapshotFrame(key: "export"))
                 }
             }
+            if rs.reference?.isReady != true { claudeButton(iconOnly: false) }
         }
         .padding(.horizontal, Space.s4)
         .frame(height: 56)
         .background(t.roles.canvas)
+    }
+
+    /// Claude (owner only): opens the chat beside the Recreate screens, as in the editor.
+    @ViewBuilder private func claudeButton(iconOnly: Bool) -> some View {
+        if store.isOwner {
+            let on = store.recreate.claudeOpen
+            SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on, iconOnly: iconOnly) { store.toggleRecreateClaude() }
+                .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
+                .help("Claude can analyse a video, explain a shot or fix one")
+        }
     }
 
     /// Under the total: the approval promise, or what happens while new shots generate.
@@ -238,12 +284,14 @@ struct SnapshotFrame: View {
 
 // MARK: Start
 
-/// Drop a video (or choose one); references analysed before, newest first. Nothing is uploaded until a video is chosen.
+/// Drop a video (anywhere on the page), choose one, paste a link, or ⌘V either; references analysed before, newest first.
+/// Nothing is uploaded until a video is chosen. A link refusal says why, with the file offered right there.
 struct RecreateStart: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @State private var importing = false
     @State private var targeted = false
+    @FocusState private var linkFocused: Bool
 
     var body: some View {
         let rs = store.recreate
@@ -259,12 +307,8 @@ struct RecreateStart: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: 640)
                 .accessibilityLabel("Choose a video")
-                .disabled(rs.uploading)
-                .dropDestination(for: URL.self) { urls, _ in
-                    guard let url = urls.first(where: { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .movie) ?? false }) else { return false }
-                    Task { await store.createRecreateReference(from: url) }
-                    return true
-                } isTargeted: { targeted = $0 }
+                .disabled(rs.uploading || rs.fetchingLink)
+                linkRow
                 if rs.uploading {
                     VStack(alignment: .leading, spacing: Space.s2) {
                         Text("Uploading").scaled(t.scale.label, t.roles.ink)
@@ -290,14 +334,59 @@ struct RecreateStart: View {
             .padding(Space.s6)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.mpeg4Movie, .quickTimeMovie, .movie]) { result in
-            guard case .success(let url) = result else { return }
-            Task {
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                await store.createRecreateReference(from: url)
+        // The whole page takes a dropped video (or a dropped link), not only the drop zone.
+        .dropDestination(for: URL.self) { urls, _ in RecreateDrop.take(urls, store: store) } isTargeted: { targeted = $0 }
+        .background {
+            // ⌘V anywhere on the page but the link field (which pastes as usual, then fetches a whole link).
+            if !linkFocused {
+                Button("") { store.pasteIntoRecreate() }
+                    .keyboardShortcut("v", modifiers: .command)
+                    .opacity(0)
+                    .accessibilityHidden(true)
             }
         }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.mpeg4Movie, .quickTimeMovie, .movie]) { result in
+            RecreateDrop.imported(result, store: store)
+        }
+    }
+
+    /// "Or paste a link": the field, Fetch, the fetching line and a refusal with the file offered beside it.
+    private var linkRow: some View {
+        @Bindable var rs = store.recreate
+        let empty = rs.linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            Text("Or paste a link").scaled(t.scale.label, t.roles.ink)
+            HStack(spacing: Space.s2) {
+                TextField("A TikTok, Instagram Reel or YouTube link", text: $rs.linkText)
+                    .focused($linkFocused)
+                    .onSubmit { Task { await store.createRecreateReference(link: rs.linkText) } }
+                    .roleField(focused: linkFocused)
+                    .accessibilityLabel("Video link")
+                    .disabled(rs.fetchingLink)
+                    .onChange(of: rs.linkText) { old, new in
+                        // A whole link pasted into an empty field is fetched at once.
+                        if old.isEmpty, RecreateLinks.detect(new) != nil { Task { await store.createRecreateReference(link: new) } }
+                    }
+                RButton(rs.fetchingLink ? "Fetching" : "Fetch", kind: .quiet, off: empty || rs.fetchingLink || rs.uploading) {
+                    Task { await store.createRecreateReference(link: rs.linkText) }
+                }
+                .disabled(empty || rs.fetchingLink || rs.uploading)
+                .fixedSize()
+                .accessibilityLabel("Fetch the video")
+            }
+            if rs.fetchingLink {
+                HStack(spacing: Space.s2) {
+                    ProgressView().controlSize(.small)
+                    Text("Fetching the video").scaled(t.scale.caption, t.roles.ink2)
+                }
+            } else if let p = rs.linkProblem {
+                RecreateLinkProblemNote(problem: p) { importing = true }
+            } else {
+                Text("Public videos only. MUSE fetches it once and keeps it private, like a dropped file.")
+                    .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: 640, alignment: .leading)
     }
 
     private func tile(_ r: RecreateReference) -> some View {
@@ -308,6 +397,83 @@ struct RecreateStart: View {
             Text(r.name ?? "Reference").scaled(t.scale.label, t.roles.ink).lineLimit(1).padding(.top, Space.s1)
             Text(r.isAnalyzing ? "Reading · \(Int(r.progress ?? 0))%" : r.isFailed ? "Couldn’t be read" : String(format: "%.1f s", r.durationSec ?? 0))
                 .scaled(t.scale.caption, t.roles.ink2).monospacedDigit().lineLimit(1)
+        }
+    }
+}
+
+/// A link refusal: what happened in the server's words, and (for every link_* code) the file offered right there.
+struct RecreateLinkProblemNote: View {
+    var problem: RecreateLinkProblem
+    var chooseFile: () -> Void
+
+    var body: some View {
+        Group {
+            if problem.offersFile {
+                InlineNotice(problem.message, tone: .caution, actionTitle: "Choose the file", action: chooseFile)
+            } else {
+                InlineNotice(problem.message, tone: .caution)
+            }
+        }
+        .background(SnapshotFrame(key: "linkProblem"))
+    }
+}
+
+/// What the start page (and a failed link's page) does with dropped or chosen files and links.
+@MainActor
+enum RecreateDrop {
+    static func take(_ urls: [URL], store: AppStore) -> Bool {
+        if let file = urls.first(where: AppStore.isMovieFile) {
+            Task { await store.createRecreateReference(from: file) }
+            return true
+        }
+        if let link = urls.first(where: { !$0.isFileURL && RecreateLinks.platform($0.absoluteString) != nil }) {
+            Task { await store.createRecreateReference(link: link.absoluteString) }
+            return true
+        }
+        return false
+    }
+
+    static func imported(_ result: Result<URL, Error>, store: AppStore) {
+        guard case .success(let url) = result else { return }
+        Task {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            await store.createRecreateReference(from: url)
+        }
+    }
+}
+
+/// A link reference whose download was blocked (`failed`, `errorCode: link_blocked`): the same words as the refusal and the
+/// file drop right there.
+struct RecreateLinkFailed: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var reference: RecreateReference
+    @State private var importing = false
+    @State private var targeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            Text("This link couldn’t be fetched").scaled(t.scale.title, t.roles.ink)
+            Text(RecreateLinks.message(code: reference.errorCode ?? "link_blocked", message: reference.error))
+                .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 560, alignment: .leading)
+            Button { importing = true } label: {
+                DropZone(title: "Drop the saved video", hint: "Up to 60 s. It’s read like any dropped file.", buttonTitle: "Choose the file", targeted: targeted)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: 640)
+            .accessibilityLabel("Choose the file")
+            if store.recreate.uploading {
+                RProgress(value: store.uploadProgress ?? 0).frame(maxWidth: 640)
+            }
+            RButton("Back to references", kind: .plain) { store.leaveRecreateReference() }
+        }
+        .padding(Space.s6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .dropDestination(for: URL.self) { urls, _ in RecreateDrop.take(urls, store: store) } isTargeted: { targeted = $0 }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.mpeg4Movie, .quickTimeMovie, .movie]) { result in
+            RecreateDrop.imported(result, store: store)
         }
     }
 }
@@ -472,11 +638,22 @@ struct RecreatePlayer: View {
             ZStack {
                 t.editViewer
                 ZStack {
-                    if let player, !yours {
+                    if yours, let b = rs.built, b.phase == .ready {
+                        // The built edit itself, drawn by the editor's engine (ramps, camera keys, text, the Look).
+                        RecreateVideoSurface(player: b.player)
+                            .background(SnapshotFrame(key: "yours"))
+                    } else if let player, !yours {
                         RecreateVideoSurface(player: player)
                     } else {
                         frame
                         if !yours || store.isDemo { overlayText }
+                        if yours && rs.loadingBuilt {
+                            VStack(spacing: Space.s2) {
+                                ProgressView().controlSize(.small)
+                                Text("Getting your edit ready to play").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                            }
+                            .padding(Space.s3)
+                        }
                     }
                 }
                 .aspectRatio(aspect, contentMode: .fit)
@@ -494,16 +671,31 @@ struct RecreatePlayer: View {
             _ = await player?.seek(to: CMTime(seconds: rs.time, preferredTimescale: 600))
         }
         .onChange(of: rs.playing) { _, on in
+            if yours {
+                if on { rs.built?.play(from: rs.time) } else { rs.built?.pause() }
+                return
+            }
             guard let player else { return }
             if on { player.play() } else { player.pause() }
         }
-        .onChange(of: rs.time) { _, time in
-            guard let player, !rs.playing else { return }
+        .onChange(of: rs.time) { old, time in
+            // Playing, the clock loops back to the start at the end: both players start again with it.
+            if rs.playing {
+                guard time < old - 0.5 else { return }
+                if yours { rs.built?.play(from: time) } else if let player {
+                    player.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                    player.play()
+                }
+                return
+            }
+            if yours { rs.built?.seek(time); return }
+            guard let player else { return }
             player.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
 
     private var aspectRatio: CGFloat {
+        if yours, let b = store.recreate.built, b.phase == .ready { return b.aspect }
         let s = store.recreate.recipe?.source
         if let w = s?.width, let h = s?.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
         return 9 / 16

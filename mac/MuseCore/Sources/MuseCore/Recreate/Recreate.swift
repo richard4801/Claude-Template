@@ -23,12 +23,62 @@ public struct RecreateReference: Codable, Hashable, Sendable, Identifiable {
     public var videoUrl: String?
     public var posterUrl: String?
     public var recipe: Recipe?
+    /// "file" | "link" (plans/api.md "From a link").
+    public var source: String?
+    /// The public link the video was fetched from.
+    public var sourceUrl: String?
+    /// Why it failed, as a code (`link_blocked` when the link's download was blocked).
+    public var errorCode: String?
+    /// The same link again: the member's reference made before (nothing is fetched twice).
+    public var cached: Bool?
+    /// A "Use this sound" reminder the server may add later, read leniently from `soundReminder` or `useThisSound`.
+    public var soundReminder: String?
 
     public var isAnalyzing: Bool { state == "analyzing" }
     public var isReady: Bool { state == "ready" && recipe != nil }
     public var isFailed: Bool { state == "failed" }
+    public var isLink: Bool { source == "link" || (source == nil && sourceUrl != nil) }
+    /// Failed because the link couldn't be fetched: the page offers the file drop instead.
+    public var failedFetchingLink: Bool { isFailed && RecreateLinks.offersFile(errorCode) }
 
-    enum CodingKeys: String, CodingKey { case id, name, state, progress, phase, error, durationSec, keep, createdAt, expiresAt, videoUrl, posterUrl, recipe }
+    enum CodingKeys: String, CodingKey {
+        case id, name, state, progress, phase, error, durationSec, keep, createdAt, expiresAt, videoUrl, posterUrl, recipe
+        case source, sourceUrl, errorCode, cached, soundReminder, useThisSound
+    }
+
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(name, forKey: .name)
+        try c.encode(state, forKey: .state)
+        try c.encodeIfPresent(progress, forKey: .progress)
+        try c.encodeIfPresent(phase, forKey: .phase)
+        try c.encodeIfPresent(error, forKey: .error)
+        try c.encodeIfPresent(durationSec, forKey: .durationSec)
+        try c.encodeIfPresent(keep, forKey: .keep)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try c.encodeIfPresent(videoUrl, forKey: .videoUrl)
+        try c.encodeIfPresent(posterUrl, forKey: .posterUrl)
+        try c.encodeIfPresent(recipe, forKey: .recipe)
+        try c.encodeIfPresent(source, forKey: .source)
+        try c.encodeIfPresent(sourceUrl, forKey: .sourceUrl)
+        try c.encodeIfPresent(errorCode, forKey: .errorCode)
+        try c.encodeIfPresent(cached, forKey: .cached)
+        try c.encodeIfPresent(soundReminder, forKey: .soundReminder)
+    }
+
+    /// `useThisSound` as a string, or an object with `reminder`, `text` or `label`.
+    static func reminderText(_ v: JSONValue) -> String? {
+        switch v {
+        case .string(let s): return s.isEmpty ? nil : s
+        case .object(let o):
+            for k in ["reminder", "text", "label"] { if case .string(let s)? = o[k], !s.isEmpty { return s } }
+            return nil
+        default: return nil
+        }
+    }
+
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -44,6 +94,15 @@ public struct RecreateReference: Codable, Hashable, Sendable, Identifiable {
         videoUrl = c.o(.videoUrl)
         posterUrl = c.o(.posterUrl)
         recipe = c.o(.recipe)
+        source = c.o(.source)
+        sourceUrl = c.o(.sourceUrl)
+        errorCode = c.o(.errorCode)
+        cached = c.o(.cached)
+        if let s: String = c.o(.soundReminder), !s.isEmpty {
+            soundReminder = s
+        } else if let v: JSONValue = c.o(.useThisSound) {
+            soundReminder = Self.reminderText(v)
+        }
     }
 }
 

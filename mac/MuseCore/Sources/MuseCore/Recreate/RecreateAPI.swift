@@ -6,6 +6,9 @@ public protocol RecreateAPI: Sendable {
     func reference(_ id: String) async throws -> RecreateReference
     /// Uploads the video (≤ 60 s) and starts its analysis; returns the reference in `analyzing`.
     func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference
+    /// A public TikTok, Instagram Reel or YouTube link: the server fetches it (`source: "link"`, phase "Fetching the
+    /// video"), or returns the member's reference from the same link (`cached: true`). Refusals throw `link_*` / `too_long`.
+    func createReference(link: String, name: String?) async throws -> RecreateReference
     func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference
     func deleteReference(_ id: String) async throws
     func fill(_ id: String) async throws -> RecreateFill
@@ -117,6 +120,7 @@ public enum RecreateIds {
 
 extension HTTPMuseAPI: RecreateAPI {
     private struct CreateBody: Encodable { var uploadId: String; var name: String? }
+    private struct LinkBody: Encodable { var url: String; var name: String? }
     private struct PatchBody: Encodable { var keep: Bool?; var name: String? }
     private struct SlotBody: Encodable { var modelId: String; var quality: String? }
     private struct MatchBody: Encodable { var modelId: String? }
@@ -126,6 +130,11 @@ extension HTTPMuseAPI: RecreateAPI {
     public func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference {
         let uploadId = try await uploadVideoForAnalysis(file, contentType: contentType, progress: progress)
         return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(CreateBody(uploadId: uploadId, name: name)))
+    }
+    public func createReference(link: String, name: String?) async throws -> RecreateReference {
+        let url = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { throw ApiError("link_unsupported", "Paste a link first") }
+        return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(LinkBody(url: url, name: name)))
     }
     public func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference {
         try await suiteCall("PATCH", "v1/recreate/references/\(try RecreateIds.check(id))", body: try JSONEncoder().encode(PatchBody(keep: keep, name: name)))
@@ -161,7 +170,11 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     private var refs: [RecreateReference]
     /// referenceId → slotId → `fill()` calls since the slot was filled.
     private var made: [String: [String: Int]] = [:]
+    /// Link references whose fetch fails on the next read (demo: a link with "fails" in it).
+    private var failing: Set<String> = []
     public static let demoPrice = 0.64
+    /// Demo mode's link (any TikTok link reads the sample at once).
+    public static let demoLink = "https://www.tiktok.com/@muse.demo/video/7400000000000000001"
 
     public init() {
         let sample = try? JSONDecoder().decode(RecreateReference.self, from: Data(RecreateDemo.referenceJSON.utf8))
@@ -172,17 +185,71 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
 
     public func listReferences() async throws -> [RecreateReference] { with { refs } }
     public func reference(_ id: String) async throws -> RecreateReference {
-        try with { guard let r = refs.first(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }; return r }
+        try with {
+            guard let i = refs.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }
+            // A link whose download is blocked: the next read reports the failure.
+            if failing.remove(id) != nil {
+                refs[i].state = "failed"
+                refs[i].phase = "Failed"
+                refs[i].error = RecreateLinks.fallback
+                refs[i].errorCode = "link_blocked"
+            }
+            return refs[i]
+        }
     }
     public func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference {
         try with {
-            guard var r = refs.first else { throw ApiError("not_found", "No sample in demo mode") }
+            guard var r = refs.first(where: { $0.recipe != nil }) else { throw ApiError("not_found", "No sample in demo mode") }
             r.id = "rx_demo\(refs.count + 1)"
             r.name = name ?? file.deletingPathExtension().lastPathComponent
+            r.source = "file"
+            r.sourceUrl = nil
+            r.cached = nil
             refs.insert(r, at: 0)
             return r
         }
     }
+
+    /// Demo mode's links: any TikTok, Instagram or YouTube link reads the sample at once (`source: "link"`); the same link
+    /// again returns it with `cached: true`. Words in the link try the refusals: "private", "downloads-off", "too-big",
+    /// "too-long", "blocked" (refused at once) and "fails" (accepted, then the fetch fails with `link_blocked`).
+    public func createReference(link: String, name: String?) async throws -> RecreateReference {
+        let url = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard RecreateLinks.platform(url) != nil else {
+            throw ApiError("link_unsupported", RecreateLinks.message(code: "link_unsupported", message: nil))
+        }
+        let low = url.lowercased()
+        let refusals: [(String, String, String?)] = [
+            ("private", "link_private", nil), ("downloads-off", "link_downloads_off", nil),
+            ("too-big", "link_too_big", "This video is too big to fetch (212 MB; the limit is 80 MB)"),
+            ("too-long", "too_long", "References can be up to 60 s for now (this one is 94 s)"), ("blocked", "link_blocked", nil),
+        ]
+        for (word, code, message) in refusals where low.contains(word) {
+            throw ApiError(code, RecreateLinks.message(code: code, message: message))
+        }
+        return try with {
+            if var hit = refs.first(where: { $0.sourceUrl == url }) {
+                hit.cached = true
+                return hit
+            }
+            guard var r = refs.first(where: { $0.recipe != nil }) else { throw ApiError("not_found", "No sample in demo mode") }
+            r.id = "rx_demo\(refs.count + 1)"
+            r.name = name ?? "\(RecreateLinks.platform(url) ?? "Link") video"
+            r.source = "link"
+            r.sourceUrl = url
+            r.cached = nil
+            if low.contains("fails") {
+                r.state = "analyzing"
+                r.phase = "Fetching the video"
+                r.progress = 0
+                r.recipe = nil
+                failing.insert(r.id)
+            }
+            refs.insert(r, at: 0)
+            return r
+        }
+    }
+
     public func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference {
         try with {
             guard let i = refs.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }

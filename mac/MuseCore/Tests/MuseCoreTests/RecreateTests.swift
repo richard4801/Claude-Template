@@ -225,6 +225,173 @@ final class RecreateTests: XCTestCase {
         await XCTAssertThrowsErrorAsync { _ = try await api.estimateSlot(ref.id, slotId: "nope", modelId: "m1", quality: nil) }
     }
 
+    // MARK: From a link (Release 1 gap 3)
+
+    func testLinkFieldsDecodeLeniently() throws {
+        let json = #"{"id":"rx_9","state":"analyzing","phase":"Fetching the video","source":"link","sourceUrl":"https://www.tiktok.com/@a/video/12345678","cached":true}"#
+        let r = try JSONDecoder().decode(RecreateReference.self, from: Data(json.utf8))
+        XCTAssertTrue(r.isLink)
+        XCTAssertEqual(r.sourceUrl, "https://www.tiktok.com/@a/video/12345678")
+        XCTAssertEqual(r.cached, true)
+        XCTAssertNil(r.errorCode)
+        let failed = #"{"id":"rx_8","state":"failed","error":"Couldn’t fetch this link — save the video and drop the file in","errorCode":"link_blocked","source":"link","cached":"nope"}"#
+        let f = try JSONDecoder().decode(RecreateReference.self, from: Data(failed.utf8))
+        XCTAssertTrue(f.failedFetchingLink)
+        XCTAssertNil(f.cached)   // a wrong type is dropped, never fails the decode
+        // A file reference: no link fields at all.
+        let file = try JSONDecoder().decode(RecreateReference.self, from: Data(#"{"id":"rx_7","state":"failed","error":"x"}"#.utf8))
+        XCTAssertFalse(file.isLink)
+        XCTAssertFalse(file.failedFetchingLink)
+        // The "Use this sound" reminder, if the server adds it, as a string or an object.
+        let s1 = try JSONDecoder().decode(RecreateReference.self, from: Data(#"{"id":"rx_6","state":"ready","soundReminder":"Use the sound"}"#.utf8))
+        XCTAssertEqual(RecreateExport.reminder(s1), "Use the sound")
+        let s2 = try JSONDecoder().decode(RecreateReference.self, from: Data(#"{"id":"rx_5","state":"ready","useThisSound":{"text":"Tap the sound"}}"#.utf8))
+        XCTAssertEqual(s2.soundReminder, "Tap the sound")
+        XCTAssertEqual(RecreateExport.reminder(file), "Post with TikTok’s “Use this sound” so the real sound plays.")
+        // Round trip keeps the link fields.
+        let again = try JSONDecoder().decode(RecreateReference.self, from: JSONEncoder().encode(r))
+        XCTAssertEqual(again.sourceUrl, r.sourceUrl)
+        XCTAssertEqual(again.source, "link")
+    }
+
+    func testLinksAreRecognised() {
+        XCTAssertEqual(RecreateLinks.platform("https://www.tiktok.com/@a/video/123456"), "TikTok")
+        XCTAssertEqual(RecreateLinks.platform("https://vm.tiktok.com/ZMabc12/"), "TikTok")
+        XCTAssertEqual(RecreateLinks.platform("https://www.instagram.com/reel/Cabc123/"), "Instagram")
+        XCTAssertEqual(RecreateLinks.platform("https://youtu.be/abcdefghijk"), "YouTube")
+        XCTAssertEqual(RecreateLinks.platform("https://m.youtube.com/shorts/abcdefghijk"), "YouTube")
+        XCTAssertNil(RecreateLinks.platform("https://vimeo.com/1"))
+        XCTAssertNil(RecreateLinks.platform("ftp://tiktok.com/x"))
+        XCTAssertNil(RecreateLinks.platform("not a link"))
+        // A share sheet's words around the link.
+        XCTAssertEqual(RecreateLinks.detect("Check this out! https://www.tiktok.com/@a/video/123456 #fyp"), "https://www.tiktok.com/@a/video/123456")
+        XCTAssertEqual(RecreateLinks.detect("(https://youtu.be/abcdefghijk)."), "https://youtu.be/abcdefghijk")
+        XCTAssertNil(RecreateLinks.detect("https://example.com/video.mp4"))
+        XCTAssertTrue(RecreateLinks.offersFile("link_private"))
+        XCTAssertFalse(RecreateLinks.offersFile("too_long"))
+        XCTAssertFalse(RecreateLinks.offersFile(nil))
+    }
+
+    func testLinkRefusalsSayWhyAndOfferTheFile() {
+        let blocked = RecreateLinkProblem(ApiError("link_blocked", "Server error 502"))
+        XCTAssertEqual(blocked?.message, RecreateLinks.fallback)
+        XCTAssertEqual(blocked?.offersFile, true)
+        let priv = RecreateLinkProblem(ApiError("link_private", "This video isn’t public, so MUSE won’t fetch it. Save it yourself and drop the file in"))
+        XCTAssertEqual(priv?.message, "This video isn’t public, so MUSE won’t fetch it. Save it yourself and drop the file in")
+        XCTAssertEqual(priv?.offersFile, true)
+        XCTAssertEqual(RecreateLinkProblem(ApiError("too_long", "References can be up to 60 s for now (this one is 94 s)"))?.offersFile, true)
+        XCTAssertNil(RecreateLinkProblem(ApiError("offline", "Can't reach the server")))
+        for code in ["link_unsupported", "link_private", "link_downloads_off", "link_too_big", "link_blocked", "too_long"] {
+            XCTAssertFalse(RecreateLinks.message(code: code, message: nil).isEmpty)
+        }
+    }
+
+    /// Demo mode: a link reads the sample at once, the same link again is the cached reference, and each refusal is tried
+    /// by a word in the link.
+    func testDemoLinks() async throws {
+        let api = FakeRecreateAPI()
+        let r = try await api.createReference(link: FakeRecreateAPI.demoLink, name: nil)
+        XCTAssertTrue(r.isReady)
+        XCTAssertTrue(r.isLink)
+        XCTAssertNil(r.cached)
+        let again = try await api.createReference(link: FakeRecreateAPI.demoLink, name: nil)
+        XCTAssertEqual(again.id, r.id)
+        XCTAssertEqual(again.cached, true)
+        let cases: [(String, String)] = [
+            ("https://www.tiktok.com/@a/video/1234567-private", "link_private"),
+            ("https://www.tiktok.com/@a/video/1234567-downloads-off", "link_downloads_off"),
+            ("https://www.instagram.com/reel/too-big1/", "link_too_big"),
+            ("https://youtu.be/too-long-vid", "too_long"),
+            ("https://www.tiktok.com/@a/video/blocked", "link_blocked"),
+            ("https://vimeo.com/123", "link_unsupported"),
+        ]
+        for (link, code) in cases {
+            do {
+                _ = try await api.createReference(link: link, name: nil)
+                XCTFail("\(link) was accepted")
+            } catch let e as ApiError {
+                XCTAssertEqual(e.code, code, link)
+                XCTAssertNotNil(RecreateLinkProblem(e), link)
+            }
+        }
+        // Accepted, then the download is blocked: the reference turns failed with link_blocked.
+        let later = try await api.createReference(link: "https://www.tiktok.com/@a/video/1234567-fails", name: nil)
+        XCTAssertTrue(later.isAnalyzing)
+        XCTAssertEqual(later.phase, "Fetching the video")
+        let failed = try await api.reference(later.id)
+        XCTAssertTrue(failed.failedFetchingLink)
+        XCTAssertEqual(failed.error, RecreateLinks.fallback)
+        // A file after a failing link still reads the sample.
+        let file = try await api.createReference(file: URL(fileURLWithPath: "/tmp/clip.mp4"), contentType: "video/mp4", name: nil, progress: nil)
+        XCTAssertTrue(file.isReady)
+        XCTAssertFalse(file.isLink)
+    }
+
+    // MARK: Assembly (Compare's built edit in demo mode) and export
+
+    func testAssemblyFollowsTheServerRules() throws {
+        let r = try XCTUnwrap(try fixture().recipe)
+        let take = RecreateAssembly.TakeInfo(id: "t1", durationSec: 15, width: 432, height: 768)
+        let built = RecreateAssembly.project(r, sourceTakeId: "t1", takes: ["s1": take, "s2": take, "s3": take],
+                                             paletteIds: ["teal_orange"], startAtSlot: true)
+        let clips = built.project.mainClips
+        XCTAssertEqual(clips.count, 3)
+        XCTAssertTrue(built.missing.isEmpty)
+        XCTAssertEqual(built.project.canvas.width, 1080)
+        XCTAssertEqual(built.project.canvas.height, 1920)
+        XCTAssertEqual(built.project.assets.count, 1)
+        // Cut → none; crossfade → fade into shot 3; the flash inside shot 3 is not a transition between clips.
+        XCTAssertNil(clips[1].transitionIn)
+        XCTAssertEqual(clips[2].transitionIn?.kind, .fade)
+        // The pan on shot 1 and the push-in on shot 2 are keyframes; the still shot 3 has none.
+        XCTAssertNotNil(clips[0].keyframes?.x)
+        XCTAssertNotNil(clips[1].keyframes?.scale)
+        XCTAssertNil(clips[2].keyframes)
+        // The Look at 0.8 (teal & orange is close enough), and the caption on a text track.
+        XCTAssertEqual(clips[0].look?.lut, "palette:teal_orange")
+        XCTAssertEqual(clips[0].look?.strength, 0.8)
+        let text = try XCTUnwrap(built.project.tracks.first { $0.kind == .text }?.items.first?.textItem)
+        XCTAssertEqual(text.text, "SUMMER")
+        // The edit is as long as the reference (cuts land on its times).
+        XCTAssertEqual(built.durationSec, r.durationSec, accuracy: 0.05)
+        XCTAssertNil(EditV2.problem(built.project, paletteIds: ["teal_orange"]))
+        // Without the Look on this Mac, no LUT; without a take, the slot is left out.
+        let partial = RecreateAssembly.project(r, sourceTakeId: "t1", takes: ["s1": take, "s3": take])
+        XCTAssertNil(partial.project.mainClips.first?.look)
+        XCTAssertEqual(partial.missing, ["s2"])
+        // A take shorter than its slot plays slower to fill it.
+        let short = RecreateAssembly.TakeInfo(id: "t2", durationSec: 0.75, width: 432, height: 768)
+        let slow = RecreateAssembly.project(r, sourceTakeId: "t2", takes: ["s1": short])
+        XCTAssertLessThan(slow.project.mainClips[0].speed, 1)
+        XCTAssertEqual(EditV2.clipLength(slow.project.mainClips[0]), r.slots[0].length, accuracy: 0.01)
+    }
+
+    func testExportWordsAndGuideRange() {
+        XCTAssertEqual(RecreateExport.guideRange(editSec: 4.4, referenceSec: 10)?.duration, 4.4)
+        XCTAssertEqual(RecreateExport.guideRange(editSec: 12, referenceSec: 4.4)?.duration, 4.4)
+        XCTAssertNil(RecreateExport.guideRange(editSec: 0, referenceSec: 4))
+        XCTAssertNil(RecreateExport.guideRange(editSec: .nan, referenceSec: 4))
+        XCTAssertEqual(RecreateExport.fileName("Summer/cut", sound: .guide), "Summer-cut recreated.mp4")
+        XCTAssertEqual(RecreateExport.fileName(nil, sound: .silent), "Recreated edit recreated silent.mp4")
+        for s in RecreateExport.Sound.allCases { XCTAssertFalse(s.label.isEmpty); XCTAssertFalse(s.hint.isEmpty) }
+    }
+
+    func testClaudeContextAndSuggestions() throws {
+        let ref = try fixture()
+        let msg = RecreateClaude.message("Explain shot 2", reference: ref, sessionId: "es_1")
+        XCTAssertTrue(msg.contains("rx_example"))
+        XCTAssertTrue(msg.contains("es_1"))
+        XCTAssertEqual(RecreateClaude.stripContext(msg), "Explain shot 2")
+        XCTAssertEqual(RecreateClaude.stripContext("plain"), "plain")
+        let chips = RecreateClaude.suggestions(selectedShot: 1, weakestShot: nil, hasRecipe: true).map(\.label)
+        XCTAssertEqual(chips, ["Explain shot 2", "Fix the weakest shot", "Analyse a new video"])
+        XCTAssertEqual(RecreateClaude.suggestions(selectedShot: 0, weakestShot: 2, hasRecipe: true)[1].label, "Fix shot 3")
+        XCTAssertEqual(RecreateClaude.suggestions(selectedShot: nil, weakestShot: nil, hasRecipe: false).map(\.label), ["Analyse a new video"])
+        // A fix never spends on its own: the prompt asks for the price and says the owner confirms.
+        let fix = RecreateClaude.suggestions(selectedShot: 0, weakestShot: 1, hasRecipe: true)[1].prompt
+        XCTAssertTrue(fix.contains("I confirm before anything is spent"))
+    }
+
     private func XCTAssertThrowsErrorAsync(_ body: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
         do {
             try await body()

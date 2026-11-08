@@ -1,8 +1,10 @@
 import AppKit
+import AVFoundation
 import Foundation
 import MuseCore
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 // "Recreate this edit" (plans/recreate/README.md): a reference video analysed into its recipe (Recipe), built with the
 // studio's takes and new shots, then compared with the reference (Compare). It lives inside Edit, opened from the Edit home.
@@ -54,6 +56,40 @@ final class RecreateState {
     var buildWhenReady: Set<String> = []
     var startingFills: Set<String> = []
 
+    // Start page: a pasted link (plans/api.md "From a link").
+    var linkText = ""
+    var fetchingLink = false
+    /// The last link refusal, with the file drop offered beside it (every link_* code).
+    var linkProblem: RecreateLinkProblem?
+
+    /// The Cast step (Release 1 item E): who plays the lead in the new shots. nil = the studio's current model.
+    var leadId: String?
+    /// The cast list is open under the lead (inline in the panel).
+    var castOpen = false
+
+    /// The edit session the built edit lives in (after Build), and the built edit Compare plays.
+    var sessionId: String?
+    var built: RecreateBuiltPreview?
+    var loadingBuilt = false
+
+    /// Export (plans/recreate-edit.md step 7).
+    var exportOpen = false
+    var exportSound: RecreateExport.Sound = .guide
+    /// 0…1 while exporting.
+    var exportProgress: Double?
+    var exportedFile: URL?
+    var exportError: String?
+    @ObservationIgnored var exportTask: Task<Void, Never>?
+
+    /// Claude on the Recreate screens (Release 1 item C).
+    var claudeOpen = false
+    /// The edit session Claude's tools work in (the built edit's, or one opened on a take for it).
+    var claudeSessionId: String?
+    /// A paid step Claude asked for (fill_slot with confirm): waiting for the owner's answer. Never started without it.
+    var claudeAsk: EditPending?
+    @ObservationIgnored var claudeWatch: Task<Void, Never>?
+    @ObservationIgnored var claudeRevision: Int?
+
     let fake = FakeRecreateAPI()
     @ObservationIgnored var pollTask: Task<Void, Never>?
     @ObservationIgnored var playTask: Task<Void, Never>?
@@ -69,6 +105,19 @@ final class RecreateState {
         error = nil
         uploading = false
         buildWhenReady = []
+        linkText = ""
+        fetchingLink = false
+        leadId = nil
+        closeClaude()
+        claudeSessionId = nil
+    }
+
+    func closeClaude() {
+        claudeWatch?.cancel()
+        claudeWatch = nil
+        claudeOpen = false
+        claudeAsk = nil
+        claudeRevision = nil
     }
 
     func clearReference() {
@@ -91,6 +140,19 @@ final class RecreateState {
         confirmSlots = []
         fillErrors = [:]
         picks = [:]
+        linkProblem = nil
+        sessionId = nil
+        built?.close()
+        built = nil
+        loadingBuilt = false
+        exportTask?.cancel()
+        exportTask = nil
+        exportOpen = false
+        exportProgress = nil
+        exportedFile = nil
+        exportError = nil
+        claudeAsk = nil
+        claudeRevision = nil
     }
 
     var recipe: Recipe? { reference?.recipe }
@@ -188,6 +250,7 @@ extension AppStore {
         } else if r.isReady {
             await loadRecreateFill(r.id)
         }
+        if recreate.claudeOpen, !isDemo, recreate.claudeSessionId == nil { await ensureRecreateClaudeSession() }
     }
 
     /// While a reference is analysed, its steps come in as `phase` / `progress`.
@@ -275,6 +338,72 @@ extension AppStore {
         }
     }
 
+    /// "Paste a link" → Fetch: the server fetches the public video and reads it like a dropped file (or returns the
+    /// reference already made from it). A refusal says why, with the file drop offered right there.
+    func createRecreateReference(link raw: String) async {
+        let link = RecreateLinks.detect(raw) ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !link.isEmpty, !recreate.fetchingLink else { return }
+        recreate.error = nil
+        recreate.linkProblem = nil
+        recreate.fetchingLink = true
+        defer { recreate.fetchingLink = false }
+        do {
+            let r = try await recreateAPI.createReference(link: link, name: nil)
+            recreate.linkText = ""
+            if r.cached == true { showToast("You read this video before: here it is again") }
+            recreate.references.removeAll { $0.id == r.id }
+            recreate.references.insert(r, at: 0)
+            await showRecreateReference(r)
+        } catch {
+            if let p = RecreateLinkProblem(error) {
+                recreate.linkProblem = p
+            } else {
+                recreate.error = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+            }
+        }
+    }
+
+    /// ⌘V on the start page: a video file copied in Finder is read like a dropped one; a link is fetched.
+    func pasteIntoRecreate() {
+        let pb = NSPasteboard.general
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           let file = urls.first(where: Self.isMovieFile) {
+            Task { await createRecreateReference(from: file) }
+            return
+        }
+        guard let text = pb.string(forType: .string) ?? (pb.readObjects(forClasses: [NSURL.self]) as? [URL])?.first?.absoluteString else { return }
+        recreate.linkText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if RecreateLinks.detect(text) != nil {
+            Task { await createRecreateReference(link: text) }
+        } else {
+            recreate.linkProblem = RecreateLinkProblem(code: "link_unsupported", message: RecreateLinks.message(code: "link_unsupported", message: nil))
+        }
+    }
+
+    /// A file a person can drop or paste: a movie by its extension (mp4, mov, m4v…).
+    nonisolated static func isMovieFile(_ url: URL) -> Bool {
+        guard url.isFileURL else { return false }
+        return UTType(filenameExtension: url.pathExtension.lowercased())?.conforms(to: .movie) ?? false
+    }
+
+    // MARK: Cast (Release 1 item E)
+
+    /// The lead the new shots are made with: the one picked here, else the studio's current model, else the first.
+    var recreateLead: MuseModel? {
+        if let id = recreate.leadId, let m = suiteCharacters.first(where: { $0.id == id }) { return m }
+        if let m = currentModel, suiteCharacters.contains(where: { $0.id == m.id }) { return m }
+        return suiteCharacters.first
+    }
+
+    /// Picks who plays the lead: the new shots are priced again for her (nothing is held).
+    func setRecreateLead(_ m: MuseModel) {
+        guard m.id != recreateModelId else { return }
+        recreate.leadId = m.id
+        recreate.estimates = [:]
+        recreate.estimateErrors = [:]
+        if let id = recreate.reference?.id { Task { await priceRecreateSlots(id) } }
+    }
+
     // MARK: Recipe
 
     func selectRecreateSlot(_ i: Int) {
@@ -331,7 +460,8 @@ extension AppStore {
     // MARK: Build and compare
 
     /// The character new shots are made with: the studio's current model, as the Suite's shots use.
-    var recreateModelId: String? { currentModel?.id ?? suiteCharacters.first?.id }
+    /// The lead picked in the Cast step (Release 1 item E), else the current model, else the first character.
+    var recreateModelId: String? { recreateLead?.id ?? currentModel?.id }
 
     /// Prices every shot still to generate (free; nothing is held). A shot that can't be made says why in plain words
     /// and is never offered to spend on. The cost line beside Build uses these prices once they are in.
@@ -517,7 +647,10 @@ extension AppStore {
             let result = try await recreateAPI.apply(ref.id, RecreateApplyRequest(sessionId: sessionId, baseRevision: revision, slots: slots, device: "mac"))
             recreate.match = result.match ?? recreate.match
             recreate.builtTakeId = baseTake
+            recreate.sessionId = isDemo ? nil : sessionId
+            if !isDemo { recreate.claudeSessionId = sessionId }
             recreate.mode = .compare
+            Task { await loadRecreateBuilt() }
             if let w = result.waiting, !w.isEmpty {
                 showToast("\(w.map { recreate.shotName($0) }.joined(separator: " and ")) isn’t ready yet, so the edit leaves it out for now")
             }
@@ -540,5 +673,176 @@ extension AppStore {
         }
         closeRecreate()
         openEdit(takeId: id)
+    }
+
+    // MARK: The built edit (Compare's "Your edit", Release 1 gap 1)
+
+    /// The built edit as a project and its files on this Mac. With a server: the edit session's own project (what Build
+    /// wrote: ramps, camera keys, text, the Look), its takes downloaded. Demo mode (no session): the recipe assembled the
+    /// server's way on the newest video take, so Compare still plays a real edit. nil when there is no video to build on.
+    func recreateBuiltProject() async throws -> (project: EditV2.Project, files: [String: URL])? {
+        let project: EditV2.Project
+        if isDemo {
+            guard let recipe = recreate.recipe, let take = editSuiteTakes.first(where: { !$0.isEdit }),
+                  let v = take.videoUrl, let url = URL(string: v) else { return nil }
+            let local = try await EditSuiteMedia.localCopy(url, key: take.id)
+            let info = try await VideoEditEngine.info(AVURLAsset(url: local))
+            let facts = RecreateAssembly.TakeInfo(id: take.id, durationSec: info.duration, width: info.width, height: info.height)
+            var takes: [String: RecreateAssembly.TakeInfo] = [:]
+            for s in recipe.slots { takes[s.id] = facts }
+            project = RecreateAssembly.project(recipe, sourceTakeId: take.id, takes: takes, paletteIds: EditV2LookLibrary.shared.paletteIds,
+                                               startAtSlot: true).project
+            return (project, [project.assets.first?.id ?? "a1": local])
+        }
+        guard let sid = recreate.sessionId else { return nil }
+        let session = try await api.editSession(id: sid)
+        project = try JSONPatch.decode(EditV2.Project.self, session.project)
+        // New shots made for the edit are new takes: read the gallery once when one isn't here yet.
+        if project.assets.contains(where: { a in a.take.map { id in !takes.contains { $0.id == id } } ?? false }) { await reload() }
+        var files: [String: URL] = [:]
+        for a in project.assets {
+            var link: String?
+            if let t = a.take { link = takes.first { $0.id == t }?.videoUrl }
+            if link == nil { link = a.url }
+            guard let link, let url = URL(string: link) else { continue }
+            files[a.id] = try await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id)
+        }
+        return (project, files)
+    }
+
+    /// Builds the player for "Your edit" with the editor's own engine (EditV2Engine), so it plays what the editor plays.
+    func loadRecreateBuilt() async {
+        let id = recreate.reference?.id
+        recreate.built?.close()
+        recreate.built = nil
+        recreate.loadingBuilt = true
+        defer { recreate.loadingBuilt = false }
+        do {
+            guard let got = try await recreateBuiltProject(), recreate.reference?.id == id else { return }
+            let b = RecreateBuiltPreview(project: got.project, files: got.files)
+            await b.load()
+            guard recreate.reference?.id == id else { b.close(); return }
+            b.seek(recreate.time)
+            recreate.built = b
+        } catch {
+            // Compare keeps the stand-in; say why once.
+            showToast("Your edit couldn’t be loaded to play here: \((error as? ApiError)?.message ?? error.localizedDescription)")
+        }
+    }
+
+    // MARK: Export (plans/recreate-edit.md step 7)
+
+    func openRecreateExport() {
+        recreate.playing = false
+        recreate.exportProgress = nil
+        recreate.exportedFile = nil
+        recreate.exportError = nil
+        // Without the reference's sound on this Mac (demo mode), the silent export is the one on offer.
+        if !recreateHasReferenceSound { recreate.exportSound = .silent }
+        recreate.exportOpen = true
+    }
+
+    /// The reference's sound can go under the edit: a server reference with its video and sound.
+    var recreateHasReferenceSound: Bool {
+        guard let r = recreate.reference else { return false }
+        return recreateMedia(r.videoUrl) != nil && r.recipe?.source?.hasAudio != false
+    }
+
+    /// Renders the built edit on this Mac with the editor's engine, with the reference's sound as the only audio (guide)
+    /// or no audio (silent), into `dest`. Nothing is uploaded or charged.
+    func exportRecreate(to dest: URL) {
+        guard recreate.exportProgress == nil else { return }
+        let sound = recreate.exportSound
+        let link = recreate.reference?.videoUrl
+        recreate.exportError = nil
+        recreate.exportedFile = nil
+        recreate.exportProgress = 0
+        recreate.exportTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let got = try await self.recreateBuiltProject() else {
+                    throw ApiError("no_edit", "There’s no built edit to export yet. Build the edit first.")
+                }
+                var guide: URL?
+                if sound == .guide {
+                    guide = await RecreateMediaLoader.video(self.recreateMedia(link))
+                    if guide == nil { throw ApiError("no_sound", "The reference’s sound couldn’t be loaded. Export silent, or try again.") }
+                }
+                try await RecreateExporter.export(project: got.project, files: got.files, guide: guide, to: dest) { [weak self] v in
+                    self?.recreate.exportProgress = v
+                }
+                self.recreate.exportedFile = dest
+            } catch is CancellationError {
+            } catch {
+                self.recreate.exportError = (error as? ApiError)?.message ?? error.localizedDescription
+            }
+            self.recreate.exportProgress = nil
+        }
+    }
+
+    func cancelRecreateExport() {
+        recreate.exportTask?.cancel()
+        recreate.exportTask = nil
+        recreate.exportProgress = nil
+    }
+
+    // MARK: Claude (Release 1 item C)
+
+    /// Opens or hides the Claude panel. With a server it finds the edit session Claude's tools work in (the built edit's,
+    /// or one opened on the take the edit is built on: free) and watches it for Claude's asks and changes.
+    func toggleRecreateClaude() {
+        if recreate.claudeOpen { recreate.closeClaude(); return }
+        recreate.claudeOpen = true
+        guard !isDemo else { return }
+        Task { await ensureRecreateClaudeSession() }
+    }
+
+    func ensureRecreateClaudeSession() async {
+        if recreate.claudeSessionId == nil {
+            if let s = recreate.sessionId {
+                recreate.claudeSessionId = s
+            } else if let take = recreate.fill?.slots.compactMap(\.takeId).first(where: { id in takes.contains { $0.id == id && $0.videoUrl != nil } })
+                        ?? recreateTakeChoices.first?.id {
+                recreate.claudeSessionId = try? await api.openEditSession(EditSessionOpenRequest(takeId: take, device: "mac")).id
+            }
+        }
+        watchRecreateClaude()
+    }
+
+    /// While the panel is open: the session every 3 s. A paid step Claude asked for waits for the owner's answer here;
+    /// a change Claude made (apply_recipe) refreshes the fill, the match and "Your edit".
+    private func watchRecreateClaude() {
+        recreate.claudeWatch?.cancel()
+        recreate.claudeWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.recreate.claudeOpen else { return }
+                if let sid = self.recreate.claudeSessionId, let s = try? await self.api.editSession(id: sid) {
+                    let ask = s.pending.first { $0.status == "waiting" }
+                    if ask?.id != self.recreate.claudeAsk?.id { self.recreate.claudeAsk = ask }
+                    if let before = self.recreate.claudeRevision, s.revision != before, let ref = self.recreate.reference?.id {
+                        self.recreate.sessionId = sid
+                        await self.loadRecreateFill(ref)
+                        if self.recreate.mode == .compare { await self.loadRecreateBuilt() }
+                    }
+                    self.recreate.claudeRevision = s.revision
+                }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    /// The owner's answer to Claude's paid step. Only a yes starts (and pays for) it.
+    func answerRecreateClaude(approve: Bool) {
+        guard let p = recreate.claudeAsk, let sid = recreate.claudeSessionId else { recreate.claudeAsk = nil; return }
+        recreate.claudeAsk = nil
+        Task {
+            do {
+                _ = try await api.answerEditPending(sessionId: sid, pendingId: p.id, approve: approve)
+                showToast(approve ? "\(p.label) started. Claude adds it to the edit when it’s ready." : "Told Claude not now")
+                if approve, !isDemo, let b = try? await api.balance() { balance = b }
+            } catch {
+                showToast((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)
+            }
+        }
     }
 }

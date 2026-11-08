@@ -344,6 +344,29 @@ enum SnapshotRunner {
                 lines.append(contentsOf: cut.map { "CUT \(label) \($0)" })
             }
         }
+        /// A frame (window space) drawn fully inside the window: FITS, else CUT.
+        func onScreen(_ key: String, _ label: String) {
+            w.contentView?.layoutSubtreeIfNeeded()
+            let content = w.contentView?.bounds.size ?? .zero
+            guard let f = state.recreateFrames[key], f.width > 0 else { lines.append("CUT \(label) \(key) not drawn"); return }
+            let inside = f.minX >= 0 && f.minY >= 0 && f.maxX <= content.width + 0.5 && f.maxY <= content.height + 0.5
+            lines.append("\(inside ? "FITS" : "CUT") \(label) \(key) \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)) in \(Int(content.width))x\(Int(content.height))")
+        }
+        // Compare's "Your edit" plays the built edit: demo mode builds it on a video take, editCheck's 15 s take (its MP4
+        // stays in the temporary folder), added for these shots only.
+        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        let demoTakeId = "rx_recreate"
+        if FileManager.default.fileExists(atPath: long.path) {
+            let raw: [String: Any] = ["id": demoTakeId, "kind": "take", "title": "Living room dance", "videoUrl": long.absoluteString,
+                                      "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
+            if let data = try? JSONSerialization.data(withJSONObject: raw), let take = try? JSONDecoder().decode(Take.self, from: data) {
+                store.takes.removeAll { $0.id == take.id }
+                store.takes.insert(take, at: 0)
+            }
+        } else {
+            lines.append("CUT recreate_compare no demo take to build on (editCheck's video is missing)")
+        }
+        defer { store.takes.removeAll { $0.id == demoTakeId } }
         for theme in [ThemeID.c, .a, .b, .d] {
             NSLog("[snapshot] recreate %@", theme.rawValue)
             store.themeID = theme
@@ -353,8 +376,31 @@ enum SnapshotRunner {
             store.recreate.buildWhenReady = []
             store.openRecreate()
             try? await Task.sleep(for: .seconds(1))
+            if theme == .c {
+                // Paste a link (Release 1 gap 3): demo mode's private link is refused, with the file offered right there.
+                // Pasted into the empty field: fetched at once.
+                store.recreate.linkText = "https://www.tiktok.com/@muse.demo/video/7400000000000000002-private"
+                try? await Task.sleep(for: .seconds(1.2))
+                if store.recreate.linkProblem == nil { await store.createRecreateReference(link: store.recreate.linkText) }
+                try? await Task.sleep(for: .seconds(0.5))
+                let p = store.recreate.linkProblem
+                lines.append("\(p?.code == "link_private" && p?.offersFile == true ? "FITS" : "CUT") recreate_link 1280x800 c refusal \(p?.code ?? "none"), file offered \(p?.offersFile == true)")
+                onScreen("linkProblem", "recreate_link 1280x800 c")
+                check("link", theme, beside: false, primary: "linkProblem")
+                capture(dir.appendingPathComponent("mac_c_recreate_link.png"))
+                // The demo link reads at once (source: link), and the same link again is the cached reference.
+                await store.createRecreateReference(link: FakeRecreateAPI.demoLink)
+                let first = store.recreate.reference
+                store.leaveRecreateReference()
+                await store.createRecreateReference(link: FakeRecreateAPI.demoLink)
+                let again = store.recreate.reference
+                let ok = first?.isLink == true && first?.isReady == true && again?.id == first?.id && again?.cached == true
+                lines.append("\(ok ? "FITS" : "CUT") recreate_link 1280x800 c the demo link reads at once (\(first?.id ?? "none")), again cached \(again?.cached == true)")
+                store.leaveRecreateReference()
+                try? await Task.sleep(for: .seconds(0.5))
+            }
             let refs = (try? await store.recreateAPI.listReferences()) ?? []
-            guard let ref = refs.first else {
+            guard let ref = refs.first(where: { $0.id == "rx_demo" }) ?? refs.first(where: { $0.recipe != nil }) else {
                 lines.append("CUT recreate no demo reference")
                 break
             }
@@ -363,6 +409,26 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(2))
             check("recipe", theme, beside: true)
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe.png"))
+            if theme == .c {
+                // The Cast step (Release 1 item E): the lead, and the studio's cast open under it.
+                let lead = store.recreateLead
+                lines.append("\(lead != nil && store.recreateModelId == lead?.id ? "FITS" : "CUT") recreate_cast 1280x800 c lead \(lead?.name ?? "none") prices the shots")
+                store.recreate.castOpen = true
+                try? await Task.sleep(for: .seconds(0.8))
+                onScreen("cast", "recreate_cast 1280x800 c")
+                check("cast", theme, beside: true)
+                capture(dir.appendingPathComponent("mac_c_recreate_cast.png"))
+                store.recreate.castOpen = false
+                // Claude beside the Recipe (Release 1 item C): the chat with Recreate's context (demo mode has no Claude
+                // connection, so it says so); Build and the total stay on screen beside each other.
+                store.toggleRecreateClaude()
+                try? await Task.sleep(for: .seconds(1.2))
+                onScreen("claude", "recreate_claude 1280x800 c")
+                check("claude", theme, beside: true)
+                capture(dir.appendingPathComponent("mac_c_recreate_claude.png"))
+                store.recreate.closeClaude()
+                try? await Task.sleep(for: .seconds(0.5))
+            }
             // The panel scrolled to the Look (owner note 1: the swatches as the Recipe shows them).
             state.scrollTo = "recreate.look"
             try? await Task.sleep(for: .seconds(1))
@@ -392,9 +458,44 @@ enum SnapshotRunner {
             for _ in 0..<40 where store.recreate.mode != .compare { try? await Task.sleep(for: .seconds(0.5)) }
             lines.append("\(store.recreate.mode == .compare ? "FITS" : "CUT") recreate_built 1280x800 \(theme.rawValue) after the new shots were ready")
             store.selectRecreateSlot(1)
-            try? await Task.sleep(for: .seconds(2))
-            check("compare", theme, beside: false, primary: "open")
+            // "Your edit" is the built edit itself, from the editor's engine (gap 1).
+            for _ in 0..<24 where store.recreate.built?.phase != .ready { try? await Task.sleep(for: .seconds(0.5)) }
+            try? await Task.sleep(for: .seconds(1))
+            let built = store.recreate.built
+            lines.append("\(built?.phase == .ready ? "FITS" : "CUT") recreate_compare 1280x800 \(theme.rawValue) your edit is the built edit (\(built.map { "\($0.project.mainClips.count) clips, \(String(format: "%.1f", $0.duration)) s" } ?? "not built"))")
+            check("compare", theme, beside: false, primary: "export")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_compare.png"))
+            if theme == .c, let built {
+                // Playing on the shared playhead: both players run, and the built edit's own clock moves with Recreate's.
+                store.recreate.time = 0
+                try? await Task.sleep(for: .seconds(0.3))
+                store.toggleRecreatePlay()
+                try? await Task.sleep(for: .seconds(1.6))
+                let at = built.player.currentTime().seconds
+                let clock = store.recreate.time
+                lines.append("\(at > 0.3 && abs(at - clock) < 1.0 ? "FITS" : "CUT") recreate_compare_playing 1280x800 c your edit at \(String(format: "%.2f", at)) s, playhead \(String(format: "%.2f", clock)) s")
+                onScreen("yours", "recreate_compare_playing 1280x800 c")
+                capture(dir.appendingPathComponent("mac_c_recreate_compare_playing.png"))
+                if store.recreate.playing { store.toggleRecreatePlay() }
+                // The exact frame the player shows (screen grabs leave video layers out): the built composition at 3.5 s,
+                // where the reference's caption is on screen.
+                if let img = await built.frame(at: 3.5) {
+                    let rep = NSBitmapImageRep(cgImage: img)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mac_c_recreate_compare_frame.png"))
+                    lines.append("FITS recreate_compare_frame c the built edit renders (\(img.width)x\(img.height))")
+                } else {
+                    lines.append("CUT recreate_compare_frame c the built edit didn't render a frame")
+                }
+                // Export (gap 2): the sheet, closed with Cancel (nothing is saved in review mode).
+                store.openRecreateExport()
+                try? await Task.sleep(for: .seconds(1.2))
+                let reminder = RecreateExport.reminder(store.recreate.reference)
+                lines.append("\(store.recreate.exportOpen && !reminder.isEmpty ? "FITS" : "CUT") recreate_export 1280x800 c sound \(store.recreate.exportSound.rawValue), reminder shown")
+                captureWithSheet(dir.appendingPathComponent("mac_c_recreate_export.png"), lines: &lines, label: "recreate_export c")
+                check("export", theme, beside: false, primary: "export")
+                store.recreate.exportOpen = false
+                try? await Task.sleep(for: .seconds(0.8))
+            }
             store.closeRecreate()
             try? await Task.sleep(for: .seconds(0.5))
         }
