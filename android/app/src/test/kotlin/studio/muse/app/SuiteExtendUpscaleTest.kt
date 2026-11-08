@@ -46,7 +46,7 @@ class SuiteExtendUpscaleTest {
     private fun res(name: String) = javaClass.getResource("/suite/$name.json")!!.readText()
 
     /** The keys server/api's ShotRequestSchema (.strict()) accepts, and those of extend and its VideoRef. */
-    private val SHOT_KEYS = setOf("mode", "extend", "cast", "title", "modelId", "outfitId", "prompt", "frames", "references", "duration", "aspectRatio", "quality", "takes",
+    private val SHOT_KEYS = setOf("draft", "mode", "extend", "cast", "title", "modelId", "outfitId", "prompt", "frames", "references", "duration", "aspectRatio", "quality", "takes",
         "audio", "speaking", "camera", "gradeLook", "seed", "engineModel", "resolution", "clipId", "keepAudio", "direction", "dryRun")
     private val EXTEND_KEYS = setOf("video", "direction", "join")
     private val VIDEO_KEYS = setOf("key", "url", "seconds")
@@ -88,7 +88,7 @@ class SuiteExtendUpscaleTest {
         assertEquals("She turns away and walks out.", r.prompt)
         val o = encoded(r)
         assertTrue("${o.keys - SHOT_KEYS}", SHOT_KEYS.containsAll(o.keys))
-        assertEquals(setOf("mode", "extend", "prompt", "duration", "quality", "takes"), o.keys) // no shape, camera, sound or engine
+        assertEquals(setOf("mode", "extend", "prompt", "duration", "quality", "takes", "draft"), o.keys) // no shape, camera, sound or engine; draft: Reuse settings
         val ex = o["extend"]!!.jsonObject
         assertTrue(EXTEND_KEYS.containsAll(ex.keys)); assertFalse("join" in ex.keys) // the server's default joins source + new part
         assertEquals(setOf("key"), ex["video"]!!.jsonObject.keys)

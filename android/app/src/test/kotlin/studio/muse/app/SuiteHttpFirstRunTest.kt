@@ -135,7 +135,7 @@ class SuiteHttpFirstRunTest {
     }
 
     // The keys the server's strict schemas take (plan.ts ShotRequestSchema / CastSchema, camera.ts CameraSpecSchema).
-    private val shotKeys = setOf("mode", "cast", "title", "modelId", "outfitId", "prompt", "frames", "references", "duration", "aspectRatio", "quality", "takes",
+    private val shotKeys = setOf("draft", "mode", "cast", "title", "modelId", "outfitId", "prompt", "frames", "references", "duration", "aspectRatio", "quality", "takes",
         "audio", "speaking", "camera", "gradeLook", "seed", "engineModel", "resolution", "clipId", "keepAudio", "direction", "dryRun")
     private val castKeys = setOf("personIndex", "personHint", "personNote", "faceCrop", "characterId", "outfitId", "speaking")
     private val cameraKeys = setOf("mode", "preset", "rig", "lighting", "palette", "move", "mix", "angle", "style", "performance", "guide")

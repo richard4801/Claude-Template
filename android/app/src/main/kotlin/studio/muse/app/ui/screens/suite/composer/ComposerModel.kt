@@ -229,7 +229,7 @@ data class ComposerDraft(
     fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
         baseRequest(slots, inputs, recast, own).let { r ->
             if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null }) else r
-        }
+        }.copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes
 
     /**
      * The prompt's @locations as references: `{image, role: "location", label: name}` after the slots' images, never more
