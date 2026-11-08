@@ -20,6 +20,7 @@ extension AppStore {
             if let n = d.count { suite.photo.count = n }
             if case .string(let p)? = d.extra["presetId"] { suite.photo.presetId = p }
         }
+        if restored.tokens.characterId != suite.composer.tokens.characterId { suite.restoredCharacterId = restored.tokens.characterId }
         suite.composer = restored
         showToast("Settings from \(take.displayLabel) are back")
         return true

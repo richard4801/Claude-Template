@@ -242,6 +242,10 @@ final class AppStore {
     let recreate = RecreateState()
     /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
     let learn = LearnState()
+    /// Owner Settings → Studio: the paid AI editing helpers' switch, daily limit and today's spend (AppStore+EditorSettings.swift).
+    var editorSettings: EditorSettings?
+    var editorSettingsError: String?
+    @ObservationIgnored let editorSettingsFake = FakeEditorSettingsAPI()
 
     // MARK: Video studio
 
@@ -488,6 +492,8 @@ final class AppStore {
         suite.reset() // AI suite (workstream 1)
         recreate.reset()
         learn.reset()
+        editorSettings = nil
+        editorSettingsError = nil
         Task { await restoreSession() }
     }
 
