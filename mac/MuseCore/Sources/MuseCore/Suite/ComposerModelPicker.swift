@@ -384,5 +384,6 @@ public enum ComposerModelPicker {
     }
 
     static func perSecond(_ p: Double) -> String { (p >= 0.1 ? String(format: "$%.2f", p) : String(format: "$%.3f", p)) + "/s" }
-    static func money(_ p: Double) -> String { p >= 0.1 ? String(format: "$%.2f", p) : String(format: "$%.3f", p) }
+    /// Per photo / per run: cents, as Android shows them.
+    static func money(_ p: Double) -> String { String(format: "$%.2f", p) }
 }

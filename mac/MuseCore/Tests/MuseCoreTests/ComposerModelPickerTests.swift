@@ -21,7 +21,7 @@ final class ComposerModelPickerTests: XCTestCase {
         XCTAssertEqual(veo.tiers, ["draft", "hd"])
         XCTAssertEqual(veo.price?.basis, "per_second")
         XCTAssertTrue(c.engines![1].custom)
-        XCTAssertEqual(ComposerModelPicker.price(c.engines![1]), "$0.040 a photo")
+        XCTAssertEqual(ComposerModelPicker.price(c.engines![1]), "$0.04 a photo")
         XCTAssertNil(SuiteDemoCatalog.catalog.engines, "the member-shaped demo catalog has none")
     }
 
