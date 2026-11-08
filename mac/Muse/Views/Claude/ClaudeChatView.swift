@@ -37,12 +37,15 @@ struct ClaudeChatView: View {
     var composerTop: AnyView?
     var sendBlocked = false
     var userImages: ((String) -> [String])?
+    var takeFiles: ((String) -> [ClaudeAttachmentFile])?
 
-    func attachments(top: AnyView?, sendBlocked: Bool, userImages: ((String) -> [String])?) -> ClaudeChatView {
+    func attachments(top: AnyView?, sendBlocked: Bool, userImages: ((String) -> [String])?,
+                     takeFiles: ((String) -> [ClaudeAttachmentFile])? = nil) -> ClaudeChatView {
         var c = self
         c.composerTop = top
         c.sendBlocked = sendBlocked
         c.userImages = userImages
+        c.takeFiles = takeFiles
         return c
     }
 
@@ -82,6 +85,7 @@ struct ClaudeChatView: View {
         .background(t.roles.raised)
         .task(id: "\(contextKind)|\(contextId)|\(fallback?.id ?? "")|\(service.configured)|\(service.baseURL?.absoluteString ?? "")") {
             model.wrapOutgoing = wrapOutgoing
+            model.takeFiles = takeFiles
             await model.attach(service, contextKind: contextKind, contextId: contextId, fallback: fallback)
         }
         .onDisappear { model.detach() }
@@ -243,7 +247,9 @@ struct ClaudeChatView: View {
 
     @ViewBuilder private func row(_ item: ClaudeChatItem) -> some View {
         switch item {
-        case .user(_, let text, let source): userBubble(unwrapShown?(text) ?? text, source: source, images: userImages?(text) ?? [])
+        case .user(let id, let text, let source):
+            let stored = model.transcript.attachmentURLs(id).map { service.resolve($0) }
+            userBubble(unwrapShown?(text) ?? text, source: source, images: stored.isEmpty ? (userImages?(text) ?? []) : stored)
         case .assistant(_, let text, let streaming): assistant(text, streaming: streaming)
         case .image(_, let url): grabbedFrame(url)
         case .tool: EmptyView()

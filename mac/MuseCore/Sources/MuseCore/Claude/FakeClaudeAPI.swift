@@ -168,7 +168,9 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
             for e in batch.events {
                 var m: ClaudeMessage?
                 switch e {
-                case .user(let text): m = ClaudeMessage(id: nextId("cmsg"), threadId: threadId, role: "user", source: source, text: text, turnId: batch.turnId, createdAt: now())
+                case .user(let text, let ids):
+                    m = ClaudeMessage(id: nextId("cmsg"), threadId: threadId, role: "user", source: source, text: text, turnId: batch.turnId, createdAt: now())
+                    if !ids.isEmpty { m?.attachments = ids.map { ClaudeAttachment(uploadId: $0, url: "/uploads/\($0).jpg") } }
                 case .assistant(let text): m = ClaudeMessage(id: nextId("cmsg"), threadId: threadId, role: "assistant", source: source, text: text, turnId: batch.turnId, createdAt: now())
                 case .tool(let id, let name, let status, let summary, _):
                     guard status != .running else { break }

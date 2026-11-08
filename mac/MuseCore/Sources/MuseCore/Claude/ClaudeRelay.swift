@@ -8,12 +8,18 @@ public struct ClaudeJob: Hashable, Sendable, Identifiable {
     public var text: String
     /// Set for phone turns (claimed before they run).
     public var turnId: String?
+    /// Images on a phone turn (downloaded when it runs).
+    public var attachments: [ClaudeAttachment]
+    /// Images typed with a Mac turn, already on disk.
+    public var files: [ClaudeAttachmentFile]
 
-    public init(id: String, threadId: String, text: String, turnId: String? = nil) {
+    public init(id: String, threadId: String, text: String, turnId: String? = nil, attachments: [ClaudeAttachment] = [], files: [ClaudeAttachmentFile] = []) {
         self.id = id
         self.threadId = threadId
         self.text = text
         self.turnId = turnId
+        self.attachments = attachments
+        self.files = files
     }
 
     public var fromPhone: Bool { turnId != nil }
@@ -93,6 +99,9 @@ public actor ClaudeRelay {
     private let onState: @Sendable (ClaudeRelayState) -> Void
 
     private var queue = ClaudeTurnQueue()
+    /// Where a relative image link (`/uploads/…`) is resolved.
+    private var assetBase: URL?
+    public func setAssetBase(_ url: URL?) { assetBase = url }
     private var runners: [String: ClaudeTurnRunner] = [:]
     private var workers: [String: Task<Void, Never>] = [:]
     /// Claude Code session per thread (for --resume).
@@ -129,10 +138,10 @@ public actor ClaudeRelay {
 
     /// A turn typed on this Mac. Returns its local id.
     @discardableResult
-    public func submit(threadId: String, text: String) -> String {
+    public func submit(threadId: String, text: String, files: [ClaudeAttachmentFile] = []) -> String {
         counter += 1
         let id = "local_\(counter)"
-        queue.enqueue(ClaudeJob(id: id, threadId: threadId, text: text))
+        queue.enqueue(ClaudeJob(id: id, threadId: threadId, text: text, files: files))
         publish()
         pump()
         return id
@@ -143,7 +152,7 @@ public actor ClaudeRelay {
         guard !closed else { return }
         var added = false
         for t in turns where t.state == "queued" && t.from != "mac" {
-            if queue.enqueue(ClaudeJob(id: t.id, threadId: t.threadId, text: t.text, turnId: t.id)) { added = true }
+            if queue.enqueue(ClaudeJob(id: t.id, threadId: t.threadId, text: t.text, turnId: t.id, attachments: t.attachments ?? [])) { added = true }
         }
         if added {
             publish()
@@ -204,10 +213,15 @@ public actor ClaudeRelay {
             if !job.fromPhone { onEvent(tid, nil, .done(ok: false, error: "Claude Code isn't ready on this Mac", model: nil)) }
             return
         }
+        var images = job.files
         if let turnId = job.turnId {
             do {
                 let t = try await api.claim(turnId: turnId)
                 if t.state != "running" && t.state != "queued" { return }
+                // The phone's images: the claim's fresh links, saved where Claude Code can Read them.
+                for a in (t.attachments ?? job.attachments) {
+                    if let f = await ClaudeAttachmentCache.download(a, threadId: tid, base: assetBase) { images.append(f) }
+                }
             } catch {
                 return // already_claimed / turn_expired / offline: not ours to run.
             }
@@ -218,8 +232,11 @@ public actor ClaudeRelay {
             if sessions[tid] == nil, let s = d.thread.claudeSessionId, !s.isEmpty { sessions[tid] = s }
             briefs[tid] = d.thread.brief?.systemPrompt ?? ""
         }
-        let req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: job.text, resume: sessions[tid], blender: await blender(),
-                                   systemPrompt: systemPrompt(threadId: tid))
+        var req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: ClaudeAttachmentPrompt.text(job.text, images), resume: sessions[tid],
+                                   blender: await blender(), systemPrompt: systemPrompt(threadId: tid))
+        req.shownText = job.text
+        req.uploadIds = job.files.map(\.uploadId)
+        if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }
         let onEvent = self.onEvent
         let turnId = job.turnId
         let outcome = await runner.run(req) { e in onEvent(tid, turnId, e) }

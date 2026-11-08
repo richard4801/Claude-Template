@@ -10,6 +10,12 @@ public struct ClaudeRunRequest: Hashable, Sendable {
     public var blender: ClaudeCommand.Blender?
     /// The thread's brief as a system prompt (recreate and edit threads; workstream 1).
     public var systemPrompt: String?
+    /// What the owner typed, when `text` carries more (the attached images' paths): the mirrored user message.
+    public var shownText: String?
+    /// The images typed with a Mac turn (the user event carries them so the phone shows them).
+    public var uploadIds: [String] = []
+    /// Where the turn's images were saved (Claude Code may Read there).
+    public var readDirectory: String?
 
     public init(threadId: String, turnId: String? = nil, text: String, resume: String? = nil, blender: ClaudeCommand.Blender? = nil,
                 systemPrompt: String? = nil) {
@@ -83,7 +89,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
     public func run(_ req: ClaudeRunRequest, onEvent: @escaping @Sendable (ClaudeEvent) -> Void) async -> ClaudeRunOutcome {
         let mirror = Mirror(api: api, threadId: req.threadId, turnId: req.turnId)
         if req.turnId == nil {
-            let u = ClaudeEvent.user(text: req.text)
+            let u = ClaudeEvent.user(text: req.shownText ?? req.text, attachments: req.uploadIds)
             onEvent(u)
             await mirror.add(u)
         }
@@ -111,7 +117,8 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
         let config = dir.appendingPathComponent(".mcp-\(UUID().uuidString.lowercased()).json")
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume, appendSystemPrompt: req.systemPrompt)
+            var cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume, appendSystemPrompt: req.systemPrompt)
+            cmd.readDirectory = req.readDirectory
             try Self.writePrivate(cmd.mcpConfigJSON(), to: config)
         } catch {
             return await fail("Couldn't prepare ~/MUSE/Claude: \(error.localizedDescription)")
@@ -135,7 +142,8 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
 
     private func once(_ req: ClaudeRunRequest, token: McpSessionToken, config: URL, resume: String?, mirror: Mirror,
                       onEvent: @escaping @Sendable (ClaudeEvent) -> Void) async throws -> Attempt {
-        let cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume, appendSystemPrompt: req.systemPrompt)
+        var cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume, appendSystemPrompt: req.systemPrompt)
+        cmd.readDirectory = req.readDirectory
         let (lines, cont) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
         let exit = ExitBox()
         let h = try launcher.launch(executable: executable, arguments: cmd.arguments(configPath: config.path), cwd: config.deletingLastPathComponent(),

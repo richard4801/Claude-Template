@@ -33,6 +33,8 @@ final class ClaudeChatModel {
     /// Called from the view's `.task(id:)`. A different context (or a restarted service) loads afresh.
     /// What each message sent from this Mac carries in front (Recreate: a line naming the reference and the edit session).
     @ObservationIgnored var wrapOutgoing: ((String) -> String)?
+    /// The Suite: images attached for this message, saved for Claude Code (thread id in, files out). Taken at send.
+    @ObservationIgnored var takeFiles: ((String) -> [ClaudeAttachmentFile])?
 
     /// `fallback`: a context to use when the server doesn't accept the first one (Recreate asks for its own "recreate"
     /// context and falls back to the edit session's "edit" thread on a server that doesn't have it yet).
@@ -124,7 +126,8 @@ final class ClaudeChatModel {
         guard !text.isEmpty, let service, let tid = thread?.id, service.info.ready else { return }
         composer = ""
         transcript.begin(userText: text, source: "mac")
-        service.send(threadId: tid, text: wrapOutgoing?(text) ?? text)
+        let files = takeFiles?(tid) ?? []
+        service.send(threadId: tid, text: wrapOutgoing?(text) ?? text, files: files)
     }
 
     /// A suggestion chip: sent as if typed (only when nothing is running).

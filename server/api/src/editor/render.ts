@@ -187,7 +187,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       if (extra.length) unsupported.add('look details (curves, grain, …)');
     }
     // Exactly the clip's frames on the timeline (rounded once from the timeline, so cuts never drift).
-    g.push(`[${last}]trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,settb=AVTB,fps=${FPS}[v${i}]`);
+    g.push(`[${last}]trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
   });
   // Join: a cut is a concat, a transition an xfade at the clip's place on the timeline.
   let acc = 'v0';

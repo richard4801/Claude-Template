@@ -77,13 +77,13 @@ export type LinkInfo = {
 };
 
 /** What the metadata alone refuses: lists, live streams, anything not public, age-gated, too long, too big. */
-export function checkInfo(info: LinkInfo, o: { maxSec: number; maxBytes: number }) {
+export function checkInfo(info: LinkInfo, o: { maxSec: number; maxBytes: number; what?: string }) {
   if (info._type === 'playlist' || info._type === 'multi_video') throw linkError('link_unsupported', 'That link is a list of videos: paste the link of one video');
   if (info.is_live || ['is_live', 'is_upcoming', 'post_live'].includes(info.live_status ?? '')) throw linkError('link_unsupported', 'MUSE can’t fetch a live stream');
   if (info.availability && info.availability !== 'public' && info.availability !== 'unlisted')
     throw linkError('link_private', 'This video isn’t public, so MUSE won’t fetch it. Save it yourself and drop the file in');
   if ((info.age_limit ?? 0) > 0) throw linkError('link_private', 'This video is age-restricted, so MUSE won’t fetch it. Save it yourself and drop the file in');
-  if (info.duration != null && info.duration > o.maxSec + 0.5) throw linkError('too_long', `References can be up to ${o.maxSec} s for now (this one is ${Math.round(info.duration)} s)`, 400);
+  if (info.duration != null && info.duration > o.maxSec + 0.5) throw linkError('too_long', `${o.what ?? 'References'} can be up to ${o.maxSec} s for now (this one is ${Math.round(info.duration)} s)`, 400);
   const size = info.filesize ?? info.filesize_approx ?? (info.requested_formats?.length ? info.requested_formats.reduce((a, f) => a + (f.filesize ?? f.filesize_approx ?? 0), 0) || null : null);
   if (size != null && size > o.maxBytes) throw linkError('link_too_big', `This video is too big to fetch (${Math.round(size / 1048576)} MB; the limit is ${Math.round(o.maxBytes / 1048576)} MB)`);
 }
