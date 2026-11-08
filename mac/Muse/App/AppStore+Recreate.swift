@@ -715,7 +715,9 @@ extension AppStore {
         let fell = recreate.slotFill(slotId)?.fallback == "generate"
         let method = recreate.methods[slotId] ?? (fell ? "generate" : nil)
         let own = method != "generate" && recreate.ownSetting.contains(slotId)
-        return RecreateFillOptions(method: method, keepBackground: own ? false : nil, locationId: own ? recreate.locationFor[slotId] : nil)
+        // The owner's models (WS6): the shot's, and the plate's when "Use your own setting" makes one.
+        return RecreateFillOptions(method: method, keepBackground: own ? false : nil, locationId: own ? recreate.locationFor[slotId] : nil,
+                                   engineModel: enginePick(.fill)?.model, imageModel: own && recreate.locationFor[slotId] == nil ? enginePick(.plate)?.model : nil)
     }
 
     /// "Swap into the reference shot" / "Generate a new shot": the slot is priced again (nothing is held).

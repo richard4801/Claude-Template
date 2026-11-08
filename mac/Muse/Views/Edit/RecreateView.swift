@@ -233,6 +233,9 @@ struct RecreateTopBar: View {
                     }
                     // Disabled (pricing, generating, building), it steps back from the accent so its label stays readable.
                     let busy = rs.fill == nil || rs.building || rs.estimating || rs.isGenerating
+                    // The owner's models for the new shots and their background plates (WS6); Build's estimates use them.
+                    OwnerModelPill(purpose: .fill, compact: true)
+                    OwnerModelPill(purpose: .plate, compact: true)
                     SuiteToolButton(title: rs.estimating ? "Pricing the shots" : "Build the edit", icon: "hammer", accent: !busy, disabled: busy) {
                         Task { await store.requestRecreateBuild() }
                     }
