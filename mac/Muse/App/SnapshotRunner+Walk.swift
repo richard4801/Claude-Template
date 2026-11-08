@@ -43,7 +43,10 @@ extension SnapshotRunner {
         store.outfitSheet = nil
         // Outfits: the angle tiles open the full view; its next, previous, zoom, fit and close all work.
         await walkScreen("outfit_lightbox", ax: ax, minimum: 6,
-                         deny: ["Make 4 angles", "Retake", "Choose files", "Use my images", "Save outfit"],
+                         // Spending, the file panel (the drop zone's label ends "Choose files"), and the sheet's own controls that
+                         // would close it or clear the angles (Close, the mode switch): the walk is about the full view.
+                         deny: ["Make 4 angles", "Retake", "Choose files", "Use my images", "Save outfit", "Drop "],
+                         denyExact: ["Close", "Describe it", "From a photo", "My own set"],
                          required: ["View front full size", "Next (→)", "Previous (←)", "Zoom in (=)", "Close (Esc)"],
                          base: { store.go(.models) },
                          open: { store.outfitSheet = demoOutfitDraft() },
@@ -52,7 +55,8 @@ extension SnapshotRunner {
         store.outfitSheet = nil
         // The owner's model picker: Auto and every model's resolutions pin without spending (Generate isn't in the list).
         await walkScreen("model_picker", ax: ax, minimum: 8, deny: ["Generate"],
-                         required: ["Model: Auto", "Use Veo 3.1 Lite at 720p"],
+                         only: { $0.hasPrefix("Use ") },
+                         required: ["Use Auto", "Use Veo 3.1 Lite at 720p"],
                          base: { store.openTool(.shot); fillDemoDraft(store) },
                          open: { state.overlay = "model_picker" },
                          isOpen: { state.overlay == "model_picker" && store.screen == .suite },
@@ -66,9 +70,9 @@ extension SnapshotRunner {
     }
 
     /// Shows `base`, takes every control on it as chrome (not walked), then opens the screen under test and presses each
-    /// of its controls once (sliders nudged), reopening it when a control leaves it. `deny` are label prefixes never
+    /// of its controls once (sliders nudged), reopening it when a control leaves it. `only` limits it to its own controls. `deny` are label parts never
     /// pressed (spending, file panels); `required` labels must have been pressed.
-    static func walkScreen(_ name: String, ax: AXWalker, minimum: Int, deny: [String], required: [String] = [],
+    static func walkScreen(_ name: String, ax: AXWalker, minimum: Int, deny: [String], denyExact: Set<String> = [], only: ((String) -> Bool)? = nil, required: [String] = [],
                            base: @MainActor () -> Void, open: @MainActor () -> Void, isOpen: @MainActor () -> Bool,
                            note: (String) -> Void) async {
         note("START walk_\(name)")
@@ -83,8 +87,8 @@ extension SnapshotRunner {
         for _ in 0..<300 {
             let scan = await ax.controls().controls
             var pick: AXWalker.Control?
-            for c in scan where !used.contains(c.key) && !skipped.contains(c.key) && !chrome.contains(c.key) {
-                if c.isMenu || deny.contains(where: { c.label.hasPrefix($0) }) {
+            for c in scan where !used.contains(c.key) && !skipped.contains(c.key) && !chrome.contains(c.key) && (only?(c.label) ?? true) {
+                if c.isMenu || denyExact.contains(c.label) || deny.contains(where: { c.label.hasPrefix($0) || c.label.contains($0) }) {
                     skipped.insert(c.key)
                     note("SKIP \(c.role) \(c.label)")
                     continue

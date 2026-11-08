@@ -81,7 +81,7 @@ struct ModelPickerList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Model: Auto")
+        .accessibilityLabel("Use Auto")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
@@ -98,7 +98,8 @@ struct ModelPickerList: View {
                     chip(ComposerModelPicker.price(m).isEmpty ? "Use" : ComposerModelPicker.price(m), picked: on,
                          help: "Use \(m.name)", label: "Use \(m.name)") { store.pinComposerModel(m) }
                 } else {
-                    HStack(spacing: Space.s1) {
+                    // Wraps: Seedance 2.0 has four resolutions, more than one line holds with their prices whole.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: Space.s1, alignment: .leading)], alignment: .leading, spacing: Space.s1) {
                         ForEach(m.resolutions, id: \.id) { r in
                             let res = ComposerModelPicker.resLabel(r.label)
                             let price = ComposerModelPicker.price(m, resolution: r.id)
@@ -119,7 +120,7 @@ struct ModelPickerList: View {
             action()
             onPick()
         } label: {
-            Text(text).monospacedDigit().typeStep(t.scale.caption)
+            Text(text).monospacedDigit().typeStep(t.scale.caption).lineLimit(1).fixedSize()
                 .foregroundStyle(t.roles.ink)
                 .padding(.horizontal, Space.s2).frame(height: 24)
                 .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(picked ? t.roles.field : .clear))
