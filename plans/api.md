@@ -1790,3 +1790,66 @@ In Settings, the owner adds an API key for a provider. MUSE lists that provider'
   - **Video entries:** every registry model that makes shots and is enabled, licensed (acknowledged) and on a set-up provider, plus enabled custom video models. `tier` is the first tier whose ladder lists it (null if none).
   - **Image entries:** the studio's photo model (Settings → Engines → Image models), plus enabled custom image models.
 - **`POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `imageModel`, owner only (members get 403 `owner_only`):** a Replicate image model `owner/name` (priced on that model, as the per-step override) or a custom id `c_…`. Use either `imageModel` or `engineModel`, not both (400). Members can still pass `engineModel:'c_…'` for a custom image model the owner made available.
+
+## Model choice (WS13, 2026-11-08)
+The owner can pick the model anywhere MUSE generates or edits with an image or video model. The inventory and gaps are in `plans/model-choice.md`; the code is in `server/api/src/engines/`. `GET /v1/models` is the character list, so the catalog lives at **`/v1/engines`**.
+
+**Purposes:**
+- **Video:** `shot`, `talking`, `ugc`, `storyboard`, `guide`, `recast`, `extend`, `swap`, `fill`.
+- **Image:** `photo`, `outfit`, `character`, `plate`.
+- **Tools:** `upscale`, `matte`, `track`, `captions`, `denoise`.
+
+### `GET /v1/engines[?purpose=P]`
+- **Owner:** every candidate.
+- **Members:** only the custom models the owner made available (`members:true`), with no `provider`, `notice` or `members` field. Their purpose defaults are `null`.
+- **Unknown purpose:** `400`.
+
+```
+{ purposes: [{ id, label, kind:'video'|'image'|'tool', default: model|null, studioDefault: model|null, rule:'ladder'|'fixed' }],
+  engines:  [{ model, name, kind, purposes:[P…], custom,
+               provider, notice|null, members?,          // owner only
+               limits: { minSeconds, maxSeconds, allowedSeconds|null, aspectRatios[], resolutions:[{id,label}], maxInputSeconds|null },
+               resolution|null,                           // the resolution it runs at by default
+               price: { basis:'per_second'|'per_run'|'per_output_second', usd } | null,   // after priceScale / markup
+               inputs: InputSlots,
+               default?: boolean }] }                     // with ?purpose: the model used when nothing is sent
+```
+
+- `rule:'ladder'`: with nothing picked, the quality ladder chooses per shot. `default` is then the first usable model on Draft.
+- `rule:'fixed'`: one model runs.
+- **Tool prices:**
+  - Editor helpers: `per_second` of source media, for a one-minute clip (start-up included, × `EDITOR_MARKUP`).
+  - Upscale: `per_output_second` (the cheapest size).
+  - Edit / Fast swap: an estimate per second of the clip.
+
+### Overrides on each endpoint (optional, owner only)
+Validation:
+- A model that isn't a candidate for the purpose → `400 engine_not_allowed`, with `valid:[model…]` and `purpose`.
+- A member → `403 owner_only`, unless the model is a custom one they may use.
+
+The estimate is priced on the chosen model, so the confirm shows the right price. For the owner, the Suite's estimate also carries `engine:{model, name, provider, …}`; for swaps it adds `source:'request'|'studio'`.
+
+| Endpoint | Field | Purpose |
+|---|---|---|
+| `POST /v1/suite/shots(/estimate)` | `engineModel` (+`resolution`) | `shot`; `talking` (audio reference or `draft.tool:'talking'`); `ugc` (`draft.tool:'ugc_ad'`); `storyboard` (`draft.tool:'storyboard'`); `guide` (`camera.mode:'directed'` or a guide); `recast`; `extend`; **`swap` (`mode:'swap'`)** |
+| `POST /v1/jobs` (classic swap) | `engineModel` | `swap`. `h3` / `h3-lite` / `h3-highspeed` run hosted; `h3-open` (Edit) and `viggle` (Fast · beta) run on our GPU. `videoModel` / `swapEngine` sent by a client are ignored |
+| `POST /v1/suite/photos(/estimate)` | `imageModel` (as before); `engineModel` for custom models | `photo` (any Replicate `owner/name` is accepted, checked when it runs) |
+| `POST /v1/outfits` | `imageModel` (or the existing `models:{step}`) | `outfit` |
+| `POST /v1/models/:id/fill-angles` | `imageModel` (or `models:{shot}`) | `character` |
+| Recreate `POST …/slots/:slotId/estimate` and `/fill` | `engineModel`, `imageModel` | `engineModel`: a swap engine → swap fill on it; any other model (or `method:'generate'`) → a generated fill (checked as `shot`). `imageModel` → the background plate (`plate`) |
+| `POST /v1/takes/:id/upscale` | `engineModel` | `upscale` (today `seedvr2`) |
+| `POST /v1/editor/estimate` and `/v1/editor/jobs` | `engineModel` | `captions` (captions, cuts), `matte`, `track` (matte with points), `denoise`. Beats run no model (400) |
+
+### Studio defaults: `GET/PATCH /v1/engines/defaults` (owner)
+- `GET` → `{ defaults:{P: model|null}, builtin:{P: model|null} }`.
+- `PATCH {swap:'h3-lite', photo:null}`:
+  - Each model must be a candidate (`400 engine_not_allowed`).
+  - `null` clears it. An unknown purpose → `400`.
+- **Order for a run:** the request's override, then the studio default (if it is still a candidate), then the built-in behaviour.
+- **Members run on the studio default too.** The exception is a custom model the owner kept to themselves.
+- **Ladder purposes:** if the studio default can't make a particular shot, the ladder picks one and the estimate warns *"The studio's chosen engine can't make this shot · the quality's usual engine is used"*.
+- **Swap:** the default applies to the hosted swap. A request that names Edit or Fast (`engine:'h3'|'viggle'`) keeps it.
+- **Storage:** `suite_settings.engine_defaults` (migration **0026_engine_defaults**).
+
+### `/v1/suite/catalog`
+`engines[]` entries (owner) gain `purposes[]`.
