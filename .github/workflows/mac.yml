@@ -99,7 +99,7 @@ jobs:
           ls -la snapshots | head -100
           tail -n 40 snapshots.log || true
 
-      # Generate must be fully on screen in the composer at 1440 × 900 and 1280 × 800 (owner fix A2). Fails on any CUT line.
+      # Generate must be fully on screen, with its price, and every bar pill whole in the composer from 1440 × 900 down to 960 × 640 (owner fix A2, coordination item 8). Fails on any CUT line.
       - name: Composer fit check
         working-directory: mac
         run: |
