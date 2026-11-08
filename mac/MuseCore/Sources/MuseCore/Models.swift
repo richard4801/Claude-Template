@@ -1039,6 +1039,8 @@ public struct ApiEvent: Codable, Sendable {
     // Edit sessions (workstream 3): `edit` events (owners only) — the session's change, note, waiting helper, frame or
     // save/export request, read from the same JSON object (`{type: "edit", sessionId, op, …}`).
     public var edit: EditSessionEvent?
+    /// Claude in the Suite: `suiteAssist` events carry the shared draft whenever Claude or another device changes it.
+    public var assist: SuiteAssist?
 
     /// Not from the server: the stream (re)connected, so the app refetches what it may have missed.
     public static let connected = "connected"
@@ -1112,6 +1114,7 @@ public struct ApiEvent: Codable, Sendable {
         script = c.o(.script)
         clip = c.o(.clip)
         edit = type == "edit" ? EditSessionEvent.fromApiEvent(d) : nil // Edit sessions (workstream 3)
+        assist = type == "suiteAssist" ? (try? SuiteAssistEnvelope(from: d))?.assist : nil // Claude in the Suite
     }
 }
 
