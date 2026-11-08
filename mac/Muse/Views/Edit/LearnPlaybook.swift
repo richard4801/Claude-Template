@@ -12,11 +12,11 @@ struct LearnPlaybookView: View {
         let l = store.learn
         ZStack(alignment: .top) {
             ScrollView(.vertical) {
+                // The title row spans the page ("Add rule" top right); the list keeps a readable 760 pt column.
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    content
+                    content.frame(maxWidth: 760, alignment: .leading)
                 }
-                .frame(maxWidth: 760, alignment: .leading)
                 .padding(.horizontal, Space.gutter)
                 .padding(.top, Space.s5)
                 .padding(.bottom, Space.s7)
@@ -27,11 +27,13 @@ struct LearnPlaybookView: View {
                 Color.black.opacity(0.001)
                     .onTapGesture { store.cancelRule() }
                     .accessibilityHidden(true)
+                // Over the list, below the segments, and never taller than the page (its fields scroll inside when short).
                 LearnRuleEditor()
-                    .padding(.top, 150)
+                    .padding(.top, 128)
+                    .padding(.bottom, Space.s5)
                     .padding(.horizontal, Space.gutter)
-                    .frame(maxWidth: 760 + 2 * Space.gutter, alignment: .center)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: 760 + 2 * Space.gutter, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .transition(.opacity)
             }
         }
@@ -267,7 +269,7 @@ struct LearnRuleEditor: View {
             fields
             ScrollView(.vertical) { fields }
         }
-        .frame(width: 540)
+        .frame(width: 600)
         .background(shape.fill(t.roles.raised))
         .clipShape(shape)
         .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: t.isDark ? 1 : 0))
@@ -293,7 +295,7 @@ struct LearnRuleEditor: View {
                         .font(t.scale.body.font)
                         .scrollContentBackground(.hidden)
                         .focused($textFocused)
-                        .frame(height: 4 * 21)
+                        .frame(height: 5 * 21)
                         .accessibilityLabel("Rule")
                 }
                 .roleField(focused: textFocused, multiline: true)
@@ -367,7 +369,7 @@ struct LearnRuleEditor: View {
     }
 }
 
-/// The eleven areas as one segmented control on three rows (a segmented control, not a menu: the click-through reaches each).
+/// The eleven areas as one segmented control on two rows (a segmented control, not a menu: the click-through reaches each).
 struct LearnAreaSeg: View {
     @Environment(\.theme) private var t
     var selection: String
@@ -376,15 +378,16 @@ struct LearnAreaSeg: View {
     var body: some View {
         let r = t.roles
         let inner = RoundedRectangle(cornerRadius: max(0, t.radii.control - 2), style: .continuous)
-        // Four to a row, so the longest name ("Transitions") never crowds its neighbour.
-        let rows: [[String]] = stride(from: 0, to: Learn.areas.count, by: 4).map { Array(Learn.areas[$0..<min($0 + 4, Learn.areas.count)]) }
+        // Six to a row in the 600 pt panel (about 90 pt a segment, room for "Transitions").
+        let per = 6
+        let rows: [[String]] = stride(from: 0, to: Learn.areas.count, by: per).map { Array(Learn.areas[$0..<min($0 + per, Learn.areas.count)]) }
         VStack(spacing: 2) {
             ForEach(rows.indices, id: \.self) { i in
                 HStack(spacing: 2) {
                     ForEach(rows[i], id: \.self) { a in
                         let on = a == selection
                         Button { onChange(a) } label: {
-                            Text(LearnText.area(a)).font(t.scale.label.font).lineLimit(1).fixedSize()
+                            Text(LearnText.area(a)).font(t.scale.label.font).lineLimit(1)
                                 .fitProbe("area \(a)")
                                 .foregroundStyle(on ? r.ink : r.ink2)
                                 .frame(maxWidth: .infinity)
@@ -396,7 +399,7 @@ struct LearnAreaSeg: View {
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(on ? .isSelected : [])
                     }
-                    ForEach(0..<(4 - rows[i].count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 28) }
+                    ForEach(0..<(per - rows[i].count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 28) }
                 }
             }
         }
