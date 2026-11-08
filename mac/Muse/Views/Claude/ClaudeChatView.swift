@@ -30,6 +30,21 @@ struct ClaudeChatView: View {
     var wrapOutgoing: ((String) -> String)?
     var unwrapShown: ((String) -> String)?
     var emptyHint: String?
+    /// ⌘Return sends (off where ⌘Return is already Generate's, as in the Suite composer).
+    var sendShortcut = true
+    /// The Suite: the attachments row over the field, Send held while images upload, and the images a sent message
+    /// carried (read from its text) as thumbnails in its bubble. Set with `attachments(…)`.
+    var composerTop: AnyView?
+    var sendBlocked = false
+    var userImages: ((String) -> [String])?
+
+    func attachments(top: AnyView?, sendBlocked: Bool, userImages: ((String) -> [String])?) -> ClaudeChatView {
+        var c = self
+        c.composerTop = top
+        c.sendBlocked = sendBlocked
+        c.userImages = userImages
+        return c
+    }
 
     init(contextKind: String, contextId: String, title: String) {
         self.contextKind = contextKind
@@ -39,7 +54,7 @@ struct ClaudeChatView: View {
 
     init(contextKind: String, contextId: String, title: String, showsHeader: Bool, footer: String? = nil, placeholder: String? = nil, accessory: AnyView? = nil,
          fallback: (kind: String, id: String)? = nil, suggestions: [RecreateClaude.Suggestion] = [], emptyHint: String? = nil,
-         wrapOutgoing: ((String) -> String)? = nil, unwrapShown: ((String) -> String)? = nil) {
+         wrapOutgoing: ((String) -> String)? = nil, unwrapShown: ((String) -> String)? = nil, sendShortcut: Bool = true) {
         self.contextKind = contextKind
         self.contextId = contextId
         self.title = title
@@ -52,6 +67,7 @@ struct ClaudeChatView: View {
         self.emptyHint = emptyHint
         self.wrapOutgoing = wrapOutgoing
         self.unwrapShown = unwrapShown
+        self.sendShortcut = sendShortcut
     }
 
     var body: some View {
@@ -227,16 +243,26 @@ struct ClaudeChatView: View {
 
     @ViewBuilder private func row(_ item: ClaudeChatItem) -> some View {
         switch item {
-        case .user(_, let text, let source): userBubble(unwrapShown?(text) ?? text, source: source)
+        case .user(_, let text, let source): userBubble(unwrapShown?(text) ?? text, source: source, images: userImages?(text) ?? [])
         case .assistant(_, let text, let streaming): assistant(text, streaming: streaming)
         case .image(_, let url): grabbedFrame(url)
         case .tool: EmptyView()
         }
     }
 
-    private func userBubble(_ text: String, source: String) -> some View {
+    private func userBubble(_ text: String, source: String, images: [String] = []) -> some View {
         VStack(alignment: .trailing, spacing: Space.s1) {
             Text(source == "phone" ? "You, from your phone" : "You").scaled(t.scale.micro, t.roles.ink2)
+            if !images.isEmpty {
+                HStack(spacing: Space.s1) {
+                    ForEach(images, id: \.self) { u in
+                        MuseImage(ref: ImageRef(url: service.resolve(u)), symbol: "photo")
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+                            .accessibilityLabel("Attached image")
+                    }
+                }
+            }
             Text(text).scaled(t.scale.body, t.roles.ink)
                 .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
                 .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
@@ -318,10 +344,11 @@ struct ClaudeChatView: View {
                     }
                 }
             }
+            if let composerTop { composerTop }
             HStack(alignment: .bottom, spacing: Space.s2) {
                 TextField(placeholder ?? "Ask Claude…", text: $model.composer, axis: .vertical)
                     .lineLimit(1...5)
-                    .onSubmit { if !busy { model.send() } }
+                    .onSubmit { if !busy && !sendBlocked { model.send() } }
                     .roleField(multiline: true)
                 if busy {
                     Button { model.stop() } label: {
@@ -336,12 +363,12 @@ struct ClaudeChatView: View {
                     Button { model.send() } label: {
                         Ph("paperplane.fill", 14)
                     }
-                    .buttonStyle(RButtonStyle(kind: .action, off: empty || model.thread == nil))
+                    .buttonStyle(RButtonStyle(kind: .action, off: empty || model.thread == nil || sendBlocked))
                     .frame(width: 40)
-                    .disabled(empty || model.thread == nil)
+                    .disabled(empty || model.thread == nil || sendBlocked)
                     .help("Send to Claude")
                     .accessibilityLabel("Send to Claude")
-                    .keyboardShortcut(.return, modifiers: .command)
+                    .keyboardShortcut(sendShortcut ? KeyboardShortcut(.return, modifiers: .command) : nil)
                 }
             }
             Text(modeLine).scaled(t.scale.micro, t.roles.ink2).lineLimit(1)

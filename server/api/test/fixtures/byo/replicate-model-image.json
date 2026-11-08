@@ -1,0 +1,21 @@
+{
+  "url": "https://replicate.com/acme/still-1", "owner": "acme", "name": "still-1",
+  "description": "Photoreal image generation with reference images", "visibility": "public",
+  "latest_version": {
+    "id": "9f0b2c1e5a7d4f3b8e6a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f",
+    "openapi_schema": {
+      "openapi": "3.0.2",
+      "components": { "schemas": {
+        "Input": { "type": "object", "title": "Input", "required": ["prompt"], "properties": {
+          "prompt": { "type": "string", "title": "Prompt" },
+          "image_input": { "type": "array", "items": { "type": "string", "format": "uri" }, "maxItems": 4, "default": [] },
+          "aspect_ratio": { "allOf": [{ "$ref": "#/components/schemas/aspect_ratio" }], "default": "1:1" },
+          "output_format": { "type": "string", "enum": ["jpg", "png"], "default": "jpg" },
+          "seed": { "type": "integer" }
+        } },
+        "aspect_ratio": { "enum": ["1:1", "3:4", "4:3", "9:16", "16:9"], "type": "string" },
+        "Output": { "type": "array", "items": { "type": "string", "format": "uri" } }
+      } }
+    }
+  }
+}

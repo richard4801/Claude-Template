@@ -61,6 +61,13 @@ final class RecreateState {
     // Start page: a pasted link (plans/api.md "From a link").
     var linkText = ""
     var fetchingLink = false
+    /// While a link is fetched on this Mac: "Fetching the video… 42%", then the upload; and its progress (0…1).
+    var linkStatus: String?
+    var linkProgress: Double?
+    /// The fetch in progress (Stop cancels it).
+    @ObservationIgnored var linkTask: Task<Void, Never>?
+    /// The studio's link rules (GET /v1/recreate/settings), when the server has them.
+    var linkSettings: RecreateLinkSettings?
     /// The last link refusal, with the file drop offered beside it (every link_* code).
     var linkProblem: RecreateLinkProblem?
 
@@ -141,8 +148,13 @@ final class RecreateState {
         error = nil
         uploading = false
         buildWhenReady = []
+        linkTask?.cancel()
+        linkTask = nil
         linkText = ""
         fetchingLink = false
+        linkStatus = nil
+        linkProgress = nil
+        linkSettings = nil
         leadId = nil
         closeClaude()
         claudeSessionId = nil
@@ -275,6 +287,7 @@ extension AppStore {
         recreate.error = nil
         recreate.open = true
         Task { await loadRecreateReferences() }
+        Task { await loadRecreateLinkSettings() }
         // "Use your own setting" lists the studio locations (the Suite's own list).
         if suite.locations.isEmpty { Task { if let l = try? await api.suiteLocations() { suite.locations = l } } }
     }
@@ -408,28 +421,154 @@ extension AppStore {
         }
     }
 
-    /// "Paste a link" → Fetch: the server fetches the public video and reads it like a dropped file (or returns the
-    /// reference already made from it). A refusal says why, with the file drop offered right there.
+    /// "Paste a link" → Fetch. With a server, this Mac downloads the video first (platforms refuse the cloud server) and
+    /// uploads it like a dropped file; a video the Mac refuses (private, too long, too big) is shown at once, and when the
+    /// Mac can't fetch it at all the server's link endpoint tries (or returns the reference already made from it). A
+    /// refusal says why, with the file drop offered right there. Demo mode keeps its instant fake path.
     func createRecreateReference(link raw: String) async {
         let link = RecreateLinks.detect(raw) ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !link.isEmpty, !recreate.fetchingLink else { return }
         recreate.error = nil
         recreate.linkProblem = nil
         recreate.fetchingLink = true
-        defer { recreate.fetchingLink = false }
+        recreate.linkStatus = nil
+        recreate.linkProgress = nil
+        let task = Task { await fetchRecreateLink(link) }
+        recreate.linkTask = task
+        await task.value
+        recreate.linkTask = nil
+        recreate.fetchingLink = false
+        recreate.linkStatus = nil
+        recreate.linkProgress = nil
+    }
+
+    /// Stop: the fetch (on this Mac, or the server's call) is cancelled; nothing is uploaded.
+    func stopRecreateLinkFetch() {
+        recreate.linkTask?.cancel()
+    }
+
+    private func fetchRecreateLink(_ link: String) async {
+        if api is HTTPMuseAPI, await fetchLinkOnThisMac(link) { return }
+        if Task.isCancelled { return }
+        // The server tries (demo mode: its instant fake). On the big platforms it usually answers link_blocked, shown
+        // with the file drop offered.
         do {
             let r = try await recreateAPI.createReference(link: link, name: nil)
-            recreate.linkText = ""
-            if r.cached == true { showToast("You read this video before: here it is again") }
-            recreate.references.removeAll { $0.id == r.id }
-            recreate.references.insert(r, at: 0)
-            await showRecreateReference(r)
+            if Task.isCancelled { return }
+            await openLinkReference(r)
         } catch {
+            if Task.isCancelled { return }
             if let p = RecreateLinkProblem(error) {
                 recreate.linkProblem = p
             } else {
                 recreate.error = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
             }
+        }
+    }
+
+    /// A reference made (or found again) from a link, opened.
+    private func openLinkReference(_ r: RecreateReference) async {
+        recreate.linkText = ""
+        if r.cached == true { showToast("You read this video before: here it is again") }
+        recreate.references.removeAll { $0.id == r.id }
+        recreate.references.insert(r, at: 0)
+        await showRecreateReference(r)
+    }
+
+    /// The studio's link rules (`GET /v1/recreate/settings`), kept for the Settings toggle; nil when the server doesn't
+    /// have the call yet (this Mac then uses the defaults: strict, 60 s, 80 MB).
+    @discardableResult
+    func loadRecreateLinkSettings() async -> RecreateLinkSettings? {
+        guard let s = try? await recreateAPI.linkSettings() else { return nil }
+        recreate.linkSettings = s
+        return s
+    }
+
+    /// Settings → Studio → "Strict link rules" (owner).
+    func setStrictLinks(_ on: Bool) {
+        Task {
+            do {
+                recreate.linkSettings = try await recreateAPI.setStrictLinks(on)
+                showToast(on ? "Strict link rules are on" : "Strict link rules are off")
+            } catch {
+                showToast((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)
+            }
+        }
+    }
+
+    /// The link fetched on this Mac (DeviceLinkFetcher) and uploaded with `sourceUrl`, under the studio's link rules.
+    /// true = done here (the reference is open, a refusal is shown, or it was stopped); false = the server should try.
+    private func fetchLinkOnThisMac(_ raw: String) async -> Bool {
+        recreate.linkStatus = RecreateDeviceFetch.statusLine(fetched: nil)
+        let settings = await loadRecreateLinkSettings() ?? recreate.linkSettings ?? RecreateLinkSettings()
+        // The server's verdict on the link first: refused (with its reason and the file offered), or this member's
+        // reference from it (opened, nothing downloaded). A server without the check: strict rules on this Mac.
+        var link = raw
+        var platform: String?
+        do {
+            let c = try await recreateAPI.checkLink(raw)
+            if Task.isCancelled { return true }
+            if let p = c.problem {
+                recreate.linkProblem = p
+                return true
+            }
+            if var hit = c.cached {
+                hit.cached = true
+                await openLinkReference(hit)
+                return true
+            }
+            if let u = c.url, !u.isEmpty { link = u }
+            platform = c.platform
+        } catch {
+            if Task.isCancelled { return true }
+            guard RecreateLinks.platform(raw) != nil || !settings.strictLinks else { return false }
+        }
+        let result = await DeviceLinkFetcher.shared.fetch(link, platform: platform, settings: settings) { v in
+            Task { @MainActor [weak self] in
+                guard let self, self.recreate.fetchingLink, self.recreate.linkTask?.isCancelled == false else { return }
+                self.recreate.linkProgress = v
+                self.recreate.linkStatus = RecreateDeviceFetch.statusLine(fetched: v)
+            }
+        }
+        if Task.isCancelled {
+            if case .success(let f) = result { try? FileManager.default.removeItem(at: f.file.deletingLastPathComponent()) }
+            return true
+        }
+        switch result {
+        case .failure(.refused(let p)):
+            // The server would refuse it too: no second try there.
+            recreate.linkProblem = p
+            return true
+        case .failure(.unavailable(let why)):
+            NSLog("[link] this Mac couldn't fetch it (%@): the server tries", why)
+            return false
+        case .success(let f):
+            defer { try? FileManager.default.removeItem(at: f.file.deletingLastPathComponent()) }
+            recreate.linkStatus = "Uploading the video…"
+            recreate.linkProgress = 0
+            let title = (f.title ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            let name: String? = title.isEmpty ? nil : String(title.prefix(80))
+            do {
+                let r = try await recreateAPI.createReference(file: f.file, contentType: RecreateDeviceFetch.contentType(f.file), name: name,
+                                                              sourceUrl: raw) { v in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.recreate.fetchingLink else { return }
+                        self.recreate.linkProgress = v
+                        self.recreate.linkStatus = "Uploading the video… \(Int((v * 100).rounded()))%"
+                    }
+                }
+                if Task.isCancelled { return true }
+                await openLinkReference(r)
+            } catch {
+                if Task.isCancelled { return true }
+                // The server re-checks the link and the file (422 link_unsupported / link_too_big): shown with the file offered.
+                if let p = RecreateLinkProblem(error) {
+                    recreate.linkProblem = p
+                } else {
+                    recreate.error = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+                }
+            }
+            return true
         }
     }
 
@@ -443,7 +582,8 @@ extension AppStore {
         }
         guard let text = pb.string(forType: .string) ?? (pb.readObjects(forClasses: [NSURL.self]) as? [URL])?.first?.absoluteString else { return }
         recreate.linkText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if RecreateLinks.detect(text) != nil {
+        let other = recreate.linkSettings?.strictLinks == false && text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("http")
+        if RecreateLinks.detect(text) != nil || other {
             Task { await createRecreateReference(link: text) }
         } else {
             recreate.linkProblem = RecreateLinkProblem(code: "link_unsupported", message: RecreateLinks.message(code: "link_unsupported", message: nil))

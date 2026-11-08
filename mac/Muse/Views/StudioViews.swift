@@ -574,6 +574,7 @@ struct StudioSettingsSection: View {
             }
             .padding(.top, Space.s4)
             EditorHelpersSettings()
+            LinkRulesSettings()
         } else if store.loading {
             SectionTitle("Spend caps", top: 0)
             SkeletonRows(count: 3, thumb: false)
@@ -640,6 +641,30 @@ struct EditorHelpersSettings: View {
         }
         store.setEditorDailyLimit(v)
         limit = ""
+    }
+}
+
+// MARK: - Settings → Studio → Links in Recreate
+
+/// "Strict link rules" (on by default; PATCH /v1/recreate/settings): on, a link pasted in Recreate is fetched only from
+/// TikTok, Instagram Reels or YouTube, and TikTok's "downloads off" is respected. Shown only when the server says this
+/// person may change it (`canEdit`); a server without the setting shows nothing and this Mac stays strict.
+struct LinkRulesSettings: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        // A VStack (not a Group) so the load runs even while nothing is shown.
+        VStack(alignment: .leading, spacing: 0) {
+            if let rules = store.recreate.linkSettings, rules.canEdit {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    SectionTitle("Links in Recreate")
+                    SettingRow("Strict link rules", hint: "On: only TikTok, Instagram Reel and YouTube links, and never a TikTok whose creator turned downloads off. Off: any public video link. Either way, public videos up to \(rules.maxSec) s only.") {
+                        RSwitch(label: "Strict link rules", isOn: Binding(get: { rules.strictLinks }, set: { store.setStrictLinks($0) }))
+                    }
+                }
+            }
+        }
+        .task { await store.loadRecreateLinkSettings() }
     }
 }
 

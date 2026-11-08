@@ -1,0 +1,8 @@
+{
+  "prices": [
+    { "endpoint_id": "acme-ai/vidgen/v2/text-to-video", "unit_price": 0.07, "unit": "second", "currency": "USD" },
+    { "endpoint_id": "acme-ai/pix/edit", "unit_price": 0.04, "unit": "image", "currency": "USD" }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}
