@@ -44,9 +44,22 @@ export interface EditorProvider {
 const env = (k: string, d: string) => process.env[k]?.trim() || d;
 const envNum = (k: string, d: number) => { const v = Number(process.env[k]); return Number.isFinite(v) && v > 0 ? v : d; };
 
-/** Replicate's per-second GPU prices (replicate.com/pricing, 2026-11): A100 80 GB $0.0014, L40S $0.000975. */
-export const DEFAULT_RATES = { transcribe: 0.0014, matte: 0.000975, separate: 0.0014, track: 0.0014 };
+/**
+ * What Replicate bills per second for each model (checked on each model's page, 2026-11-08, workstream 1):
+ * transcription on A100 80 GB $0.0014; matting and tracking on L40S $0.000975; separation on A100 40 GB $0.00115.
+ */
+export const DEFAULT_RATES = { transcribe: 0.0014, matte: 0.000975, separate: 0.00115, track: 0.000975 };
 export const DEFAULT_MODELS = { transcribe: 'victor-upmeet/whisperx', matte: 'arielreplicate/robust_video_matting', separate: 'ryan5453/demucs', track: 'meta/sam-2-video' };
+/**
+ * The pinned version of each default model (their latest on 2026-11-08), so a new upstream version can't change the
+ * output or the price unannounced. EDITOR_*_VERSION overrides; a model set by EDITOR_*_MODEL runs its own latest.
+ */
+export const DEFAULT_VERSIONS: Record<string, string> = {
+  'victor-upmeet/whisperx': '655845d6190ef70573c669245f245892cd039df4b880a1e3a65852c09252f5cc',
+  'arielreplicate/robust_video_matting': '73d2128a371922d5d1abf0712a1d974be0e4e2358cc1218e4e34714767232bac',
+  'ryan5453/demucs': 'ff5ad47d2685b27c0f820ee134c4394140804f08fa755cb20c846459faa4b337',
+  'meta/sam-2-video': '33432afdfc06a10da6b4018932893d39b0159f838b6d11dd1236dff85cc5ec1d',
+};
 
 // ------------------------------------------------------------------ mock
 /** 64×64, 1 fps, 121 s of white (longer than the 120 s matte limit), made once with ffmpeg: lavfi color=white, libx264, yuv420p. */
@@ -162,13 +175,28 @@ export class ReplicateProvider implements EditorProvider {
   };
   rates = { transcribe: envNum('EDITOR_TRANSCRIBE_USD_PER_SEC', DEFAULT_RATES.transcribe), matte: envNum('EDITOR_MATTE_USD_PER_SEC', DEFAULT_RATES.matte), separate: envNum('EDITOR_SEPARATE_USD_PER_SEC', DEFAULT_RATES.separate),
     track: envNum('EDITOR_TRACK_USD_PER_SEC', DEFAULT_RATES.track) };
+  /** The pinned version per model id (workstream 1). */
+  versions: Record<string, string | undefined> = {
+    [this.models.transcribe]: env('EDITOR_TRANSCRIBE_VERSION', DEFAULT_VERSIONS[this.models.transcribe] ?? '') || undefined,
+    [this.models.matte]: env('EDITOR_MATTE_VERSION', DEFAULT_VERSIONS[this.models.matte] ?? '') || undefined,
+    [this.models.separate]: env('EDITOR_SEPARATE_VERSION', DEFAULT_VERSIONS[this.models.separate] ?? '') || undefined,
+    [this.models.track]: env('EDITOR_TRACK_VERSION', DEFAULT_VERSIONS[this.models.track] ?? '') || undefined,
+  };
   constructor(private ctx: Ctx) {}
 
-  /** Community models run by version: the latest one from the catalog (cached there), and its input names. */
+  /**
+   * The version to run: the pinned one (input names from the catalog's schema), else the latest. A newer upstream
+   * version is logged for the owner, never picked up on its own.
+   */
   private async version(model: string): Promise<{ version?: string; inputs: string[] | null }> {
     const raw = await this.ctx.imageModels.catalog.model(model).catch(() => null);
     const props = (raw?.latest_version?.openapi_schema as any)?.components?.schemas?.Input?.properties;
     const inputs = props && typeof props === 'object' ? Object.keys(props) : null;
+    const pinned = this.versions[model];
+    if (pinned) {
+      if (raw?.latest_version?.id && raw.latest_version.id !== pinned) this.ctx.log.info({ model, pinned, latest: raw.latest_version.id }, 'editor model has a newer version (still running the pinned one)');
+      return { version: pinned, inputs };
+    }
     if (raw?.is_official) return { inputs };
     const v = raw?.latest_version?.id;
     if (!v) throw new ReplicateError(`No runnable version of ${model}`, 'failed');

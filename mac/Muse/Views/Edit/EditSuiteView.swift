@@ -28,6 +28,12 @@ struct EditSuiteView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.recreate.open {
                 RecreateView()
+            } else if let page = store.learn.page {
+                // The learning editor (plans/learning-editor-ui.md): Playbook and Recipes, owner only.
+                switch page {
+                case .playbook: LearnPlaybookView()
+                case .recipes: LearnRecipesView()
+                }
             } else {
                 EditSuiteHome { openId = $0 }
             }
@@ -72,6 +78,11 @@ struct EditSuiteHome: View {
         Page {
             PageHeader(eyebrow: "Edit suite", title: "Edit") {
                 // "Recreate this edit" (plans/recreate): opens its start page; nothing is uploaded until a video is chosen.
+                // The learning editor (owner only): two quiet text buttons beside it.
+                if store.isOwner {
+                    SuiteToolButton(title: "Playbook", icon: "book-open-text", plain: true) { store.openLearn(.playbook) }
+                    SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
+                }
                 SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
             }
             if takes.isEmpty {
@@ -206,7 +217,11 @@ struct EditSuiteEditor: View {
                     }
                     if claudeOpen {
                         SuiteRule(vertical: true)
-                        EditSuiteClaudePanel(session: session) { showClaude = false }
+                        EditSuiteClaudePanel(session: session, openPlaybook: {
+                            // Leaves the editor for the Playbook.
+                            onClose()
+                            store.openLearn(.playbook)
+                        }) { showClaude = false }
                             .frame(width: claudeW)
                     }
                 }
@@ -229,7 +244,11 @@ struct EditSuiteEditor: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            // Review mode (SnapshotRunner.learnShots): the Claude panel up on its Playbook tab.
+            if SnapshotRunner.state.claudeTab != nil { showClaude = true }
+        }
         .onKeyPress(.space) { session.togglePlay(); return .handled }
         .onKeyPress(.leftArrow) { session.step(-1); return .handled }
         .onKeyPress(.rightArrow) { session.step(1); return .handled }

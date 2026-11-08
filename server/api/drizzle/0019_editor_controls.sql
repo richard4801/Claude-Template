@@ -1,0 +1,2 @@
+ALTER TABLE "studio_settings" ADD COLUMN IF NOT EXISTS "editor_paid_off" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "studio_settings" ADD COLUMN IF NOT EXISTS "editor_cap_per_day" double precision;
