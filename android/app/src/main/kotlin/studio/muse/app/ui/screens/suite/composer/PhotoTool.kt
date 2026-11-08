@@ -61,6 +61,8 @@ object PhotoComposer {
             gradeLook = if (!s.gradeLook && (s.palette != null || s.stock != null)) false else null,
             count = p.count.coerceIn(1, PhotoRules.MAX_COUNT), presetId = p.presetId, productImage = p.product,
             references = p.refs.take(ShootRef.MAX).ifEmpty { null }, title = d.title.trim().ifBlank { null },
+            // Reuse settings: the composer as it was, stored on every still.
+            draft = ComposerDrafts.draft(d, photoCount = p.count, presetId = p.presetId),
         )
     }
 

@@ -110,6 +110,8 @@ sealed interface EditAction {
     data class AddKeyframe(val prop: KfProp) : EditAction
     data class SetMask(val mask: Mask?, val done: Boolean = true) : EditAction
     data object RemoveBackground : EditAction
+    /** Turns a clip's background removal off (its alpha matte goes; the matte asset stays in the project for undo). */
+    data object KeepBackground : EditAction
     /** Remove background → tap what to keep (workstream 1, plans/api.md "KeepPoint"): on / off. */
     data class TapToKeep(val on: Boolean) : EditAction
     /** A tap on the paused picture at (x, y), 0–1 of the frame. */
@@ -147,6 +149,9 @@ sealed interface EditAction {
     data class WordHighlight(val on: Boolean) : EditAction
     data class DeleteWord(val index: Int) : EditAction
     data object CutSilences : EditAction
+    /** Tablet track headers (plans/edit-layout.md): a track's sound on / off, and a picture track shown / hidden. */
+    data class ToggleTrackMuted(val trackId: String) : EditAction
+    data class ToggleTrackHidden(val trackId: String) : EditAction
     data object RemoveFillers : EditAction
     // Looks & adjust
     data class FiltersTab(val tab: String) : EditAction
@@ -276,7 +281,7 @@ class EditSuiteController(
         EditAction.Split -> "Split"; EditAction.Delete -> "Delete"; EditAction.Duplicate -> "Duplicate"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
         is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe -> "Keyframe"; is EditAction.SetMask -> "Mask"
-        EditAction.RemoveBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
+        EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
         EditAction.DetectBeats -> "Beats"; is EditAction.AddAudio -> if (a.voiceOver) "Voice-over" else "Music"
@@ -284,6 +289,7 @@ class EditSuiteController(
         is EditAction.CaptionStyleOf, is EditAction.CaptionFont, is EditAction.CaptionColors, is EditAction.CaptionY,
         is EditAction.CaptionWordsPerPage, is EditAction.WordHighlight -> "Caption style"
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
+        is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
         is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
@@ -393,6 +399,9 @@ class EditSuiteController(
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
             is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
             EditAction.RemoveBackground -> if (u.matteOff == null) removeBackground(u, null)
+            EditAction.KeepBackground -> u.activeClip?.takeIf { it.alphaMatte != null }?.let { clip ->
+                change { pp -> pp.updateItem(clip.id) { (it as VideoClip).copy(alphaMatte = null) } }
+            }
             is EditAction.TapToKeep -> if (u.matteOff == null || !a.on) {
                 if (u.playing && a.on) act(EditAction.PlayPause) // taps go on a paused frame
                 _ui.update { it.copy(keep = if (a.on) KeepUi() else null) }
@@ -453,6 +462,8 @@ class EditSuiteController(
             }
             is EditAction.DeleteWord -> deleteWord(a.index)
             EditAction.CutSilences -> cutSilences()
+            is EditAction.ToggleTrackMuted -> change { pp -> pp.copy(tracks = pp.tracks.map { t -> if (t.id == a.trackId) t.copy(muted = if (t.muted == true) null else true) else t }) }
+            is EditAction.ToggleTrackHidden -> change { pp -> pp.copy(tracks = pp.tracks.map { t -> if (t.id == a.trackId) t.copy(hidden = if (t.hidden == true) null else true) else t }) }
             EditAction.RemoveFillers -> removeFillers()
 
             is EditAction.FiltersTab -> _ui.update { it.copy(filtersTab = a.tab) }

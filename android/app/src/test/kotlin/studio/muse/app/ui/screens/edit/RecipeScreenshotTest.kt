@@ -32,7 +32,7 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("pick", "analysing", "ready", "ready_full", "ready_tablet", "home", "link_analysing", "link_failed").map { arrayOf<Any>(t, it) }
+            listOf("pick", "pick_link", "pick_refs", "analysing", "analysing_steps", "ready", "ready_full", "ready_tablet", "home", "link_analysing", "link_failed").map { arrayOf<Any>(t, it) }
         }
     }
 
@@ -45,7 +45,12 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
         }
         val recipe = FakeRecipes.cafeTrend()
         val ui = when (state) {
-            "pick" -> RecipeUi()
+            "pick", "pick_link" -> RecipeUi()
+            "pick_refs" -> RecipeUi(references = listOf(
+                studio.muse.core.edit.RecipeReference("rx_1", "Café morning", "ready", 100, durationSec = 15.0),
+                studio.muse.core.edit.RecipeReference("rx_2", "Gym hook", "analyzing", 62, "Reading the text"),
+                studio.muse.core.edit.RecipeReference("rx_3", "Sunset walk", "failed", 0)))
+            "analysing_steps" -> RecipeUi(RecipePhase.Analysing(.62f, "Reading the text", "Reading the text"), "cafe_morning.mp4")
             "analysing" -> RecipeUi(RecipePhase.Analysing(.6f, "Reading the text"), "cafe_morning.mp4")
             // Share → MUSE with a link: fetching it, and a link the server can't use (its message, then the saved file).
             "link_analysing" -> RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), "TikTok link")
@@ -60,7 +65,7 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
                         TakeChoice("t1", "Morning café", "HD", ImageRef.asset("g_tq"), 18.4, false, true),
                     ), onBack = {}, onOpen = {}, onRecreate = {},
                 )
-                else RecipeContent(ui, onBack = {}, onPick = {})
+                else RecipeContent(ui, onBack = {}, onPick = {}, draftLink = if (state == "pick_link") "https://www.tiktok.com/@studio/video/7351" else "")
             }
         }
         shadowOf(Looper.getMainLooper()).idle()

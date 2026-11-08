@@ -126,7 +126,10 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
         onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
     else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }) { open = it }
-    else EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
+    // "Open playbook" in the editor's Claude sheet leaves the editor for the Playbook.
+    else androidx.compose.runtime.CompositionLocalProvider(LocalOpenPlaybook provides { open = null; learn = "playbook" }) {
+        EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
+    }
 }
 
 // ======================================================================= home
@@ -405,18 +408,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
-    /** The project with only what has a local file (assets made on the server without a URL are left out of the preview/export). */
-    private fun playable(p: EditProject): EditProject {
-        val have = files.keys
-        val tracks = p.tracks.mapNotNull { t ->
-            val items = t.items.filter { it ->
-                when (it) { is VideoClip -> it.asset in have; is AudioClip -> it.asset in have; is ImageItem -> it.asset in have; else -> true }
-            }.map { if (it is VideoClip && it.audioAsset != null && it.audioAsset !in have) it.copy(audioAsset = null) else it }
-            if (t.kind == TrackKind.MAIN || items.isNotEmpty() || t.kind == TrackKind.CAPTION) t.copy(items = items) else null
-        }
-        val looksOk = tracks.map { t -> t.copy(items = t.items.map { it -> if (it is VideoClip && it.look?.lutAssetId?.let { l -> l !in have } == true) it.copy(look = it.look!!.copy(lut = null)) else it }) }
-        return p.copy(tracks = looksOk)
-    }
+    private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
 
     private fun rebuildPreview(p: EditProject) {
         if (sourceFile == null) return
@@ -598,3 +590,14 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     }
 }
 
+/** The project with only what has a local file in [have] (assets made on the server without a URL are left out of the preview/export). */
+fun playableProject(p: EditProject, have: Set<String>): EditProject {
+    val tracks = p.tracks.mapNotNull { t ->
+        val items = t.items.filter { it ->
+            when (it) { is VideoClip -> it.asset in have; is AudioClip -> it.asset in have; is ImageItem -> it.asset in have; else -> true }
+        }.map { if (it is VideoClip && it.audioAsset != null && it.audioAsset !in have) it.copy(audioAsset = null) else it }
+        if (t.kind == TrackKind.MAIN || items.isNotEmpty() || t.kind == TrackKind.CAPTION) t.copy(items = items) else null
+    }
+    val looksOk = tracks.map { t -> t.copy(items = t.items.map { it -> if (it is VideoClip && it.look?.lutAssetId?.let { l -> l !in have } == true) it.copy(look = it.look!!.copy(lut = null)) else it }) }
+    return p.copy(tracks = looksOk)
+}

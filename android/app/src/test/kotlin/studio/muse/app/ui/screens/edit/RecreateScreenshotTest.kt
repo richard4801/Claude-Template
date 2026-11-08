@@ -34,7 +34,7 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet").map { arrayOf<Any>(t, it) }
+            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export").map { arrayOf<Any>(t, it) }
         }
     }
 
@@ -48,7 +48,8 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
             var ref = api.createReference("up_1", "Café morning")
             while (ref.state == "analyzing") ref = api.reference(ref.id)
             val takes = api.listTakes().filter { it.kind == "take" }.map { RecreateTakeChoice(it.id, it.title, it.durationSec, label = it.label) }
-            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, "Café morning", takes = takes), modelId = { "m_demo" }, pollMs = 60_000)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, "Café morning", takes = takes, kept = ref.keptLine(),
+                cast = api.listModels().map { RecreateCastChoice(it.id, it.name) }, castId = api.listModels().firstOrNull()?.id), defaultModelId = { "m_demo" }, pollMs = 60_000)
             model.load()
             model.select(1)
             val base = model.ui.value
@@ -58,10 +59,11 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
                 // Shot 2's job reports 42% (the studio's live jobs); "waiting": its job isn't listed, a calm indeterminate state.
                 "generating", "waiting" -> base.copy(buildWhenReady = true, building = true, jobProgress = if (state.startsWith("generating")) mapOf("job_rx_s2" to 42) else emptyMap(),
                     fill = base.fill!!.copy(slots = base.fill!!.slots.map { if (it.state == "to_generate") it.copy(state = "generating", jobId = "job_rx_${it.slotId}") else it }))
-                "compare" -> {
+                "compare", "export" -> {
                     val f = base.fill!!.copy(slots = base.fill!!.slots.map { if (it.state == "to_generate") it.copy(state = "ready", jobId = "job_rx_${it.slotId}") else it })
                     val r = api.applyRecipe(ref.id, "es_demo", 0, f.slots.associate { it.slotId to (it.jobId ?: it.takeId!!) })
-                    base.copy(fill = f, match = r.match, mode = RecreateMode.Compare, builtTakeId = takes.firstOrNull()?.id)
+                    base.copy(fill = f, match = r.match, mode = RecreateMode.Compare, builtTakeId = takes.firstOrNull()?.id,
+                        export = if (state == "export") RecreateExportUi(guide = true, progress = .4f) else null)
                 }
                 else -> base
             }

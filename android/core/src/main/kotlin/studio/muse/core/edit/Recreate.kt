@@ -125,6 +125,16 @@ object RecreateJson {
 object RecreateText {
     const val APPROVE_NOTE = "You approve before anything is made."
 
+    /** The analysis steps, in the order the server reports them as `phase` (server/api/src/recreate/analyze.ts). */
+    val ANALYSIS_STEPS = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Reading the poses", "Writing the recipe")
+
+    /** The step the analysis is on (its index in [ANALYSIS_STEPS]): -1 before the first, the size once done. */
+    fun analysisStep(phase: String?, state: String = "analyzing"): Int {
+        if (state == "ready") return ANALYSIS_STEPS.size
+        val i = ANALYSIS_STEPS.indexOfFirst { it.equals(phase, ignoreCase = true) }
+        return if (i >= 0) i else if (phase.equals("done", true)) ANALYSIS_STEPS.size else -1
+    }
+
     /** "$1.28". */
     fun money(amount: Double): String = "$" + String.format(java.util.Locale.ROOT, "%.2f", amount)
 
@@ -279,4 +289,33 @@ object RecreateSwatches {
         val p = v * (1 - s); val q = v * (1 - s * f); val t = v * (1 - s * (1 - f))
         return when (i) { 0 -> Triple(v, t, p); 1 -> Triple(q, v, p); 2 -> Triple(p, v, t); 3 -> Triple(p, q, v); 4 -> Triple(t, p, v); else -> Triple(v, p, q) }
     }
+}
+
+/**
+ * Recreate's export (plans/recreate-edit.md step 7; Release 1): the built edit with the reference's sound as a guide
+ * track, so it lands on the beat (then post it with the platform's "Use this sound"), or silent, timed for the sound.
+ */
+object RecreateExport {
+    /** The guide's asset: the reference video saved on the device (its sound only is used). */
+    const val GUIDE_ASSET = "recreate_guide"
+    const val GUIDE_TRACK = "recreate_guide_track"
+
+    /** Plain words for the reminder shown with the export. */
+    const val REMINDER = "When you post, tap Use this sound on the original so your edit plays with its sound."
+
+    /**
+     * The edit's own sound is muted and the reference's sound plays under it from the start, for [durationSec] (the
+     * reference's length, which the built edit matches).
+     */
+    fun withGuide(p: EditProject, durationSec: Double): EditProject {
+        val muted = p.tracks.filter { it.id != GUIDE_TRACK }.map { if (it.kind == TrackKind.CAPTION) it else it.copy(muted = true) }
+        val guide = Track(GUIDE_TRACK, TrackKind.MUSIC, name = "Guide sound",
+            items = listOf(AudioClip("recreate_guide_clip", GUIDE_ASSET, 0.0, 0.0, durationSec)))
+        val assets = p.assets.filter { it.id != GUIDE_ASSET } + Asset(GUIDE_ASSET, AssetKind.AUDIO, upload = "local:$GUIDE_ASSET", durationSec = durationSec) // on this device only; never saved
+        return p.copy(assets = assets, tracks = muted + guide, mute = null)
+    }
+
+    /** No sound at all: the edit is timed for the sound, which is attached when posting. */
+    fun silent(p: EditProject): EditProject = p.copy(tracks = p.tracks.filter { it.id != GUIDE_TRACK }.map { if (it.kind == TrackKind.CAPTION) it else it.copy(muted = true) },
+        assets = p.assets.filter { it.id != GUIDE_ASSET }, mute = true)
 }
