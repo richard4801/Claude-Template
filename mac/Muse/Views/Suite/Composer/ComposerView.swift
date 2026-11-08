@@ -3,7 +3,7 @@ import SwiftUI
 
 // AI suite: the composer page, laid out as the owner-approved render (plans/design-direction/composer-mac-b.png and
 // composer-mac-1000-b.png; plans/design-direction.md §9 fix 1; design/direction/render.py `composer_mac`).
-// - Header: the tool's title (it opens the tool browser) and a quiet "Presets" link for the presets strip.
+// - Header: the tool's title (it opens the mode menu, SuiteNav.swift) and a quiet "Presets" link for the presets strip.
 // - Main row, filling the height: the picture on the left (the take in progress or the latest take; before any, the
 //   scene's light), and on the right a 300 pt rail (264 when narrow) with Setup rows, the Inputs thumbnails and the
 //   tool's own controls.
@@ -47,7 +47,10 @@ struct ComposerView: View {
                 .scrollDisabled(fits)
             }
             ComposerPickerHost()
-            if s.browserOpen { ToolBrowser().transition(.opacity) }
+            // The title's mode menu (owner decision 2026-11-08: a plain grouped list, no presets; they stay in the strip).
+            if s.browserOpen { SuiteModeMenu() }
+            // Review only: the big tool and preset browser it replaced, for the before shot.
+            if SnapshotRunner.state.overlay == "tools_before" { ToolBrowser() }
         }
         .onAppear { presetsOpen = draftIsEmpty }
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty }
@@ -130,7 +133,7 @@ struct ComposerView: View {
         let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
         let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
         return HStack(spacing: Space.s3) {
-            Button { store.suite.browserOpen = true } label: {
+            Button { store.suite.browserOpen.toggle() } label: {
                 HStack(spacing: Space.s2) {
                     Text(d.tool.title).font(t.scale.title.font).foregroundStyle(t.roles.ink).lineLimit(1)
                     Ph("caret-down", 14).foregroundStyle(t.roles.ink2)
@@ -139,8 +142,8 @@ struct ComposerView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Change the tool or start from a preset")
-            .accessibilityLabel("\(d.tool.title), change tool")
+            .help("Change the mode")
+            .accessibilityLabel("\(d.tool.title), change mode")
             if let name = preset?.label ?? photoPreset?.name {
                 Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1)
             }

@@ -29,6 +29,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -126,6 +129,8 @@ fun PromptBox(
     minHeight: androidx.compose.ui.unit.Dp = 52.dp, maxHeight: androidx.compose.ui.unit.Dp = 132.dp, locations: List<SuiteLocation> = emptyList(),
     /** Test hook: the field starts with this caret (an open @ menu in screenshots). */
     initialCaret: Int? = null,
+    /** Backspace left the prompt empty, or was pressed in an empty one (a hardware key): the composer lets go of its preset. */
+    onEmptied: () -> Unit = {},
 ) {
     val m = muse
     val encoded = PromptCodec.encode(tokens)
@@ -145,10 +150,15 @@ fun PromptBox(
                 field,
                 { v ->
                     val clean = v.text.take(2000)
+                    val emptied = clean.isEmpty() && field.text.isNotEmpty()
                     field = v.copy(text = clean)
                     onChange(PromptCodec.decode(latest, clean))
+                    if (emptied) onEmptied()
                 },
-                Modifier.fillMaxWidth().semantics {
+                Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+                    if (e.key == androidx.compose.ui.input.key.Key.Backspace && e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && field.text.isEmpty()) onEmptied()
+                    false
+                }.semantics {
                     contentDescription = "Prompt. $placeholder"
                     // TalkBack: each token can move one place left or right (drag to reorder for touch).
                     customActions = tokens.parts.filter { it !is PromptPart.Text }.flatMap { p ->

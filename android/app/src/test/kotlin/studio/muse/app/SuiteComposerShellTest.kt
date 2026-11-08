@@ -95,6 +95,14 @@ class SuiteComposerShellTest {
         assertTrue(movesFor(cat, "aerial", "", false).all { it.group == "aerial" })
     }
 
+    @Test fun `backspacing the prompt to empty unselects the preset (owner decision 2026-11-08)`() {
+        val d = ComposerDraft().pickPreset(cat, "cinematic")
+        assertEquals(d, d.unselectingPreset()) // the prompt still has the preset's #move
+        val n = d.copy(tokens = PromptTokens()).unselectingPreset()
+        assertFalse(n.collapsed); assertNull(n.settings.preset); assertNull(n.settings.body)
+        assertEquals(ComposerDraft(), ComposerDraft().unselectingPreset()) // no preset: nothing changes
+    }
+
     @Test fun `a preset collapses the composer and Edit settings shows its values`() {
         val d = ComposerDraft().pickPreset(cat, "cinematic")
         assertTrue(d.collapsed)

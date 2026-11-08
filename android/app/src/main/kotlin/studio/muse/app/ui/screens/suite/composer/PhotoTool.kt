@@ -157,6 +157,8 @@ class PhotoStore(private val c: AppContainer) {
     fun setCount(n: Int) = draft.update { it.copy(count = n.coerceIn(1, PhotoRules.MAX_COUNT)) }
     /** Picks a photo preset; picking the same one again clears it. */
     fun pickPreset(id: String?) = draft.update { it.copy(presetId = if (id == it.presetId) null else id) }
+    /** The prompt was backspaced to empty (owner decision 2026-11-08): the photo preset is unselected. */
+    fun clearPreset() = draft.update { it.copy(presetId = null) }
 
     private fun safe(s: String) = if (!owner && SuiteRules.PROVIDER_WORDS.containsMatchIn(s)) ErrorText.WENT_WRONG else s
 }

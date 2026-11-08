@@ -612,6 +612,18 @@ public struct ComposerDraft: Hashable, Sendable {
         catalog?.tier(quality)?.slots(for: engineModel) ?? .none
     }
 
+    /// The prompt was backspaced to empty (owner decision 2026-11-08): the selected preset is let go and the composer is the
+    /// normal one again, its rows back on Auto (the grade switch stays). Nothing changes while the prompt has anything in it
+    /// or no preset is selected.
+    public func unselectingPreset() -> ComposerDraft {
+        guard tokens.isEmpty, collapsed != nil || settings.preset != nil else { return self }
+        var d = self
+        d.collapsed = nil
+        d.directed = nil
+        d.settings = ComposerSettings(gradeLook: settings.gradeLook)
+        return d
+    }
+
     /// Picking a preset: its values go in the chips, its move becomes a #move, and the composer collapses (C6).
     public func applying(preset p: SuitePreset, _ c: CameraCatalog) -> ComposerDraft {
         var d = self
