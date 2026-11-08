@@ -50,6 +50,10 @@ Spec `plans/claude-editing.md`. Workstream 3: edit sessions plus the editing MCP
 
 `migrateWithLock` skips any migration whose `when` is ≤ the last one applied, so the coordinator merges them in that order. 0013 waits until 0011 and 0012 have landed.
 
+### Queued (owner, 2026-11-08)
+- **Edit: "find the action peaks" tool (free).** Server-side motion energy per frame (frame differencing / optical flow on a downscaled proxy) returns exact motion-peak times. It's exposed to Claude as an MCP tool so actions can be matched to beats frame-accurately. It comes after the Edit crash fix and the Edit redesign.
+- **Remove background, fix 1:** use RVM's alpha output instead of a green composite plus chroma key, so green clothing and hair edges survive. Option 2 (tap what to keep, with SAM 2 tracking) waits for the owner's OK on price and mockup.
+
 ## Owner's standing rule for production pushes (2026-11-07)
 The owner said: "Push anything that's green on all checks and that I've already approved in principle (fixes, approved designs). Still ask me for new features or anything that spends money."
 - The coordinator pushes to `claude/ecstatic-rubin-2egjfb` without asking when:
