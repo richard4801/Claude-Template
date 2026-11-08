@@ -169,3 +169,51 @@ This covers every open item at that point:
   - 4K: $0.19/s (70 GPU s/s).
 - **A 5 s clip costs:** about $0.43, $0.54 or $0.95.
 - **Availability:** a size is offered only when a pod advertises the "upscale" capability.
+
+## Editor AI switch-over checklist: EDITOR_AI_PROVIDER mock → replicate (WS3, 2026-11-08)
+Nobody changes the variable until every box is ticked and the owner says go. This section is written by WS3. Code references: `server/api/src/editor/providers.ts` (`makeProvider`, `DEFAULT_RATES`, `DEFAULT_MODELS`) and `service.ts` (`GPU_SEC`, `EDITOR_LIMITS`).
+
+**What the switch changes:**
+- `makeProvider` reads the variable once, when the server starts. A change only takes effect after a redeploy.
+- The default is `mock`. In production the mock is free (rates 0: no hold, no charge).
+- With `replicate` (or `auto` plus a token), each paid helper is estimated, then held, then settled at the GPU seconds Replicate bills. The minimum charge is $0.01. A failure, a cancel or a restart releases the hold.
+
+**Renderers (alphaMatte):**
+- [x] Server: model and validation, plus the matte applied in edit sessions (WS1, bed290b).
+- [x] Mac: the matte on its own composition track per lane; luma → alpha before the look, mask and transform. CI has a pixel check (matte_render) plus "Pick what to keep" in the walk (af7b1ec, run 42479593357).
+- [x] Android: `AlphaMatteEffect` is the first effect on the clip (WS4, prod 3e1f2a8). WS4 notes that matte timing and rotation still need a real-device check.
+- [ ] Android real-device check: a portrait phone take, the matte lined up across a speed ramp and a trim.
+- [ ] Export check on both apps: an exported MP4 of a matted clip over a coloured background matches the preview.
+
+**The mock today (found 2026-11-08):**
+- [ ] With the mock, a finished matte job's asset is the source video itself (`service.ts` `store`: "the mock points at the source").
+  - So in production right now, Remove background and Pick what to keep use the clip's own brightness as its alpha: dark areas go see-through.
+  - Before or with the switch, either the mock returns an all-white matte (no visible change), or Remove background is hidden while the mock runs (`/v1/editor/features` `matte.available`).
+
+**Prices** (the defaults, unless `EDITOR_*_USD_PER_SEC` is set; GPU seconds × $/s):
+
+| Helper | GPU s for d s of media | Rate $/GPU s | 15 s | 60 s | 120 s |
+|---|---|---|---|---|---|
+| Captions (and cuts without a transcript) | 8 + 0.15·d | 0.0014 | $0.014 | $0.024 | $0.036 |
+| Remove background (person) | 10 + 4·d | 0.000975 | $0.068 | $0.24 | $0.48 |
+| Pick what to keep (track) | 15 + 3·d | 0.0014 | $0.084 | $0.27 | $0.53 |
+| Voice clean-up (separate) | 5 + 0.3·d | 0.0014 | $0.013 | $0.032 | $0.057 |
+
+Free on every provider: cuts with a transcript, silence-only cuts, beats, and the voice analysis.
+
+- [ ] Check the four rates against the GPUs Replicate bills these models on today. Set `EDITOR_*_USD_PER_SEC` if they differ.
+- [ ] Decide on a markup. These are cost prices; SeedVR2 used cost × 2 on the owner's word.
+- [ ] One paid run of each helper on a 15 s clip, under a small cap (owner-approved spend, about $0.25 in all).
+  - Compare the billed GPU seconds with `GPU_SEC`, and adjust the formulas if they are off by more than 25 %.
+  - Confirm the settle step charges what Replicate billed.
+- [ ] Pin the model versions (`EDITOR_MATTE_MODEL`, `EDITOR_TRACK_MODEL`, `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_SEPARATE_MODEL`), so that a new upstream version can't change the output or the price unannounced.
+- [ ] Prices are shown before every paid run on both apps: the Mac shows "Cut out · ≈ $…", then "Run the cut-out"; Android equivalent per WS4. Members never see a model or provider name (owner views only).
+
+**Kill switch:**
+- [ ] Today the only way back is setting `EDITOR_AI_PROVIDER=mock` and redeploying. Running jobs fail with "Interrupted · try again" and their holds come back.
+  - Decide whether that is enough, or add a runtime switch that refuses new paid jobs, checked at `start` and listed in `/v1/editor/features` so the apps hide the paid helpers.
+- [ ] A spend cap per studio per day for editor helpers, on top of the token balance.
+- [ ] At most 2 jobs at a time per server (`EDITOR_LIMITS.maxRunning`, today's limit). Remove background stays limited to clips of 120 s.
+
+**Owner's word:**
+- [ ] The owner approves the prices, the markup and the go date. The coordinator changes the variable on Railway, and no session does.
