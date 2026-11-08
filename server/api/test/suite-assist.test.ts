@@ -9,7 +9,10 @@ import { users } from '../src/db/schema.js';
 import { assistantOf } from '../src/recreate/assistant.js';
 import { cameraOf, checkVisibleRig, promptText, requestOf, suiteOptions } from '../src/suite/assist.js';
 import { APERTURES, FOCAL_STEPS, FOCALS } from '../src/suite/camera.js';
-import { SUITE_TOOLS } from '../src/suite/mcpTools.js';
+import { PROMPT_SKILL, SKILL_FILE, SUITE_PROMPT, SUITE_TOOLS } from '../src/suite/mcpTools.js';
+import { threadBrief } from '../src/camera/claude.js';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { suiteAssists } from '../src/suite/schema.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
 
@@ -39,6 +42,25 @@ describe('Suite assist (unit)', () => {
     const r = requestOf({ v: 1, tool: 'shot', quality: 'standard', aspect: '16:9', duration: 6, takes: 2, sound: false, rig: { stock: 'kodak_portra', gradeLook: false }, tokens: toks } as any);
     expect(r).toMatchObject({ modelId: 'm1', prompt: 'Zelphira walks out to the street, smiling', quality: 'standard', aspectRatio: '16:9', duration: 6, takes: 2, audio: false, gradeLook: false,
       camera: { rig: { look: 'kodak_portra' }, move: { id: 'dolly_in', intensity: 0.4 } } });
+  });
+});
+
+describe('Suite brief follows the owner\'s prompt skill (workstream 1)', () => {
+  it('the suite brief and the API prompt carry the skeleton, the rig, the lengths, consistency and output rules', () => {
+    const brief = threadBrief('suite', 'sa_x') as { prompt: string; tools: string[] };
+    expect(brief.prompt).toBe(SUITE_PROMPT);
+    for (const h of ['## 3. The prompt skeleton', '## 4. The rig', '## 5. Lengths and formats', '## 6. Consistency rules', '## 7. Output',
+      'SUBJECT —', 'LOCATION —', 'ACTION —', 'SHOT 1 (0:00', 'STYLE —', 'CONSTRAINTS —']) expect(brief.prompt).toContain(h);
+    expect(brief.prompt).not.toContain('## 8.');
+    expect(brief.prompt).not.toMatch(/suite_generate/);
+    for (const t of brief.tools) expect(SUITE_TOOLS.some(x => x.name === t)).toBe(true);
+    expect(PROMPT_SKILL).toMatch(/suite_request_shot/);
+  });
+  it('the server copy is the repo skill, and the skill\'s apertures are the ones the composer shows', () => {
+    const repo = path.resolve(path.dirname(SKILL_FILE), '../../../../.claude/skills/muse-prompt-structure/SKILL.md');
+    if (existsSync(repo)) expect(readFileSync(SKILL_FILE, 'utf8')).toBe(readFileSync(repo, 'utf8'));
+    const listed = PROMPT_SKILL.match(/\*\*Aperture:\*\* \*\*(.+?) only\.\*\*/)![1]!.split(' · ');
+    expect(listed.sort()).toEqual(suiteOptions().camera.aperture.map(a => a.label).sort());
   });
 });
 

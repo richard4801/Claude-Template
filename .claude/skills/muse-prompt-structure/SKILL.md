@@ -239,7 +239,7 @@ Pick from these exactly. Anything else isn't in the composer, and the server ref
 ## 7. Output
 - **For one shot or photo:** the prompt block plus a **RIG** table (row → choice, one-line reason), then the "Avoid" line.
 - **For a script:** define the @tags, number the scenes, decide how many ~15 s prompts each needs, and write each with the skeleton and its rig. Give it as copy-ready blocks, or, if the owner wants a shotlist, as one self-contained HTML page with a collapsible prefix, a checkbox per scene and a Copy button per prompt.
-- **When Claude drives the composer** (`suite_set_draft`): put the prompt text in `prompt` and set every rig row by its option id from `suite_options()`. Explain the choices in two or three lines. Then call `suite_generate` without confirm to show the price, and only generate after the owner approves.
+- **When Claude drives the composer** (`suite_set_draft`): put the prompt text in `prompt` and set every rig row by its option id from `suite_options()`. Explain the choices in two or three lines. Then call `suite_request_shot` without confirm to show the price; with `confirm: true` it asks the owner in the app, and nothing runs until they approve.
 
 ## 8. Worked example: a seated editorial photo
 
