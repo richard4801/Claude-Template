@@ -33,6 +33,26 @@ object ErrorText {
     fun codeOf(status: Int): String = when (status) { 401 -> "unauthorized"; 429 -> "rate_limited"; 413 -> "too_large"; 502, 503, 504 -> "server_restarting"; else -> "http_$status" }
     const val RESTARTING = "The studio server is restarting. Try again in a moment."
 
+    /**
+     * True for a server message that isn't for people: a validator's field path ("project.tracks.1.items.2.startSec: …"),
+     * "Invalid request: …", a stack line or JSON. Show plain words instead and log the detail.
+     */
+    fun looksInternal(message: String?): Boolean {
+        val m = message?.trim() ?: return false
+        return Regex("""^[A-Za-z_]+(\.[A-Za-z0-9_]+)+\s*:""").containsMatchIn(m) || m.startsWith("Invalid request", true) ||
+            m.startsWith("{") || m.contains("Exception") || Regex("""\bat [a-z]+\.[A-Za-z.]+\(""").containsMatchIn(m)
+    }
+
+    /** [e]'s words if they are for people, else [fallback] (the detail goes to the log). */
+    fun plain(e: Throwable, fallback: String): String {
+        val msg = e.message
+        if (msg.isNullOrBlank() || looksInternal(msg)) {
+            runCatching { android.util.Log.w("MUSE", "${(e as? ApiException)?.code ?: e.javaClass.simpleName}: $msg") }
+            return fallback
+        }
+        return msg
+    }
+
     fun of(code: String, serverMessage: String?): String {
         val server = serverMessage?.trim().orEmpty()
         return when (code) {

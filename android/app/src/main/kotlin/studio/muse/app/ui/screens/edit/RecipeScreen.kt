@@ -83,7 +83,10 @@ sealed interface RecipePhase {
     data class Ready(val recipe: Recipe, val referenceId: String? = null, val kept: String? = null) : RecipePhase
     /** [fromLink]: a link couldn't be used; the saved file is offered instead. */
     /** [retry]: "Try again" picks the analysis up again (the server restarted while reading the video). */
-    data class Failed(val message: String, val fromLink: Boolean = false, val retry: RecipeRetry? = null) : RecipePhase
+    data class Failed(val message: String, val fromLink: Boolean = false, val retry: RecipeRetry? = null) : RecipePhase {
+        /** "Retry" where the server's words say so (a failed analysis), else "Try again". */
+        val retryLabel: String get() = if (message.contains("Retry")) "Retry" else "Try again"
+    }
 }
 
 /** What "Try again" picks up: the reference, and the upload it was made from (to make it again if the analysis was lost). */
@@ -112,7 +115,9 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
         ui = RecipeUi(RecipePhase.Analysing(.5f, "Opening the reference"), null)
         ui = runCatching { c.repo.api.reference(rid) }.fold(
             { ref -> if (ref.state == "analyzing") follow(c.repo.api, ref, show = { ui = it })
-                else ref.recipe?.let { RecipeUi(RecipePhase.Ready(it, ref.id, ref.keptLine()), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
+                else ref.recipe?.let { RecipeUi(RecipePhase.Ready(it, ref.id, ref.keptLine()), ref.name) }
+                    // A failed reference can be analysed again on the server (Retry).
+                    ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired.", retry = if (ref.state == "failed") RecipeRetry(ref.id, null, ref.name) else null), ref.name) },
             { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference", retry = if ((e as? ApiException)?.transient == true) RecipeRetry(rid, null, null) else null), null) })
     }
     // Share → MUSE: a link. The server fetches it within the platforms' rules; when it can't, its message says why and the
@@ -193,6 +198,15 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         if (!c.repo.demo) poster = c.repo.api.referencePoster(referenceId)?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
         model.load()
     }
+    // Each shot's keyframe for the tiles (the authenticated thumb route), loaded once.
+    var slotThumbs by remember(referenceId) { mutableStateOf<Map<String, androidx.compose.ui.graphics.ImageBitmap>>(emptyMap()) }
+    LaunchedEffect(referenceId) {
+        if (c.repo.demo) return@LaunchedEffect
+        for (s in recipe.slots) {
+            val b = c.repo.api.referenceSlotThumb(referenceId, s.id) ?: continue
+            android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()?.let { img -> slotThumbs = slotThumbs + (s.id to img) }
+        }
+    }
     // The reference video, from its authenticated route into the cache (≤ 60 s), so the player needs no token.
     LaunchedEffect(referenceId) {
         if (c.repo.demo) return@LaunchedEffect
@@ -209,9 +223,15 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     val prefs by c.prefs.collectAsState()
     var claude by remember { mutableStateOf(false) }
     var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
-    LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
+    // The built edit plays as itself or not at all: "Preparing the preview…" while it renders or downloads, "The preview
+    // didn't render · Retry" when neither the server's render nor the phone's (all takes' real video) is there.
+    var editStatus by remember(referenceId) { mutableStateOf<String?>(null) }
+    var previewTry by remember(referenceId) { mutableStateOf(0) }
+    LaunchedEffect(ui.builtSessionId, ui.builtRevision, previewTry) {
         val sid = ui.builtSessionId ?: return@LaunchedEffect
         if (c.repo.demo) return@LaunchedEffect // demo mode has no media to build from
+        built?.release(); built = null
+        editStatus = PREVIEW_PREPARING
         val rendered = server.preview(sid)
         val next: androidx.media3.common.Player? = if (rendered != null) {
             androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
@@ -221,9 +241,9 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
             runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             local.player()
         }
-        built?.release()
         built = next
         editLabel = rendered?.render?.label
+        editStatus = if (next == null) PREVIEW_FAILED else null
     }
     androidx.compose.runtime.DisposableEffect(referenceId) { onDispose { built?.release() } }
     // Shots being made: their progress from the studio's live jobs.
@@ -276,11 +296,14 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
                     { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't make the video. Try again.") })
             }
         },
-    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel))
+    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel, slotThumbs, editStatus, onRetryEdit = { previewTry++ }))
     // The chat refreshes the recipe's fill when Claude has matched or priced shots.
     ClaudeChatSheet(open = claude, onDismiss = { claude = false; scope.launch { model.load() } },
         contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")
 }
+
+const val PREVIEW_PREPARING = "Preparing the preview…"
+const val PREVIEW_FAILED = "The preview didn't render"
 
 /** When the server restarted while reading the video and didn't come back in time. */
 const val RECIPE_RESTARTED = "The server restarted while reading this video. Try again"
@@ -314,8 +337,8 @@ internal suspend fun follow(
     val recipe = ref.recipe
     return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe, ref.id, ref.keptLine()), ref.name)
     else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish.", fromLink = ref.error?.contains("link", true) == true,
-        // A failed analysis can be made again from the same upload.
-        retry = if (ref.state == "failed" && uploadId != null) again else null), ref.name)
+        // A failed analysis can run again on the server (Retry), or be made again from the same upload.
+        retry = if (ref.state == "failed") again else null), ref.name)
 }
 
 /** Try again: the reference if it is still being read or ready, else a new one from the same upload. */
@@ -323,6 +346,14 @@ internal suspend fun resume(api: studio.muse.app.data.MuseApi, r: RecipeRetry, p
     val ref = api.reference(r.referenceId)
     when {
         ref.state == "analyzing" || ref.state == "ready" -> follow(api, ref, r.uploadId, pause = pause, show = show)
+        // Failed: the server analyses it again (a lighter analysis after it crashed); without the video, from the upload.
+        ref.state == "failed" -> try { follow(api, api.retryReference(ref.id), r.uploadId, pause = pause, show = show) } catch (e: ApiException) {
+            when {
+                e.code == "not_failed" -> follow(api, api.reference(ref.id), r.uploadId, pause = pause, show = show)
+                r.uploadId != null -> follow(api, api.createReference(r.uploadId, r.name), r.uploadId, pause = pause, show = show)
+                else -> RecipeUi(RecipePhase.Failed(e.message ?: "This video can't be read again · pick it again"), r.name)
+            }
+        }
         r.uploadId != null -> follow(api, api.createReference(r.uploadId, r.name), r.uploadId, pause = pause, show = show)
         else -> RecipeUi(RecipePhase.Failed(ref.error ?: "The analysis didn’t finish."), r.name)
     }
@@ -355,7 +386,7 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit, onLink: 
                             T(ph.message, m.scale.body, m.t.ink)
                             val r = ph.retry
                             // The server restarted mid-analysis: Try again is the one action; another video stays possible.
-                            if (r != null) { Primary("Try again") { onRetry(r) }; Secondary("Pick another video", onPick) }
+                            if (r != null) { Primary(ph.retryLabel) { onRetry(r) }; Secondary("Pick another video", onPick) }
                             // A link MUSE couldn't use: the saved video is the way in (the one action here).
                             else if (ph.fromLink) Primary("Pick the saved video", onPick) else Secondary("Pick another video", onPick)
                         }

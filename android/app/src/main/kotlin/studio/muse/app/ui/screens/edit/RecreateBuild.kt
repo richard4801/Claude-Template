@@ -50,6 +50,9 @@ data class RecreateCastChoice(val id: String, val name: String)
 
 data class RecreateTakeChoice(val id: String, val caption: String, val durationSec: Double?, val thumb: studio.muse.app.data.ImageRef? = null, val label: String? = null)
 
+/** A build the server refused (a validator's text, any 4xx): what the owner sees; the detail goes to the log. */
+const val BUILD_FAILED = "Couldn't build this edit. Try again, or change a shot."
+
 data class RecreateBuildUi(
     val referenceId: String,
     val recipe: Recipe,
@@ -180,7 +183,7 @@ class RecreateBuildModel(
             api.matchReference(id, modelId)
             take(api.referenceFill(id))
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            _ui.update { it.copy(message = e.message ?: "Couldn’t match your takes for the new lead") }
+            _ui.update { it.copy(message = studio.muse.app.data.ErrorText.plain(e, "Couldn’t match your takes for the new lead")) }
         } finally { _ui.update { it.copy(loadingFill = false) } }
         price()
     }
@@ -242,7 +245,7 @@ class RecreateBuildModel(
             take(f)
             f.match?.let { m -> _ui.update { it.copy(match = m) } }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            _ui.update { it.copy(loadingFill = false, message = e.message ?: "Couldn’t load how the shots are made") }
+            _ui.update { it.copy(loadingFill = false, message = studio.muse.app.data.ErrorText.plain(e, "Couldn’t load how the shots are made")) }
             return
         }
         _ui.update { it.copy(loadingFill = false) }
@@ -363,7 +366,7 @@ class RecreateBuildModel(
             true
         } catch (e: CancellationException) { throw e } catch (e: ApiException) {
             if (e.code == "slot_not_in_edit" || e.code == "not_built_here") false
-            else { _ui.update { it.copy(message = e.message ?: "Couldn’t swap the shot") }; true }
+            else { _ui.update { it.copy(message = studio.muse.app.data.ErrorText.plain(e, "Couldn’t swap the shot")) }; true }
         }
     }
 
@@ -426,7 +429,7 @@ class RecreateBuildModel(
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 // WS1: a background plate that couldn't be made (502 background_failed) is never charged.
                 val line = if ((e as? ApiException)?.code == "background_failed") "The background couldn’t be made, so this shot didn’t start. You weren’t charged. Try again, or pick one of your locations."
-                    else "This shot didn’t start: ${e.message ?: "try again"}"
+                    else "This shot didn’t start: ${studio.muse.app.data.ErrorText.plain(e, "try again")}"
                 _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to line)) }
             } finally {
                 _ui.update { it.copy(starting = it.starting - s) }
@@ -495,7 +498,11 @@ class RecreateBuildModel(
                     message = r.waiting.takeIf { it.isNotEmpty() }?.let { w -> "${w.joinToString(" and ") { v.shotName(it) }} isn’t ready yet, so the edit leaves it out for now" })
             }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            _ui.update { it.copy(building = false, message = e.message ?: "Couldn’t build the edit") }
+            // A validator's or other internal text never reaches the owner (it goes to the log): plain words instead.
+            val code = (e as? ApiException)?.code.orEmpty()
+            val invalid = code == "bad_request" || code == "validation" || code == "conflict" || code.matches(Regex("http_4\\d\\d"))
+            _ui.update { it.copy(building = false, message = if (invalid || studio.muse.app.data.ErrorText.looksInternal(e.message)) {
+                studio.muse.app.data.ErrorText.plain(Exception(e.message), BUILD_FAILED); BUILD_FAILED } else studio.muse.app.data.ErrorText.plain(e, BUILD_FAILED)) }
         }
     }
 

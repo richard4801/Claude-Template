@@ -88,6 +88,7 @@ import studio.muse.app.ui.screens.suite.HardwareImage
 import studio.muse.app.ui.screens.suite.undoRig
 import studio.muse.app.ui.screens.suite.queueShot
 import studio.muse.app.ui.screens.suite.answerClaude
+import studio.muse.app.ui.screens.suite.askClaude
 import studio.muse.app.ui.screens.suite.applyAssist
 import studio.muse.app.ui.screens.suite.openClaude
 import studio.muse.app.ui.screens.suite.pushComposerToAssist
@@ -318,6 +319,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     // Generate waits for the owner's approval at the price shown.
     val assist by store.assist.collectAsState()
     var claudeOpen by remember { mutableStateOf(false) }
+    var chipsUsed by remember(assist?.id) { mutableStateOf(false) }
     val canClaude = owner || c.repo.demo
     LaunchedEffect(Unit) {
         c.repo.live.collect { ev ->
@@ -335,7 +337,8 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     Box(Modifier.heightIn(min = 48.dp).press { showFeed = !showFeed }.padding(horizontal = 12.dp).semantics { role = Role.Button },
                         contentAlignment = Alignment.Center) { T(if (showFeed) "Composer" else "Takes", muse.scale.label, muse.t.ink, maxLines = 1) }
                     if (canClaude && !showFeed && d.tool in ComposerDraft.PROMPT_TOOLS) Box(Modifier.heightIn(min = 48.dp)
-                        .press { scope.launch { if (store.openClaude() != null) claudeOpen = true } }.padding(horizontal = 12.dp).semantics { role = Role.Button },
+                        .press { scope.launch { if (store.openClaude() != null) claudeOpen = true } }.padding(horizontal = 12.dp)
+                        .semantics { role = Role.Button; contentDescription = studio.muse.app.ui.screens.suite.SuiteClaudeWords.toggle(claudeOpen) },
                         contentAlignment = Alignment.Center) { T("Claude", muse.scale.label, muse.t.ink, maxLines = 1) }
                     MoreMenu(listOfNotNull(
                         // Build step 3: save this shot to run later (priced, nothing held; Run from Takes).
@@ -382,7 +385,10 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
             assist?.let { a ->
                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
-                    above = if (a.pending != null || a.message != null) ({ SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }) else null)
+                    above = {
+                        SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
+                        if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    })
             }
         }
     }

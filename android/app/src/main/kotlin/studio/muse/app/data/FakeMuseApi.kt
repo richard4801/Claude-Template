@@ -1280,6 +1280,14 @@ class FakeMuseApi(
         return if (platform == null && strict) RecreateLinkCheck(false, url, code = "link_unsupported", reason = "Paste a TikTok, Instagram Reel or YouTube link")
             else RecreateLinkCheck(true, url, platform ?: "other")
     }
+    /** Demo: a failed reference analysed again (tests mark one failed with [debugFailReference]). */
+    private val failedRefs = HashSet<String>()
+    fun debugFailReference(id: String) = failedRefs.add(id)
+    override suspend fun retryReference(id: String): RecipeReference {
+        if (lock.withLock { !failedRefs.remove(id) }) throw ApiException("not_failed", "This reference isn't failed")
+        lock.withLock { recreatePolls[id] = 0 }
+        return reference(id)
+    }
     /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
     override suspend fun createReferenceFromLink(url: String, name: String?): RecipeReference {
         if ("private" in url) throw ApiException("link_private", "This video is private · save it and share the file instead")
@@ -1295,6 +1303,7 @@ class FakeMuseApi(
     private val recreateNames = HashMap<String, String>()
     override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
+        if (id in failedRefs) return@withLock RecipeReference(id, recreateNames[id] ?: "Reference", "failed", error = "The analysis stopped the server twice · tap Retry for a lighter analysis", errorCode = "analysis_crashed")
         recreatePolls[id] = n + 1
         if (n < recreatePhases.size) RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
         else RecipeJson.reference("""{"id":"$id","name":"${recreateNames[id] ?: "Reference"}","state":"ready","progress":100,"phase":"Done","durationSec":15.0,"keep":false,"createdAt":${now()},"expiresAt":${now() + 30L * 86_400_000},"recipe":${FakeRecipes.cafeTrendJson()}}""")

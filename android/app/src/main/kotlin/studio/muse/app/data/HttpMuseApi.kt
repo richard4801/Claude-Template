@@ -197,6 +197,7 @@ interface MuseService {
     @GET("v1/editor/settings") suspend fun editorSettings(): EditorSettings
     @PATCH("v1/editor/settings") suspend fun patchEditorSettings(@Body r: JsonObject): EditorSettings
     @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
+    @GET("v1/recreate/references/{id}/slots/{slot}/thumb") suspend fun referenceSlotThumb(@Path("id") id: String, @Path("slot") slot: String): retrofit2.Response<okhttp3.ResponseBody>
     // OkHttp follows the redirect to storage and drops the Authorization header on the way to another host.
     @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/video") suspend fun referenceVideo(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
 
@@ -204,6 +205,7 @@ interface MuseService {
     @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
     @GET("v1/recreate/references") suspend fun listReferences(): kotlinx.serialization.json.JsonElement
+    @POST("v1/recreate/references/{id}/retry") suspend fun retryReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/match") suspend fun matchReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}/fill") suspend fun referenceFill(@Path("id") id: String): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
@@ -517,6 +519,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun deleteRecipe(id: String) { call { deleteRecipe(id) } }
     override suspend fun nearestRecipes(id: String, k: Int) = call { nearestRecipes(id, k) }
     override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
+    override suspend fun referenceSlotThumb(referenceId: String, slotId: String): ByteArray? =
+        runCatching { call { referenceSlotThumb(rx(referenceId), shotId(slotId)) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
     override suspend fun referencePoster(referenceId: String): ByteArray? =
         runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
     override suspend fun editorSettings() = call { editorSettings() }
@@ -589,6 +593,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
     override suspend fun listReferences() = studio.muse.core.edit.RecipeJson.references(call { listReferences() })
+    override suspend fun retryReference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { retryReference(rx(id), JsonObject(emptyMap())) })
     // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
     private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
     private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
