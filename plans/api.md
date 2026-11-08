@@ -548,7 +548,8 @@ EditorJob    { id, kind, state: "running"|"done"|"failed"|"cancelled", progress 
                models?: string[] /* owners only */ }
 CaptionsResult { language, words: { text, startSec, endSec, score? }[] /* SOURCE seconds */, durationSec, reused: boolean }
 CutsResult     { cuts: { startSec, endSec, reason: "silence"|"filler"|"repeat", text? }[] /* source s */, savedSec, words, language, options, durationSec }
-MatteResult    { asset: { kind: "video", upload | take, url?, durationSec }, chroma: { color: "#00FF00", similarity: 0.4, smoothness: 0.08, spill: 0.5 } }
+MatteResult    { asset: { kind: "video", upload | take, url?, durationSec }, alpha: true, mode: "person" | "tracked", points?: KeepPoint[] }   // workstream 1: an alpha matte
+KeepPoint      { x: 0–1, y: 0–1 /* of the frame */, t: seconds into the source (default 0), keep: boolean (default true) }
 DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, suggestion: { level: "none"|"light"|"strong", reason, confidence: number|null } }
 ```
 
@@ -571,11 +572,25 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 - `captions` `{language?: "auto"|"en"|…}` → `CaptionsResult`. Word timestamps of the source's speech. Free (reused, cost 0) when the same video already has a transcript from the last 30 days in that language.
 - `cuts` `{minSilenceSec? 0.25–5 (0.7), keepPadSec? 0–0.5 (0.12), fillers? (true), repeats? (false), extraFillers?: string[] ≤ 50, fromJobId?, silenceOnly?, noiseDb? −60…−10 (−35)}` → `CutsResult`: suggested source ranges to remove (silences longer than `minSilenceSec`, keeping `keepPadSec` of each side; "um/uh/er/ah/hmm…" + `extraFillers`; a word said twice in a row). Free when a transcript exists (`fromJobId`, or the newest one of that video); otherwise it transcribes first (priced like captions). **`silenceOnly: true`** is always free and needs no transcript: the server reads the audio level (ffmpeg `silencedetect`, analysis only, nothing encoded) and returns silence cuts only (`words: []`); quieter than `noiseDb` counts as silence. The app shows the cuts and applies the accepted ones with `applyCuts(project, assetId, cuts)`.
 - `beats` (free; music or any video/audio, ≤ 10 min) → `{bpm, beats: number[], strong: number[] /* source s */, durationSec}`: beat marks for the music track (ffmpeg decode + onset/tempo analysis on the server; nothing encoded). The tempo is checked against half, double and 3:2 readings: if the points between the grid's beats are onsets too, the faster tempo wins, up to 180 bpm (`test/beats.test.ts`: click tracks at 60–180 bpm, off-beats, music).
-- `matte` (video ≤ 120 s) → `MatteResult`: the person on pure green; the app adds the asset (usually on an overlay/PiP track) with the given `chroma`. Priced per second of video.
+- `matte` (video ≤ 120 s) → `MatteResult`, priced per second of video (workstream 1, 2026-11-08: fix 1 and option 2, approved by the owner):
+  - **The result is an alpha matte**: a grey video the same length as the source, white = keep. It is not a green composite, so green clothes and hair edges survive.
+  - The app keeps the original clip and sets `alphaMatte: {asset}` on it, with the matte asset added to the project. A finished job in an edit session does this itself; `chroma` is removed.
+  - Old clips with `chroma` keep working.
+  - **`options.points: KeepPoint[]`** (1–10, at least one `keep`) is **tap to keep**. The owner taps what to keep (a pet, a product, one of two people) on one or more frames, and taps `keep: false` on what to leave out. That subject is tracked through the clip and comes back as the same kind of matte (`mode: "tracked"`).
+  - Tap to keep has its own price: GPU 15 + 3·d seconds. Estimate it with the same `options`. It runs as an ordinary paid job: estimate → hold → settle at the billed time, or release on failure or cancel.
+  - Points are checked (0–1, `t` inside the clip) before anything is held.
+  - Owner views list the model; member views never name it.
+
+**`VideoClip.alphaMatte {asset, invert?}`** (project model v2, workstream 1):
+- `asset` is a video asset of the project, aligned with the clip's own asset (the same source times).
+- Its luma is the clip's alpha: white = opaque. With `invert`, black is opaque.
+- It is applied before the clip's look, mask and transform. Validation: the asset must exist and be a video.
+- Apps render it: Mac (AVFoundation/Core Image `blendWithMask`, or a Metal pass) and Android (a luma-to-alpha shader on the matte's frame at the same time).
+- An app that doesn't know the field shows the clip unmatted.
 - `denoise` `{analyzeOnly?}`: `analyzeOnly: true` is free and needs a transcript → `{suggestion}` from how clearly the words were heard. Otherwise → the voice alone (music and noise removed) as an audio asset + the suggestion; the app sets it as the clip's `audioAsset`.
 - Estimates: GPU seconds (captions 8 + 0.15·d, matte 10 + 4·d, voice 5 + 0.3·d, d = media seconds) × the GPU's $/s; at least $0.01. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.
 - **Events:** `{type: "editor", editorJob: EditorJob}` to the job's user and the owners; `{type: "editor", op: "delete", id}` when one is removed.
-- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with green-screen output, a stem separation model); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
+- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with alpha-mask output, a stem separation model); `EDITOR_TRACK_MODEL` (default: a SAM 2 video segmentation model, for tap to keep); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
 
 **Looks (filters, 2026-11-05)** — spec `plans/video-editor.md` "Looks". A `look` (LUT + curves + texture effects) on video/image items; asset kind `"lut"` for imported .cube files.
 

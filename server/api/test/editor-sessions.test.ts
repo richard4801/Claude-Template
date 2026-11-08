@@ -192,10 +192,20 @@ describe('edit sessions API and Claude tools', () => {
 
   it('paid helpers: estimate, then the owner approves in the app, then the result lands on the edit', async () => {
     const sid = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body.id;
+    // Tap to keep: its own label and price; bad points are refused before anything is asked.
+    const tap = await tool('remove_background').run(env(), { sessionId: sid, points: [{ x: 0.5, y: 0.3 }] }) as any;
+    expect(tap).toMatchObject({ needsConfirmation: true });
+    expect(tap.estimateUsd).toBeGreaterThan(0);
+    await expect(tool('remove_background').run(env(), { sessionId: sid, points: [{ x: 0.5, y: 0.3, keep: false }] })).rejects.toMatchObject({ status: 400 });
+    // An alpha matte must point at a video asset of the project.
+    const bad = structuredClone((await owner.req('GET', `/v1/edit-sessions/${sid}`)).body.project);
+    bad.tracks[0].items[0].alphaMatte = { asset: 'nope' };
+    expect(() => M.validate(bad)).toThrow(/alphaMatte.asset/);
     const est = await tool('remove_background').run(env(), { sessionId: sid }) as any;
     expect(est).toMatchObject({ needsConfirmation: true });
     expect(String(est.label)).toMatch(/^Remove background · about \$/);
     expect(est.estimateUsd).toBeGreaterThan(0);
+    expect(tap.estimateUsd).not.toBe(est.estimateUsd); // tracking has its own price
     const asked = await tool('remove_background').run(env(), { sessionId: sid, confirm: true }) as any;
     expect(asked).toMatchObject({ waitingForOwner: true });
     const pend = (await owner.req('GET', `/v1/edit-sessions/${sid}`)).body.pending;
@@ -204,8 +214,10 @@ describe('edit sessions API and Claude tools', () => {
     expect((await owner.req('POST', `/v1/edit-sessions/${sid}/pending/${asked.pendingId}`, { approve: true })).body.status).toBe('running');
     const after = await until(async () => { const s = (await owner.req('GET', `/v1/edit-sessions/${sid}`)).body; return s.revision > rev0 ? s : null; }, 15_000);
     const c = after.project.tracks[0].items[0];
-    expect(c.chroma).toMatchObject({ color: '#00FF00' });
-    expect(c.audioAsset).toBe('src');
+    // The original clip stays, with the matte as its alpha (no chroma key).
+    expect(c.asset).toBe('src');
+    expect(c.chroma).toBeUndefined();
+    expect(after.project.assets.find((x: any) => x.id === c.alphaMatte.asset)).toMatchObject({ kind: 'video' });
     expect(after.history[0]).toMatchObject({ byClaude: true, label: 'Remove background' });
   }, 30_000);
 
