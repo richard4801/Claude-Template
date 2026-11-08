@@ -105,7 +105,7 @@ fun SuiteFeedView(photo: Boolean, wide: Boolean, onOpen: (String) -> Unit, modif
         collections.firstOrNull { it.id == collection && it.canEdit }?.let { col -> CollectionTools(col) }
         LearnSegmented(SuiteFeedFilter.entries.map { it.label }, filter.ordinal, Modifier.fillMaxWidth().widthIn(max = 520.dp)) { store.feedFilter.value = SuiteFeedFilter.entries[it] }
         if (comparing.size == 1) T("Pick a second take to compare", m.scale.caption, m.roles.ink2)
-        if (shown.isEmpty()) T(if (items == null && !older) "Loading your takes" else "No takes here yet. Generate one and it appears here.", m.scale.body, m.roles.ink2)
+        if (shown.isEmpty()) T(if (items == null && !older) "Loading your takes" else "Your takes appear here", m.scale.body, m.roles.ink2)
         val cols = if (wide) 4 else 2
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Queued: shots saved to run later; nothing is held until Run (priced again, then confirmed).
@@ -199,9 +199,9 @@ private fun FeedCard(item: SuiteFeedItem, progress: Double?, comparing: Boolean,
     val m = muse
     val shape = RoundedCornerShape(m.radii.container)
     val status = when (item.status) {
-        "queued" -> "Waiting"
-        "running" -> progress?.takeIf { it > 0 }?.let { "${it.toInt()}%" } ?: "Rendering"
-        "failed" -> "Failed, not charged"
+        "queued" -> "Waiting to start"
+        "running" -> progress?.takeIf { it > 0 }?.let { "Rendering · ${it.toInt()}%" } ?: "Rendering"
+        "failed" -> "Didn’t render"
         else -> item.summary.ifBlank { "Ready" }
     }
     Column(modifier.semantics(mergeDescendants = true) { contentDescription = "${item.title.ifBlank { "Take" }}, $status" }, verticalArrangement = Arrangement.spacedBy(6.dp)) {

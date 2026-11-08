@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -83,6 +84,8 @@ class RecreateActions(
     /** G2: how a shot to make is made ("swap" | "generate"), and whether a swap keeps the reference's setting. */
     val onMethod: (String, String) -> Unit = { _, _ -> },
     val onKeepBackground: (String, Boolean) -> Unit = { _, _ -> },
+    /** The Build confirmation's per-shot tick ("pick which shots to make"). */
+    val onConfirmTick: (String) -> Unit = {},
     /** "Use your own setting": a studio location for the shot, or null for the place in its brief. */
     val onLocation: (String, String?) -> Unit = { _, _ -> },
     val onExport: () -> Unit = {},
@@ -730,10 +733,16 @@ private fun BuildConfirm(ui: RecreateBuildUi, paid: List<String>, a: RecreateAct
             Modifier.padding(24.dp).widthIn(max = 460.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            val chosen = ui.confirmChosen
             T(if (paid.isEmpty()) "Build the edit?" else "Build the edit for ${RecreateText.money(total)}?", m.scale.title, m.roles.ink, maxLines = 2)
-            T(RecreateText.confirmMessage(paid.size, yours, cant.size), m.scale.body, m.roles.ink2)
+            T(RecreateText.confirmMessage(chosen.size, yours, cant.size), m.scale.body, m.roles.ink2)
+            // Pick which shots to make: all ticked; an unticked shot stays to generate. One stays ticked.
+            if (paid.size > 1) T("Untick a shot to make it later.", m.scale.caption, m.roles.ink2)
             if (paid.isNotEmpty() || cant.isNotEmpty()) Column {
-                paid.forEach { s -> ConfirmRow(ui, s, problem = null) }
+                paid.forEach { s ->
+                    val on = s in chosen
+                    ConfirmRow(ui, s, problem = null, ticked = if (paid.size > 1) on else null, onTick = { a.onConfirmTick(s) }, last = on && chosen.size == 1)
+                }
                 cant.forEach { s -> ConfirmRow(ui, s, problem = ui.estimateErrors[s]) }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
@@ -745,14 +754,19 @@ private fun BuildConfirm(ui: RecreateBuildUi, paid: List<String>, a: RecreateAct
 }
 
 @Composable
-private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?) {
+private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?, ticked: Boolean? = null, onTick: () -> Unit = {}, last: Boolean = false) {
     val m = muse
     val slot = ui.slots.firstOrNull { it.id == slotId }
     val e = ui.estimates[slotId]
-    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
+    val tick = if (ticked == null) Modifier else Modifier.toggleable(ticked, enabled = !last, role = Role.Checkbox) { onTick() }
+    Column(Modifier.fillMaxWidth().then(tick).semantics(mergeDescendants = true) { if (last) stateDescription = "Ticked, at least one shot is made" }) {
         LearnHairline()
         Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (ticked != null) Box(Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).background(if (ticked) m.roles.action else Color.Transparent)
+                    .border(1.5.dp, if (ticked) m.roles.action else m.roles.hairline, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+                    if (ticked) studio.muse.app.ui.theme.Ic("check", 16.dp, m.roles.onAction)
+                }
                 T(ui.shotName(slotId), m.scale.label, m.roles.ink, maxLines = 1)
                 T(slot?.let { listOfNotNull(it.shotSize, it.angle?.lowercase()).joinToString(" · ").ifEmpty { String.format(java.util.Locale.ROOT, "%.1f s", it.lengthSec) } } ?: "",
                     m.scale.caption, m.roles.ink2, Modifier.weight(1f), maxLines = 1)

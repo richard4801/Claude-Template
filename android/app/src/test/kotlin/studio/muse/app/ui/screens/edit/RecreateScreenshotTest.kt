@@ -34,7 +34,7 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export", "export_saved", "own_setting_tablet", "briefs_tablet", "briefs_confirm").map { arrayOf<Any>(t, it) }
+            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export", "export_saved", "own_setting_tablet", "confirm_picked", "briefs_tablet", "briefs_confirm").map { arrayOf<Any>(t, it) }
         }
     }
 
@@ -55,6 +55,8 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
             val base = model.ui.value
             when (state.removeSuffix("_tablet")) {
                 "confirm" -> { model.requestBuild(); model.ui.value }
+                // Pick which shots to make: one unticked, the total follows.
+                "confirm_picked" -> { model.requestBuild(); model.toggleConfirmShot(model.ui.value.confirmSlots!!.last()); model.ui.value }
                 // Use your own setting on the first shot to make: the location chips and the background's price.
                 "own_setting" -> {
                     api.createSuiteLocation(studio.muse.app.data.SuiteLocationCreate("Café counter", studio.muse.app.data.ImageRef.asset("g_tq")))
