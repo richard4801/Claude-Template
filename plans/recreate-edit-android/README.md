@@ -16,9 +16,11 @@ Per plans/recreate-edit.md (APPROVED), build phase 1: pick a reference and see i
 - On a tablet, the lower sections sit side by side in a centred column of 880 dp at most.
 
 **Data.**
-- `core/.../edit/Recipe.kt` holds the model and a lenient reader that follows the plan's field list.
-- WS1 owns the server `recipe` schema. When it lands, only `RecipeJson` and the screen's source change.
-- Until then the recipe is a stand-in (`FakeRecipes.cafeTrend()`), and the entry shows **in demo mode only**, so nobody sees a made-up recipe for their own video.
+- Recipes come from WS1's server (`plans/api.md` "Recreate this edit"): the video is uploaded with the editor's upload, `POST /v1/recreate/references {uploadId, name}` starts the analysis, and the app polls `GET …/{id}` (showing the server's step) until it is `ready` or `failed`.
+- `core/.../edit/Recipe.kt` reads `muse.recipe/1` into the view: ids become words ("cu" → "Close-up", "zoom_in" → "Zoom in"), unknown transitions are flagged, unread caption words say so, and a read pose shows "Pose read". It is tested on the server's own fixture (`core/src/test/resources/recipe-v1.json`, a copy of `server/api/test/fixtures/recipe-v1.json` at WS1's f5c06d7).
+- Claude's summary and the recipe's gaps ("Not recreated yet") show when present.
+- Demo mode runs the same flow on FakeMuseApi with `FakeRecipes.cafeTrendJson()`, in the same schema.
+- A server without these endpoints answers "This studio server can't read edits yet".
 
 **Next phases** (not built): cast and fill, assemble, the side-by-side compare, and the phone share target (waiting on the platform-rules check).
 
