@@ -177,3 +177,19 @@ The export test therefore checks everything up to the encoder:
 - The saved version's request, with `aiLabel`.
 
 On a phone, check scrubbing smoothness, the waveform and recording a voice-over by hand.
+
+## Images (`plans/android-edit/`, all four themes `a`–`d`)
+
+**Before/after pairs** (left is the base branch before WS8, right is now; Roborazzi, 390 dp):
+
+- `<theme>_suite_recent_before_after.png`: Suite → Recent takes. The play badge was at the bottom; it is now centred.
+- `<theme>_take_start_before_after.png`: the owner's case, a 15 s 9:16 take at 0.
+- `<theme>_take_split_before_after.png`: the same take split at 6 s, with the second clip selected. Now there are trim handles, the clip-sound lane and Split in the transport.
+
+**Now only:**
+
+- `<theme>_take_detached.png`: the second clip's sound detached to its own lane.
+- `<theme>_audio.png`: the Audio panel, with Sound and Detach audio.
+- `<theme>_export.png`: Export without the C2PA placeholder.
+- `<theme>_editor.png`: a multi-clip edit with captions, music, voice-over and hook. The waveforms are stand-ins in tests.
+- `<theme>_tablet.png`: tablet, 1280 × 800.

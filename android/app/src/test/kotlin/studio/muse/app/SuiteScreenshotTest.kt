@@ -3,8 +3,6 @@ package studio.muse.app
 import android.os.Looper
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performScrollTo
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.runBlocking
@@ -68,6 +66,8 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
 
     @Test fun capture() {
         if (width == 360) RuntimeEnvironment.setQualifiers("w360dp-h740dp-xhdpi")
+        // The recent takes row (the play badge on each finished take) sits below the fold: a tall window shows it.
+        if (screen == "hub_recent") RuntimeEnvironment.setQualifiers("w${width}dp-h1600dp-xhdpi")
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
         val member = screen == "hub_off_member"
@@ -121,8 +121,6 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
         compose.setContent { MuseApp(c, route) }
         repeat(8) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
-        // The recent takes row (play icon on each finished take) sits below the fold.
-        if (screen == "hub_recent") { compose.onNodeWithText("Recent takes", substring = true).performScrollTo(); idle() }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/suite_${theme}_${screen}_$width.png")
     }
 }
