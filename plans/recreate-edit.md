@@ -174,3 +174,7 @@ See plans/research/platform-download-rules.md for the guardrails.
   - The segment is sent per slot and trimmed to the slot's length.
   - Storage is unchanged: private, deleted after 30 days.
   - The price is confirmed per shot.
+- **Pose-guided generation, final (owner, 2026-11-08):** missing shots are filled with the existing H3 Edit swap (the Suite's "Swaps her into every frame of the whole clip"), driven by the reference's slot segment.
+  - Same pricing and approval as the Suite; runs on RunPod, with the Replicate swap as fallback.
+  - Per-slot option: keep the original background, or use the owner's setting.
+  - Wan Animate is dropped.
