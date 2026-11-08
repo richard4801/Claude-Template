@@ -84,6 +84,7 @@ extension AppStore {
         }
         // Prompt scripts (workstream 4): "Performer is speaking" (off: the server sends the clip without its sound, no lip-sync).
         req.speaking = speaking
+        req.engineModel = enginePick(.swap)?.model // the owner's swap model (WS6)
         submit(req, cost: cost, takes: takeCount)
     }
 
@@ -337,7 +338,7 @@ extension AppStore {
         perform { [self] in
             // No single-slot endpoint: clear the slot, then "fill missing angles" regenerates just that one ($0.02).
             _ = try await api.setSlot(modelId: m.id, slot: angle.rawValue, SetSlotRequest(image: nil, source: "generated"))
-            let r = try await api.fillAngles(modelId: m.id)
+            let r = try await fillAnglesWithPick(m.id)
             replaceModel(r.model)
             balance = try await api.balance()
             showToast("Retaking \(angle.label.lowercased()) from your other images · \(PhotoPricing.label(r.cost))")
@@ -493,7 +494,7 @@ extension AppStore {
         perform { [self] in
             do {
                 let id = try await ensureDraftModel()
-                let r = try await api.fillAngles(modelId: id)
+                let r = try await fillAnglesWithPick(id)
                 replaceModel(r.model)
                 syncDraftSlots(from: r.model)
                 balance = try await api.balance()

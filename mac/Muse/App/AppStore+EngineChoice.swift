@@ -76,3 +76,13 @@ extension AppStore {
         }
     }
 }
+
+extension AppStore {
+    /// "Fill missing angles" on the owner's model-photo model (purpose "character", WS13 `imageModel`); else as before.
+    func fillAnglesWithPick(_ modelId: String) async throws -> FillAnglesResponse {
+        if let pick = enginePick(.character)?.model, let http = api as? HTTPMuseAPI {
+            return try await http.fillAngles(modelId: modelId, imageModel: pick)
+        }
+        return try await api.fillAngles(modelId: modelId)
+    }
+}

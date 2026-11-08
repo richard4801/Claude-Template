@@ -373,6 +373,7 @@ struct CreateModelView: View {
                             Text("Optional. Makes the \(ScreenCopy.count(missing, "empty angle")) from the images you added.").scaled(t.scale.caption, t.roles.ink2)
                         }
                         Spacer()
+                        OwnerModelPill(purpose: .character, compact: true) // the owner's model-photo model (WS6)
                         RButton("Fill \(missing) · \(Pricing.money(store.sheetAnglesEstimate(missing)))") { store.fillMissing() }
                     }
                     .padding(.top, Space.s5)

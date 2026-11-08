@@ -255,6 +255,11 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func createModel(_ req: CreateModelRequest) async throws -> MuseModel { try await call("POST", "v1/models", req) }
     public func setSlot(modelId: String, slot: String, _ req: SetSlotRequest) async throws -> MuseModel { try await call("PUT", "v1/models/\(modelId)/slots/\(slot)", req) }
     public func fillAngles(modelId: String) async throws -> FillAnglesResponse { try await call("POST", "v1/models/\(modelId)/fill-angles", Empty()) }
+    /// Owner only (WS13): the sheet's missing angles on this image model.
+    public func fillAngles(modelId: String, imageModel: String) async throws -> FillAnglesResponse {
+        struct Body: Encodable { var imageModel: String }
+        return try await call("POST", "v1/models/\(modelId)/fill-angles", Body(imageModel: imageModel))
+    }
     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
     public func saveOutfit(outfitId: String) async throws -> Outfit { try await call("POST", "v1/outfits/\(outfitId)/save", Empty()) }
