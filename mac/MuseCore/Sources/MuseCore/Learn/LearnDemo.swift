@@ -135,10 +135,10 @@ struct LearnDemo {
         gaps = [
             LearnGap(key: "transition:unknown", kind: "transition", what: "Unknown transition", count: 4,
                      examples: [LearnGap.Example(note: "A spin blur between two outfits in Mirror outfit swap", recipeId: "rcp_mirror", at: ago(D))], lastAt: ago(D)),
-            LearnGap(key: "effect:lens-flare", kind: "effect", what: "Lens flare", count: 1,
-                     examples: [LearnGap.Example(note: "“Add a flare when she turns”, in Rooftop turn", recipeId: "ask_demo", at: ago(3 * D))], lastAt: ago(3 * D)),
             LearnGap(key: "effect:speed-ramp-drop", kind: "effect", what: "Speed ramp on a drop", count: 2,
                      examples: [LearnGap.Example(note: "Slows to a stop on the drop in Kitchen walk", recipeId: "rcp_kitchen", at: ago(4 * D))], lastAt: ago(4 * D)),
+            LearnGap(key: "effect:lens-flare", kind: "effect", what: "Lens flare", count: 1,
+                     examples: [LearnGap.Example(note: "“Add a flare when she turns”, in Rooftop turn", recipeId: "ask_demo", at: ago(3 * D))], lastAt: ago(3 * D)),
         ]
     }
 }
