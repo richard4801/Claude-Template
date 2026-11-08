@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { analyzeReference } from '../src/recreate/analyze.js';
-import { findGlitches } from '../src/recreate/signals.js';
+import { findGlitches, glitchJitter } from '../src/recreate/signals.js';
+import { renderProject } from '../src/editor/render.js';
 import { buildProject } from '../src/recreate/assemble.js';
 import * as M from '../src/editor/model.js';
 import { ENC, ff, hasFfmpeg } from './recreate-fixture.js';
@@ -25,6 +26,17 @@ describe('glitch bursts (unit)', () => {
     expect(findGlitches(frames(one, one.map(v => (v > 0.3 ? 0.3 : 0.005)), i => (i < 3 ? 3 : 20)))).toEqual([]);
     const long = Array.from({ length: 40 }, (_, i) => (i > 2 && i < 30 ? 0.7 : 0.01)); // 0.9 s of change: not a glitch
     expect(findGlitches(frames(long, long.map(v => (v > 0.3 ? 0.3 : 0.005)), i => (i < 15 ? 3 : 20)))).toEqual([]);
+  });
+});
+
+describe('glitch jitter around a cut (unit)', () => {
+  const g = (f: (k: number) => number) => Array.from({ length: 61 }, (_, i) => ({ dx: f(i - 30), dy: 0, scale: 1 }));
+  it('jitter only around the cut, in no steady direction, is a glitch; handheld shake all through, a whip one way, or calm are not', () => {
+    const glitch = g(k => (Math.abs(k) <= 4 && k ? [0.02, -0.06, 0.03, -0.02][Math.abs(k) - 1]! * (k > 0 ? 1 : -1) : 0));
+    expect(glitchJitter(glitch, 30)).toMatchObject({ frames: 9 });
+    expect(glitchJitter(g(k => 0.05 * Math.sin(k * 2.7)), 30)).toBeNull(); // shake everywhere
+    expect(glitchJitter(g(k => (Math.abs(k) <= 5 ? 0.04 : 0)), 30)).toBeNull(); // a whip: one way
+    expect(glitchJitter(g(() => 0), 30)).toBeNull();
   });
 });
 
@@ -56,6 +68,21 @@ describe.skipIf(!hasFfmpeg)('glitch transitions on video', () => {
     expect(r.slots.flatMap(s => s.peaks).every(p => p.t < 1.0 || p.t > 1.4)).toBe(true); // the flicker isn't action
     const out = buildProject(r, 'take_src', { s1: { id: 'tA', durationSec: 3, width: 720, height: 1280 }, s2: { id: 'tB', durationSec: 3, width: 720, height: 1280 } });
     expect((M.mainTrack(out.project).items[1] as M.VideoClip).transitionIn?.kind).toBe('glitch');
+  }, 60_000);
+
+  it('the glitch as the apps and our render draw it (a switch with sideways jitter and a colour split) reads back as a glitch', async () => {
+    const tA = path.join(dir, 'ta.mp4'), tB = path.join(dir, 'tb.mp4');
+    ff('-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=3', ...ENC, tA);
+    ff('-f', 'lavfi', '-i', 'mandelbrot=s=360x640:r=30', '-t', '3', ...ENC, tB);
+    const p = { version: 2, sourceTakeId: 'ta', canvas: { width: 360, height: 640, fps: 30, background: '#000000' },
+      assets: [{ id: 'a', kind: 'video', take: 'ta', durationSec: 3 }, { id: 'b', kind: 'video', take: 'tb', durationSec: 3 }],
+      tracks: [{ id: 'main', kind: 'main', items: [{ id: 'c1', asset: 'a', inSec: 0, outSec: 1.5, speed: 1 }, { id: 'c2', asset: 'b', inSec: 0, outSec: 1.5, speed: 1, transitionIn: { kind: 'glitch', durationSec: 0.4 } }] }] } as any;
+    const out = path.join(dir, 'rendered.mp4');
+    await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, { a: tA, b: tB }, out, {});
+    const { recipe: r } = await analyzeReference({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, out);
+    expect(r.slots).toHaveLength(2);
+    expect(r.transitions).toEqual([expect.objectContaining({ kind: 'glitch', from: 's1', to: 's2' })]);
+    expect(Math.abs(r.transitions[0]!.atSec - 1.3)).toBeLessThanOrEqual(0.07); // the switch, in the middle of the 0.4 s window
   }, 60_000);
 
   it('a glitch that comes back to the same shot is an effect inside it; a plain cut stays a cut', async () => {
