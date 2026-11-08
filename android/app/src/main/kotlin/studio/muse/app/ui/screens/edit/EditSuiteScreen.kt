@@ -126,7 +126,10 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
         onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
     else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }) { open = it }
-    else EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
+    // "Open playbook" in the editor's Claude sheet leaves the editor for the Playbook.
+    else androidx.compose.runtime.CompositionLocalProvider(LocalOpenPlaybook provides { open = null; learn = "playbook" }) {
+        EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
+    }
 }
 
 // ======================================================================= home

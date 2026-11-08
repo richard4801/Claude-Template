@@ -29,6 +29,14 @@ import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.components.Ink
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
+import studio.muse.app.ui.theme.roles
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 
 /*
  * Edit sessions (workstream 3, plans/claude-editing.md A and E): what the owner sees of Claude in the Edit suite — the
@@ -154,19 +162,71 @@ fun EditClaudeButton(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     )
 }
 
-/** Tablet / wide: workstream 2's chat as the right panel, for this edit's session (the chat's one panel call site). */
+/** Tablet / wide: workstream 2's chat as the right panel, for this edit's session, with the Playbook segment. */
 @Composable
 fun EditClaudePanel(ui: EditSuiteUi, modifier: Modifier = Modifier) {
     val s = ui.session ?: return
-    studio.muse.app.ui.screens.claude.ClaudeChatPanel(contextKind = "edit", contextId = s.id, title = ui.title.ifBlank { "Claude" }, width = 380.dp, modifier = modifier)
+    val m = muse
+    ChatAndPlaybook(s.id, ui.title.ifBlank { "Claude" }, modifier.width(380.dp).fillMaxHeight()
+        .drawBehind { drawLine(m.roles.hairline, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(0f, size.height), 1f) })
 }
 
-/** Phone: workstream 2's chat sheet for this edit's session (the chat's one sheet call site). */
+/** Phone: workstream 2's chat sheet for this edit's session, with the Playbook segment (plans/learning-editor-ui.md). */
 @Composable
 fun EditClaudeSheet(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val s = ui.session ?: return
-    studio.muse.app.ui.screens.claude.ClaudeChatSheet(open = s.chatOpen, onDismiss = { act(EditAction.ClaudePanel(false)) },
-        contextKind = "edit", contextId = s.id, title = ui.title.ifBlank { "Claude" })
+    if (!s.chatOpen) return
+    studio.muse.app.ui.screens.claude.ClaudeSheetFrame(onDismiss = { act(EditAction.ClaudePanel(false)) }) {
+        ChatAndPlaybook(s.id, ui.title.ifBlank { "Claude" }, Modifier.fillMaxSize())
+    }
+}
+
+/** "Open playbook" from inside the editor: the Edit screen leaves the editor for the Playbook (null: not offered). */
+val LocalOpenPlaybook = androidx.compose.runtime.staticCompositionLocalOf<(() -> Unit)?> { null }
+
+/**
+ * Chat | Playbook: Claude's chat for the edit, or a read-only list of the pinned rules Claude follows while it edits,
+ * with "Open playbook" (plans/learning-editor-ui.md "Inside the editor"). The chat stays composed under the segment.
+ */
+@Composable
+private fun ChatAndPlaybook(sessionId: String, title: String, modifier: Modifier) {
+    var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    val store = studio.muse.app.ui.screens.claude.rememberClaudeChatStore("edit", sessionId)
+    Column(modifier) {
+        studio.muse.app.ui.screens.edit.learn.LearnSegmented(listOf("Chat", "Playbook"), tab, Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) { tab = it }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (tab == 0) studio.muse.app.ui.screens.claude.ClaudeChat(store, title, Modifier.fillMaxSize())
+            else PinnedRules()
+        }
+    }
+}
+
+@Composable
+private fun PinnedRules() {
+    val m = muse
+    val c = studio.muse.app.ui.LocalContainer.current
+    val open = LocalOpenPlaybook.current
+    var rules by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<studio.muse.app.data.LearnRule>?>(null) }
+    var failed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        runCatching { c.repo.api.playbook() }.onSuccess { rules = it.filter { r -> r.pinned } }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; failed = true }
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        T("Claude follows these pinned rules while it edits.", m.scale.caption, m.roles.ink2)
+        when {
+            failed -> T("The playbook couldn't load.", m.scale.body, m.roles.ink2)
+            rules == null -> studio.muse.app.ui.screens.edit.learn.SkeletonRows(3)
+            rules!!.isEmpty() -> T("No pinned rules yet.", m.scale.body, m.roles.ink2)
+            else -> rules!!.forEach { r ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    T(r.text, m.scale.body, m.roles.ink)
+                    T(r.byline, m.scale.caption, m.roles.ink2, maxLines = 1)
+                }
+            }
+        }
+        if (open != null) studio.muse.app.ui.screens.edit.learn.LearnLink("Open playbook", onClick = open)
+    }
 }
 
 /** Kept for layout: a full-size scrim that closes what it covers. */
