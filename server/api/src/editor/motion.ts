@@ -13,25 +13,35 @@ export type MotionFrames = {
   energy: Float32Array;
   /** histDist[i]: how different frame i's brightness histogram is from frame i-1's (0–1, half the L1 distance). */
   histDist: Float32Array;
+  /** luma[i]: frame i's mean brightness (0–1). */
+  luma: Float32Array;
+  /** hists[i]: frame i's 32-bin brightness histogram (sums to 1), for comparing frames further apart. */
+  hists: Float32Array[];
 };
+/** Called for every proxy frame with the previous one (null for the first): extra measures in the same pass. */
+export type FrameHook = (cur: Uint8Array, prev: Uint8Array | null, i: number, size: { width: number; height: number }) => void;
 
 /**
  * Decodes `input` to a `width`-px grey proxy at `fps` and measures it frame by frame (streamed: memory stays at two
  * frames whatever the length). `maxSec` caps the analysis.
  */
-export function measureMotion(ffmpeg: string, ffprobe: string, input: string, o: { fps?: number; width?: number; maxSec?: number } = {}): Promise<MotionFrames> {
+export function measureMotion(ffmpeg: string, ffprobe: string, input: string, o: { fps?: number; width?: number; maxSec?: number; onFrame?: FrameHook } = {}): Promise<MotionFrames> {
   const width = o.width ?? PROXY_WIDTH, maxSec = o.maxSec ?? 600;
   return probeSize(ffprobe, input, width).then(({ height, fps: srcFps }) => new Promise((resolve, reject) => {
     const fps = o.fps ?? Math.min(PROXY_FPS_MAX, Math.round(srcFps) || PROXY_FPS_MAX);
     const frame = width * height;
     const p = spawn(ffmpeg, ['-v', 'error', '-i', input, '-t', String(maxSec), '-an',
       '-vf', `fps=${fps},scale=${width}:${height}:flags=area,format=gray`, '-f', 'rawvideo', 'pipe:1']);
-    const energy: number[] = [], hist: number[] = [];
+    const energy: number[] = [], hist: number[] = [], luma: number[] = [], hists: Float32Array[] = [];
     let prev: Uint8Array | null = null, prevH: Float64Array | null = null, buf: Buffer = Buffer.alloc(0), err = '';
     const take = (f: Uint8Array) => {
       const h = new Float64Array(32);
-      for (let i = 0; i < f.length; i++) h[f[i]! >> 3]! += 1;
+      let sum = 0;
+      for (let i = 0; i < f.length; i++) { h[f[i]! >> 3]! += 1; sum += f[i]!; }
       for (let i = 0; i < 32; i++) h[i]! /= f.length;
+      luma.push(sum / f.length / 255);
+      hists.push(Float32Array.from(h));
+      o.onFrame?.(f, prev, energy.length, { width, height });
       if (!prev) { energy.push(0); hist.push(0); }
       else {
         let s = 0;
@@ -53,7 +63,7 @@ export function measureMotion(ffmpeg: string, ffprobe: string, input: string, o:
     p.on('close', code => {
       clearTimeout(timer);
       if (code !== 0) return reject(new Error(`ffmpeg failed: ${err.trim().split('\n').slice(-1)[0]?.slice(0, 200) || `exit ${code}`}`));
-      resolve({ fps, width, height, energy: Float32Array.from(energy), histDist: Float32Array.from(hist) });
+      resolve({ fps, width, height, energy: Float32Array.from(energy), histDist: Float32Array.from(hist), luma: Float32Array.from(luma), hists });
     });
   }));
 }
@@ -90,11 +100,16 @@ export function findCuts(m: MotionFrames, o: { threshold?: number; minChange?: n
   // each pixel changes by only a few levels.
   const th = o.threshold ?? 0.35, minChange = o.minChange ?? 0.05;
   const cuts: (Cut & { flash?: boolean })[] = [];
-  for (let i = 1; i < m.histDist.length; i++) {
+  const n = m.histDist.length;
+  for (let i = 1; i < n; i++) {
     const d = m.histDist[i]!;
-    const around = Math.max(m.histDist[i - 1] ?? 0, m.histDist[i + 1] ?? 0);
-    // A spike over the threshold (a fade's gradual change never is); a flash is two equal spikes in a row, both kept.
-    if (d >= th && d >= around * 0.5 && m.energy[i]! >= minChange) cuts.push({ t: round3(i / m.fps), strength: round3(Math.min(1, d)) });
+    if (d < th || m.energy[i]! < minChange) continue;
+    // A spike at most 2 frames wide (a flash is in and out): a fade or a fast move changes the picture for many frames
+    // in a row, each step about as big as the next.
+    let a0 = i, a1 = i;
+    while (a0 > 1 && m.histDist[a0 - 1]! >= d * 0.5) a0--;
+    while (a1 < n - 1 && m.histDist[a1 + 1]! >= d * 0.5) a1++;
+    if (a1 - a0 + 1 <= 2) cuts.push({ t: round3(i / m.fps), strength: round3(Math.min(1, d)) });
   }
   for (let k = 0; k + 1 < cuts.length; k++) if ((cuts[k + 1]!.t - cuts[k]!.t) * m.fps <= 2.5) cuts[k]!.flash = true;
   return cuts;

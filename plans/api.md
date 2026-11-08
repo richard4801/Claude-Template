@@ -1133,6 +1133,70 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 - It never overwrites a row the user set. With two @ models in the prompt, nothing applies automatically.
 - `moves` in a default rig are added as `#` chips only if the prompt has no move yet.
 
+## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
+A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.
+
+**Privacy and retention:**
+- Each member sees their own references; the owner sees all of them. Another member's reference reads as `404`.
+- The contact sheet is stored under `rx/`, which is not served by `/uploads/*`. It is served only by the authenticated route below.
+- After **30 days**, unless `keep: true`, the reference video (its upload) and the contact sheet are deleted. The row turns `expired` and leaves the lists, and the recipe JSON stays, since it holds no pixels.
+- `DELETE` removes everything at once.
+- Pose keypoints are body points only; reference pixels are never stored in a recipe.
+
+**Endpoints**
+| | |
+|---|---|
+| `POST /v1/recreate/references {uploadId, name?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). |
+| `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
+| `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
+| `PATCH /v1/recreate/references/{id} {keep?, name?}` | `keep: true` stops the 30-day deletion (`expiresAt: null`). |
+| `DELETE /v1/recreate/references/{id}` | → `204`. The video, the contact sheet and the row are deleted. |
+| `GET /v1/recreate/references/{id}/contact-sheet` | → the PNG: each slot's keyframe, labelled "2 · 1.5–2.7 s". Claude writes the shot briefs from it. |
+
+`Reference`: `{id, name, state: "analyzing" | "ready" | "failed" | "expired", progress, phase, error?, durationSec, userId, keep, createdAt, expiresAt | null, recipe?}`.
+
+**Recipe** (`schema: "muse.recipe/1"`; every element has a `confidence` from 0 to 1; times are seconds in the reference):
+```
+Recipe {
+  schema, id, referenceId, createdAt, analyzer: {version, tookMs},
+  source: {durationSec, width, height, fps, aspect: "9:16", hasAudio},
+  sound: {bpm, beats[], strong[], confidence} | null,
+  pacing: {shots, avgShotSec, cutsPerMin, energy: {everySec, values[] /* 0–1 */}},
+  slots: Slot[], transitions: Transition[], text: TextItem[],
+  grade: {swatches: hex[5], contrast, saturation, warmth /* −1…1 */, look: {id, kind: "palette", label, distance} | null, grade: Grade, confidence},
+  contactSheet: {url, times[]} | null,
+  gaps: {what, atSec?, note}[]
+}
+Slot {
+  id: "s1", index, startSec, endSec, durationSec, keyframeSec, confidence,
+  brief: {shotSize?, angle?, subject?, action?, location?, notes?} | null,
+  rig: Rig | null,
+  camera: {motion: "static"|"pan"|"tilt"|"zoom_in"|"zoom_out"|"shake"|"mixed", shake, keys: {t, x, y, scale}[], confidence},
+  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence},
+  peaks: {t, strength}[],
+  pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
+}
+Transition { atSec, from, to, kind: "cut"|"flash"|"whip"|"zoom"|"fade"|"crossfade"|"glitch"|"unknown", durationSec, confidence }
+TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, animIn, animOut, confidence }
+```
+
+How each part is found:
+- **Shots and cuts:**
+  - A hard cut is a histogram jump plus a pixel jump at most 2 frames wide, so it is frame-accurate. A one-frame flash is `kind: "flash"`.
+  - A gradual transition is a run of frames that keep changing a little and add up to a different picture: `fade` through black or white, otherwise `crossfade`. The shot boundary is its middle.
+  - Whip and zoom transitions are told apart by fast camera motion or scale change across the cut.
+- **Camera:**
+  - Global motion is found by block matching on a 96 px proxy; scale is measured against the frame 6 back.
+  - `keys` are the content's cumulative shift (`x`, `y`: + = right/down) and `scale` (> 1 = zooming in) from the slot's start, about 4 a second. The editor's transform keyframes can replay them.
+  - Frames inside transitions are skipped.
+  - `rig.moves` is the Suite move that recreates the slot, for example `pan_right` when the content slides left.
+- **Speed:** from how much the picture changes per frame against the slot's median. This is a proxy for optical flow, so `confidence` is about 0.55.
+- **Beats:** `detectBeats` on the audio. **Action peaks:** `find_action_peaks`'s detector.
+- **Text:** caption-like regions (bands of sharp edges in near-white or near-black strokes), tracked at 6 fps for their box, size, colour and in/out times.
+  - `words` stays `null` until OCR is approved; Claude reads the words from the contact sheet. This is logged in `gaps`.
+- **Grade:** k-means of the keyframes gives 5 swatches. The Suite's `swatchGrade` turns them into the look pack's `Grade` (the palette→LUT path), and `look` is the nearest existing palette.
+- **Pose:** `status: "pending"` until the pose engine is approved.
+
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.
 
