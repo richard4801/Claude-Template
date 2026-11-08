@@ -9,10 +9,8 @@ import SwiftUI
 struct ClaudeBadge: View {
     @Environment(\.theme) private var t
     var body: some View {
-        HStack(spacing: 3) {
-            Ph("sparkle", 8.5).accessibilityHidden(true)
-            Text("Claude").font(t.scale.micro.font).monospacedDigit()
-        }
+        // No sparkle (plans/design-direction.md: AI has no icon); the word says who made the change.
+        Text("Claude").font(t.scale.micro.font)
         .foregroundStyle(t.accentInk)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
@@ -84,7 +82,6 @@ struct EditSuiteClaudeToast: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Ph("sparkle", 13).foregroundStyle(t.accent).accessibilityHidden(true)
             Text(text).font(t.body(13)).foregroundStyle(t.ink).lineLimit(2)
             SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 22, action: dismiss)
         }
@@ -150,10 +147,12 @@ struct EditSuiteClaudeAsk: View {
     }
 }
 
-/// The right panel the top bar's "Claude" toggle shows (owner only): the chat, and the session's history with undo.
+/// The right panel the top bar's "Claude" toggle shows (owner only): the chat, the session's history with undo, and the
+/// pinned rules of the playbook Claude follows while it edits (read-only, with "Open playbook").
 struct EditSuiteClaudePanel: View {
     @Environment(\.theme) private var t
     var session: EditSuiteSession
+    var openPlaybook: () -> Void = {}
     var close: () -> Void
     @State private var tab = 0
 
@@ -167,7 +166,7 @@ struct EditSuiteClaudePanel: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
-            EditSeg(options: [(0, "Chat"), (1, "History")], selection: tab) { tab = $0 }
+            EditSeg(options: [(0, "Chat"), (1, "History"), (2, "Playbook")], selection: tab) { tab = $0 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
             SuiteRule()
@@ -179,11 +178,14 @@ struct EditSuiteClaudePanel: View {
                 } else {
                     noSession
                 }
-            } else {
+            } else if tab == 1 {
                 ScrollView { EditSuiteHistoryList(session: session) }
+            } else {
+                EditSuitePlaybookTab(openPlaybook: openPlaybook)
             }
         }
         .background(t.chrome)
+        .onAppear { if let x = SnapshotRunner.state.claudeTab { tab = x } } // review mode: the Playbook tab's shot
     }
 
     /// No edit session yet (still opening, or it couldn't be shared): no chat to attach to.
@@ -198,5 +200,61 @@ struct EditSuiteClaudePanel: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The Claude panel's Playbook tab (plans/learning-editor-ui.md): the pinned rules Claude follows while it edits, compact
+/// and read-only under small area labels, with "Open playbook" at the bottom.
+struct EditSuitePlaybookTab: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var openPlaybook: () -> Void
+
+    var body: some View {
+        let l = store.learn
+        let pinned = l.pinned
+        VStack(spacing: 0) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Claude reads these before every edit.").scaled(t.scale.caption, t.roles.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if l.rules == nil {
+                        VStack(alignment: .leading, spacing: Space.s3) {
+                            ForEach(0..<3, id: \.self) { i in SkeletonBlock(width: CGFloat([220, 180, 200][i]), height: 10) }
+                        }
+                        .padding(.top, Space.s2)
+                    } else if pinned.isEmpty {
+                        Text("No pinned rules yet. Pin the rules Claude should always follow in the playbook.")
+                            .scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, Space.s2)
+                    } else {
+                        ForEach(LearnFilter.grouped(pinned)) { g in
+                            Text(LearnText.area(g.area)).scaled(t.scale.micro, t.roles.ink2)
+                                .padding(.top, Space.s2)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(g.rules) { r in
+                                Text(r.text).scaled(t.scale.caption, t.roles.ink).lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .help(r.text)
+                            }
+                        }
+                    }
+                }
+                .padding(Space.s3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            SuiteRule()
+            HStack {
+                Button(action: openPlaybook) {
+                    HStack(spacing: Space.s2) { Ph("book-open-text", 14); Text("Open playbook").fixedSize().fitProbe("Open playbook") }
+                }
+                .buttonStyle(RButtonStyle(kind: .plain, small: true))
+                .accessibilityLabel("Open playbook")
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Space.s2)
+            .frame(height: 48)
+        }
+        .task { await store.loadPinnedRules() }
     }
 }

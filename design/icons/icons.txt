@@ -263,3 +263,7 @@ lock
 lock-open
 # Recreate this edit (plans/recreate)
 hammer
+# Playbook and Recipes (plans/learning-editor-ui.md)
+book-open-text
+push-pin
+pencil-simple
