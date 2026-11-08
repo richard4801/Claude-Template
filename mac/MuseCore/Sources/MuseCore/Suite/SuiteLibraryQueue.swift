@@ -200,7 +200,7 @@ struct CollectionBody: Encodable {
 }
 
 struct TakeIdsBody: Encodable { var takeIds: [String] }
-struct ConfirmBody: Encodable { var confirm = true }
+struct QueueRunConfirmBody: Encodable { var confirm = true }
 
 extension HTTPMuseAPI: LibraryQueueAPI {
     private func json<B: Encodable>(_ b: B) throws -> Data { try JSONEncoder().encode(b) }
@@ -245,7 +245,7 @@ extension HTTPMuseAPI: LibraryQueueAPI {
         try await suiteCall("POST", "v1/suite/queue/\(Self.pathKey(id))/estimate", body: json([String: String]()))
     }
     public func runQueued(_ id: String) async throws -> QueueRunResult {
-        var r: QueueRunResult = try await suiteCall("POST", "v1/suite/queue/\(Self.pathKey(id))/run", body: json(ConfirmBody()))
+        var r: QueueRunResult = try await suiteCall("POST", "v1/suite/queue/\(Self.pathKey(id))/run", body: json(QueueRunConfirmBody()))
         r.job = absolutize(r.job)
         return r
     }
