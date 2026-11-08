@@ -268,7 +268,8 @@ private fun TextSection(r: Recipe) = Section("Text") {
     r.texts.forEach { t ->
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                T("“${t.text}”", m.scale.label, m.t.ink, Modifier.weight(1f), maxLines = 2)
+                if (t.text == studio.muse.core.edit.RecipeJson.UNREAD_WORDS) T(t.text, m.scale.label, m.t.muted, Modifier.weight(1f), maxLines = 1)
+                else T("“${t.text}”", m.scale.label, m.t.ink, Modifier.weight(1f), maxLines = 2)
                 Confidence(t.confidence)
             }
             T(listOfNotNull("${suiteTime(t.startSec)} – ${suiteTime(t.endSec)}", t.position, t.animation).joinToString("  ·  "), m.scale.caption.tabular(), m.t.muted, maxLines = 1)

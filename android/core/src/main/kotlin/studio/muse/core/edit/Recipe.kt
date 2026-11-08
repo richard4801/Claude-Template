@@ -122,6 +122,8 @@ object RecipeConfidence {
 
 /** WS1's `muse.recipe/1` and its `Reference`, read into [Recipe] (see the file comment). */
 object RecipeJson {
+    /** A text item whose words weren't read (they stay null until OCR is approved). */
+    const val UNREAD_WORDS = "Text, words not read yet"
     private val json = Json { ignoreUnknownKeys = true }
 
     /** A `GET /v1/recreate/references/{id}` response (or a bare recipe, which reads as a ready reference). */
@@ -195,7 +197,7 @@ object RecipeJson {
         return RecipeText(
             startSec = num("startSec") ?: return null, endSec = num("endSec") ?: return null,
             // Words stay null until OCR is approved (Claude reads them from the contact sheet).
-            text = str("words") ?: "Text (words not read yet)",
+            text = str("words") ?: UNREAD_WORDS,
             position = cy?.let { if (it < .34) "Top" else if (it < .62) "Middle" else "Lower third" },
             style = listOfNotNull(font, str("color")?.let(::colorName)).joinToString(", ").ifBlank { null },
             animation = anim,
