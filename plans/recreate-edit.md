@@ -112,3 +112,8 @@ Assignments:
   - Android: the Edit layout port, then the Recipe view;
   - the phone share target (step 5, after the platform-rules check).
 - **Coordinator:** verify each platform's download-permission mechanism and terms before step 5.
+
+## Mac Recreate screens APPROVED by the owner (2026-11-08): "Approve with your two notes"
+Mocks: plans/recreate/ on claude/muse-mcp-bridge @4c2f3f9 (Recipe and Compare). The notes:
+1. The Look swatches are never garish: they show the grade's real colours, softened for display.
+2. The total cost ("N from your takes, M to generate · $X in all") is always visible next to "Build the edit", which still confirms before spending.
