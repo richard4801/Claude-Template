@@ -11,6 +11,7 @@ import { findText, type TextItem } from './text.js';
 import { readWords } from './ocr.js';
 import { textMotions } from './textMotion.js';
 import { readPoses, type PoseRun } from './pose.js';
+import { readPoseTracks, type PoseTrack, type TrackRun } from './poseTrack.js';
 
 export const RECIPE_SCHEMA = 'muse.recipe/1';
 export const ANALYZER_VERSION = '1.1.0'; // 1.1: words (OCR) and poses
@@ -24,12 +25,16 @@ export type Slot = {
   camera: CameraMotion; speed: Speed; peaks: { t: number; strength: number }[];
   /** Body keypoints only (never pixels), 0–1 in the frame: MoveNet's 17 points at the keyframe. "none": no person found;
    * "pending": not read (memory was tight, past the first 20 slots, or the pose engine is off). */
-  pose: { status: 'pending' | 'done' | 'none'; frameSec?: number; keypoints?: { name: string; x: number; y: number; score: number }[] };
+  pose: { status: 'pending' | 'done' | 'none'; frameSec?: number; keypoints?: { name: string; x: number; y: number; score: number }[];
+    /** Per-frame poses of the whole shot (stored next to the reference, not in the recipe): how many frames, at what rate. */
+    track?: { frames: number; fps: number } };
 };
 export type RecipeTransition = Transition & { from: string; to: string };
 export type Gap = { key: string; kind: 'transition' | 'effect' | 'text' | 'font' | 'motion' | 'other'; what: string; atSec?: number; note: string };
 export type Recipe = {
-  schema: typeof RECIPE_SCHEMA; analyzer: { version: string; tookMs: number; pose?: { frames: number; ms: number; peakRssMb: number } | { skipped: string; peakRssMb?: number } };
+  schema: typeof RECIPE_SCHEMA; analyzer: { version: string; tookMs: number; pose?: { frames: number; ms: number; peakRssMb: number } | { skipped: string; peakRssMb?: number };
+    /** The per-frame pose read (every frame of each shot, for matching takes by movement). */
+    poseTracks?: { frames: number; ms: number; peakRssMb: number } | { skipped: string } };
   /** Where it came from: a reference video (this analysis) or one of the studio's own edits (workstream 3's converter). */
   origin: 'reference' | 'edit'; referenceId?: string; takeId?: string; versionId?: string;
   /** Claude's one-line read of the contact sheet, and free tags ("street", "dance", "outfit-transition"). */
@@ -69,7 +74,7 @@ export type AnalyzeHooks = { progress?: (f: number, phase: string) => void | Pro
  * The recipe of the video at `input` (a local path or URL). Returns the recipe plus the contact sheet PNG for the
  * caller to store (its URL goes into `recipe.contactSheet`).
  */
-export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; tesseract?: string; pose?: boolean | { model?: string; minFreeMb?: number } }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null }> {
+export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; tesseract?: string; pose?: boolean | { model?: string; minFreeMb?: number; trackFrames?: number } }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null; poseTracks?: (PoseTrack | null)[] }> {
   const t0 = Date.now(), maxSec = o.maxSec ?? 61;
   const info = await probe(cfg.ffprobe, input);
   if (!info.width || !info.height) throw new Error('no video stream');
@@ -115,6 +120,15 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
     await o.progress?.(0.85, 'Reading the poses');
     poseRun = await readPoses({ ffmpeg: cfg.ffmpeg, ...(typeof cfg.pose === 'object' ? cfg.pose : {}) }, input, keyTimes, info).catch(e => ({ skipped: 'failed' as const, detail: String(e?.message ?? e) }));
   }
+  // Every frame of each shot, for matching takes by movement (only when the keyframe poses could be read).
+  let trackRun: TrackRun | null = null;
+  if (cfg.pose && poseRun && 'poses' in poseRun) {
+    await o.progress?.(0.9, 'Following the movement');
+    const pc = typeof cfg.pose === 'object' ? cfg.pose : {};
+    trackRun = await readPoseTracks({ ffmpeg: cfg.ffmpeg, ...pc }, input, shots.map(s => ({ startSec: s.startSec, endSec: s.endSec })),
+      { width: info.width, height: info.height, fps: info.fps || m.fps }, { maxFrames: pc.trackFrames }).catch(e => ({ skipped: 'failed' as const, detail: String(e?.message ?? e) }));
+  }
+  const tracks = trackRun && 'tracks' in trackRun ? trackRun.tracks : null;
 
   // Shots → slots; boundaries → transitions.
   const slots: Slot[] = shots.map((s, i) => {
@@ -124,7 +138,8 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
     return {
       id: `s${i + 1}`, index: i, startSec: s.startSec, endSec: s.endSec, durationSec: r3(s.endSec - s.startSec), keyframeSec: keyTimes[i]!,
       confidence: s.endSec - s.startSec < 0.15 ? 0.5 : 0.9, brief: null, rig: { moves: moveFor(camera) }, camera, speed: { ...sp, curve: thin(sp.curve, MAX_CURVE_POINTS) }, peaks: peaksIn(peaks, s),
-      pose: (poseRun && 'poses' in poseRun ? poseRun.poses[i] : undefined) ?? { status: 'pending' },
+      pose: { ...((poseRun && 'poses' in poseRun ? poseRun.poses[i] : undefined) ?? { status: 'pending' as const }),
+        ...(tracks?.[i] ? { track: { frames: tracks[i]!.frames.length, fps: tracks[i]!.fps } } : {}) },
     };
   });
   const transitions: RecipeTransition[] = [];
@@ -162,14 +177,15 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   await o.progress?.(0.95, 'Writing the recipe');
   const recipe: Recipe = {
     schema: RECIPE_SCHEMA, analyzer: { version: ANALYZER_VERSION, tookMs: Date.now() - t0,
-      ...(poseRun ? { pose: 'poses' in poseRun ? { frames: poseRun.poses.length, ms: poseRun.ms, peakRssMb: poseRun.peakRssMb } : { skipped: poseRun.skipped, ...(poseRun.peakRssMb ? { peakRssMb: poseRun.peakRssMb } : {}) } } : {}) }, origin: 'reference',
+      ...(poseRun ? { pose: 'poses' in poseRun ? { frames: poseRun.poses.length, ms: poseRun.ms, peakRssMb: poseRun.peakRssMb } : { skipped: poseRun.skipped, ...(poseRun.peakRssMb ? { peakRssMb: poseRun.peakRssMb } : {}) } } : {}),
+      ...(trackRun ? { poseTracks: 'tracks' in trackRun ? { frames: trackRun.frames, ms: trackRun.ms, peakRssMb: trackRun.peakRssMb } : { skipped: trackRun.skipped } } : {}) }, origin: 'reference',
     source: { durationSec, width: info.width, height: info.height, fps: r3(info.fps || m.fps), aspect: aspectName(info.width, info.height), hasAudio: !!info.audioCodec },
     sound,
     pacing: { shots: slots.length, avgShotSec: r3(durationSec / Math.max(1, slots.length)), cutsPerMin: r3((slots.length - 1) / Math.max(durationSec, 1) * 60), energy: energyCurve(m) },
     slots, transitions, text, grade, gaps,
     contactSheet: png ? { url: '', times: keyTimes, tiles: sheetTiles(slots.length, kw, kh).map((t, i) => ({ slotId: slots[i]!.id, ...t })) } : null,
   };
-  return { recipe, contactSheetPng: png };
+  return { recipe, contactSheetPng: png, ...(tracks ? { poseTracks: tracks } : {}) };
 }
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
