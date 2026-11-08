@@ -353,7 +353,11 @@ extension AppStore {
     /// What the chosen quality takes (start / end frames, references, audio); the owner's pinned engine's when one is pinned.
     var composerInputs: SuiteInputs { suite.composer.inputs(suite.catalog) }
 
-    var shotRequest: ShotRequest { suite.composer.request(suite.composerSlots.slots, composerInputs, locations: suite.locations) }
+    var shotRequest: ShotRequest {
+        let r = suite.composer.request(suite.composerSlots.slots, composerInputs, locations: suite.locations)
+        // Claude's reference images (Claude in the Suite) go as reference images, as on the server's own request.
+        return SuiteAssistDraft.request(r, with: suite.claude.references)
+    }
 
     /// "Coming soon" until the server lists the tool in the catalog's modes.
     func isComingSoon(_ tool: ComposerTool) -> Bool { tool.isComingSoon(in: suite.catalog) }

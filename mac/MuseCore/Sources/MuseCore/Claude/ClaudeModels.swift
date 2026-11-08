@@ -136,9 +136,9 @@ public struct ClaudeMessage: Codable, Hashable, Sendable, Identifiable {
     /// A frame Claude grabbed.
     public var image: ClaudeImageRef?
     public var createdAt: Double
-    /// Images the owner attached (upload ids). Read leniently: `attachments: [id]`, `uploadIds` or one `uploadId`; the final
-    /// shape comes with workstream 1's suite contract.
-    public var attachments: [String]? = nil
+    /// Images the owner attached: `attachments: [{id, uploadId, mimeType, bytes, width, height, url}]` (the url is a signed
+    /// link that lasts an hour: read the thread again for fresh ones). Read leniently (bare upload ids too).
+    public var attachments: [ClaudeAttachment]? = nil
 
     public init(id: String, threadId: String, role: String, source: String, text: String = "", turnId: String? = nil,
                 tool: ClaudeToolRef? = nil, image: ClaudeImageRef? = nil, createdAt: Double) {
@@ -166,12 +166,21 @@ public struct ClaudeMessage: Codable, Hashable, Sendable, Identifiable {
         tool = try? c.decodeIfPresent(ClaudeToolRef.self, forKey: .tool)
         image = try? c.decodeIfPresent(ClaudeImageRef.self, forKey: .image)
         createdAt = (try? c.decodeIfPresent(Double.self, forKey: .createdAt)) ?? 0
-        // Split up: one chained `??` expression here was too slow for the type checker.
-        var ids: [String]? = nil
-        if let a = try? c.decodeIfPresent([String].self, forKey: .attachments) { ids = a }
-        if ids == nil, let a = try? c.decodeIfPresent([String].self, forKey: .uploadIds) { ids = a }
-        if ids == nil, let one = try? c.decodeIfPresent(String.self, forKey: .uploadId) { ids = [one] }
-        attachments = (ids?.isEmpty ?? true) ? nil : ids
+        attachments = Self.attachments(c)
+    }
+
+    /// `attachments: [{…} | "id"]`, else `uploadIds: [id]`, else one `uploadId`. nil when there are none.
+    private static func attachments(_ c: KeyedDecodingContainer<K>) -> [ClaudeAttachment]? {
+        var list: [ClaudeAttachment] = []
+        if let wrapped = try? c.decodeIfPresent([Lenient<ClaudeAttachment>].self, forKey: .attachments) {
+            list = wrapped.compactMap { $0.value }
+        } else if let ids = try? c.decodeIfPresent([String].self, forKey: .uploadIds) {
+            list = ids.map { ClaudeAttachment(uploadId: $0) }
+        } else if let id = try? c.decodeIfPresent(String.self, forKey: .uploadId) {
+            list = [ClaudeAttachment(uploadId: id)]
+        }
+        let kept = list.filter { !$0.uploadId.isEmpty || $0.url != nil }
+        return kept.isEmpty ? nil : kept
     }
 }
 
@@ -187,9 +196,12 @@ public struct ClaudeTurn: Codable, Hashable, Sendable, Identifiable {
     public var createdAt: Double
     public var claimedAt: Double?
     public var finishedAt: Double?
+    /// Images sent with the turn (the claim response carries fresh links).
+    public var attachments: [ClaudeAttachment]?
 
     public init(id: String, threadId: String, text: String, from: String = "phone", state: String = "queued", error: String? = nil,
-                createdAt: Double, claimedAt: Double? = nil, finishedAt: Double? = nil) {
+                createdAt: Double, claimedAt: Double? = nil, finishedAt: Double? = nil, attachments: [ClaudeAttachment]? = nil) {
+        self.attachments = attachments
         self.id = id
         self.threadId = threadId
         self.text = text
@@ -202,6 +214,24 @@ public struct ClaudeTurn: Codable, Hashable, Sendable, Identifiable {
     }
 
     public var isOpen: Bool { state == "queued" || state == "running" }
+
+    private enum K: String, CodingKey { case id, threadId, text, from, state, error, createdAt, claimedAt, finishedAt, attachments }
+
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decode(String.self, forKey: .id)
+        threadId = try c.decode(String.self, forKey: .threadId)
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        from = (try? c.decodeIfPresent(String.self, forKey: .from)) ?? "phone"
+        state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? "queued"
+        error = (try? c.decodeIfPresent(String.self, forKey: .error)) ?? nil
+        createdAt = (try? c.decodeIfPresent(Double.self, forKey: .createdAt)) ?? 0
+        claimedAt = (try? c.decodeIfPresent(Double.self, forKey: .claimedAt)) ?? nil
+        finishedAt = (try? c.decodeIfPresent(Double.self, forKey: .finishedAt)) ?? nil
+        var a: [ClaudeAttachment] = []
+        if let wrapped = try? c.decodeIfPresent([Lenient<ClaudeAttachment>].self, forKey: .attachments) { a = wrapped.compactMap { $0.value } }
+        attachments = a.isEmpty ? nil : a
+    }
 }
 
 public enum ClaudeToolStatus: String, Codable, Hashable, Sendable {
@@ -210,7 +240,8 @@ public enum ClaudeToolStatus: String, Codable, Hashable, Sendable {
 
 /// What the Mac mirrors (POST …/events) and what the live `claude` `{op: "event"}` carries.
 public enum ClaudeEvent: Codable, Hashable, Sendable {
-    case user(text: String)
+    /// `attachments`: the upload ids of images typed with it on this Mac (`[{uploadId}]` on the wire).
+    case user(text: String, attachments: [String] = [])
     case text(delta: String)
     case assistant(text: String)
     case tool(id: String, name: String, status: ClaudeToolStatus, summary: String?, input: JSONValue?)
@@ -220,14 +251,19 @@ public enum ClaudeEvent: Codable, Hashable, Sendable {
 
     public static let maxImageBytes = 2 * 1024 * 1024
 
-    private enum K: String, CodingKey { case type, text, delta, id, name, status, summary, input, data, mimeType, ok, error, model }
+    private enum K: String, CodingKey { case type, text, delta, id, name, status, summary, input, data, mimeType, ok, error, model, attachments }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         let type = try c.decode(String.self, forKey: .type)
         func s(_ k: K) -> String? { (try? c.decodeIfPresent(String.self, forKey: k)) ?? nil }
         switch type {
-        case "user": self = .user(text: s(.text) ?? "")
+        case "user":
+            var ids: [String] = []
+            if let wrapped = try? c.decodeIfPresent([Lenient<ClaudeAttachment>].self, forKey: .attachments) {
+                ids = wrapped.compactMap { $0.value?.uploadId }.filter { !$0.isEmpty }
+            }
+            self = .user(text: s(.text) ?? "", attachments: ids)
         case "text": self = .text(delta: s(.delta) ?? "")
         case "assistant": self = .assistant(text: s(.text) ?? "")
         case "tool":
@@ -242,9 +278,10 @@ public enum ClaudeEvent: Codable, Hashable, Sendable {
     public func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
         switch self {
-        case .user(let text):
+        case .user(let text, let attachments):
             try c.encode("user", forKey: .type)
             try c.encode(text, forKey: .text)
+            if !attachments.isEmpty { try c.encode(attachments.map { ClaudeAttachmentRef(uploadId: $0) }, forKey: .attachments) }
         case .text(let delta):
             try c.encode("text", forKey: .type)
             try c.encode(delta, forKey: .delta)
@@ -424,6 +461,60 @@ enum ClaudeTime {
 }
 
 /// Decodes an element or nil, so one malformed entry never drops a whole list.
+/// An image on a Claude message or turn. Every field but the upload id is optional; a bare string reads as an upload id.
+public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var uploadId: String
+    public var mimeType: String?
+    public var bytes: Int?
+    public var width: Int?
+    public var height: Int?
+    /// A private signed link (about an hour), or a normal /uploads address.
+    public var url: String?
+
+    public init(id: String? = nil, uploadId: String, mimeType: String? = nil, bytes: Int? = nil, width: Int? = nil, height: Int? = nil, url: String? = nil) {
+        self.id = id ?? uploadId
+        self.uploadId = uploadId
+        self.mimeType = mimeType
+        self.bytes = bytes
+        self.width = width
+        self.height = height
+        self.url = url
+    }
+
+    private enum K: String, CodingKey { case id, uploadId, mimeType, bytes, width, height, url }
+
+    public init(from d: Decoder) throws {
+        if let s = try? d.singleValueContainer().decode(String.self) {
+            self.init(uploadId: s)
+            return
+        }
+        let c = try d.container(keyedBy: K.self)
+        func s(_ k: K) -> String? { (try? c.decodeIfPresent(String.self, forKey: k)) ?? nil }
+        func n(_ k: K) -> Int? { ((try? c.decodeIfPresent(Double.self, forKey: k)) ?? nil).map { Int($0) } }
+        var up = ""
+        if let u = s(.uploadId) { up = u } else if let i = s(.id) { up = i }
+        self.init(id: s(.id), uploadId: up, mimeType: s(.mimeType), bytes: n(.bytes), width: n(.width), height: n(.height), url: s(.url))
+    }
+
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: K.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(uploadId, forKey: .uploadId)
+        try c.encodeIfPresent(mimeType, forKey: .mimeType)
+        try c.encodeIfPresent(bytes, forKey: .bytes)
+        try c.encodeIfPresent(width, forKey: .width)
+        try c.encodeIfPresent(height, forKey: .height)
+        try c.encodeIfPresent(url, forKey: .url)
+    }
+}
+
+/// `{uploadId}`: an image sent with a message.
+public struct ClaudeAttachmentRef: Codable, Hashable, Sendable {
+    public var uploadId: String
+    public init(uploadId: String) { self.uploadId = uploadId }
+}
+
 struct Lenient<T: Decodable>: Decodable {
     var value: T?
     init(from d: Decoder) throws { value = try? T(from: d) }

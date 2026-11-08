@@ -279,7 +279,7 @@ final class SuiteAssistTests: XCTestCase {
 
     // MARK: Attached images
 
-    func testAttachmentsTakeUpToFourImagesOfTheAllowedTypes() {
+    func testAttachmentsTakeUpToFourImagesOfTheAllowedTypesAndSize() {
         XCTAssertEqual(SuiteClaudeAttachments.mime(name: "a.JPG"), "image/jpeg")
         XCTAssertEqual(SuiteClaudeAttachments.mime(name: "a.heic"), "image/heic")
         XCTAssertEqual(SuiteClaudeAttachments.mime(name: "a.webp"), "image/webp")
@@ -288,13 +288,16 @@ final class SuiteAssistTests: XCTestCase {
         XCTAssertNil(SuiteClaudeAttachments.mime(name: "a.png", mime: "application/pdf"), "a known type wins over the name")
         XCTAssertNil(SuiteClaudeAttachments.mime(name: "clip.mov"))
 
-        let ok = SuiteClaudeAttachments.check(existing: 0, picked: [("a.png", nil), ("b.jpeg", nil)])
+        let ok = SuiteClaudeAttachments.check(existing: 0, picked: [("a.png", nil, 1000), ("b.jpeg", nil, nil)])
         XCTAssertEqual(ok.take, [0, 1])
         XCTAssertNil(ok.refusal)
-        let mixed = SuiteClaudeAttachments.check(existing: 1, picked: [("a.png", nil), ("doc.pdf", nil), ("b.heic", nil), ("c.webp", nil), ("d.png", nil)])
+        let mixed = SuiteClaudeAttachments.check(existing: 1, picked: [("a.png", nil, 10), ("doc.pdf", nil, 10), ("b.heic", nil, 10), ("c.webp", nil, 10), ("d.png", nil, 10)])
         XCTAssertEqual(mixed.take, [0, 2, 3], "the wrong type is left out, and only three more fit")
-        XCTAssertEqual(mixed.refusal, "Up to 4 images (JPEG, PNG, WebP or HEIC)")
-        XCTAssertEqual(SuiteClaudeAttachments.check(existing: 4, picked: [("a.png", nil)]).take, [])
+        XCTAssertEqual(mixed.refusal, "Up to 4 images (JPEG, PNG, WebP or HEIC), 10 MB each")
+        let big = SuiteClaudeAttachments.check(existing: 0, picked: [("a.png", nil, 10 * 1024 * 1024 + 1), ("b.png", nil, 0)])
+        XCTAssertEqual(big.take, [], "over 10 MB, or empty, is refused")
+        XCTAssertNotNil(big.refusal)
+        XCTAssertEqual(SuiteClaudeAttachments.check(existing: 4, picked: [("a.png", nil, 10)]).take, [])
     }
 
     func testASentMessageNamesItsImagesAndTheThreadReadsThemBack() {
@@ -307,37 +310,83 @@ final class SuiteAssistTests: XCTestCase {
         XCTAssertNil(SuiteClaudeAttachments.contextPart([]))
     }
 
-    func testAUserMessageReadsItsAttachmentsLeniently() throws {
-        let a = try JSONDecoder().decode(ClaudeMessage.self, from: Data(#"{"id":"m1","role":"user","text":"x","attachments":["up_1","up_2"]}"#.utf8))
-        XCTAssertEqual(a.attachments, ["up_1", "up_2"])
+    func testMessagesTurnsAndUserEventsCarryAttachmentsLeniently() throws {
+        let full = #"{"id":"m1","role":"user","text":"","attachments":[{"id":"ca_1","uploadId":"up_1","mimeType":"image/png","bytes":2048,"width":640,"height":800,"url":"https://s3/x.png?sig=1"},"up_2",{"broken":true},7]}"#
+        let a = try JSONDecoder().decode(ClaudeMessage.self, from: Data(full.utf8))
+        XCTAssertEqual(a.attachments?.map(\.uploadId), ["up_1", "up_2"])
+        XCTAssertEqual(a.attachments?.first?.width, 640)
+        XCTAssertEqual(a.attachments?.first?.url, "https://s3/x.png?sig=1")
+        var t = ClaudeTranscript()
+        t.load([a])
+        XCTAssertEqual(t.attachmentURLs("m1"), ["https://s3/x.png?sig=1"])
         let b = try JSONDecoder().decode(ClaudeMessage.self, from: Data(#"{"id":"m2","role":"user","text":"x","uploadId":"up_3"}"#.utf8))
-        XCTAssertEqual(b.attachments, ["up_3"])
+        XCTAssertEqual(b.attachments?.map(\.uploadId), ["up_3"])
         let c = try JSONDecoder().decode(ClaudeMessage.self, from: Data(#"{"id":"m3","role":"user","text":"x","attachments":7}"#.utf8))
         XCTAssertNil(c.attachments)
+
+        let turn = try JSONDecoder().decode(ClaudeTurn.self, from: Data(#"{"id":"tu_1","threadId":"ct_1","text":"Use this","state":"queued","attachments":[{"id":"ca_1","uploadId":"up_1","url":"/uploads/a.webp"}]}"#.utf8))
+        XCTAssertEqual(turn.attachments?.first?.uploadId, "up_1")
+        XCTAssertEqual(turn.from, "phone")
+
+        let ev = ClaudeEvent.user(text: "Use these", attachments: ["up_1"])
+        let json = String(decoding: try JSONEncoder().encode(ev), as: UTF8.self)
+        XCTAssertTrue(json.contains(#""uploadId":"up_1""#))
+        XCTAssertEqual(try JSONDecoder().decode(ClaudeEvent.self, from: Data(json.utf8)), ev)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(ClaudeEvent.user(text: "x")), as: UTF8.self).contains("attachments"))
     }
 
-    func testClaudesReferencesFillTheReferenceSlotsWhileThereIsRoom() {
-        let pose = SuiteDraftReference(image: ImageRef(url: "https://x/p.png"), role: "pose", uploadId: "up_1")
-        let place = SuiteDraftReference(image: ImageRef(url: "https://x/l.png"), role: "location")
-        let odd = SuiteDraftReference(image: ImageRef(url: "https://x/o.png"), role: "logo")
+    func testClaudeCodeGetsEachImagesPathAndUploadId() {
+        let files = [ClaudeAttachmentFile(path: "/c/MUSE/claude/ct_1/ca_1.png", uploadId: "up_1")]
+        XCTAssertEqual(ClaudeAttachmentPrompt.text("Use this pose", files),
+                       "Use this pose\n\nAttached images (Read each one):\n- /c/MUSE/claude/ct_1/ca_1.png (uploadId up_1)")
+        XCTAssertEqual(ClaudeAttachmentPrompt.text("", files), "Attached images (Read each one):\n- /c/MUSE/claude/ct_1/ca_1.png (uploadId up_1)")
+        XCTAssertEqual(ClaudeAttachmentPrompt.text("Hi", []), "Hi")
+        XCTAssertEqual(ClaudeAttachmentCache.fileName(ClaudeAttachment(id: "ca_1", uploadId: "up_1", mimeType: "image/webp")), "ca_1.webp")
+        XCTAssertEqual(ClaudeAttachmentCache.fileName(ClaudeAttachment(id: "ca/2", uploadId: "up_2", url: "https://s3/a.HEIC?sig=1")), "ca_2.heic")
+        XCTAssertEqual(ClaudeAttachmentCache.fileName(ClaudeAttachment(uploadId: "up_3")), "up_3.jpg")
+        let dir = ClaudeAttachmentCache.directory(threadId: "ct_1", caches: URL(fileURLWithPath: "/c"))
+        XCTAssertEqual(dir.path, "/c/MUSE/claude/ct_1")
+        // Claude Code may Read that folder only when the turn has images.
+        var cmd = ClaudeCommand(mcpURL: "https://x/mcp", token: "t")
+        XCTAssertFalse(cmd.arguments(configPath: "/p").contains { $0.hasPrefix("Read(") })
+        cmd.readDirectory = dir.path
+        XCTAssertTrue(cmd.arguments(configPath: "/p").contains("Read(//c/MUSE/claude/ct_1/**)"))
+    }
+
+    func testTheDraftsReferencesReadLenientlyAndRideAlong() throws {
+        let pose = SuiteDraftReference(uploadId: "up_1", url: "/uploads/p.png", use: "pose")
+        let place = SuiteDraftReference(uploadId: "up_2", url: "/uploads/l.png", use: "location", label: "Rooftop")
         var d = SuiteDraft(tool: "shot")
-        d.raw["references"] = .array([pose.json, place.json, odd.json, .object(["role": .string("style")]), .string("junk")])
-        XCTAssertEqual(SuiteAssistDraft.references(SuiteAssistDraft.with([pose], in: SuiteDraft(tool: "shot"))), [pose])
+        d.raw["references"] = .array([pose.json, place.json, .object(["uploadId": .string("up_9"), "url": .string("/u"), "use": .string("logo")]),
+                                      .object(["use": .string("style")]), .string("junk"),
+                                      .object(["uploadId": .string("up_4"), "image": .object(["url": .string("/uploads/s.png")]), "role": .string("Style")]),
+                                      .object(["uploadId": .string("up_5"), "url": .string("/uploads/o.png"), "use": .string("outfit")])])
         let refs = SuiteAssistDraft.references(d)
-        XCTAssertEqual(refs, [pose, place, odd], "entries without an image are skipped")
+        XCTAssertEqual(refs.map(\.uploadId), ["up_1", "up_2", "up_4"], "unknown uses and entries without an image are skipped; at most 3")
+        XCTAssertEqual(refs[2].url, "/uploads/s.png")
+        XCTAssertEqual(refs.map(\.title), ["Pose", "Location", "Style"])
         XCTAssertNil(d.problem, "references ride along as an extra key")
 
-        let r = SuiteAssistDraft.place(refs, into: InputSlots(), capacity: 6)
-        XCTAssertEqual(r.added, 2)
-        XCTAssertEqual(r.slots[SlotId(.image, 0)]?.role, "person")
-        XCTAssertEqual(r.slots[SlotId(.image, 0)]?.name, "Pose from Claude")
-        XCTAssertEqual(r.slots[SlotId(.image, 1)]?.role, "location")
-        XCTAssertEqual(r.rejected.map(\.reason), ["isn't a pose, style, location or outfit reference"])
-        let again = SuiteAssistDraft.place(refs, into: r.slots, capacity: 6)
-        XCTAssertEqual(again.added, 0, "an image already there isn't added twice")
-        let tight = SuiteAssistDraft.place([pose, place], into: InputSlots(), capacity: 1)
-        XCTAssertEqual(tight.added, 1)
-        XCTAssertEqual(tight.rejected.first?.reason, "has no room: this quality takes 1")
-        XCTAssertEqual(SuiteAssistDraft.place([pose], into: InputSlots(), capacity: 0).rejected.first?.reason, "isn't taken by this quality")
+        // Removing one: the draft goes back without it; none at all leaves the key out.
+        let without = SuiteAssistDraft.with([place], in: d)
+        XCTAssertEqual(SuiteAssistDraft.references(without), [place])
+        XCTAssertNil(SuiteAssistDraft.with([], in: d).raw["references"])
+
+        // The composer's own Generate sends them as reference images.
+        let r = SuiteAssistDraft.request(composerRequest(PromptTokens.text("x"), ComposerSettings()), with: [pose, place])
+        XCTAssertEqual(r.references?.images?.map(\.role), ["pose", "location"])
+        XCTAssertEqual(r.references?.images?.map(\.label), ["Pose", "Rooftop"])
+    }
+
+    func testTheFakeAssistKeepsReferencesAndUploadsImages() async throws {
+        let a = try await api()
+        let made = try await a.createSuiteAssist(SuiteAssistCreate(draft: ComposerDrafts.draft(ComposerDraft())))
+        let pose = SuiteDraftReference(uploadId: "up_1", url: "/uploads/p.png", use: "pose")
+        let withRef = try await a.demoClaudeAssist(id: made.id, draft: SuiteAssistDraft.with([pose], in: try XCTUnwrap(made.draft)), generate: false)
+        XCTAssertEqual(SuiteAssistDraft.references(try XCTUnwrap(withRef.draft)), [pose])
+        let up = try await a.uploadClaudeImage(name: "a.png", data: Data([1, 2, 3]), mime: "image/png")
+        XCTAssertTrue(up.uploadId.hasPrefix("up_"))
+        XCTAssertNotNil(up.url)
+        await expectError("bad_request") { _ = try await a.uploadClaudeImage(name: "a.gif", data: Data([1]), mime: "image/gif") }
     }
 }

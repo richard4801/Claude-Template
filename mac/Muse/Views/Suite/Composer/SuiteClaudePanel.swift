@@ -60,12 +60,13 @@ struct SuiteClaudePanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else if let a = c.assist {
             ClaudeChatView(contextKind: "suite", contextId: a.id, title: "Claude", showsHeader: false,
-                           placeholder: "Describe the shot you want…",
+                           placeholder: "Describe the shot…",
                            suggestions: SuiteAssistClaude.suggestions,
-                           emptyHint: "Tell Claude the shot you want. It fills in the character, the prompt and every Setup row with options the composer offers, and says what it set. You can change anything by hand; Claude sees it. Nothing is generated until you confirm the price.",
+                           emptyHint: SuiteClaudeWords.emptyHint,
                            wrapOutgoing: { [store] text in store.suiteClaudeOutgoing(text) },
                            unwrapShown: SuiteAssistClaude.stripContext, sendShortcut: false)
-                .attachments(top: AnyView(SuiteClaudeAttachRow()), sendBlocked: c.uploading, userImages: SuiteClaudeAttachments.images(in:))
+                .attachments(top: AnyView(SuiteClaudeAttachRow()), sendBlocked: c.uploading, userImages: SuiteClaudeAttachments.images(in:),
+                             takeFiles: { [store] tid in store.suiteClaudeTakeFiles(threadId: tid) })
         } else {
             VStack(alignment: .leading, spacing: Space.s2) {
                 Text("Sharing the composer with Claude…").scaled(t.scale.caption, t.roles.ink2)
@@ -87,7 +88,7 @@ struct SuiteClaudePanel: View {
     }
 }
 
-/// "Claude wants to generate this shot · $0.16": Decline, or open the Generate confirmation. The row itself never spends.
+/// "Claude wants to generate · $0.16": Decline, or open the Generate confirmation. The row itself never spends.
 struct SuiteClaudeAskRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -95,20 +96,18 @@ struct SuiteClaudeAskRow: View {
 
     var body: some View {
         let c = store.suite.claude
+        let seconds = c.assist?.request?.duration ?? store.suite.composer.duration
         VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                Text("Claude wants to generate this shot").scaled(t.scale.label, t.roles.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Space.s2)
-                Text(Pricing.money(pending.maxUsd)).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
-            }
-            if let note = c.priceNote { Text(note).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
+            Text(SuiteClaudeWords.askTitle).scaled(t.scale.label, t.roles.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(c.priceNote ?? SuiteClaudeWords.askBody).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Space.s2) {
                 Spacer(minLength: 0)
                 SuiteToolButton(title: "Decline", disabled: c.answering) { store.answerSuiteAsk(approve: false) }
                     .accessibilityLabel("Decline Claude's request to generate")
-                SuiteToolButton(title: "Review price", accent: true, disabled: c.answering) { c.confirmOpen = true }
-                    .help("Opens the Generate confirmation. Nothing is spent until you press Generate there.")
+                // Opens the confirmation (where the press approves); the row itself never spends.
+                SuiteToolButton(title: SuiteClaudeWords.generate(seconds: seconds, usd: pending.maxUsd), disabled: c.answering) { c.confirmOpen = true }
+                    .help("Opens the confirmation. Nothing is made until you press Generate there.")
             }
         }
         .padding(Space.s3)
@@ -126,14 +125,14 @@ struct SuiteClaudeGenerateSheet: View {
     var body: some View {
         let c = store.suite.claude
         let d = store.suite.composer
-        let price = Pricing.money(pending.maxUsd)
+        // The shot's real length: the server's request for the draft, else the composer's.
+        let seconds = c.assist?.request?.duration ?? d.duration
+        let generate = SuiteClaudeWords.generate(seconds: seconds, usd: pending.maxUsd)
         VStack(alignment: .leading, spacing: Space.s4) {
             HStack(spacing: Space.s2) {
                 ClaudeBadge()
-                Text("Claude is asking").scaled(t.scale.caption, t.roles.ink2)
+                Text(SuiteClaudeWords.askTitle).scaled(t.scale.title, t.roles.ink)
             }
-            Text("Generate this shot for \(price)?").scaled(t.scale.title, t.roles.ink)
-                .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: Space.s1) {
                 let text = d.tokens.promptText()
                 Text(text.isEmpty ? "No prompt" : text).scaled(t.scale.body, t.roles.ink).lineLimit(3)
@@ -141,7 +140,7 @@ struct SuiteClaudeGenerateSheet: View {
                 Text("\(SuiteText.tierLabel(d.quality)), \(d.aspect), \(d.duration) seconds, \(d.takes) take\(d.takes == 1 ? "" : "s")")
                     .scaled(t.scale.caption, t.roles.ink2)
             }
-            Text(c.priceNote ?? "It's charged to the studio like any shot, and a take that fails is refunded.")
+            Text(c.priceNote ?? SuiteClaudeWords.askBody)
                 .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Space.s3) {
                 Spacer(minLength: 0)
@@ -150,7 +149,7 @@ struct SuiteClaudeGenerateSheet: View {
                     store.answerSuiteAsk(approve: false)
                 }
                 .keyboardShortcut(.cancelAction)
-                SuiteToolButton(title: "Generate · \(price)", accent: true, disabled: c.answering) {
+                SuiteToolButton(title: generate, accent: true, disabled: c.answering) {
                     c.confirmOpen = false
                     store.answerSuiteAsk(approve: true)
                 }
@@ -177,7 +176,7 @@ struct SuiteClaudeDemoChat: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.s3) {
                         if c.demoLines.isEmpty {
-                            Text("Tell Claude the shot you want. It fills in the character, the prompt and every Setup row, and says what it set. You can change anything by hand. Nothing is generated until you confirm the price.")
+                            Text(SuiteClaudeWords.emptyHint)
                                 .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                         }
                         ForEach(c.demoLines) { line in
@@ -245,7 +244,7 @@ struct SuiteClaudeDemoChat: View {
             }
             SuiteClaudeAttachRow()
             HStack(alignment: .bottom, spacing: Space.s2) {
-                TextField("Describe the shot you want…", text: $draft, axis: .vertical)
+                TextField("Describe the shot…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .onSubmit(send)
                     .roleField(multiline: true)
@@ -296,6 +295,16 @@ struct SuiteClaudeAttachRow: View {
             .background { if SnapshotRunner.probing && !c.attachments.isEmpty { ComposerBarFrame(key: "claude attachments") } }
             if let note = c.attachNote {
                 Text(note).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            // The server couldn't read an image (often HEIC): say so, and offer it again as JPEG.
+            ForEach(c.attachments.filter { $0.error != nil }) { a in
+                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                    Text(a.error ?? "").scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                    if a.unsupported {
+                        Button("Send as JPEG") { store.resendSuiteClaudeAttachmentAsJPEG(a.id) }
+                            .buttonStyle(RButtonStyle(kind: .quiet, small: true))
+                    }
+                }
             }
             // ⌘V: an image on the pasteboard attaches; anything else is passed on to the field as a normal paste.
             Button("Paste") { paste() }
@@ -364,4 +373,49 @@ struct SuiteClaudeAttachRow: View {
         }
         NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
     }
+}
+
+/// The shared draft's reference images in the composer (Inputs): "Pose", "Style", "Location" or "Outfit" with the image,
+/// each with a remove button (the draft goes back without it).
+struct SuiteClaudeReferenceChips: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let refs = store.suite.claude.references
+        FlowLayout(spacing: Space.s1) {
+            ForEach(refs) { r in chip(r) }
+        }
+        .background { if SnapshotRunner.probing && !refs.isEmpty { ComposerBarFrame(key: "claude references") } }
+    }
+
+    private func chip(_ r: SuiteDraftReference) -> some View {
+        HStack(spacing: Space.s1) {
+            MuseImage(ref: ImageRef(url: r.url), symbol: "photo")
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .accessibilityHidden(true)
+            Text(r.title).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
+            Button { store.removeSuiteClaudeReference(r) } label: {
+                Ph("x", 10).foregroundStyle(t.roles.ink2).frame(width: 20, height: 20).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Remove this \(r.use) reference")
+            .accessibilityLabel("Remove \(r.title) reference")
+        }
+        .padding(.leading, 3).padding(.trailing, Space.s1)
+        .frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
+        .help(r.label ?? "\(r.title) reference from Claude")
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The words shared with the Android app (workstream 4), so both read the same.
+enum SuiteClaudeWords {
+    static let askTitle = "Claude wants to generate"
+    static let askBody = "Check the composer, then approve. It runs at this price or not at all."
+    static let emptyHint = "Describe the shot you want. Claude sets up the composer: the model, the prompt and the rig. You approve the price before anything is made."
+    /// "Generate · 8 s · $0.40": the shot's seconds and the price being approved.
+    static func generate(seconds: Int, usd: Double) -> String { "Generate · \(seconds) s · \(Pricing.money(usd))" }
 }
