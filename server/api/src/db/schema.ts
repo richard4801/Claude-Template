@@ -521,5 +521,5 @@ export * from '../editor/schema.js';
 // Prompt scripts (workstream 4): the owner's rule edits per script.
 export * from '../prompt/scripts/schema.js';
 
-// Bring your own provider (WS5, migration 0023).
+// Bring your own provider (WS5, migration 0024).
 export * from '../byo/schema.js';

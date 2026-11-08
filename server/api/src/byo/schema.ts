@@ -1,4 +1,4 @@
-// Bring your own provider tables (migration 0023). Re-exported from db/schema.ts.
+// Bring your own provider tables (migration 0024). Re-exported from db/schema.ts.
 import { bigint, boolean, doublePrecision, index, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import type { Analysis, Kind } from './classify.js';
 import type { Price } from './adapters.js';

@@ -18,6 +18,7 @@ import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
 import { ASSET_DIR, ASSET_KEYS, PROVIDERS, type ShootRefIn } from '../images/service.js';
 import { PhotoBill } from '../images/bill.js';
+import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
 import type { EngineSelection } from '../images/engines.js'; // WS5
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
@@ -651,7 +652,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: p.references, templateId: p.presetId,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true };
     // WS5: a custom image model the user may use replaces the studio's image engine for this run.
-    const engine = p.engineModel ? (await ctx.suite.byo.checkUse(u, p.engineModel, 'image'), { provider: 'byo' as const, model: p.engineModel }) : undefined;
+    // Owner only: `imageModel` picks any image model for this run (a Replicate "owner/name" or a custom "c_…").
+    if (p.imageModel && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the image model');
+    if (p.imageModel && p.engineModel) throw badRequest('Use imageModel or engineModel, not both');
+    const custom = p.engineModel ?? (p.imageModel?.startsWith('c_') ? p.imageModel : undefined);
+    const engine = custom ? (await ctx.suite.byo.checkUse(u, custom, 'image'), { provider: 'byo' as const, model: custom }) : undefined;
+    if (p.imageModel && !custom && !MODEL_ID_RE.test(p.imageModel)) throw badRequest('imageModel: use owner/name or a custom model id');
+    if (p.imageModel && !custom) (shoot as Record<string, unknown>).models = { shot: p.imageModel }; // priced on that model (planShoot)
     const s = await planShoot(u, shoot, p.presetId ? undefined : still, engine);
     const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
     return { p, s, notes, graded };

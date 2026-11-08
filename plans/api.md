@@ -1694,7 +1694,7 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `fallback_off` | 409 | `api-turn` while the API fallback is off or no key is set |
 
 ## Bring your own provider (WS5, 2026-11-08, owner-approved)
-In Settings, the owner adds an API key for a provider. MUSE lists that provider's models, the owner switches on the ones they want and names them, and enabled models appear in the AI Suite like built-in ones. Code: `server/api/src/byo/**`, routes `src/routes/providers.ts`, migration **0023_byo_providers**, tests `test/byo.test.ts` (recorded fixtures in `test/fixtures/byo`; no live provider calls).
+In Settings, the owner adds an API key for a provider. MUSE lists that provider's models, the owner switches on the ones they want and names them, and enabled models appear in the AI Suite like built-in ones. Code: `server/api/src/byo/**`, routes `src/routes/providers.ts`, migration **0024_byo_providers**, tests `test/byo.test.ts` (recorded fixtures in `test/fixtures/byo`; no live provider calls).
 
 **Providers.** Replicate and fal.ai, both of which publish machine-readable input schemas. Each provider is an adapter (`byo/adapters.ts` `ProviderAdapter`): validate a key, search models, read one model, start/get/cancel a run. More can be added later (e.g. OpenAI-compatible image endpoints) by implementing that interface.
 
@@ -1733,3 +1733,17 @@ In Settings, the owner adds an API key for a provider. MUSE lists that provider'
 - **Catalog:** `GET /v1/suite/catalog` adds `custom: [{id, name, kind, price:{basis, usd}, inputs: InputSlots, minSeconds, maxSeconds, aspectRatios}]`. The owner sees every enabled model, plus `members` and `provider`. Members see only models marked `members: true`, by the owner's display name, with no provider, ref or field names.
 - **Video:** `POST /v1/suite/shots/estimate` and `/v1/suite/shots` take `engineModel:'c_…'`. Members may pass it for a model available to them; built-in `engineModel`s stay owner-only. Custom models make plain shots: text, keyframe or reference, not swap, recast or extend. The owner can also put custom ids on the tier ladders in `/v1/suite/settings`.
 - **Photo:** `POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `engineModel:'c_…'` (an image model). It replaces the studio's image engine for that run. References go in the model's own image field, up to its limit.
+
+### Owner's model picker (WS5, added 2026-11-08 at the coordinator's request; for the WS7/WS6 model picker)
+- **`GET /v1/suite/catalog`, owner only, adds `engines[]`:** a flat list across tiers, built-in and enabled custom, video and image. Members never get this field. Each entry is:
+
+  ```
+  {model, name, kind:'video'|'image', custom, tier|null, tiers:[...], resolution|null,
+   resolutions:[{id, label, perSec}], perSec|null, perRun|null, minSeconds, maxSeconds,
+   allowedSeconds|null, aspectRatios, inputs: InputSlots}
+  ```
+
+  - **Prices** are after the model's priceScale. Video: `perSec` at `resolution`, plus `perRun` for per-run custom models. Image: `perRun` = one photo (built-in: the studio's photo model with 3 identity images; null when its price is unknown).
+  - **Video entries:** every registry model that makes shots and is enabled, licensed (acknowledged) and on a set-up provider, plus enabled custom video models. `tier` is the first tier whose ladder lists it (null if none).
+  - **Image entries:** the studio's photo model (Settings → Engines → Image models), plus enabled custom image models.
+- **`POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `imageModel`, owner only (members get 403 `owner_only`):** a Replicate image model `owner/name` (priced on that model, as the per-step override) or a custom id `c_…`. Use either `imageModel` or `engineModel`, not both (400). Members can still pass `engineModel:'c_…'` for a custom image model the owner made available.

@@ -20,12 +20,13 @@ import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
-import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
+import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 import { rigCheck } from './rigcheck.js';
 import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
+import { modelName } from '../images/steps.js';
 
 /**
  * Estimate for removing the vocals of an audio reference (beat-only audio), held with the shot; the job settles the
@@ -173,8 +174,45 @@ export class SuiteService {
     ];
     // WS5: owner-added models (members: only those the owner made available, by display name).
     const custom = this.mode === 'off' ? [] : await this.byo.catalog(u);
-    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, custom, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
+    const engines = u.role === 'owner' && this.mode !== 'off' ? await this.ownerEngines(u.studioId, p, avail) : undefined; // WS5: the owner's model picker
+    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, custom, ...(engines ? { engines } : {}), modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
+  }
+
+  /**
+   * WS5 · the owner's model picker: every engine the owner can pick for a shot or a photo, flat across tiers. Video: each
+   * usable registry model that makes shots (enabled, licensed, its provider set up) and each enabled custom video model.
+   * Image: the studio's photo model and each enabled custom image model. Prices are after the model's priceScale.
+   */
+  async ownerEngines(studioId: string, p: SuitePrefs, avail: Set<ProviderId>) {
+    const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === id));
+    const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
+    const video = [...MODELS, ...customModelsOf(studioId)].filter(m => m.status !== 'removed' && !m.licence.blockNewFeatures && p.models?.[m.id]?.enabled !== false
+      && !(m.licence.requiresAck && !p.models?.[m.id]?.acknowledgedAt) && avail.has(m.provider) && (m.modes.text || m.modes.image || m.modes.reference))
+      .map(m => {
+        const scale = p.models?.[m.id]?.priceScale ?? 1, tiers = tiersOf(m.id);
+        const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
+        return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, tier: tiers[0] ?? null, tiers, resolution,
+          resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
+          perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
+          perRun: m.byo?.perRunUsd ? Math.round(m.byo.perRunUsd * scale * 10000) / 10000 : null,
+          minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios, inputs: inputSlotsOf([m]) };
+      });
+    // The studio's photo model (the Photo tool's default) and its price for one photo with the usual 3 identity images.
+    const shot = await this.ctx.imageModels.resolve(studioId, 'shot').catch(() => null);
+    const image: Record<string, unknown>[] = [];
+    if (shot) {
+      const n = 3, inMp = P.PHOTO_REF_MP * n;
+      const perRun = this.ctx.imageModels.isRecipe('shot', shot.model) ? P.newShotEstimateImages(this.ctx.images.photoPrices(), 2, n)
+        : await this.ctx.imageModels.estimate(shot.model, { outMp: 2, inMp }).catch(() => null);
+      image.push({ model: shot.model, name: modelName(shot.model), kind: 'image', custom: false, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
+        perRun: perRun == null ? null : Math.round(perRun * 10000) / 10000, minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: [],
+        inputs: { ...NO_INPUTS, images: Math.min(6, this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS) } });
+    }
+    for (const c of await this.byo.catalog({ studioId, role: 'owner' } as AuthUser)) if (c.kind === 'image')
+      image.push({ model: c.id, name: c.name, kind: 'image', custom: true, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null, perRun: c.price.usd,
+        minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: c.aspectRatios, inputs: c.inputs });
+    return [...video, ...image];
   }
 
   // ------------------------------------------------------------------ character

@@ -308,6 +308,26 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       const ph = await member!.req('POST', '/v1/suite/photos', { modelId: dm.id, prompt: 'On the pier', count: 2, engineModel: im.id });
       expect(ph.status).toBe(200);
       expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, engineModel: vm.id })).status).toBe(400); // not an image model
+      // Owner-only image model override: a custom id or any Replicate "owner/name"; members get 403.
+      expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: im.id })).status).toBe(403);
+      expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(403);
+      const oe = (await owner.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 2, imageModel: im.id })).body;
+      expect(oe.perPhoto).toBeCloseTo(0.05, 6);
+      expect((await owner.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(200);
+      expect((await owner.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: 'not a model' })).status).toBe(400);
+      expect((await owner.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: im.id, engineModel: im.id })).status).toBe(400);
+
+      // The owner's flat engine list (built-in and custom, video and image); members never get it.
+      const engines = (await owner.req('GET', '/v1/suite/catalog')).body.engines;
+      const cv = engines.find((e: any) => e.model === vm.id);
+      expect(cv).toMatchObject({ name: 'House Motion', kind: 'video', custom: true, tier: null, perSec: 0, perRun: 0.6, minSeconds: 5, maxSeconds: 10, allowedSeconds: [5, 10] });
+      const lite = engines.find((e: any) => e.model === 'h3-lite');
+      expect(lite).toMatchObject({ kind: 'video', custom: false, tier: 'draft', resolution: '768P', perSec: 0.02, perRun: null });
+      expect(engines.find((e: any) => e.model === 'h3-open')).toBeUndefined(); // licence-blocked
+      expect(engines.filter((e: any) => e.kind === 'image').map((e: any) => [e.name, e.custom])).toEqual([[expect.any(String), false], ['House Still', true]]);
+      expect(engines.find((e: any) => e.model === im.id).perRun).toBeCloseTo(0.05, 6);
+      expect((await member!.req('GET', '/v1/suite/catalog')).body.engines).toBeUndefined();
+
       // The test renderer called no provider.
       expect(calls.filter(c => c.url.includes('/predictions'))).toHaveLength(0);
     } finally { await a.close(); }

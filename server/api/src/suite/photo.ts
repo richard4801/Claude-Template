@@ -38,6 +38,8 @@ export const PhotoRequestSchema = z.object({
   draft: z.unknown().optional(),
   /** WS5: an owner-added image model ("c_…") instead of the studio's image engine (members: only ones made available). */
   engineModel: z.string().max(40).optional(),
+  /** WS5 · owner only: the image model for this run, a Replicate image model ("owner/name") or a custom one ("c_…"). */
+  imageModel: z.string().max(170).optional(),
 }).strict();
 export type PhotoRequest = z.infer<typeof PhotoRequestSchema>;
 
