@@ -153,6 +153,12 @@ data class ComposerDraft(
     /** Leaves the preset: chips back to Auto, the tool card back to Shot. */
     fun clearPreset(): ComposerDraft = copy(settings = ComposerSettings(gradeLook = settings.gradeLook), collapsed = false)
 
+    /**
+     * The prompt was backspaced to empty (owner decision 2026-11-08): the selected preset is unselected and the composer is
+     * the normal one again ([clearPreset]). Nothing changes while the prompt has anything in it or no preset is picked.
+     */
+    fun unselectingPreset(): ComposerDraft = if (tokens.isEmpty && (collapsed || settings.preset != null)) clearPreset() else this
+
     /** What the collapsed preset asks for: the character, or a photo for presets built around a product. */
     fun collapsedSlot(): ToolSlot = if (settings.preset in PHOTO_PRESETS) ToolSlot("start", "Photo", "Your product shot") else ToolSlot("character", "Character", "Your models")
 

@@ -104,6 +104,8 @@ class SheetContext(
     val extendKey: String? = null,
     val onPickTake: (studio.muse.app.data.Take) -> Unit = {},
     val onUploadVideo: () -> Unit = {},
+    /** The mode menu's Camera stage (owner). */
+    val onCameraStage: () -> Unit = {},
 ) {
     val cam: CameraCatalog get() = catalog?.camera ?: CameraCatalog()
 }
@@ -182,7 +184,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
         SheetKind.REFERENCES -> if (d.tool == ComposerTool.PHOTO) PhotoReferencesSheet(x) // Photo tool (workstream 3): pose / look / scene references
             else PickerShell("References", x.wide, x.close) { ReferencesBody(x) }
         SheetKind.SETTINGS -> PickerShell("Settings", x.wide, x.close, heightFraction = .9f, footer = { SettingsFooter(x) }) { SettingsBody(x) }
-        SheetKind.TOOLS -> PickerShell("Tools", x.wide, x.close) { ToolsBody(x) }
+        SheetKind.TOOLS -> ModeMenu(x) // owner decision 2026-11-08: a plain grouped mode menu, no presets (ModeMenu.kt)
         SheetKind.CHARACTER -> PickerShell("Character", x.wide, x.close, heightFraction = .7f) { CharacterBody(x) }
         SheetKind.TOKEN -> {
             val tok = d.tokens.parts.firstOrNull { it.key == sheet.token && it !is PromptPart.Text }
@@ -459,56 +461,6 @@ fun ShapeTile(aspect: String, on: Boolean, modifier: Modifier, dark: Boolean = f
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)) {
         Box(Modifier.size(rw.dp, rh.dp).background(if (on) (if (dark) m.t.accent.copy(alpha = .2f) else m.t.ink) else Color.Transparent).border(1.5.dp, if (on) on2 else m.t.muted))
         T(aspect, m.type.mono.copy(fontSize = 12.sp, letterSpacing = .06.em), if (on) m.t.ink else m.t.muted, maxLines = 1)
-    }
-}
-
-@Composable
-private fun ColumnScope.ToolsBody(x: SheetContext) {
-    val m = muse
-    val cam = x.cam
-    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SheetLabel("Tools")
-        ComposerTool.entries.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { t ->
-                    val on = t == x.d.tool && x.d.settings.preset == null
-                    Column(Modifier.weight(1f).picked(on, m.t.accent).clip(RoundedCornerShape(10.dp)).background(m.t.surface).press { x.update { it.withTool(t) }; x.close() }
-                        .semantics(mergeDescendants = true) { selected = on; role = Role.Button }) {
-                        PreviewTile(Preview(t.render), Modifier.fillMaxWidth().height(70.dp)) {
-                            if (!t.isLive(x.catalog)) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                T("Soon", m.scale.micro, Color.White)
-                            }
-                        }
-                        Column(Modifier.padding(10.dp)) {
-                            T(t.title, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
-                            T(if (t.isLive(x.catalog)) t.tagline else "Coming soon", m.type.body.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
-                        }
-                    }
-                }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).background(m.t.surface).press { x.close(); x.onStoryboard() }.padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                T("Storyboard", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
-                T("Shots in a row, one cast and look", m.type.body.copy(fontSize = 12.sp), m.t.muted)
-            }
-            SIc("chev", 16.dp, m.t.muted)
-        }
-        SheetLabel("Start from a preset", "${cam.presets.size} presets", Modifier.padding(top = 8.dp))
-        cam.presets.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { p ->
-                    val on = x.d.settings.preset == p.id
-                    Box(Modifier.weight(1f).picked(on, m.t.accent)) {
-                        PreviewTile(presetPreview(cam, p.id, p.label), Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(10.dp)).press { x.update { it.pickPreset(cam, p.id, x.models.firstOrNull()?.id) }; x.close() }
-                            .semantics { contentDescription = "Preset ${p.label}"; role = Role.Button })
-                    }
-                }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
     }
 }
 

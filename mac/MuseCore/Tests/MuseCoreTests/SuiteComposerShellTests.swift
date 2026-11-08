@@ -68,6 +68,20 @@ final class SuiteComposerShellTests: XCTestCase {
         XCTAssertEqual(ComposerPresets.summary(p, quality: "draft", seconds: 8), "Draft · 8 s · friend-filmed phone, natural light")
     }
 
+    /// Owner decision 2026-11-08: backspacing the prompt to empty unselects the preset; anything left in the prompt keeps it.
+    func testBackspaceToEmptyUnselectsThePreset() throws {
+        let p = try XCTUnwrap(cat.presets.first { $0.id == "phone_ugc" })
+        var d = ComposerDraft(tokens: .text("She laughs")).applying(preset: p, cat)
+        XCTAssertEqual(d.unselectingPreset(), d, "the prompt still has the #move and the text")
+        d.tokens = PromptTokens()
+        let n = d.unselectingPreset()
+        XCTAssertNil(n.collapsed)
+        XCTAssertNil(n.settings.preset)
+        XCTAssertNil(n.settings.body, "the preset's rows are back on Auto")
+        XCTAssertEqual(n.settings.gradeLook, d.settings.gradeLook)
+        XCTAssertEqual(ComposerDraft().unselectingPreset(), ComposerDraft(), "no preset: nothing changes")
+    }
+
     func testGeneratePriceStates() {
         XCTAssertEqual(GeneratePrice.of(nil), .unknown)
         XCTAssertEqual(GeneratePrice.of(nil).buttonText, "Generate · —")
