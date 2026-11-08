@@ -124,3 +124,44 @@ Mocks: plans/recreate/ on claude/muse-mcp-bridge @4c2f3f9 (Recipe and Compare). 
 
 ## Link fetching: the owner chose "Keep link fetching" (2026-11-08)
 See plans/research/platform-download-rules.md for the guardrails.
+
+## Server audit against this plan (WS1, 2026-11-08, Release 1)
+
+**Built** (all in plans/api.md, "Recreate this edit"):
+- **The reference:**
+  - From a file, or a public link (TikTok, Reels, Shorts) with the guardrails in plans/research/platform-download-rules.md.
+  - Stored privately and deleted after 30 days.
+- **The analysis:**
+  - Cuts and flashes, frame-accurate.
+  - Beats, with half and double tempo fixed.
+  - Action peaks; speed ramps and freezes; camera pan, tilt, zoom and shake as keys.
+  - Transitions: cut, flash, whip, zoom, fade, crossfade, unknown.
+  - Text: region, timing, colour, and words by OCR.
+  - The grade, as swatches → the nearest palette → a LUT.
+  - The contact sheet, and pose keypoints (MoveNet).
+- **Building:**
+  - Briefs, the matcher, the fill request with its price, and the Suite job.
+  - Assembly into an edit session (cuts on the reference, ramps, camera keys, text, Look) and the match score per element.
+  - The sources fed to the corrections log, and the playbook's pinned rules enforced on Claude's changes.
+- **Compare and export:**
+  - The server renders the built edit for Compare.
+  - Export with the reference's sound as a guide, or silent, plus the "Use this sound" steps.
+- **Claude:** analyze_reference, get_recipe, set_slot_briefs, match_slots, apply_recipe, fill_slot, playbook_read, playbook_add and report_gap.
+- **The learning editor:** a new recreate starts from the nearest proven recipe.
+
+**Fixed in this audit:** generating a missing shot whose slot had no brief sent an empty prompt.
+- Its words now come from the reference's summary, else a neutral line. The framing and move still apply.
+- The estimate says where the words came from (`promptFrom: "brief" | "summary" | "default"`), so the apps can suggest writing a brief first.
+
+**Gaps against this plan** (agreed scope not yet built on the server):
+
+| # | Plan | Gap | Who | Size |
+|---|---|---|---|---|
+| G1 | §3 "cuts and action peaks snap to the sound's beat map" | Cuts land on the reference's times, but each take starts at its first frame. The take's own action peak isn't lined up with the slot's peak or beat. Fix: pick each take's in-point so its strongest peak lands on the slot's (free, CPU). | WS1 | ½ day |
+| G2 | §3 "pose is guided by the skeleton" | Slots have keypoints, but the Suite shot request has no pose input, and no current video provider takes one. Needs a provider that accepts a pose or control input, and the owner's OK on its price. | WS1, plus an owner decision | Open |
+| G3 | §4 "Fix this slot re-picks or regenerates that slot" | Only a whole-edit apply exists, and it replaces the tracks, so later hand edits are lost. Fix: `POST …/slots/{slotId}/replace {sessionId, takeId\|jobId}` swaps one clip in place, as one undoable change. | WS1 (server), WS2/WS4 (button) | ½ day |
+| G4 | §2 Text "animation in/out; fonts matched to the nearest" | Text in/out is always "cut", and the font is always "sans". Fix: fades from the box's contrast over time; the family (serif, condensed, marker, mono) from the OCR crop. | WS1 | 1 day |
+| G5 | §2 "ramps and freezes" | Freezes are detected but left out of the assembly (logged as a gap). Fix: hold the frame with a still item, or a minimum-speed piece. | WS1 | ½ day |
+| G6 | §2 Transitions "glitch" | The type exists, but the classifier never outputs it. | WS1 | Low |
+| G7 | Release 1 #4 "Claude button on the Recreate screens" | Claude chat threads accept only `camera` or `edit` contexts, and the API fallback works only in Camera. Recreate's tools are on the MCP server already. | WS2 (threads), WS1 (on request) | — |
+| G8 | §6 "Claude's reading of the contact sheet … or a few cents on the API fallback" | Without the owner's Claude, slots get no briefs. There is no server-side briefing (that would be paid API use). The fill prompt now falls back to the summary or a default (above). | Owner decision on spend | — |

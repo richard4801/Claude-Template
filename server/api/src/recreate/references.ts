@@ -17,7 +17,7 @@ import { editSessionsOf } from '../editor/sessions.js';
 import { timeline } from '../editor/model.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
-import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
+import { BriefSchema, matchSlots, promptSource, shotRequestFor, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
 import { rendersOf, type RenderState } from '../editor/renders.js';
@@ -321,7 +321,8 @@ export class RecreateReferences {
   async estimateSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
     const { request } = this.fillRequest(recipe, r, slotId, body);
-    return { slotId, request, estimate: await this.ctx.suite.estimate(u, request) };
+    // promptFrom: "brief", or "summary"/"default" while the slot has no brief yet (the apps suggest writing one).
+    return { slotId, request, promptFrom: promptSource(recipe, recipe.slots.find(x => x.id === slotId)!), estimate: await this.ctx.suite.estimate(u, request) };
   }
   /** Fills a slot with a new Suite shot: an ordinary job, held and priced like any shot (the caller confirmed the price). */
   async fillSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
