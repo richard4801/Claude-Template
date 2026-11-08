@@ -85,6 +85,8 @@ import studio.muse.app.ui.screens.BlurredStageArt
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.suite.HardwareImage
+import studio.muse.app.ui.screens.suite.undoRig
+import studio.muse.app.ui.screens.suite.applyDefaultRigIfAny
 import studio.muse.app.ui.screens.suite.ComposerRigRow
 import studio.muse.app.ui.screens.suite.InputSlotUploader
 import studio.muse.app.ui.screens.suite.SIc
@@ -137,6 +139,13 @@ fun SuiteComposerScreen(toolId: String? = null) {
     LaunchedEffect(Unit) { if (store.catalog.value == null) store.load() }
     LaunchedEffect(Unit) { store.loadLocations() }
     val locations by store.locations.collectAsState()
+    // A model's default rig (the AI suite plan): when the prompt's one @character changes to someone with a default rig,
+    // it fills only the rows still on Auto ("Applied <name>'s rig", with Undo on the Rigs row).
+    val sole = ComposerDrafts.characterIds(d.tokens).distinct().singleOrNull()
+    var lastSole by remember { mutableStateOf(sole) }
+    LaunchedEffect(sole) { if (sole != lastSole) { lastSole = sole; if (sole != null) store.applyDefaultRigIfAny() } }
+    // "Takes": the results feed in place of the composer.
+    var showFeed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val catalogError by store.catalogError.collectAsState()
     LaunchedEffect(toolId) { ComposerTool.entries.firstOrNull { it.id == toolId }?.let { t -> if (store.composer.value.tool != t) store.composer.update { it.withTool(t) } } }
     // The clip picked in New video becomes Character swap's / Recast's source.
@@ -298,13 +307,17 @@ fun SuiteComposerScreen(toolId: String? = null) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = ComposerLayout.wide(maxWidth.value.toInt())
             Column(Modifier.fillMaxSize()) {
-                TopBar(if (wide) "" else d.tool.title, onBack = { nav.back() }, onTitle = if (wide) null else ({ open(ComposerSheet(SheetKind.TOOLS)) })) {
+                TopBar(if (showFeed) "Takes" else if (wide) "" else d.tool.title, onBack = { if (showFeed) showFeed = false else nav.back() },
+                    onTitle = if (wide || showFeed) null else ({ open(ComposerSheet(SheetKind.TOOLS)) })) {
+                    Box(Modifier.heightIn(min = 48.dp).press { showFeed = !showFeed }.padding(horizontal = 12.dp).semantics { role = Role.Button },
+                        contentAlignment = Alignment.Center) { T(if (showFeed) "Composer" else "Takes", muse.scale.label, muse.t.ink, maxLines = 1) }
                     MoreMenu(listOfNotNull(
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
                         if (owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                     ))
                 }
-                if (wide) WideComposer(ui, job, recent, st.takes) { j -> nav.go(Routes.suiteTake(j)) }
+                if (showFeed) SuiteFeedView(photo = d.tool == ComposerTool.PHOTO, wide = wide, onOpen = { j -> nav.go(Routes.suiteTake(j)) }, modifier = Modifier.weight(1f))
+                else if (wide) WideComposer(ui, job, recent, st.takes) { j -> nav.go(Routes.suiteTake(j)) }
                 else PhoneComposer(ui, job, recent, st.takes, { j -> nav.go(Routes.suiteTake(j)) }, { r -> scope.launch { store.generate(r, store.shotJobs) } })
             }
             sheet?.let { sh ->
@@ -332,6 +345,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                 ))
             }
             upscaleFor?.let { id -> UpscaleSheet(id, wide) { j -> nav.go(Routes.suiteTake(j.id)) } }
+            SuiteCompareOverlay(wide) { showFeed = false }
         }
     }
 }
@@ -532,12 +546,28 @@ private fun SettingRows(ui: ComposerUi) {
                 ui.open(ComposerSheet(when (chip) { ComposerChip.REFERENCES -> SheetKind.REFERENCES; ComposerChip.STYLE -> SheetKind.STYLE; ComposerChip.CAMERA -> SheetKind.CAMERA; ComposerChip.LOOK -> SheetKind.LOOK; ComposerChip.LIGHTING -> SheetKind.LIGHTING }))
             }
         }
+        // Rigs (the AI suite plan): saved rigs and a character's default; after one is applied, the row offers Undo.
+        RigsRow(ui)
         if (ui.photo == null) {
             // Shape, length, sound, speaking and takes live in Settings; the row says what they are now.
             val (a, b) = if (d.tool == ComposerTool.EXTEND) "+${d.duration} s ${if (d.extendDirection == "before") "before" else "after"}" to d.barSummary.second else d.barSummary
             SettingRow("ratio", "Settings", "$a, $b", auto = false) { ui.open(ComposerSheet(SheetKind.SETTINGS)) }
         }
     }
+}
+
+@Composable
+private fun RigsRow(ui: ComposerUi) {
+    val m = muse
+    val store = LocalContainer.current.suite
+    val undo by store.rigUndo.collectAsState()
+    val rigs by store.savedRigs.collectAsState()
+    val applied = undo
+    if (applied != null) Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SIc("stack", 20.dp, m.t.muted)
+        T(applied.first, m.scale.label, m.t.ink, Modifier.weight(1f), maxLines = 1)
+        Box(Modifier.heightIn(min = 48.dp).press { store.undoRig() }.semantics { role = Role.Button }, contentAlignment = Alignment.Center) { T("Undo", m.scale.label, m.roles.link, maxLines = 1) }
+    } else SettingRow("stack", "Rigs", if (rigs.isEmpty()) "Save or apply" else "${rigs.size} saved", auto = true) { ui.open(ComposerSheet(SheetKind.RIGS)) }
 }
 
 @Composable
