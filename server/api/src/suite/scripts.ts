@@ -39,7 +39,7 @@ export const SUITE_CAMERA_SCRIPT: Script = {
 const REFS: InputDef = {
   name: 'refs', label: 'Extra references', description: 'Product, location, style, prop or person images sent after hers.', type: 'list',
   fields: [
-    en('kind', 'Kind', 'What the image is.', [['product', 'Product'], ['location', 'Location'], ['style', 'Style'], ['prop', 'Prop'], ['person', 'Another person']]),
+    en('kind', 'Kind', 'What the image is.', [['product', 'Product'], ['location', 'Location'], ['style', 'Style'], ['prop', 'Prop'], ['person', 'Another person'], ['pose', 'Pose'], ['outfit', 'Outfit']]),
     { name: 'ref', label: 'Token', description: 'How the prompt names the image (<Image 6>, @image_6, [Image6]).', type: 'text', sample: '<Image 6>' },
     { name: 'role', label: 'Role words', description: '"the product (the perfume bottle)".', type: 'text', sample: 'the product' },
     { name: 'use', label: 'Use', description: 'What to take from it.', type: 'text', sample: 'shape, colours, packaging and label' },

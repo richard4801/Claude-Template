@@ -162,6 +162,13 @@
       "when": 1794166679887,
       "tag": "0022_suite_assists",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794168235585,
+      "tag": "0023_claude_attachments",
+      "breakpoints": true
     }
   ]
 }
