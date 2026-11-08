@@ -217,3 +217,6 @@ Free on every provider: cuts with a transcript, silence-only cuts, beats, and th
 
 **Owner's word:**
 - [ ] The owner approves the prices, the markup and the go date. The coordinator changes the variable on Railway, and no session does.
+
+## Android distribution (owner, 2026-11-08)
+The owner couldn't get the Android upload to /get working. Decision: the owner uploads each Android build to the download page by hand, once there's a final version. The upload session (session_01Py2rxqFT9BvkxLttPb5c8Z) is no longer pending.
