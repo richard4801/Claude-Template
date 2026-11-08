@@ -558,7 +558,9 @@ private fun ChatComposer(ui: ClaudeChatUi, actions: ClaudeChatActions, horizonta
                     }
                 }
             }
-            val send: @Composable () -> Unit = { if (ui.busy) StopButton(ui.turn?.stopping == true, actions.stop) else SendButton(ui.canSend, actions.send) }
+            // While the offline block offers its own primary action, Send steps back to a tonal button (one `action` fill per screen).
+            val quiet = Fallback.decide(ui.status, ui.refusal, ui.contextKind) != null
+            val send: @Composable () -> Unit = { if (ui.busy) StopButton(ui.turn?.stopping == true, actions.stop) else SendButton(ui.canSend, actions.send, quiet) }
             if (compact) Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.Bottom) {
                 attach()
                 ChatField(ui.draft, actions.edit, ClaudeText.placeholder(ui.contextKind), Modifier.weight(1f), maxLines = 3)
@@ -617,12 +619,13 @@ private fun ChatField(value: String, onChange: (String) -> Unit, placeholder: St
 
 /** Send: the one action in the chat, an arrow in the `action` fill. Quiet while there's nothing to send. */
 @Composable
-private fun SendButton(enabled: Boolean, onClick: () -> Unit) {
+private fun SendButton(enabled: Boolean, onClick: () -> Unit, quiet: Boolean = false) {
     val m = muse
+    val filled = enabled && !quiet
     Box(Modifier.size(48.dp).press(enabled, onClick).semantics { contentDescription = "Send"; role = Role.Button }, contentAlignment = Alignment.Center) {
-        Box(Modifier.size(36.dp).clip(CircleShape).background(if (enabled) m.roles.action else m.roles.field)
-            .let { if (m.isD && enabled) it.border(2.dp, m.roles.ink, CircleShape) else it }, contentAlignment = Alignment.Center) {
-            Ic("arrow-up", 18.dp, if (enabled) m.roles.onAction else m.roles.ink2)
+        Box(Modifier.size(36.dp).clip(CircleShape).background(if (filled) m.roles.action else m.roles.field)
+            .let { if (m.isD && filled) it.border(2.dp, m.roles.ink, CircleShape) else it }, contentAlignment = Alignment.Center) {
+            Ic("arrow-up", 18.dp, if (filled) m.roles.onAction else if (enabled) m.roles.ink else m.roles.ink2)
         }
     }
 }
