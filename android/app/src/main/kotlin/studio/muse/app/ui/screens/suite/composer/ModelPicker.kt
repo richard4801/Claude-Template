@@ -60,8 +60,13 @@ data class PickerEngine(
     val custom: Boolean,
     val perRun: Double? = null,
     val kind: String = "video",
+    /** The resolution each quality's ladder runs it at (tier id → resolution id). */
+    val ladderRes: Map<String, String> = emptyMap(),
 ) {
     val tier: String? get() = tiers.firstOrNull()
+
+    /** The resolution it runs at on [quality]: that ladder's, else its default. */
+    fun resolutionOn(quality: String): String? = ladderRes[quality] ?: resolution
 
     /** $/s at [res] (the resolution's own price when the server lists it). */
     fun perSecAt(res: String?): Double? = resolutions.firstOrNull { it.id == res }?.perSec ?: perSec
@@ -106,10 +111,12 @@ object ModelPicker {
      */
     fun engines(cat: SuiteCatalog?, kind: String = "video"): List<PickerEngine> {
         cat ?: return emptyList()
+        // Which resolution each quality's ladder runs a model at (owner catalogs list it per tier).
+        fun ladderRes(id: String) = cat.tiers.mapNotNull { t -> t.models?.firstOrNull { it.model == id }?.resolution?.ifBlank { null }?.let { t.id to it } }.toMap()
         cat.engines?.let { list ->
             return list.filter { it.kind == kind }.map { e ->
                 PickerEngine(e.model, e.name.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
-                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind)
+                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model))
             }
         }
         if (kind != "video") return cat.custom.orEmpty().filter { it.kind == kind }.map { c -> customEngine(c) }
@@ -118,7 +125,7 @@ object ModelPicker {
             val (t0, m0) = at.first()
             PickerEngine(id, m0.name.ifBlank { id }, at.map { it.first.id }.distinct(), m0.resolution.ifBlank { null },
                 at.map { (_, m) -> SuiteResolution(m.resolution, m.resolution, perSec = m.perSec ?: 0.0) }.filter { it.id.isNotBlank() }.distinctBy { it.id },
-                m0.minSeconds ?: t0.minSeconds, m0.maxSeconds ?: t0.maxSeconds, null, emptyList(), m0.perSec, m0.inputs, custom = false)
+                m0.minSeconds ?: t0.minSeconds, m0.maxSeconds ?: t0.maxSeconds, null, emptyList(), m0.perSec, m0.inputs, custom = false, ladderRes = ladderRes(id))
         }
         return core + cat.custom.orEmpty().filter { it.kind == "video" }.map(::customEngine)
     }
@@ -155,7 +162,7 @@ object ModelPicker {
 fun ComposerDraft.pinEngine(e: PickerEngine?, res: String? = null): ComposerDraft {
     if (e == null) return copy(engineModel = null, resolution = null)
     val q = if (e.tiers.isEmpty() || quality in e.tiers) quality else e.tiers.first()
-    var d = copy(engineModel = e.id, resolution = res ?: e.resolution, quality = q)
+    var d = copy(engineModel = e.id, resolution = res ?: e.resolutionOn(q), quality = q)
     val lo = e.minSeconds; val hi = e.maxSeconds
     if (lo != null && hi != null && hi >= lo) d = d.copy(duration = d.duration.coerceIn(lo, hi))
     else if (hi != null) d = d.copy(duration = d.duration.coerceAtMost(hi))
@@ -172,7 +179,7 @@ fun ComposerDraft.modelLabel(cat: SuiteCatalog?): String =
 /** The tablet menu's items: Auto, then every engine as "Name · 720p · $0.065/s". Index 0 is Auto. */
 fun modelMenuItems(d: ComposerDraft, groups: PickerGroups): List<Pair<String, Boolean>> =
     listOf("Auto" to (d.engineModel == null)) + groups.all.map { e ->
-        (listOf(e.name, e.price).filter { it.isNotBlank() }.joinToString(" · ") + if (e.custom) " (yours)" else "") to (e.id == d.engineModel)
+        (listOf(e.name, e.price(e.resolutionOn(d.quality))).filter { it.isNotBlank() }.joinToString(" · ") + if (e.custom) " (yours)" else "") to (e.id == d.engineModel)
     }
 
 /**
@@ -194,13 +201,13 @@ fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngin
             list.forEach { e ->
                 val on = e.id == d.engineModel
                 val detail = listOfNotNull(e.tier?.takeIf { d.quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(" · ")
-                ModelRow(e.name, detail, e.price(if (on) d.resolution ?: e.resolution else e.resolution), on) { onPick(e, null) }
+                ModelRow(e.name, detail, e.price(if (on) d.resolution ?: e.resolutionOn(d.quality) else e.resolutionOn(d.quality)), on) { onPick(e, null) }
                 // The pinned engine's resolutions, each with its own price per second.
                 if (on && e.resolutions.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 14.dp, bottom = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     e.resolutions.forEach { r ->
                         val label = r.label.substringBefore(' ').ifBlank { r.id } + (e.perSecAt(r.id)?.let { " · ${ModelPicker.rate(it)}/s" } ?: "")
-                        DarkChip(label, r.id == (d.resolution ?: e.resolution)) { onPick(e, r.id) }
+                        DarkChip(label, r.id == (d.resolution ?: e.resolutionOn(d.quality))) { onPick(e, r.id) }
                     }
                 }
             }

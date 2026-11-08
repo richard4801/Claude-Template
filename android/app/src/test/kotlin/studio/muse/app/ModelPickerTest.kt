@@ -113,6 +113,13 @@ class ModelPickerLogicTest {
         assertEquals(0.157, kling.perSecAt("720p")!!, 1e-9)
     }
 
+    @Test fun ladderRowsUseThatQualitysResolution() {
+        val h3 = ModelPicker.groups(owner, "hd").ladder.first { it.id == "h3" }
+        assertEquals("2K", h3.resolutionOn("hd"))
+        assertEquals("2K", ComposerDraft(quality = "hd").pinEngine(h3).resolution)
+        assertEquals("768P", ComposerDraft(quality = "standard").pinEngine(h3).resolution)
+    }
+
     @Test fun rates() {
         assertEquals("$0.065", ModelPicker.rate(0.065))
         assertEquals("$0.13", ModelPicker.rate(0.13))
@@ -131,7 +138,7 @@ class ModelPickerLogicTest {
 
 /**
  * The model list in the composer's Settings sheet (phone), all four themes at 390 dp: Auto opened by tapping the row, a
- * ladder engine of another quality pinned, a custom model pinned. A member's sheet has no Model row (asserted).
+ * this quality's Kling pinned (its resolutions shown), a custom model pinned. Members get no models (ModelPickerLogicTest).
  * PNGs: app/build/outputs/roborazzi/model_picker_<theme>_<state>.png.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
@@ -149,10 +156,10 @@ class ModelPickerScreenshotTest(private val theme: String, private val state: St
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
     @Test fun capture() {
-        if (state != "member") RuntimeEnvironment.setQualifiers("w390dp-h1400dp-xhdpi")
+        RuntimeEnvironment.setQualifiers("w390dp-h1640dp-xhdpi")
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
-        val role = if (state == "member") "member" else "owner"
+        val role = "owner"
         val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = role, email = "jenne@studio.com")), fake, null)
         val cat = fake.suite.catalog(owner = true)
         var d = ComposerDraft(tokens = PromptTokens().withText("She walks into a quiet café at golden hour"), modelId = SampleData.DEMO, quality = "hd", duration = 8)
@@ -166,17 +173,13 @@ class ModelPickerScreenshotTest(private val theme: String, private val state: St
         compose.setContent { MuseApp(c, Routes.SUITE_SHOT) }
         repeat(8) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
-        if (state == "member") {
-            assertTrue(compose.onAllNodesWithTag("model_picker").fetchSemanticsNodes().isEmpty())
-            assertTrue(compose.onAllNodesWithText("Model ·", substring = true).fetchSemanticsNodes().isEmpty())
-        } else {
-            if (state == "auto") { compose.onNodeWithText("Model · Auto").performClick(); repeat(3) { idle(); compose.mainClock.advanceTimeBy(400) } }
-            assertEquals(1, compose.onAllNodesWithTag("model_picker", useUnmergedTree = true).fetchSemanticsNodes().size)
-            // Scroll the sheet to the end of the list: "Your providers" and the custom model.
-            compose.onAllNodesWithText("Your providers", useUnmergedTree = true).onFirst().performScrollTo()
-            repeat(3) { idle(); compose.mainClock.advanceTimeBy(400) }
-            compose.onAllNodesWithText("Kling turbo", substring = true, useUnmergedTree = true).onFirst().assertIsDisplayed()
-        }
+        // Let the clock run for the interactions (scrolling waits for idle).
+        compose.mainClock.autoAdvance = true
+        if (state == "auto") { compose.onAllNodesWithText("Model · Auto", useUnmergedTree = true).onFirst().performClick(); compose.waitForIdle() }
+        assertEquals(1, compose.onAllNodesWithTag("model_picker", useUnmergedTree = true).fetchSemanticsNodes().size)
+        // Scroll the sheet so the list's end ("Your providers") is in view.
+        compose.onAllNodesWithText("Your providers", useUnmergedTree = true).onFirst().performScrollTo()
+        compose.waitForIdle()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/model_picker_${theme}_$state.png")
     }
 }

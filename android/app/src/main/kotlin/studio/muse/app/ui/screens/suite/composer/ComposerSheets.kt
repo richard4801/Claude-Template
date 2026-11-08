@@ -338,7 +338,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
         // A model pinned by the owner sets the quality: every tier would show the same price, so say so once (owner bug).
         val pinned = x.owner && d.engineModel != null
         if (pinned) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            T("Model pinned: ${d.modelLabel(x.catalog)}. Quality is set by the model${x.estimate?.let { ", ${ComposerPrice.short(it)}" } ?: ""}.",
+            T("Model pinned: ${d.modelLabel(x.catalog)}. The price follows the model${x.estimate?.let { ": ${ComposerPrice.short(it)}" } ?: ""}.",
                 m.scale.caption, m.t.ink, Modifier.weight(1f), maxLines = 3)
             Box(Modifier.heightIn(min = 48.dp).press { x.update { it.pinEngine(null).fit(x.catalog) } }.semantics { role = Role.Button }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
                 T("Unpin", m.scale.label, m.link, maxLines = 1)
