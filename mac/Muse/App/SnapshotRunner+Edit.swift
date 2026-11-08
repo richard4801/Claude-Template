@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import AVFoundation
 import MuseCore
 
@@ -167,152 +168,176 @@ extension SnapshotRunner {
     // MARK: Every control (owner request 2026-11-08: "vet the entire Edit function")
 
     /// Presses every button, checkbox, tab and radio button of the Edit suite, and nudges every slider one step, through the
-    /// app's own accessibility tree (so each control's real action runs, closures and all). It explores as panels appear
-    /// (a tab press reveals its panel's controls), handles sheets (works inside them, then closes them) and comes back if
-    /// a control leaves the editor. Each control is logged before it is used. Skipped on purpose, and logged as SKIP:
-    /// controls that open a blocking system panel (file import, the save panel behind the sheet's Export, the microphone)
-    /// and menus (their tracking loop would block this run).
+    /// Accessibility API on this app's own process (AXUIElementCreateApplication(getpid()), queried off the main thread so
+    /// the main thread can answer): each control's real action runs, closures and all. SwiftUI only builds its
+    /// accessibility tree for an accessibility client, so in-process NSAccessibility calls see an empty window.
+    /// It explores as panels appear (a tab press reveals its panel), works inside sheets and closes them, and comes back if a
+    /// control leaves the editor. Each control is logged before it is used. Skipped on purpose (logged as SKIP): controls
+    /// that open a blocking system panel (file import, the save panel behind the sheet's Export, the microphone) and menus.
     static func controlsCheck(_ store: AppStore, takeId: String, note: (String) -> Void) async {
         note("START controls \(takeId)")
+        let ax = AXWalker()
+        note("AX trusted \(AXIsProcessTrusted())")
         store.openEdit(takeId: takeId)
-        // Wait for the editor (its timeline ruler) up to 25 s, then say what the accessibility tree shows.
+        var ready = false
         for _ in 0..<50 {
             try? await Task.sleep(for: .seconds(0.5))
-            if store.screen == .edit, axFind(mainWindow?.contentView, label: "Timeline ruler") { break }
+            let found = await ax.find("Timeline ruler")
+            if store.screen == .edit, found { ready = true; break }
         }
         capture(SnapshotRunner.dir!.appendingPathComponent("mac_edit_controls_start.png"))
-        let stats = axStats(mainWindow?.contentView)
-        note("AX nodes \(stats.nodes), actionable \(stats.actionable), screen \(store.screen), editTakeId \(store.suite.editTakeId ?? "nil"), sample: \(stats.sample)")
-        let deny = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
-                    "Back", "Close editor", "Translate…"]
-        let denyInSheet = ["Export", "Save to Library"]
+        let st = await ax.stats()
+        note("AX nodes \(st.nodes), actionable \(st.actionable), error \(st.error), screen \(store.screen), sample: \(st.sample)")
+        guard ready else { note("FAIL controls: the editor (its Timeline ruler) never appeared to accessibility on \(takeId)"); return }
+        let deny: Set<String> = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
+                                 "Back", "Close editor", "Translate…"]
+        let denyInSheet: Set<String> = ["Export", "Save to Library"]
+        let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()
         var presses = 0, nudges = 0
-        func inEditor() -> Bool { store.screen == .edit && axFind(mainWindow?.contentView, label: "Timeline ruler") }
-        guard inEditor() else { note("FAIL controls: the editor didn't open on \(takeId)"); return }
-        for _ in 0..<600 {
-            guard let w = mainWindow else { break }
-            let sheet = w.attachedSheet
-            let root: NSView? = sheet?.contentView ?? w.contentView
-            let all = axControls(root)
-            let next = all.first { c in
-                let key = (sheet == nil ? "" : "sheet:") + c.key
-                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) { return false }
-                if deny.contains(where: { c.label == $0 }) || (sheet != nil && denyInSheet.contains(c.label)) || c.isMenu {
-                    if !skipped.contains(c.key) { skipped.insert(c.key); note("SKIP \(c.role) \(c.label)") }
-                    return false
+        func inEditor() async -> Bool {
+            guard store.screen == .edit else { return false }
+            return await ax.find("Timeline ruler")
+        }
+        for _ in 0..<700 {
+            let scan = await ax.controls()
+            let inSheet = scan.inSheet
+            var pick: AXWalker.Control?
+            for c in scan.controls {
+                let key = (inSheet ? "sheet:" : "") + c.key
+                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) { continue }
+                if deny.contains(c.label) || (inSheet && denyInSheet.contains(c.label)) || c.isMenu {
+                    skipped.insert(c.key)
+                    note("SKIP \(c.role) \(c.label)")
+                    continue
                 }
-                return true
+                pick = c
+                break
             }
-            guard let c = next else {
-                if let sheet {
-                    // Done with this sheet: close it like a person would.
+            guard let c = pick else {
+                if inSheet {
                     note("CLOSE sheet")
-                    if let close = all.first(where: { ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"].contains($0.label) }) {
-                        _ = close.press()
-                    } else { w.endSheet(sheet) }
+                    if let close = scan.controls.first(where: { closers.contains($0.label) }) { await ax.press(close) }
                     try? await Task.sleep(for: .seconds(0.8))
-                    if w.attachedSheet === sheet { w.endSheet(sheet) }
+                    let stillSheet = await ax.controls().inSheet
+                    if stillSheet, let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
+                    try? await Task.sleep(for: .seconds(0.4))
                     continue
                 }
                 break
             }
-            let key = (sheet == nil ? "" : "sheet:") + c.key
-            used.insert(key)
+            used.insert((inSheet ? "sheet:" : "") + c.key)
             note("\(c.isSlider ? "NUDGE" : "PRESS") \(c.role) \(c.label)")
-            if c.isSlider { _ = c.increment(); nudges += 1 } else { _ = c.press(); presses += 1 }
+            if c.isSlider { await ax.increment(c); nudges += 1 } else { await ax.press(c); presses += 1 }
             try? await Task.sleep(for: .seconds(0.45))
-            // A control that leaves the editor (navigation): note it, never press it again, and come back.
-            if mainWindow?.attachedSheet == nil, !inEditor() {
+            let stillIn = await inEditor()
+            if mainWindow?.attachedSheet == nil, !stillIn {
                 left.insert(c.key)
                 note("LEFT the editor via \(c.label); reopening")
                 store.openEdit(takeId: nil)
                 try? await Task.sleep(for: .seconds(0.5))
                 store.openEdit(takeId: takeId)
-                try? await Task.sleep(for: .seconds(8))
-                if !inEditor() { note("FAIL controls: couldn't get back into the editor"); return }
+                var back = false
+                for _ in 0..<40 {
+                    try? await Task.sleep(for: .seconds(0.5))
+                    let ok = await inEditor()
+                    if ok { back = true; break }
+                }
+                if !back { note("FAIL controls: couldn't get back into the editor"); return }
             }
         }
         note("CONTROLS pressed \(presses), sliders nudged \(nudges), skipped \(skipped.count), left the editor via \(left.count)")
-        // The tree must really have been walked: the Edit suite has well over 40 controls across its tabs.
-        if presses + nudges < 40 { note("FAIL controls: only \(presses + nudges) controls found (accessibility tree not reachable?)") }
-        if let s = mainWindow?.attachedSheet { mainWindow?.endSheet(s) }
+        if presses + nudges < 40 { note("FAIL controls: only \(presses + nudges) controls found") }
+        if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
         store.openEdit(takeId: nil)
         try? await Task.sleep(for: .seconds(1))
         note("DONE controls \(takeId)")
     }
+}
 
-    /// One actionable accessibility element.
-    struct AXControl {
-        let element: AnyObject
+/// An Accessibility API client on this app's own process. Every call runs off the main thread (the app answers on it).
+final class AXWalker: @unchecked Sendable {
+    struct Control: @unchecked Sendable {
+        let element: AXUIElement
         let role: String
         let label: String
         var key: String { "\(role)|\(label)" }
-        var isSlider: Bool { role == NSAccessibility.Role.slider.rawValue }
-        var isMenu: Bool { role == NSAccessibility.Role.popUpButton.rawValue || role == NSAccessibility.Role.menuButton.rawValue }
-        // Dynamic Objective-C calls: the accessibility methods exist on every AppKit / SwiftUI accessibility element.
-        func press() -> Bool { element.accessibilityPerformPress?() ?? false }
-        func increment() -> Bool { element.accessibilityPerformIncrement?() ?? false }
+        var isSlider: Bool { role == "AXSlider" }
+        var isMenu: Bool { role == "AXPopUpButton" || role == "AXMenuButton" }
+    }
+    private let app: AXUIElement
+    static let actionable: Set<String> = ["AXButton", "AXCheckBox", "AXRadioButton", "AXSlider", "AXPopUpButton", "AXMenuButton", "AXDisclosureTriangle"]
+
+    init() {
+        app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 3)
     }
 
-    static let actionable: Set<NSAccessibility.Role> = [.button, .checkBox, .radioButton, .slider, .popUpButton, .menuButton, .disclosureTriangle]
+    private func value(_ e: AXUIElement, _ a: String) -> CFTypeRef? {
+        var v: CFTypeRef?
+        return AXUIElementCopyAttributeValue(e, a as CFString, &v) == .success ? v : nil
+    }
+    private func string(_ e: AXUIElement, _ a: String) -> String? { (value(e, a) as? String).flatMap { $0.isEmpty ? nil : $0 } }
+    private func children(_ e: AXUIElement) -> [AXUIElement] { (value(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
+    /// The main window, or its sheet when one is up.
+    private func root() -> (AXUIElement?, Bool) {
+        guard let w = value(app, kAXMainWindowAttribute) ?? value(app, kAXFocusedWindowAttribute) else { return (nil, false) }
+        let win = w as! AXUIElement
+        if let sheets = value(win, "AXSheets") as? [AXUIElement], let s = sheets.first { return (s, true) }
+        return (win, false)
+    }
+    private func walk(_ e: AXUIElement, _ depth: Int, _ visit: (AXUIElement) -> Bool) {
+        guard depth < 90, visit(e) else { return }
+        for k in children(e) { walk(k, depth + 1, visit) }
+    }
 
-    /// Every enabled actionable element under `root`, in tree order (labels from the label, title or help text).
-    static func axControls(_ root: Any?) -> [AXControl] {
-        var out: [AXControl] = []
-        var seen = Set<ObjectIdentifier>()
-        func walk(_ x: Any, _ depth: Int) {
-            guard depth < 80 else { return }
-            let e = x as AnyObject
-            let id = ObjectIdentifier(e)
-            guard !seen.contains(id) else { return }
-            seen.insert(id)
-            if let role = e.accessibilityRole?() ?? nil, actionable.contains(role), (e.isAccessibilityEnabled?() ?? true) {
-                let label = [e.accessibilityLabel?() ?? nil, e.accessibilityTitle?() ?? nil, e.accessibilityHelp?() ?? nil].compactMap { $0 }.first { !$0.isEmpty } ?? ""
-                if !label.isEmpty { out.append(AXControl(element: e, role: role.rawValue, label: label)) }
+    func controls() async -> (controls: [Control], inSheet: Bool) {
+        await Task.detached { [self] in
+            let (r, sheet) = root()
+            guard let r else { return ([], false) }
+            var out: [Control] = []
+            walk(r, 0) { e in
+                if let role = string(e, kAXRoleAttribute), Self.actionable.contains(role), (value(e, kAXEnabledAttribute) as? Bool) ?? true,
+                   let label = string(e, kAXDescriptionAttribute) ?? string(e, kAXTitleAttribute) ?? string(e, kAXHelpAttribute) {
+                    out.append(Control(element: e, role: role, label: label))
+                }
+                return true
             }
-            for k in (e.accessibilityChildren?() ?? nil) ?? [] { walk(k, depth + 1) }
-        }
-        if let root { walk(root, 0) }
-        return out
+            return (out, sheet)
+        }.value
     }
 
-    /// How big the accessibility tree is, and a sample of roles and labels (diagnostics for the CI log).
-    static func axStats(_ root: Any?) -> (nodes: Int, actionable: Int, sample: String) {
-        var nodes = 0, act = 0
-        var sample: [String] = []
-        var seen = Set<ObjectIdentifier>()
-        func walk(_ x: Any, _ depth: Int) {
-            guard depth < 80 else { return }
-            let e = x as AnyObject
-            let id = ObjectIdentifier(e)
-            guard !seen.contains(id) else { return }
-            seen.insert(id)
-            nodes += 1
-            let role = (e.accessibilityRole?() ?? nil)?.rawValue ?? "-"
-            let label = (e.accessibilityLabel?() ?? nil) ?? (e.accessibilityTitle?() ?? nil) ?? ""
-            if let r = e.accessibilityRole?() ?? nil, actionable.contains(r) { act += 1 }
-            if sample.count < 25, !label.isEmpty || role != "-" { sample.append("\(role):\(label.prefix(24))") }
-            for k in (e.accessibilityChildren?() ?? nil) ?? [] { walk(k, depth + 1) }
-        }
-        if let root { walk(root, 0) }
-        return (nodes, act, sample.joined(separator: " | "))
+    func find(_ label: String) async -> Bool {
+        await Task.detached { [self] in
+            guard let r = root().0 else { return false }
+            var found = false
+            walk(r, 0) { e in
+                if found { return false }
+                if string(e, kAXDescriptionAttribute) == label { found = true; return false }
+                return true
+            }
+            return found
+        }.value
     }
 
-    /// Whether an element labelled `label` is under `root`.
-    static func axFind(_ root: Any?, label: String) -> Bool {
-        var found = false
-        var seen = Set<ObjectIdentifier>()
-        func walk(_ x: Any, _ depth: Int) {
-            guard !found, depth < 80 else { return }
-            let e = x as AnyObject
-            let id = ObjectIdentifier(e)
-            guard !seen.contains(id) else { return }
-            seen.insert(id)
-            if (e.accessibilityLabel?() ?? nil) == label { found = true; return }
-            for k in (e.accessibilityChildren?() ?? nil) ?? [] { walk(k, depth + 1) }
-        }
-        if let root { walk(root, 0) }
-        return found
+    func press(_ c: Control) async { await Task.detached { _ = AXUIElementPerformAction(c.element, kAXPressAction as CFString) }.value }
+    func increment(_ c: Control) async { await Task.detached { _ = AXUIElementPerformAction(c.element, kAXIncrementAction as CFString) }.value }
+
+    func stats() async -> (nodes: Int, actionable: Int, error: String, sample: String) {
+        await Task.detached { [self] in
+            var v: CFTypeRef?
+            let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &v)
+            guard let r = root().0 else { return (0, 0, "\(err.rawValue)", "") }
+            var nodes = 0, act = 0
+            var sample: [String] = []
+            walk(r, 0) { e in
+                nodes += 1
+                let role = string(e, kAXRoleAttribute) ?? "-"
+                if Self.actionable.contains(role) { act += 1 }
+                if sample.count < 25, let l = string(e, kAXDescriptionAttribute) ?? string(e, kAXTitleAttribute) { sample.append("\(role):\(l.prefix(24))") }
+                return true
+            }
+            return (nodes, act, "\(err.rawValue)", sample.joined(separator: " | "))
+        }.value
     }
 }
