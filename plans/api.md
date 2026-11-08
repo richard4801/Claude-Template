@@ -1260,7 +1260,8 @@ Slot {
   pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
 }
 Transition { atSec, from, to, kind: "cut"|"flash"|"whip"|"zoom"|"fade"|"crossfade"|"glitch"|"unknown", durationSec, confidence }
-TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker", animIn, animOut, confidence }
+// glitch: a burst of 3+ hard changes in under 0.6 s (the picture flickering between shots). One that returns to the same shot has from = to (an effect inside the shot, logged as an editor gap).
+TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker" /* nearest editor font to the read words' shape; "sans" when unsure */, animIn: "cut"|"fade"|"typewriter"|null, animOut: "cut"|"fade"|null, animInSec?, animOutSec? /* how long the fade or typing takes */, confidence }
 ```
 **Size caps** (a recipe stays under about 256 KB): speed curves at most 48 points and camera keys at most 64 per slot (thinned, ends kept), at most 100 text items. An `unknown` transition also adds a gap.
 
@@ -1389,7 +1390,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
 - **Freezes** (`speed.freeze {t, durationSec}`, from the analysis): the clip plays at the editor's slowest, 0.1×, for the freeze's length at its moment, so the held frame barely moves. The editor has no speed 0. The cuts don't move. Only freezes without a known place are logged as a gap.
 - **Action peaks** (plan §3, `options.peaks`, on by default): each take starts where its own strongest action peak, found free with `find_action_peaks`'s detector and cached per take, plays at the moment of the slot's strongest peak. The cuts don't move. A peak that would push the range past the take's end falls back to the next one, else the take starts at 0. A note says where each take starts.
 - **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
-- **Text items** go on a text track. Text whose words weren't read says "Text".
+- **Text items** go on a text track. Text whose words weren't read says "Text". A fade or typewriter in and a fade out become the item's `animIn`/`animOut` (length 0.1–2 s), and the matched font its `style.font`.
 - **The Look:** the nearest palette's LUT at 0.8, when its distance is under 0.4.
 - **Missing slots** are left out and listed in `missing`.
 - **Revision:** `baseRevision` must be current (`409` otherwise).

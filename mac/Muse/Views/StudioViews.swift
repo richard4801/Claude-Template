@@ -573,6 +573,7 @@ struct StudioSettingsSection: View {
                 RButton("Save caps", kind: .action, small: true) { saveCaps(s) }
             }
             .padding(.top, Space.s4)
+            EditorHelpersSettings()
         } else if store.loading {
             SectionTitle("Spend caps", top: 0)
             SkeletonRows(count: 3, thumb: false)
@@ -595,6 +596,50 @@ struct StudioSettingsSection: View {
         capDay = ""
         capUser = ""
         store.showToast("Caps saved")
+    }
+}
+
+// MARK: - Settings → Studio → AI editing helpers
+
+/// The paid AI editing helpers (captions, background removal, voice clean-up): the owner's switch, the studio's daily
+/// limit on them and today's spend (GET/PATCH /v1/editor/settings). Free helpers (silence cuts, beats) aren't affected.
+struct EditorHelpersSettings: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var limit = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SectionTitle("AI editing helpers")
+            if let e = store.editorSettings {
+                SettingRow("AI editing helpers", hint: "Captions, background removal and voice clean-up in Edit. Off: they're hidden and nothing is charged.") {
+                    RSwitch(label: "AI editing helpers", isOn: Binding(get: { e.isOn }, set: { store.setPaidHelpers($0) }))
+                }
+                SettingRow("Daily limit", hint: e.todayLine) {
+                    HStack(spacing: Space.s2) {
+                        DollarField(placeholder: String(format: "%.2f", e.capPerDayUsd ?? 5), text: $limit) { saveLimit() }
+                        RButton("Save limit", kind: .plain, small: true) { saveLimit() }
+                    }
+                }
+                Text("Prices shown in Edit already include the studio's markup. Over the limit, new helper jobs wait until tomorrow (UTC).")
+                    .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            } else if let err = store.editorSettingsError {
+                InlineNotice(err, tone: .caution)
+                RButton("Try again", kind: .plain, small: true) { Task { await store.loadEditorSettings() } }
+            } else {
+                SkeletonRows(count: 2, thumb: false)
+            }
+        }
+        .task { await store.loadEditorSettings() }
+    }
+
+    private func saveLimit() {
+        guard let v = EditorSettings.parseLimit(limit) else {
+            store.showToast("Type a daily limit in dollars, like 5")
+            return
+        }
+        store.setEditorDailyLimit(v)
+        limit = ""
     }
 }
 

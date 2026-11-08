@@ -219,7 +219,9 @@ struct FeedTakeCard: View {
             Button("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
             if !photo { Button("Use as start frame") { store.useAsStartFrame(take) } }
             Button(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
+            if ExtendSource.take(take) != nil { Button("Extend") { store.openExtend(take) } }
             if take.isVideo { Button("Open in Edit") { store.openEdit(takeId: take.id) } }
+            Button("Post…") { store.openPostSheet(take) }
         }
         Button("Open") { open() }
     }
