@@ -263,14 +263,21 @@ interface MuseApi {
     suspend fun matchReference(id: String, modelId: String?): Unit = throw ApiException("not_found", "This studio server can't build recipes yet")
     suspend fun referenceFill(id: String): studio.muse.core.edit.RecreateFill = throw ApiException("not_found", "This studio server can't build recipes yet")
     /** A shot's price as a new shot. Nothing is held. */
-    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
+    /** [method]: "swap" | "generate" (null: the server's default, swap when it can run); [keepBackground]: swap only. */
+    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null): studio.muse.core.edit.RecreateSlotEstimate =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Makes a shot: an ordinary Suite job, held and charged. Only after the person confirmed the total. */
-    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateFillStart =
+    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null): studio.muse.core.edit.RecreateFillStart =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
         throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** G8: the price of having Claude (on the server) write every shot's brief. Nothing is held. */
+    suspend fun estimateReferenceBriefs(id: String): studio.muse.core.edit.RecreateBriefsEstimate =
+        throw ApiException("not_found", "This studio server can't write shot briefs yet")
+    /** G8: writes them (charged; the caller confirmed the price) and returns the updated reference. */
+    suspend fun writeReferenceBriefs(id: String): studio.muse.core.edit.RecipeReference =
+        throw ApiException("not_found", "This studio server can't write shot briefs yet")
     /**
      * Fix shot (WS1 a7302fb): swaps one shot's clip in the built edit for [take] (a take id, or a finished fill's job id),
      * keeping its timing, transition, ramp, camera moves and look, and the owner's other edits. 409 slot_not_in_edit:
@@ -296,6 +303,24 @@ interface MuseApi {
     suspend fun setModelDefaultRig(modelId: String, rig: SuiteRig?): Model = throw ApiException("not_found", "This server doesn't have default rigs yet")
     /** The takes rail: newest first, queued/running/failed jobs as one card each, every done take and photo as its own. */
     suspend fun suiteFeed(q: SuiteFeedQuery = SuiteFeedQuery()): SuiteFeedPage = throw ApiException("not_found", "This server doesn't have the takes feed yet")
+
+    // Build step 3 (plans/api.md "Library collections and the Suite queue"). Defaults: a server without them.
+    /** Queue a shot to run later: checked and priced, nothing held. [req] is the body of POST /v1/suite/shots. */
+    suspend fun queueSuiteShot(req: SuiteShotRequest): QueuedShot = throw ApiException("not_found", "This server can't queue shots yet")
+    suspend fun suiteQueue(): List<QueuedShot> = emptyList()
+    /** Today's price for a queued shot (shown, then confirmed). */
+    suspend fun estimateQueuedShot(id: String): QueuedEstimate = throw ApiException("not_found", "This server can't queue shots yet")
+    /** Runs it, as POST /v1/suite/shots would (held and charged); the caller confirmed the price. */
+    suspend fun runQueuedShot(id: String): QueuedRun = throw ApiException("not_found", "This server can't queue shots yet")
+    suspend fun deleteQueuedShot(id: String): Unit = throw ApiException("not_found", "This server can't queue shots yet")
+    suspend fun libraryCollections(): List<LibraryCollection> = emptyList()
+    suspend fun createLibraryCollection(name: String, takeIds: List<String> = emptyList()): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun renameLibraryCollection(id: String, name: String): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun deleteLibraryCollection(id: String): Unit = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun addToLibraryCollection(id: String, takeIds: List<String>): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun removeFromLibraryCollection(id: String, takeIds: List<String>): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    /** The collections a take or photo is in (its detail). */
+    suspend fun takeCollections(takeId: String): List<LibraryCollection> = emptyList()
 
     // AI suite · Photo tool (workstream 3, plans/api.md "Photo tool"): Photoshoot on the composer. Free estimate; create holds and makes the stills.
     suspend fun photoEstimate(req: PhotoRequest): PhotoEstimate = throw ApiException("not_found", "This server doesn't have the Photo tool yet")

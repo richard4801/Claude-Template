@@ -86,6 +86,7 @@ import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.suite.HardwareImage
 import studio.muse.app.ui.screens.suite.undoRig
+import studio.muse.app.ui.screens.suite.queueShot
 import studio.muse.app.ui.screens.suite.applyDefaultRigIfAny
 import studio.muse.app.ui.screens.suite.ComposerRigRow
 import studio.muse.app.ui.screens.suite.InputSlotUploader
@@ -312,6 +313,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     Box(Modifier.heightIn(min = 48.dp).press { showFeed = !showFeed }.padding(horizontal = 12.dp).semantics { role = Role.Button },
                         contentAlignment = Alignment.Center) { T(if (showFeed) "Composer" else "Takes", muse.scale.label, muse.t.ink, maxLines = 1) }
                     MoreMenu(listOfNotNull(
+                        // Build step 3: save this shot to run later (priced, nothing held; Run from Takes).
+                        if (live && problem == null && photo == null && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS)
+                            MenuItem("clock", "Queue this shot") { scope.launch { store.queueShot(req) } } else null,
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
                         if (owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                     ))
@@ -346,6 +350,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
             upscaleFor?.let { id -> UpscaleSheet(id, wide) { j -> nav.go(Routes.suiteTake(j.id)) } }
             SuiteCompareOverlay(wide) { showFeed = false }
+            SuiteRunConfirm { j -> nav.go(Routes.suiteTake(j)) }
         }
     }
 }

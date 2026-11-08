@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -75,6 +76,13 @@ class RecreateActions(
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
     val onRemake: (String) -> Unit = {},
     val onCast: (String) -> Unit = {},
+    /** G8: "Write the shot briefs" (asks with its price), then the yes. */
+    val onBriefs: () -> Unit = {},
+    val onBriefsConfirm: () -> Unit = {},
+    val onBriefsCancel: () -> Unit = {},
+    /** G2: how a shot to make is made ("swap" | "generate"), and whether a swap keeps the reference's setting. */
+    val onMethod: (String, String) -> Unit = { _, _ -> },
+    val onKeepBackground: (String, Boolean) -> Unit = { _, _ -> },
     val onExport: () -> Unit = {},
     /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
     val onClaude: (() -> Unit)? = null,
@@ -100,18 +108,20 @@ class RecreateMedia(
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
 private val LocalRemake = androidx.compose.runtime.staticCompositionLocalOf<(String) -> Unit> { {} }
+private val LocalActions = androidx.compose.runtime.staticCompositionLocalOf { RecreateActions() }
 
 /** The whole screen as a function of [ui] (screenshots render it). [picture]: the reference's poster, when the server has it. */
 @Composable
 fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap? = null, picking: String? = null, media: RecreateMedia = RecreateMedia()) {
     var pick by remember(picking) { mutableStateOf(picking) }
-    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media, LocalRemake provides a.onRemake) { ScreenBox(statusPad = true) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media, LocalRemake provides a.onRemake, LocalActions provides a) { ScreenBox(statusPad = true) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 720.dp
             val pickTake: (String) -> Unit = { pick = it }
             if (wide) TabletLayout(ui, a, picture, pickTake) else PhoneLayout(ui, a, picture, pickTake)
             ui.confirmSlots?.let { BuildConfirm(ui, it, a) }
             ui.export?.let { ExportSheet(it, a) }
+            if (ui.askBriefs) ui.briefs?.let { b -> BriefsConfirm(b, a) }
             pick?.let { s -> TakePicker(ui.takes, onPick = { t -> a.onUseTake(s, t); pick = null }, onClose = { pick = null }) }
         }
     } }
@@ -499,6 +509,7 @@ private fun ShotPanel(ui: RecreateBuildUi, s: RecipeSlot, index: Int, pickTake: 
 private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Unit, onRetry: () -> Unit) {
     val m = muse
     val remakeShot = LocalRemake.current
+    val acts = LocalActions.current
     val f = ui.slotFill(s.id)
     val state = f?.state ?: "empty"
     val failed = ui.fillErrors[s.id]
@@ -513,7 +524,9 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
         making -> "Being made with your model. You can leave this page; it carries on."
         state == "ready" -> "Generated for this shot."
         f?.reason != null -> f.reason!!
-        state == "to_generate" -> "Made with your model: ${String.format(java.util.Locale.ROOT, "%.1f", s.lengthSec)} s, ${ui.recipe.aspect ?: "9:16"}."
+        state == "to_generate" && ui.estimates[s.id]?.method == "swap" ->
+            "Your model is swapped into the reference's own shot, ${suiteTime(ui.estimates[s.id]?.segmentStart ?: s.startSec)}–${suiteTime(ui.estimates[s.id]?.segmentEnd ?: s.endSec)}. Its camera, speed and look come with it."
+        state == "to_generate" -> "A new shot made with your model: ${String.format(java.util.Locale.ROOT, "%.1f", s.lengthSec)} s, ${ui.recipe.aspect ?: "9:16"}."
         state == "matched" -> "From one of your takes."
         else -> "Pick a take for this shot."
     }
@@ -527,6 +540,28 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
             }
         }
         T(line, m.scale.caption, if (cant != null) m.roles.caution else m.roles.ink2)
+        // G2: swap into the reference's own shot (the default) or generate a new one; a swap can keep the reference's setting.
+        if (state == "to_generate" && !making && ui.fill != null) {
+            val e = ui.estimates[s.id]
+            val method = ui.methods[s.id] ?: e?.method ?: "swap"
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                studio.muse.app.ui.screens.edit.learn.LearnChip("Swap into the reference shot", on = method == "swap") { if (method != "swap") acts.onMethod(s.id, "swap") }
+                studio.muse.app.ui.screens.edit.learn.LearnChip("Generate a new shot", on = method == "generate") { if (method != "generate") acts.onMethod(s.id, "generate") }
+            }
+            e?.swapUnavailable?.let { T(it, m.scale.caption, m.roles.caution) }
+            if (method == "swap" && e?.method == "swap") {
+                val keep = ui.keepBackground[s.id] ?: e.keepBackground
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press { acts.onKeepBackground(s.id, !keep) }
+                    .semantics(mergeDescendants = true) { role = Role.Switch; stateDescription = if (keep) "On" else "Off" }, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        T(if (keep) "Keep the reference's setting" else "Use your own setting", m.scale.label, m.roles.ink, maxLines = 1)
+                        T(if (keep) "Your model, in their place" else "The place from this shot's brief", m.scale.caption, m.roles.ink2, maxLines = 1)
+                    }
+                    studio.muse.app.ui.components.Toggle(keep, { acts.onKeepBackground(s.id, !keep) })
+                }
+            }
+            if (method == "generate" && e?.promptFrom != null && e.promptFrom != "brief") T("Write a brief for this shot first for a closer match.", m.scale.caption, m.roles.ink2)
+        }
         if (making) ShotProgress(ui.progress(s.id))
         if (ui.fill != null && !making) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (failed != null) Quiet("Try again", enabled = !ui.buildBusy, onClick = onRetry)
@@ -592,6 +627,12 @@ private fun WholeEdit(ui: RecreateBuildUi) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T("The whole edit", m.scale.heading, m.roles.ink)
         r.summary?.let { T(it, m.scale.caption, m.roles.ink) }
+        // G8: shots without a brief: Claude can write them (a quiet button with its price), or says why it can't here.
+        ui.briefs?.let { b ->
+            if (ui.writingBriefs) T("Writing the shot briefs", m.scale.caption, m.roles.ink2)
+            else if (b.available) Quiet(b.label, onClick = LocalActions.current.onBriefs)
+            else b.reason?.let { T(it, m.scale.caption, m.roles.ink2) }
+        }
         T(listOfNotNull(if (r.slots.size == 1) "1 shot" else "${r.slots.size} shots", "${Math.round(r.cutsPerMinute)} cuts a minute", r.beats?.bpm?.let { "${Math.round(it)} BPM" }).joinToString(" · "),
             m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
     }
@@ -606,6 +647,24 @@ private fun WholeEdit(ui: RecreateBuildUi) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 T(g.note ?: "Not supported yet", m.scale.label, m.roles.caution)
                 T(g.atSec?.let { "${g.what} at ${suiteTime(it)}" } ?: g.what, m.scale.caption, m.roles.ink2)
+            }
+        }
+    }
+}
+
+/** G8: the one confirmation before Claude (on the server) writes the shot briefs. */
+@Composable
+private fun BriefsConfirm(b: studio.muse.core.edit.RecreateBriefsEstimate, a: RecreateActions) {
+    val m = muse
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .32f)).press(onClick = a.onBriefsCancel), contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(24.dp).widthIn(max = 420.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            T("Write the shot briefs for about ${RecreateText.money(b.estimateUsd)}?", m.scale.title, m.roles.ink)
+            T("Claude reads each shot and writes what happens in it, so new shots match the reference more closely. It's charged to the studio. Asking Claude on your Mac is free.",
+                m.scale.body, m.roles.ink2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                LearnQuiet("Cancel", onClick = a.onBriefsCancel)
+                Primary("Write · about ${RecreateText.money(b.estimateUsd)}", onClick = a.onBriefsConfirm)
             }
         }
     }
@@ -683,7 +742,10 @@ private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?) {
                 T(e?.takeIf { problem == null }?.let { RecreateText.money(it.amount) } ?: "–", m.scale.label.tabular(), m.roles.ink, maxLines = 1)
             }
             if (problem != null) T(problem, m.scale.caption, m.roles.caution)
-            else e?.let { RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds) }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
+            else e?.let {
+                if (it.method == "swap") "Swapped into the reference, ${suiteTime(it.segmentStart ?: slot?.startSec ?: 0.0)}–${suiteTime(it.segmentEnd ?: slot?.endSec ?: 0.0)}"
+                else RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds)
+            }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
         }
     }
 }
