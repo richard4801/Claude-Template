@@ -79,7 +79,11 @@ extension AppStore {
             linkImport.error = "This server can't import from links yet. Save the video and choose the file instead."
             return
         }
-        let settings = linkImport.settings ?? (try? await api.linkImportSettings()) ?? RecreateLinkSettings()
+        var settings = linkImport.settings ?? RecreateLinkSettings()
+        if linkImport.settings == nil, let fetched = try? await api.linkImportSettings() {
+            settings = fetched
+            linkImport.settings = fetched
+        }
         var link = raw
         var platform: String?
         // The server's verdict first. A server without the check: this Mac's own strict rules.
