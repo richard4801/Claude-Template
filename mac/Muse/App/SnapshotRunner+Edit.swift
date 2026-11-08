@@ -168,8 +168,8 @@ extension SnapshotRunner {
     // MARK: Every control (owner request 2026-11-08: "vet the entire Edit function")
 
     /// Presses every button, checkbox, tab and radio button of the Edit suite, and nudges every slider one step, through the
-    /// Accessibility API on this app's own process (AXUIElementCreateApplication(getpid()), queried off the main thread so
-    /// the main thread can answer): each control's real action runs, closures and all. SwiftUI only builds its
+    /// Accessibility API on this app's own process (AXUIElementCreateApplication(getpid()), queried
+    /// on the main actor, as the AX API runs own-process requests inline): each control's real action runs, closures and all. SwiftUI only builds its
     /// accessibility tree for an accessibility client, so in-process NSAccessibility calls see an empty window.
     /// It explores as panels appear (a tab press reveals its panel), works inside sheets and closes them, and comes back if a
     /// control leaves the editor. Each control is logged before it is used. Skipped on purpose (logged as SKIP): controls
@@ -264,8 +264,10 @@ extension SnapshotRunner {
     }
 }
 
-/// An Accessibility API client on this app's own process. Every call runs off the main thread (the app answers on it).
-final class AXWalker: @unchecked Sendable {
+/// An Accessibility API client on this app's own process. For its own process the AX API runs each request inline on the
+/// calling thread (no round trip), and SwiftUI's actions assert the main actor, so every call runs on the main actor.
+@MainActor
+final class AXWalker {
     struct Control: @unchecked Sendable {
         let element: AXUIElement
         let role: String
@@ -301,7 +303,7 @@ final class AXWalker: @unchecked Sendable {
     }
 
     func controls() async -> (controls: [Control], inSheet: Bool) {
-        await Task.detached { [self] in
+        do {
             let (r, sheet) = root()
             guard let r else { return ([], false) }
             var out: [Control] = []
@@ -313,11 +315,11 @@ final class AXWalker: @unchecked Sendable {
                 return true
             }
             return (out, sheet)
-        }.value
+        }
     }
 
     func find(_ label: String) async -> Bool {
-        await Task.detached { [self] in
+        do {
             guard let r = root().0 else { return false }
             var found = false
             walk(r, 0) { e in
@@ -326,14 +328,14 @@ final class AXWalker: @unchecked Sendable {
                 return true
             }
             return found
-        }.value
+        }
     }
 
-    func press(_ c: Control) async { await Task.detached { _ = AXUIElementPerformAction(c.element, kAXPressAction as CFString) }.value }
-    func increment(_ c: Control) async { await Task.detached { _ = AXUIElementPerformAction(c.element, kAXIncrementAction as CFString) }.value }
+    func press(_ c: Control) async { _ = AXUIElementPerformAction(c.element, kAXPressAction as CFString) }
+    func increment(_ c: Control) async { _ = AXUIElementPerformAction(c.element, kAXIncrementAction as CFString) }
 
     func stats() async -> (nodes: Int, actionable: Int, error: String, sample: String) {
-        await Task.detached { [self] in
+        do {
             var v: CFTypeRef?
             let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &v)
             guard let r = root().0 else { return (0, 0, "\(err.rawValue)", "") }
@@ -347,6 +349,6 @@ final class AXWalker: @unchecked Sendable {
                 return true
             }
             return (nodes, act, "\(err.rawValue)", sample.joined(separator: " | "))
-        }.value
+        }
     }
 }
