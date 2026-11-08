@@ -90,7 +90,7 @@ Every analysed reference and every finished edit, so the owner can find what wor
 - Hidden when empty.
 
 ## Copy (exact)
-"Playbook", "Recipes", "Add rule", "Save rule", "Delete rule", "Delete this rule?", "Keep", "Pin rule", "Unpin rule", "Edit rule", "Make a rule", "Rules", "Suggestions", "History", "Search recipes", "All", "References", "Your edits", "Newest", "Most viewed", "Use in Recreate", "Open edit", "Delete recipe", "Delete this recipe?", "Rename recipe", "+ Tag", "Effects MUSE can't make yet", "Claude reads these before every edit."
+"Playbook", "Recipes", "Add rule", "Save rule", "Delete rule", "Delete this rule?", "Keep", "Pin rule", "Unpin rule", "Edit rule", "Make a rule", "See rule", "Rules", "Suggestions", "History", "Search recipes", "All", "References", "Your edits", "Newest", "Most viewed", "Use in Recreate", "Open edit", "Delete recipe", "Delete this recipe?", "Rename recipe", "+ Tag", "Effects MUSE can't make yet", "Claude reads these before every edit."
 
 - No exclamation marks.
 - No "AI" sparkle. Claude is named only in this owner-only area.
