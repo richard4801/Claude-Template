@@ -336,6 +336,24 @@ enum SnapshotRunner {
         try? p.run()
         p.waitUntilExit()
     }
+    /// Review mode only: an uncaught Objective-C exception or a fatal signal writes its stack to the log before the app
+    /// dies, so CI shows where (the macOS crash report isn't always written on the runner).
+    nonisolated static func installCrashLogging() {
+        NSSetUncaughtExceptionHandler { e in
+            print("CRASH uncaught exception \(e.name.rawValue): \(e.reason ?? "")")
+            for s in e.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+            fflush(stdout)
+        }
+        for sig in [SIGABRT, SIGILL, SIGSEGV, SIGBUS, SIGTRAP, SIGFPE] {
+            signal(sig) { n in
+                print("CRASH signal \(n)")
+                for s in Thread.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+                fflush(stdout)
+                signal(n, SIG_DFL)
+                raise(n)
+            }
+        }
+    }
 }
 
 /// The Claude chat panel as it sits beside a camera session, for the review screenshots only.
@@ -367,22 +385,4 @@ struct SnapshotOverlay: View {
         }
     }
 
-    /// Review mode only: an uncaught Objective-C exception or a fatal signal writes its stack to the log before the app
-    /// dies, so CI shows where (the macOS crash report isn't always written on the runner).
-    static func installCrashLogging() {
-        NSSetUncaughtExceptionHandler { e in
-            print("CRASH uncaught exception \(e.name.rawValue): \(e.reason ?? "")")
-            for s in e.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
-            fflush(stdout)
-        }
-        for sig in [SIGABRT, SIGILL, SIGSEGV, SIGBUS, SIGTRAP, SIGFPE] {
-            signal(sig) { n in
-                print("CRASH signal \(n)")
-                for s in Thread.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
-                fflush(stdout)
-                signal(n, SIG_DFL)
-                raise(n)
-            }
-        }
-    }
 }
