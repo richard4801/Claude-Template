@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Ctx } from '../ctx.js';
 import { ReplicateError, outputUrl, type Prediction } from '../replicate/client.js';
 import { uid } from '../lib/util.js';
@@ -48,6 +49,14 @@ export const DEFAULT_RATES = { transcribe: 0.0014, matte: 0.000975, separate: 0.
 export const DEFAULT_MODELS = { transcribe: 'victor-upmeet/whisperx', matte: 'arielreplicate/robust_video_matting', separate: 'ryan5453/demucs', track: 'meta/sam-2-video' };
 
 // ------------------------------------------------------------------ mock
+/** 64×64, 1 fps, 121 s of white (longer than the 120 s matte limit), made once with ffmpeg: lavfi color=white, libx264, yuv420p. */
+export const WHITE_MATTE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/editor/white-matte.mp4');
+/** A fresh copy of the white matte (the job deletes the file it is given once it is stored). */
+async function whiteMatte(): Promise<string> {
+  const f = path.join(os.tmpdir(), `${uid('mockmatte')}.mp4`);
+  try { await fs.promises.copyFile(WHITE_MATTE, f); } catch { throw new ReplicateError("Couldn't cut out the background · try again", 'failed'); }
+  return f;
+}
 const SCRIPT = 'Okay so um this is the one product I keep coming back to. Honestly uh it changed my whole routine. You put a little on like this and you just wait. Look at that glow! I I use it every single day. Um anyway link is in my bio.';
 
 /** Deterministic words for a clip: the script spoken at ~2.6 words/s with a pause after each sentence, cut to the duration. */
@@ -81,16 +90,19 @@ export class MockProvider implements EditorProvider {
     await this.steps(h, 'Listening');
     return { words: mockWords(durationSec), language: language ?? 'en', gpuSec: 8 + 0.15 * durationSec };
   }
-  /** The mock returns no file: the job then points the result at the source itself. */
+  /**
+   * The mock's matte is all white (keep everything), so a mock cut-out leaves the clip as it was. 2026-11-08: it used to
+   * hand back the source itself, and with the apps applying alphaMatte the clip's own brightness became its alpha.
+   */
   async matte(_url: string, durationSec: number, h: Hooks): Promise<Produced> {
     await this.steps(h, 'Cutting out the background');
-    return { file: null, contentType: 'video/mp4', gpuSec: 10 + 4 * durationSec };
+    return { file: await whiteMatte(), contentType: 'video/mp4', gpuSec: 10 + 4 * durationSec };
   }
-  /** The mock's tracked matte: no file either (the job points the result at the source). */
+  /** The mock's tracked matte: all white too. */
   async track(_url: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced> {
     if (!points.some(p => p.keep)) throw new ReplicateError('No point to keep', 'failed');
     await this.steps(h, 'Following what you tapped');
-    return { file: null, contentType: 'video/mp4', gpuSec: 15 + 3 * durationSec };
+    return { file: await whiteMatte(), contentType: 'video/mp4', gpuSec: 15 + 3 * durationSec };
   }
   async separate(_url: string, durationSec: number, h: Hooks, _stem: Stem = 'vocals'): Promise<Produced> {
     await this.steps(h, 'Cleaning up the voice');
