@@ -110,10 +110,10 @@ class ClaudeLogicTest {
         assertEquals(ClaudeText.STOPPING, ClaudeText.status(ui).text)
         ui = ChatReducer.live(ui, ev("tu_1", ClaudeEvent("done", ok = false, error = "Stopped")))
         assertEquals("stopped", ui.turn!!.state)
-        assertEquals("Stopped", ClaudeText.ended(ui.turn))
+        assertEquals("Stopped. Send a message to carry on.", ClaudeText.ended(ui.turn))
         // After a reload the line stays, without live parts.
         ui = ChatReducer.loaded(ui, thread.copy(messages = ui.messages))
-        assertEquals("Stopped", ClaudeText.ended(ui.turn))
+        assertEquals("Stopped. Send a message to carry on.", ClaudeText.ended(ui.turn))
         val failed = ChatReducer.live(base().copy(turn = LiveTurn("tu_2", "queued")), ClaudeLive("turn", turn = ClaudeTurn("tu_2", "ct_1", state = "failed", error = "Your Mac didn't pick this up")))
         assertEquals("Your Mac didn't pick this up", ClaudeText.ended(failed.turn))
     }

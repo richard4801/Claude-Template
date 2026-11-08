@@ -39,10 +39,10 @@ The old Camera chat pieces (`YouBubble`, `ClaudeBlock`, `WorkingBlock`, `NoticeV
 ## What changed
 ### Messages (Claude-app style)
 - **The owner's messages** are right-aligned bubbles in the `field` tone, up to 82% of the width (520 dp at most). The corner nearest the speaker is tighter. There's no "You · Phone" caption.
-- **Claude's replies** are clean left-aligned text with no bubble. A small "Claude" label appears once, at the start of each answer, so a run of text, tool rows and frames reads as one reply.
-- **Tool steps** are compact rows. A pulsing dot shows while a step runs, a check when it's done, and a warning (in `danger`) when it failed. A tap opens one plain line ("Saved camera path, done", "Grabbed a frame didn't work. Claude can try another way."). Raw input and output are never shown.
+- **Claude's replies** are clean left-aligned text with no bubble and no label. A wider gap before each answer makes a run of text, tool rows and frames read as one reply.
+- **Tool steps** are compact rows. A pulsing dot shows while a step runs, a check when it's done, and a warning (in `danger`) when it failed. A tap opens one plain line ("Set camera path: Saved camera path. Finished.", "Get frame. This step didn't work; Claude usually tries another way."). Raw input and output are never shown.
 - **Images** the owner attached are thumbnails in the bubble (160 dp for one image, 76 dp each for several). A tap opens the full-screen `ImageViewer`. Frames Claude grabbed show at 200×113 dp and open the same way.
-- **Streaming** text grows in place: the list is reversed, so the bottom stays anchored and the reply pushes up smoothly. Unfinished Markdown is held back instead of flashing raw (see below). The `▍` cursor is gone. Before the first words arrive, the answer shows "Claude is thinking…" with a pulsing dot, or "Waiting for your Mac…" while the turn is queued.
+- **Streaming** text grows in place: the list is reversed, so the bottom stays anchored and the reply pushes up smoothly. Unfinished Markdown is held back instead of flashing raw (see below). The `▍` cursor is gone. Before the first words arrive, the answer shows "Claude is working…" with a pulsing dot, or "Waiting for your Mac…" while the turn is queued.
 
 ### Markdown (`ChatMarkdown.kt` parser, `ChatMarkdownView.kt` renderer)
 - **Blocks:**
@@ -73,8 +73,8 @@ The old Camera chat pieces (`YouBubble`, `ClaudeBlock`, `WorkingBlock`, `NoticeV
   - Timeouts: "Claude took too long to answer. Try again."
   - Network: "Couldn't reach the studio. Check your connection and try again."
   - Rate limits: "Claude is busy right now. Try again in a minute."
-  - Anything technical (traces, JSON, paths, error codes, "Error:" lines): "Claude couldn't finish this reply."
-  - This applies to failed turns, notices, upload errors and the load error.
+  - Anything technical (traces, JSON, paths, error codes, "Error:" lines): "Claude stopped before finishing. Try again."
+  - This applies to failed turns, notices, upload errors and the load error. Failed turns use the fuller list in "Copy and rules" below.
 - **Copy:** the API fallback note no longer names an environment variable ("The API fallback isn't set up on the server yet"). The chat names no model or provider. Claude chat is owner-only, as before.
 
 ### Composer
@@ -92,11 +92,11 @@ The old Camera chat pieces (`YouBubble`, `ClaudeBlock`, `WorkingBlock`, `NoticeV
 ### Everything else
 - **Scrolling:** the list follows new messages while the owner is at the bottom. Scrolling up stops following, and a **Jump to latest** pill appears. Tapping it, or scrolling back down, resumes following.
 - **Copy:** long-press any message (the owner's or Claude's) to copy it. There's a haptic tick and a "Copied" pill. TalkBack offers the same as a "Copy message" / "Copy reply" action. Code blocks have their own Copy.
-- **Retry:** a failed reply shows "Claude couldn't finish this reply." (or the plain reason) with **Retry**. Retry sends the owner's last message again, on the Mac, or on the studio key if that's what answered (`ClaudeChatStore.retry()`).
+- **Try again:** a failed reply shows its plain reason (the table below) with **Try again**, which sends the owner's last message again, on the Mac, or on the studio key if that's what answered (`ClaudeChatStore.retry()`).
 - **States:**
   - Loading: a skeleton shaped like a bubble and three lines.
-  - Empty: "Start a conversation" plus a one-line hint for that surface.
-  - Load error: "Can't open the chat", the plain reason, and Try again.
+  - Empty: "Chat with Claude" plus a one-line hint for that surface.
+  - Load error: "Can't open the chat" with the plain reason, or "You're offline" when the phone has no connection, plus Try again.
   - Offline: "Claude on your Mac is offline", what to do, then "Use the studio API key" (the one primary action, when the fallback is on) or "Open in Claude", the connector note, and "Add MUSE in Connections".
   - Notices: a warning icon, plain text, and tap to dismiss.
 - **Timestamps:** a centred label ("Today 14:05", "Yesterday 09:12", "Mon 3 Nov, 18:40") above the first message and wherever the conversation paused for 30 minutes or more.
@@ -115,22 +115,44 @@ The old Camera chat pieces (`YouBubble`, `ClaudeBlock`, `WorkingBlock`, `NoticeV
 ### Icons
 `arrow-up`, `arrow-down`, `paperclip`, `square` and `check-square` were added to `design/icons/icons.txt` (Phosphor Regular 2.1.1). `python3 design/icons/build.py` regenerated `PhosphorIcons.kt` and the Mac asset catalog; the change only adds icons.
 
-## Copy (shared with WS11)
+## Copy and rules (aligned with WS11, Mac)
+The leak rules are a one-to-one port of the Mac's `MuseCore/Claude/ChatLeakFilter.swift` (WS11): `ChatClean.assistantText` / `userText` / `summary` / `toolDetail` / `turnError`. Beyond the list above, they also:
+- strip `<thinking>` and tool markup; an unclosed tag hides what follows it mid-stream;
+- drop JSON lines and ```json fences, and stack traces line by line;
+- show paths as the file name ("Final cut.mp4"), else "a file", and leave them alone inside code fences;
+- remove UUIDs and long hex ids;
+- drop the "Attached images (Read each one):" list and any sentence that names a snake_case tool from the owner's messages.
+
+On the phone, "this Mac" reads "your Mac".
+
 | Where | Text |
 |---|---|
 | Status, ready | On your Claude plan, answered by your Mac |
 | Status, answering | Your Mac is answering |
-| Status / block, offline | Claude on your Mac is offline |
+| Status / block, Mac offline | Claude on your Mac is offline |
 | Studio key answering | Answering on the studio API key, billed per use |
-| Waiting | Waiting for your Mac… · Claude is thinking… |
-| Failed turn | Claude couldn't finish this reply. + Retry |
+| Before the first words | Waiting for your Mac… · Claude is working… |
+| Tool detail | `<Tool>: <summary>. Finished.` · `Still running.` · `This step didn't work; Claude usually tries another way.` |
+| Failed turn (+ Try again) | Claude stopped before finishing. Try again. · Couldn't reach the server. Check your connection, then try again. · Claude took too long to answer. Try again. · Your Claude plan has reached its limit for now. Try again in a little while. · Claude Code is signed out on your Mac. Sign in again, then try again. · Claude Code isn't ready on your Mac. Open MUSE on your Mac to set it up, then try again. · That message waited too long and expired. Send it again. · Your Mac stopped answering. Check MUSE on your Mac, then try again. |
+| Stopped | Stopped. Send a message to carry on. |
+| Phone offline (the chat can't load) | You're offline · The chat comes back when the connection does. |
+| Empty | Chat with Claude + the surface's hint |
+| Frame | Frame Claude looked at |
 | Placeholder | Describe the shot… (Suite) · Ask Claude to edit… (Edit) · Direct the shot… (Camera) · Message Claude… (Recreate, others) |
 | Scrolled up | Jump to latest |
 | Copy | Copy · Copied |
-| Empty | Start a conversation + the surface's hint |
+| Attach limit | Up to 4 images (JPEG, PNG, WebP or HEIC), 10 MB each |
+| Image the server can't read | Claude couldn't read that image. Send it as JPEG. + "Send as JPEG" on the image |
+
+No "You" / "Claude" labels on messages, as on the Mac and in the Claude app.
+
+## Images (WS2's Mac behaviour, via WS4)
+- HEIC/HEIF and WebP are converted to JPEG before upload (`ChatImages.toJpeg`: ImageDecoder on Android 9+, which turns the photo upright, else BitmapFactory; long edge ≤ 4096 px, quality 92).
+- If the server still refuses an image at send time (415 `unsupported_image`), that image stays in the composer, marked, with **Send as JPEG**, which converts it and uploads it again. The rest of the message is kept as a draft. Images that failed are never sent.
 
 ## Tests
 - `claude/ChatMarkdownTest`: tricky Markdown, streaming prefixes, unclosed markers, tables, lists, links, escapes.
-- `claude/ChatCleanTest`: context lines, briefs, tool summaries, errors, the transcript's words, retry text, time labels, and no key or model names in the copy.
+- `claude/ChatCleanTest`: context lines, briefs, thinking and unclosed tags, JSON fences, traces, paths, tool summaries, the Mac's error words, the transcript's words, retry text, time labels, and no key or model names in the copy.
+- `claude/ChatAttachTest`: the attach limit wording and "Send as JPEG".
 - `claude/ClaudeChatSurfacesScreenshotTest`: 4 surfaces × 4 themes × (phone and tablet, keyboard closed and open, plus phone landscape with the keyboard), and 6 states × 4 themes. Each case also asserts that no raw marker, context line, `mcp__` name, JSON or exception text is on screen. The PNGs are `app/build/outputs/roborazzi/chat_<theme>_<surface>_<device>_<kb|nokb>.png` and `chat_<theme>_state_<state>.png`.
 - The existing `ClaudeChatScreenshotTest`, `ClaudeLogicTest` and `FakeClaudeApiTest` were updated for the new copy and the icon-only Stop button.

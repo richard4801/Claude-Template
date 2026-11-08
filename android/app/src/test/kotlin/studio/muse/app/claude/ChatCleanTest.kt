@@ -35,7 +35,8 @@ class ChatCleanTest {
         assertNull(ChatClean.summary("[{\"id\":\"x\"}]"))
         assertNull(ChatClean.summary("error: mcp__muse__set_camera_path failed"))
         assertNull(ChatClean.summary("Traceback (most recent call last):\n  File \"x.py\", line 3"))
-        assertEquals("Saved to a file", ChatClean.summary("Saved to /Users/jenne/Library/Muse/edit.json"))
+        assertEquals("Saved to edit.json", ChatClean.summary("Saved to /Users/jenne/Library/Muse/edit.json"))
+        assertEquals("Saved to a file", ChatClean.summary("Saved to /Users/jenne/Library/Muse/es_8f7a6b5c.json"))
         assertEquals("Trimmed take", ChatClean.summary("Trimmed take tk_8a7sdf9a8sd"))
         assertEquals("Shot draft · estimate \$1.92", ChatClean.summary("Shot draft · estimate \$1.92"))
         assertTrue(ChatClean.summary("x".repeat(200))!!.length <= 80)
@@ -43,10 +44,11 @@ class ChatCleanTest {
 
     @Test fun errorsArePlainSentences() {
         assertEquals(ChatClean.FAILED, ChatClean.error("java.lang.IllegalStateException: boom\n\tat studio.muse.X.y(X.kt:3)"))
-        assertEquals(ChatClean.FAILED, ChatClean.error("{\"error\":{\"type\":\"overloaded_error\"}}".replace("overloaded", "x")))
+        assertEquals(ChatClean.FAILED, ChatClean.error("{\"error\":{\"type\":\"x_error\"}}"))
         assertEquals("Claude is busy right now. Try again in a minute.", ChatClean.error("529 overloaded_error"))
         assertEquals("Claude took too long to answer. Try again.", ChatClean.error("SocketTimeoutException: timeout"))
-        assertEquals("Couldn't reach the studio. Check your connection and try again.", ChatClean.error("Unable to resolve host \"api\""))
+        assertEquals(ChatClean.NETWORK, ChatClean.error("Unable to resolve host \"api\""))
+        assertTrue(ChatClean.isNetwork("java.net.UnknownHostException: Unable to resolve host \"api\""))
         assertEquals("Your Mac stopped answering", ChatClean.error("Your Mac stopped answering"))
         assertEquals(ChatClean.FAILED, ChatClean.error(null))
         assertEquals(ChatClean.FAILED, ChatClean.error("   "))
@@ -67,16 +69,39 @@ class ChatCleanTest {
         assertFalse(draft.detail.contains("{"))
         val failed = items[2] as ChatItem.Tool
         assertFalse(failed.ok)
-        assertEquals("Grabbed a frame didn't work", failed.text)
+        assertEquals("Get frame didn't work", failed.text)
         assertTrue(failed.detail.contains("didn't work"))
         // Every row's words: no ids, no tool names, no JSON.
         items.forEach { i -> val t = i.toString(); assertFalse(t, t.contains("mcp__")) }
     }
 
     @Test fun failedTurnLineIsPlain() {
-        assertEquals("Couldn't reach the studio. Check your connection and try again.", ClaudeText.ended(LiveTurn("tu_1", "failed", error = "Error: ECONNRESET at /srv/app/index.js:12")))
-        assertEquals(ChatClean.FAILED, ClaudeText.ended(LiveTurn("tu_1", "failed", error = "Error: spawn failed at /srv/app/index.js:12")))
-        assertEquals("Stopped", ClaudeText.ended(LiveTurn("tu_1", "stopped")))
+        fun ended(e: String?) = ClaudeText.ended(LiveTurn("tu_1", "failed", error = e))
+        // The Mac's errorWords, one to one (WS11).
+        assertEquals(ChatClean.NETWORK, ended("Error: ECONNRESET at /srv/app/index.js:12"))
+        assertEquals(ChatClean.FAILED, ended("Error: spawn failed at /srv/app/index.js:12"))
+        assertEquals(ChatClean.FAILED, ended(null))
+        assertEquals("Your Claude plan has reached its limit for now. Try again in a little while.", ended("usage limit reached"))
+        assertEquals("Claude Code is signed out on your Mac. Sign in again, then try again.", ended("Not signed in"))
+        assertEquals("That message waited too long and expired. Send it again.", ended("turn_expired"))
+        assertEquals("Your Mac stopped answering. Check MUSE on your Mac, then try again.", ended("Your Mac stopped answering"))
+        assertEquals("Stopped. Send a message to carry on.", ended("Stopped"))
+        assertEquals("Stopped. Send a message to carry on.", ClaudeText.ended(LiveTurn("tu_1", "stopped")))
+    }
+
+    @Test fun repliesLoseBriefsJsonTracesAndPaths() {
+        assertEquals("Done.", ChatClean.assistantText("<thinking>plan the cut</thinking>Done."))
+        assertEquals("Working", ChatClean.assistantText("Working<system-reminder>half a brief, still strea"))
+        assertEquals("Set.\n\nNext.", ChatClean.assistantText("Set.\n\n```json\n{\"a\":1}\n```\n\nNext."))
+        assertEquals("Saved.", ChatClean.assistantText("Saved.\n{\"ok\":true}"))
+        assertEquals("Exported Final cut.mp4.", ChatClean.assistantText("Exported /Users/jenne/Movies/Final cut.mp4."))
+        assertEquals("```sh\nls /Users/jenne\n```", ChatClean.assistantText("```sh\nls /Users/jenne\n```"))
+        assertEquals("Failed.", ChatClean.assistantText("Failed.\nTraceback (most recent call last):\n  File \"x.py\", line 3"))
+    }
+
+    @Test fun userTextDropsImageListAndToolInstructions() {
+        assertEquals("Match this look.", ChatClean.userText("Match this look. Attached images (Read each one):\n/tmp/a.jpg"))
+        assertEquals("Rebuild the recipe.", ChatClean.userText("Rebuild the recipe. Use get_recipe and match_slots."))
     }
 
     @Test fun retryUsesTheLastMessage() {

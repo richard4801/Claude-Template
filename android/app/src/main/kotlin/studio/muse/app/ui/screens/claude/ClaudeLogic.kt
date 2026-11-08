@@ -257,13 +257,8 @@ object ChatReducer {
         val running = status == "running"
         val ok = status != "error"
         val text = ChipText.of(name, summary, running)
-        val what = ChipText.of(name, null, false)
-        val detail = when {
-            running -> "$what, in progress"
-            !ok -> "$what didn't work. Claude can try another way."
-            summary != null && summary != what -> "$what: $summary"
-            else -> "$what, done"
-        }
+        val what = ChipText.words(name)
+        val detail = ChatClean.toolDetail(what, summary, if (running) "running" else if (!ok) "error" else "done")
         return ChatItem.Tool(key, if (!ok) "$what didn't work" else text, ok, running, detail)
     }
 
@@ -324,8 +319,8 @@ object ClaudeText {
 
     /** A finished turn's line under the transcript ("Stopped", "Your Mac didn't pick this up"), or null. */
     fun ended(t: LiveTurn?): String? = when (t?.state) {
-        "stopped" -> "Stopped"
-        "failed" -> ChatClean.error(t.error)
+        "stopped" -> "Stopped. Send a message to carry on."
+        "failed" -> ChatClean.turnError(t.error)
         else -> null
     }
 
@@ -363,70 +358,242 @@ object Fallback {
 // ---------------------------------------------------------------- what the chat may show (plans/claude-chat-android.md)
 
 /**
- * Keeps internal content out of the chat: the context line the Mac puts before a typed message ("[Suite · Shot …]"),
- * system-brief tags, raw JSON, stack traces, file paths and internal ids. What's left is plain language.
+ * Keeps internal content out of the chat, one to one with the Mac's ChatLeakFilter (WS11, MuseCore): system briefs and
+ * thinking markup, the context line the Mac puts before a message ("[Suite · …]"), raw JSON and json fences, stack
+ * traces, file paths (shown as the file name, else "a file"), internal ids and MCP tool names. What's left is plain language.
  */
 object ChatClean {
-    /** "[Suite · Shot · draft 3]", "[Camera session cs_1 · revision 4 …]": a bracketed first line the Mac adds. */
-    private val CONTEXT_LINE = Regex("""^\[[A-Z][^\]\n]{0,2000}]\s*(\n|$)""")
-    private val BRIEF_TAG = Regex("""<(system|system-reminder|muse[-_][a-z_-]+|context|brief)\b[^>]*>[\s\S]*?</\1>\s*""", RegexOption.IGNORE_CASE)
-    private val PATH = Regex("""(?<![\w.])(?:/(?:Users|home|var|tmp|private|data|opt|srv|app)/[^\s'"),]+|[A-Z]:\\[^\s'"),]+)""")
-    /** An internal id: a short prefix, an underscore, and 6+ characters with a digit in them ("tk_8a7sdf9a", "toolu_01AB…"). */
-    private val ID = Regex("""\b[a-z]{1,8}_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,}\b""")
-    /** Low-level error codes and words that mean nothing to a person. */
-    private val TECH = Regex("""\bE[A-Z]{4,}\b|\b(?:errno|undefined|null pointer|NaN|stderr|stdout|exit code|status code|HTTP \d{3})\b""", RegexOption.IGNORE_CASE)
-    private val STACK = Regex("""(?m)^\s*(at [\w.$]+\(|File ".*", line \d+|Traceback \(most recent call last\)|\w+(Exception|Error):\s)""")
-    private val TOOL_NAME = Regex("""\bmcp__\w+""")
+    private val TAGS = listOf("system-reminder", "system", "thinking", "context", "brief", "instructions", "muse_context", "suite_context",
+        "tool_use", "tool_result", "function_calls", "function_results", "invoke", "parameter", "env", "command-name",
+        "local-command-stdout", "user-prompt-submit-hook")
+    private val CONTEXT_HEADS = setOf("Suite", "Recreate", "Camera", "Edit", "MUSE", "Muse", "Context", "System")
+    private val TRACE = Regex(listOf(
+        """^at\s+\S.*[:(]\d+(:\d+)?\)?$""", """^Traceback \(most recent call last\)""", """^File ".+", line \d+""",
+        """^\d+\s+\S+\s+0x[0-9a-fA-F]+\s""", """^#\d+\s+0x[0-9a-fA-F]+""",
+        """^(Fatal error|Thread \d+ Crashed|Exception Type|Uncaught|UnhandledPromiseRejection)""",
+        """^\w*(Error|Exception): .+ at .+:\d+""", """^\s*node:internal/""", """^at [\w.$]+\(""", """^\w+(\.\w+)+(Exception|Error)(:|$)""",
+    ).joinToString("|"))
+    private val PATH = Regex("""(?<![\w.:/~-])(?:~|/(?:Users|home|private|var|tmp|opt|Volumes|Library|Applications|usr|etc|srv|app|workspace|root|mnt|data|sdcard|storage))(?:/[^\s/`'"()<>\[\],;]+)+/?|[A-Za-z]:\\(?:[^\s\\]+\\)*[^\s\\]+""")
+    private val MCP = Regex("""\bmcp__[A-Za-z0-9_-]+""")
+    private val UPLOAD_ID = Regex("""\s*\((?:upload ?id|id|thread|session|turn)[: ]+[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\)""", RegexOption.IGNORE_CASE)
+    private val UUID = Regex("""\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b""")
+    /** "cs_1a2b3c", "up_1", "toolu_01ABC": a short lowercase prefix, an underscore, and letters with a digit. */
+    private val ID = Regex("""`?\b(?:[a-z]{1,8}_)+(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{1,40}\b`?""")
+    private val HEX = Regex("""\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{16,}\b""")
+    private val LABELLED_ID = Regex("""(?i)\b(?:upload ?id|thread ?id|session ?id|turn ?id|id)\s*[:=]?\s*$""")
+    private val TOOL_WORD = Regex("""\b[a-z]+(?:_[a-z]+)+\b""")
 
-    /** What the owner typed, without the context line or any brief the Mac wrapped around it. */
+    /** Claude's reply, ready for ChatMarkdown. Safe mid-stream: an unfinished brief or JSON line is hidden. */
+    fun assistantText(text: String): String = tidy(scrub(stripLines(stripTags(text), dropContext = true)))
+
+    /** The owner's message as typed: no context line, no attached-image list, no sentence that only instructs Claude. */
     fun userText(text: String): String {
-        var t = text
-        repeat(3) { t = t.replace(BRIEF_TAG, "") }
-        while (true) { val m = CONTEXT_LINE.find(t.trimStart()) ?: break; t = t.trimStart().substring(m.range.last + 1) }
-        return t.trim()
+        var t = stripTags(text)
+        while (t.startsWith("[")) {
+            val nl = t.indexOf('\n')
+            if (nl < 0) { if (contextLine(t)) t = ""; break }
+            if (!contextLine(t.substring(0, nl))) break
+            t = t.substring(nl + 1)
+        }
+        t.indexOf("Attached images (Read each one):").takeIf { it >= 0 }?.let { t = t.substring(0, it) }
+        t = dropToolSentences(t)
+        return tidy(scrub(t)).trim()
     }
 
-    /** Claude's reply, without system-brief tags it may have echoed. Markdown stays (the view renders it). */
-    fun assistantText(text: String): String = text.replace(BRIEF_TAG, "")
-
-    /**
-     * A tool's summary as a short line, or null when it's internal (JSON, a path, an id, a long dump): the chip then uses
-     * the tool's name in words.
-     */
+    /** A tool's summary as one short line, or null when nothing usable is left (the row then uses the tool's name in words). */
     fun summary(s: String?): String? {
-        val t = s?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        if (t.startsWith("{") || t.startsWith("[") || t.contains("\":") || STACK.containsMatchIn(t) || TOOL_NAME.containsMatchIn(t)) return null
-        val line = t.lineSequence().first().replace(PATH, "a file").replace(ID, "").replace(Regex("""\s{2,}"""), " ").trim()
-        if (line.isEmpty()) return null
+        val t = s?.let { tidy(scrub(stripTags(it))).trim() }?.takeIf { it.isNotEmpty() } ?: return null
+        if (looksLikeJson(t) || t.startsWith("{") || t.startsWith("[{") || t.contains("\":") || TRACE.containsMatchIn(t.lineSequence().first().trim())) return null
+        val line = t.lineSequence().first().trim()
         return if (line.length > 80) line.take(77).trimEnd() + "…" else line
     }
 
-    /**
-     * An error as one plain sentence: a timeout, the network, or the fallback. Stack traces, JSON, paths and ids never
-     * reach the screen. [fallback] when there's nothing usable.
-     */
-    fun error(raw: String?, fallback: String = FAILED): String {
-        val t = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return fallback
-        val low = t.lowercase()
-        return when {
-            "timed out" in low || "timeout" in low -> "Claude took too long to answer. Try again."
-            "unable to resolve host" in low || "failed to connect" in low || "econnrefused" in low || "econnreset" in low || "connection reset" in low ||
-                "network" in low && "error" in low -> "Couldn't reach the studio. Check your connection and try again."
-            "rate limit" in low || "429" in low || "overloaded" in low -> "Claude is busy right now. Try again in a minute."
-            STACK.containsMatchIn(t) || t.startsWith("{") || t.startsWith("[") || t.contains("\":") || TOOL_NAME.containsMatchIn(t) ||
-                PATH.containsMatchIn(t) || TECH.containsMatchIn(t) || t.startsWith("Error:") -> fallback
-            else -> {
-                val line = t.lineSequence().first().replace(PATH, "a file").replace(ID, "").replace(Regex("""\s{2,}"""), " ").trim()
-                when {
-                    line.isEmpty() -> fallback
-                    line.length > 140 -> fallback
-                    else -> line
-                }
-            }
+    /** The row's expanded line (the Mac's wording): what the step was and how it ended. */
+    fun toolDetail(what: String, summary: String?, status: String): String {
+        val head = if (summary == null || summary.equals(what, ignoreCase = true)) what else "$what: $summary"
+        return when (status) {
+            "running" -> "$head. Still running."
+            "error" -> "$head. This step didn't work; Claude usually tries another way."
+            else -> "$head. Finished."
         }
     }
 
-    const val FAILED = "Claude couldn't finish this reply."
+    /** A failed turn's error in plain words (the Mac's errorWords): what happened and what to do. */
+    fun turnError(raw: String?): String {
+        val r = raw?.trim().orEmpty()
+        val l = r.lowercase()
+        fun has(vararg xs: String) = xs.any { it in l }
+        return when {
+            r.isEmpty() -> FAILED
+            // The server's silent-turn timeout ("Your Mac stopped answering"): not the owner's Stop.
+            has("mac stopped answering", "stopped responding") -> "Your Mac stopped answering. Check MUSE on your Mac, then try again."
+            has("stopped", "interrupt", "cancel", "aborted") -> "Stopped. Send a message to carry on."
+            has("isn't ready", "not installed", "enoent", "command not found") -> "Claude Code isn't ready on your Mac. Open MUSE on your Mac to set it up, then try again."
+            has("rate limit", "usage limit", "429", "overloaded", "quota") -> "Your Claude plan has reached its limit for now. Try again in a little while."
+            has("not signed in", "login", "log in", "401", "unauthor") -> "Claude Code is signed out on your Mac. Sign in again, then try again."
+            has("timed out", "timeout", "took too long") -> "Claude took too long to answer. Try again."
+            has("offline", "network", "connection", "econnrefused", "econnreset", "enotfound", "unable to resolve host", "dns", "unreachable", "failed to connect") -> NETWORK
+            has("turn_expired", "expired") -> "That message waited too long and expired. Send it again."
+            else -> plainOr(r, FAILED, strict = true)
+        }
+    }
+
+    /** A notice or load error as one plain sentence; [fallback] when it is technical. */
+    fun error(raw: String?, fallback: String = FAILED): String {
+        val r = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return fallback
+        val l = r.lowercase()
+        return when {
+            "timed out" in l || "timeout" in l -> "Claude took too long to answer. Try again."
+            listOf("unable to resolve host", "failed to connect", "econnrefused", "econnreset", "connection reset", "enotfound").any { it in l } ||
+                "network" in l && "error" in l -> NETWORK
+            "rate limit" in l || "429" in l || "overloaded" in l -> "Claude is busy right now. Try again in a minute."
+            else -> plainOr(r, fallback, strict = false)
+        }
+    }
+
+    /** Is this error about the connection (the "You're offline" state)? */
+    fun isNetwork(raw: String?): Boolean = error(raw, "") == NETWORK
+
+    private fun plainOr(r: String, fallback: String, strict: Boolean): String {
+        val cleaned = tidy(scrub(stripLines(stripTags(r), dropContext = true))).trim()
+        val technical = cleaned.isEmpty() || cleaned.length > 160 || looksLikeJson(cleaned) || cleaned.startsWith("{") || cleaned.contains("\":") ||
+            TRACE.containsMatchIn(r) || PATH.containsMatchIn(r) || r.startsWith("Error:") || cleaned.contains('\n') ||
+            Regex("""\bE[A-Z]{4,}\b|(?i)\b(exception|errno|exit code|status \d{3}|http \d{3}|traceback|panic|fatal|undefined|null pointer|stderr)\b""").containsMatchIn(cleaned) ||
+            (strict && Regex("""(?i)\b(error|null|nil)\b""").containsMatchIn(cleaned))
+        if (technical) return fallback
+        return if (strict && !cleaned.endsWith(".")) "$cleaned." else cleaned
+    }
+
+    // ---------------------------------------------------------------- pieces
+
+    /** `<system-reminder>…</system-reminder>`, `<thinking>…`, tool markup: removed with what they hold; an unclosed one hides the rest. */
+    fun stripTags(text: String): String {
+        if ('<' !in text) return text
+        var s = text
+        for (name in TAGS) {
+            while (true) {
+                val open = s.indexOf("<$name", ignoreCase = true)
+                if (open < 0) break
+                val after = s.getOrNull(open + name.length + 1)
+                if (after != null && after != '>' && after != ' ' && after != '\n') break
+                val close = s.indexOf("</$name>", open + 1, ignoreCase = true)
+                s = if (close >= 0) s.removeRange(open, close + name.length + 3) else s.substring(0, open)
+            }
+        }
+        return s
+    }
+
+    private fun contextLine(line: String): Boolean {
+        val t = line.trim()
+        if (!t.startsWith("[") || !t.endsWith("]")) return false
+        return t.drop(1).takeWhile { it.isLetter() } in CONTEXT_HEADS
+    }
+
+    /** Line by line: context lines, raw JSON, stack traces. Code fences stay, except one that holds only JSON. */
+    private fun stripLines(text: String, dropContext: Boolean): String {
+        val lines = text.split('\n')
+        val out = ArrayList<String>(lines.size)
+        var i = 0
+        var inTrace = false
+        while (i < lines.size) {
+            val line = lines[i]
+            val t = line.trim()
+            if (t.startsWith("```") || t.startsWith("~~~")) {
+                val marker = t.take(3)
+                val lang = t.drop(3).trim().lowercase()
+                var j = i + 1
+                val body = mutableListOf<String>()
+                while (j < lines.size && !lines[j].trim().startsWith(marker)) { body += lines[j]; j++ }
+                val joined = body.joinToString("\n").trim()
+                if (lang == "json" || lang == "jsonc" || (lang.isEmpty() && looksLikeJson(joined))) { i = j + 1; continue }
+                out += line; out += body
+                if (j < lines.size) out += lines[j]
+                i = j + 1; continue
+            }
+            if (dropContext && contextLine(t)) { i++; continue }
+            if (t.startsWith("{\"") || t.startsWith("[{\"") || (looksLikeJson(t) && t.length > 2)) { i++; continue }
+            if (TRACE.containsMatchIn(t) || (inTrace && (line.startsWith("  ") || line.startsWith("\t")) && t.isNotEmpty())) { inTrace = true; i++; continue }
+            inTrace = false
+            out += line
+            i++
+        }
+        return out.joinToString("\n")
+    }
+
+    private fun looksLikeJson(t: String): Boolean {
+        val obj = t.startsWith("{") && t.endsWith("}")
+        val arr = t.startsWith("[") && t.endsWith("]") && t.contains("{")
+        if (!obj && !arr) return false
+        return runCatching { kotlinx.serialization.json.Json.parseToJsonElement(t); true }.getOrDefault(false)
+    }
+
+    /** Paths, ids and MCP tool names out of running text (code blocks keep paths: a script needs them). */
+    private fun scrub(text: String): String {
+        var inFence = false
+        return text.split('\n').joinToString("\n") { line ->
+            val t = line.trim()
+            if (t.startsWith("```") || t.startsWith("~~~")) { inFence = !inFence; return@joinToString line }
+            var s = MCP.replace(line) { ChipText.words(it.value).lowercase() }
+            s = UPLOAD_ID.replace(s, "")
+            if (!inFence) s = PATH.replace(s) { m ->
+                val tail = m.value.takeLastWhile { it in ".,;:!?" }
+                fileName(m.value.dropLast(tail.length)) + tail
+            }
+            s = UUID.replace(s, "")
+            s = HEX.replace(s, "")
+            if (!inFence) s = ID.replace(s, "")
+            LABELLED_ID.replace(s, "")
+        }
+    }
+
+    /** A path as its file name when that reads as a name ("Final cut.mp4"), else "a file". */
+    private fun fileName(path: String): String {
+        val last = path.split('/', '\\').lastOrNull { it.isNotEmpty() }.orEmpty()
+        val stem = last.substringBeforeLast('.', last)
+        val ext = if ('.' in last) last.substringAfterLast('.') else ""
+        val idLike = Regex("""^(?:[a-z]{1,8}_)+[A-Za-z0-9]*\d|^[0-9a-fA-F-]{12,}$|^\d+$""").containsMatchIn(stem)
+        return if (last.isEmpty() || ext.isEmpty() || idLike || stem.length > 48) "a file" else last
+    }
+
+    /** A suggestion's instructions for Claude ("Use get_recipe.") aren't the owner's words: sentences naming a tool go. */
+    private fun dropToolSentences(text: String): String {
+        if (!TOOL_WORD.containsMatchIn(text)) return text
+        val sentences = mutableListOf<String>()
+        val cur = StringBuilder()
+        text.forEachIndexed { i, c ->
+            cur.append(c)
+            val next = text.getOrNull(i + 1)
+            if (c == '\n' || (c in ".?!" && (next == null || next == ' ' || next == '\n'))) { sentences += cur.toString(); cur.clear() }
+        }
+        if (cur.isNotEmpty()) sentences += cur.toString()
+        val kept = sentences.filterNot { TOOL_WORD.containsMatchIn(it) }.joinToString("").trim()
+        return kept.ifEmpty { text }
+    }
+
+    /** Spaces and blank lines left where something was removed; code fences keep their whitespace. */
+    private fun tidy(s: String): String {
+        val out = mutableListOf<String>()
+        var inFence = false
+        var blank = 0
+        for (raw in s.split('\n')) {
+            val t = raw.trim()
+            if (t.startsWith("```") || t.startsWith("~~~")) { inFence = !inFence; blank = 0; out += raw; continue }
+            if (inFence) { out += raw; continue }
+            if (t.isEmpty()) { blank++; if (blank <= 1 && out.isNotEmpty()) out += ""; continue }
+            blank = 0
+            val indent = raw.takeWhile { it == ' ' || it == '\t' }
+            var body = raw.drop(indent.length)
+            while ("  " in body) body = body.replace("  ", " ")
+            for (p in listOf(" .", " ,", " ;", " :", " )")) body = body.replace(p, p.drop(1))
+            body = body.replace("( ", "(").replace(" ()", "")
+            out += indent + body.trim()
+        }
+        while (out.lastOrNull() == "") out.removeAt(out.lastIndex)
+        return out.joinToString("\n")
+    }
+
+    const val FAILED = "Claude stopped before finishing. Try again."
+    const val NETWORK = "Couldn't reach the server. Check your connection, then try again."
 }
 
 /** Time labels between messages: "Today 14:05", "Yesterday 09:12", "Mon 3 Nov, 18:40" (24 h, the phone's zone). */

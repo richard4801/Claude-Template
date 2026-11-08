@@ -249,12 +249,12 @@ class ClaudeChatSurfacesScreenshotTest(private val theme: String, private val su
         // Never raw markers, context lines or JSON.
         listOf("**", "##", "```", "[Suite", "[Edit", "[Camera", "[Recreate", "mcp__", "{\"", "Exception", "Runner.kt").forEach(::hasNot)
         when (surface) {
-            "state_empty" -> has("Start a conversation")
+            "state_empty" -> has("Chat with Claude")
             "state_loading" -> has("Opening the chat")
-            "state_error" -> { has("Can't open the chat"); has("Couldn't reach the studio") }
+            "state_error" -> { has("You're offline"); has("The chat comes back when the connection does.") }
             "state_offline" -> { has("Claude on your Mac is offline"); has("Use the studio API key") }
             "state_streaming" -> { has("Stop"); has("Grabbing a frame") }
-            "state_failed" -> { has("Claude couldn't finish this reply."); has("Retry") }
+            "state_failed" -> { has("Claude stopped before finishing. Try again."); has("Try again") }
             else -> { has("Send"); if (!keyboard) has("Copy") }
         }
         val name = if (surface.startsWith("state_")) "chat_${theme}_$surface" else "chat_${theme}_${surface}_${device}_${if (keyboard) "kb" else "nokb"}"

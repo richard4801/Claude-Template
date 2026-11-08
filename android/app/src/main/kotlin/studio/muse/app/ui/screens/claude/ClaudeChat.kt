@@ -220,12 +220,12 @@ private fun rows(ui: ClaudeChatUi, items: List<ChatItem>, now: Long): List<ChatR
         val at = when (it) { is ChatItem.User -> it.at; is ChatItem.Assistant -> it.at; else -> 0L }
         if (at > 0 && ChatTime.needsLabel(prevAt, at)) out += ChatRow.Time("time-${it.key}", ChatTime.label(at, now))
         if (at > 0) prevAt = at
-        // "Claude" heads a reply only where it follows the owner's message, so a run of text and tool rows reads as one answer.
+        // [first]: the start of an answer (after the owner's message), which gets the wider gap; no labels, as in the Claude app.
         out += ChatRow.Item(it, first = it !is ChatItem.User && (prev == null || prev is ChatItem.User))
         prev = it
     }
     val t = ui.turn
-    if (t != null && t.active && (prev == null || prev is ChatItem.User)) out += ChatRow.Thinking(if (t.state == "queued" && !t.api) ClaudeText.WAITING else "Claude is thinking…")
+    if (t != null && t.active && (prev == null || prev is ChatItem.User)) out += ChatRow.Thinking(if (t.state == "queued" && !t.api) ClaudeText.WAITING else "Claude is working…")
     ClaudeText.ended(t)?.let { out += ChatRow.Ended(it, t?.state == "failed") }
     if (Fallback.decide(ui.status, ui.refusal, ui.contextKind) != null && t?.active != true) out += ChatRow.Offline
     ui.notice?.let { out += ChatRow.Notice(ChatClean.error(it, "Couldn't send that. Try again.")) }
@@ -277,8 +277,9 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
                 !ui.loaded -> ChatSkeleton(Modifier.padding(horizontal = horizontal, vertical = MuseSpace.s3))
                 ui.error != null && ui.thread == null -> Column(Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = MuseSpace.s4),
                     verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                    T("Can't open the chat", m.scale.heading, m.roles.ink)
-                    T(ChatClean.error(ui.error, "Check your connection and try again."), m.scale.body, m.roles.ink2)
+                    val offline = ChatClean.isNetwork(ui.error)
+                    T(if (offline) "You're offline" else "Can't open the chat", m.scale.heading, m.roles.ink)
+                    T(if (offline) "The chat comes back when the connection does." else ChatClean.error(ui.error, "Check your connection, then try again."), m.scale.body, m.roles.ink2)
                     Spacer(Modifier.height(MuseSpace.s1))
                     SecondaryButton("Try again", { actions.retry() }, icon = "retry")
                 }
@@ -342,7 +343,7 @@ private fun RowView(r: ChatRow, ui: ClaudeChatUi, actions: ClaudeChatActions, co
         is ChatRow.Ended -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
             if (r.failed) Ic("warning", 16.dp, m.roles.danger)
             T(r.text, m.scale.caption, if (r.failed) m.roles.danger else m.roles.ink2, Modifier.weight(1f, fill = false))
-            if (r.failed && !ui.busy && ui.thread != null) TextAction("Retry", actions.retryTurn)
+            if (r.failed && !ui.busy && ui.thread != null) TextAction("Try again", actions.retryTurn)
         }
         ChatRow.Offline -> Fallback.decide(ui.status, ui.refusal, ui.contextKind)?.let { OfflineCard(it, ui, actions) }
         is ChatRow.Notice -> Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press(onClick = actions.dismissNotice).semantics(mergeDescendants = true) {
@@ -359,7 +360,7 @@ private fun RowView(r: ChatRow, ui: ClaudeChatUi, actions: ClaudeChatActions, co
 private fun EmptyState(contextKind: String, modifier: Modifier) {
     val m = muse
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-        T("Start a conversation", m.scale.heading, m.roles.ink)
+        T("Chat with Claude", m.scale.heading, m.roles.ink)
         T(ClaudeText.empty(contextKind), m.scale.body, m.roles.ink2)
     }
 }
@@ -431,14 +432,10 @@ private fun UserBubble(u: ChatItem.User, copy: (String) -> Unit, view: (List<Vie
 private fun AssistantText(a: ChatItem.Assistant, label: Boolean, copy: (String) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxWidth().copyable(a.text, copy, "reply"), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-        if (label) ClaudeLabel()
         ChatMarkdownText(a.text, a.streaming, Modifier.fillMaxWidth())
     }
 }
 
-/** "Claude" over the start of an answer, in the caption step. */
-@Composable
-private fun ClaudeLabel() = T("Claude", muse.scale.caption.copy(fontWeight = FontWeight.SemiBold), muse.roles.ink2, Modifier.semantics { heading() }, maxLines = 1)
 
 /** Waiting for the first words: a pulsing dot (progress) and what's happening. */
 @Composable
@@ -447,7 +444,6 @@ private fun Thinking(text: String) {
     val pulse = rememberInfiniteTransition(label = "thinking")
     val a by pulse.animateFloat(.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "dot")
     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-        ClaudeLabel()
         Row(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
             Box(Modifier.size(8.dp).graphicsLayer { alpha = a }.clip(CircleShape).background(m.roles.ink2))
@@ -466,7 +462,6 @@ private fun ToolRow(t: ChatItem.Tool, label: Boolean, open: Boolean, onToggle: (
     val r = m.roles
     val col = if (!t.ok) r.danger else if (t.running) r.ink else r.ink2
     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
-        if (label) ClaudeLabel()
         Row(Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(m.radii.chip)).background(r.field).press(onClick = onToggle).padding(horizontal = 10.dp, vertical = 6.dp)
             .semantics(mergeDescendants = true) {
                 role = Role.Button
@@ -498,16 +493,15 @@ private fun FrameView(f: ChatItem.Image, label: Boolean, view: (List<ViewerImage
         f.data?.let { d -> runCatching { Base64.decode(d, Base64.DEFAULT).let { b -> BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() } }.getOrNull() }
     }
     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
-        if (label) ClaudeLabel()
         Box(Modifier.width(200.dp).height(113.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field)
-            .press(enabled = f.url != null) { f.url?.let { view(listOf(ViewerImage(ImageRef(url = it), "Frame Claude checked")), 0) } }
-            .semantics { contentDescription = "Frame Claude checked"; role = Role.Image }, contentAlignment = Alignment.Center) {
+            .press(enabled = f.url != null) { f.url?.let { view(listOf(ViewerImage(ImageRef(url = it), "Frame Claude looked at")), 0) } }
+            .semantics { contentDescription = "Frame Claude looked at"; role = Role.Image }, contentAlignment = Alignment.Center) {
             when {
                 bmp != null -> Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 f.url != null -> AsyncImage(f.url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
         }
-        Caption("Frame Claude checked")
+        Caption("Frame Claude looked at")
     }
 }
 
