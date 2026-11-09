@@ -4,3 +4,4 @@ __pycache__/
 
 # Release APKs built for download (WS4), not committed
 release/*.apk
+downloads/
