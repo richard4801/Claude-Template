@@ -156,57 +156,38 @@ export type RenderOptions = {
   quality?: 'preview' | 'export';
 };
 /** stills: text frames (SVG) and sprites: their shadows, drawn to PNG (renderProject) before ffmpeg runs; temp: files and folders to remove after. */
-export type RenderPlan = { args: string[]; soundArgs: string[] | null; durationSec: number; width: number; height: number; unsupported: string[]; temp: string[]; stills: { file: string; svg: string; crop: TD.Crop }[]; sprites: TD.Sprite[] };
+export type RenderPlan = { chunks: string[][]; joinArgs: string[]; soundArgs: string[] | null; durationSec: number; width: number; height: number; unsupported: string[]; temp: string[]; stills: { file: string; svg: string; crop: TD.Crop }[]; sprites: TD.Sprite[] };
 
 /**
- * The ffmpeg arguments for a project. `files` maps asset ids to local files or URLs; `sizes` gives each video asset's
- * pixel size (the cover/contain fit needs it); `hasAudio` says which have sound.
+ * The ffmpeg runs for a project: `soundArgs` (the sound, a pass of its own), one run per stretch of the timeline
+ * (`chunks`, each with only the clips and pictures it shows, so memory stays bounded however long the edit), then
+ * `joinArgs` (the stretches joined without re-encoding, with the sound). `files` maps asset ids to local files or
+ * URLs; `sizes` gives each asset's pixel size and whether it has sound.
  */
 export function planRender(p: M.EditProject, files: Record<string, string>, sizes: Record<string, { width: number; height: number; hasAudio: boolean }>, out: string, o: RenderOptions = {}): RenderPlan {
   const unsupported = new Set<string>();
   const temp: string[] = [];
-  const baked = new Map<string, string>(); // look key → baked .cube (one per distinct look)
+  const baked = new Map<string, string>(); // cube text → its file (one per distinct colour)
   const f = Math.min(1, (o.maxSide ?? Math.max(p.canvas.width, p.canvas.height)) / Math.max(p.canvas.width, p.canvas.height));
   const W = even(p.canvas.width * f), H = even(p.canvas.height * f), FPS = Math.min(o.fps ?? p.canvas.fps ?? 30, 60);
-  const inputs: string[] = [], index = new Map<string, number>(), inputArgs = new Map<number, string[]>();
-  const input = (file: string) => { let i = index.get(file); if (i === undefined) { i = inputs.length; inputs.push(file); index.set(file, i); } return i; };
-  const g: string[] = [];
   const main = M.mainTrack(p), clips = main.items as M.VideoClip[], tl = M.timeline(p);
   if (!clips.length) throw new Error('nothing on the main track');
   const total = o.durationSec ?? (tl.at(-1)?.endSec ?? 0);
   const fr = (t: number) => Math.round(t * FPS);
+  const TOTAL = Math.max(1, fr(total));
   /** A clip's frames: from its first frame on the timeline to its last. */
   const frames = (i: number) => Math.max(1, fr(tl[i]!.endSec) - fr(tl[i]!.startSec));
+  let tmpN = 0;
+  const tmpName = (kind: string, ext: string) => path.join(os.tmpdir(), `muse-${kind}-${process.pid}-${Date.now()}-${tmpN++}.${ext}`);
 
-  /**
-   * An input for a clip's source from `at` for `dur` seconds (opened there: a stream never buffers frames a later clip
-   * will need). Main clips going forward through the same file, without transitions, share one.
-   */
-  const openAt = (file: string, at: number, dur: number, threads = 2): number => {
-    const k = inputs.length;
-    inputs.push(file);
-    inputArgs.set(k, ['-threads', String(threads), '-ss', n4(Math.max(0, at)), '-t', n4(dur + 0.5)]);
-    return k;
-  };
-  /** Source frames of a video clip (its speed pieces from input `k` opened at `at`, or one held frame) or a picture, `n` frames. */
-  const sourceFrames = (k: number, at: number, c: { inSec: number; outSec: number; speed?: number; speedCurve?: M.SpeedCurve; holdSec?: number } | null, n: number, tag: string): string => {
-    if (!c || c.holdSec !== undefined) {
-      g.push(`[${k}:v]${c ? `trim=start=${n4(Math.max(0, c.inSec - at))},setpts=PTS-STARTPTS,` : ''}trim=end_frame=1,loop=loop=-1:size=1,setpts=N/${FPS}/TB,trim=end_frame=${n}[${tag}]`);
-      return tag;
-    }
-    const pieces = M.speedPieces(c);
-    pieces.forEach((pc, j) => g.push(`[${k}:v]trim=start=${n4(Math.max(0, pc.inSec - at))}:end=${n4(pc.outSec - at)},setpts=(PTS-STARTPTS)/${n4(pc.speed)},fps=${FPS}[${tag}p${j}]`));
-    g.push(`${pieces.map((_, j) => `[${tag}p${j}]`).join('')}concat=n=${pieces.length}:v=1:a=0,trim=end_frame=${n},setpts=N/${FPS}/TB[${tag}]`);
-    return tag;
-  };
   let lookN = 0;
   /** A .cube for an item's colour (layer.ts colourCube), or null. */
   const colourFile = (adjust: M.Adjust | undefined, filter: M.FilterRef | undefined, look: Look | undefined): string | null => {
     let lut: Lut | null = null;
     if (look?.lut) {
-      const f = lutFile(look.lut, files);
-      if (!f) unsupported.add('a look that is not on the server');
-      else try { lut = parseCube(fs.readFileSync(f, 'utf8')); } catch { unsupported.add('a look that is not on the server'); }
+      const lf = lutFile(look.lut, files);
+      if (!lf) unsupported.add('a look that is not on the server');
+      else try { lut = parseCube(fs.readFileSync(lf, 'utf8')); } catch { unsupported.add('a look that is not on the server'); }
     }
     const cube = L.colourCube(M.colorMatrix(adjust, filter, FILTERS), adjust, look, lut);
     if (!cube) return null;
@@ -217,229 +198,52 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   const lut3d = (file: string) => `lut3d=file='${file.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '')}'`;
   const LOOK_DETAILS = ['sharpen', 'chromatic', 'halation', 'leak', 'vignette', 'grain'] as const;
   type Visual = M.VideoClip | M.ImageItem;
-  /**
-   * A clip or picture drawn as the apps draw it (layer.ts), from the source frames `src` (w × h px, item-local time,
-   * `n` frames, `len` s long): crop → chroma key → colour → matte and mask → placed → opacity. Static and unrotated:
-   * a picture to put at (x, y); else RGBA the size of the canvas (`canvas` forces that, e.g. for blend modes).
-   */
-  type Layer = { s: string; x: number; y: number; opaque: boolean; w: number; h: number } | { s: string; x: null; y: null; opaque: false; w: number; h: number };
-  const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; matte?: () => string | null }): Layer => {
-    const { n, len, tag } = o, vc = o.video ? it as M.VideoClip : null;
-    let s = src;
-    const cr = it.crop ?? {}, l = cr.left ?? 0, t = cr.top ?? 0, r = cr.right ?? 0, b = cr.bottom ?? 0;
-    const cw = w * (1 - l - r), ch = h * (1 - t - b);
-    const kf = (it.fit ?? o.fit) === 'cover' ? Math.max(W / cw, H / ch) : Math.min(W / cw, H / ch);
-    const fw0 = cw * kf, fh0 = ch * kf;
-    const mo = L.motion(it, len, `(in/${FPS})`);
-    const still = [mo.x, mo.y, mo.scale, mo.rotation].map(L.constant);
-    const sprite = !o.canvas && still.every(v => v !== null) && Math.abs(((still[3]! % 360) + 360) % 360) < 1e-9;
-    // Drawn at the size it reaches on the canvas: its own size when still, else its largest scale.
-    const big = sprite ? still[2]! : Math.min(L.maxScale(it), (2 * Math.max(W, H)) / Math.max(fw0, fh0));
-    const iw = even(fw0 * big), ih = even(fh0 * big);
-    const cropF = l || t || r || b ? `crop=w=iw*${n6(1 - l - r)}:h=ih*${n6(1 - t - b)}:x=iw*${n6(l)}:y=ih*${n6(t)},` : '';
-    // Kept in yuv (half the memory of RGB: every clip's buffers stay for the whole render) until a step needs RGB.
-    g.push(`[${s}]${cropF}scale=${iw}:${ih},setsar=1,format=yuv420p[${tag}c]`);
-    s = `${tag}c`;
-    let rgb = false;
-    const toRgb = () => { if (!rgb) { g.push(`[${s}]format=gbrp[${tag}rgb]`); s = `${tag}rgb`; rgb = true; } };
-    const alphas: string[] = [];
-    // Chroma key (model.ts chromaKey): alpha and spill from the pixel's (Cb, Cr), the colour pulled towards its luma.
-    if (vc?.chroma) {
-      toRgb();
-      const e = L.chromaExprs(vc.chroma);
-      g.push(`[${s}]split=3[${tag}k0][${tag}k1][${tag}k2]`,
-        `[${tag}k0]scale=out_color_matrix=bt601:out_range=full,format=yuv444p,extractplanes=u+v[${tag}u][${tag}v]`,
-        `[${tag}u]split[${tag}u1][${tag}u2]`, `[${tag}v]split[${tag}v1][${tag}v2]`,
-        `[${tag}u1][${tag}v1]lut2=c0='${e.alpha}'[${tag}ka]`, `[${tag}u2][${tag}v2]lut2=c0='${e.spill}',format=gbrp[${tag}ks]`,
-        `[${tag}k1]colorchannelmixer=rr=0.2126:rg=0.7152:rb=0.0722:gr=0.2126:gg=0.7152:gb=0.0722:br=0.2126:bg=0.7152:bb=0.0722[${tag}kl]`,
-        `[${tag}kl][${tag}k2][${tag}ks]maskedmerge[${tag}kd]`);
-      s = `${tag}kd`; alphas.push(`${tag}ka`);
-    }
-    // Colour: the matrix (adjust, filter), tone, curves, HSL, LUT and lift as one 3D LUT; colour keyframes in runs.
-    const look = it.look;
-    if (look && LOOK_DETAILS.some(x => look[x] !== undefined)) unsupported.add('look details (grain, vignette, …)');
-    if (M.LOOK_KF_PROPS.some(x => it.keyframes?.[x]?.length)) unsupported.add('look details (grain, vignette, …)');
-    if (!M.COLOR_KF_PROPS.some(x => it.keyframes?.[x]?.length)) { const cf = colourFile(it.adjust, it.filter, look); if (cf) { toRgb(); g.push(`[${s}]${lut3d(cf)}[${tag}g]`); s = `${tag}g`; } }
-    else {
-      const step = Math.max(0.1, len / 60), parts: string[] = [];
-      for (let a = 0; a < len - 1e-9; a += step) {
-        const cf = colourFile(M.adjustAt(it, a + step / 2), it.filter, look);
-        if (cf) parts.push(`${lut3d(cf)}:enable='gte(t,${n4(a)})*lt(t,${n4(a + step)})'`);
-      }
-      if (parts.length) { toRgb(); g.push(`[${s}]${parts.join(',')}[${tag}g]`); s = `${tag}g`; }
-    }
-    // Background removal: the matte's luma (cut and timed like the clip) is the alpha.
-    if (vc?.alphaMatte) {
-      const ms = o.matte?.();
-      if (!ms) unsupported.add('background removal');
-      else { g.push(`[${ms}]${cropF}scale=${iw}:${ih},format=gray${vc.alphaMatte.invert ? ',negate' : ''}[${tag}ma]`); alphas.push(`${tag}ma`); }
-    }
-    // Mask (model.ts maskAlpha, keyed by maskAt), in the picture's own frame: grey frames written here, one, or one a frame while it moves.
-    if (it.mask) {
-      const keyed = M.MASK_KF_PROPS.some(x => it.keyframes?.[x]?.length);
-      const q = keyed ? Math.min(1, Math.sqrt(8e6 / (n * iw * ih))) : 1, mw = Math.max(2, Math.round(iw * q)), mh = Math.max(2, Math.round(ih * q));
-      const raw = path.join(os.tmpdir(), `muse-mask-${process.pid}-${Date.now()}-${tag}.gray`);
-      const fd = fs.openSync(raw, 'w');
-      try { for (let f = 0; f < (keyed ? n : 1); f++) fs.writeSync(fd, L.maskPixels(M.maskAt(it, f / FPS)!, mw, mh)); } finally { fs.closeSync(fd); }
-      temp.push(raw);
-      const mk = inputs.length;
-      inputs.push(raw);
-      inputArgs.set(mk, ['-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${mw}x${mh}`, '-framerate', String(FPS)]);
-      g.push(`[${mk}:v]${keyed ? '' : 'loop=loop=-1:size=1,'}setpts=N/${FPS}/TB,trim=end_frame=${n},scale=${iw}:${ih}[${tag}mk]`);
-      alphas.push(`${tag}mk`);
-    }
-    const ac = L.constant(mo.alpha);
-    // Opaque: no alpha at all (a full-frame main clip is then just cut to the canvas).
-    const opaque = !alphas.length && ac !== null && ac >= 1 && sprite;
-    if (alphas.length) {
-      let a = alphas[0]!;
-      for (let j = 1; j < alphas.length; j++) { g.push(`[${a}][${alphas[j]}]lut2=c0='x*y/255'[${tag}a${j}]`); a = `${tag}a${j}`; }
-      g.push(`[${s}][${a}]alphamerge[${tag}al]`);
-      s = `${tag}al`;
-    } else if (!opaque) { g.push(`[${s}]format=${rgb ? 'gbrap' : 'yuva420p'}[${tag}al]`); s = `${tag}al`; }
-    const flipX = !!it.transform?.flipX, flipY = !!it.transform?.flipY;
-    let x: number | null = null, y: number | null = null, ow = W, oh = H;
-    if (sprite) {
-      // Still: mirrored, then put at its place.
-      if (flipX || flipY) { g.push(`[${s}]${[flipX ? 'hflip' : '', flipY ? 'vflip' : ''].filter(Boolean).join(',')}[${tag}fl]`); s = `${tag}fl`; }
-      x = Math.round(still[0]! * W - iw / 2); y = Math.round(still[1]! * H - ih / 2); ow = iw; oh = ih;
-    } else {
-      // Moving: placed by its corners over time (fit, mirror, scale, rotation, position; keys, animation, loop).
-      // Drawn in the area it sweeps over the canvas (a frame the canvas's size costs ~4 × the memory for a picture-in-picture).
-      const sw = L.sweep(it, len, n, FPS, W, H, fw0, fh0);
-      const bx = Math.max(0, Math.floor((sw[0] - 2) / 2) * 2), by = Math.max(0, Math.floor((sw[1] - 2) / 2) * 2);
-      const bw = Math.max(2, even(Math.min(W, Math.ceil(sw[2] + 2)) - bx)), bh = Math.max(2, even(Math.min(H, Math.ceil(sw[3] + 2)) - by));
-      const fw = Math.max(iw + 2, bw), fh = Math.max(ih + 2, bh);
-      const cs = L.cornerExprs(mo, W, H, fw0, fh0, iw, ih, fw, fh, flipX, flipY, bx, by);
-      const moving = still.some(v => v === null);
-      // (perspective in gbrap: its yuva420p alpha plane comes out wrong.)
-      g.push(`[${s}]format=gbrap,pad=${fw}:${fh}:1:1:color=black@0,perspective=sense=destination:eval=${moving ? 'frame' : 'init'}:${cs.map((e, j) => `${['x', 'y'][j % 2]}${Math.floor(j / 2)}='${e}'`).join(':')},crop=${bw}:${bh}:0:0${o.canvas ? `,pad=${W}:${H}:${bx}:${by}:color=black@0` : ',format=yuva420p'}[${tag}pl]`);
-      s = `${tag}pl`;
-      if (!o.canvas) { x = bx; y = by; ow = bw; oh = bh; }
-    }
-    // Opacity over time (keys, animation, loop): a 2 × 2 grey drawn by expression, stretched and multiplied into the alpha.
-    if (ac === null) {
-      g.push(`color=c=white:s=2x2:r=${FPS}:d=${n4(n / FPS + 1)},format=gray,geq=lum='255*clip(${L.motion(it, len, 'T').alpha},0,1)',scale=${ow}:${oh}:flags=neighbor,trim=end_frame=${n}[${tag}op]`,
-        `[${s}]split[${tag}o1][${tag}o2]`, `[${tag}o1]alphaextract[${tag}oa]`, `[${tag}oa][${tag}op]lut2=c0='x*y/255'[${tag}om]`, `[${tag}o2][${tag}om]alphamerge[${tag}o]`);
-      s = `${tag}o`;
-    } else if (ac < 1) { g.push(`[${s}]lut=c3='val*${n4(Math.max(0, ac))}'[${tag}o]`); s = `${tag}o`; }
-    return x === null || o.canvas ? { s, x: null, y: null, opaque: false, w: W, h: H } : { s, x, y: y!, opaque, w: ow, h: oh };
-  };
+  type Src = { inSec: number; outSec: number; speed?: number; speedCurve?: M.SpeedCurve; holdSec?: number };
 
-  // Main clips: each its own picture of the canvas (the background colour, or the blur fill, under the clip).
-  /**
-   * The input the previous clip read: the next one reads it too when it goes on forward through the same file without
-   * a transition. Any other sharing makes ffmpeg buffer the frames decoded for a clip until its turn (gigabytes).
-   */
-  let shared: { file: string; k: number; at: number; end: number } | null = null;
-  clips.forEach((c, i) => {
-    const asset = p.assets.find(a => a.id === c.asset);
-    const file = asset && files[asset.id], size = asset && sizes[asset.id];
-    const n = frames(i), len = M.clipLength(c);
-    const bg = `color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(n / FPS + 1)},trim=end_frame=${n},format=yuv420p`;
-    if (!asset || !file || !size || !size.width) { g.push(`${bg},format=yuv420p,setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); return; }
-    if (main.hidden) { g.push(`${bg},format=yuv420p,setsar=1,settb=AVTB[v${i}]`); return; } // hidden: only the background
-    const from = c.holdSec !== undefined ? c.inSec : Math.min(...M.speedPieces(c).map(x => x.inSec)), to = c.holdSec !== undefined ? c.inSec + 0.2 : c.outSec;
-    if (!shared || shared.file !== file || from < shared.end - 1e-6 || c.transitionIn || c.holdSec !== undefined || clips[i - 1]?.holdSec !== undefined) shared = { file, k: openAt(file, from, Math.max(0.2, to - from), clips.length > 8 ? 1 : 2), at: from, end: to };
-    else { inputArgs.get(shared.k)!.splice(-1, 1, n4(to - shared.at + 0.5)); shared.end = to; }
-    const src = sourceFrames(shared.k, shared.at, c, n, `m${i}s`);
-    const blur = p.canvas.fill === 'blur' && (c.fit ?? 'cover') === 'contain';
-    let under = `m${i}bg`, layerSrc = src;
-    if (blur) {
-      // Blur fill (model.ts blurFill): the clip cover-fitted with its colour (not its transform), box-blurred, darkened.
-      const rad = Math.max(1, Math.round(M.blurFillRadius(p.canvas) * f));
-      const cf = colourFile(c.adjust, c.filter, c.look);
-      g.push(`[${src}]split[m${i}f][m${i}l]`,
-        `[m${i}f]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=gbrp${cf ? `,${lut3d(cf)}` : ''},boxblur=luma_radius=${rad}:luma_power=1:chroma_radius=${rad}:chroma_power=1,colorchannelmixer=rr=${M.BLUR_FILL_DARKEN}:gg=${M.BLUR_FILL_DARKEN}:bb=${M.BLUR_FILL_DARKEN}[${under}]`);
-      layerSrc = `m${i}l`;
+  // ---------------------------------------------------------------- what is on the timeline, in frames
+  /** A picture item on the timeline: its first frame and frame count, its source, and how many inputs it reads. */
+  type Placed = { it: Visual; video: boolean; start: number; n: number; len: number; file: string; size: { width: number; height: number }; track: number };
+  const overlayItems: Placed[] = [];
+  p.tracks.forEach((tr, ti) => {
+    if ((tr.kind !== 'video' && tr.kind !== 'image') || tr.hidden) return;
+    for (const it of tr.items as Visual[]) {
+      const video = tr.kind === 'video', start = (it as { startSec: number }).startSec;
+      const len = video ? M.clipLength(it as M.VideoClip) : (it as M.ImageItem).durationSec;
+      const s0 = fr(start), n = Math.min(fr(start + len), TOTAL) - s0;
+      if (n < 1) continue;
+      const asset = p.assets.find(a => a.id === it.asset), file = asset && files[asset.id], size = asset && sizes[asset.id];
+      if (!asset || !file || !size || !size.width) { unsupported.add('missing media'); continue; }
+      overlayItems.push({ it, video, start: s0, n, len, file, size, track: ti });
     }
-    const matte = () => {
-      const mf = c.alphaMatte && files[c.alphaMatte.asset];
-      return mf ? sourceFrames(openAt(mf, from, Math.max(0.2, to - from)), from, c, n, `m${i}mt`) : null;
-    };
-    const lay = visualLayer(c, layerSrc, size.width, size.height, { video: true, n, len, fit: 'cover', tag: `m${i}`, canvas: false, matte });
-    if (!blur && lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
-      // Opaque and covering the canvas: cut to it (no background, no overlay).
-      g.push(`[${lay.s}]crop=${W}:${H}:${-lay.x}:${-lay.y}[m${i}o]`);
-    } else {
-      if (blur) g.push(`[${under}]format=yuv420p[${under}y]`), under = `${under}y`;
-      else g.push(`${bg}[${under}]`);
-      g.push(`[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[m${i}o]`);
-    }
-    // Exactly the clip's frames on the timeline (rounded once from the timeline, so cuts never drift).
-    g.push(`[m${i}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
   });
+  const cost = (it: Visual, video: boolean) => 1 + (it.mask ? 1 : 0) + (video && (it as M.VideoClip).alphaMatte ? 1 : 0);
 
-  /** Composites every overlay track (in order) over the picture `base`; returns the result (yuv420p). */
-  const overlays = (base: string): string => {
-    let cur = base, oi = 0, any = false;
-    for (const tr of p.tracks) {
-      if ((tr.kind !== 'video' && tr.kind !== 'image') || tr.hidden) continue;
-      for (const it of tr.items as Visual[]) {
-        const video = tr.kind === 'video', vc = video ? it as M.VideoClip : null, start = (it as { startSec: number }).startSec;
-        const len = vc ? M.clipLength(vc) : (it as M.ImageItem).durationSec;
-        const end = Math.min(start + len, total), n = fr(end) - fr(start);
-        if (n < 1) continue;
-        const asset = p.assets.find(a => a.id === it.asset), file = asset && files[asset.id], size = asset && sizes[asset.id];
-        if (!asset || !file || !size || !size.width) { unsupported.add('missing media'); continue; }
-        const tag = `ov${oi++}`;
-        any = true;
-        const from = vc ? (vc.holdSec !== undefined ? vc.inSec : Math.min(...M.speedPieces(vc).map(x => x.inSec))) : 0, to = vc ? (vc.holdSec !== undefined ? vc.inSec + 0.2 : vc.outSec) : 0;
-        const vk = vc ? openAt(file, from, Math.max(0.2, to - from), 1) : -1;
-        const src = vc ? sourceFrames(vk, from, vc, n, `${tag}s`) : sourceFrames(input(file), 0, null, n, `${tag}s`);
-        const mode = it.blend ?? 'normal';
-        const matte = () => { const mf = vc?.alphaMatte && files[vc.alphaMatte.asset]; return mf ? sourceFrames(openAt(mf, from, Math.max(0.2, to - from)), from, vc, n, `${tag}mt`) : null; };
-        const lay = visualLayer(it, src, size.width, size.height, { video, n, len, fit: 'contain', tag, canvas: mode !== 'normal', matte });
-        const t0 = n4(fr(start) / FPS), on = `enable='between(t,${t0},${n4((fr(start) + n - 0.5) / FPS)})'`;
-        // Normal: over the picture as it is (yuv; the mix is linear, as in RGB).
-        if (mode === 'normal') g.push(`[${lay.s}]setpts=PTS+${t0}/TB[${tag}t]`, `[${cur}][${tag}t]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass:${on}[${tag}x]`);
-        else {
-          // blendPixel: the mode's colour (lut2, exact W3C formulas) mixed in by the item's coverage (maskedmerge).
-          const e = L.blendExpr(mode);
-          g.push(`[${lay.s}]tpad=start_duration=${t0}:stop_duration=${n4(total)}:color=black@0,trim=end_frame=${fr(total)},split[${tag}t1][${tag}t2]`,
-            `[${cur}]format=gbrp,split[${tag}b1][${tag}b2]`, `[${tag}t1]format=gbrp[${tag}tc]`, `[${tag}tc][${tag}b1]lut2=c0='${e}':c1='${e}':c2='${e}'[${tag}bl]`,
-            `[${tag}t2]alphaextract,format=gbrp[${tag}ta]`, `[${tag}b2][${tag}bl][${tag}ta]maskedmerge,format=yuv420p[${tag}x]`);
-        }
-        cur = `${tag}x`;
-      }
+  // ---------------------------------------------------------------- the stretches (windows) rendered one at a time
+  // A window never cuts a transition; it ends where reading more would take more than MAX_INPUTS inputs at once
+  // (each input holds decoded frames for the whole run), and at most every 60 s.
+  const MAX_INPUTS = 6;
+  const inTransition = (F: number) => clips.some((c, i) => i > 0 && c.transitionIn && tl[i]!.transitionSec > 0 && F > fr(tl[i]!.startSec) && F < fr(tl[i - 1]!.endSec))
+    || clips.some((c, i) => i > 0 && c.transitionIn && tl[i]!.transitionSec > 0 && F === fr(tl[i]!.startSec));
+  const marks = new Set<number>([TOTAL]);
+  clips.forEach((_, i) => marks.add(fr(tl[i]!.startSec)));
+  for (const x of overlayItems) { marks.add(x.start); marks.add(x.start + x.n); }
+  for (let F = 0; F < TOTAL; F += 15 * FPS) marks.add(F);
+  const cuts = [...marks].filter(F => F > 0 && F <= TOTAL && (F === TOTAL || !inTransition(F))).sort((a, b) => a - b);
+  const load = (F0: number, F1: number) => clips.reduce((s, _, i) => s + (fr(tl[i]!.startSec) < F1 && fr(tl[i]!.startSec) + frames(i) > F0 ? cost(clips[i]!, true) : 0), 0)
+    + overlayItems.reduce((s, x) => s + (x.start < F1 && x.start + x.n > F0 ? cost(x.it, x.video) : 0), 0);
+  const windows: [number, number][] = [];
+  for (let F0 = 0; F0 < TOTAL;) {
+    let end = cuts.find(F => F > F0)!;
+    for (const F of cuts) {
+      if (F <= end) continue;
+      if (F - F0 > 60 * FPS || load(F0, F) > MAX_INPUTS) break;
+      end = F;
     }
-    return any ? cur : base;
-  };
-
-  let acc = 'v0';
-  const glitches: { start: number; d: number }[] = [];
-  for (let i = 1; i < clips.length; i++) {
-    const t = clips[i]!.transitionIn, next = `j${i}`;
-    const d = t && tl[i]!.transitionSec > 0 ? fr(tl[i - 1]!.endSec) - fr(tl[i]!.startSec) : 0;
-    if (t?.kind === 'glitch' && d >= 2) { g.push(...glitchSwitch(acc, `v${i}`, next, fr(tl[i]!.startSec), d, i, FPS)); glitches.push({ start: fr(tl[i]!.startSec), d }); }
-    else if (t && d > 0) g.push(`[${acc}][v${i}]xfade=transition=${XFADE[t.kind] ?? 'fade'}:duration=${n4(d / FPS)}:offset=${n4(fr(tl[i]!.startSec) / FPS)}[${next}]`);
-    else g.push(`[${acc}][v${i}]concat=n=2:v=1:a=0[${next}]`);
-    acc = next;
+    windows.push([F0, end]);
+    F0 = end;
   }
 
-  // The glitches' jitter and colour split, on the joined picture.
-  if (glitches.length) {
-    g.push(`[${acc}]format=gbrp,sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=yuv420p[gfx]`);
-    acc = 'gfx';
-  }
-  // Overlays (video and image tracks), in track order, over the joined main picture (layer.ts).
-  acc = overlays(acc);
-  // Adjustment layers: over the pictures, under the text. Each run of one colour is one affine channel mix, on only
-  // while the run lasts: on RGBA with an opaque alpha, the offsets go in as the alpha's coefficients, so the sum is
-  // clamped once, at the end (model.ts: "not clamped between layers, only at the end").
-  const runs = adjustRuns(p);
-  if (runs.length) {
-    const st: string[] = ['format=rgba'];
-    for (const { a, b, m } of runs) {
-      const on = `enable='gte(t,${n4(a)})*lt(t,${n4(b)})'`;
-      st.push(`colorchannelmixer=rr=${n6(m[0]!)}:rg=${n6(m[1]!)}:rb=${n6(m[2]!)}:ra=${n6(m[3]!)}:gr=${n6(m[4]!)}:gg=${n6(m[5]!)}:gb=${n6(m[6]!)}:ga=${n6(m[7]!)}:br=${n6(m[8]!)}:bg=${n6(m[9]!)}:bb=${n6(m[10]!)}:ba=${n6(m[11]!)}:${on}`);
-    }
-    g.push(`[${acc}]${st.join(',')},format=yuv420p[adj]`);
-    acc = 'adj';
-  }
-  g.push(`[${acc}]tpad=stop_mode=clone:stop_duration=${n4(Math.max(0, total))},trim=duration=${n4(total)},setpts=PTS-STARTPTS,format=yuv420p[vpad]`);
-  // Text and captions, above every picture (textdraw.ts): the whole canvas's text as one RGBA picture per change of
-  // what shows, as a still sequence (ffconcat) overlaid once. Static stretches are one still; moving ones one a frame.
+  // ---------------------------------------------------------------- text and captions: stills for the whole timeline
   const pieces: ((t: number) => TD.Piece | null)[] = [];
   const pages = M.captionPages(p);
   for (const tr of p.tracks) {
@@ -457,51 +261,297 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       pieces.push(t => TD.textPiece(it, t, font));
     }
   }
-  let vlast = 'vpad';
   const stills: RenderPlan['stills'] = [], sprites: TD.Sprite[] = [];
+  let textSeq: number[] = [], textCrop: TD.Crop | null = null, stillFile = (_k: number) => '';
   if (pieces.length) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-text-'));
     temp.push(dir);
     const missing = new Set<string>();
-    const byKey = new Map<string, number>(), frames: TD.Frame[] = [], spriteMap = new Map<string, TD.Sprite>();
-    const seq: { still: number; frames: number }[] = []; // still −1: nothing shows
-    const nFrames = Math.max(1, Math.round(total * FPS));
-    for (let fi = 0; fi < nFrames; fi++) {
-      const shown = pieces.map(f => f(fi / FPS)).filter((x): x is TD.Piece => !!x);
+    const byKey = new Map<string, number>(), fms: TD.Frame[] = [], spriteMap = new Map<string, TD.Sprite>();
+    textSeq = new Array(TOTAL); // the still each frame shows (−1: none)
+    for (let fi = 0; fi < TOTAL; fi++) {
+      const shown = pieces.map(x => x(fi / FPS)).filter((x): x is TD.Piece => !!x);
       const key = shown.length ? JSON.stringify(shown) : '';
       let k = key ? byKey.get(key) : -1;
-      if (k === undefined) {
-        const fr = TD.frameBody(shown, W, H, missing, spriteMap);
-        k = fr ? frames.push(fr) - 1 : -1;
-        byKey.set(key, k);
-      }
-      const last = seq.at(-1);
-      if (last && last.still === k) last.frames++; else seq.push({ still: k, frames: 1 });
+      if (k === undefined) { const fm = TD.frameBody(shown, W, H, missing, spriteMap); k = fm ? fms.push(fm) - 1 : -1; byKey.set(key, k); }
+      textSeq[fi] = k;
     }
     if (missing.delete(TD.EMOJI)) unsupported.add('colour emoji (drawn in the text colour)');
     if (missing.size) unsupported.add(`letters no font on the server has (${[...missing].slice(0, 8).join(' ')})`);
-    if (frames.length) {
+    if (fms.length) {
       // Every still is cropped to the box all the text ever paints (smaller stills are much cheaper to draw and read).
-      const x0 = Math.max(0, Math.floor(Math.min(...frames.map(f => f.box[0])) / 2) * 2), y0 = Math.max(0, Math.floor(Math.min(...frames.map(f => f.box[1])) / 2) * 2);
-      const x1 = Math.min(W, Math.ceil(Math.max(...frames.map(f => f.box[2])))), y1 = Math.min(H, Math.ceil(Math.max(...frames.map(f => f.box[3]))));
+      const x0 = Math.max(0, Math.floor(Math.min(...fms.map(x => x.box[0])) / 2) * 2), y0 = Math.max(0, Math.floor(Math.min(...fms.map(x => x.box[1])) / 2) * 2);
+      const x1 = Math.min(W, Math.ceil(Math.max(...fms.map(x => x.box[2])))), y1 = Math.min(H, Math.ceil(Math.max(...fms.map(x => x.box[3]))));
       if (x1 > x0 && y1 > y0) {
-        const crop: TD.Crop = [x0, y0, even(x1 - x0), even(y1 - y0)];
-        const file = (k: number) => path.join(dir, k < 0 ? 'empty.png' : `s${k}.png`);
-        stills.push({ file: file(-1), svg: '', crop }, ...frames.map((f, k) => ({ file: file(k), svg: f.svg, crop })));
+        textCrop = [x0, y0, even(x1 - x0), even(y1 - y0)];
+        stillFile = (k: number) => path.join(dir, k < 0 ? 'empty.png' : `s${k}.png`);
+        stills.push({ file: stillFile(-1), svg: '', crop: textCrop }, ...fms.map((x, k) => ({ file: stillFile(k), svg: x.svg, crop: textCrop! })));
         sprites.push(...spriteMap.values());
-        const list = path.join(dir, 'text.ffconcat');
-        fs.writeFileSync(list, ['ffconcat version 1.0', ...seq.flatMap(x => [`file '${file(x.still)}'`, `duration ${n6(x.frames / FPS)}`]), `file '${file(seq.at(-1)!.still)}'`].join('\n') + '\n');
-        const k = input(list);
-        inputArgs.set(k, ['-threads', '1', '-f', 'concat', '-safe', '0']);
-        g.push(`[${k}:v]format=rgba[txt]`, `[vpad][txt]overlay=${x0}:${y0}:format=auto:eof_action=repeat[vtxt]`);
-        vlast = 'vtxt';
       }
     }
   }
-  g.push(`[${vlast}]format=yuv420p[vout]`);
+  const runs = adjustRuns(p);
+  const masks = new Map<string, string>(); // static masks, written once
 
-  // Sound: a pass of its own before the picture's (renderProject), so reading a clip's sound never pulls its picture
-  // in early (a stream that has to wait for its picture's time buffers every frame meanwhile).
+  // ---------------------------------------------------------------- one window's graph
+  const chunk = (F0: number, F1: number, outFile: string): string[] => {
+    const inputs: string[] = [], index = new Map<string, number>(), inputArgs = new Map<number, string[]>();
+    const input = (file: string) => { let i = index.get(file); if (i === undefined) { i = inputs.length; inputs.push(file); index.set(file, i); } return i; };
+    const g: string[] = [];
+    const N = F1 - F0;
+    /** An input for a clip's source from `at` for `dur` seconds (opened there, so it never buffers frames for later). */
+    const openAt = (file: string, at: number, dur: number, threads = 2): number => {
+      const k = inputs.length;
+      inputs.push(file);
+      inputArgs.set(k, ['-threads', String(threads), '-ss', n4(Math.max(0, at)), '-t', n4(dur + 0.5)]);
+      return k;
+    };
+    /**
+     * Frames [skip, skip + n) of a video clip (its speed pieces, or one held frame) or of a picture, from its own start.
+     * A constant-speed clip's input opens at the first frame needed; a curve's is cut after its pieces are joined.
+     */
+    const source = (file: string, c: Src | null, skip: number, n: number, tag: string, threads: number): string => {
+      if (!c || c.holdSec !== undefined) {
+        const k = c ? openAt(file, c.inSec, 0.2, threads) : input(file);
+        g.push(`[${k}:v]trim=end_frame=1,loop=loop=-1:size=1,setpts=N/${FPS}/TB,trim=end_frame=${n}[${tag}]`);
+        return tag;
+      }
+      const pieces = M.speedPieces(c);
+      if (pieces.length === 1) {
+        const sp = pieces[0]!.speed, at = c.inSec + (skip / FPS) * sp;
+        const k = openAt(file, at, Math.max(0.2, c.outSec - at), threads);
+        g.push(`[${k}:v]setpts=(PTS-STARTPTS)/${n4(sp)},fps=${FPS},trim=end_frame=${n},setpts=N/${FPS}/TB[${tag}]`);
+        return tag;
+      }
+      const k = openAt(file, c.inSec, c.outSec - c.inSec, threads);
+      pieces.forEach((pc, j) => g.push(`[${k}:v]trim=start=${n4(pc.inSec - c.inSec)}:end=${n4(pc.outSec - c.inSec)},setpts=(PTS-STARTPTS)/${n4(pc.speed)},fps=${FPS}[${tag}p${j}]`));
+      g.push(`${pieces.map((_, j) => `[${tag}p${j}]`).join('')}concat=n=${pieces.length}:v=1:a=0,trim=start_frame=${skip}:end_frame=${skip + n},setpts=N/${FPS}/TB[${tag}]`);
+      return tag;
+    };
+    type Layer = { s: string; x: number; y: number; opaque: boolean; w: number; h: number } | { s: string; x: null; y: null; opaque: false; w: number; h: number };
+    /**
+     * A clip or picture drawn as the apps draw it (layer.ts), its frames [skip, skip + n) from the source frames `src`
+     * (w × h px): crop → chroma key → colour → matte and mask → placed → opacity. Static and unrotated: a picture to put
+     * at (x, y); moving: drawn in the area it sweeps; `canvas`: RGBA the size of the canvas (blend modes).
+     */
+    const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; skip: number; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; matte?: () => string | null }): Layer => {
+      const { skip, n, len, tag } = o, vc = o.video ? it as M.VideoClip : null, t0 = skip / FPS;
+      let s = src;
+      const cr = it.crop ?? {}, l = cr.left ?? 0, t = cr.top ?? 0, r = cr.right ?? 0, b = cr.bottom ?? 0;
+      const cw = w * (1 - l - r), ch = h * (1 - t - b);
+      const kf = (it.fit ?? o.fit) === 'cover' ? Math.max(W / cw, H / ch) : Math.min(W / cw, H / ch);
+      const fw0 = cw * kf, fh0 = ch * kf;
+      const mo = L.motion(it, len, `((in+${skip})/${FPS})`);
+      const still = [mo.x, mo.y, mo.scale, mo.rotation].map(L.constant);
+      const sprite = !o.canvas && still.every(v => v !== null) && Math.abs(((still[3]! % 360) + 360) % 360) < 1e-9;
+      // Drawn at the size it reaches on the canvas: its own size when still, else its largest scale.
+      const big = sprite ? still[2]! : Math.min(L.maxScale(it), (2 * Math.max(W, H)) / Math.max(fw0, fh0));
+      const iw = even(fw0 * big), ih = even(fh0 * big);
+      const cropF = l || t || r || b ? `crop=w=iw*${n6(1 - l - r)}:h=ih*${n6(1 - t - b)}:x=iw*${n6(l)}:y=ih*${n6(t)},` : '';
+      // Kept in yuv (half the memory of RGB) until a step needs RGB.
+      g.push(`[${s}]${cropF}scale=${iw}:${ih},setsar=1,format=yuv420p[${tag}c]`);
+      s = `${tag}c`;
+      let rgb = false;
+      const toRgb = () => { if (!rgb) { g.push(`[${s}]format=gbrp[${tag}rgb]`); s = `${tag}rgb`; rgb = true; } };
+      const alphas: string[] = [];
+      // Chroma key (model.ts chromaKey): alpha and spill from the pixel's (Cb, Cr), the colour pulled towards its luma.
+      if (vc?.chroma) {
+        toRgb();
+        const e = L.chromaExprs(vc.chroma);
+        g.push(`[${s}]split=3[${tag}k0][${tag}k1][${tag}k2]`,
+          `[${tag}k0]scale=out_color_matrix=bt601:out_range=full,format=yuv444p,extractplanes=u+v[${tag}u][${tag}v]`,
+          `[${tag}u]split[${tag}u1][${tag}u2]`, `[${tag}v]split[${tag}v1][${tag}v2]`,
+          `[${tag}u1][${tag}v1]lut2=c0='${e.alpha}'[${tag}ka]`, `[${tag}u2][${tag}v2]lut2=c0='${e.spill}',format=gbrp[${tag}ks]`,
+          `[${tag}k1]colorchannelmixer=rr=0.2126:rg=0.7152:rb=0.0722:gr=0.2126:gg=0.7152:gb=0.0722:br=0.2126:bg=0.7152:bb=0.0722[${tag}kl]`,
+          `[${tag}kl][${tag}k2][${tag}ks]maskedmerge[${tag}kd]`);
+        s = `${tag}kd`; alphas.push(`${tag}ka`);
+      }
+      // Colour: the matrix (adjust, filter), tone, curves, HSL, LUT and lift as one 3D LUT; colour keyframes in runs.
+      const look = it.look;
+      if (look && LOOK_DETAILS.some(x => look[x] !== undefined)) unsupported.add('look details (grain, vignette, …)');
+      if (M.LOOK_KF_PROPS.some(x => it.keyframes?.[x]?.length)) unsupported.add('look details (grain, vignette, …)');
+      if (!M.COLOR_KF_PROPS.some(x => it.keyframes?.[x]?.length)) { const cf = colourFile(it.adjust, it.filter, look); if (cf) { toRgb(); g.push(`[${s}]${lut3d(cf)}[${tag}g]`); s = `${tag}g`; } }
+      else {
+        const step = Math.max(0.1, len / 60), parts: string[] = [];
+        for (let a = 0; a < len - 1e-9; a += step) {
+          if (a + step < t0 || a > t0 + n / FPS) continue;
+          const cf = colourFile(M.adjustAt(it, a + step / 2), it.filter, look);
+          if (cf) parts.push(`${lut3d(cf)}:enable='gte(t,${n4(a - t0)})*lt(t,${n4(a + step - t0)})'`);
+        }
+        if (parts.length) { toRgb(); g.push(`[${s}]${parts.join(',')}[${tag}g]`); s = `${tag}g`; }
+      }
+      // Background removal: the matte's luma (cut and timed like the clip) is the alpha.
+      if (vc?.alphaMatte) {
+        const ms = o.matte?.();
+        if (!ms) unsupported.add('background removal');
+        else { g.push(`[${ms}]${cropF}scale=${iw}:${ih},format=gray${vc.alphaMatte.invert ? ',negate' : ''}[${tag}ma]`); alphas.push(`${tag}ma`); }
+      }
+      // Mask (model.ts maskAlpha, keyed by maskAt), in the picture's own frame: grey frames written here, one, or one a frame while it moves.
+      if (it.mask) {
+        const keyed = M.MASK_KF_PROPS.some(x => it.keyframes?.[x]?.length);
+        const q = keyed ? Math.min(1, Math.sqrt(8e6 / (n * iw * ih))) : 1, mw = Math.max(2, Math.round(iw * q)), mh = Math.max(2, Math.round(ih * q));
+        const key = `${it.id}|${mw}x${mh}`;
+        let raw = keyed ? undefined : masks.get(key);
+        if (!raw) {
+          raw = tmpName('mask', 'gray');
+          const fd = fs.openSync(raw, 'w');
+          try { for (let fi = 0; fi < (keyed ? n : 1); fi++) fs.writeSync(fd, L.maskPixels(M.maskAt(it, (skip + fi) / FPS)!, mw, mh)); } finally { fs.closeSync(fd); }
+          temp.push(raw);
+          if (!keyed) masks.set(key, raw);
+        }
+        const mk = inputs.length;
+        inputs.push(raw);
+        inputArgs.set(mk, ['-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${mw}x${mh}`, '-framerate', String(FPS)]);
+        g.push(`[${mk}:v]${keyed ? '' : 'loop=loop=-1:size=1,'}setpts=N/${FPS}/TB,trim=end_frame=${n},scale=${iw}:${ih}[${tag}mk]`);
+        alphas.push(`${tag}mk`);
+      }
+      const ac = L.constant(mo.alpha);
+      // Opaque: no alpha at all (a full-frame main clip is then just cut to the canvas).
+      const opaque = !alphas.length && ac !== null && ac >= 1 && sprite;
+      if (alphas.length) {
+        let a = alphas[0]!;
+        for (let j = 1; j < alphas.length; j++) { g.push(`[${a}][${alphas[j]}]lut2=c0='x*y/255'[${tag}a${j}]`); a = `${tag}a${j}`; }
+        g.push(`[${s}][${a}]alphamerge[${tag}al]`);
+        s = `${tag}al`;
+      } else if (!opaque) { g.push(`[${s}]format=${rgb ? 'gbrap' : 'yuva420p'}[${tag}al]`); s = `${tag}al`; }
+      const flipX = !!it.transform?.flipX, flipY = !!it.transform?.flipY;
+      let x: number | null = null, y: number | null = null, ow = W, oh = H;
+      if (sprite) {
+        // Still: mirrored, then put at its place.
+        if (flipX || flipY) { g.push(`[${s}]${[flipX ? 'hflip' : '', flipY ? 'vflip' : ''].filter(Boolean).join(',')}[${tag}fl]`); s = `${tag}fl`; }
+        x = Math.round(still[0]! * W - iw / 2); y = Math.round(still[1]! * H - ih / 2); ow = iw; oh = ih;
+      } else {
+        // Moving: placed by its corners over time (fit, mirror, scale, rotation, position; keys, animation, loop),
+        // drawn in the area it sweeps over the canvas (a frame the canvas's size costs ~4 × the memory for a picture-in-picture).
+        const sw = L.sweep(it, len, n, FPS, W, H, fw0, fh0, skip);
+        const bx = Math.max(0, Math.floor((sw[0] - 2) / 2) * 2), by = Math.max(0, Math.floor((sw[1] - 2) / 2) * 2);
+        const bw = Math.max(2, even(Math.min(W, Math.ceil(sw[2] + 2)) - bx)), bh = Math.max(2, even(Math.min(H, Math.ceil(sw[3] + 2)) - by));
+        const fw = Math.max(iw + 2, bw), fh = Math.max(ih + 2, bh);
+        const cs = L.cornerExprs(mo, W, H, fw0, fh0, iw, ih, fw, fh, flipX, flipY, bx, by);
+        const moving = still.some(v => v === null);
+        // (perspective in gbrap: its yuva420p alpha plane comes out wrong.)
+        g.push(`[${s}]format=gbrap,pad=${fw}:${fh}:1:1:color=black@0,perspective=sense=destination:eval=${moving ? 'frame' : 'init'}:${cs.map((e, j) => `${['x', 'y'][j % 2]}${Math.floor(j / 2)}='${e}'`).join(':')},crop=${bw}:${bh}:0:0${o.canvas ? `,pad=${W}:${H}:${bx}:${by}:color=black@0` : ',format=yuva420p'}[${tag}pl]`);
+        s = `${tag}pl`;
+        if (!o.canvas) { x = bx; y = by; ow = bw; oh = bh; }
+      }
+      // Opacity over time (keys, animation, loop): a 2 × 2 grey drawn by expression, stretched and multiplied into the alpha.
+      if (ac === null) {
+        g.push(`color=c=white:s=2x2:r=${FPS}:d=${n4(n / FPS + 1)},format=gray,geq=lum='255*clip(${L.motion(it, len, `(T+${n6(t0)})`).alpha},0,1)',scale=${ow}:${oh}:flags=neighbor,trim=end_frame=${n}[${tag}op]`,
+          `[${s}]split[${tag}o1][${tag}o2]`, `[${tag}o1]alphaextract[${tag}oa]`, `[${tag}oa][${tag}op]lut2=c0='x*y/255'[${tag}om]`, `[${tag}o2][${tag}om]alphamerge[${tag}o]`);
+        s = `${tag}o`;
+      } else if (ac < 1) { g.push(`[${s}]lut=c3='val*${n4(Math.max(0, ac))}'[${tag}o]`); s = `${tag}o`; }
+      return x === null || o.canvas ? { s, x: null, y: null, opaque: false, w: W, h: H } : { s, x, y: y!, opaque, w: ow, h: oh };
+    };
+
+    // Main clips in the window: each its own picture of the canvas (the background colour, or the blur fill, under it).
+    const mine = clips.map((c, i) => ({ c, i, S: fr(tl[i]!.startSec), n: frames(i) })).filter(x => x.S < F1 && x.S + x.n > F0);
+    const shown = new Map<number, string>(); // clip index → its frames in this window
+    const many = mine.length > MAX_INPUTS;
+    for (const { c, i, S, n: whole } of mine) {
+      const skip = Math.max(0, F0 - S), n = Math.min(S + whole, F1) - Math.max(S, F0), tag = `m${i}`;
+      const asset = p.assets.find(a => a.id === c.asset);
+      const file = asset && files[asset.id], size = asset && sizes[asset.id];
+      const len = M.clipLength(c);
+      const bg = `color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(n / FPS + 1)},trim=end_frame=${n},format=yuv420p`;
+      shown.set(i, `v${i}`);
+      if (!asset || !file || !size || !size.width) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); continue; }
+      if (main.hidden) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); continue; } // hidden: only the background
+      const src = source(file, c, skip, n, `${tag}s`, many ? 1 : 2);
+      const blur = p.canvas.fill === 'blur' && (c.fit ?? 'cover') === 'contain';
+      let under = `${tag}bg`, layerSrc = src;
+      if (blur) {
+        // Blur fill (model.ts blurFill): the clip cover-fitted with its colour (not its transform), box-blurred, darkened.
+        const rad = Math.max(1, Math.round(M.blurFillRadius(p.canvas) * f));
+        const cf = colourFile(c.adjust, c.filter, c.look);
+        g.push(`[${src}]split[${tag}f][${tag}l]`,
+          `[${tag}f]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=gbrp${cf ? `,${lut3d(cf)}` : ''},boxblur=luma_radius=${rad}:luma_power=1:chroma_radius=${rad}:chroma_power=1,colorchannelmixer=rr=${M.BLUR_FILL_DARKEN}:gg=${M.BLUR_FILL_DARKEN}:bb=${M.BLUR_FILL_DARKEN},format=yuv420p[${under}]`);
+        layerSrc = `${tag}l`;
+      }
+      const matte = () => { const mf = c.alphaMatte && files[c.alphaMatte.asset]; return mf ? source(mf, c, skip, n, `${tag}mt`, 1) : null; };
+      const lay = visualLayer(c, layerSrc, size.width, size.height, { video: true, skip, n, len, fit: 'cover', tag, canvas: false, matte });
+      if (!blur && lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
+        // Opaque and covering the canvas: cut to it (no background, no overlay).
+        g.push(`[${lay.s}]crop=${W}:${H}:${-lay.x}:${-lay.y}[${tag}o]`);
+      } else {
+        if (!blur) g.push(`${bg}[${under}]`);
+        g.push(`[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[${tag}o]`);
+      }
+      // Exactly the clip's frames in the window (rounded once from the timeline, so cuts never drift).
+      g.push(`[${tag}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
+    }
+    // Joined: a cut is a concat, a transition an xfade at the clip's place (transitions never straddle windows).
+    let acc = `v${mine[0]!.i}`;
+    const glitches: { start: number; d: number }[] = [];
+    for (const { c, i } of mine.slice(1)) {
+      const t = c.transitionIn, next = `j${i}`;
+      const d = t && tl[i]!.transitionSec > 0 ? fr(tl[i - 1]!.endSec) - fr(tl[i]!.startSec) : 0;
+      const at = fr(tl[i]!.startSec) - F0;
+      if (t?.kind === 'glitch' && d >= 2) { g.push(...glitchSwitch(acc, `v${i}`, next, at, d, i, FPS)); glitches.push({ start: at, d }); }
+      else if (t && d > 0) g.push(`[${acc}][v${i}]xfade=transition=${XFADE[t.kind] ?? 'fade'}:duration=${n4(d / FPS)}:offset=${n4(at / FPS)}[${next}]`);
+      else g.push(`[${acc}][v${i}]concat=n=2:v=1:a=0[${next}]`);
+      acc = next;
+    }
+    // The glitches' jitter and colour split, on the joined picture.
+    if (glitches.length) {
+      g.push(`[${acc}]format=gbrp,sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=yuv420p[gfx]`);
+      acc = 'gfx';
+    }
+    // Held on its last frame to the window's end (a set render length past the timeline's end).
+    g.push(`[${acc}]tpad=stop_mode=clone:stop_duration=${n4(N / FPS)},trim=end_frame=${N},setpts=N/${FPS}/TB[base]`);
+    acc = 'base';
+    // Overlays (video and image tracks), in track order (layer.ts).
+    overlayItems.filter(x => x.start < F1 && x.start + x.n > F0).forEach((x, oi) => {
+      const { it, video } = x, vc = video ? it as M.VideoClip : null, tag = `ov${oi}`;
+      const skip = Math.max(0, F0 - x.start), n = Math.min(x.start + x.n, F1) - Math.max(x.start, F0), at = Math.max(x.start, F0) - F0;
+      const src = source(x.file, vc, skip, n, `${tag}s`, 1);
+      const mode = it.blend ?? 'normal';
+      const matte = () => { const mf = vc?.alphaMatte && files[vc.alphaMatte.asset]; return mf ? source(mf, vc, skip, n, `${tag}mt`, 1) : null; };
+      const lay = visualLayer(it, src, x.size.width, x.size.height, { video, skip, n, len: x.len, fit: 'contain', tag, canvas: mode !== 'normal', matte });
+      const t0 = n4(at / FPS), on = `enable='between(t,${t0},${n4((at + n - 0.5) / FPS)})'`;
+      // Normal: over the picture as it is (yuv; the mix is linear, as in RGB).
+      if (mode === 'normal') g.push(`[${lay.s}]setpts=PTS+${t0}/TB[${tag}t]`, `[${acc}][${tag}t]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass:${on}[${tag}x]`);
+      else {
+        // blendPixel: the mode's colour (lut2, exact W3C formulas) mixed in by the item's coverage (maskedmerge).
+        const e = L.blendExpr(mode);
+        g.push(`[${lay.s}]tpad=start_duration=${t0}:stop_duration=${n4(N / FPS)}:color=black@0,trim=end_frame=${N},split[${tag}t1][${tag}t2]`,
+          `[${acc}]format=gbrp,split[${tag}b1][${tag}b2]`, `[${tag}t1]format=gbrp[${tag}tc]`, `[${tag}tc][${tag}b1]lut2=c0='${e}':c1='${e}':c2='${e}'[${tag}bl]`,
+          `[${tag}t2]alphaextract,format=gbrp[${tag}ta]`, `[${tag}b2][${tag}bl][${tag}ta]maskedmerge,format=yuv420p[${tag}x]`);
+      }
+      acc = `${tag}x`;
+    });
+    // Adjustment layers: over the pictures, under the text. Each run of one colour is one affine channel mix, on only
+    // while the run lasts: on RGBA with an opaque alpha, the offsets go in as the alpha's coefficients, so the sum is
+    // clamped once, at the end (model.ts: "not clamped between layers, only at the end").
+    const mineRuns = runs.filter(r => fr(r.b) > F0 && fr(r.a) < F1);
+    if (mineRuns.length) {
+      const st: string[] = ['format=rgba'];
+      for (const { a, b, m } of mineRuns) {
+        const on = `enable='gte(t,${n4(a - F0 / FPS)})*lt(t,${n4(b - F0 / FPS)})'`;
+        st.push(`colorchannelmixer=rr=${n6(m[0]!)}:rg=${n6(m[1]!)}:rb=${n6(m[2]!)}:ra=${n6(m[3]!)}:gr=${n6(m[4]!)}:gg=${n6(m[5]!)}:gb=${n6(m[6]!)}:ga=${n6(m[7]!)}:br=${n6(m[8]!)}:bg=${n6(m[9]!)}:bb=${n6(m[10]!)}:ba=${n6(m[11]!)}:${on}`);
+      }
+      g.push(`[${acc}]${st.join(',')},format=yuv420p[adj]`);
+      acc = 'adj';
+    }
+    // Text and captions, above every picture (textdraw.ts): the window's stretch of the stills, overlaid once.
+    if (textCrop && textSeq.slice(F0, F1).some(k => k >= 0)) {
+      const seq: { still: number; frames: number }[] = [];
+      for (let fi = F0; fi < F1; fi++) { const k = textSeq[fi]!, last = seq.at(-1); if (last && last.still === k) last.frames++; else seq.push({ still: k, frames: 1 }); }
+      const list = tmpName('text', 'ffconcat');
+      fs.writeFileSync(list, ['ffconcat version 1.0', ...seq.flatMap(x => [`file '${stillFile(x.still)}'`, `duration ${n6(x.frames / FPS)}`]), `file '${stillFile(seq.at(-1)!.still)}'`].join('\n') + '\n');
+      temp.push(list);
+      const k = input(list);
+      inputArgs.set(k, ['-threads', '1', '-f', 'concat', '-safe', '0']);
+      g.push(`[${k}:v]format=rgba[txt]`, `[${acc}][txt]overlay=${textCrop[0]}:${textCrop[1]}:format=auto:eof_action=repeat[vtxt]`);
+      acc = 'vtxt';
+    }
+    g.push(`[${acc}]format=yuv420p[vout]`);
+    return ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]',
+      '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-threads', '2', '-frames:v', String(N), outFile];
+  };
+
+  // ---------------------------------------------------------------- sound: a pass of its own
+  // Before the pictures (renderProject), so reading a clip's sound never pulls its picture in early (a stream waiting
+  // for its picture's time buffers every frame meanwhile).
   const amix: string[] = [], ag: string[] = [], ainputs: string[] = [];
   const ainput = (file: string) => { let k = ainputs.indexOf(file); if (k < 0) { k = ainputs.length; ainputs.push(file); } return k; };
   const A = 'aformat=sample_rates=48000:channel_layouts=stereo';
@@ -512,7 +562,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   } else if (o.audio !== 'none' && !p.mute) {
     // Each clip's sound: its source cut and timed like its picture, its voice (enhance, effect), placed on the timeline,
     // then its gain over time (model.ts audioEnvelope: volume and its keys, fades, transition crossfades, ducking).
-    const voice = (c: M.VideoClip | M.AudioClip) => voiceChain(c, 48000).map(q => `,biquad=b0=${q.b0}:b1=${q.b1}:b2=${q.b2}:a0=1:a1=${q.a1}:a2=${q.a2}`).join('');
+    const voice = (c: M.VideoClip | M.AudioClip) => voiceChain(c, 48000).map(v => `,biquad=b0=${v.b0}:b1=${v.b1}:b2=${v.b2}:a0=1:a1=${v.a1}:a2=${v.a2}`).join('');
     const envelope = (c: M.VideoClip | M.AudioClip, trackId: string) => {
       const env = M.audioEnvelope(p, trackId, c.id);
       return env.some(x => x.gain > 0) ? env : null; // silent throughout: left out
@@ -528,11 +578,10 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       const asset = p.assets.find(a => a.id === (c.audioAsset ?? c.asset)), file = asset && files[asset.id];
       const env = asset && file && sizes[asset.id]?.hasAudio ? envelope(c, trackId) : null;
       if (!env || !file) return;
-      const k = ainput(file), pieces = M.speedPieces(c);
-      if (pieces.length === 1) ag.push(`[${k}:a]atrim=start=${n4(c.inSec)}:end=${n4(c.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(pieces[0]!.speed).map(x => `,${x}`).join('')}[${tag}s]`);
-      else ag.push(`[${k}:a]atrim=start=${n4(c.inSec)}:end=${n4(c.outSec)},asetpts=PTS-STARTPTS,${A},${curveTempo(pieces, c.inSec, tag)}[${tag}s]`);
-      const s = `${tag}s`;
-      place(s, c, env, startSec, tag);
+      const k = ainput(file), pcs = M.speedPieces(c);
+      if (pcs.length === 1) ag.push(`[${k}:a]atrim=start=${n4(c.inSec)}:end=${n4(c.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(pcs[0]!.speed).map(x => `,${x}`).join('')}[${tag}s]`);
+      else ag.push(`[${k}:a]atrim=start=${n4(c.inSec)}:end=${n4(c.outSec)},asetpts=PTS-STARTPTS,${A},${curveTempo(pcs, c.inSec, tag)}[${tag}s]`);
+      place(`${tag}s`, c, env, startSec, tag);
     };
     clips.forEach((c, i) => clipSound(c, main.id, tl[i]!.startSec, `ac${i}`));
     let vi = 0;
@@ -552,18 +601,24 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     }
   }
   if (amix.length) ag.push(`${amix.map(x => `[${x}]`).join('')}amix=inputs=${amix.length}:normalize=0:duration=longest,apad,atrim=end=${n4(total)}[aout]`);
-
-  const q = o.quality === 'export' ? ['-preset', 'veryfast', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
-  let soundArgs: string[] | null = null;
+  let soundArgs: string[] | null = null, sound: string | null = null;
   if (amix.length) {
-    const wav = path.join(os.tmpdir(), `muse-sound-${process.pid}-${Date.now()}.flac`);
-    temp.push(wav);
-    soundArgs = ['-y', '-v', 'error', ...ainputs.flatMap(x => ['-vn', '-i', x]), '-filter_complex', ag.join(';'), '-map', '[aout]', '-c:a', 'flac', '-t', n4(total), wav];
-    inputs.push(wav);
+    sound = tmpName('sound', 'flac');
+    temp.push(sound);
+    soundArgs = ['-y', '-v', 'error', ...ainputs.flatMap(x => ['-vn', '-i', x]), '-filter_complex', ag.join(';'), '-map', '[aout]', '-c:a', 'flac', '-t', n4(total), sound];
   }
-  const args = ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]', ...(soundArgs ? ['-map', `${inputs.length - 1}:a`, '-c:a', 'aac', '-b:a', '128k'] : []),
-    '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-movflags', '+faststart', '-threads', '2', '-t', n4(total), out];
-  return { args, soundArgs, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp, stills, sprites };
+
+  // ---------------------------------------------------------------- the pictures, window by window, then joined
+  const q = o.quality === 'export' ? ['-preset', 'veryfast', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
+  const chunkFiles = windows.map(() => tmpName('part', 'mp4'));
+  temp.push(...chunkFiles);
+  const chunks = windows.map(([F0, F1], i) => chunk(F0, F1, chunkFiles[i]!));
+  const list = tmpName('parts', 'ffconcat');
+  fs.writeFileSync(list, ['ffconcat version 1.0', ...chunkFiles.map(x => `file '${x}'`)].join('\n') + '\n');
+  temp.push(list);
+  const joinArgs = ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', list, ...(sound ? ['-i', sound] : []), '-map', '0:v', ...(sound ? ['-map', '1:a', '-c:a', 'aac', '-b:a', '128k'] : []),
+    '-c:v', 'copy', '-movflags', '+faststart', '-t', n4(TOTAL / FPS), out];
+  return { chunks, joinArgs, soundArgs, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp, stills, sprites };
 }
 
 /**
@@ -623,7 +678,8 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
     const run = (args: string[]) => new Promise<void>((resolve, reject) => execFile(cfg.ffmpeg, args, { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 },
       (err, _o, e) => (err ? reject(new Error(`render failed: ${String(e ?? err.message).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`)) : resolve())));
     if (plan.soundArgs) await run(plan.soundArgs);
-    await run(plan.args);
+    for (const c of plan.chunks) await run(c);
+    await run(plan.joinArgs);
   } finally { for (const t of plan.temp) fs.rmSync(t, { force: true, recursive: true }); }
   return { durationSec: plan.durationSec, width: plan.width, height: plan.height, unsupported: plan.unsupported };
 }

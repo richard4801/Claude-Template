@@ -50,16 +50,14 @@ const sizes = { a: { width: 800, height: 1280, hasAudio: true }, b: { width: 128
 
 function plan(p: M.EditProject) {
   const r = planRender(p, files, sizes, '/x/out.mp4', { maxSide: 640 });
-  // Text is drawn from stills (SVG) listed in a temporary folder: their content and timing are part of the plan, the
-  // folder's name is not.
-  const list = r.temp.map(t => path.join(t, 'text.ffconcat')).find(f => fs.existsSync(f));
-  const cubes = r.temp.filter(t => t.endsWith('.cube') && fs.existsSync(t)).map(t => fs.readFileSync(t, 'utf8'));
-  // Masks are grey frames written to files: their pixels are part of the plan.
-  cubes.push(...r.temp.filter(t => t.endsWith('.gray') && fs.existsSync(t)).map(t => createHash('sha1').update(fs.readFileSync(t)).digest('hex')));
-  const texts = [list ? fs.readFileSync(list, 'utf8') : '', ...cubes, ...r.stills.map(x => JSON.stringify([x.svg, x.crop])), JSON.stringify(r.sprites)].join('\n');
+  // Text stills, colour cubes, masks and still lists live in temporary files: their contents are part of the plan, their
+  // names are not.
+  const contents = r.temp.filter(t => fs.existsSync(t) && fs.statSync(t).isFile()).map(t => t.endsWith('.gray') ? createHash('sha1').update(fs.readFileSync(t)).digest('hex')
+    : /\.(cube|ffconcat)$/.test(t) ? fs.readFileSync(t, 'utf8') : '');
+  const texts = [...contents, ...r.stills.map(x => JSON.stringify([x.svg, x.crop])), JSON.stringify(r.sprites)].join('\n');
   for (const t of r.temp) fs.rmSync(t, { force: true, recursive: true });
-  const tmp = (x: string) => x.replace(/muse-text-[^/'"\\]+/g, 'TEMP').replace(/muse-look-[\dc-]+\.cube/g, 'LOOK').replace(/muse-(sound|mask)-[^'"\\]+/g, 'TEMP');
-  return { args: tmp(JSON.stringify([r.args, r.soundArgs])) + tmp(texts), unsupported: new Set(r.unsupported) };
+  const tmp = (x: string) => x.replace(/muse-[a-z]+-[^/'"\\\s]+/g, 'TEMP');
+  return { args: tmp(JSON.stringify([r.chunks, r.joinArgs, r.soundArgs])) + tmp(texts), unsupported: new Set(r.unsupported) };
 }
 
 // ------------------------------------------------------------------ the model's shapes

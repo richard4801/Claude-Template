@@ -115,13 +115,13 @@ export function cornerExprs(m: Motion, W: number, H: number, fw0: number, fh0: n
 }
 
 /**
- * The canvas area (x0, y0, x1, y1 px) an item's picture covers over its `n` frames (android RenderPlan.itemPlacement
+ * The canvas area (x0, y0, x1, y1 px) an item's picture covers over `n` of its frames from frame `skip` (android RenderPlan.itemPlacement
  * from model.ts propAt / animState / loopState, every frame), so a moving item is drawn in a frame no bigger than that.
  */
-export function sweep(item: { transform?: M.Transform; keyframes?: M.Keyframes; opacity?: number; animIn?: M.Anim; animOut?: M.Anim; animLoop?: M.AnimLoop }, len: number, n: number, fps: number, W: number, H: number, fw0: number, fh0: number): [number, number, number, number] {
+export function sweep(item: { transform?: M.Transform; keyframes?: M.Keyframes; opacity?: number; animIn?: M.Anim; animOut?: M.Anim; animLoop?: M.AnimLoop }, len: number, n: number, fps: number, W: number, H: number, fw0: number, fh0: number, skip = 0): [number, number, number, number] {
   const tr = item.transform ?? {};
   const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
-  for (let f = 0; f <= n; f++) {
+  for (let f = skip; f <= skip + n; f++) {
     const t = Math.min(len, f / fps), a = M.animState({ durationSec: len, animIn: item.animIn, animOut: item.animOut }, t), lp = M.loopState(item.animLoop, t);
     const x = M.propAt(item, 'x', tr.x ?? 0.5, t) * W, y = (M.propAt(item, 'y', tr.y ?? 0.5, t) + a.dy + lp.dy) * H;
     const sc = M.propAt(item, 'scale', tr.scale ?? 1, t) * a.scale * lp.scale, r = ((M.propAt(item, 'rotation', tr.rotation ?? 0, t) + lp.rotation) * Math.PI) / 180;
