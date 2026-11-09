@@ -593,6 +593,26 @@ class EditSmallRowsTest {
         c.act(EditAction.SetEffect(null)); assertNull(c.p().mainClips[0].effect)
     }
 
+    @Test fun cutToTheMusic() = runTest {
+        val c = controller()
+        val p0 = c.p()
+        val src = p0.mainClips[0]
+        val song = studio.muse.core.edit.Asset("song_up", studio.muse.core.edit.AssetKind.AUDIO, upload = "up_song", durationSec = 30.0)
+        val two = p0.copy(assets = p0.assets + song, tracks = p0.tracks.map { t -> if (t.kind == TrackKind.MAIN) t.copy(items = listOf(src.copy(id = "a", inSec = 0.0, outSec = 6.0), src.copy(id = "b", inSec = 6.0, outSec = 12.0, transitionIn = studio.muse.core.edit.Transition(studio.muse.core.edit.TransitionKind.FADE, .4)))) else t } +
+            studio.muse.core.edit.Track("mus", TrackKind.MUSIC, items = listOf(AudioClip("m1", song.id, 0.0, 0.0, 20.0))))
+        c.load(two, "T", "take_1", null, false)
+        // No beats yet: the free helper runs first, then the cut.
+        c.act(EditAction.CutToMusic(studio.muse.core.edit.MusicPace.FAST)); advanceUntilIdle()
+        val beats = studio.muse.core.edit.musicBeatTimes(c.p())
+        assertTrue(beats.isNotEmpty())
+        val first = c.p().mainClips[0]
+        val end = first.outSec - first.inSec
+        assertTrue("the first cut lands on a beat", beats.any { kotlin.math.abs(it - end) < 1e-3 })
+        assertNull(c.p().mainClips[1].transitionIn)
+        assertEquals(studio.muse.core.edit.MusicPace.FAST, c.ui.value.musicPace)
+        valid(c.p())
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

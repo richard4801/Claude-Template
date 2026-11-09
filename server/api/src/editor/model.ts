@@ -511,6 +511,74 @@ export function applyCutout(p: EditProject, itemId: string, assetId: string, box
   return { ...p, tracks: p.tracks.map(t => (t === track ? { ...t, items: t.items.map(i => (i.id === itemId ? next : i)) } : t)) };
 }
 
+export type MusicPace = 'relaxed' | 'normal' | 'fast';
+export const PACE_BEATS: Record<MusicPace, number> = { relaxed: 8, normal: 4, fast: 2 };
+
+/** The music tracks' beat marks (source times) on the timeline, sorted. */
+export function musicBeatTimes(p: EditProject): number[] {
+  const out: number[] = [];
+  for (const t of p.tracks) if (t.kind === 'music') for (const it of t.items as AudioClip[])
+    for (const b of it.beats ?? []) if (b >= it.inSec && b <= it.outSec) out.push(r6(it.startSec + clipTimeAt(it, b)));
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Cut to the music (owner-approved 2026-11-09): main clips in order, each cut landing on a beat every [pace] beats
+ * (relaxed 8, normal 4, fast 2), each clip trimmed to its liveliest stretch ([interest]: scores per 0.5 s of an asset's
+ * source, from the device; without them, centred on the clip's current middle). Freeze frames and speed curves keep
+ * their length; a clip whose source can't reach the beat takes the latest beat it can (or all it has). Transitions are
+ * removed (hard cuts on the beat). Null with fewer than two main clips or no beats.
+ */
+export function cutToMusic(p: EditProject, pace: MusicPace, interest: Record<string, number[]> = {}): { project: EditProject; cuts: number } | null {
+  const beats = musicBeatTimes(p);
+  const main = mainTrack(p);
+  const clips = main.items as VideoClip[];
+  if (clips.length < 2 || beats.length === 0) return null;
+  const N = PACE_BEATS[pace];
+  const assets = new Map(p.assets.map(a => [a.id, a]));
+  const firstAt = (t: number) => { const i = beats.findIndex(b => b >= t + 1e-6); return i < 0 ? beats.length : i; };
+  let cursor = 0, k = firstAt(0), cuts = 0;
+  const out = clips.map(c0 => {
+    const { transitionIn: _t, ...c } = c0;
+    if (c.holdSec !== undefined || c.speedCurve) { cursor += clipLength(c); k = firstAt(cursor); return c as VideoClip; }
+    const speed = c.speed ?? 1;
+    const dur = assets.get(c.asset)?.durationSec ?? c.outSec;
+    const maxLen = dur / speed;
+    let len: number | null = null;
+    if (k + N < beats.length) {
+      const target = beats[k + N]!;
+      if (target - cursor <= maxLen + 1e-9 && target - cursor >= 0.3) { len = target - cursor; k += N; }
+      else {
+        for (let j = Math.min(k + N - 1, beats.length - 1); j > k; j--) {
+          if (beats[j]! - cursor <= maxLen + 1e-9 && beats[j]! - cursor >= 0.3) { len = beats[j]! - cursor; k = j; break; }
+        }
+        if (len === null && target - cursor > maxLen) { len = maxLen; k = firstAt(cursor + len); }
+      }
+    }
+    if (len === null) { cursor += clipLength(c); k = firstAt(cursor); return c as VideoClip; }
+    len = r6(Math.round(len * 1000) / 1000);
+    const W = Math.min(dur, len * speed);
+    const mid = (c.inSec + c.outSec) / 2;
+    const scores = interest[c.asset];
+    let best = Math.min(Math.max(0, mid - W / 2), dur - W), bestScore = -Infinity;
+    if (scores && scores.length) {
+      for (let s = 0; s <= dur - W + 1e-9; s += 0.1) {
+        const s0 = Math.round(s * 10) / 10;
+        let sc = 0;
+        scores.forEach((v, i) => { const a = Math.max(s0, i * 0.5), b = Math.min(s0 + W, i * 0.5 + 0.5); if (b > a) sc += v * (b - a); });
+        const better = sc > bestScore + 1e-9 || (Math.abs(sc - bestScore) <= 1e-9 && Math.abs(s0 + W / 2 - mid) < Math.abs(best + W / 2 - mid));
+        if (better) { bestScore = sc; best = s0; }
+      }
+    }
+    const inSec = Math.round(best * 1000) / 1000;
+    const next = { ...c, inSec, outSec: Math.round(Math.min(dur, inSec + W) * 1000) / 1000 } as VideoClip;
+    cursor += len;
+    if (next.inSec !== c0.inSec || next.outSec !== c0.outSec || c0.transitionIn) cuts++;
+    return next;
+  });
+  return { project: { ...p, tracks: p.tracks.map(t => (t === main ? { ...t, items: out } : t)) }, cuts };
+}
+
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
 export const clipLength = (c: Timed) => c.holdSec !== undefined ? c.holdSec :
   c.speedCurve ? speedPieces(c).reduce((s, p) => s + (p.outSec - p.inSec) / p.speed, 0) : (c.outSec - c.inSec) / (c.speed ?? 1);

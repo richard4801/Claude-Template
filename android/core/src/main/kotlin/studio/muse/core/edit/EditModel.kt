@@ -1,5 +1,6 @@
 package studio.muse.core.edit
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -290,6 +291,68 @@ fun applyCutout(p: EditProject, itemId: String, assetId: String, box: List<Doubl
     val next = im.copy(asset = assetId, crop = null, keyframes = keys,
         transform = tr.copy(x = r6((tr.x ?: 0.5) + ox), y = r6((tr.y ?: 0.5) + oy), scale = r6(scale2)))
     return p.copy(tracks = p.tracks.map { t -> if (t === track) t.copy(items = t.items.map { if (it.id == itemId) next else it }) else t })
+}
+
+enum class MusicPace(val wire: String, val beats: Int) { RELAXED("relaxed", 8), NORMAL("normal", 4), FAST("fast", 2) }
+
+/** The music tracks' beat marks (source times) on the timeline, sorted. */
+fun musicBeatTimes(p: EditProject): List<Double> = p.tracks.filter { it.kind == TrackKind.MUSIC }.flatMap { t ->
+    t.items.filterIsInstance<AudioClip>().flatMap { c -> c.beats.orEmpty().filter { it >= c.inSec && it <= c.outSec }.map { b -> r6(c.startSec + clipTimeAt(c, b)) } }
+}.sorted()
+
+/**
+ * Cut to the music (owner-approved 2026-11-09): main clips in order, each cut on a beat every [pace] beats, each clip
+ * trimmed to its liveliest stretch ([interest]: scores per 0.5 s of an asset's source; without them, centred on the
+ * clip's middle). Freeze frames and speed curves keep their length; transitions are removed. The project and how many
+ * clips changed; null with fewer than two main clips or no beats. The reference is model.ts (fixture `cutToMusic`).
+ */
+fun cutToMusic(p: EditProject, pace: MusicPace, interest: Map<String, List<Double>> = emptyMap()): Pair<EditProject, Int>? {
+    val beats = musicBeatTimes(p)
+    val main = p.tracks.first { it.kind == TrackKind.MAIN }
+    val clips = main.items.map { it as VideoClip }
+    if (clips.size < 2 || beats.isEmpty()) return null
+    val n = pace.beats
+    fun firstAt(t: Double) = beats.indexOfFirst { it >= t + 1e-6 }.let { if (it < 0) beats.size else it }
+    var cursor = 0.0; var k = firstAt(0.0); var cuts = 0
+    val out = clips.map { c0 ->
+        val c = c0.copy(transitionIn = null)
+        if (c.holdSec != null || c.speedCurve != null) { cursor += clipLength(c); k = firstAt(cursor); return@map c }
+        val speed = c.speed
+        val dur = p.asset(c.asset)?.durationSec ?: c.outSec
+        val maxLen = dur / speed
+        var len: Double? = null
+        if (k + n < beats.size) {
+            val target = beats[k + n]
+            if (target - cursor <= maxLen + 1e-9 && target - cursor >= 0.3) { len = target - cursor; k += n }
+            else {
+                var j = min(k + n - 1, beats.size - 1)
+                while (j > k) { if (beats[j] - cursor <= maxLen + 1e-9 && beats[j] - cursor >= 0.3) { len = beats[j] - cursor; k = j; break }; j-- }
+                if (len == null && target - cursor > maxLen) { len = maxLen; k = firstAt(cursor + maxLen) }
+            }
+        }
+        if (len == null) { cursor += clipLength(c); k = firstAt(cursor); return@map c }
+        val l = r6(Math.round(len * 1000) / 1000.0)
+        val w = min(dur, l * speed)
+        val mid = (c.inSec + c.outSec) / 2
+        var best = min(max(0.0, mid - w / 2), dur - w); var bestScore = Double.NEGATIVE_INFINITY
+        val scores = interest[c.asset]
+        if (!scores.isNullOrEmpty()) {
+            var s = 0.0
+            while (s <= dur - w + 1e-9) {
+                val s0 = Math.round(s * 10) / 10.0
+                var sc = 0.0
+                scores.forEachIndexed { i, v -> val a = max(s0, i * 0.5); val b = min(s0 + w, i * 0.5 + 0.5); if (b > a) sc += v * (b - a) }
+                if (sc > bestScore + 1e-9 || (abs(sc - bestScore) <= 1e-9 && abs(s0 + w / 2 - mid) < abs(best + w / 2 - mid))) { bestScore = sc; best = s0 }
+                s += 0.1
+            }
+        }
+        val inSec = Math.round(best * 1000) / 1000.0
+        val next = c.copy(inSec = inSec, outSec = Math.round(min(dur, inSec + w) * 1000) / 1000.0)
+        cursor += l
+        if (next.inSec != c0.inSec || next.outSec != c0.outSec || c0.transitionIn != null) cuts++
+        next
+    }
+    return p.copy(tracks = p.tracks.map { if (it === main) it.copy(items = out) else it }) to cuts
 }
 
 /** The helper steps from the original to [assetId], in the order applied ("stabilize", "slowmo", "reverse"). */

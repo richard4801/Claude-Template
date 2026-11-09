@@ -631,6 +631,19 @@ const effects = { pattern: { width: FXW, height: FXH, pixels: fxPattern }, perm:
   const e: FX.Effect = { id, amount, ...(id === 'flash' || id === 'rain' ? { speed: 1.5 } : {}), ...(id === 'duotone' && amount === 1 ? { colors: ['#003344', '#FFE600'] as [string, string] } : {}) };
   return { width: W, height: H, effect: e, t, samples: fxPoints.map(([u, v]) => ({ u, v, rgb: FX.effectPixel(e, t, W, H, u, v, fxSampler).map(x => Math.round(x * 1e6) / 1e6) })) };
 })))) };
+// Cut to the music (M): beats every 0.5 s from 0.25 on the music track; three clips of a 10 s source, a short 2.2 s
+// asset (can't reach its beat), and a freeze frame in the middle; the three paces, and interest that moves a window.
+const shortAsset: M.Asset = { id: 'short', kind: 'video', upload: 'up_short', durationSec: 2.2 };
+const songBeats: M.Asset = { id: 'song2', kind: 'audio', upload: 'up_song2', durationSec: 30 };
+const musicProject: M.EditProject = proj([main([clip('c1', 0, 3), clip('c2', 3, 7, { speed: 1.5, transitionIn: { kind: 'fade', durationSec: 0.4 } }), clip('h1', 7, 7.1, { holdSec: 1 }),
+  { id: 'c3', asset: 'short', inSec: 0.2, outSec: 1.9, speed: 1 }, clip('c4', 2, 9)]),
+  { id: 'mus', kind: 'music', items: [{ id: 'm1', asset: 'song2', startSec: 0, inSec: 1, outSec: 25, beats: Array.from({ length: 50 }, (_, i) => 1.25 + i * 0.5) }] } as M.Track], [src, shortAsset, songBeats]);
+M.validate(musicProject, FILTERS);
+const lively = { src: Array.from({ length: 20 }, (_, i) => (i >= 12 && i < 16 ? 1 : 0.1)) };
+const cutToMusic = { project: musicProject, beats: M.musicBeatTimes(musicProject), cases: [
+  ...(['relaxed', 'normal', 'fast'] as M.MusicPace[]).map(pace => ({ pace, interest: {}, result: M.cutToMusic(musicProject, pace) })),
+  { pace: 'normal' as M.MusicPace, interest: lively, result: M.cutToMusic(musicProject, 'normal', lively) },
+].map(c => { if (c.result) M.validate(c.result.project, FILTERS); return c; }) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -675,7 +688,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { effects, reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, separation: { project: sepProject, cases: separation }, cutouts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { effects, cutToMusic, reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, separation: { project: sepProject, cases: separation }, cutouts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

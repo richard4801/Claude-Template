@@ -368,6 +368,20 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun cutToMusicFixture() {
+        val d = fn["cutToMusic"]!!.obj
+        val p = EditJson.parse(d["project"]!!)
+        assertEquals(d["beats"]!!.arr.map { it.num }, musicBeatTimes(p))
+        for (c in d["cases"]!!.arr) {
+            val pace = MusicPace.entries.first { it.wire == c.obj["pace"]!!.str }
+            val interest = c.obj["interest"]!!.obj.mapValues { (_, v) -> v.arr.map { it.num } }
+            val r = cutToMusic(p, pace, interest)!!
+            assertEquals(c.obj["result"]!!.obj["cuts"]!!.num.toInt(), r.second)
+            assertJson("cutToMusic $pace ${interest.isNotEmpty()}", c.obj["result"]!!.obj["project"], EditJson.encode(r.first))
+            validate(r.first)
+        }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

@@ -13004,6 +13004,825 @@
    }
   ]
  },
+ "cutToMusic": {
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "short",
+     "kind": "video",
+     "upload": "up_short",
+     "durationSec": 2.2
+    },
+    {
+     "id": "song2",
+     "kind": "audio",
+     "upload": "up_song2",
+     "durationSec": 30
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 3,
+       "speed": 1
+      },
+      {
+       "id": "c2",
+       "asset": "src",
+       "inSec": 3,
+       "outSec": 7,
+       "speed": 1.5,
+       "transitionIn": {
+        "kind": "fade",
+        "durationSec": 0.4
+       }
+      },
+      {
+       "id": "h1",
+       "asset": "src",
+       "inSec": 7,
+       "outSec": 7.1,
+       "speed": 1,
+       "holdSec": 1
+      },
+      {
+       "id": "c3",
+       "asset": "short",
+       "inSec": 0.2,
+       "outSec": 1.9,
+       "speed": 1
+      },
+      {
+       "id": "c4",
+       "asset": "src",
+       "inSec": 2,
+       "outSec": 9,
+       "speed": 1
+      }
+     ]
+    },
+    {
+     "id": "mus",
+     "kind": "music",
+     "items": [
+      {
+       "id": "m1",
+       "asset": "song2",
+       "startSec": 0,
+       "inSec": 1,
+       "outSec": 25,
+       "beats": [
+        1.25,
+        1.75,
+        2.25,
+        2.75,
+        3.25,
+        3.75,
+        4.25,
+        4.75,
+        5.25,
+        5.75,
+        6.25,
+        6.75,
+        7.25,
+        7.75,
+        8.25,
+        8.75,
+        9.25,
+        9.75,
+        10.25,
+        10.75,
+        11.25,
+        11.75,
+        12.25,
+        12.75,
+        13.25,
+        13.75,
+        14.25,
+        14.75,
+        15.25,
+        15.75,
+        16.25,
+        16.75,
+        17.25,
+        17.75,
+        18.25,
+        18.75,
+        19.25,
+        19.75,
+        20.25,
+        20.75,
+        21.25,
+        21.75,
+        22.25,
+        22.75,
+        23.25,
+        23.75,
+        24.25,
+        24.75,
+        25.25,
+        25.75
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "beats": [
+   0.25,
+   0.75,
+   1.25,
+   1.75,
+   2.25,
+   2.75,
+   3.25,
+   3.75,
+   4.25,
+   4.75,
+   5.25,
+   5.75,
+   6.25,
+   6.75,
+   7.25,
+   7.75,
+   8.25,
+   8.75,
+   9.25,
+   9.75,
+   10.25,
+   10.75,
+   11.25,
+   11.75,
+   12.25,
+   12.75,
+   13.25,
+   13.75,
+   14.25,
+   14.75,
+   15.25,
+   15.75,
+   16.25,
+   16.75,
+   17.25,
+   17.75,
+   18.25,
+   18.75,
+   19.25,
+   19.75,
+   20.25,
+   20.75,
+   21.25,
+   21.75,
+   22.25,
+   22.75,
+   23.25,
+   23.75
+  ],
+  "cases": [
+   {
+    "pace": "relaxed",
+    "interest": {},
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "short",
+        "kind": "video",
+        "upload": "up_short",
+        "durationSec": 2.2
+       },
+       {
+        "id": "song2",
+        "kind": "audio",
+        "upload": "up_song2",
+        "durationSec": 30
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 4.25,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 2,
+          "outSec": 8,
+          "speed": 1.5
+         },
+         {
+          "id": "h1",
+          "asset": "src",
+          "inSec": 7,
+          "outSec": 7.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c3",
+          "asset": "short",
+          "inSec": 0.05,
+          "outSec": 2.05,
+          "speed": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 3.5,
+          "outSec": 7.5,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song2",
+          "startSec": 0,
+          "inSec": 1,
+          "outSec": 25,
+          "beats": [
+           1.25,
+           1.75,
+           2.25,
+           2.75,
+           3.25,
+           3.75,
+           4.25,
+           4.75,
+           5.25,
+           5.75,
+           6.25,
+           6.75,
+           7.25,
+           7.75,
+           8.25,
+           8.75,
+           9.25,
+           9.75,
+           10.25,
+           10.75,
+           11.25,
+           11.75,
+           12.25,
+           12.75,
+           13.25,
+           13.75,
+           14.25,
+           14.75,
+           15.25,
+           15.75,
+           16.25,
+           16.75,
+           17.25,
+           17.75,
+           18.25,
+           18.75,
+           19.25,
+           19.75,
+           20.25,
+           20.75,
+           21.25,
+           21.75,
+           22.25,
+           22.75,
+           23.25,
+           23.75,
+           24.25,
+           24.75,
+           25.25,
+           25.75
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "cuts": 4
+    }
+   },
+   {
+    "pace": "normal",
+    "interest": {},
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "short",
+        "kind": "video",
+        "upload": "up_short",
+        "durationSec": 2.2
+       },
+       {
+        "id": "song2",
+        "kind": "audio",
+        "upload": "up_song2",
+        "durationSec": 30
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0.375,
+          "outSec": 2.625,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 3.5,
+          "outSec": 6.5,
+          "speed": 1.5
+         },
+         {
+          "id": "h1",
+          "asset": "src",
+          "inSec": 7,
+          "outSec": 7.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c3",
+          "asset": "short",
+          "inSec": 0.05,
+          "outSec": 2.05,
+          "speed": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 4.5,
+          "outSec": 6.5,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song2",
+          "startSec": 0,
+          "inSec": 1,
+          "outSec": 25,
+          "beats": [
+           1.25,
+           1.75,
+           2.25,
+           2.75,
+           3.25,
+           3.75,
+           4.25,
+           4.75,
+           5.25,
+           5.75,
+           6.25,
+           6.75,
+           7.25,
+           7.75,
+           8.25,
+           8.75,
+           9.25,
+           9.75,
+           10.25,
+           10.75,
+           11.25,
+           11.75,
+           12.25,
+           12.75,
+           13.25,
+           13.75,
+           14.25,
+           14.75,
+           15.25,
+           15.75,
+           16.25,
+           16.75,
+           17.25,
+           17.75,
+           18.25,
+           18.75,
+           19.25,
+           19.75,
+           20.25,
+           20.75,
+           21.25,
+           21.75,
+           22.25,
+           22.75,
+           23.25,
+           23.75,
+           24.25,
+           24.75,
+           25.25,
+           25.75
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "cuts": 4
+    }
+   },
+   {
+    "pace": "fast",
+    "interest": {},
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "short",
+        "kind": "video",
+        "upload": "up_short",
+        "durationSec": 2.2
+       },
+       {
+        "id": "song2",
+        "kind": "audio",
+        "upload": "up_song2",
+        "durationSec": 30
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0.875,
+          "outSec": 2.125,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 4.25,
+          "outSec": 5.75,
+          "speed": 1.5
+         },
+         {
+          "id": "h1",
+          "asset": "src",
+          "inSec": 7,
+          "outSec": 7.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c3",
+          "asset": "short",
+          "inSec": 0.3,
+          "outSec": 1.8,
+          "speed": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 5,
+          "outSec": 6,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song2",
+          "startSec": 0,
+          "inSec": 1,
+          "outSec": 25,
+          "beats": [
+           1.25,
+           1.75,
+           2.25,
+           2.75,
+           3.25,
+           3.75,
+           4.25,
+           4.75,
+           5.25,
+           5.75,
+           6.25,
+           6.75,
+           7.25,
+           7.75,
+           8.25,
+           8.75,
+           9.25,
+           9.75,
+           10.25,
+           10.75,
+           11.25,
+           11.75,
+           12.25,
+           12.75,
+           13.25,
+           13.75,
+           14.25,
+           14.75,
+           15.25,
+           15.75,
+           16.25,
+           16.75,
+           17.25,
+           17.75,
+           18.25,
+           18.75,
+           19.25,
+           19.75,
+           20.25,
+           20.75,
+           21.25,
+           21.75,
+           22.25,
+           22.75,
+           23.25,
+           23.75,
+           24.25,
+           24.75,
+           25.25,
+           25.75
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "cuts": 4
+    }
+   },
+   {
+    "pace": "normal",
+    "interest": {
+     "src": [
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      1,
+      1,
+      1,
+      1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+     ]
+    },
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "short",
+        "kind": "video",
+        "upload": "up_short",
+        "durationSec": 2.2
+       },
+       {
+        "id": "song2",
+        "kind": "audio",
+        "upload": "up_song2",
+        "durationSec": 30
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 5.8,
+          "outSec": 8.05,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 5,
+          "outSec": 8,
+          "speed": 1.5
+         },
+         {
+          "id": "h1",
+          "asset": "src",
+          "inSec": 7,
+          "outSec": 7.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c3",
+          "asset": "short",
+          "inSec": 0.05,
+          "outSec": 2.05,
+          "speed": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 6,
+          "outSec": 8,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song2",
+          "startSec": 0,
+          "inSec": 1,
+          "outSec": 25,
+          "beats": [
+           1.25,
+           1.75,
+           2.25,
+           2.75,
+           3.25,
+           3.75,
+           4.25,
+           4.75,
+           5.25,
+           5.75,
+           6.25,
+           6.75,
+           7.25,
+           7.75,
+           8.25,
+           8.75,
+           9.25,
+           9.75,
+           10.25,
+           10.75,
+           11.25,
+           11.75,
+           12.25,
+           12.75,
+           13.25,
+           13.75,
+           14.25,
+           14.75,
+           15.25,
+           15.75,
+           16.25,
+           16.75,
+           17.25,
+           17.75,
+           18.25,
+           18.75,
+           19.25,
+           19.75,
+           20.25,
+           20.75,
+           21.25,
+           21.75,
+           22.25,
+           22.75,
+           23.25,
+           23.75,
+           24.25,
+           24.75,
+           25.25,
+           25.75
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "cuts": 4
+    }
+   }
+  ]
+ },
  "reverse": [
   {
    "clip": {

@@ -206,6 +206,8 @@ data class EditSuiteUi(
     val translateLanguages: List<Pair<String, String>> = emptyList(),
     /** The server's note when the captions' script can't be drawn in exports yet (captions/translate `exportNotice`). */
     val captionNotice: String? = null,
+    /** Cut to the music: the pace last used (shown selected; picking another re-cuts). */
+    val musicPace: studio.muse.core.edit.MusicPace? = null,
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
 ) {

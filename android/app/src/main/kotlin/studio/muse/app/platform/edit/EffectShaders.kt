@@ -158,3 +158,19 @@ object EffectThumbnails {
         return out
     }
 }
+
+/** Cut to the music's liveliness: per frame, the mean absolute luma change from the previous one (0–1). */
+object Liveliness {
+    fun scores(frames: List<android.graphics.Bitmap?>): List<Double> {
+        var prev: IntArray? = null
+        return frames.map { b ->
+            if (b == null) return@map 0.0
+            val w = b.width; val h = b.height
+            val px = IntArray(w * h); b.getPixels(px, 0, w, 0, 0, w, h)
+            val y = IntArray(w * h) { (((px[it] shr 16) and 255) * 54 + ((px[it] shr 8) and 255) * 183 + (px[it] and 255) * 19) shr 8 }
+            val p = prev
+            prev = y
+            if (p == null || p.size != y.size) 0.0 else y.indices.sumOf { kotlin.math.abs(y[it] - p[it]) } / (255.0 * y.size)
+        }
+    }
+}

@@ -271,6 +271,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
         post = { id -> nav.go(studio.muse.app.ui.Routes.post(id)) },
+        cutToMusic = vm::cutToMusic,
         headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         reframe = vm::reframe,
@@ -935,6 +936,24 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                     controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
                 }
             }
+        }
+    }
+
+    private val interest = HashMap<String, List<Double>>()
+
+    /** Cut to the music: each main clip's source liveliness at 2 per second (mean luma change between frames), then the cut. */
+    fun cutToMusic(pace: studio.muse.core.edit.MusicPace) {
+        val p = controller.project ?: return
+        viewModelScope.launch {
+            for (a in p.mainClips.map { it.asset }.distinct()) {
+                if (a in interest) continue
+                val f = files[a] ?: continue
+                val dur = p.asset(a)?.durationSec ?: continue
+                val times = (0 until (dur * 2).toInt().coerceIn(1, 240)).map { it * 0.5 + 0.25 }
+                val frames = runCatching { engine.frames(f, times, 36) }.getOrNull() ?: continue
+                interest[a] = studio.muse.app.platform.edit.Liveliness.scores(frames)
+            }
+            controller.act(EditAction.CutToMusic(pace, interest.toMap()))
         }
     }
 

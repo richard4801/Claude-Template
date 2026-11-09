@@ -117,6 +117,8 @@ data class SuiteHost(
     val export: (toPhone: Boolean) -> Unit = {},
     val cancelExport: () -> Unit = {},
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** Cut to the music: measures each clip's liveliness on the phone, then cuts at [pace]. */
+    val cutToMusic: ((studio.muse.core.edit.MusicPace) -> Unit)? = null,
     /** After an export: opens Post for the saved version (its take id). */
     val post: ((String) -> Unit)? = null,
     /** The effects library's tiles: each effect on the frame under the playhead (id or "none" → picture). */
@@ -203,6 +205,19 @@ private fun signed(v: Int) = if (v > 0) "+$v" else if (v < 0) "−${-v}" else "0
 @Composable
 private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
+    // Cut to the music: with two or more clips and a song, every cut on a beat at the chosen pace.
+    val pp = ui.project
+    if (pp != null && pp.mainClips.size >= 2 && SuiteOps.musicTrack(pp) != null) {
+        val beatsJob = ui.ai["beats"]
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            T("Cut to the music", m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f))
+            if (beatsJob?.running == true) T("Finding the beats…", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+        }
+        SuiteSeg(studio.muse.core.edit.MusicPace.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, ui.musicPace?.wire,
+            { w -> val pace = studio.muse.core.edit.MusicPace.entries.first { it.wire == w }; host.cutToMusic?.invoke(pace) ?: act(EditAction.CutToMusic(pace)) },
+            Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+        T("Each cut lands on a beat; each clip keeps its liveliest part. Undo puts it back.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    }
     val sel = ui.selection?.second
     val clip = ui.activeClip
     T(
