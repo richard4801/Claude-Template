@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -220,6 +220,12 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 }
                 ui = c.ui.value.copy(message = null)
                 host = host.copy(contentUrl = { path -> java.io.File(dir, path).absolutePath }, addContent = {}, soundPlaying = if (state == "c_sfx") "content:uisfx/cinematic-success" else null)
+            }
+            "x_reframe" -> {
+                // A 16:9 take in a 9:16 edit, half-way through finding faces.
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1920, 1080, 30.0, true)).let { it.copy(canvas = it.canvas.copy(width = 1080, height = 1920)) }
+                ui = ui.copy(project = one, playheadSec = 1.0, selectedId = one.mainClips[0].id, panel = Panel.TRANSFORM, reframing = 0.45f)
+                host = host.copy(reframe = {})
             }
             "m_reverse" -> {
                 // The reversed copy already in the edit: the toggle swaps to it.

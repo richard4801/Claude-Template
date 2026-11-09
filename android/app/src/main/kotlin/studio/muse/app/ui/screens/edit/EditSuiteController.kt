@@ -261,6 +261,8 @@ sealed interface EditAction {
     data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
+    /** Auto reframe's result for clip [id]: x keyframes that follow the face (one key = a still position), cover fit. */
+    data class ApplyReframe(val id: String, val keys: List<studio.muse.core.edit.Keyframe>) : EditAction
     /** A caption template from the content library: the whole caption style. */
     data class CaptionTemplate(val style: studio.muse.core.edit.CaptionStyle, val name: String) : EditAction
     /** A sticker from the content library ([ref]) placed at the playhead. */
@@ -427,7 +429,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -879,6 +881,16 @@ class EditSuiteController(
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
             is EditAction.Reverse -> reverse(u, a.on)
+            is EditAction.ApplyReframe -> {
+                if (a.keys.isEmpty()) return
+                val moving = a.keys.size > 1
+                if (change { p -> p.updateItem(a.id) { it ->
+                        val c = it as? VideoClip ?: return@updateItem it
+                        val tr = (c.transform ?: Transform()).copy(x = a.keys.first().v)
+                        val keys = c.keyframes.orEmpty().filterKeys { k -> k != KfProp.X } + (if (moving) mapOf(KfProp.X to a.keys) else emptyMap())
+                        c.copy(fit = null, transform = tr, keyframes = keys.ifEmpty { null })
+                    } }) say(if (moving) "Following the face · ${a.keys.size} keyframes" else "Face centred")
+            }
             is EditAction.CaptionTemplate -> if (change(refused = "Make captions first") { p -> SuiteOps.captionStyle(p) { a.style } }) say("${a.name} captions")
             is EditAction.AddSticker -> {
                 var newId: String? = null

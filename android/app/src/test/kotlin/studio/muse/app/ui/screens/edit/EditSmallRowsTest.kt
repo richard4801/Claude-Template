@@ -394,6 +394,20 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun reframeFollowsTheFace() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val keys = listOf(studio.muse.core.edit.Keyframe(0.0, 1.2, studio.muse.core.edit.Ease.EASE_IN_OUT), studio.muse.core.edit.Keyframe(3.0, 0.4, studio.muse.core.edit.Ease.EASE_IN_OUT))
+        c.act(EditAction.ApplyReframe(clip.id, keys))
+        var now = c.p().mainClips[0]
+        assertEquals(keys, now.keyframes!![studio.muse.core.edit.KfProp.X]); assertEquals(1.2, now.transform!!.x!!, 1e-9); assertNull(now.fit)
+        valid(c.p())
+        // A still result: one position, no x keys left.
+        c.act(EditAction.ApplyReframe(clip.id, listOf(studio.muse.core.edit.Keyframe(0.0, 0.8, studio.muse.core.edit.Ease.EASE_IN_OUT))))
+        now = c.p().mainClips[0]
+        assertNull(now.keyframes?.get(studio.muse.core.edit.KfProp.X)); assertEquals(0.8, now.transform!!.x!!, 1e-9)
+    }
+
     @Test fun contentStickersSoundsAndCaptionTemplates() = runTest {
         val c = controller()
         c.act(EditAction.Scrub(2.0, end = true)); c.act(EditAction.AddSticker("content:twemoji/1f600", 160, 160))

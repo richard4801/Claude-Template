@@ -145,6 +145,8 @@ dependencies {
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // Auto reframe: on-device face detection (the Play Services model, ~0.8 MB; owner-approved 2026-11-09).
+    implementation(libs.mlkit.face)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     // The on-device video editor (plans/video-editor.md): export with Transformer, frame-rate effects.

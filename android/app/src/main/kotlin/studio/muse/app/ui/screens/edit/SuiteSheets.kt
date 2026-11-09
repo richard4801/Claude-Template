@@ -126,6 +126,8 @@ data class SuiteHost(
     val headphones: Boolean = false,
     /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
     val addPhoto: (() -> Unit)? = null,
+    /** Auto reframe: finds the face in the active clip and follows it (null: not offered). */
+    val reframe: (() -> Unit)? = null,
     /** The content library: a file's download URL, adding a sticker or sound, and the sound preview (null: no library). */
     val contentUrl: (String) -> String? = { null },
     val addContent: ((studio.muse.app.platform.edit.ContentItem) -> Unit)? = null,
@@ -160,7 +162,7 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
         when (panel) {
             Panel.EDIT -> EditBody(ui, host, act)
             Panel.SPEED -> SpeedBody(ui, act)
-            Panel.TRANSFORM -> TransformBody(ui, act)
+            Panel.TRANSFORM -> TransformBody(ui, host, act)
             Panel.AUDIO -> AudioBody(ui, host, act)
             Panel.TEXT -> TextBody(ui, host, act)
             Panel.CAPTIONS -> CaptionsBody(ui, host, act)
@@ -408,13 +410,23 @@ private fun CurveGraph(ui: EditSuiteUi, c: VideoClip, act: (EditAction) -> Unit)
 
 // ======================================================================= Transform & keyframes (E2)
 @Composable
-private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun TransformBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual || it is TextItem } ?: ui.activeClip)?.id ?: return
     val item = p.tracks.flatMap { it.items }.firstOrNull { it.id == id } ?: return
     val tr = when (item) { is Visual -> item.transform; is TextItem -> item.transform; else -> null } ?: Transform()
     val keys = when (item) { is Visual -> item.keyframes; is TextItem -> item.keyframes; else -> null }
+    // Auto reframe: a clip wider than the frame follows the speaker's face (found on the phone).
+    if (item is VideoClip && host.reframe != null) {
+        val a = p.asset(item.asset)
+        val wide = a?.width != null && a.height != null && studio.muse.core.edit.Reframe.coverWidth(a.width!!, a.height!!, p.canvas.width, p.canvas.height) > 1.05
+        if (wide) {
+            val busy = ui.reframing
+            SuiteButton(if (busy != null) "Finding faces… ${(busy * 100).toInt()}%" else "Follow faces", host.reframe, Modifier.fillMaxWidth(), icon = "user", enabled = busy == null)
+            T("Moves the picture to keep the speaker in frame. Found on this phone.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+        }
+    }
 
     @Composable
     fun line(label: String, prop: KfProp, value: String, frac: Float, set: (Float) -> Transform?) {
