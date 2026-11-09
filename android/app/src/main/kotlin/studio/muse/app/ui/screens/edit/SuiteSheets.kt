@@ -107,6 +107,11 @@ data class SuiteHost(
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
     /** Decoded sound levels per asset id, for the timeline's sound lanes. */
     val waves: Map<String, Peaks> = emptyMap(),
+    /**
+     * WS13 (owner): the model row for a helper ([purpose] captions / matte / track / denoise), shown before its Run.
+     * The app's shared ModelChoiceRow (it hides itself for members and when the server lists no models); null in screenshots.
+     */
+    val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
 )
@@ -132,8 +137,8 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
             Panel.TRANSFORM -> TransformBody(ui, act)
             Panel.AUDIO -> AudioBody(ui, host, act)
             Panel.TEXT -> TextBody(ui, act)
-            Panel.CAPTIONS -> CaptionsBody(ui, act)
-            Panel.EFFECTS -> EffectsBody(ui, act)
+            Panel.CAPTIONS -> CaptionsBody(ui, host, act)
+            Panel.EFFECTS -> EffectsBody(ui, host, act)
             Panel.FILTERS -> FiltersBody(ui, host, act)
             Panel.OVERLAY -> OverlayBody(ui, host, act)
             Panel.RATIO -> RatioBody(ui, act)
@@ -396,6 +401,7 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     val cleaned = (clip as? VideoClip)?.audioAsset != null
     // Paid helpers off (or not available): a plain line; already cleaned audio keeps its toggle, to turn it off.
     val denoiseOff = ui.helpersOff["denoise"]?.takeIf { !cleaned }
+    if (denoiseOff == null && !cleaned) host.modelRow?.invoke("denoise")
     if (denoiseOff != null) ComingSoon("Noise reduction", denoiseOff) else OptRow(
         "Noise reduction",
         when { denoise?.running == true -> "Cleaning the voice · ${denoise.progress} %"; cleaned -> "Background noise removed"; else -> "Removes background noise · ${denoise?.price ?: "AI"}" },
@@ -520,12 +526,13 @@ fun AnimPicker(id: String, animIn: studio.muse.core.edit.Anim?, animOut: studio.
 
 // ======================================================================= Captions (EM2, E3)
 @Composable
-private fun CaptionsBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val p = ui.project ?: return
     val ct = ui.captionTrack?.caption
     if (ct == null) {
         T("Word-timed captions from the speech, in the style you pick.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted)
+        if (ui.helpersOff["captions"] == null) host.modelRow?.invoke("captions")
         ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return
@@ -614,10 +621,10 @@ private fun WordsBody(ui: EditSuiteUi, p: EditProject, act: (EditAction) -> Unit
 
 // ======================================================================= Effects: transitions, mask & green screen (E2)
 @Composable
-private fun EffectsBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun EffectsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     SuiteSeg(listOf("Transitions" to "Transitions", "Mask" to "Mask & key"), ui.effectsTab, { act(EditAction.EffectsTab(it)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
-    if (ui.effectsTab == "Mask") return MaskBody(ui, act)
+    if (ui.effectsTab == "Mask") return MaskBody(ui, host, act)
     val c = ui.activeClip
     val idx = ui.project?.mainClips?.indexOfFirst { it.id == c?.id } ?: -1
     val cur = c?.transitionIn
@@ -641,13 +648,13 @@ private fun EffectsBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
 }
 
 @Composable
-private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun MaskBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual } ?: ui.activeClip)?.id ?: return
     val v = p.tracks.flatMap { it.items }.firstOrNull { it.id == id } as? Visual ?: return
     // Tap to keep is on: only its controls, so they sit right under the picture being tapped.
-    ui.keep?.let { k -> if (v is VideoClip) { SuiteLabel("Tap what to keep"); KeepPanel(ui, k, act); return } }
+    ui.keep?.let { k -> if (v is VideoClip) { SuiteLabel("Tap what to keep"); KeepPanel(ui, k, host, act); return } }
     val mask = v.mask
     SuiteLabel("Mask")
     SuiteChips(listOf("none" to "None") + MaskShape.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, mask?.shape?.wire ?: "none", { w ->
@@ -684,6 +691,7 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             return
         }
         val matte = ui.ai["matte"]
+        if (!keyed && ui.keep == null) host.modelRow?.invoke("matte")
         OptRow("Remove background", when { matte?.running == true -> "Cutting out · ${matte.progress} %"; keyed -> "Done · the background is gone"; else -> "The person stays · ${matte?.price ?: "priced next"}" },
             matte?.done == true || keyed, {
                 when {
@@ -696,7 +704,7 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         if (ui.matteOff != null) ComingSoon("Tap what to keep", ui.matteOff)
         else if (k == null) {
             SuiteLink("Tap what to keep instead") { act(EditAction.TapToKeep(true)) }
-        } else KeepPanel(ui, k, act)
+        } else KeepPanel(ui, k, host, act)
     }
 }
 
@@ -916,7 +924,7 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
  * what to drop (1–10 taps, at least one keep). The run's price is on its button: one run per press.
  */
 @Composable
-private fun KeepPanel(ui: EditSuiteUi, k: KeepUi, act: (EditAction) -> Unit) {
+private fun KeepPanel(ui: EditSuiteUi, k: KeepUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val task = ui.ai["matte_keep"]
     T("Pause on a frame, then tap what to keep. Switch to Leave out and tap anything that should go.", m.scale.caption, m.t.muted)
@@ -933,6 +941,7 @@ private fun KeepPanel(ui: EditSuiteUi, k: KeepUi, act: (EditAction) -> Unit) {
         !k.ready -> "Tap something to keep"
         else -> "Cut out" + (task?.price?.let { " · $it" } ?: "")
     }
+    host.modelRow?.invoke("track")
     SuiteButton(label, { act(EditAction.RunTapToKeep) }, Modifier.fillMaxWidth(), primary = true, enabled = k.ready && task?.running != true && task?.price != null)
     SuiteLink("Cancel") { act(EditAction.TapToKeep(false)) }
 }

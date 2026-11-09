@@ -116,6 +116,8 @@ data class EditSuiteUi(
     val recordingAt: Double? = null,
     /** Easing given to keyframes added from now on (and chosen for the ones at the playhead). */
     val keyEase: studio.muse.core.edit.Ease = studio.muse.core.edit.Ease.EASE_IN_OUT,
+    /** The owner's model per helper purpose (WS13; absent / null = the studio's default). */
+    val helperModels: Map<String, String?> = emptyMap(),
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     /** The item the edit tools act on (a main clip by default: the one under the playhead). */

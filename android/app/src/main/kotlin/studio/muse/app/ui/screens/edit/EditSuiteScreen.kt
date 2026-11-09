@@ -243,6 +243,11 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         lookThumbs = thumbs,
         waves = waves,
         saveFrame = vm::saveFrame,
+        modelRow = { purpose ->
+            studio.muse.app.data.ModelPurpose.of(purpose)?.let { mp ->
+                studio.muse.app.ui.screens.ModelChoiceRow(mp, studio.muse.app.ui.screens.ModelPick(ui.helperModels[purpose]), onPick = { pick -> vm.controller.act(EditAction.PickModel(purpose, pick.model)) })
+            }
+        },
     )
     EditSuiteContent(ui, frames, host, vm.controller::act, onClose = onBack, drawText = player == null) { mod ->
         val p = player
@@ -289,11 +294,13 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
         }.toMap()
     }
 
-    override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =
-        runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
+    override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> = estimate(kind, source, options, null)
+    override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?, engineModel: String?): Pair<EditorEstimate?, String?> =
+        runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options, engineModel)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
 
-    override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
-        val (started, err) = runCatching { c.repo.attemptInline { startEditorJob(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
+    override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> = run(kind, source, options, null, onProgress)
+    override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, engineModel: String?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
+        val (started, err) = runCatching { c.repo.attemptInline { startEditorJob(EditorJobRequest(kind, source, options, engineModel)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
         var job = started ?: return null to (err ?: "Couldn't start the helper")
         try {
             onProgress(job)

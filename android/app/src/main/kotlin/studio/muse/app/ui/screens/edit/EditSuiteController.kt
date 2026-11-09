@@ -78,6 +78,9 @@ import kotlin.math.roundToInt
 interface EditBackend {
     suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?>
     suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?>
+    /** The same, on the owner's chosen model ([engineModel], WS13; null = the studio's default). */
+    suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?, engineModel: String?): Pair<EditorEstimate?, String?> = estimate(kind, source, options)
+    suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, engineModel: String?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> = run(kind, source, options, onProgress)
     /** A helper's result added an asset the device doesn't have yet (background removal's matte): fetch [url] for it. */
     fun assetArrived(assetId: String, url: String) {}
     /**
@@ -213,6 +216,8 @@ sealed interface EditAction {
     data class AdjustField(val field: String, val value: Double, val done: Boolean = true) : EditAction
     // Overlay, ratio, export
     data class AddPip(val take: TakeChoice) : EditAction
+    /** The owner's model for a helper ([purpose] captions / matte / track / denoise; null = the studio's default). */
+    data class PickModel(val purpose: String, val model: String?) : EditAction
     /** Another take added whole to the end of the video. */
     data class AppendTake(val take: TakeChoice) : EditAction
     /** Green/blue screen on the selected video: the key colour and how much around it goes (null = off). */
@@ -640,6 +645,16 @@ class EditSuiteController(
                 if (change(refused = "Couldn't add that overlay here") { p -> SuiteOps.addPip(p, a.take.id, a.take.durationSec ?: 5.0, u.playheadSec)?.let { (np, id) -> newId = id; np } })
                     _ui.update { it.copy(selectedId = newId) }
             }
+            is EditAction.PickModel -> {
+                _ui.update { it.copy(helperModels = it.helperModels + (a.purpose to a.model)) }
+                // The price may change with the model: ask again.
+                when (a.purpose) {
+                    "captions" -> { if (u.captionTrack == null) estimate("captions") }
+                    "matte" -> estimate("matte")
+                    "track" -> estimateKeep()
+                    "denoise" -> estimate("denoise")
+                }
+            }
             is EditAction.AppendTake -> {
                 var newId: String? = null
                 if (change(refused = "That video can't be added at the end") { p -> SuiteOps.appendTake(p, a.take.id, a.take.durationSec ?: return@change null)?.let { (np, id) -> newId = id; np } }) {
@@ -715,13 +730,22 @@ class EditSuiteController(
         else -> kind
     }
 
+    /** Which model list a helper runs on (WS13): captions and cuts → captions, matte → matte (with tapped points → track), denoise. */
+    fun helperPurpose(kind: String, options: JsonObject?): String? = when (kind) {
+        "captions", "cuts" -> "captions"
+        "matte" -> if (options?.containsKey("points") == true) "track" else "matte"
+        "denoise" -> "denoise"
+        else -> null
+    }
+
     /** Fetches what a helper costs, for its button ("about $0.02" / "Free"). */
     fun estimate(kind: String, options: JsonObject? = null, source: EditorSourceDto? = mainSource()) {
         val src = source ?: return
         val key = aiKey(kind, options)
         if (_ui.value.ai[key]?.running == true) return
         scope.launch {
-            val (e, err) = backend.estimate(kind, src, options)
+            val model = _ui.value.helperModels[helperPurpose(kind, options)]
+            val (e, err) = if (model == null) backend.estimate(kind, src, options) else backend.estimate(kind, src, options, model)
             setAi(key) { it.copy(price = e?.let(::priceOf) ?: it.price, error = if (e == null) err else null) }
         }
     }
@@ -735,7 +759,10 @@ class EditSuiteController(
         if (_ui.value.ai[key]?.running == true) return
         setAi(key) { it.copy(running = true, progress = 0, phase = "Starting", error = null) }
         jobs[key] = scope.launch {
-            val (result, err) = backend.run(kind, src, options) { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
+            val model = _ui.value.helperModels[helperPurpose(kind, options)]
+            val progress: (EditorJob) -> Unit = { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
+            // No pick: the studio's default (the original call); a pick goes with the model-aware one (WS13).
+            val (result, err) = if (model == null) backend.run(kind, src, options, progress) else backend.run(kind, src, options, model, progress)
             setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
             if (result != null) {
                 actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; else -> "Edit" }
