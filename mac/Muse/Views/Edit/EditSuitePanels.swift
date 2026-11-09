@@ -364,11 +364,12 @@ struct AdjustPanel: View {
                 SuiteToolButton(title: "Auto adjust", icon: "sliders-horizontal", plain: true) { Task { await session.autoAdjust() } }
                     .help("Balance this clip from its picture at the playhead")
             }
-            SuiteSlider("Exposure", value: a.exposure ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.exposure = v } }
-            SuiteSlider("Contrast", value: a.contrast ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.contrast = v } }
-            SuiteSlider("Saturation", value: a.saturation ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.saturation = v } }
-            SuiteSlider("Temperature", value: a.temperature ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.temperature = v } }
-            SuiteSlider("Tint", value: a.tint ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.tint = abs(v) < 0.005 ? nil : (v * 100).rounded() / 100 } }
+            // Colour keyframes (contract, WS8 c10e398): the ◆ keys the value at the playhead; once keyed, the slider sets it there.
+            colorRow("Exposure", .exposure)
+            colorRow("Contrast", .contrast)
+            colorRow("Saturation", .saturation)
+            colorRow("Temperature", .temperature)
+            colorRow("Tint", .tint)
             SuiteSlider("Highlights", value: a.highlights ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.highlights = v } }
             SuiteSlider("Shadows", value: a.shadows ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.shadows = v } }
             // The look's effects (parity): 0 removes each.
@@ -390,6 +391,25 @@ struct AdjustPanel: View {
                 SuiteRule()
                 SuiteLabel("Curves")
                 CurvesEditor(session: session)
+            }
+        }
+    }
+}
+
+extension AdjustPanel {
+    fileprivate func colorRow(_ label: String, _ prop: EditV2.KfProp) -> some View {
+        let s = session.state
+        let value = s.visualValue(prop) ?? 0
+        let keyed = !(visual.keyframes?[prop]?.isEmpty ?? true)
+        let here = s.hasKeyframe(prop)
+        return HStack(alignment: .bottom, spacing: 8) {
+            SuiteSlider(label, value: min(1, max(-1, value)), range: -1...1, format: signed100) { v in
+                session.edit { $0.setVisualValue(prop, (v * 100).rounded() / 100) }
+            }
+            SuiteIconButton(systemName: here ? "diamond.fill" : "diamond",
+                            label: here ? "Remove the \(label.lowercased()) keyframe at the playhead" : "Add a \(label.lowercased()) keyframe at the playhead",
+                            on: keyed, size: 28) {
+                if here { session.edit { $0.removeKeyframe(prop) } } else { session.edit { $0.addKeyframe(prop, value: value) } }
             }
         }
     }

@@ -170,10 +170,12 @@ final class EditV2LookRenderer: @unchecked Sendable {
 
     /// Applies the item's colour matrix and look to `src` (extent at 0,0). `frame` = the output frame number (grain);
     /// `fps` turns it into the leak's time.
-    func apply(_ look: E.Look?, matrix m: [Double], tone: E.Tone? = nil, to src: CIImage, frame: Int, fps: Double) -> CIImage {
+    /// `keyed`: the matrix changes every frame (colour keyframes), so it runs on its own (clamped, as the cube would) and
+    /// the cube keeps only tone, curves, LUT and lift: one cube for the clip instead of one per frame.
+    func apply(_ look: E.Look?, matrix m: [Double], tone: E.Tone? = nil, keyed: Bool = false, to src: CIImage, frame: Int, fps: Double) -> CIImage {
         let ext = src.extent
         guard ext.width >= 1, ext.height >= 1, ext.width.isFinite, ext.height.isFinite else { return src }
-        guard let look else { return colorOnly(src, matrix: m, tone: tone, look: nil, lut: nil) }
+        guard let look else { return colorOnly(src, matrix: m, tone: tone, keyed: keyed, look: nil, lut: nil) }
         let short = max(1, Int(min(ext.width, ext.height).rounded()))
         var img = src
 
@@ -205,7 +207,7 @@ final class EditV2LookRenderer: @unchecked Sendable {
         }
 
         // 3–6. colour matrix, curves, LUT, lift: one colour cube
-        img = colorOnly(img, matrix: m, tone: tone, look: look, lut: library.lut(for: look.lut, imported: imported))
+        img = colorOnly(img, matrix: m, tone: tone, keyed: keyed, look: look, lut: library.lut(for: look.lut, imported: imported))
 
         // 7. halation: blurred highlights above the threshold, tinted warm red, screened on
         if let ha = look.halation, ha.amount > 0 {
@@ -271,7 +273,18 @@ final class EditV2LookRenderer: @unchecked Sendable {
     }
 
     /// Steps 3–6: the matrix alone (CIColorMatrix) when the look has no colour part, else the baked colour cube.
-    private func colorOnly(_ img: CIImage, matrix m: [Double], tone: E.Tone? = nil, look: E.Look?, lut: E.Lut?) -> CIImage {
+    private func colorOnly(_ src: CIImage, matrix m0: [Double], tone: E.Tone? = nil, keyed: Bool = false, look: E.Look?, lut: E.Lut?) -> CIImage {
+        var img = src, m = m0
+        if keyed, !E.isIdentity(m) {
+            img = img.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: m[0], y: m[1], z: m[2], w: 0),
+                "inputGVector": CIVector(x: m[4], y: m[5], z: m[6], w: 0),
+                "inputBVector": CIVector(x: m[8], y: m[9], z: m[10], w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: m[3], y: m[7], z: m[11], w: 0),
+            ]).applyingFilter("CIColorClamp")
+            m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]
+        }
         if E.lookColorIsIdentity(matrix: m, tone: tone, look: look, lut: lut) { return img }
         if tone == nil, look == nil || E.lookColorIsIdentity(matrix: nil, look: look, lut: lut) {
             return img.applyingFilter("CIColorMatrix", parameters: [

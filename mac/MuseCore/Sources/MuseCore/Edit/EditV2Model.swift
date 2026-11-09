@@ -18,7 +18,14 @@ extension EditV2 {
         public init(t: Double, v: Double, ease: Ease? = nil) { self.t = t; self.v = v; self.ease = ease }
     }
 
-    public enum KfProp: String, Codable, Hashable, Sendable, CaseIterable { case x, y, scale, rotation, opacity, volume }
+    public enum KfProp: String, Codable, Hashable, Sendable, CaseIterable {
+        case x, y, scale, rotation, opacity, volume
+        /// Colour keyframes (contract, WS8 c10e398): replace the adjust field's static value over time (`adjustAt`).
+        case exposure, contrast, saturation, temperature, tint
+        /// The colour properties, in the contract's order (COLOR_KF_PROPS).
+        public static let color: [KfProp] = [.exposure, .contrast, .saturation, .temperature, .tint]
+        public var isColor: Bool { KfProp.color.contains(self) }
+    }
 
     public struct Keyframes: Codable, Hashable, Sendable {
         public var x: [Keyframe]?
@@ -27,6 +34,11 @@ extension EditV2 {
         public var rotation: [Keyframe]?
         public var opacity: [Keyframe]?
         public var volume: [Keyframe]?
+        public var exposure: [Keyframe]?
+        public var contrast: [Keyframe]?
+        public var saturation: [Keyframe]?
+        public var temperature: [Keyframe]?
+        public var tint: [Keyframe]?
         public init(x: [Keyframe]? = nil, y: [Keyframe]? = nil, scale: [Keyframe]? = nil, rotation: [Keyframe]? = nil,
                     opacity: [Keyframe]? = nil, volume: [Keyframe]? = nil) {
             self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.opacity = opacity; self.volume = volume
@@ -40,6 +52,11 @@ extension EditV2 {
                 case .rotation: return rotation
                 case .opacity: return opacity
                 case .volume: return volume
+                case .exposure: return exposure
+                case .contrast: return contrast
+                case .saturation: return saturation
+                case .temperature: return temperature
+                case .tint: return tint
                 }
             }
             set {
@@ -50,6 +67,11 @@ extension EditV2 {
                 case .rotation: rotation = newValue
                 case .opacity: opacity = newValue
                 case .volume: volume = newValue
+                case .exposure: exposure = newValue
+                case .contrast: contrast = newValue
+                case .saturation: saturation = newValue
+                case .temperature: temperature = newValue
+                case .tint: tint = newValue
                 }
             }
         }
@@ -103,6 +125,29 @@ extension EditV2 {
                     highlights: Double? = nil, shadows: Double? = nil, tint: Double? = nil) {
             self.exposure = exposure; self.contrast = contrast; self.saturation = saturation; self.temperature = temperature
             self.highlights = highlights; self.shadows = shadows; self.tint = tint
+        }
+        /// A colour keyframe property's field (nil for the other KfProps).
+        public subscript(_ p: KfProp) -> Double? {
+            get {
+                switch p {
+                case .exposure: return exposure
+                case .contrast: return contrast
+                case .saturation: return saturation
+                case .temperature: return temperature
+                case .tint: return tint
+                default: return nil
+                }
+            }
+            set {
+                switch p {
+                case .exposure: exposure = newValue
+                case .contrast: contrast = newValue
+                case .saturation: saturation = newValue
+                case .temperature: temperature = newValue
+                case .tint: tint = newValue
+                default: break
+                }
+            }
         }
     }
 

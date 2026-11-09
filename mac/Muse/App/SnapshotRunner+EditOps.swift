@@ -360,6 +360,15 @@ extension SnapshotRunner {
         check("project: a red frame gets cooler", (aa?.temperature ?? 0) < 0, "\(String(describing: aa)) · \(s.notice ?? s.lastError ?? "")")
         if aa != nil { s.undo() }
 
+        step("Colour keyframes (exposure dark → normal)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(0.5); s.edit { $0.addKeyframe(.exposure, value: -1) }
+        s.seek(2.5); s.edit { $0.addKeyframe(.exposure, value: 0) }
+        check("project: exposure keys", s.project.mainClips.first?.keyframes?.exposure?.count == 2 && E.problem(s.project) == nil)
+        let qd = await previewPixel(s, at: 0.5), ql = await previewPixel(s, at: 2.5)
+        check("preview: darker at the first key", (qd?.r ?? 255) + 40 < (ql?.r ?? 0) && isRed(ql), "\(describe(qd)) then \(describe(ql))")
+        for _ in 0..<2 { s.undo() }
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }

@@ -24,6 +24,7 @@ extension EditSuiteState {
         case .rotation: return tf.rotation ?? 0
         case .opacity: return v.opacity ?? 1
         case .volume: return 1
+        case .exposure, .contrast, .saturation, .temperature, .tint: return v.adjust?[prop] ?? 0
         }
     }
 
@@ -39,7 +40,16 @@ extension EditSuiteState {
     @discardableResult
     public mutating func setVisualValue(_ prop: E.KfProp, _ value: Double) -> Bool {
         guard let v = selectedVisual, prop != .volume else { return false }
+        if prop.isColor && selectedItem?.textItem != nil { return false }
+        let value = prop.isColor ? E.r6(min(1, max(-1, value))) : value
         if let keys = v.keyframes?[prop], !keys.isEmpty { return addKeyframe(prop, value: value, ease: keys.first?.ease ?? .easeInOut) }
+        if prop.isColor {
+            return changeVisual { vv in
+                var a = vv.adjust ?? E.Adjust()
+                a[prop] = abs(value) < 0.005 ? nil : value
+                vv.adjust = a == E.Adjust() ? nil : a
+            }
+        }
         return changeVisual { vv in
             var tf = vv.transform ?? E.Transform()
             switch prop {
@@ -48,7 +58,7 @@ extension EditSuiteState {
             case .scale: tf.scale = E.r6(min(10, max(0.05, value)))
             case .rotation: tf.rotation = E.r6(min(3600, max(-3600, value)))
             case .opacity: vv.opacity = E.r6(min(1, max(0, value))); return
-            case .volume: return
+            case .volume, .exposure, .contrast, .saturation, .temperature, .tint: return
             }
             vv.transform = tf
         }
@@ -80,8 +90,10 @@ extension EditSuiteState {
                 case .rotation: tf.rotation = last.v
                 case .opacity: v.opacity = last.v
                 case .volume: break
+                case .exposure, .contrast, .saturation, .temperature, .tint:
+                    var a = v.adjust ?? E.Adjust(); a[prop] = last.v == 0 ? nil : last.v; v.adjust = a == E.Adjust() ? nil : a
                 }
-                if prop != .opacity && prop != .volume { v.transform = tf }
+                if [.x, .y, .scale, .rotation].contains(prop) { v.transform = tf }
             }
             k[prop] = left.isEmpty ? nil : left
             v.keyframes = k.isEmpty ? nil : k

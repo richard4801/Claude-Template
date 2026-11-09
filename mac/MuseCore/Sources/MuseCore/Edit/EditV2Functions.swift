@@ -78,6 +78,19 @@ extension EditV2 {
     }
 
     /// A property at item-local t: its keyframes when it has any, else the static value.
+    /// The item's adjust at item-local `t`: each keyed colour property at its keyframes' value there (model.ts adjustAt).
+    /// Unchanged when no colour property is keyed; a keyed property without a static value appears with the curve's value.
+    public static func adjustAt(_ adjust: Adjust?, _ keyframes: Keyframes?, _ t: Double) -> Adjust? {
+        let keyed = KfProp.color.filter { !(keyframes?[$0] ?? []).isEmpty }
+        guard !keyed.isEmpty else { return adjust }
+        var out = adjust ?? Adjust()
+        for p in keyed { out[p] = r6(propAt(keyframes, p, fallback: adjust?[p] ?? 0, t)) }
+        return out
+    }
+
+    /// Whether any colour property is keyed (the matrix then changes over time).
+    public static func hasColorKeys(_ keyframes: Keyframes?) -> Bool { KfProp.color.contains { !(keyframes?[$0] ?? []).isEmpty } }
+
     public static func propAt(_ keyframes: Keyframes?, _ prop: KfProp, fallback: Double, _ t: Double) -> Double {
         if let k = keyframes?[prop], !k.isEmpty { return keyframeValue(k, t) }
         return fallback

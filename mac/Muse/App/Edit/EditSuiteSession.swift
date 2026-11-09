@@ -453,7 +453,7 @@ final class EditSuiteSession {
             local = max(0, t - (clip.startSec ?? 0))
         }
         let src = E.clipSourceAt(clip, local)
-        let matrix = E.colorMatrix(clip.adjust, clip.filter)
+        let matrix = E.colorMatrix(E.adjustAt(clip.adjust, clip.keyframes, local), clip.filter)
         thumbTask = Task { [weak self] in
             guard let frame = await EditSuiteMedia.frame(url, at: src, maxSide: 360), !Task.isCancelled else { return }
             let tiles = await EditV2LookThumbnails.render(frame: frame, matrix: E.isIdentity(matrix) ? nil : matrix, shortSide: 96)
