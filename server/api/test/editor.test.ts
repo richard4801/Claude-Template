@@ -336,6 +336,30 @@ describe('editor AI jobs (mock provider)', () => {
     expect(r!.state).toBe('failed');
     expect((await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, 'edj_stuck'))).map(x => x.kind).sort()).toEqual(['hold', 'release']);
   });
+
+  it('voice and music apart: "coming soon" on the production mock; else two audio files, hidden models, the owner\'s switch', async () => {
+    const prodCtx = { ...a.ctx, config: { ...a.ctx.config, NODE_ENV: 'production', DEV_MODE: false } } as typeof a.ctx;
+    const prodMock = new EditorAiService(prodCtx, new MockProvider(5));
+    expect((await prodMock.features()).separate).toMatchObject({ available: false });
+    await expect(prodMock.estimate({ id: 'u', studioId, role: 'owner' } as any, { kind: 'separate', source: { takeId: src } })).rejects.toThrow(/coming soon/);
+    const s2 = await videoTake(a, studioId, { durationSec: 25 });
+    await owner.req('POST', '/v1/wallets/transfer', { toUserId: member.id, tokens: 500, note: 'test' });
+    const est = (await member.req('POST', '/v1/editor/estimate', { kind: 'separate', source: { takeId: s2 } })).body;
+    expect(est.usd).toBeCloseTo(Math.max(0.01, (5 + 0.3 * 25) * 0.00115 * 2), 3); // like the clean-up: GPU time × rate × 2
+    const j = (await member.req('POST', '/v1/editor/jobs', { kind: 'separate', source: { takeId: s2 } })).body;
+    expect(j.models).toBeUndefined();
+    const r = await done(j.id, member);
+    expect(r.state, JSON.stringify(r)).toBe('done');
+    expect(r.result).toMatchObject({ vocals: { kind: 'audio' }, instrumental: { kind: 'audio' }, durationSec: 25 });
+    expect(JSON.stringify(r)).not.toMatch(/demucs|replicate|mock/i);
+    // The member's tokens go back (later tests expect a member with none).
+    const left = (await member.req('GET', '/v1/balance')).body.tokens;
+    if (left > 0) expect((await owner.req('POST', '/v1/wallets/reclaim', { fromUserId: member.id, tokens: left })).status).toBe(200);
+    await owner.req('PATCH', '/v1/editor/settings', { paidHelpers: 'off' });
+    expect((await owner.req('POST', '/v1/editor/jobs', { kind: 'separate', source: { takeId: await videoTake(a, studioId, { durationSec: 10 }) } })).status).toBe(503);
+    expect((await owner.req('GET', '/v1/editor/features')).body.separate.available).toBe(false);
+    await owner.req('PATCH', '/v1/editor/settings', { paidHelpers: 'on' });
+  });
 });
 
 // ------------------------------------------------------------------ saving v2 projects
@@ -483,6 +507,23 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     const dr = await done(d.id);
     expect(dr.result.asset).toMatchObject({ kind: 'audio', upload: expect.stringMatching(/^up_/) });
     expect(creates.find(x => x.version === 'v_demucs').input).toMatchObject({ stem: 'vocals' });
+    // Voice and music apart: one split, both stems stored as their own audio files, priced like the clean-up.
+    const demucsRuns = creates.filter(x => x.version === 'v_demucs').length;
+    const sp = (await owner.req('POST', '/v1/editor/jobs', { kind: 'separate', source: { takeId: src } })).body;
+    expect(sp.models).toEqual(d.models);
+    const sr = await done(sp.id);
+    expect(sr.state, JSON.stringify(sr)).toBe('done');
+    expect(creates.filter(x => x.version === 'v_demucs').length).toBe(demucsRuns + 1); // one run for both
+    expect(sr.result).toMatchObject({ vocals: { kind: 'audio', upload: expect.stringMatching(/^up_/) }, instrumental: { kind: 'audio', upload: expect.stringMatching(/^up_/) }, reused: false });
+    const fileAt = async (url: string) => (await a.app.inject({ method: 'GET', url: new URL(url, 'http://x').pathname })).body;
+    expect(await fileAt(sr.result.vocals.url)).toBe('file /files/vocals.mp3');
+    expect(await fileAt(sr.result.instrumental.url)).toBe('file /files/rest.mp3');
+    expect(sr.costUsd).toBeCloseTo(dr.costUsd, 6); // the same split, the same price
+    expect((await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, sp.id))).map(x => x.kind).sort()).toEqual(['hold', 'settle']);
+    // The same source again: reused, free.
+    expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'separate', source: { takeId: src } })).body.usd).toBe(0);
+    const again = await done((await owner.req('POST', '/v1/editor/jobs', { kind: 'separate', source: { takeId: src } })).body.id);
+    expect(again.result).toMatchObject({ reused: true, vocals: { upload: sr.result.vocals.upload } });
     // Beat-only audio for other features (workstream 4): the other stem of the same split.
     const svc = new (await import('../src/editor/providers.js')).ReplicateProvider(a.ctx);
     const beat = await svc.separate('https://x/in.mp4', 8, { cancelled: () => false }, 'no_vocals');

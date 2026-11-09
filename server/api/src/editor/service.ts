@@ -25,11 +25,11 @@ import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError
 import { FalProvider } from '../suite/providers.js';
 import { SLOWMO_LIMITS, SLOWMO_MODEL, cutRange, falInterpolate, retime, slowmoComputeSec, slowmoUsd, type SlowmoFactor } from './slowmo.js';
 import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
-import { EXPORT_LANGUAGES, exportNotice } from './scripts.js';
+import { exportLanguages, exportNotice } from './scripts.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
@@ -38,7 +38,7 @@ export const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', briefs: 'Writing the briefs' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', separate: 'Splitting voice and music', briefs: 'Writing the briefs' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
@@ -47,7 +47,7 @@ export const MAX_KEEP_POINTS = 10;
 export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
 
 /** The languages translate offers: those the export draws today. */
-const translateTargets = () => Object.keys(TRANSLATE_LANGUAGES).filter(l => EXPORT_LANGUAGES.has(l));
+const translateTargets = () => { const ok = exportLanguages(); return Object.keys(TRANSLATE_LANGUAGES).filter(l => ok.has(l)); };
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -80,7 +80,7 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   }
   if (kind === 'translate') {
     // Only languages the export can draw (scripts.ts): the others would show in the app but vanish from exports.
-    if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage] || !EXPORT_LANGUAGES.has(o.targetLanguage)) throw badRequest(`options.targetLanguage: one of ${translateTargets().join(', ')}`);
+    if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage] || !exportLanguages().has(o.targetLanguage)) throw badRequest(`options.targetLanguage: one of ${translateTargets().join(', ')}`);
     out.targetLanguage = o.targetLanguage;
     if (o.sourceLanguage !== undefined) { if (typeof o.sourceLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.sourceLanguage]) throw badRequest('options.sourceLanguage: a language code'); out.sourceLanguage = o.sourceLanguage; }
     if (o.lines !== undefined) {
@@ -253,6 +253,12 @@ export class EditorAiService {
       const sz = src.size;
       return { kind, opts, src, reuse, usd: slowmoUsd(slowmoComputeSec(opts.endSec! - opts.startSec!, sz?.fps ?? 30, opts.factor!, sz?.width ?? 1080, sz?.height ?? 1920), this.markup) };
     }
+    if (kind === 'separate') {
+      // Voice and music as two audio files (one split, priced like the voice clean-up). Not while production runs the mock.
+      if (!this.matteAvailable) throw badRequest('Splitting voice and music is coming soon');
+      if (await this.separateBefore(u.studioId, src.key)) return { kind, opts, src, reuse, usd: 0 };
+      return { kind, opts, src, reuse, usd: Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(GPU_SEC.separate(d) * this.provider.rates.separate * this.markup * 10000) / 10000) };
+    }
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
     let usd = 0, transcriber: string | null = null;
@@ -278,7 +284,7 @@ export class EditorAiService {
     const e = await this.estimate(u, body);
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
+    const models = e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     try {
@@ -336,6 +342,11 @@ export class EditorAiService {
     const c = await (await import('../engines/service.js')).modelChoice(this.ctx).choose(u, 'captions', requested);
     if (c && (c.model !== ASSEMBLY_MODEL || this.assembly.configured())) return c.model;
     return this.assembly.configured() ? ASSEMBLY_MODEL : this.provider.models.transcribe;
+  }
+  /** The last finished voice/music split of this source in the studio (reused, free). */
+  private async separateBefore(studioId: string, key: string) {
+    const [prev] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'separate'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(1);
+    return prev?.result ? prev : null;
   }
   private vidstab: Promise<boolean> | null = null;
   /** Whether this server's ffmpeg can stabilise (checked once). */
@@ -407,6 +418,17 @@ export class EditorAiService {
           const r = await this.slowmo(row, u, src, o, temps);
           result = r.result;
           if (r.computeSec != null) spentUsd = slowmoUsd(r.computeSec, this.markup);
+        }
+      } else if (row.kind === 'separate') {
+        const prev = await this.separateBefore(u.studioId, src.key);
+        if (prev) { result = { ...(prev.result as Record<string, unknown>), reused: true }; spentUsd = 0; }
+        else {
+          const out = await p.separateBoth(url, d, hooks);
+          temps.push(...[out.vocals.file, out.instrumental.file].filter((f): f is string => !!f));
+          gpuSec = out.gpuSec; rate = p.rates.separate;
+          const vocals = await this.store(u, src, out.vocals.file, out.vocals.contentType, 'audio', d);
+          const instrumental = await this.store(u, src, out.instrumental.file, out.instrumental.contentType, 'audio', d);
+          result = { vocals, instrumental, durationSec: d, reused: false };
         }
       } else if (row.kind === 'translate') {
         const q = o.quality ?? 'standard';
@@ -629,6 +651,7 @@ export class EditorAiService {
       denoise: { available: paid },
       beats: { available: true, free: true },
       stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
+      separate: { available: paid && this.matteAvailable },
       slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
       translate: { available: paid && !!this.translator(), languages: translateTargets(), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,

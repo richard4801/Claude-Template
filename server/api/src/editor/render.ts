@@ -272,7 +272,10 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       if (k === undefined) { const fm = TD.frameBody(shown, W, H, missing, spriteMap); k = fm ? fms.push(fm) - 1 : -1; byKey.set(key, k); }
       textSeq[fi] = k;
     }
+    // The text is outlines now: drop the CJK faces (80–110 MB each parsed) before the stills and ffmpeg run.
+    TD.releaseCjk();
     if (missing.delete(TD.EMOJI)) unsupported.add('colour emoji (drawn in the text colour)');
+    if (missing.delete(TD.UNSHAPED)) unsupported.add('text in a script drawn without shaping');
     if (missing.size) unsupported.add(`letters no font on the server has (${[...missing].slice(0, 8).join(' ')})`);
     if (fms.length) {
       // Every still is cropped to the box all the text ever paints (smaller stills are much cheaper to draw and read).
@@ -790,6 +793,7 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
     const info = await probeStreams(cfg.ffprobe, file);
     if (info) sizes[id] = { width: info.width || a.width || 1080, height: info.height || a.height || 1920, hasAudio: info.hasAudio };
   }
+  await TD.ensureShaper(); // Arabic, Hebrew, Devanagari and Thai text is shaped by HarfBuzz (loaded once)
   const plan = planRender(p, files, sizes, out, o);
   try {
     const sprites = await TD.drawSprites(plan.sprites);

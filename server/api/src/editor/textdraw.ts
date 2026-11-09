@@ -7,12 +7,119 @@
 // lineHeight / 1.15. Painted back to front: background box, caption word box / marker stripe, shadow, stroke, fill.
 // The item's scale (static × keyframes × animation × loop), rotation, mirror and opacity apply to the whole block.
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import bidiModule from 'bidi-js';
 import opentype from 'opentype.js';
 import sharp from 'sharp';
 import * as M from './model.js';
 
 /** Faces for letters the editor's fonts lack (Cyrillic, Greek, …): Debian's fonts-dejavu-core (Dockerfile). */
 export const FALLBACK_FONTS = { regular: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', bold: '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' };
+
+/**
+ * Chinese, Japanese and Korean (plans/edit-xl-options.md §4, step 2): Noto Sans SC / JP / KR, Regular and Bold, put in
+ * assets/cjk by scripts/cjk-fonts.mjs (the Docker build runs it). Each face is 80–110 MB once parsed, so only the one a
+ * block needs is loaded, and releaseCjk() drops them once a render's text frames are drawn.
+ */
+export const CJK_DIR = process.env.MUSE_CJK_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/cjk');
+export type CjkKind = 'sc' | 'jp' | 'kr';
+export const cjkFile = (k: CjkKind, bold: boolean) => path.join(CJK_DIR, `NotoSans${k.toUpperCase()}-${bold ? 'Bold' : 'Regular'}.ttf`);
+const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/u;
+const KANA = /[぀-ヿㇰ-ㇿｦ-ﾟ]/u;
+const HAN = /[⺀-⿟　-〿㐀-䶿一-鿿豈-﫿＀-￯]/u;
+/** The CJK face for [text]: Korean for hangul, Japanese for kana, else the language's (ja, ko, zh), else Chinese. */
+export function cjkKind(text: string, language?: string | null): CjkKind | null {
+  if (HANGUL.test(text)) return 'kr';
+  if (KANA.test(text)) return 'jp';
+  if (!HAN.test(text)) return null;
+  const l = (language ?? '').toLowerCase().split(/[-_]/)[0];
+  return l === 'ja' ? 'jp' : l === 'ko' ? 'kr' : 'sc';
+}
+/** Languages written without spaces between words: their caption words are drawn touching. */
+export const UNSPACED_LANGUAGES = new Set(['ja', 'zh', 'th']);
+/** How many CJK faces are parsed right now (tests: only the one needed, none after a render). */
+export function cjkLoaded() { return [...faces.keys()].filter(k => k.startsWith(CJK_DIR) && faces.get(k)).length; }
+/** Drops the parsed CJK and script faces and their shapers (call when a render's text is drawn). */
+export function releaseCjk() {
+  for (const k of [...faces.keys()]) if (k.startsWith(CJK_DIR)) faces.delete(k);
+  hbFonts.clear();
+}
+
+/**
+ * Scripts that need shaping (plans/edit-xl-options.md §4, step 3): Arabic (joining forms, right to left), Hebrew (right
+ * to left), Devanagari (conjuncts, reordered vowel signs) and Thai (stacked marks). A word containing one is shaped as
+ * a whole by HarfBuzz (harfbuzzjs, WebAssembly) with that script's Noto face (they also carry Latin, digits and
+ * punctuation); the outlines come from the same file through opentype.js, so glyph ids match. A line's words are then
+ * put in display order by their Unicode bidi levels (bidi-js), so right-to-left captions read right to left and the
+ * numbers and Latin words inside them stay left to right. Letter spacing isn't added inside shaped words (it would
+ * break Arabic joining).
+ */
+export type ShapedKind = 'arabic' | 'hebrew' | 'devanagari' | 'thai';
+const SHAPED: [ShapedKind, RegExp][] = [
+  ['arabic', /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/u], ['hebrew', /[֐-׿יִ-ﭏ]/u],
+  ['devanagari', /[ऀ-ॿ꣠-ꣿ]/u], ['thai', /[฀-๿]/u],
+];
+export const scriptFile = (k: ShapedKind, bold: boolean) => path.join(CJK_DIR, `NotoSans${k[0]!.toUpperCase()}${k.slice(1)}-${bold ? 'Bold' : 'Regular'}.ttf`);
+/** The script a word needs shaped in, or null. */
+export function shapedKind(text: string): ShapedKind | null { return SHAPED.find(([, re]) => re.test(text))?.[0] ?? null; }
+/** Put in `missing` when a word needed shaping but the shaper wasn't loaded (ensureShaper): drawn letter by letter. */
+export const UNSHAPED = 'unshaped script';
+
+type Hb = typeof import('harfbuzzjs');
+let hb: Hb | null = null;
+/** Loads HarfBuzz (once; a few MB of WebAssembly). The render calls it before drawing text. */
+export async function ensureShaper() { hb ??= await import('harfbuzzjs'); }
+/** A HarfBuzz font; harfbuzzjs frees its WebAssembly objects when they're collected (no destroy in v1). */
+type HbFont = { font: InstanceType<Hb['Font']>; upem: number };
+const hbFonts = new Map<string, HbFont | null>();
+function hbFont(file: string): HbFont | null {
+  if (hbFonts.has(file)) return hbFonts.get(file)!;
+  let r: HbFont | null = null;
+  if (hb) {
+    try {
+      const b = fs.readFileSync(file), blob = new hb.Blob(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)), fc = new hb.Face(blob), font = new hb.Font(fc);
+      r = { font, upem: fc.upem };
+    } catch { r = null; }
+  }
+  hbFonts.set(file, r);
+  return r;
+}
+/** A word shaped by HarfBuzz with [file]: outline at baseline 0 in display order, or null when it can't be. */
+function shapeComplex(text: string, file: string, px: number, missing: Set<string>): Shaped | null {
+  const ot = face(file), hf = hbFont(file);
+  if (!hb || !ot || !hf) return null;
+  const buf = new hb.Buffer(); // freed when collected
+  buf.addText(text); buf.guessSegmentProperties(); hb.shape(hf.font, buf);
+  const info = buf.getGlyphInfos(), pos = buf.getGlyphPositions(), k = px / hf.upem;
+  let x = 0, d = '';
+  info.forEach((g, i) => {
+    const p = pos[i]!;
+    if (!g.codepoint) { const ch = String.fromCodePoint(text.codePointAt(g.cluster) ?? 0x20); if (!/\s/.test(ch)) missing.add(ch); }
+    else d += ot.glyphs.get(g.codepoint).getPath(x + p.xOffset * k, -p.yOffset * k, px).toPathData(2);
+    x += p.xAdvance * k;
+  });
+  return { d, width: x };
+}
+
+// bidi-js is CommonJS: at run time the default import is the factory itself (its typings describe an ES default).
+const bidi = ((bidiModule as unknown as { default?: () => unknown }).default ?? bidiModule as unknown as () => unknown)() as { getEmbeddingLevels(text: string, dir: 'auto' | 'ltr' | 'rtl'): { levels: Uint8Array } };
+/** Display order of one line's words from their bidi levels (UAX #9 rule L2, a word taking its first letter's level). */
+function visualOrder<T>(words: T[], levels: number[]): T[] {
+  const out = words.map((w, i) => ({ w, l: levels[i] ?? 0 }));
+  const max = Math.max(0, ...out.map(x => x.l)), minOdd = Math.min(...out.map(x => x.l).filter(l => l % 2 === 1), Infinity);
+  if (!Number.isFinite(minOdd)) return words;
+  for (let lv = max; lv >= minOdd; lv--) {
+    for (let i = 0; i < out.length;) {
+      if (out[i]!.l < lv) { i++; continue; }
+      let j = i;
+      while (j < out.length && out[j]!.l >= lv) j++;
+      out.splice(i, j - i, ...out.slice(i, j).reverse());
+      i = j;
+    }
+  }
+  return out.map(x => x.w);
+}
 
 /** Put in `missing` when an emoji is drawn: the fonts here have it in one colour (outline), the apps in full colour. */
 export const EMOJI = 'colour emoji';
@@ -33,15 +140,15 @@ const xmlAttr = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 /** A word (or run of words) and how it is drawn. */
 export type Run = { text: string; color: string; scale?: number; box?: string; marker?: string };
-type Word = { d: string; width: number; run: Run; scale: number };
+type Word = { d: string; width: number; run: Run; scale: number; text: string; level: number };
 type Shaped = { d: string; width: number };
 
 /** One word as an outline at baseline 0: glyphs from the font, or the fallback where it lacks one; kerned, tracked. */
-function shape(text: string, font: opentype.Font, fallback: opentype.Font | null, px: number, tracking: number, missing: Set<string>): Shaped {
+function shape(text: string, font: opentype.Font, fallbacks: opentype.Font[], px: number, tracking: number, missing: Set<string>): Shaped {
   let x = 0, d = '';
   let prev: { g: opentype.Glyph; f: opentype.Font } | null = null;
   for (const ch of text) {
-    let f: opentype.Font | null = font.charToGlyphIndex(ch) ? font : fallback?.charToGlyphIndex(ch) ? fallback : null;
+    const f: opentype.Font | null = font.charToGlyphIndex(ch) ? font : fallbacks.find(x => x.charToGlyphIndex(ch)) ?? null;
     if (!f) { if (!/\s/.test(ch)) missing.add(ch); prev = null; continue; }
     if (/\p{Extended_Pictographic}/u.test(ch)) missing.add(EMOJI);
     const g = f.glyphs.get(f.charToGlyphIndex(ch));
@@ -62,22 +169,43 @@ export type Block = { width: number; height: number; under: string; shadow: { sv
  * Lays out and paints runs (each split into words) in a block whose top-left is (0, 0). `missing` collects letters no
  * font has. `id` keeps filter ids unique in a frame.
  */
-export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number, fontFile: string, o: { maxLines?: number; missing: Set<string>; id: string }): Block | null {
+export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number, fontFile: string, o: { maxLines?: number; missing: Set<string>; id: string; language?: string | null; tight?: boolean }): Block | null {
   const font = face(fontFile) ?? face(FALLBACK_FONTS.regular);
   if (!font) return null;
-  const fallback = face(s.weight >= 700 ? FALLBACK_FONTS.bold : FALLBACK_FONTS.regular);
+  const bold = s.weight >= 700, fallbacks: opentype.Font[] = [];
+  const dv = face(bold ? FALLBACK_FONTS.bold : FALLBACK_FONTS.regular);
+  if (dv) fallbacks.push(dv);
+  // CJK letters the member's font lacks: the one Noto face this block needs (loaded only now).
+  const all = runs.map(r => r.text).join('');
+  const ck = [...all].some(ch => !font.charToGlyphIndex(ch)) ? cjkKind(all, o.language) : null;
+  if (ck) { const f = face(cjkFile(ck, bold)) ?? face(cjkFile(ck, !bold)); if (f) fallbacks.push(f); }
   const tracking = (s.letterSpacing ?? 0) * px;
-  const space = ((font.charToGlyph(' ').advanceWidth ?? font.unitsPerEm * 0.25) / font.unitsPerEm) * px + tracking;
+  // Unspaced languages (captions in ja, zh, th): the words touch (a line may still break between them).
+  const space = o.tight ? tracking : ((font.charToGlyph(' ').advanceWidth ?? font.unitsPerEm * 0.25) / font.unitsPerEm) * px + tracking;
   // Words, with forced breaks between paragraphs.
   const paras: Word[][] = [[]];
   for (const r of runs) {
     r.text.split('\n').forEach((part, i) => {
       if (i > 0) paras.push([]);
       for (const w of part.split(/[ \t]+/).filter(Boolean)) {
-        const k = r.scale ?? 1, sh = shape(w, font, fallback, px * k, tracking * k, o.missing);
-        paras.at(-1)!.push({ d: sh.d, width: sh.width, run: r, scale: k });
+        const k = r.scale ?? 1, sk = shapedKind(w);
+        // Arabic, Hebrew, Devanagari, Thai: the whole word shaped with its script's face (unless the member's font has it all).
+        let sh: Shaped | null = null;
+        if (sk && [...w].some(ch => !font.charToGlyphIndex(ch))) {
+          sh = shapeComplex(w, scriptFile(sk, bold), px * k, o.missing) ?? shapeComplex(w, scriptFile(sk, !bold), px * k, o.missing);
+          if (!sh) o.missing.add(UNSHAPED);
+        }
+        sh ??= shape(w, font, fallbacks, px * k, tracking * k, o.missing);
+        paras.at(-1)!.push({ d: sh.d, width: sh.width, run: r, scale: k, text: w, level: 0 });
       }
     });
+  }
+  // Bidi levels per word (its first letter's), per paragraph: right-to-left words and paragraphs read right to left.
+  for (const para of paras) {
+    if (!para.some(w => /[֐-ࣿיִ-﷿ﹰ-﻿]/u.test(w.text))) continue;
+    const text = para.map(w => w.text).join(' '), lv = bidi.getEmbeddingLevels(text, 'auto').levels;
+    let at = 0;
+    for (const w of para) { w.level = lv[at] ?? 0; at += w.text.length + 1; }
   }
   const lines: Word[][] = [];
   for (const para of paras) {
@@ -88,6 +216,8 @@ export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number,
     }
     lines.push(line);
   }
+  // Line breaks are found in reading order; each line is then drawn in display order.
+  for (let i = 0; i < lines.length; i++) if (lines[i]!.some(w => w.level > 0)) lines[i] = visualOrder(lines[i]!, lines[i]!.map(w => w.level));
   const shown = lines.slice(0, o.maxLines ?? lines.length);
   const asc = (font.ascender / font.unitsPerEm) * px, natural = ((font.ascender - font.descender) / font.unitsPerEm) * px;
   const mult = (s.lineHeight ?? 1.15) / 1.15;
@@ -140,7 +270,9 @@ export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number,
 
 // ------------------------------------------------------------------ what shows at a moment (RenderPlan.textFrame / captionFrame)
 /** One text block on the canvas at a moment. */
-export type Piece = { runs: Run[]; style: M.TextStyle; font: string; maxLines?: number; x: number; y: number; scale: number; rotation: number; flipX: boolean; flipY: boolean; alpha: number };
+export type Piece = { runs: Run[]; style: M.TextStyle; font: string; maxLines?: number; x: number; y: number; scale: number; rotation: number; flipX: boolean; flipY: boolean; alpha: number;
+  /** Captions: the words' language (picks the CJK face) and whether they're drawn touching (ja, zh, th). */
+  language?: string | null; tight?: boolean };
 
 /** A text item at timeline t, or null when it isn't on screen (android RenderPlan.textFrame). */
 export function textPiece(it: M.TextItem, t: number, font: string): Piece | null {
@@ -183,7 +315,9 @@ export function captionPiece(ct: M.CaptionTrack, pages: M.CaptionPage[], t: numb
     }
     return run;
   });
-  return { runs, style: s, font, maxLines: s.maxLines ?? 2, x: 0.5, y: s.y ?? 0.72, scale: 1, rotation: 0, flipX: false, flipY: false, alpha: 1 };
+  // CaptionTrack.language (translated captions, WS8's contract): read loosely until every model copy has the field.
+  const language = (ct as { language?: string }).language ?? null, lang = (language ?? '').toLowerCase().split(/[-_]/)[0]!;
+  return { runs, style: s, font, maxLines: s.maxLines ?? 2, x: 0.5, y: s.y ?? 0.72, scale: 1, rotation: 0, flipX: false, flipY: false, alpha: 1, language, tight: UNSPACED_LANGUAGES.has(lang) };
 }
 
 /** A frame of text and captions: the groups to draw (canvas coordinates) and the canvas box they can paint (x0, y0, x1, y1). */
@@ -200,7 +334,7 @@ export function frameBody(pieces: Piece[], W: number, H: number, missing: Set<st
   const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
   pieces.forEach((pc, i) => {
     const px = Math.max(1, pc.style.sizePct * H), maxW = Math.max(1, (pc.style.maxWidthPct ?? 0.85) * W);
-    const b = drawBlock(pc.runs, pc.style, px, maxW, pc.font, { maxLines: pc.maxLines, missing, id: String(i) });
+    const b = drawBlock(pc.runs, pc.style, px, maxW, pc.font, { maxLines: pc.maxLines, missing, id: String(i), language: pc.language, tight: pc.tight });
     if (!b || pc.alpha <= 0.001 || pc.scale <= 0) return;
     let shadow = b.shadow?.svg ?? '';
     if (b.shadow && b.shadow.sigma > 0) {

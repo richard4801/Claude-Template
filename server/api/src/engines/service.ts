@@ -8,6 +8,10 @@ import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError, badRequest } from '../errors.js';
 import * as P from '../pricing.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js';
+import { estimateOne } from '../replicate/prices.js';
+
+/** How many of Replicate's image models the picker lists beyond the curated ones. */
+const BROWSE_IMAGE_MODELS = 40;
 import { modelName, type StepOverrides } from '../images/steps.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
@@ -108,16 +112,39 @@ export class ModelChoice {
     return [...out.values()];
   }
 
+  /**
+   * Replicate's image models the owner can run straight from the picker (owner 2026-11-09: "direct access to all the
+   * available models"): the text-to-image and image-editing collections, most-run first, those the input mapping can
+   * drive. Cached by the catalog; a slow or unreachable catalog just leaves the curated list.
+   */
+  private async replicateImageModels(): Promise<{ id: string; name: string }[]> {
+    const cat = this.ctx.imageModels.catalog;
+    if (!cat.configured) return [];
+    try {
+      const l = await Promise.race([cat.list('shot'), new Promise<null>(r => setTimeout(() => r(null), 4000))]);
+      if (!l) return [];
+      return l.models.filter(m => m.compatible !== false).slice(0, BROWSE_IMAGE_MODELS).map(m => ({ id: m.id, name: m.name }));
+    } catch { return []; }
+  }
+
   private async imageEngines(studioId: string, u: AuthUser): Promise<Engine[]> {
     const im = this.ctx.imageModels;
     const shot = await im.resolve(studioId, 'shot').catch(() => null);
-    const ids = [...new Set([shot?.model, this.ctx.config.REPLICATE_IMAGE_MODEL, ...IMAGE_CANDIDATES].filter((x): x is string => !!x))];
+    const browse = await this.replicateImageModels();
+    const ids = [...new Set([shot?.model, this.ctx.config.REPLICATE_IMAGE_MODEL, ...IMAGE_CANDIDATES, ...browse.map(b => b.id)].filter((x): x is string => !!x))];
+    const names = new Map(browse.map(b => [b.id, b.name]));
     const n = 3, inMp = P.PHOTO_REF_MP * n;
     const inputs = { ...NO_INPUTS, images: Math.min(6, this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS) };
+    const curated = new Set([shot?.model, this.ctx.config.REPLICATE_IMAGE_MODEL, ...IMAGE_CANDIDATES]);
     const out: Engine[] = [];
     for (const id of ids) {
-      const usd = im.isRecipe('shot', id) ? P.newShotEstimateImages(this.ctx.images.photoPrices(), 2, n) : await im.estimate(id, { outMp: 2, inMp }).catch(() => null);
-      out.push({ model: id, name: modelName(id), kind: 'image', purposes: [...IMAGE_PURPOSES], custom: false, provider: 'replicate', notice: null,
+      // Curated models are priced now; browsed ones from the catalog's price cache (filled as the list loads), else no price yet.
+      const cached = curated.has(id) ? null : im.catalog.cachedPrice(id);
+      const usd = im.isRecipe('shot', id) ? P.newShotEstimateImages(this.ctx.images.photoPrices(), 2, n)
+        : curated.has(id) ? await im.estimate(id, { outMp: 2, inMp }).catch(() => null)
+        : cached ? (() => { try { return estimateOne(cached, { outMp: 2, inMp }, im.estOpts()); } catch { return null; } })() : null;
+      const nm = modelName(id);
+      out.push({ model: id, name: nm !== id ? nm : names.get(id) ? `${names.get(id)} (${id.split('/')[0]})` : id, kind: 'image', purposes: [...IMAGE_PURPOSES], custom: false, provider: 'replicate', notice: null,
         limits: noLimits, resolution: null, price: usd == null ? null : { basis: 'per_run', usd: r4(usd) }, inputs });
     }
     // WS5: the studio's custom image models (Photo runs them; the other image paths use the image engine's step models).

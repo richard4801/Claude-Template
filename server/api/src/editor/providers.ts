@@ -39,6 +39,8 @@ export interface EditorProvider {
   track(mediaUrl: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced>;
   /** The voice alone (music and noise removed), or with `stem: "no_vocals"` everything but the voice (beat-only audio). */
   separate(mediaUrl: string, durationSec: number, h: Hooks, stem?: Stem): Promise<Produced>;
+  /** Both stems of one split (the same run as `separate`, nothing extra billed): the voice and everything else. */
+  separateBoth(mediaUrl: string, durationSec: number, h: Hooks): Promise<{ vocals: Produced; instrumental: Produced; gpuSec: number | null }>;
 }
 
 const env = (k: string, d: string) => process.env[k]?.trim() || d;
@@ -120,6 +122,11 @@ export class MockProvider implements EditorProvider {
   async separate(_url: string, durationSec: number, h: Hooks, _stem: Stem = 'vocals'): Promise<Produced> {
     await this.steps(h, 'Cleaning up the voice');
     return { file: null, contentType: 'audio/mpeg', gpuSec: 5 + 0.3 * durationSec };
+  }
+  async separateBoth(_url: string, durationSec: number, h: Hooks) {
+    await this.steps(h, 'Splitting voice and music');
+    const gpuSec = 5 + 0.3 * durationSec;
+    return { vocals: { file: null, contentType: 'audio/mpeg', gpuSec }, instrumental: { file: null, contentType: 'audio/mpeg', gpuSec }, gpuSec };
   }
 }
 
@@ -249,8 +256,20 @@ export class ReplicateProvider implements EditorProvider {
     const p = await this.run(this.models.separate, { audio: url, stem: 'vocals', output_format: 'mp3' }, h, 300 + durationSec * 3);
     const u = stem === 'no_vocals' ? (() => { const o = p.output as Record<string, unknown> | null; return o && typeof o === 'object' && !Array.isArray(o) ? pickFile(o['no_vocals'] ?? o['other'] ?? o['accompaniment'] ?? null) : null; })() : pickFile(p.output, ['vocals']);
     if (!u) throw new ReplicateError('The voice clean-up returned no audio', 'failed');
+    return this.audio(u, this.gpu(p));
+  }
+  async separateBoth(url: string, durationSec: number, h: Hooks) {
+    // One two-stem split: its output has `vocals` and `no_vocals` (older versions: `other` / `accompaniment`). Both kept.
+    const p = await this.run(this.models.separate, { audio: url, stem: 'vocals', output_format: 'mp3' }, h, 300 + durationSec * 3);
+    const o = p.output as Record<string, unknown> | null, gpuSec = this.gpu(p);
+    const v = pickFile(p.output, ['vocals']), rest = o && typeof o === 'object' && !Array.isArray(o) ? pickFile(o['no_vocals'] ?? o['other'] ?? o['accompaniment'] ?? null) : null;
+    if (!v || !rest) throw new ReplicateError('The split returned only one part', 'failed');
+    const vocals = await this.audio(v, gpuSec);
+    try { return { vocals, instrumental: await this.audio(rest, gpuSec), gpuSec }; } catch (e) { rmQuiet(vocals.file); throw e; }
+  }
+  private async audio(u: string, gpuSec: number | null): Promise<Produced> {
     const ext = /\.(wav|flac|mp3|m4a)(\?|$)/i.exec(u)?.[1]?.toLowerCase() ?? 'mp3';
-    return { file: await this.fetch(u, ext), contentType: ext === 'wav' ? 'audio/wav' : ext === 'flac' ? 'audio/flac' : ext === 'm4a' ? 'audio/mp4' : 'audio/mpeg', gpuSec: this.gpu(p) };
+    return { file: await this.fetch(u, ext), contentType: ext === 'wav' ? 'audio/wav' : ext === 'flac' ? 'audio/flac' : ext === 'm4a' ? 'audio/mp4' : 'audio/mpeg', gpuSec };
   }
 }
 
