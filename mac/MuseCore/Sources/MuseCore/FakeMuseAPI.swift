@@ -71,6 +71,8 @@ public actor FakeMuseAPI: MuseAPI {
     /// AI suite (workstream 1): the demo studio's suite settings (Engines), once changed.
     var suiteSettingsBox: SuiteSettings?
     /// Settings → Default models (EngineChoice.swift): the studio's pick per purpose.
+    /// Imports in demo mode (LinkImport.swift), newest first.
+    var demoImports: [LinkImportResult] = []
     var engineDefaultsBox: [String: String?] = [:]
     /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
     var suiteLooks: [String: SuiteLook] = [:]

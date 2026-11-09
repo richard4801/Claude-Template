@@ -117,6 +117,21 @@ public protocol LinkImportAPI: Sendable {
     func importVideo(file: URL, contentType: String, sourceUrl: String, name: String?, progress: UploadProgress?) async throws -> LinkImportResult
     /// The server fetches the link itself (when this Mac couldn't).
     func importLink(_ sourceUrl: String, name: String?) async throws -> LinkImportResult
+    /// GET /v1/imports: this studio's imported clips, newest first.
+    func listImports() async throws -> [LinkImportResult]
+}
+
+/// GET /v1/imports: a bare array or {imports:[…]}.
+struct ImportList: Decodable {
+    var items: [LinkImportResult]
+    enum CodingKeys: String, CodingKey { case imports }
+    init(from d: Decoder) throws {
+        if let a = try? d.singleValueContainer().decode([LinkImportResult].self) {
+            items = a
+        } else {
+            items = (try? d.container(keyedBy: CodingKeys.self).decode([LinkImportResult].self, forKey: .imports)) ?? []
+        }
+    }
 }
 
 public enum LinkImport {
@@ -173,6 +188,11 @@ extension HTTPMuseAPI: LinkImportAPI {
         return absolutized(r)
     }
 
+    public func listImports() async throws -> [LinkImportResult] {
+        let l: ImportList = try await suiteCall("GET", "v1/imports")
+        return l.items.map(absolutized)
+    }
+
     /// Imports' "/uploads/…" poster made absolute (WS12 serves them relative).
     func absolutized(_ r: LinkImportResult) -> LinkImportResult {
         var x = r
@@ -198,12 +218,17 @@ extension FakeMuseAPI: LinkImportAPI {
         try await importLink(sourceUrl, name: name)
     }
 
+    public func listImports() async throws -> [LinkImportResult] { demoImports }
+
     /// Demo mode never downloads: the link becomes the sample performer clip under the link's name.
     public func importLink(_ sourceUrl: String, name: String?) async throws -> LinkImportResult {
         let check = try await checkImportLink(sourceUrl)
         guard check.allowed else { throw ApiError(check.code ?? "link_unsupported", check.reason ?? RecreateLinks.fallback) }
         var c = uploadClip(SampleData.sampleMeta, file: nil, progress: nil)
         c.name = name ?? LinkImport.name(title: nil, platform: check.platform) ?? c.name
-        return LinkImportResult(clip: c, sourceUrl: check.url, platform: check.platform)
+        let r = LinkImportResult(clip: c, sourceUrl: check.url, platform: check.platform)
+        demoImports.removeAll { $0.clip?.id == c.id }
+        demoImports.insert(r, at: 0)
+        return r
     }
 }

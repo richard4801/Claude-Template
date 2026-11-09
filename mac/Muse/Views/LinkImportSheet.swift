@@ -33,6 +33,30 @@ struct LinkImportSheet: View {
                         .disabled(s.fetching)
                         .accessibilityLabel("Video link")
                 }
+                if !s.fetching, s.purpose == .swap, !s.recent.isEmpty {
+                    // Your earlier imports: pick one again, nothing downloaded (owner bug 2026-11-09: choose from the Library).
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Your imports").scaled(t.scale.label, t.roles.ink)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: Space.s2) {
+                                ForEach(Array(s.recent.enumerated()), id: \.offset) { _, r in
+                                    if let c = r.clip {
+                                        Button { store.useEarlierImport(r) } label: {
+                                            VStack(alignment: .leading, spacing: Space.s1) {
+                                                MuseImage(ref: c.thumb).frame(width: 72, height: 96)
+                                                    .clipShape(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous))
+                                                Text(c.name).scaled(t.scale.caption, t.roles.ink2).lineLimit(1).frame(width: 72, alignment: .leading)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Use \(c.name)")
+                                        .accessibilityLabel("Use import \(c.name)")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if s.fetching {
                     VStack(alignment: .leading, spacing: Space.s2) {
                         HStack {

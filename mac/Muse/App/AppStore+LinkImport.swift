@@ -21,6 +21,8 @@ final class LinkImportState {
     /// Anything else, in plain words.
     var error: String?
     var settings: RecreateLinkSettings?
+    /// This studio's earlier imports (GET /v1/imports), to pick one again without a download.
+    var recent: [LinkImportResult] = []
     @ObservationIgnored var task: Task<Void, Never>?
 }
 
@@ -39,7 +41,10 @@ extension AppStore {
         let clip = NSPasteboard.general.string(forType: .string).flatMap { LinkImport.link($0, strict: false) }
         s.text = link ?? clip ?? ""
         withAnimation(.easeOut(duration: 0.15)) { s.open = true }
-        Task { if let v = try? await linkImportAPI?.linkImportSettings() { linkImport.settings = v } }
+        Task {
+            if let v = try? await linkImportAPI?.linkImportSettings() { linkImport.settings = v }
+            if let list = try? await linkImportAPI?.listImports() { linkImport.recent = Array(list.filter { $0.clip != nil }.prefix(8)) }
+        }
         if let link, !link.isEmpty { startLinkImport() }
     }
 
@@ -166,6 +171,13 @@ extension AppStore {
         } else {
             linkImport.error = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
         }
+    }
+
+    /// An earlier import picked again from the sheet's "Your imports".
+    func useEarlierImport(_ r: LinkImportResult) {
+        var x = r
+        x.cached = true
+        finishLinkImport(x)
     }
 
     /// What the import is for: Swap's source (selected), or the Library and Edit's Uploads.
