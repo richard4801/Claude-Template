@@ -216,6 +216,15 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     }
 
     private fun visual(f: String, it: Visual) {
+        it.effect?.let { e ->
+            num("$f.effect.amount", e.amount, 0.0, 1.0, false)
+            num("$f.effect.speed", e.speed, 0.1, 4.0)
+            e.colors?.let { cs ->
+                if (e.id != EffectId.DUOTONE) bad("$f.effect.colors", "only for duotone")
+                if (cs.size != 2) bad("$f.effect.colors", "must be two colours")
+                cs.forEachIndexed { i, c -> color("$f.effect.colors.$i", c, false) }
+            }
+        }
         transform(f, it.transform)
         it.crop?.let { c -> num("$f.crop.left", c.left, 0.0, 0.45); num("$f.crop.top", c.top, 0.0, 0.45); num("$f.crop.right", c.right, 0.0, 0.45); num("$f.crop.bottom", c.bottom, 0.0, 0.45) }
         num("$f.opacity", it.opacity, 0.0, 1.0)

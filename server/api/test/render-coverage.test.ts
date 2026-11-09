@@ -116,6 +116,7 @@ const nested: Entry = meta('probed field by field');
 const clipKeys: Table<M.VideoClip> = {
   id: meta('an id'), asset: set('asset', 'mt'), inSec: set('inSec', 0.5), outSec: set('outSec', 1.2), speed: set('speed', 2), speedCurve: nested, startSec: set('startSec', 0.2),
   volume: set('volume', 0.5), muted: set('muted', true), fadeInSec: set('fadeInSec', 0.3), fadeOutSec: set('fadeOutSec', 0.6), audioAsset: set('audioAsset', 'm'),
+  effect: meta('effects library (2026-11-09): reference in effects.ts; the render follows (WS16)'),
   chroma: nested, transitionIn: nested, alphaMatte: nested, holdSec: { mut: o => { o.holdSec = 1; o.speed = 1; } }, blend: set('blend', 'screen'),
   animIn: nested, animOut: nested, animLoop: nested, voiceEffect: set('voiceEffect', 'radio'), enhance: set('enhance', true),
   fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
@@ -129,7 +130,8 @@ const clipFields = (main: boolean) => ({
 });
 const imageKeys: Table<M.ImageItem> = { id: meta('an id'), asset: set('asset', 'im'), startSec: set('startSec', 0.4), durationSec: set('durationSec', 0.5), blend: set('blend', 'multiply'),
   animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
-  transitionIn: meta('overlay cross-dissolve (2026-11-09): needs a previous item it overlaps; the render follows (WS16)') };
+  transitionIn: meta('overlay cross-dissolve (2026-11-09): needs a previous item it overlaps; the render follows (WS16)'),
+  effect: meta('effects library (2026-11-09): reference in effects.ts; the render follows (WS16)') };
 const imageFields = { startSec: imageKeys.startSec, durationSec: imageKeys.durationSec, blend: imageKeys.blend,
   ...visualFields(['x', 'y', 'scale', 'rotation', 'opacity', ...M.COLOR_KF_PROPS, ...M.MASK_KF_PROPS, ...M.LOOK_KF_PROPS], 'cover'),
   ...nest('animIn', animFields('animIn')), ...nest('animOut', animFields('animOut')), ...nest('animLoop', loopFields) };

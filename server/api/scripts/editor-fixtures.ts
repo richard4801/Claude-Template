@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as M from '../src/editor/model.js';
+import * as FX from '../src/editor/effects.js';
 import { CAPTION_STYLES, CAPTION_STYLE_LABELS, FILTERS, HOOKS, TRANSITION_LABELS } from '../src/editor/presets.js';
 import { suggestCuts } from '../src/editor/cuts.js';
 import { runChain, voiceChain } from '../src/editor/audio.js';
@@ -211,6 +212,13 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'overlay dissolve too long', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 0.8, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 1.2 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.durationSec' },
   { name: 'overlay dissolve on the first item', project: mut(p => { p.tracks[2].items[0].transitionIn = { kind: 'fade', durationSec: 0.5 }; }), ok: false, field: 'edits.tracks.2.items.0.transitionIn' },
   { name: 'overlay overlap without a dissolve', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2 }); }), ok: false, field: 'edits.tracks.2.items.1.startSec' },
+  // The effects library (2026-11-09).
+  { name: 'effect ok', project: mut(p => { p.tracks[0].items[0].effect = { id: 'vhs', amount: 0.6, speed: 2 }; }), ok: true },
+  { name: 'effect duotone colours ok', project: mut(p => { p.tracks[2].items[0].effect = { id: 'duotone', amount: 1, colors: ['#000000', '#FFFFFF'] }; }), ok: true },
+  { name: 'effect unknown', project: mut(p => { p.tracks[0].items[0].effect = { id: 'sparkle', amount: 0.5 }; }), ok: false, field: 'edits.tracks.0.items.0.effect.id' },
+  { name: 'effect amount', project: mut(p => { p.tracks[0].items[0].effect = { id: 'blur', amount: 1.5 }; }), ok: false, field: 'edits.tracks.0.items.0.effect.amount' },
+  { name: 'effect speed', project: mut(p => { p.tracks[0].items[0].effect = { id: 'shake', amount: 0.5, speed: 9 }; }), ok: false, field: 'edits.tracks.0.items.0.effect.speed' },
+  { name: 'effect colours not duotone', project: mut(p => { p.tracks[0].items[0].effect = { id: 'blur', amount: 0.5, colors: ['#000000', '#FFFFFF'] }; }), ok: false, field: 'edits.tracks.0.items.0.effect.colors' },
   // Derived copies (stabilize/slowmo, 2026-11-09).
   { name: 'stabilized asset ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', durationSec: 10, derivedFrom: { asset: 'src', op: 'stabilize' } }); }), ok: true },
   { name: 'stabilized then reversed ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'src', op: 'stabilize' } }, { id: 'src_st_rev', kind: 'video', upload: 'up_strev', reverseOf: 'src_st' }); }), ok: true },
@@ -608,6 +616,17 @@ const cutouts = [
   { name: 'cover', project: cutBase({ fit: 'cover', transform: { x: 0.5, y: 0.5, scale: 1 } }) },
   { name: 'keyframes', project: cutBase({ transform: { x: 0.5, y: 0.5, scale: 0.6 }, keyframes: { scale: [{ t: 0, v: 0.6 }, { t: 2, v: 0.9, ease: 'easeOut' }], x: [{ t: 0, v: 0.4 }, { t: 2, v: 0.6 }], opacity: [{ t: 0, v: 1 }] } }) },
 ].map(c => { const r = M.applyCutout(c.project, 'i1', 'cut', { x: 700, y: 150, w: 300, h: 500 }, 1200, 800); if (r) M.validate(r, FILTERS); return { ...c, box: { x: 700, y: 150, w: 300, h: 500 }, sourceWidth: 1200, sourceHeight: 800, result: r }; });
+// The effects library (M): each effect on a 16×16 test pattern (a gradient plus a checker), sample pixels at two
+// amounts and two times. Bilinear, clamp-to-edge sampling like a GPU texture.
+const FXW = 16, FXH = 16;
+const fxPattern: FX.RGB[] = Array.from({ length: FXW * FXH }, (_, i) => { const x = i % FXW, y = Math.floor(i / FXW); const chk = (x + y) % 2 === 0 ? 0.15 : 0;
+  return [Math.round((x / 15 * 0.8 + chk) * 1000) / 1000, Math.round((y / 15 * 0.7 + 0.1) * 1000) / 1000, Math.round(((x + y) / 30 * 0.6 + 0.2 - chk) * 1000) / 1000] as FX.RGB; });
+const fxPoints: [number, number][] = [[0.03, 0.03], [0.5, 0.5], [0.97, 0.03], [0.03, 0.97], [0.97, 0.97], [0.25, 0.6], [0.7, 0.3], [0.41, 0.13], [0.59, 0.84], [0.12, 0.45], [0.88, 0.55], [0.33, 0.33]];
+const fxSampler = FX.imageSampler(FXW, FXH, fxPattern);
+const effects = { width: FXW, height: FXH, pattern: fxPattern, perm: FX.PERM, cases: FX.EFFECT_IDS.flatMap(id => [0.4, 1].flatMap(amount => [0.37, 1.2].map(t => {
+  const e: FX.Effect = { id, amount, ...(id === 'flash' || id === 'rain' ? { speed: 1.5 } : {}), ...(id === 'duotone' && amount === 1 ? { colors: ['#003344', '#FFE600'] as [string, string] } : {}) };
+  return { effect: e, t, samples: fxPoints.map(([u, v]) => ({ u, v, rgb: FX.effectPixel(e, t, FXW, FXH, u, v, fxSampler).map(x => Math.round(x * 1e6) / 1e6) })) };
+}))) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -652,7 +671,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, separation: { project: sepProject, cases: separation }, cutouts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { effects, reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, separation: { project: sepProject, cases: separation }, cutouts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

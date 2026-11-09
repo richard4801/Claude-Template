@@ -3,6 +3,7 @@
 // case in test/fixtures/editor/*.json (scripts/editor-fixtures.ts writes them from these functions). Pure: no I/O.
 
 import { hash01, lookProblem, type Look } from './look.js';
+import { EFFECT_IDS, type Effect } from './effects.js';
 
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
@@ -61,7 +62,9 @@ export type DerivedFrom = { asset: string; op: 'stabilize' } | { asset: string; 
 export const DERIVED_OPS: readonly DerivedOp[] = ['stabilize', 'slowmo'];
 export const SLOWMO = { factors: [2, 4] as const, minRangeSec: 0.3, maxRangeSec: 10 };
 
-type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
+/** The effects library (2026-11-09): one picture effect on a clip or image, after its look, before its mask and transform (effects.ts). */
+export type { Effect } from './effects.js';
+type Visual = { effect?: Effect; fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
 /** Voice processing on a clip with sound (Edit suite audio panel). */
 type Voice = { voiceEffect?: VoiceEffect; enhance?: boolean };
 export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: number; outSec: number; speed: number; speedCurve?: SpeedCurve; startSec?: number;
@@ -1231,6 +1234,17 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   };
   const visual = (f: string, it: Visual, len: number) => {
     if (it.fit !== undefined && it.fit !== 'cover' && it.fit !== 'contain') bad(`${f}.fit`, 'must be cover or contain');
+    if (it.effect !== undefined) {
+      const e = it.effect;
+      if (!e || typeof e !== 'object' || !EFFECT_IDS.includes(e.id)) bad(`${f}.effect.id`, 'unknown effect');
+      num(`${f}.effect.amount`, e.amount, 0, 1, false);
+      num(`${f}.effect.speed`, e.speed, 0.1, 4);
+      if (e.colors !== undefined) {
+        if (e.id !== 'duotone') bad(`${f}.effect.colors`, 'only for duotone');
+        if (!Array.isArray(e.colors) || e.colors.length !== 2) bad(`${f}.effect.colors`, 'must be two colours');
+        e.colors.forEach((c, i) => color(`${f}.effect.colors.${i}`, c, false));
+      }
+    }
     if (it.transform !== undefined) {
       num(`${f}.transform.x`, it.transform.x, -2, 3); num(`${f}.transform.y`, it.transform.y, -2, 3);
       num(`${f}.transform.scale`, it.transform.scale, 0.05, 10); num(`${f}.transform.rotation`, it.transform.rotation, -3600, 3600);

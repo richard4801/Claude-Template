@@ -350,6 +350,23 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun effectsLibrary() {
+        val d = fn["effects"]!!.obj
+        val w = d["width"]!!.num.toInt(); val h = d["height"]!!.num.toInt()
+        assertEquals(d["perm"]!!.arr.map { it.num.toInt() }, Effects.PERM.toList())
+        val sample = Effects.sampler(w, h, d["pattern"]!!.arr.map { px -> px.arr.map { it.num }.toDoubleArray() })
+        for (c in d["cases"]!!.arr) {
+            val e = c.obj["effect"]!!.obj
+            val fx = Effect(EffectId.entries.first { it.wire == e["id"]!!.str }, e["amount"]!!.num, e["speed"]?.num, e["colors"]?.arr?.map { it.str })
+            val t = c.obj["t"]!!.num
+            for (smp in c.obj["samples"]!!.arr) {
+                val got = Effects.pixel(fx, t, w, h, smp.obj["u"]!!.num, smp.obj["v"]!!.num, sample)
+                val want = smp.obj["rgb"]!!.arr.map { it.num }
+                for (q in 0..2) assertEquals("${fx.id} a=${fx.amount} t=$t at ${smp.obj["u"]},${smp.obj["v"]} [$q]", want[q], got[q], 2e-6)
+            }
+        }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj
