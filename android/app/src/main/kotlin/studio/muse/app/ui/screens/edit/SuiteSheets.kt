@@ -821,12 +821,21 @@ private fun MaskBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
     if (clip != null) {
         // Chroma key (green or blue screen): on/off, the key colour, how much around it goes, the edge and the spill.
         val ck = clip.chroma
-        OptRow("Chroma key", if (ck == null) "Removes a green or blue screen" else "Removing ${if (ck.color.equals(BLUE_KEY, true)) "blue" else "green"}", ck != null, {
+        OptRow("Chroma key", if (ck == null) "Removes a green or blue screen" else "Removing ${if (ck.color.equals(BLUE_KEY, true)) "blue" else if (ck.color.equals(GREEN_KEY, true)) "green" else "a picked colour"}", ck != null, {
             act(EditAction.SetChroma(if (ck == null) studio.muse.core.edit.Chroma(GREEN_KEY, .4, .08, .5) else null))
         })
         if (ck != null) {
-            SuiteSeg(listOf(GREEN_KEY to "Green screen", BLUE_KEY to "Blue screen"), if (ck.color.equals(BLUE_KEY, true)) BLUE_KEY else GREEN_KEY,
+            SuiteSeg(listOf(GREEN_KEY to "Green screen", BLUE_KEY to "Blue screen"), if (ck.color.equals(BLUE_KEY, true)) BLUE_KEY else if (ck.color.equals(GREEN_KEY, true)) GREEN_KEY else null,
                 { act(EditAction.SetChroma(ck.copy(color = it))) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+            // The eyedropper (owner-approved 2026-11-09): touch the colour to remove on the paused picture.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val sw = runCatching { Color(android.graphics.Color.parseColor(ck.color)) }.getOrDefault(Color.Transparent)
+                Box(Modifier.size(28.dp).background(sw).border(1.dp, m.t.line).semantics { contentDescription = "Key colour ${ck.color}" })
+                T(ck.color.uppercase(), m.type.mono.copy(fontSize = 12.5.sp), m.t.ink, Modifier.weight(1f))
+                val picking = ui.pick != null
+                SuiteButton(if (picking) "Cancel" else "Pick from video", { act(EditAction.PickColor(!picking)) }, height = 34.dp, icon = if (picking) null else "drop", primary = picking)
+            }
+            if (ui.pick != null) T("Touch the colour to remove on the picture, then lift your finger.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
             val sim = ck.similarity ?: .4; val sm = ck.smoothness ?: .08; val sp = ck.spill ?: .5
             SuiteSlider(sim.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(similarity = f.toDouble()), done)) }, label = "Strength", valueText = "${(sim * 100).roundToInt()}")
             SuiteSlider(sm.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(smoothness = f.toDouble()), done)) }, label = "Edge softness", valueText = "${(sm * 100).roundToInt()}")

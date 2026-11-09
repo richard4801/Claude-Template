@@ -37,6 +37,7 @@ import studio.muse.core.edit.Font
 import studio.muse.core.edit.Grain
 import studio.muse.core.edit.ImageItem
 import studio.muse.core.edit.KfProp
+import studio.muse.core.edit.propAt
 import studio.muse.core.edit.Look
 import studio.muse.core.edit.Mask
 import studio.muse.core.edit.MediaClip
@@ -252,6 +253,12 @@ sealed interface EditAction {
     data object CutToBeats : EditAction
     /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
     data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
+    /** The chroma eyedropper on (pauses; the view model loads the frame) or off. */
+    data class PickColor(val on: Boolean) : EditAction
+    /** The eyedropper's frame: the clip's source picture at the playhead, [w] × [h] ARGB. */
+    class PickFrame(val w: Int, val h: Int, val argb: IntArray) : EditAction
+    /** The finger at ([x], [y]) (fractions of the canvas); [done] sets the key colour there and closes the eyedropper. */
+    data class PickAt(val x: Double, val y: Double, val done: Boolean) : EditAction
     /** Auto-captions' language (null: detect it). */
     data class CaptionLanguage(val code: String?) : EditAction
     /** A saved style kit applied to the whole edit ([studio.muse.core.edit.applyKit]). */
@@ -835,6 +842,14 @@ class EditSuiteController(
                 if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
                     say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
             }
+            is EditAction.PickColor -> {
+                if (!a.on) return _ui.update { it.copy(pick = null) }
+                val clip = (u.selection?.second as? VideoClip) ?: u.activeClip ?: return say("Select a clip to key")
+                setPlayback(u.playheadSec, false)
+                _ui.update { it.copy(pick = PickUi(clip.id)) }
+            }
+            is EditAction.PickFrame -> _ui.update { s -> s.copy(pick = s.pick?.copy(w = a.w, h = a.h, argb = a.argb)) }
+            is EditAction.PickAt -> pickAt(u, a)
             is EditAction.CaptionLanguage -> _ui.update { it.copy(captionLanguage = a.code) }
             is EditAction.ApplyKit -> if (change(refused = "That style kit doesn't fit this edit") { p -> studio.muse.core.edit.applyKit(p, a.kit.kit).takeIf { it != p } })
                 say("Applied “${a.kit.name}”") else if (project != null) say("This edit already has that style")
@@ -1062,6 +1077,31 @@ class EditSuiteController(
             _ui.update { it.copy(bpm = bpm) }
             say("Beats found · ${bpm?.let { "${it.roundToInt()} BPM" } ?: "${beats.size} marks"}")
         }
+    }
+
+    /** The eyedropper: the source pixel under canvas point (x, y) of the clip being keyed; on [done], its colour becomes the key. */
+    private fun pickAt(u: EditSuiteUi, a: EditAction.PickAt) {
+        val pk = u.pick ?: return
+        val px = pk.argb ?: return
+        val p = project ?: return
+        val (t, i) = p.locate(pk.clipId) ?: return
+        val c = t.items[i] as? VideoClip ?: return
+        val local = (u.playheadSec - itemSpan(p, t, c).startSec).coerceAtLeast(0.0)
+        val k = c.keyframes; val tr = c.transform
+        val place = Transform(propAt(k, KfProp.X, tr?.x ?: .5, local), propAt(k, KfProp.Y, tr?.y ?: .5, local), propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local),
+            propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local), tr?.flipX, tr?.flipY)
+        val asset = p.asset(c.asset)
+        val fit = c.fit ?: if (t.kind == TrackKind.MAIN) studio.muse.core.edit.Fit.COVER else studio.muse.core.edit.Fit.CONTAIN
+        val src = studio.muse.core.edit.sourcePoint(p.canvas.width, p.canvas.height, asset?.width ?: pk.w, asset?.height ?: pk.h, fit, place, c.crop, a.x, a.y)
+        val hex = src?.let { (sx, sy) ->
+            val x = (sx * pk.w).toInt().coerceIn(0, pk.w - 1); val y = (sy * pk.h).toInt().coerceIn(0, pk.h - 1)
+            "#%06X".format(px[y * pk.w + x] and 0xFFFFFF)
+        }
+        if (!a.done) return _ui.update { it.copy(pick = pk.copy(at = a.x to a.y, hex = hex, src = src)) }
+        _ui.update { it.copy(pick = null) }
+        if (hex == null) return say("That's outside the clip · try again on the picture")
+        val ch = c.chroma ?: studio.muse.core.edit.Chroma(hex)
+        if (change { pp -> pp.updateItem(c.id) { (it as? VideoClip)?.copy(chroma = ch.copy(color = hex)) ?: it } }) say("Key colour $hex")
     }
 
     /** Tap to keep: a tap at the playhead's source time of the clip being cut out (1–10 taps). */

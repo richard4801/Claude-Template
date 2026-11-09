@@ -356,4 +356,21 @@ class EditSmallRowsTest {
         assertEquals(.65, mk.maskAt(2.5)!!.x!!, .1)
         assertEquals(-.5, mk.lookAt(4.0).vignette!!.amount, 1e-9)
     }
+
+    @Test fun chromaEyedropper() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id)); c.act(EditAction.Scrub(2.0, end = true))
+        c.act(EditAction.PickColor(true))
+        assertEquals(id, c.ui.value.pick!!.clipId); assertTrue(!c.ui.value.playing)
+        // A 4 × 4 frame: the left half green screen, the right half grey.
+        c.act(EditAction.PickFrame(4, 4, IntArray(16) { i -> if (i % 4 < 2) 0xFF2BD15F.toInt() else 0xFF808080.toInt() }))
+        c.act(EditAction.PickAt(.75, .5, done = false)); assertEquals("#808080", c.ui.value.pick!!.hex)
+        c.act(EditAction.PickAt(.2, .5, done = true))
+        assertNull(c.ui.value.pick)
+        assertEquals("#2BD15F", c.p().mainClips[0].chroma!!.color)
+        valid(c.p())
+        // Cancel leaves the key as it was.
+        c.act(EditAction.PickColor(true)); c.act(EditAction.PickColor(false)); assertNull(c.ui.value.pick)
+    }
 }

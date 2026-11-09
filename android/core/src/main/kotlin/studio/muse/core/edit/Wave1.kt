@@ -93,3 +93,25 @@ fun blurFillClip(p: EditProject, t: Double): Pair<String, Double>? {
     }
     return null
 }
+
+/**
+ * The chroma eyedropper (owner-approved design pass, 2026-11-09): where canvas point ([x], [y], fractions of the canvas)
+ * falls in an item's source picture, as fractions of the source (0–1), or null outside it. The inverse of [itemCorners]
+ * on the cropped picture, then the crop undone.
+ */
+fun sourcePoint(canvasW: Int, canvasH: Int, srcW: Int, srcH: Int, fit: Fit, t: Transform, crop: Crop?, x: Double, y: Double): Pair<Double, Double>? {
+    val l = crop?.left ?: 0.0; val r = crop?.right ?: 0.0; val tp = crop?.top ?: 0.0; val b = crop?.bottom ?: 0.0
+    val w = srcW * (1 - l - r); val h = srcH * (1 - tp - b)
+    if (w <= 0 || h <= 0) return null
+    val c = itemCorners(canvasW, canvasH, w, h, fit, t)
+    val (ox, oy) = c[0]
+    val ux = c[1].first - ox; val uy = c[1].second - oy // top-left → top-right
+    val vx = c[3].first - ox; val vy = c[3].second - oy // top-left → bottom-left
+    val det = ux * vy - uy * vx
+    if (kotlin.math.abs(det) < 1e-9) return null
+    val px = x * canvasW - ox; val py = y * canvasH - oy
+    val u = (px * vy - py * vx) / det
+    val v = (ux * py - uy * px) / det
+    if (u < -1e-9 || u > 1 + 1e-9 || v < -1e-9 || v > 1 + 1e-9) return null
+    return (l + u.coerceIn(0.0, 1.0) * (1 - l - r)) to (tp + v.coerceIn(0.0, 1.0) * (1 - tp - b))
+}

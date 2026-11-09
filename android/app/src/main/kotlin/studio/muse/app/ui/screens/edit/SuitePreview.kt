@@ -1,5 +1,13 @@
 package studio.muse.app.ui.screens.edit
 
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.Path
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -88,6 +96,8 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
             ui.safeArea?.let { SafeAreaGuides(it) }
             // Remove background → tap what to keep: taps on the paused picture, and where they are.
             ui.keep?.let { k -> KeepTaps(k, act) }
+            // The chroma eyedropper: touch the colour to remove; a loupe shows the source pixels under the finger.
+            ui.pick?.let { pk -> PickOverlay(pk, act) }
         }
         // Safe-area switch: TikTok → Reels → Shorts → off.
         if (!safeChip) return@BoxWithConstraints
@@ -266,6 +276,68 @@ fun CaptionTile(style: CaptionStyle, label: String, on: Boolean, onClick: () -> 
 }
 
 
+
+/**
+ * The eyedropper over the picture (owner-approved design pass): dims it slightly, follows the finger with a loupe of
+ * the clip's source pixels (about 4×) and the colour's hex above it; lifting the finger sets the key colour.
+ */
+@Composable
+private fun PickOverlay(pk: PickUi, act: (EditAction) -> Unit) {
+    val m = muse
+    val frame = androidx.compose.runtime.remember(pk.argb) {
+        pk.argb?.let { px -> android.graphics.Bitmap.createBitmap(px, pk.w, pk.h, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap() }
+    }
+    val measurer = rememberTextMeasurer()
+    Canvas(
+        Modifier.fillMaxSize()
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    fun at(o: Offset) = (o.x / size.width).toDouble().coerceIn(0.0, 1.0) to (o.y / size.height).toDouble().coerceIn(0.0, 1.0)
+                    var last = down.position
+                    at(last).let { (x, y) -> act(EditAction.PickAt(x, y, done = false)) }
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) break
+                        last = ch.position; ch.consume()
+                        at(last).let { (x, y) -> act(EditAction.PickAt(x, y, done = false)) }
+                    }
+                    at(last).let { (x, y) -> act(EditAction.PickAt(x, y, done = true)) }
+                }
+            }
+            .semantics { contentDescription = "Picture · touch the colour to remove" },
+    ) {
+        drawRect(Color.Black.copy(alpha = .18f))
+        val a = pk.at ?: return@Canvas
+        val c = Offset((a.first * size.width).toFloat(), (a.second * size.height).toFloat())
+        val r = 44.dp.toPx()
+        // Above the finger (below it near the top edge).
+        val lc = Offset(c.x.coerceIn(r, size.width - r), if (c.y - r * 2.2f > r) c.y - r * 1.8f else c.y + r * 1.8f)
+        val src = pk.src
+        if (frame != null && src != null) {
+            val half = 11
+            val sx = (src.first * pk.w).toInt().coerceIn(half, maxOf(half, pk.w - half - 1)) - half
+            val sy = (src.second * pk.h).toInt().coerceIn(half, maxOf(half, pk.h - half - 1)) - half
+            val clip = Path().apply { addOval(androidx.compose.ui.geometry.Rect(lc, r)) }
+            clipPath(clip) {
+                drawImage(frame, androidx.compose.ui.unit.IntOffset(sx, sy), androidx.compose.ui.unit.IntSize(half * 2 + 1, half * 2 + 1),
+                    androidx.compose.ui.unit.IntOffset((lc.x - r).toInt(), (lc.y - r).toInt()), androidx.compose.ui.unit.IntSize((r * 2).toInt(), (r * 2).toInt()),
+                    filterQuality = androidx.compose.ui.graphics.FilterQuality.None)
+            }
+        } else drawCircle(Color.Black.copy(alpha = .5f), r, lc)
+        drawCircle(Color.White, r, lc, style = Stroke(3.dp.toPx()))
+        drawLine(Color.White, Offset(lc.x - 6.dp.toPx(), lc.y), Offset(lc.x + 6.dp.toPx(), lc.y), 1.5f.dp.toPx())
+        drawLine(Color.White, Offset(lc.x, lc.y - 6.dp.toPx()), Offset(lc.x, lc.y + 6.dp.toPx()), 1.5f.dp.toPx())
+        drawCircle(Color.White, 6.dp.toPx(), c, style = Stroke(2.dp.toPx()))
+        pk.hex?.let { hx ->
+            val tl = measurer.measure(hx, TextStyle(fontFamily = m.t.body, fontSize = 12.sp, color = Color.White, fontFeatureSettings = "tnum"))
+            val tx = lc.x - tl.size.width / 2f; val ty = lc.y + r + 6.dp.toPx()
+            drawRect(Color.Black.copy(alpha = .6f), Offset(tx - 6.dp.toPx(), ty - 2.dp.toPx()), Size(tl.size.width + 12.dp.toPx(), tl.size.height + 4.dp.toPx()))
+            drawText(tl, topLeft = Offset(tx, ty))
+        }
+    }
+}
 
 /** Tap to keep: a tap adds a point (0–1 of the frame); keep taps are filled rings, leave-out taps are crossed. */
 @Composable
