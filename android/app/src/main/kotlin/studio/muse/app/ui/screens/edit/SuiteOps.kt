@@ -264,7 +264,8 @@ object SuiteOps {
         for (t in p.tracks) if (t.kind == TrackKind.MUSIC) for (it in t.items) {
             val c = it as AudioClip
             val marks = (if (strongOnly) c.strongBeats ?: c.beats else c.beats).orEmpty()
-            for (b in marks) if (b >= c.inSec && b <= c.outSec) out += c.startSec + (b - c.inSec)
+            // Beat marks are source times: through the clip's speed onto the timeline.
+            for (b in marks) if (b >= c.inSec && b <= c.outSec) out += c.startSec + studio.muse.core.edit.clipTimeAt(c, b)
         }
         return out.sorted()
     }

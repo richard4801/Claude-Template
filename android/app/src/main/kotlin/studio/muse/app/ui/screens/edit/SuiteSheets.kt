@@ -292,6 +292,16 @@ private fun fracToSpeed(f: Float) = 10.0.pow(f * 2.0 - 1).let { (it * 100).round
 @Composable
 private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
+    // A selected music, voice or sound-effect clip: a plain speed (0.5–2×, pitch kept); audio has no curves.
+    (ui.selection?.second as? studio.muse.core.edit.AudioClip)?.let { ac ->
+        val sp = ac.speed ?: 1.0
+        T("Sound keeps its pitch at any speed.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        SuiteSlider(((sp - .5) / 1.5).toFloat(), { f, done -> act(EditAction.AudioSpeed(ac.id, .5 + f * 1.5, done)) }, label = "Speed", valueText = "${fmt1(sp)}×")
+        SuiteChips(listOf(".5" to "0.5×", "1" to "1×", "1.5" to "1.5×", "2" to "2×"), listOf(.5, 1.0, 1.5, 2.0).firstOrNull { kotlin.math.abs(it - sp) < 1e-6 }?.let { if (it == 1.0) "1" else if (it == 2.0) "2" else it.toString().removePrefix("0") },
+            { w -> act(EditAction.AudioSpeed(ac.id, w.toDouble())) })
+        T("${fmt1(clipLength(ac))} s on the timeline", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+        return
+    }
     val c = ui.activeClip ?: return T("Pick a clip", m.type.body, m.t.muted)
     SuiteSeg(listOf("normal" to "Normal", "curve" to "Curve"), if (ui.speedCurveTab) "curve" else "normal", {
         act(EditAction.SpeedTab(it == "curve"))

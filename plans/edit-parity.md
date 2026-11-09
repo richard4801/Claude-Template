@@ -66,7 +66,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Constant speed 0.1–10×, pitch kept | Has | Has | — | |
 | Speed curves (presets + custom graph) | Has | Has | — | |
 | **Smooth slow-mo (frame interpolation)** | Missing | Missing | XL | Needs a model choice (server job like denoise, or on-device). The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
-| Speed on audio-only clips | Missing | Missing | M | The contract says audio plays at 1×; needs a contract change. |
+| Speed on audio-only clips | Has | Missing | M | Android: Speed panel on a selected music, voice or effect clip: 0.5–2×, pitch kept (contract: audio speed 0.5–2; beats map through clipTimeAt; server render uses atempo). |
 | Set the duration (speed computed) | Has | Missing | S |. Android: Speed → Length slider. |
 
 ## 3. Transitions

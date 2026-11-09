@@ -1045,7 +1045,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         const c = it as AudioClip;
         clipBase(g, c, ['audio', 'video']);
         num(`${g}.startSec`, c.startSec, 0, 600, false);
-        if (c.speed !== undefined && c.speed !== 1) bad(`${g}.speed`, 'audio clips play at 1×');
+        // Audio speed (M): 0.5–2×, pitch kept (time stretch); timeline length = (outSec − inSec) / speed.
+        num(`${g}.speed`, c.speed, 0.5, 2);
         kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['volume']);
         for (const k of ['beats', 'strongBeats'] as const) { const bs = c[k]; if (bs !== undefined && (!Array.isArray(bs) || bs.length > 2000 || bs.some(b => !isNum(b) || b < 0))) bad(`${g}.${k}`, 'must be up to 2000 times'); }
       }

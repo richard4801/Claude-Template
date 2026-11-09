@@ -1,4 +1,88 @@
 {
+ "audioSpeed": [
+  {
+   "clip": {
+    "id": "m",
+    "asset": "mus",
+    "startSec": 1,
+    "inSec": 2,
+    "outSec": 14,
+    "speed": 1.5,
+    "beats": [
+     2,
+     2.5,
+     3.1,
+     6,
+     13.9
+    ]
+   },
+   "length": 8,
+   "beatsOnTimeline": [
+    1,
+    1.333333,
+    1.733333,
+    3.666667,
+    8.933333
+   ],
+   "sourceAt": [
+    {
+     "t": 0,
+     "src": 2
+    },
+    {
+     "t": 0.4,
+     "src": 2.6
+    },
+    {
+     "t": 1,
+     "src": 3.5
+    },
+    {
+     "t": 2.5,
+     "src": 5.75
+    },
+    {
+     "t": 4,
+     "src": 8
+    }
+   ]
+  },
+  {
+   "clip": {
+    "id": "v",
+    "asset": "vo",
+    "startSec": 0.5,
+    "inSec": 0,
+    "outSec": 3,
+    "speed": 0.75,
+    "fadeInSec": 0.2
+   },
+   "length": 4,
+   "beatsOnTimeline": [],
+   "sourceAt": [
+    {
+     "t": 0,
+     "src": 0
+    },
+    {
+     "t": 0.4,
+     "src": 0.30000000000000004
+    },
+    {
+     "t": 1,
+     "src": 0.75
+    },
+    {
+     "t": 2.5,
+     "src": 1.875
+    },
+    {
+     "t": 4,
+     "src": 3
+    }
+   ]
+  }
+ ],
  "loops": [
   {
    "loop": {

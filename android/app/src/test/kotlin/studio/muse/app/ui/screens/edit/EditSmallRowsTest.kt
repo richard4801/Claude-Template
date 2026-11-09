@@ -410,4 +410,18 @@ class EditSmallRowsTest {
         assertNull(c.p().mainClips[0].animLoop); assertEquals("Loop animations are for overlays, photos and text", c.ui.value.message)
         c.act(EditAction.SetLoop(tid, null)); assertNull((c.p().tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).animLoop)
     }
+
+    @Test fun audioSpeed() = runTest {
+        val c = controller()
+        c.act(EditAction.AddAudio("up_m", 8.0, voiceOver = false))
+        val m = c.p().tracks.first { it.kind == TrackKind.MUSIC }.items.single() as AudioClip
+        c.act(EditAction.MarkBeat.let { EditAction.Scrub(2.0, end = true) }); c.act(EditAction.MarkBeat)
+        c.act(EditAction.AudioSpeed(m.id, 2.0))
+        val m2 = c.p().tracks.first { it.kind == TrackKind.MUSIC }.items.single() as AudioClip
+        assertEquals(2.0, m2.speed!!, 1e-9); assertEquals(4.0, clipLength(m2), 1e-9)
+        assertEquals(listOf(1.0), SuiteOps.beatTimes(c.p(), false)) // the beat at source 2 s plays at 1 s
+        valid(c.p())
+        c.act(EditAction.AudioSpeed(m.id, 5.0)); assertEquals(2.0, (c.p().tracks.first { it.kind == TrackKind.MUSIC }.items.single() as AudioClip).speed!!, 1e-9) // clamped
+        c.act(EditAction.AudioSpeed(m.id, 1.0)); assertNull((c.p().tracks.first { it.kind == TrackKind.MUSIC }.items.single() as AudioClip).speed)
+    }
 }
