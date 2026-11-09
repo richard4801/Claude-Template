@@ -92,7 +92,8 @@ extension SnapshotRunner {
                             "Install Claude Code", "Open claude.ai", "Sign in", "Use this engine"]
         let sectionTitles = Set(SettingsSection.allCases.map(\.title))
         for section in SettingsSection.allCases {
-            await walkScreen("settings_\(section.rawValue)", ax: ax, minimum: 1, deny: settingsDeny, denyExact: sectionTitles.union(["MUSE server", "Demo mode (no server)"]),
+            // Advanced: every control changes the server or the data (all skipped), so the walk checks it opens.
+            await walkScreen("settings_\(section.rawValue)", ax: ax, minimum: section == .advanced ? 0 : 1, deny: settingsDeny, denyExact: sectionTitles.union(["MUSE server", "Demo mode (no server)"]),
                              base: { store.go(.home) },
                              open: { store.openSettings(section) },
                              isOpen: { store.screen == .settings && store.settingsSection == section },
