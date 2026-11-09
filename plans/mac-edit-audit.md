@@ -194,6 +194,7 @@ Mac CI run 42552492893 (4946284): build, click-through and every Edit operation 
 | Colour keyframes (exposure, contrast, saturation, temperature, tint) | Adjust: ◆ beside each slider | Shared fixtures (colorKeys, validation); ops check (darker at the first key) |
 | The owner's model pick on the AI helpers (WS6 pill) | Beside Remove background, Pick what to keep, Auto-captions, Noise reduction | EditorHelperModelTests |
 | Style kits (save, apply, delete) | Video → Style kits | Shared fixtures (kits: kitOf, applyKit, validateKit); fake API test; ops check (save, apply, delete) |
+| Mask and look keyframes (mask x, y, size, rotation, feather; vignette, grain, light leak) | Mask: ◆ beside each slider; Adjust: ◆ beside Vignette, Grain, Light leak | Shared fixtures (motionKeys, validation); ops check (the corner darkens) |
 | Chroma key colour from the picture (design pass) | Mask → Chroma key → Pick from video, then click the preview | EditSuiteKeysTests (sourcePoint inverts fit, flip, crop); ops check (the red take's colour) |
 | Hear the video while recording a voice-over (design pass) | Bin → Record VO, "Play the video while recording" | EditSuiteParityTests (lands at its start, delay trimmed); the microphone itself can't run in CI |
 | Overlay photos at 2048 px at most (design pass) | Bin → Import picture | Ops check (3000 px PNG → 2048 × 683 PNG) |

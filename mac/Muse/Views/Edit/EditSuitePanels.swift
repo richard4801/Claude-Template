@@ -376,19 +376,18 @@ struct AdjustPanel: View {
             SuiteSlider("Shadows", value: a.shadows ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.shadows = v } }
             // The look's effects (parity): 0 removes each.
             ForEach(EditSuite.LookEffect.allCases) { e in
-                SuiteSlider(e.label, value: session.state.lookEffect(e), range: e.range, format: { e == .vignette ? signed100($0) : "\(Int(($0 * 100).rounded()))" }) { v in
-                    session.edit { $0.setLookEffect(e, v) }
-                }
-            }
-            SuiteSlider("Grain", value: visual.look?.grain?.amount ?? 0, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
-                session.edit { s in
-                    s.changeVisual { vv in
-                        var l = vv.look ?? EditV2.Look()
-                        l.grain = v > 0.005 ? EditV2.Grain(amount: (v * 100).rounded() / 100, size: l.grain?.size) : nil
-                        vv.look = l
+                // Look keyframes: vignette and light leak take a ◆ (the other effects are baked or multi-pass).
+                if e == .vignette || e == .leak {
+                    KeyedRow(session: session, label: e.label, props: [e == .vignette ? .vignette : .leak], range: e.range,
+                             format: { e == .vignette ? signed100($0) : "\(Int(($0 * 100).rounded()))" }, store: { v, _ in (v * 1000).rounded() / 1000 })
+                } else {
+                    SuiteSlider(e.label, value: session.state.lookEffect(e), range: e.range, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                        session.edit { $0.setLookEffect(e, v) }
                     }
                 }
             }
+            KeyedRow(session: session, label: "Grain", props: [.grain], range: 0...1, format: { "\(Int(($0 * 100).rounded()))" },
+                     store: { v, _ in (v * 100).rounded() / 100 })
             if session.state.selectedItem?.textItem == nil {
                 SuiteRule()
                 SuiteLabel("Curves")
@@ -432,6 +431,41 @@ struct HelperModelPill: View {
     }
 }
 
+/// A slider with a ◆ for keyframe properties beyond the transform (mask, look): the value at the playhead; the ◆ adds keys
+/// of every listed property there (mask size keys width and height together) or removes them; once keyed, the slider sets
+/// the keys at the playhead (EditSuiteState.setVisualValue).
+struct KeyedRow: View {
+    @Bindable var session: EditSuiteSession
+    var label: String
+    var props: [EditV2.KfProp]
+    var range: ClosedRange<Double>
+    var format: (Double) -> String
+    var display: (Double) -> Double = { $0 }
+    var store: (Double, EditV2.KfProp) -> Double = { v, _ in v }
+
+    var body: some View {
+        let s = session.state
+        let value = display(s.visualValue(props[0]) ?? 0)
+        let keyed = props.contains { !(s.selectedVisual?.keyframes?[$0]?.isEmpty ?? true) }
+        let here = props.contains { s.hasKeyframe($0) }
+        HStack(alignment: .bottom, spacing: 8) {
+            SuiteSlider(label, value: min(range.upperBound, max(range.lowerBound, value)), range: range, format: format) { v in
+                session.edit { st in props.reduce(false) { ok, p in st.setVisualValue(p, store(v, p)) || ok } }
+            }
+            SuiteIconButton(systemName: here ? "diamond.fill" : "diamond",
+                            label: here ? "Remove the \(label.lowercased()) keyframe at the playhead" : "Add a \(label.lowercased()) keyframe at the playhead",
+                            on: keyed, size: 28) {
+                if here {
+                    session.edit { st in props.reduce(false) { ok, p in st.removeKeyframe(p) || ok } }
+                } else {
+                    let values = props.map { session.state.visualValue($0) ?? 0 }
+                    session.edit { st in zip(props, values).reduce(false) { ok, pv in st.addKeyframe(pv.0, value: pv.1) || ok } }
+                }
+            }
+        }
+    }
+}
+
 struct MaskPanel: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
@@ -453,14 +487,17 @@ struct MaskPanel: View {
                 }
             }
             if let m {
-                SuiteSlider("Feather", value: m.feather ?? 0.1, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in setMask { $0?.feather = v } }
-                SuiteSlider("Size", value: m.width ?? 0.5, range: 0.05...1.5, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
-                    setMask { $0?.width = v; $0?.height = v * ((m.height ?? 0.5) / max(0.01, m.width ?? 0.5)) }
-                }
-                SuiteSlider("Rotation", value: m.rotation ?? 0, range: -180...180, format: { "\(Int($0.rounded()))°" }) { v in setMask { $0?.rotation = v } }
+                // Mask keyframes (contract, WS8 bfa44a6): each slider has a ◆; once keyed it sets the key at the playhead.
+                KeyedRow(session: session, label: "Feather", props: [.maskFeather], range: 0...1, format: { "\(Int(($0 * 100).rounded()))" })
+                let ratio = (m.height ?? 0.5) / max(0.01, m.width ?? 0.5)
+                KeyedRow(session: session, label: "Size", props: [.maskWidth, .maskHeight], range: 0.05...1.5, format: { "\(Int(($0 * 100).rounded()))%" },
+                         store: { v, p in p == .maskHeight ? v * ratio : v })
+                KeyedRow(session: session, label: "Rotation", props: [.maskRotation], range: -180...180, format: { "\(Int($0.rounded()))°" })
                 // Where the mask sits on the picture (Mac Edit audit: it could only be centred).
-                SuiteSlider("Position X", value: (m.x ?? 0.5) - 0.5, range: -0.5...0.5, format: signed100) { v in session.edit { $0.changeMask { $0.x = 0.5 + (v * 100).rounded() / 100 } } }
-                SuiteSlider("Position Y", value: (m.y ?? 0.5) - 0.5, range: -0.5...0.5, format: signed100) { v in session.edit { $0.changeMask { $0.y = 0.5 + (v * 100).rounded() / 100 } } }
+                KeyedRow(session: session, label: "Position X", props: [.maskX], range: -0.5...0.5, format: signed100,
+                         display: { $0 - 0.5 }, store: { v, _ in 0.5 + (v * 100).rounded() / 100 })
+                KeyedRow(session: session, label: "Position Y", props: [.maskY], range: -0.5...0.5, format: signed100,
+                         display: { $0 - 0.5 }, store: { v, _ in 0.5 + (v * 100).rounded() / 100 })
                 SuiteToggleRow(title: "Invert", isOn: m.invert == true) { on in setMask { $0?.invert = on ? true : nil } }
             }
             if isVideo {

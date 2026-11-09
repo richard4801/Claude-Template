@@ -245,7 +245,7 @@ final class EditV2LookRenderer: @unchecked Sendable {
 
         // 10. grain: mix(v − g/2, v + g/2, noise), g = 0.18·amount·(1 − |2·luma − 1|/2), cells of `cell` px, new every frame
         if let gr = look.grain, gr.amount > 0 {
-            let (dk, lt) = grainCubes(gr.amount)
+            let (dk, lt) = grainCubes((gr.amount * 200).rounded() / 200)   // keyed grain: cubes cached at 1/200 steps
             let n = Self.grainCubeSize
             let darker = img.applyingFilter("CIColorCubeWithColorSpace", parameters: ["inputCubeDimension": n, "inputCubeData": dk, "inputColorSpace": srgb])
             let lighter = img.applyingFilter("CIColorCubeWithColorSpace", parameters: ["inputCubeDimension": n, "inputCubeData": lt, "inputColorSpace": srgb])
@@ -338,7 +338,9 @@ final class EditV2LookRenderer: @unchecked Sendable {
             .cropped(to: ext)
     }
 
-    private func vignette(_ v: E.Vignette, to ext: CGRect) -> CIImage? {
+    private func vignette(_ v0: E.Vignette, to ext: CGRect) -> CIImage? {
+        // Keyed amounts change every frame (look keyframes): the map is cached at 1/200 steps, which can't be seen.
+        let v = E.Vignette(amount: (v0.amount * 200).rounded() / 200, size: v0.size, softness: v0.softness)
         let n = Self.vignetteMapSize
         lock.lock()
         let cached = vignettes[v]

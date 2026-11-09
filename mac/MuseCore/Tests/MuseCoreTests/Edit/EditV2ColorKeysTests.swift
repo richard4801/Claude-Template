@@ -32,6 +32,25 @@ final class EditV2ColorKeysTests: XCTestCase {
         }
     }
 
+    /// Mask and look keyframes (WS8 bfa44a6, 9cf11a4): maskAt and lookAt at item-local t (functions.json → motionKeys).
+    func testMaskAndLookKeys() throws {
+        let cases = try editorFixture("functions")["motionKeys"].array
+        XCTAssertEqual(cases.count, 4)
+        for (i, c) in cases.enumerated() {
+            let item = c["item"]
+            let mask = item["mask"].isNull ? nil : try item["mask"].decode(E.Mask.self)
+            let look = item["look"].isNull ? nil : try item["look"].decode(E.Look.self)
+            let keys = try item["keyframes"].decode(E.Keyframes.self)
+            for s in c["samples"].array {
+                let t = s["t"].double!
+                let gm = try JV.of(E.maskAt(mask, keys, t)), gl = try JV.of(E.lookAt(look, keys, t))
+                let dm = jsonDiff(gm, s["mask"]), dl = jsonDiff(gl, s["look"])
+                XCTAssert(dm.isEmpty, "item \(i) maskAt \(t): " + dm.prefix(4).joined(separator: "; "))
+                XCTAssert(dl.isEmpty, "item \(i) lookAt \(t): " + dl.prefix(4).joined(separator: "; "))
+            }
+        }
+    }
+
     /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
     func testAutoAdjustFixtures() throws {
         let cases = try editorFixture("functions")["autoAdjust"].array

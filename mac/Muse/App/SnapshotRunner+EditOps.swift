@@ -384,6 +384,15 @@ extension SnapshotRunner {
             check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
         }
 
+        step("Look keyframes (vignette 0 → 1)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(0.5); s.edit { $0.addKeyframe(.vignette, value: 0) }
+        s.seek(2.5); s.edit { $0.addKeyframe(.vignette, value: 1) }
+        check("project: vignette keys", s.project.mainClips.first?.keyframes?.vignette?.count == 2 && E.problem(s.project) == nil)
+        let v0 = await previewPixel(s, at: 0.5, 0.03, 0.03), v1 = await previewPixel(s, at: 2.5, 0.03, 0.03)
+        check("preview: the corner darker at the second key", (v1?.r ?? 255) + 40 < (v0?.r ?? 0), "\(describe(v0)) then \(describe(v1))")
+        for _ in 0..<2 { s.undo() }
+
         step("Key colour from the picture (eyedropper)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.seek(1)

@@ -22,9 +22,17 @@ extension EditV2 {
         case x, y, scale, rotation, opacity, volume
         /// Colour keyframes (contract, WS8 c10e398): replace the adjust field's static value over time (`adjustAt`).
         case exposure, contrast, saturation, temperature, tint
+        /// Mask keyframes (contract, WS8 bfa44a6): replace the mask's field over time (`maskAt`); only on items with a mask.
+        case maskX, maskY, maskWidth, maskHeight, maskRotation, maskFeather
+        /// Look keyframes: the finishing effects' amounts over time (`lookAt`).
+        case vignette, grain, leak
         /// The colour properties, in the contract's order (COLOR_KF_PROPS).
         public static let color: [KfProp] = [.exposure, .contrast, .saturation, .temperature, .tint]
+        public static let mask: [KfProp] = [.maskX, .maskY, .maskWidth, .maskHeight, .maskRotation, .maskFeather]
+        public static let look: [KfProp] = [.vignette, .grain, .leak]
         public var isColor: Bool { KfProp.color.contains(self) }
+        public var isMask: Bool { KfProp.mask.contains(self) }
+        public var isLook: Bool { KfProp.look.contains(self) }
     }
 
     public struct Keyframes: Codable, Hashable, Sendable {
@@ -39,6 +47,15 @@ extension EditV2 {
         public var saturation: [Keyframe]?
         public var temperature: [Keyframe]?
         public var tint: [Keyframe]?
+        public var maskX: [Keyframe]?
+        public var maskY: [Keyframe]?
+        public var maskWidth: [Keyframe]?
+        public var maskHeight: [Keyframe]?
+        public var maskRotation: [Keyframe]?
+        public var maskFeather: [Keyframe]?
+        public var vignette: [Keyframe]?
+        public var grain: [Keyframe]?
+        public var leak: [Keyframe]?
         public init(x: [Keyframe]? = nil, y: [Keyframe]? = nil, scale: [Keyframe]? = nil, rotation: [Keyframe]? = nil,
                     opacity: [Keyframe]? = nil, volume: [Keyframe]? = nil) {
             self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.opacity = opacity; self.volume = volume
@@ -57,6 +74,15 @@ extension EditV2 {
                 case .saturation: return saturation
                 case .temperature: return temperature
                 case .tint: return tint
+                case .maskX: return maskX
+                case .maskY: return maskY
+                case .maskWidth: return maskWidth
+                case .maskHeight: return maskHeight
+                case .maskRotation: return maskRotation
+                case .maskFeather: return maskFeather
+                case .vignette: return vignette
+                case .grain: return grain
+                case .leak: return leak
                 }
             }
             set {
@@ -72,6 +98,15 @@ extension EditV2 {
                 case .saturation: saturation = newValue
                 case .temperature: temperature = newValue
                 case .tint: tint = newValue
+                case .maskX: maskX = newValue
+                case .maskY: maskY = newValue
+                case .maskWidth: maskWidth = newValue
+                case .maskHeight: maskHeight = newValue
+                case .maskRotation: maskRotation = newValue
+                case .maskFeather: maskFeather = newValue
+                case .vignette: vignette = newValue
+                case .grain: grain = newValue
+                case .leak: leak = newValue
                 }
             }
         }

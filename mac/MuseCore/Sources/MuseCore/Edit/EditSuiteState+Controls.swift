@@ -25,7 +25,65 @@ extension EditSuiteState {
         case .opacity: return v.opacity ?? 1
         case .volume: return 1
         case .exposure, .contrast, .saturation, .temperature, .tint: return v.adjust?[prop] ?? 0
+        case .maskX: return v.mask?.x ?? 0.5
+        case .maskY: return v.mask?.y ?? 0.5
+        case .maskWidth: return v.mask?.width ?? 0.5
+        case .maskHeight: return v.mask?.height ?? 0.5
+        case .maskRotation: return v.mask?.rotation ?? 0
+        case .maskFeather: return v.mask?.feather ?? 0.1
+        case .vignette: return v.look?.vignette?.amount ?? 0
+        case .grain: return v.look?.grain?.amount ?? 0
+        case .leak: return v.look?.leak?.amount ?? 0
         }
+    }
+
+    /// The range a property's value is clamped to (the contract's keyframe ranges).
+    static func range(_ prop: E.KfProp) -> ClosedRange<Double> {
+        switch prop {
+        case .x, .y: return -2...3
+        case .scale: return 0.05...10
+        case .rotation: return -3600...3600
+        case .opacity: return 0...1
+        case .volume: return 0...2
+        case .exposure, .contrast, .saturation, .temperature, .tint, .vignette: return -1...1
+        case .maskX, .maskY: return -1...2
+        case .maskWidth, .maskHeight: return 0.01...3
+        case .maskRotation: return -360...360
+        case .maskFeather, .grain, .leak: return 0...1
+        }
+    }
+
+    /// Writes a property's static value (what it shows without keyframes); colour and look amounts of 0 are left out.
+    static func setStatic(_ v: inout EditSuite.Visual, _ prop: E.KfProp, _ raw: Double) {
+        let r = range(prop)
+        let value = E.r6(min(r.upperBound, max(r.lowerBound, raw)))
+        var tf = v.transform ?? E.Transform()
+        switch prop {
+        case .x: tf.x = value
+        case .y: tf.y = value
+        case .scale: tf.scale = value
+        case .rotation: tf.rotation = value
+        case .opacity: v.opacity = value
+        case .volume: break
+        case .exposure, .contrast, .saturation, .temperature, .tint:
+            var a = v.adjust ?? E.Adjust(); a[prop] = abs(value) < 0.005 ? nil : value; v.adjust = a == E.Adjust() ? nil : a
+        case .maskX: v.mask?.x = value
+        case .maskY: v.mask?.y = value
+        case .maskWidth: v.mask?.width = value
+        case .maskHeight: v.mask?.height = value
+        case .maskRotation: v.mask?.rotation = value
+        case .maskFeather: v.mask?.feather = value
+        case .vignette, .grain, .leak:
+            var l = v.look ?? E.Look()
+            let on = abs(value) > 0.0005
+            switch prop {
+            case .vignette: l.vignette = on ? E.Vignette(amount: value, size: l.vignette?.size, softness: l.vignette?.softness) : nil
+            case .grain: l.grain = on ? E.Grain(amount: value, size: l.grain?.size) : nil
+            default: l.leak = on ? E.Leak(kind: l.leak?.kind ?? .warm, amount: value, angle: l.leak?.angle) : nil
+            }
+            v.look = l == E.Look() ? nil : l
+        }
+        if [.x, .y, .scale, .rotation].contains(prop) { v.transform = tf }
     }
 
     /// The value a transform property has at the playhead: its keyframes there when it has any, else the static value.
@@ -40,28 +98,12 @@ extension EditSuiteState {
     @discardableResult
     public mutating func setVisualValue(_ prop: E.KfProp, _ value: Double) -> Bool {
         guard let v = selectedVisual, prop != .volume else { return false }
-        if prop.isColor && selectedItem?.textItem != nil { return false }
-        let value = prop.isColor ? E.r6(min(1, max(-1, value))) : value
+        if (prop.isColor || prop.isLook || prop.isMask) && selectedItem?.textItem != nil { return false }
+        if prop.isMask && v.mask == nil { return false }
+        let r = Self.range(prop)
+        let value = (prop.isColor || prop.isMask || prop.isLook) ? E.r6(min(r.upperBound, max(r.lowerBound, value))) : value
         if let keys = v.keyframes?[prop], !keys.isEmpty { return addKeyframe(prop, value: value, ease: keys.first?.ease ?? .easeInOut) }
-        if prop.isColor {
-            return changeVisual { vv in
-                var a = vv.adjust ?? E.Adjust()
-                a[prop] = abs(value) < 0.005 ? nil : value
-                vv.adjust = a == E.Adjust() ? nil : a
-            }
-        }
-        return changeVisual { vv in
-            var tf = vv.transform ?? E.Transform()
-            switch prop {
-            case .x: tf.x = E.r6(value)
-            case .y: tf.y = E.r6(value)
-            case .scale: tf.scale = E.r6(min(10, max(0.05, value)))
-            case .rotation: tf.rotation = E.r6(min(3600, max(-3600, value)))
-            case .opacity: vv.opacity = E.r6(min(1, max(0, value))); return
-            case .volume, .exposure, .contrast, .saturation, .temperature, .tint: return
-            }
-            vv.transform = tf
-        }
+        return changeVisual { Self.setStatic(&$0, prop, value) }
     }
 
     /// Whether the selected item has a key of `prop` at the playhead (within half a frame).
@@ -81,20 +123,7 @@ extension EditSuiteState {
             let left = list.filter { abs($0.t - t) > tol }
             guard left.count != list.count else { return }
             // The last key gone: its value becomes the static one, so the picture doesn't jump.
-            if left.isEmpty, let last = list.first(where: { abs($0.t - t) <= tol }) {
-                var tf = v.transform ?? E.Transform()
-                switch prop {
-                case .x: tf.x = last.v
-                case .y: tf.y = last.v
-                case .scale: tf.scale = last.v
-                case .rotation: tf.rotation = last.v
-                case .opacity: v.opacity = last.v
-                case .volume: break
-                case .exposure, .contrast, .saturation, .temperature, .tint:
-                    var a = v.adjust ?? E.Adjust(); a[prop] = last.v == 0 ? nil : last.v; v.adjust = a == E.Adjust() ? nil : a
-                }
-                if [.x, .y, .scale, .rotation].contains(prop) { v.transform = tf }
-            }
+            if left.isEmpty, let last = list.first(where: { abs($0.t - t) <= tol }) { Self.setStatic(&v, prop, last.v) }
             k[prop] = left.isEmpty ? nil : left
             v.keyframes = k.isEmpty ? nil : k
         }
