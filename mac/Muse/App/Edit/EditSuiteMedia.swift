@@ -44,6 +44,25 @@ enum EditSuiteMedia {
         return await VideoEditEngine.thumbnails(a, duration: d, count: count, height: height).map(\.1)
     }
 
+    /// A file's frame at source time `t`, small (at most `size` px), as straight sRGB r, g, b, … 0–1: what auto adjust reads.
+    static func frameRGB(_ url: URL, at t: Double, size: Int = 96) async -> [Double]? {
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: size, height: size)
+        gen.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 30)
+        gen.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 30)
+        guard let cg = try? await gen.image(at: CMTime(seconds: max(0, t), preferredTimescale: 600)).image else { return nil }
+        let w = max(1, cg.width), h = max(1, cg.height)
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var out = [Double](); out.reserveCapacity(w * h * 3)
+        for i in 0..<(w * h) { for c in 0..<3 { out.append(Double(px[i * 4 + c]) / 255) } }
+        return out
+    }
+
     /// What the waveform asks the reader for: 16-bit little-endian interleaved PCM at the track's own sample rate and channel
     /// count. Never a sample rate or channel count: the reader's converter raises an uncatchable exception on ones it can't do.
     static let pcmReaderSettings: [String: Any] = [

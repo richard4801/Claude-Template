@@ -330,6 +330,36 @@ extension SnapshotRunner {
         check("preview: background colour", isBlue(qcol), describe(qcol))
         for _ in 0..<3 { s.undo() }
 
+        // Parity M rows (as Android c8875ec): keyframes on the timeline, curves, auto adjust.
+        step("Drag a keyframe on the timeline")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        let kid = s.project.mainClips.first?.id ?? ""
+        s.seek(0.5); s.edit { $0.addKeyframe(.opacity, value: 1) }
+        s.seek(1.5); s.edit { $0.addKeyframe(.opacity, value: 0.4) }
+        s.beginGesture()
+        for d in [0.2, 0.4, 0.5] { s.updateGesture { $0.movingKeys(kid, from: 0.5, by: d) } }
+        s.endGesture()
+        check("project: the 0.5 s key moved to 1 s", s.state.keyTimes(kid) == [1, 1.5], "\(s.state.keyTimes(kid))")
+        s.updateGesture { $0.movingKeys(kid, from: 1, by: 2) }
+        check("a key can't pass its neighbour", s.state.keyTimes(kid) == [1, 1.5], "\(s.state.keyTimes(kid))")
+        for _ in 0..<3 { s.undo() }
+
+        step("Curves")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.setCurve(.rgb, [[0, 0], [1, 0.3]]) }
+        check("project: an All curve", s.project.mainClips.first?.look?.curves?.rgb?.count == 2)
+        let qk = await previewPixel(s, at: 1)
+        check("preview: darker red under the curve", qk.map { $0.r > 30 && $0.r < 120 && $0.g < 40 } ?? false, describe(qk))
+        s.undo()
+
+        step("Auto adjust")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1)
+        await s.autoAdjust()
+        let aa = s.project.mainClips.first?.adjust
+        check("project: a red frame gets cooler", (aa?.temperature ?? 0) < 0, "\(String(describing: aa)) · \(s.notice ?? s.lastError ?? "")")
+        if aa != nil { s.undo() }
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }

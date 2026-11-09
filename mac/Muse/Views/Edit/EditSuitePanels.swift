@@ -359,6 +359,11 @@ struct AdjustPanel: View {
     var body: some View {
         let a = visual.adjust ?? EditV2.Adjust()
         EditPanel(title: "Adjust") {
+            if session.state.selectedVideo != nil {
+                // Parity: the clip's own picture under the playhead → exposure, contrast, saturation, white balance.
+                SuiteToolButton(title: "Auto adjust", icon: "sliders-horizontal", plain: true) { Task { await session.autoAdjust() } }
+                    .help("Balance this clip from its picture at the playhead")
+            }
             SuiteSlider("Exposure", value: a.exposure ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.exposure = v } }
             SuiteSlider("Contrast", value: a.contrast ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.contrast = v } }
             SuiteSlider("Saturation", value: a.saturation ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.saturation = v } }
@@ -380,6 +385,11 @@ struct AdjustPanel: View {
                         vv.look = l
                     }
                 }
+            }
+            if session.state.selectedItem?.textItem == nil {
+                SuiteRule()
+                SuiteLabel("Curves")
+                CurvesEditor(session: session)
             }
         }
     }

@@ -999,6 +999,27 @@ final class EditSuiteSession {
         if changed > 0 { notice = "Evened out \(changed) clip\(changed == 1 ? "" : "s")" }
     }
 
+    // MARK: Auto adjust (parity)
+
+    /// Auto adjust of the selected clip from its own picture under the playhead (the source frame, before its look), as
+    /// Android: exposure, contrast, saturation, temperature and tint; highlights and shadows kept.
+    func autoAdjust() async {
+        let p = project
+        guard let c = state.selectedVideo ?? p.mainClip(at: playhead).map({ p.mainClips[$0.index] }) else { lastError = "Select a clip to adjust"; return }
+        guard let url = files[c.asset] else { lastError = "This clip's file isn't on this Mac yet"; return }
+        guard let loc = p.locate(c.id) else { return }
+        let track = p.tracks[loc.track]
+        let span = E.itemSpan(p, track, track.items[loc.item])
+        let local = min(max(0, playhead - span.startSec), span.endSec - span.startSec)
+        guard let rgb = await EditSuiteMedia.frameRGB(url, at: E.clipSourceAt(c, local)) else { lastError = "Couldn't read this clip's picture"; return }
+        var changed = false
+        edit { s in
+            if s.selection != c.id { s.selection = c.id }
+            changed = s.autoAdjust(rgb); return changed
+        }
+        notice = changed ? "Adjusted · fine-tune with the sliders" : "This picture already looks balanced"
+    }
+
     // MARK: Export → upload → new version
 
     /// Problems that stop an export (shown on the sheet).
