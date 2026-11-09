@@ -138,7 +138,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Body and face effects | Missing | Missing | XL | Segmentation and tracking; mostly **Content** |
 | Adjustment keyframes | Has | Has | M | Android: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint in Filters → Adjust (KfProp exposure…tint, `adjustAt`; the colour matrix runs per frame). Highlights, shadows and look effects are not keyframable yet. Mac: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint; a keyed slider sets its key at the playhead (shared fixtures). |
 | AI restyle (generative) | Missing | Missing | XL | MUSE's Suite does generation. Re-styling an edit is a model question. |
-| HDR editing / export | Missing | Missing | L | |
+| HDR editing / export | Missing | Partial | L | Mac: HDR footage keeps its highlights through the edit when exporting HDR (extended-range colour; LUT looks still clip at white); the preview stays SDR (WS9, XL owner-approved). |
 
 ## 7. Keyframes
 
@@ -227,7 +227,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Label as AI-generated | Has | Has | — | Sent with the version (fixed in WS8). Mac: Sent with the version (WS9) |
 | Content Credentials (C2PA) | Missing | Missing | L | Signing needs a certificate decision. The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
 | 2K, bitrate choice | Has | Has | S | Android: 2K, and Smaller file / Recommended / Higher quality bitrate (0.6× / 1× / 1.6× of ~0.12 bit per pixel per frame). Mac: 2K, and Smaller file / Recommended / Higher quality (reader → writer export at the bitrate). |
-| HDR export | Missing | Missing | L | |
+| HDR export | Missing | Has | L | Mac: Export → "HDR (HLG)": HEVC Main 10, BT.2020 / HLG, through the reader → writer path; checked in CI (codec, tags, picture) (WS9, XL owner-approved, Mac first). |
 | Share straight to TikTok / IG / Shorts | Partial | Partial | — | MUSE Socials (posting) |
 | GIF / audio-only export | Has | Has | S each | No competitor confirmed either. Android: Export → Sound only (.m4a, AAC 192 kbit/s, into Music/MUSE) and GIF (loops, 15 fps, 480 px short side, up to 30 s, into Pictures/MUSE); both saved to the phone only, not as versions. Mac: Export → Format: Sound only (.m4a, AAC 192 kbit/s) and GIF (loops, 15 fps, 480 px, up to 30 s), saved to a file you pick. |
 | Watermark | n/a | n/a | — | MUSE adds none |

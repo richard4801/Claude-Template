@@ -1364,15 +1364,16 @@ final class EditSuiteSession {
                 // Captions go out as an .srt only next to a saved file; the Library's video always carries them burnt in
                 // (Mac Edit audit: "Save to Library" with .SRT lost the captions).
                 let burn = settings.captions == .burnIn || saveFileTo == nil
-                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn)
+                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn, hdr: settings.hdr)
                 let onProgress: @MainActor (Double) -> Void = { [weak self] v in
                     if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
                 }
-                if settings.bitrate == .recommended {
+                if settings.bitrate == .recommended, !settings.hdr {
                     try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc, progress: onProgress)
                 } else {
-                    // A chosen bitrate (parity): reader → writer at the size estimate's rate × the choice.
-                    try await EditV2Engine.write(built, to: file, hevc: settings.codec == .hevc, bitrate: settings.videoBitrate, progress: onProgress)
+                    // A chosen bitrate (parity), or HDR (HEVC Main 10, HLG): reader → writer at the size estimate's rate.
+                    try await EditV2Engine.write(built, to: file, hevc: settings.effectiveCodec == .hevc, bitrate: settings.videoBitrate,
+                                                 hdr: settings.hdr, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)

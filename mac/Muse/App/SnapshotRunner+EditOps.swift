@@ -560,6 +560,25 @@ extension SnapshotRunner {
             let rms = await audioRMS(silent.url, from: 0.2, to: 2.8)
             check("export: muted is silent", rms < 0.005, String(format: "RMS %.4f", rms))
         }
+        note("STEP export: HDR (HEVC 10-bit HLG)")
+        if let hdr = await exportFile(s, media: media, name: "hdr", labelAI: false, hdr: true, note: note) {
+            let asset = AVURLAsset(url: hdr.url)
+            let vt = try? await asset.loadTracks(withMediaType: .video).first
+            let desc = (try? await vt?.load(.formatDescriptions))?.first
+            let codec = desc.map { CMFormatDescriptionGetMediaSubType($0) } ?? 0
+            let ext = desc.flatMap { CMFormatDescriptionGetExtensions($0) as? [String: Any] } ?? [:]
+            let transfer = ext[kCMFormatDescriptionExtension_TransferFunction as String] as? String ?? ""
+            let primaries = ext[kCMFormatDescriptionExtension_ColorPrimaries as String] as? String ?? ""
+            let depth = ext[kCMFormatDescriptionExtension_Depth as String] as? Int ?? 0
+            check("export HDR: HEVC", codec == kCMVideoCodecType_HEVC, String(format: "%08x", codec))
+            check("export HDR: BT.2020 / HLG", transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String)
+                  && primaries == (kCMFormatDescriptionColorPrimaries_ITU_R_2020 as String), "\(primaries) / \(transfer) depth \(depth)")
+            let gen = AVAssetImageGenerator(asset: asset)
+            gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
+            let frame = try? await gen.image(at: CMTime(seconds: 1.5, preferredTimescale: 600)).image
+            let px = frame.flatMap { pixel($0, 0.5, 0.5) }
+            check("export HDR: the picture", isRed(px), describe(px))
+        }
     }
 
     /// Parity formats: a video at a chosen bitrate (the reader → writer path), Sound only (.m4a) and GIF.
@@ -623,13 +642,14 @@ extension SnapshotRunner {
 
     /// Runs the session's export to a file next to the check's media; returns the file and the saved version.
     @MainActor
-    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, note: (String) -> Void) async -> (url: URL, take: Take?)? {
+    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, hdr: Bool = false, note: (String) -> Void) async -> (url: URL, take: Take?)? {
         var settings = s.state.export
         settings.ratio = .portrait
         settings.resolution = .p720
         settings.fps = 30
         settings.codec = .h264
         settings.labelAI = labelAI
+        settings.hdr = hdr
         let url = media.appendingPathComponent("export-\(name).mp4")
         try? FileManager.default.removeItem(at: url)
         var saved: Take?
