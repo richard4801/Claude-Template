@@ -261,6 +261,8 @@ sealed interface EditAction {
     data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
+    /** HSL per hue on the picture the Adjust panel acts on: [band]'s [field] (hue, sat or light) to [value] (−1…1); a null [band] resets every band. */
+    data class SetHsl(val band: studio.muse.core.edit.HueBand?, val field: String = "", val value: Double = 0.0, val done: Boolean = true) : EditAction
     /** An own font (an editor upload named [name]) added to the edit and set on the selected text. */
     data class AddFont(val upload: String, val name: String) : EditAction
     /** A new adjustment layer at the playhead (3 s): it grades everything under it. */
@@ -417,7 +419,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -868,6 +870,23 @@ class EditSuiteController(
                 p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animLoop = l); is ImageItem -> it.copy(animLoop = l); is VideoClip -> it.copy(animLoop = l); else -> it } }
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
+            is EditAction.SetHsl -> {
+                val id = visualId(u) ?: return
+                val v = r2(a.value.coerceIn(-1.0, 1.0)).takeIf { it != 0.0 }
+                change(a.done) { p ->
+                    p.updateItem(id) { it ->
+                        val vis = it as? studio.muse.core.edit.Visual ?: return@updateItem it
+                        val l = vis.look ?: Look()
+                        val hsl = if (a.band == null) null else {
+                            val b = l.hsl?.get(a.band) ?: studio.muse.core.edit.HslBand()
+                            val nb = when (a.field) { "hue" -> b.copy(hue = v); "sat" -> b.copy(sat = v); "light" -> b.copy(light = v); else -> b }
+                            (l.hsl.orEmpty() + (a.band to nb)).filterValues { x -> x != studio.muse.core.edit.HslBand() }.ifEmpty { null }
+                        }
+                        val look = l.copy(hsl = hsl).takeIf { n -> n != Look() }
+                        when (it) { is VideoClip -> it.copy(look = look); is ImageItem -> it.copy(look = look); else -> it }
+                    }
+                }
+            }
             is EditAction.AddFont -> {
                 val text = u.selection?.second as? TextItem
                 if (change(refused = "Couldn't add that font") { p ->

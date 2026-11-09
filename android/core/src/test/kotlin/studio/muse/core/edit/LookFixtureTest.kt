@@ -8,6 +8,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import kotlinx.serialization.json.buildJsonObject
 import studio.muse.core.edit.Fixtures.assertJson
 import java.io.File
 import kotlin.math.abs
@@ -48,6 +49,23 @@ class LookFixtureTest {
         }
         assertNull(curveFn(listOf(CurvePoint(0.0, 0.0))))
         assertNull(curvesFn(emptyMap()))
+    }
+
+    @Test fun hslPerHue() {
+        for (w in f["hueWeights"]!!.arr) {
+            val got = hueWeights(w.obj["h"]!!.num)
+            w.obj["w"]!!.arr.forEachIndexed { i, v -> near("weights at ${w.obj["h"]!!.num} [$i]", v.num, got[i], 1e-6) }
+        }
+        for (c in f["hsl"]!!.arr) {
+            val hsl = EditJson.parseLook(buildJsonObject { put("hsl", c.obj["hsl"]!!) }).hsl!!
+            val fn = hslFn(hsl)!!
+            for (sm in c.obj["samples"]!!.arr) {
+                val rgb = sm.obj["rgb"]!!.arr.map { it.num }.toDoubleArray()
+                val got = fn(rgb.copyOf())
+                sm.obj["out"]!!.arr.forEachIndexed { i, v -> near("hsl ${c.obj["hsl"]} on ${rgb.toList()} [$i]", v.num, got[i], 1e-6) }
+            }
+        }
+        assertNull(hslFn(mapOf(HueBand.RED to HslBand())))
     }
 
     @Test fun hash() {
@@ -125,7 +143,7 @@ class LookFixtureTest {
     @Test fun renders() {
         val img = image()
         val renders = f["renders"]!!.arr
-        assertEquals(11, renders.size)
+        assertEquals(12, renders.size)
         for (r in renders) {
             val o = r.obj
             val name = o["name"]!!.str

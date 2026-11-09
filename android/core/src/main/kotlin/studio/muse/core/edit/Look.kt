@@ -16,13 +16,22 @@ import kotlin.math.sqrt
  * the CPU renderer the app uses for filter thumbnails. Pure: no I/O, no Android types.
  *
  * Per item, on sRGB values 0–1, in this order:
- *   1 sharpen (unsharp mask)  2 chromatic aberration  3 colour matrix (adjust + filter)  4 tone curves
+ *   1 sharpen (unsharp mask)  2 chromatic aberration  3 colour matrix (adjust + filter)  4 tone curves  4b HSL per hue
  *   5 3D LUT (trilinear, blended by strength)  6 lift (faded blacks)  7 halation  8 light leak  9 vignette  10 grain
  * Pictures are stored as 32-bit floats like the reference's Float32Array, so the renders agree to ~1e-6.
  */
 
 enum class LeakKind(override val wire: String) : Wire { WARM("warm"), ROSE("rose"), AMBER("amber"), TEAL("teal"), RAINBOW("rainbow") }
 enum class CurveChannel(override val wire: String) : Wire { RGB("rgb"), R("r"), G("g"), B("b") }
+
+enum class HueBand(override val wire: String, val centre: Double) : Wire {
+    RED("red", 0.0), ORANGE("orange", 30.0), YELLOW("yellow", 60.0), GREEN("green", 120.0), AQUA("aqua", 180.0), BLUE("blue", 240.0),
+    PURPLE("purple", 270.0), MAGENTA("magenta", 300.0),
+}
+/** One hue band's change: hue shift (±1 = ±30°), saturation and luminance, each −1…1. */
+data class HslBand(val hue: Double? = null, val sat: Double? = null, val light: Double? = null)
+/** HSL per hue band, in JSON order. */
+typealias Hsl = Map<HueBand, HslBand>
 
 data class CurvePoint(val x: Double, val y: Double)
 /** Tone curves by channel, in JSON order (master `rgb`, then the channel's own). */
@@ -41,6 +50,8 @@ data class Look(
     val lut: String? = null,
     val strength: Double? = null,
     val curves: Curves? = null,
+    /** HSL per hue band (step 4b, after the curves). */
+    val hsl: Hsl? = null,
     val lift: Double? = null,
     val sharpen: Double? = null,
     val chromatic: Double? = null,
@@ -60,13 +71,13 @@ data class Look(
 
     /** True when the look changes nothing (whatever LUT it would load). */
     fun isNoop(hasLut: Boolean = lut != null): Boolean =
-        !(hasLut && (strength ?: 1.0) > 0) && curvesFn(curves) == null && (lift ?: 0.0) <= 0 && (sharpen ?: 0.0) <= 0 && (chromatic ?: 0.0) <= 0 &&
+        !(hasLut && (strength ?: 1.0) > 0) && curvesFn(curves) == null && hslFn(hsl) == null && (lift ?: 0.0) <= 0 && (sharpen ?: 0.0) <= 0 && (chromatic ?: 0.0) <= 0 &&
             (halation?.amount ?: 0.0) <= 0 && (leak?.amount ?: 0.0) <= 0 && (vignette?.amount ?: 0.0) == 0.0 && (grain?.amount ?: 0.0) <= 0
 
     companion object {
         const val PACK_PREFIX = "pack:"
         const val PALETTE_PREFIX = "palette:"
-        val KEYS = listOf("lut", "strength", "curves", "lift", "sharpen", "chromatic", "halation", "leak", "vignette", "grain")
+        val KEYS = listOf("lut", "strength", "curves", "hsl", "lift", "sharpen", "chromatic", "halation", "leak", "vignette", "grain")
     }
 }
 
@@ -233,6 +244,51 @@ fun curvesFn(c: Curves?): ((DoubleArray) -> DoubleArray)? {
     }
 }
 
+// ------------------------------------------------------------------ HSL per hue
+/** Each band's weight at hue [h] (degrees): linear between neighbouring centres, summing to 1 (look.ts `hueWeights`). */
+fun hueWeights(h: Double): DoubleArray {
+    val bands = HueBand.entries
+    val w = DoubleArray(bands.size)
+    val x = ((h % 360) + 360) % 360
+    for (i in bands.indices) {
+        val a = bands[i].centre; val b = if (i + 1 < bands.size) bands[i + 1].centre else 360.0
+        if (x >= a && x < b) { val t = (x - a) / (b - a); w[i] = 1 - t; w[(i + 1) % bands.size] += t; break }
+    }
+    return w
+}
+
+/**
+ * HSL per hue band (look step 4b, look.ts `hslFn`), in place: hue += Σ w·hue·30°, saturation ×= 1 + Σ w·sat,
+ * lightness += Σ w·light · s·l·(1−l)·2 (greys never move). Null when nothing is set.
+ */
+fun hslFn(hsl: Hsl?): ((DoubleArray) -> DoubleArray)? {
+    if (hsl == null) return null
+    val bands = HueBand.entries.map { hsl[it] ?: HslBand() }
+    if (bands.none { (it.hue ?: 0.0) != 0.0 || (it.sat ?: 0.0) != 0.0 || (it.light ?: 0.0) != 0.0 }) return null
+    return { rgb ->
+        val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
+        val mx = max(r, max(g, b)); val mn = min(r, min(g, b)); val l = (mx + mn) / 2; val d = mx - mn
+        if (d >= 1e-9) {
+            val s = min(1.0, d / (1 - abs(2 * l - 1)))
+            if (s >= 1e-6) {
+                val h0 = when (mx) { r -> 60 * (((g - b) / d) % 6); g -> 60 * ((b - r) / d + 2); else -> 60 * ((r - g) / d + 4) }
+                val h = (h0 + 360) % 360
+                val w = hueWeights(h)
+                var dh = 0.0; var ds = 0.0; var dl = 0.0
+                for (i in bands.indices) { val k = w[i]; if (k == 0.0) continue; dh += k * (bands[i].hue ?: 0.0) * 30; ds += k * (bands[i].sat ?: 0.0); dl += k * (bands[i].light ?: 0.0) }
+                val s2 = lc01(s * (1 + ds)); val l2 = lc01(l + dl * s * l * (1 - l) * 2)
+                val c = (1 - abs(2 * l2 - 1)) * s2; val hp = (((h + dh) % 360 + 360) % 360) / 60; val x = c * (1 - abs((hp % 2) - 1)); val m = l2 - c / 2
+                val (rr, gg, bb) = when {
+                    hp < 1 -> Triple(c, x, 0.0); hp < 2 -> Triple(x, c, 0.0); hp < 3 -> Triple(0.0, c, x)
+                    hp < 4 -> Triple(0.0, x, c); hp < 5 -> Triple(x, 0.0, c); else -> Triple(c, 0.0, x)
+                }
+                rgb[0] = lc01(rr + m); rgb[1] = lc01(gg + m); rgb[2] = lc01(bb + m)
+            }
+        }
+        rgb
+    }
+}
+
 // ------------------------------------------------------------------ noise, vignette, leak
 /** 32-bit integer hash (lowbias32) → 0…1. The same bits as the reference (Math.imul) and Swift (UInt32). */
 fun hash01(x: Int, y: Int, frame: Int): Double {
@@ -338,13 +394,14 @@ class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?, tone: Tone? = nul
     private val sh = tone?.shadows ?: 0.0
     private val hi = tone?.highlights ?: 0.0
     private val curves = curvesFn(look.curves)
+    private val hsl = hslFn(look.hsl)
     private val strength = lclamp(look.strength ?: 1.0, 0.0, 1.0)
     private val l: Lut? = lut?.takeIf { strength > 0 }
     private val lift = 0.12 * lclamp(look.lift ?: 0.0, 0.0, 1.0)
     private val t = DoubleArray(3)
 
     /** True when the stack changes nothing. */
-    val isIdentity: Boolean get() = m == null && sh == 0.0 && hi == 0.0 && curves == null && l == null && lift <= 0
+    val isIdentity: Boolean get() = m == null && sh == 0.0 && hi == 0.0 && curves == null && hsl == null && l == null && lift <= 0
 
     /** Applies the stack to [rgb] in place (not thread-safe: one instance per thread). */
     fun apply(rgb: DoubleArray): DoubleArray {
@@ -355,6 +412,8 @@ class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?, tone: Tone? = nul
         // 3b. highlights / shadows (Adjust)
         if (sh != 0.0 || hi != 0.0) for (i in 0 until 3) rgb[i] = toneAdjust(rgb[i], sh, hi)
         curves?.invoke(rgb)
+        // 4b. HSL per hue
+        hsl?.invoke(rgb)
         l?.let { lut ->
             lutSample(lut, rgb[0], rgb[1], rgb[2], t)
             for (i in 0 until 3) rgb[i] = lc01(rgb[i] + (t[i] - rgb[i]) * strength)

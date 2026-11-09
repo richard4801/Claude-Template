@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -195,6 +195,18 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 c.act(EditAction.PickAt(.3, .55, done = false))
                 ui = c.ui.value.copy(message = null)
             }
+            "m_hsl" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 0.0, selectedId = null))
+                c.act(EditAction.Select(one.mainClips[0].id))
+                c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.RED, "sat", -.3)); c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.RED, "light", .2))
+                c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.BLUE, "hue", .4))
+                c.act(EditAction.Open(Panel.FILTERS))
+                ui = c.ui.value.copy(message = null, filtersTab = "Adjust")
+            }
             "m_own_font" -> {
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
                 val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
@@ -288,6 +300,12 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 else if (state == "m_curves") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
                     // The curves editor on its own (in the phone sheet it sits below the fold).
                     CurvesEditor(ui.project!!.mainClips[0].look?.curves, true) {}
+                }
+                else if (state == "m_hsl") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
+                    // The HSL section on its own (in the phone sheet it sits below the fold), on the red band.
+                    androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        HslSection(ui.project!!.mainClips[0].look?.hsl, true) {}
+                    }
                 }
                 else EditSuiteContent(ui, frames(), host, act = {}, onClose = {}) { mod -> RefImage(ui.poster, mod, 30) }
             }

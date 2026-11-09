@@ -394,6 +394,24 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun hslPerHue() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.ORANGE, "sat", -.4))
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.ORANGE, "light", .25))
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.BLUE, "hue", .5))
+        fun look() = (c.p().mainClips[0]).look
+        assertEquals(studio.muse.core.edit.HslBand(sat = -.4, light = .25), look()!!.hsl!![studio.muse.core.edit.HueBand.ORANGE])
+        assertEquals(.5, look()!!.hsl!![studio.muse.core.edit.HueBand.BLUE]!!.hue!!, 1e-9)
+        valid(c.p())
+        // Back to 0 drops the band; reset drops the rest (and the empty look).
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.BLUE, "hue", 0.0))
+        assertNull(look()!!.hsl!![studio.muse.core.edit.HueBand.BLUE])
+        c.act(EditAction.SetHsl(null))
+        assertNull(look())
+    }
+
     @Test fun ownFonts() = runTest {
         val c = controller()
         c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddText)
