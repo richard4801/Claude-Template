@@ -17,6 +17,10 @@ COPY ${APP_DIR}/package.json ${APP_DIR}/package-lock.json ./
 # onnxruntime-node (Recreate's pose model, workstream 1): no CUDA download (CPU only).
 ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN npm ci --no-audit --no-fund
+# The edit render's Chinese / Japanese / Korean faces (Noto Sans SC, JP, KR; Regular and Bold; about 45 MB; OFL):
+# six files out of pinned npm packages, each checked against its SHA-256 (scripts/cjk-fonts.mjs).
+COPY ${APP_DIR}/scripts/cjk-fonts.mjs ./scripts/cjk-fonts.mjs
+RUN node scripts/cjk-fonts.mjs /app/cjk && npm cache clean --force
 COPY ${APP_DIR}/tsconfig.json ${APP_DIR}/tsconfig.build.json ./
 COPY ${APP_DIR}/src ./src
 # ...and only this platform's onnxruntime binaries (about 47 MB of 294 MB on linux/x64).
@@ -54,6 +58,7 @@ COPY --from=build /app/dist ./dist
 COPY ${APP_DIR}/package.json ./
 COPY ${APP_DIR}/drizzle ./drizzle
 COPY ${APP_DIR}/assets ./assets
+COPY --from=build /app/cjk ./assets/cjk
 COPY ${APP_DIR}/scripts/invite.mjs ./scripts/invite.mjs
 # Only used without R2 (STORAGE=local): writable, but gone on every redeploy. Production uses R2.
 RUN mkdir -p /app/data && chown node:node /app/data
