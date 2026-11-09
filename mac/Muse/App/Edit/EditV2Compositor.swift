@@ -472,7 +472,10 @@ final class EditV2Scene: @unchecked Sendable {
         let wrap = CGFloat(st.maxWidthPct ?? 0.85) * size.width
         // Neon draws its glow with the style's own shadow colour (coordinator, 2026-11-09: server, Android and Mac match).
         let textStyle = st.textStyle
-        guard let img = cachedText(key, { EditV2TextRenderer.render(runs, style: textStyle, fontSize: fontSize, wrapWidth: wrap) }) else { return base }
+        let joiner = E.captionJoiner(ct.language), rtl = E.isRtlLanguage(ct.language)
+        guard let img = cachedText(key + "|\(ct.language ?? "")", {
+            EditV2TextRenderer.render(runs, style: textStyle, fontSize: fontSize, wrapWidth: wrap, joiner: joiner, rtl: rtl)
+        }) else { return base }
         // As Android's core RenderPlan: `pop` is the active word at 1.15× (above); `single` (one word a page) pops in,
         // 0.6 → 1 over 0.15 s, easing out, at full opacity. No other preset scales the page.
         var scale = 1.0

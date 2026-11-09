@@ -151,3 +151,19 @@ extension EditV2DerivedTests {
         XCTAssertEqual(s.captionLanguage, "es")
     }
 }
+
+extension EditV2DerivedTests {
+    /// Captions in other scripts (functions.json → captionScripts, WS8 d0c1a6e): joiner, right to left, text, a Japanese .srt.
+    func testCaptionScripts() throws {
+        let f = try editorFixture("functions")["captionScripts"]
+        let words = ["今日は", "いい", "天気"]
+        for c in f["languages"].array {
+            let l = c["language"].string
+            XCTAssertEqual(E.captionJoiner(l), c["joiner"].string, l ?? "nil")
+            XCTAssertEqual(E.isRtlLanguage(l), c["rtl"] == .bool(true), l ?? "nil")
+            XCTAssertEqual(E.captionText(words, l), c["text"].string, l ?? "nil")
+        }
+        let p = try f["srtJa"]["project"].decode(E.Project.self)
+        XCTAssertEqual(E.toSrt(p), f["srtJa"]["srt"].string)
+    }
+}

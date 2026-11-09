@@ -81,11 +81,24 @@ extension EditV2 {
         return "\(pad(h, 2)):\(pad(m, 2)):\(pad(s, 2)),\(pad(ms % 1000, 3))"
     }
 
+    // MARK: Captions in other scripts (WS8 d0c1a6e)
+
+    /// Languages written without spaces between words: their caption pages join words with nothing between.
+    public static let unspacedLanguages = ["ja", "zh", "th", "lo", "km", "my"]
+    /// Languages written right to left (a caption page reads from the right; the words keep their order).
+    public static let rtlLanguages = ["ar", "he", "fa", "ur"]
+    static func baseLanguage(_ l: String?) -> String { l.map { String($0.split(separator: "-", omittingEmptySubsequences: false).first ?? "") } ?? "" }
+    /// What goes between a caption page's words.
+    public static func captionJoiner(_ language: String?) -> String { unspacedLanguages.contains(baseLanguage(language)) ? "" : " " }
+    public static func isRtlLanguage(_ language: String?) -> Bool { rtlLanguages.contains(baseLanguage(language)) }
+    /// A caption page's text in `language` (words joined by captionJoiner).
+    public static func captionText(_ words: [String], _ language: String?) -> String { words.joined(separator: captionJoiner(language)) }
+
     /// The captions as an .srt file (one cue per caption page; upper case when the style says so). Empty without captions.
     public static func toSrt(_ p: Project) -> String {
         guard let ct = p.captionTrack else { return "" }
         return captionPages(p).enumerated().map { i, pg in
-            let text = pg.words.map(\.text).joined(separator: " ")
+            let text = captionText(pg.words.map(\.text), ct.language)
             return "\(i + 1)\n\(srtTime(pg.startSec)) --> \(srtTime(pg.endSec))\n\(ct.style.uppercase == true ? text.uppercased() : text)\n"
         }.joined(separator: "\n")
     }
