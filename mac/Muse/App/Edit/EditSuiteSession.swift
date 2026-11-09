@@ -1005,6 +1005,47 @@ final class EditSuiteSession {
         if changed > 0 { notice = "Evened out \(changed) clip\(changed == 1 ? "" : "s")" }
     }
 
+    // MARK: Style kits (parity, shared kit engine)
+
+    /// The studio's saved style kits (members: their own), newest first; nil until loaded.
+    var kits: [EditKit]?
+
+    func loadKits() async {
+        do { kits = try await api.editKits() } catch { if kits == nil { kits = [] } }
+    }
+
+    /// Saves this edit's look, colour, transition, caption and text styles and background as a kit.
+    func saveKit(name: String) async -> Bool {
+        let kit = E.kitOf(project)
+        guard kit != E.StyleKit() else { lastError = "This edit has no style to save yet · add a look, colour, transition or captions"; return false }
+        do {
+            let k = try await api.saveEditKit(name: name, kit: kit)
+            kits = [k] + (kits ?? [])
+            notice = "Saved \u{201C}\(k.name)\u{201D}"
+            return true
+        } catch let e as E.EditProblem {
+            lastError = "This style can't be saved (\(e.message))"
+        } catch {
+            lastError = (error as? ApiError)?.message ?? "Couldn't save the style · try again"
+        }
+        return false
+    }
+
+    /// Applies a kit to this edit (one undo step).
+    func applyKit(_ k: EditKit) {
+        if edit({ $0.apply { E.applyKit($0, k.kit) } }) { notice = "Applied \u{201C}\(k.name)\u{201D}" }
+        else if lastError == nil { notice = "This edit already has that style" }
+    }
+
+    func deleteKit(_ k: EditKit) async {
+        do {
+            try await api.deleteEditKit(id: k.id)
+            kits?.removeAll { $0.id == k.id }
+        } catch {
+            lastError = (error as? ApiError)?.message ?? "Couldn't delete the style kit · try again"
+        }
+    }
+
     // MARK: Auto adjust (parity)
 
     /// Auto adjust of the selected clip from its own picture under the playhead (the source frame, before its look), as

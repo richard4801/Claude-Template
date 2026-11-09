@@ -17,6 +17,8 @@ public actor FakeMuseAPI: MuseAPI {
     /// (0 = free, as before), the owner's switch off, today's cap reached.
     var editorPriceUsd: Double = 0
     var editorPaidOff = false
+    /// Style kits (/v1/editor/kits), newest first.
+    var editKitStore: [EditKit] = []
     var editorCapHit = false
     /// Edit sessions (workstream 3): the live edits shared with Claude, in memory (Edit/FakeMuseAPI+EditSessions.swift).
     var editSessions: [String: FakeEditSessionRecord] = [:]

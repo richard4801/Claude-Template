@@ -41,6 +41,8 @@ struct VideoPanels: View {
         } else {
             InspectorEmpty(text: "Select a clip, an overlay or a sticker on the timeline.")
         }
+        // The whole edit's style (parity): shown whatever is selected.
+        StyleKitsPanel(session: session)
     }
 }
 

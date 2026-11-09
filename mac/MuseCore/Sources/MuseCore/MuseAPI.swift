@@ -214,6 +214,14 @@ public protocol MuseAPI: AnyObject, Sendable {
     func editorJob(id: String) async throws -> EditorJob
     /// DELETE /v1/editor/jobs/{id}
     func cancelEditorJob(id: String) async throws
+    /// GET /v1/editor/kits (style kits, newest first)
+    func editKits() async throws -> [EditKit]
+    /// POST /v1/editor/kits {name, kit}
+    func saveEditKit(name: String, kit: EditV2.StyleKit) async throws -> EditKit
+    /// PATCH /v1/editor/kits/{id} {name?, kit?}
+    func updateEditKit(id: String, name: String?, kit: EditV2.StyleKit?) async throws -> EditKit
+    /// DELETE /v1/editor/kits/{id}
+    func deleteEditKit(id: String) async throws
     /// POST /v1/editor/uploads/presign {contentType, bytes, purpose?} + PUT → the uploadId (music, voice-over, .cube).
     func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String
     /// POST /v1/editor/luts/validate {uploadId}

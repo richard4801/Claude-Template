@@ -280,3 +280,24 @@ public struct TakeVersionV2Request: Codable, Sendable, Equatable {
         return abs(durationSec - d) <= max(0.5, 0.05 * d)
     }
 }
+
+/// A saved style kit (GET/POST/PATCH /v1/editor/kits, plans/api.md "Edit style kits"): members see their own, the owner
+/// the studio's.
+public struct EditKit: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var kit: EditV2.StyleKit
+    public var createdBy: String?
+    public var createdAt: String?
+    public var updatedAt: String?
+    public init(id: String, name: String, kit: EditV2.StyleKit, createdBy: String? = nil, createdAt: String? = nil, updatedAt: String? = nil) {
+        self.id = id; self.name = name; self.kit = kit; self.createdBy = createdBy; self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+}
+
+public struct EditKitList: Codable, Hashable, Sendable { public var kits: [EditKit] }
+public struct EditKitBody: Codable, Hashable, Sendable {
+    public var name: String?
+    public var kit: EditV2.StyleKit?
+    public init(name: String? = nil, kit: EditV2.StyleKit? = nil) { self.name = name; self.kit = kit }
+}

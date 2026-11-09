@@ -136,7 +136,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Auto adjust | Has | Has | M | Android: Filters → Adjust → Auto adjust: the frame under the playhead → exposure, contrast, saturation, temperature and tint (core `autoAdjust`). Mac: Adjust → Auto adjust from the clip's source frame under the playhead (same numbers as Android's `autoAdjust`). |
 | Video effects library (glitch, blur, retro, …) | Missing | Missing | L | **Content** plus GL effects |
 | Body and face effects | Missing | Missing | XL | Segmentation and tracking; mostly **Content** |
-| Adjustment keyframes | Has | Missing | M | Android: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint in Filters → Adjust (KfProp exposure…tint, `adjustAt`; the colour matrix runs per frame). Highlights, shadows and look effects are not keyframable yet. |
+| Adjustment keyframes | Has | Has | M | Android: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint in Filters → Adjust (KfProp exposure…tint, `adjustAt`; the colour matrix runs per frame). Highlights, shadows and look effects are not keyframable yet. Mac: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint; a keyed slider sets its key at the playhead (shared fixtures). |
 | AI restyle (generative) | Missing | Missing | XL | MUSE's Suite does generation. Re-styling an edit is a model question. |
 | HDR editing / export | Missing | Missing | L | |
 

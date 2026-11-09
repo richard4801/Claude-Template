@@ -176,7 +176,7 @@ The contract (server `model.ts`, ops, fixtures) is WS8's 60bff55; the Mac port i
 
 ## Parity wave 2 (as Android 214d602-era app rows, 22a950d, f90b4f3, and the tint and video animation contracts)
 
-Mac CI: pending on 04047be (run 42550126329); this section is marked green once that run passes.
+Mac CI run 42552492893 (4946284): build, click-through and every Edit operation and export probe green (the scroll check didn't run: review mode passed the workflow's 1200 s limit, now 1800 s).
 
 | Feature | Where on the Mac | Proven by |
 |---|---|---|
@@ -190,7 +190,10 @@ Mac CI: pending on 04047be (run 42550126329); this section is marked green once 
 | Video clip in/out animations (`animIn` / `animOut`) | Animate panel on video clips | Shared fixtures; EditSuiteParityTests |
 | Keyframes on the timeline (drag a ◆ to move every property's key at that time) | Timeline, on the selected item | EditSuiteKeysTests; ops check (key drag, can't pass a neighbour) |
 | Curves (All / Red / Green / Blue) | Adjust → Curves | EditSuiteKeysTests; ops check (the preview darkens) |
-| Auto adjust | Adjust → Auto adjust | EditSuiteKeysTests (Android's AutoAdjustTest cases); ops check (red take gets cooler) |
+| Auto adjust | Adjust → Auto adjust | Shared fixtures (functions.json autoAdjust); EditSuiteKeysTests; ops check (red take gets cooler) |
+| Colour keyframes (exposure, contrast, saturation, temperature, tint) | Adjust: ◆ beside each slider | Shared fixtures (colorKeys, validation); ops check (darker at the first key) |
+| The owner's model pick on the AI helpers (WS6 pill) | Beside Remove background, Pick what to keep, Auto-captions, Noise reduction | EditorHelperModelTests |
+| Style kits (save, apply, delete) | Video → Style kits | Shared fixtures (kits: kitOf, applyKit, validateKit); fake API test; ops check (save, apply, delete) |
 
 ## Left for the owner
 

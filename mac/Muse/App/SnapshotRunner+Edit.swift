@@ -316,7 +316,9 @@ extension SnapshotRunner {
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
                                  "Remove background", "Run the cut-out",
                                  // The shared link import sheet (WS6) has its own walk (SnapshotRunner+Walk.swift).
-                                 "Import a video from a link"]
+                                 "Import a video from a link",
+                                 // Asks first (its own Keep / Delete kit dialog).
+                                 "Delete style kit"]
         let denyInSheet: Set<String> = ["Export", "Save to Library", "Save GIF…", "Save sound…"]
         let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()

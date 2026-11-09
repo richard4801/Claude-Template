@@ -369,6 +369,21 @@ extension SnapshotRunner {
         check("preview: darker at the first key", (qd?.r ?? 255) + 40 < (ql?.r ?? 0) && isRed(ql), "\(describe(qd)) then \(describe(ql))")
         for _ in 0..<2 { s.undo() }
 
+        step("Style kit: save, apply, delete")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.changeVisual { $0.adjust = E.Adjust(contrast: 0.3) } }
+        let savedKit = await s.saveKit(name: "CI style")
+        check("kit saved", savedKit && s.kits?.first?.name == "CI style", s.lastError ?? "")
+        check("kit carries the colour", s.kits?.first?.kit.adjust?.contrast == 0.3, "\(String(describing: s.kits?.first?.kit))")
+        s.undo()
+        if let k = s.kits?.first {
+            s.applyKit(k)
+            check("project: every main clip takes the kit's colour", s.project.mainClips.allSatisfy { $0.adjust?.contrast == 0.3 })
+            s.undo()
+            await s.deleteKit(k)
+            check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
+        }
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }
