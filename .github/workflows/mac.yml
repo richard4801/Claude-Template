@@ -100,6 +100,18 @@ jobs:
           ls -la snapshots | head -100
           tail -n 60 snapshots.log || true
 
+      # Closing a chat mid-reply in the same tick as a screen change must not freeze the app (plans/claude-chat-mac.md).
+      # Review mode runs it first (SnapshotRunner+StreamClose.swift); on a freeze it samples the app into the snapshots.
+      - name: Stream close check
+        working-directory: mac
+        run: |
+          f=snapshots/stream-close.txt
+          if [ ! -f "$f" ]; then echo "no stream-close.txt (review mode didn't reach it)"; exit 1; fi
+          cat "$f"
+          if [ -f snapshots/stream-close-sample.txt ]; then head -n 400 snapshots/stream-close-sample.txt; fi
+          if grep -q '^CUT' "$f"; then exit 1; fi
+          if [ "$(grep -c '^FITS stream_close' "$f")" -ne 6 ] || ! grep -q '^DONE stream_close' "$f"; then echo "stream close check incomplete"; exit 1; fi
+
       # Generate must be fully on screen, with its price, and every bar pill whole in the composer from 1440 × 900 down to 960 × 640 (owner fix A2, coordination item 8). Fails on any CUT line.
       - name: Composer fit check
         working-directory: mac
@@ -109,7 +121,7 @@ jobs:
           cat "$f"
           if grep -q '^CUT' "$f"; then echo "Generate is cut off"; exit 1; fi
 
-      # A screen change must never leave the old screen drawn (plans/claude-chat-mac.md): in themes C and D a live chat
+      # A screen change must never leave the old screen drawn (plans/claude-chat-mac.md): in every theme (10 tries each) a live chat
       # overlay closes in the same tick as openEdit + openRecreate, and 1 s later the window must hold only store.screen
       # (SnapshotRunner+Chat.swift, staleScreenCheck). Its CUT lines already fail the fit check; this step makes sure it ran.
       - name: Stale screen check
@@ -117,7 +129,7 @@ jobs:
         run: |
           f=snapshots/fit-check.txt
           grep 'stale_screen' "$f" || true
-          if [ "$(grep -c '^FITS stale_screen' "$f")" -ne 10 ]; then echo "stale screen check missing or failed"; exit 1; fi
+          if [ "$(grep -c '^FITS stale_screen' "$f")" -ne 40 ]; then echo "stale screen check missing or failed"; exit 1; fi
 
       # Opening Edit with takes shaped like live ones must not crash (owner blocker 2026-11-07). The review run writes each
       # step before it runs (SnapshotRunner+Edit.swift), so a crash leaves the step that crashed as the last START line.
