@@ -264,7 +264,8 @@ object SuiteOps {
         for (t in p.tracks) if (t.kind == TrackKind.MUSIC) for (it in t.items) {
             val c = it as AudioClip
             val marks = (if (strongOnly) c.strongBeats ?: c.beats else c.beats).orEmpty()
-            for (b in marks) if (b >= c.inSec && b <= c.outSec) out += c.startSec + (b - c.inSec)
+            // Beat marks are source times: through the clip's speed onto the timeline.
+            for (b in marks) if (b >= c.inSec && b <= c.outSec) out += c.startSec + studio.muse.core.edit.clipTimeAt(c, b)
         }
         return out.sorted()
     }
@@ -426,6 +427,24 @@ object SuiteOps {
         val id = base.newId("p")
         val clip = VideoClip(id, assetId, 0.0, len, 1.0, startSec = start, fit = Fit.CONTAIN, transform = Transform(0.72, 0.68, 0.4), muted = true)
         return base.addItem(tid, clip)?.let { it to id }
+    }
+
+    /**
+     * A photo (an editor upload) placed over the edit at [atSec] (owner-approved design pass): an image item on the first
+     * image track it fits on (else a new one), 3 s long (less near the end), contain-fitted at 40 % scale, centred.
+     * Returns the project and the new item's id.
+     */
+    fun addImage(p: EditProject, uploadId: String, width: Int, height: Int, atSec: Double): Pair<EditProject, String>? {
+        val assetId = newAssetId(p, "img")
+        val withAsset = p.copy(assets = p.assets + Asset(assetId, AssetKind.IMAGE, upload = uploadId, width = width, height = height))
+        val dur = studio.muse.core.edit.durationSec(withAsset)
+        val start = atSec.coerceIn(0.0, maxOf(0.0, dur - EditLimits.MIN_ITEM_SEC))
+        val len = minOf(3.0, maxOf(EditLimits.MIN_ITEM_SEC, dur - start))
+        val base = withAsset.tracks.firstOrNull { t -> t.kind == TrackKind.IMAGE && fitsAt(withAsset, t, start, len) }?.let { withAsset }
+            ?: withAsset.copy(tracks = withAsset.tracks + Track(withAsset.newId("img"), TrackKind.IMAGE, name = "Photos"))
+        val tid = base.tracks.last { t -> t.kind == TrackKind.IMAGE && fitsAt(base, t, start, len) }.id
+        val id = base.newId("i")
+        return base.addItem(tid, ImageItem(id, assetId, Math.round(start * 1000) / 1000.0, Math.round(len * 1000) / 1000.0, fit = Fit.CONTAIN, transform = Transform(0.5, 0.5, 0.4)))?.let { it to id }
     }
 
     /**

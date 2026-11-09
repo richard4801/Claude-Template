@@ -217,7 +217,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if (tr.kind !== 'text') continue;
     for (const it of tr.items as M.TextItem[]) {
       const st = it.style, px = Math.max(6, st.sizePct * H);
-      if (it.animIn && it.animIn.kind !== 'none' || it.animOut && it.animOut.kind !== 'none' || it.keyframes) unsupported.add('text animation');
+      if (it.animIn && it.animIn.kind !== 'none' || it.animOut && it.animOut.kind !== 'none' || it.keyframes || it.animLoop) unsupported.add('text animation');
       const lines = wrap(st.uppercase ? it.text.toUpperCase() : it.text, px, (st.maxWidthPct ?? 0.9) * W);
       const lh = px * (st.lineHeight ?? 1.15), cx = (it.transform?.x ?? 0.5) * W, cy = (it.transform?.y ?? 0.5) * H;
       lines.forEach((line, li) => {

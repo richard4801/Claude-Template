@@ -168,6 +168,31 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun audioSpeedTiming() {
+        for (c in fn["audioSpeed"]!!.arr) {
+            val o = c.obj["clip"]!!.obj
+            val clip = AudioClip(o["id"]!!.str, o["asset"]!!.str, o["startSec"]!!.num, o["inSec"]!!.num, o["outSec"]!!.num, speed = o["speed"]?.num,
+                beats = o["beats"]?.arr?.map { it.num })
+            assertEquals(c.obj["length"]!!.num, clipLength(clip), 1e-9)
+            val beats = c.obj["beatsOnTimeline"]!!.arr.map { it.num }
+            assertEquals(beats, clip.beats.orEmpty().map { Math.round((clip.startSec + clipTimeAt(clip, it)) * 1e6) / 1e6 })
+            for (sm in c.obj["sourceAt"]!!.arr) assertEquals(sm.obj["src"]!!.num, clipSourceAt(clip, sm.obj["t"]!!.num), 1e-9)
+        }
+    }
+
+    @Test fun loopAnimations() {
+        for ((i, c) in fn["loops"]!!.arr.withIndex()) {
+            val lo = c.obj["loop"]!!.obj
+            val loop = AnimLoop(LoopKind.entries.first { it.wire == lo["kind"]!!.str }, lo["periodSec"]!!.num, lo["amount"]?.num)
+            for (sm in c.obj["samples"]!!.arr) {
+                val t = sm.obj["t"]!!.num; val want = sm.obj["state"]!!.obj
+                val got = loopState(loop, t)
+                for ((k, v) in listOf("scale" to got.scale, "rotation" to got.rotation, "dy" to got.dy, "opacity" to got.opacity))
+                    assertEquals("loop $i $k t=$t", want[k]!!.num, v, 1e-6)
+            }
+        }
+    }
+
     @Test fun maskAndLookKeyframes() {
         for ((i, c) in fn["motionKeys"]!!.arr.withIndex()) {
             val o = Obj.of(c.obj["item"]!!, "item")

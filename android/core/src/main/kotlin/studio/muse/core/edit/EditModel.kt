@@ -407,6 +407,23 @@ fun animState(durationSec: Double, animIn: Anim?, animOut: Anim?, text: String?,
     return AnimState(r6(opacity), r6(scale), r6(dy), chars)
 }
 
+/** A loop at item-local [t] (model.ts `loopState`): scale ×, rotation + (degrees), dy + (canvas heights), opacity ×. */
+data class LoopState(val scale: Double = 1.0, val rotation: Double = 0.0, val dy: Double = 0.0, val opacity: Double = 1.0)
+
+fun loopState(loop: AnimLoop?, t: Double): LoopState {
+    if (loop == null || loop.periodSec <= 0) return LoopState()
+    val a = clamp(loop.amount ?: 0.5, 0.0, 1.0); val ph = 2 * Math.PI * t / loop.periodSec; val wave = 0.5 - 0.5 * kotlin.math.cos(ph)
+    fun r6(v: Double) = Math.round(v * 1e6) / 1e6
+    val s = when (loop.kind) {
+        LoopKind.PULSE -> LoopState(scale = 1 + 0.12 * a * wave)
+        LoopKind.SWAY -> LoopState(rotation = 8 * a * kotlin.math.sin(ph))
+        LoopKind.FLOAT -> LoopState(dy = -0.03 * a * kotlin.math.sin(ph))
+        LoopKind.SPIN -> LoopState(rotation = (360 * t / loop.periodSec) % 360)
+        LoopKind.BLINK -> LoopState(opacity = 1 - a * wave)
+    }
+    return LoopState(r6(s.scale), r6(s.rotation), r6(s.dy), r6(s.opacity))
+}
+
 fun animState(item: ImageItem, t: Double) = animState(item.durationSec, item.animIn, item.animOut, null, t)
 fun animState(item: TextItem, t: Double) = animState(item.durationSec, item.animIn, item.animOut, item.text, t)
 

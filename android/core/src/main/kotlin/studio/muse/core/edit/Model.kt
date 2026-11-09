@@ -206,6 +206,8 @@ data class VideoClip(
     /** In / out animation (as images; no typewriter), main or overlay: [animState] over [clipLength]. */
     val animIn: Anim? = null,
     val animOut: Anim? = null,
+    /** A repeating animation (overlay clips only): [loopState]. */
+    val animLoop: AnimLoop? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -228,6 +230,7 @@ data class ImageItem(
     val animOut: Anim? = null,
     /** Wave 1: overlay blend mode. */
     val blend: BlendMode? = null,
+    val animLoop: AnimLoop? = null,
 ) : Visual
 
 data class Stroke(val color: String, val widthPct: Double)
@@ -261,6 +264,7 @@ data class TextItem(
     val animIn: Anim? = null,
     val animOut: Anim? = null,
     val template: String? = null,
+    val animLoop: AnimLoop? = null,
 ) : Item
 
 data class AudioClip(
@@ -316,6 +320,10 @@ data class Track(
 )
 
 /** [fill] (wave 1): what shows where a contain-fitted main clip leaves the frame empty: the background colour, or a blur of the clip. */
+/** Loop animations (M): a repeating move while the item is on screen ([loopState]). */
+enum class LoopKind(override val wire: String) : Wire { PULSE("pulse"), SWAY("sway"), FLOAT("float"), SPIN("spin"), BLINK("blink") }
+data class AnimLoop(val kind: LoopKind, val periodSec: Double, val amount: Double? = null)
+
 enum class CanvasFill(override val wire: String) : Wire { COLOR("color"), BLUR("blur") }
 
 data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null, val fill: CanvasFill? = null)

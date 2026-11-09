@@ -55,16 +55,18 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
   /** Wave 1: overlay tracks only. */
   blend?: BlendMode;
   /** In / out animation (as images: fade, pop, slideUp, slideDown, zoom), main or overlay; [animState] over clipLength. */
-  animIn?: Anim; animOut?: Anim };
+  animIn?: Anim; animOut?: Anim;
+  /** A repeating animation while it's on screen (overlay clips only; text and images have it too). */
+  animLoop?: AnimLoop };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
-export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode };
+export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop };
 export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
   align: 'left' | 'center' | 'right'; maxWidthPct?: number; lineHeight?: number; letterSpacing?: number; uppercase?: boolean;
   stroke?: { color: string; widthPct: number }; shadow?: { color: string; opacity: number; blurPct: number; dyPct: number };
   background?: { color: string; opacity: number; paddingPct: number; radiusPct: number } };
 export type TextItem = { id: string; startSec: number; durationSec: number; text: string; style: TextStyle; transform?: Transform; opacity?: number;
-  keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string };
+  keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string; animLoop?: AnimLoop };
 export type AudioClip = Voice & { id: string; asset: string; strongBeats?: number[]; startSec: number; inSec: number; outSec: number; speed?: number; volume?: number; muted?: boolean;
   fadeInSec?: number; fadeOutSec?: number; keyframes?: Keyframes; beats?: number[] };
 export type CaptionPreset = 'plain' | 'highlight' | 'box' | 'karaoke' | 'pop' | 'single' | 'highlighter' | 'neon';
@@ -466,6 +468,29 @@ export function transitionState(kind: TransitionKind, p: number): TransitionStat
 }
 
 export type AnimState = { opacity: number; scale: number; dy: number; chars: number | null };
+
+/** Loop animations (M): a repeating move while the item is on screen. */
+export type LoopKind = 'pulse' | 'sway' | 'float' | 'spin' | 'blink';
+export const LOOP_KINDS: LoopKind[] = ['pulse', 'sway', 'float', 'spin', 'blink'];
+export type AnimLoop = { kind: LoopKind; periodSec: number; amount?: number };
+export type LoopState = { scale: number; rotation: number; dy: number; opacity: number };
+/**
+ * A loop at item-local t: scale ×, rotation + (degrees), dy + (canvas heights, negative up), opacity ×. Every kind is at
+ * rest at t = 0; [amount] defaults to 0.5 (spin ignores it).
+ */
+export function loopState(loop: AnimLoop | undefined, t: number): LoopState {
+  const st: LoopState = { scale: 1, rotation: 0, dy: 0, opacity: 1 };
+  if (!loop || !(loop.periodSec > 0)) return st;
+  const a = clamp(loop.amount ?? 0.5, 0, 1), ph = (2 * Math.PI * t) / loop.periodSec, wave = 0.5 - 0.5 * Math.cos(ph);
+  switch (loop.kind) {
+    case 'pulse': st.scale = 1 + 0.12 * a * wave; break;
+    case 'sway': st.rotation = 8 * a * Math.sin(ph); break;
+    case 'float': st.dy = -0.03 * a * Math.sin(ph); break;
+    case 'spin': st.rotation = ((360 * t) / loop.periodSec) % 360; break;
+    case 'blink': st.opacity = 1 - a * wave; break;
+  }
+  return { scale: r6(st.scale), rotation: r6(st.rotation), dy: r6(st.dy), opacity: r6(st.opacity) };
+}
 /** In/out animation of an image or text item at item-local t (chars: how many characters typewriter shows, else null). */
 export function animState(item: { durationSec: number; animIn?: Anim; animOut?: Anim; text?: string }, t: number): AnimState {
   const st: AnimState = { opacity: 1, scale: 1, dy: 0, chars: null };
@@ -881,6 +906,11 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (!BLEND_MODES.includes(b)) bad(`${f}.blend`, `one of ${BLEND_MODES.join(', ')}`);
     if (!overlay) bad(`${f}.blend`, 'only on overlay tracks (video, image)');
   };
+  const loop = (f: string, l: AnimLoop | undefined) => {
+    if (l === undefined) return;
+    if (!l || typeof l !== 'object' || !LOOP_KINDS.includes(l.kind)) bad(`${f}.kind`, 'unknown loop animation');
+    num(`${f}.periodSec`, l.periodSec, 0.2, 5, false); num(`${f}.amount`, l.amount, 0, 1);
+  };
   const anim = (f: string, a: Anim | undefined, text: boolean) => {
     if (a === undefined) return;
     if (!ANIMS.includes(a.kind) || (a.kind === 'typewriter' && !text)) bad(`${f}.kind`, 'unknown animation');
@@ -972,6 +1002,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
           }
         }
         anim(`${g}.animIn`, c.animIn, false); anim(`${g}.animOut`, c.animOut, false);
+        if (c.animLoop !== undefined && t.kind === 'main') bad(`${g}.animLoop`, 'loop animations are for overlays, images and text');
+        loop(`${g}.animLoop`, c.animLoop);
         if (c.chroma !== undefined) {
           color(`${g}.chroma.color`, c.chroma.color, false);
           num(`${g}.chroma.similarity`, c.chroma.similarity, 0, 1); num(`${g}.chroma.smoothness`, c.chroma.smoothness, 0, 1); num(`${g}.chroma.spill`, c.chroma.spill, 0, 1);
@@ -999,7 +1031,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         visual(g, im, im.durationSec);
         blend(g, im.blend, true);
         kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity', ...COLOR_KF_PROPS, ...MASK_KF_PROPS, ...LOOK_KF_PROPS], !!im.mask);
-        anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false);
+        anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false); loop(`${g}.animLoop`, im.animLoop);
       } else if (t.kind === 'text') {
         const tx = it as TextItem;
         if (typeof tx.text !== 'string' || tx.text.length < 1 || tx.text.length > LIMITS.maxText) bad(`${g}.text`, `must be 1–${LIMITS.maxText} characters`);
@@ -1008,12 +1040,13 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         if (tx.transform !== undefined) visual(g, { transform: tx.transform }, tx.durationSec);
         num(`${g}.opacity`, tx.opacity, 0, 1);
         kfs(`${g}.keyframes`, tx.keyframes, tx.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
-        anim(`${g}.animIn`, tx.animIn, true); anim(`${g}.animOut`, tx.animOut, true);
+        anim(`${g}.animIn`, tx.animIn, true); anim(`${g}.animOut`, tx.animOut, true); loop(`${g}.animLoop`, tx.animLoop);
       } else if (t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') {
         const c = it as AudioClip;
         clipBase(g, c, ['audio', 'video']);
         num(`${g}.startSec`, c.startSec, 0, 600, false);
-        if (c.speed !== undefined && c.speed !== 1) bad(`${g}.speed`, 'audio clips play at 1×');
+        // Audio speed (M): 0.5–2×, pitch kept (time stretch); timeline length = (outSec − inSec) / speed.
+        num(`${g}.speed`, c.speed, 0.5, 2);
         kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['volume']);
         for (const k of ['beats', 'strongBeats'] as const) { const bs = c[k]; if (bs !== undefined && (!Array.isArray(bs) || bs.length > 2000 || bs.some(b => !isNum(b) || b < 0))) bad(`${g}.${k}`, 'must be up to 2000 times'); }
       }

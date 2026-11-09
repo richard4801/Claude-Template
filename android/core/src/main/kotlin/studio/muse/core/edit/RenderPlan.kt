@@ -227,6 +227,13 @@ data class RenderPlan(
         )
     }
 
+    /** A loop animation on a placement (after keyframes and the in / out animation). */
+    private fun looped(b: Placement, loop: AnimLoop?, local: Double): Placement {
+        if (loop == null) return b
+        val s = loopState(loop, local)
+        return b.copy(alpha = b.alpha * s.opacity, scale = b.scale * s.scale, rotationCw = b.rotationCw + s.rotation, centerY = b.centerY + s.dy)
+    }
+
     /** A video clip's in / out animation ([animState] over its length) on its placement. */
     private fun animated(b: Placement, c: VideoClip, local: Double): Placement {
         if (c.animIn == null && c.animOut == null) return b
@@ -241,9 +248,9 @@ data class RenderPlan(
             is ImageItem -> {
                 val b = basePlacement(item, local)
                 val a = animState(item, local)
-                b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy, blend = item.blend)
+                looped(b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy, blend = item.blend), item.animLoop, local)
             }
-            is VideoClip -> basePlacement(item, local).let { b -> animated(b, item, local).copy(blend = item.blend) }
+            is VideoClip -> basePlacement(item, local).let { b -> looped(animated(b, item, local), item.animLoop, local).copy(blend = item.blend) }
             else -> Placement.HIDDEN
         }
     }
@@ -301,14 +308,15 @@ data class RenderPlan(
         val k = it.keyframes; val tr = it.transform
         var text = if (it.style.uppercase == true) it.text.uppercase() else it.text
         a.chars?.let { n -> text = text.substring(0, text.offsetByCodePoints(0, min(n, text.codePointCount(0, text.length)))) }
-        val alpha = propAt(k, KfProp.OPACITY, it.opacity ?: 1.0, local) * a.opacity
+        val lp = loopState(it.animLoop, local)
+        val alpha = propAt(k, KfProp.OPACITY, it.opacity ?: 1.0, local) * a.opacity * lp.opacity
         if (alpha <= 0.0 || text.isEmpty()) return null
         return TextFrame(
             text, alpha,
             centerX = propAt(k, KfProp.X, tr?.x ?: 0.5, local),
-            centerY = propAt(k, KfProp.Y, tr?.y ?: 0.5, local) + a.dy,
-            scale = propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale,
-            rotationCw = propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local),
+            centerY = propAt(k, KfProp.Y, tr?.y ?: 0.5, local) + a.dy + lp.dy,
+            scale = propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale * lp.scale,
+            rotationCw = propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local) + lp.rotation,
             flipX = tr?.flipX == true, flipY = tr?.flipY == true,
         )
     }

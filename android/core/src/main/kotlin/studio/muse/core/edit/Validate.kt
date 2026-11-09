@@ -199,6 +199,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         l.leak?.let { num("$f.leak.amount", it.amount, 0.0, 1.0, false); num("$f.leak.angle", it.angle, -360.0, 360.0) }
     }
 
+    private fun loop(f: String, l: AnimLoop?) {
+        l ?: return
+        num("$f.periodSec", l.periodSec, 0.2, 5.0, false); num("$f.amount", l.amount, 0.0, 1.0)
+    }
+
     private fun anim(f: String, a: Anim?, text: Boolean) {
         a ?: return
         if (a.kind == AnimKind.TYPEWRITER && !text) bad("$f.kind", "unknown animation")
@@ -237,6 +242,8 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         // Background removal's matte (workstream 1): the asset must be a video of the project (the server's message).
         c.alphaMatte?.let { m -> if (assets[m.asset]?.kind != AssetKind.VIDEO) bad("$g.alphaMatte.asset", "must be a video asset") }
         anim("$g.animIn", c.animIn, false); anim("$g.animOut", c.animOut, false)
+        if (c.animLoop != null && t.kind == TrackKind.MAIN) bad("$g.animLoop", "loop animations are for overlays, images and text")
+        loop("$g.animLoop", c.animLoop)
         c.chroma?.let { ch ->
             color("$g.chroma.color", ch.color, false)
             num("$g.chroma.similarity", ch.similarity, 0.0, 1.0); num("$g.chroma.smoothness", ch.smoothness, 0.0, 1.0); num("$g.chroma.spill", ch.spill, 0.0, 1.0)
@@ -261,7 +268,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         num("$g.startSec", im.startSec, 0.0, 600.0, false); num("$g.durationSec", im.durationSec, EditLimits.MIN_ITEM_SEC, 600.0, false)
         visual(g, im)
         keyframes("$g.keyframes", im.keyframes, im.durationSec, VISUAL_PROPS + KfProp.COLOR + KfProp.MASK + KfProp.LOOK, im.mask != null)
-        anim("$g.animIn", im.animIn, false); anim("$g.animOut", im.animOut, false)
+        anim("$g.animIn", im.animIn, false); anim("$g.animOut", im.animOut, false); loop("$g.animLoop", im.animLoop)
     }
 
     private fun textItem(g: String, tx: TextItem) {
@@ -271,13 +278,14 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         transform(g, tx.transform)
         num("$g.opacity", tx.opacity, 0.0, 1.0)
         keyframes("$g.keyframes", tx.keyframes, tx.durationSec, VISUAL_PROPS)
-        anim("$g.animIn", tx.animIn, true); anim("$g.animOut", tx.animOut, true)
+        anim("$g.animIn", tx.animIn, true); anim("$g.animOut", tx.animOut, true); loop("$g.animLoop", tx.animLoop)
     }
 
     private fun audioClip(g: String, c: AudioClip) {
         clipBase(g, c, setOf(AssetKind.AUDIO, AssetKind.VIDEO))
         num("$g.startSec", c.startSec, 0.0, 600.0, false)
-        if (c.speed != null && c.speed != 1.0) bad("$g.speed", "audio clips play at 1×")
+        // Audio speed (M): 0.5–2×, pitch kept; timeline length = (outSec − inSec) / speed.
+        num("$g.speed", c.speed, 0.5, 2.0)
         keyframes("$g.keyframes", c.keyframes, clipLength(c), setOf(KfProp.VOLUME))
         c.beats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.beats", "must be up to 2000 times") }
         c.strongBeats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.strongBeats", "must be up to 2000 times") }

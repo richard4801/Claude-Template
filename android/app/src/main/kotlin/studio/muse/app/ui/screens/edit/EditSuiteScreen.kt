@@ -239,6 +239,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var savedVideo by remember { mutableStateOf<Uri?>(null) }
     val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { savedVideo = uri; importing = true } }
+    // "Add a photo": the system photo picker (images only; no storage permission).
+    val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.addPhoto(it) } }
     if (importing) studio.muse.app.ui.screens.ImportLinkDialog(studio.muse.app.ui.screens.ImportPurpose.EDIT, file = savedVideo,
         onClose = { importing = false; savedVideo = null }, onPickFile = { importing = false; video.launch("video/*") }) { v ->
         importing = false; savedVideo = null; vm.addImported(v)
@@ -260,6 +262,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
+        addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         autoAdjust = vm::autoAdjust,
         saveKit = vm::saveKit,
         deleteKit = vm::deleteKit,
@@ -557,6 +561,33 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
+    /**
+     * "Add a photo" (owner-approved design pass): the picked image, scaled to 2048 px on the long side at most (PNG when
+     * it has transparency, else JPEG), uploaded as an editor asset and placed over the edit at the playhead.
+     */
+    fun addPhoto(uri: Uri) {
+        viewModelScope.launch {
+            controller.update { it.copy(message = "Adding the photo…") }
+            val made = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return@runCatching null
+                    val k = minOf(1f, 2048f / maxOf(src.width, src.height))
+                    val bmp = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(src, maxOf(1, (src.width * k).roundToInt()), maxOf(1, (src.height * k).roundToInt()), true) else src
+                    val png = bmp.hasAlpha()
+                    val f = File(app.cacheDir, "edit-suite/photo_${System.currentTimeMillis()}.${if (png) "png" else "jpg"}").apply { parentFile?.mkdirs() }
+                    f.outputStream().use { bmp.compress(if (png) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                    Triple(f, if (png) "image/png" else "image/jpeg", bmp.width to bmp.height)
+                }.getOrNull()
+            } ?: return@launch c.repo.toast("Couldn't read that photo")
+            val (f, mime, size) = made
+            val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, mime) } }.getOrElse { null to "Couldn't upload · try again" }
+            if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
+            controller.act(EditAction.AddImage(id, size.first, size.second))
+            controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
+            controller.project?.let { rebuildPreview(it) }
+        }
+    }
+
     // ------------------------------------------------------------ style kits
     private fun kitsOf(list: List<studio.muse.app.data.EditKit>) = list.mapNotNull { k -> runCatching { KitChoice(k.id, k.name, studio.muse.core.edit.parseKit(k.kit)) }.getOrNull() }
 
@@ -667,6 +698,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         } catch (e: Exception) { r.release(); f.delete(); c.repo.toast("Couldn't start the microphone · try again"); return }
         recorder = r; voFile = f
         controller.update { it.copy(recordingAt = it.playheadSec) }
+        // Hearing the video while recording: the preview plays from the playhead with the edit's sound.
+        val route = outputRoute()
+        voLatency = if (controller.ui.value.voPlayback ?: route.headphones) route.latencySec else null
+        if (voLatency != null) controller.setPlayback(controller.ui.value.playheadSec, true)
     }
 
     /** Stops the voice-over and adds it to the Voice-over lane where recording started. */
@@ -675,11 +710,33 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val f = voFile
         val at = controller.ui.value.recordingAt
         recorder = null; voFile = null
+        val lag = voLatency ?: 0.0
+        voLatency = null
+        if (controller.ui.value.playing) pause()
         val ok = runCatching { r.stop() }.isSuccess
         r.release()
         controller.update { it.copy(recordingAt = null) }
         if (!ok || f == null || f.length() == 0L) { f?.delete(); c.repo.toast("That recording was too short · hold on a little longer"); return }
-        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at)
+        // Heard late by the output's latency, the voice is late by it too: the take goes that much earlier.
+        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at?.let { maxOf(0.0, it - lag) })
+    }
+
+    /** While recording with the video playing: the output route's latency (s); null when the video isn't playing. */
+    private var voLatency: Double? = null
+
+    data class OutputRoute(val headphones: Boolean, val latencySec: Double)
+
+    /**
+     * The current audio output: headphones (wired, USB, Bluetooth) or the speaker, and its latency. Android has no
+     * public output-latency API, so the latency is the typical figure for the route (Bluetooth about 200 ms, wired and
+     * USB about 20 ms); measured per route on a device later if the takes drift.
+     */
+    fun outputRoute(): OutputRoute {
+        val am = app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+        val outs = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
+        val bt = outs.any { it == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || (Build.VERSION.SDK_INT >= 31 && it == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET) }
+        val wired = outs.any { it == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET || it == android.media.AudioDeviceInfo.TYPE_USB_HEADSET }
+        return OutputRoute(bt || wired, if (bt) 0.2 else if (wired) 0.02 else 0.0)
     }
 
     fun importCube(uri: Uri) {
