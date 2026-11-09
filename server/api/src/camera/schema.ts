@@ -138,9 +138,16 @@ export const claudeThreads = pgTable('claude_threads', {
   contextKind: text('context_kind').notNull().$type<'camera' | 'edit' | 'recreate' /* workstream 1: a Recreate reference */ | 'suite' /* workstream 1: a Suite shot Claude sets up */>(),
   contextId: text('context_id').notNull(),
   claudeSessionId: text('claude_session_id'),
+  /**
+   * WS18 (migration 0028): the list of chats this thread belongs to, so each place has its own sessions: `suite:<tool>`
+   * for the AI Suite's modes (suite:shot, suite:photo, …), `<kind>:<contextId>` for Recreate, Edit and Camera.
+   */
+  contextKey: text('context_key'),
+  /** The chat's name: set by the owner (rename), else taken from the first message. */
+  title: text('title'),
   createdAt: ms('created_at').notNull(),
   updatedAt: ms('updated_at').notNull(),
-}, t => [uniqueIndex('claude_threads_context_idx').on(t.ownerId, t.contextKind, t.contextId)]);
+}, t => [index('claude_threads_context_idx').on(t.ownerId, t.contextKind, t.contextId), index('claude_threads_key_idx').on(t.ownerId, t.contextKey, t.updatedAt)]);
 
 export const claudeMessages = pgTable('claude_messages', {
   id: text('id').primaryKey(),
