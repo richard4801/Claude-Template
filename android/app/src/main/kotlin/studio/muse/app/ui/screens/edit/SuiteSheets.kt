@@ -812,7 +812,12 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual } ?: ui.activeClip)?.id
     val v = id?.let { i -> p.tracks.flatMap { it.items }.firstOrNull { it.id == i } } as? Visual
-    if (ui.filtersTab == "Adjust") return AdjustBody(v, host, act)
+    if (ui.filtersTab == "Adjust") {
+        // Item-local playhead, for colour keyframes.
+        val local = ui.project?.let { p -> (v as? studio.muse.core.edit.Item)?.id?.let { id -> p.locate(id)?.let { (t, i) -> itemSpan(p, t, t.items[i]) } } }
+            ?.let { sp -> (ui.playheadSec - sp.startSec).takeIf { it >= -1e-6 && ui.playheadSec <= sp.endSec + 1e-6 } }
+        return AdjustBody(v, host, act, local)
+    }
     val look = v?.look
     val current = look?.lut?.removePrefix("pack:")
     androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -868,13 +873,26 @@ private fun lookSwatch(l: LookChoice): List<Color> = when (l.category) {
 }
 
 @Composable
-private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit) {
+private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit, local: Double? = null) {
+    val m = muse
     val a = v?.adjust
     SuiteButton("Auto adjust", host.autoAdjust, Modifier.fillMaxWidth(), icon = "sliders", enabled = v != null)
     @Composable
-    fun row(label: String, field: String, value: Double) {
+    fun row(label: String, field: String, static: Double) {
+        // A colour field with keyframes shows (and sets) its value at the playhead; ◆ adds a key there.
+        val kp = KfProp.COLOR.firstOrNull { it.wire == field }
+        val keys = kp?.let { v?.keyframes?.get(it) }
+        val value = if (!keys.isNullOrEmpty() && local != null) studio.muse.core.edit.keyframeValue(keys, local) else static
         val n = (value * 100).roundToInt()
-        SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.AdjustField(field, f * 2.0 - 1, done)) }, label = label, valueText = signed(n), enabled = v != null)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.AdjustField(field, f * 2.0 - 1, done)) }, Modifier.weight(1f), label = label, valueText = signed(n), enabled = v != null)
+            if (kp != null) {
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(48.dp).press(enabled = v != null && local != null) { act(EditAction.AddKeyframe(kp)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+                    EIc(if (keys.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys.isNullOrEmpty()) m.t.muted else m.t.accent)
+                }
+            }
+        }
     }
     row("Exposure", "exposure", a?.exposure ?: 0.0)
     row("Contrast", "contrast", a?.contrast ?: 0.0)

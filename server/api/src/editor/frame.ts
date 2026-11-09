@@ -94,12 +94,14 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
     if (lookRef.startsWith('pack:') || lookRef.startsWith('palette:')) lut = packLut(lookRef);
     else { const a = p.assets.find(x => x.id === lookRef); if (a?.upload) lut = await lutOfUpload(ctx, studioId, a.upload).catch(() => null); }
   }
-  const hasColour = clip.look || clip.filter || clip.adjust;
+  // Colour keyframes: the adjust at this frame.
+  const adj = M.adjustAt(clip, t - spans[k]!.startSec);
+  const hasColour = clip.look || clip.filter || adj;
   if (hasColour) {
     const f = new Float32Array(W * H * 3);
     for (let i = 0; i < f.length; i++) f[i] = rgb[i]! / 255;
     const out = renderLook({ width: W, height: H, data: f }, clip.look ?? {}, {
-      matrix: M.colorMatrix(clip.adjust, clip.filter, FILTERS), tone: clip.adjust ? { shadows: clip.adjust.shadows, highlights: clip.adjust.highlights } : null,
+      matrix: M.colorMatrix(adj, clip.filter, FILTERS), tone: adj ? { shadows: adj.shadows, highlights: adj.highlights } : null,
       lut, frame: Math.round(t * p.canvas.fps), fps: p.canvas.fps,
     });
     for (let i = 0; i < out.data.length; i++) rgb[i] = Math.round(out.data[i]! * 255);

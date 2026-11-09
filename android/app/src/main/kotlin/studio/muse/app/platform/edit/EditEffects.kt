@@ -43,6 +43,18 @@ class ColorMatrixEffect(rowMajor3x4: List<Double>) : RgbMatrix {
     override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = m
 }
 
+/**
+ * Colour keyframes: [at] gives the 3×4 row-major matrix for a presentation time (µs), as [ColorMatrixEffect] lays it
+ * out. The presentation time is taken to be the composition's, as the transition and matte effects do.
+ */
+@OptIn(UnstableApi::class)
+class TimedColorMatrixEffect(private val at: (Long) -> List<Double>) : RgbMatrix {
+    override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+        val m = at(presentationTimeUs)
+        return FloatArray(16).also { out -> for (row in 0 until 3) for (col in 0 until 4) out[col * 4 + row] = m[row * 4 + col].toFloat(); out[15] = 1f }
+    }
+}
+
 /** The chroma key (studio.muse.core.edit.ChromaKey, same formula) as a GL shader effect. */
 @OptIn(UnstableApi::class)
 class ChromaKeyEffect(private val key: Chroma) : GlEffect {

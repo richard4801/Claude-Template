@@ -269,4 +269,26 @@ class EditSmallRowsTest {
         c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.TYPEWRITER, 1.0), null))
         assertEquals(studio.muse.core.edit.AnimKind.FADE, c.p().mainClips[0].animIn!!.kind)
     }
+
+    @Test fun colourKeyframes() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.EXPOSURE))
+        c.act(EditAction.Scrub(5.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.EXPOSURE))
+        // A keyed slider sets the key at the playhead.
+        c.act(EditAction.AdjustField("exposure", .6))
+        val keys = c.p().mainClips[0].keyframes!![studio.muse.core.edit.KfProp.EXPOSURE]!!
+        assertEquals(listOf(1.0 to 0.0, 5.0 to 0.6), keys.map { it.t to it.v })
+        assertNull(c.p().mainClips[0].adjust) // the static value stays as it was
+        valid(c.p())
+        // The plan: a per-frame matrix that brightens over time.
+        val plan = planRender(c.p(), infos)
+        val look = plan.layers.flatMap { it.clips }.first { it.itemId == id }.look!!
+        val keysOf = look.colorKeys!!
+        assertEquals(1.0, keysOf.matrixAt(1.0)[0], 1e-9)
+        assertEquals(Math.pow(2.0, .6), keysOf.matrixAt(5.0)[0], 1e-6)
+        // Unkeyed fields still take the static value.
+        c.act(EditAction.AdjustField("contrast", .2)); assertEquals(.2, c.p().mainClips[0].adjust!!.contrast!!, 1e-9)
+    }
 }

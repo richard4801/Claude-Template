@@ -7,7 +7,10 @@ import { hash01, lookProblem, type Look } from './look.js';
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
 export type Keyframe = { t: number; v: number; ease?: Ease };
-export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
+export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume' | ColorKfProp;
+/** Colour keyframes (M): replace the adjust field's static value over time (`adjustAt`). Video clips and images. */
+export type ColorKfProp = 'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint';
+export const COLOR_KF_PROPS: ColorKfProp[] = ['exposure', 'contrast', 'saturation', 'temperature', 'tint'];
 export type Keyframes = Partial<Record<KfProp, Keyframe[]>>;
 /** flipX / flipY (wave 1, mirror): the picture mirrored about its own centre, after the crop and before scale and rotation. */
 export type Transform = { x?: number; y?: number; scale?: number; rotation?: number; flipX?: boolean; flipY?: boolean };
@@ -137,6 +140,15 @@ export function keyframeValue(keys: Keyframe[], t: number): number {
 export function propAt(item: { keyframes?: Keyframes }, prop: KfProp, fallback: number, t: number) {
   const k = item.keyframes?.[prop];
   return k && k.length ? keyframeValue(k, t) : fallback;
+}
+
+/** The item's adjust at item-local t: each keyed colour property ([COLOR_KF_PROPS]) at its keyframes' value there. */
+export function adjustAt(item: { adjust?: Adjust; keyframes?: Keyframes }, t: number): Adjust | undefined {
+  const keyed = COLOR_KF_PROPS.filter(p => item.keyframes?.[p]?.length);
+  if (!keyed.length) return item.adjust;
+  const out: Adjust = { ...(item.adjust ?? {}) };
+  for (const p of keyed) out[p] = r6(propAt(item, p, item.adjust?.[p] ?? 0, t));
+  return out;
 }
 
 // ------------------------------------------------------------------ timeline
@@ -760,7 +772,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.t`, kf.t, 0, len + LIMITS.endSlackSec, false);
         if (kf.t < prev) bad(`${g}.t`, 'keyframes must be in time order');
         prev = kf.t;
-        const range: Record<KfProp, [number, number]> = { x: [-2, 3], y: [-2, 3], scale: [0.05, 10], rotation: [-3600, 3600], opacity: [0, 1], volume: [0, 2] };
+        const range: Record<KfProp, [number, number]> = { x: [-2, 3], y: [-2, 3], scale: [0.05, 10], rotation: [-3600, 3600], opacity: [0, 1], volume: [0, 2],
+          exposure: [-1, 1], contrast: [-1, 1], saturation: [-1, 1], temperature: [-1, 1], tint: [-1, 1] };
         num(`${g}.v`, kf.v, range[prop as KfProp][0], range[prop as KfProp][1], false);
         if (kf.ease !== undefined && !['linear', 'easeIn', 'easeOut', 'easeInOut', 'hold'].includes(kf.ease)) bad(`${g}.ease`, 'unknown ease');
       });
@@ -877,7 +890,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
           if (sc.points[0]![0] !== 0 || sc.points[sc.points.length - 1]![0] !== 1) bad(`${g}.speedCurve.points`, 'must start at x 0 and end at x 1');
         }
         visual(g, c, clipLength(c));
-        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']);
+        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume', ...COLOR_KF_PROPS]);
         if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
         if (c.alphaMatte !== undefined) {
           const m = c.alphaMatte as AlphaMatte;
@@ -915,7 +928,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.startSec`, im.startSec, 0, 600, false); num(`${g}.durationSec`, im.durationSec, LIMITS.minItemSec, 600, false);
         visual(g, im, im.durationSec);
         blend(g, im.blend, true);
-        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
+        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity', ...COLOR_KF_PROPS]);
         anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false);
       } else if (t.kind === 'text') {
         const tx = it as TextItem;

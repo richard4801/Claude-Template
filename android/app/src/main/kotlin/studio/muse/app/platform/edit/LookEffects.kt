@@ -57,6 +57,8 @@ object LookEffects {
         data class Chromatic(val amount: Double) : Stage
         /** The colour matrix alone (3×4 row-major). */
         data class Matrix(val rowMajor3x4: List<Double>) : Stage
+        /** Colour keyframes: the matrix per frame, from the effect's presentation time (µs). */
+        class TimedMatrix(val at: (Long) -> List<Double>) : Stage
         /** Steps 3–6 baked: [cube] is [size]³ rgb triples in Media3's [R][G][B] order. */
         class BakedLut(val size: Int, val cube: FloatArray) : Stage
         data class Halo(val halation: Halation) : Stage
@@ -70,13 +72,17 @@ object LookEffects {
      * The stages for an item: [matrix] = its colour matrix (null = identity), [look] its look, [lut] the resolved LUT of
      * `look.lut` (null when it has none or it could not be loaded — the rest of the look still applies).
      */
-    fun stages(matrix: List<Double>?, look: Look?, lut: Lut?, fps: Double, tone: Tone? = null): List<Stage> = buildList {
+    fun stages(matrix: List<Double>?, look: Look?, lut: Lut?, fps: Double, tone: Tone? = null, timed: ((Long) -> List<Double>)? = null): List<Stage> = buildList {
         val l = look ?: Look()
         (l.sharpen ?: 0.0).coerceIn(0.0, 1.0).takeIf { it > 0 }?.let { add(Stage.Sharpen(it)) }
         (l.chromatic ?: 0.0).coerceIn(0.0, 1.0).takeIf { it > 0 }?.let { add(Stage.Chromatic(it)) }
         // Edit suite: highlights/shadows (tone) sit right after the matrix, so they go into the bake with the rest.
         val colour = ColorStack(null, l, lut, tone)
-        if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, ColorStack(matrix, l, lut, tone).bakeCube(BAKE_SIZE)))
+        if (timed != null) {
+            // A matrix that changes over time can't be baked: it runs on its own, then the rest of the colour as a LUT.
+            add(Stage.TimedMatrix(timed))
+            if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, colour.bakeCube(BAKE_SIZE)))
+        } else if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, ColorStack(matrix, l, lut, tone).bakeCube(BAKE_SIZE)))
         else if (matrix != null) add(Stage.Matrix(matrix))
         l.halation?.takeIf { it.amount > 0 }?.let { add(Stage.Halo(it)) }
         val leak = l.leak?.takeIf { it.amount > 0 }
@@ -91,6 +97,7 @@ object LookEffects {
             is Stage.Sharpen -> SharpenEffect(s.amount)
             is Stage.Chromatic -> ChromaticEffect(s.amount)
             is Stage.Matrix -> ColorMatrixEffect(s.rowMajor3x4)
+            is Stage.TimedMatrix -> TimedColorMatrixEffect(s.at)
             is Stage.BakedLut -> SingleColorLut.createFromCube(argbCube(s.size, s.cube))
             is Stage.Halo -> HalationEffect(s.halation)
             is Stage.Finish -> LookFinishEffect(s.leak, s.vignette, s.grain, s.fps)
