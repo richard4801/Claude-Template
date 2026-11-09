@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import MuseCore
 import Observation
 import SwiftUI
@@ -179,6 +180,12 @@ extension AppStore {
                 clip = c
                 clipFile = nil
                 clipThumb = c.thumb
+                // No poster: the file's first frame (owner bug 2026-11-09: a chosen clip showed a blank slot).
+                if c.thumb == nil, let v = r.videoUrl.flatMap(URL.init(string:)) {
+                    Task {
+                        if let still = await Self.firstFrame(v), clip?.id == c.id { clipThumb = still }
+                    }
+                }
                 openTool(.swap)
                 showToast(r.cached ? "You imported this link before: \(c.name) is the clip to swap into now." : "Imported \(c.name). It's the clip to swap into now.")
             } else {
@@ -195,6 +202,19 @@ extension AppStore {
             showToast(r.clip.map { "Imported \($0.name). It's in Uploads." } ?? "Imported. It's in Uploads.")
             Task { await forceReload() }
         }
+    }
+
+    /// A video's first frame as a still on disk (an import without a poster), or nil.
+    nonisolated static func firstFrame(_ url: URL) async -> ImageRef? {
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 640, height: 640)
+        guard let cg = try? await gen.image(at: .zero).image else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { return nil }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("muse-import-\(UUID().uuidString).jpg")
+        guard (try? data.write(to: file)) != nil else { return nil }
+        return ImageRef(url: file.absoluteString)
     }
 
     /// A link dropped or pasted where a clip goes: imported for that purpose.

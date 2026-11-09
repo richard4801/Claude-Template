@@ -706,7 +706,7 @@ final class AppStore {
         if isOwner, e.type == "prompts", let p = LiveEvents.applyPrompts(&promptLibrary, e) { promptChanged(p) }
         // Prompt scripts (workstream 4): a script saved or reset elsewhere; a late `clip` event with the talking detection.
         if isOwner, e.type == "promptScript", let v = LiveEvents.applyPromptScript(&scriptList, e) { promptScriptChanged(v) }
-        if e.type == "clip", let c = e.clip, c.id == clip?.id { clip = c }
+        if e.type == "clip", let c = e.clip, c.id == clip?.id { clip = (api as? HTTPMuseAPI)?.absolutize(c) ?? c }
         if e.type == "settings", let st = e.settings {
             studioSettings = st
             syncQualityWithServer()

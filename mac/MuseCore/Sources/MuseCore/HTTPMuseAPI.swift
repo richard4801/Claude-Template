@@ -283,14 +283,14 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         progress?(0)
         if let file, let clip: Clip = try await presigned(kind: "clip", contentType: HTTPMuseAPI.videoType(file), body: .file(file), meta: meta, progress: progress) {
             progress?(1)
-            return clip
+            return absolutize(clip)
         }
         var form = Multipart()
         form.addField("meta", value: try encoder.encode(meta), mime: "application/json")
         if let file { form.addFile("file", filename: file.lastPathComponent, mime: HTTPMuseAPI.videoType(file), data: try Data(contentsOf: file)) }
         let clip: Clip = try decode(try await send(request("POST", "v1/uploads/clips", body: form.finish(), contentType: form.contentType)))
         progress?(1)
-        return clip
+        return absolutize(clip)
     }
 
     static func videoType(_ file: URL) -> String {
@@ -660,6 +660,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func listArchivedModels() async throws -> [MuseModel] { (try await call("GET", "v1/models?archived=true") as [MuseModel]).map(absolutize) }
 
     func absolutize(_ r: ImageRef?) -> ImageRef? { r.map(absolutize) }
+    /// A clip's thumb ("/uploads/…" for imports) made absolute, so the Swap slot and canvas can show it.
+    public func absolutize(_ c: Clip) -> Clip {
+        var x = c
+        x.thumb = absolutize(c.thumb)
+        return x
+    }
     func absolutize(_ s: SheetSlot) -> SheetSlot {
         var s = s
         s.image = absolutize(s.image)

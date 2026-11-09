@@ -33,6 +33,8 @@ public struct LinkImportResult: Decodable, Sendable {
     public var platform: String?
     /// The storage key a Suite reference video uses (`{key: videoKey}`), and the upload Edit's media bin uses.
     public var videoKey: String?
+    /// The imported file (for its first frame when there's no poster).
+    public var videoUrl: String?
     public var uploadId: String?
     /// The link was imported before: this is that import (no download happened).
     public var cached: Bool
@@ -47,7 +49,7 @@ public struct LinkImportResult: Decodable, Sendable {
         self.cached = cached
     }
 
-    enum CodingKeys: String, CodingKey { case clip, take, sourceUrl, platform, videoKey, uploadId, cached, posterUrl }
+    enum CodingKeys: String, CodingKey { case clip, take, sourceUrl, platform, videoKey, uploadId, cached, posterUrl, videoUrl }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         if c.contains(.clip) || c.contains(.take) {
@@ -62,6 +64,7 @@ public struct LinkImportResult: Decodable, Sendable {
         sourceUrl = c.o(.sourceUrl)
         platform = c.o(.platform)
         videoKey = c.o(.videoKey)
+        videoUrl = c.o(.videoUrl)
         uploadId = c.o(.uploadId)
         cached = c.v(.cached, false)
     }
@@ -150,7 +153,9 @@ extension HTTPMuseAPI: LinkImportAPI {
     public func linkImportSettings() async throws -> RecreateLinkSettings { try await suiteCall("GET", "v1/links/settings") }
 
     public func checkImportLink(_ url: String) async throws -> LinkImportCheck {
-        try await suiteCall("POST", "v1/links/check", body: try JSONEncoder().encode(CheckBody(url: url)))
+        var c: LinkImportCheck = try await suiteCall("POST", "v1/links/check", body: try JSONEncoder().encode(CheckBody(url: url)))
+        c.cached = c.cached.map(absolutized)
+        return c
     }
 
     public func importVideo(file: URL, contentType: String, sourceUrl: String, name: String?, progress: UploadProgress?) async throws -> LinkImportResult {
@@ -159,11 +164,21 @@ extension HTTPMuseAPI: LinkImportAPI {
             throw ApiError("not_found", "This server can't take imported videos yet")
         }
         progress?(1)
-        return try await suiteCall("POST", "v1/imports", body: try JSONEncoder().encode(ImportBody(uploadId: uploadId, sourceUrl: sourceUrl, name: name)))
+        let r: LinkImportResult = try await suiteCall("POST", "v1/imports", body: try JSONEncoder().encode(ImportBody(uploadId: uploadId, sourceUrl: sourceUrl, name: name)))
+        return absolutized(r)
     }
 
     public func importLink(_ sourceUrl: String, name: String?) async throws -> LinkImportResult {
-        try await suiteCall("POST", "v1/imports", body: try JSONEncoder().encode(FetchBody(url: sourceUrl, name: name)))
+        let r: LinkImportResult = try await suiteCall("POST", "v1/imports", body: try JSONEncoder().encode(FetchBody(url: sourceUrl, name: name)))
+        return absolutized(r)
+    }
+
+    /// Imports' "/uploads/…" poster made absolute (WS12 serves them relative).
+    func absolutized(_ r: LinkImportResult) -> LinkImportResult {
+        var x = r
+        x.clip = r.clip.map { absolutize($0) }
+        x.videoUrl = r.videoUrl.flatMap { $0.hasPrefix("/") ? resolve($0)?.absoluteString : $0 }
+        return x
     }
 }
 
