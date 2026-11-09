@@ -8,7 +8,7 @@ final class EditV2ColorKeysTests: XCTestCase {
 
     func testAdjustAtAndMatrix() throws {
         let cases = try editorFixture("functions")["colorKeys"].array
-        XCTAssertEqual(cases.count, 2)
+        XCTAssertEqual(cases.count, 4)
         for c in cases {
             let item = c["item"]
             let adjust = item["adjust"].isNull ? nil : try item["adjust"].decode(E.Adjust.self)
@@ -29,6 +29,17 @@ final class EditV2ColorKeysTests: XCTestCase {
                 XCTAssertEqual(m.count, wm.count)
                 for (g, e) in zip(m, wm) { XCTAssertEqual(g, e, accuracy: 1e-5, "matrix at t \(t)") }
             }
+        }
+    }
+
+    /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
+    func testAutoAdjustFixtures() throws {
+        let cases = try editorFixture("functions")["autoAdjust"].array
+        XCTAssertEqual(cases.count, 4)
+        for c in cases {
+            let base = c["base"].isNull ? nil : try c["base"].decode(E.Adjust.self)
+            let got = E.autoAdjust(c["rgb"].array.compactMap(\.double), base: base)
+            XCTAssertEqual(got, try c["out"].decode(E.Adjust.self), c["name"].string ?? "")
         }
     }
 
