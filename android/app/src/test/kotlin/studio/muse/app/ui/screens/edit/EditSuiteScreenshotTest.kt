@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -195,6 +195,32 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 c.act(EditAction.PickAt(.3, .55, done = false))
                 ui = c.ui.value.copy(message = null)
             }
+            "c_stickers", "c_sfx", "c_fonts" -> {
+                // The content library from the server's real catalog, with its files on "this phone" (the repo's copy).
+                val dir = java.io.File("../../server/api/assets/content")
+                val cat = studio.muse.app.platform.edit.ContentCatalog.parse(java.io.File(dir, "catalog.json").readText())
+                studio.muse.app.platform.edit.ContentLibrary.catalog = cat
+                val here = cat.packs.flatMap { it.items }.flatMap { listOfNotNull(it.file) + ((it.raw["files"] as? kotlinx.serialization.json.JsonObject)?.values?.mapNotNull { v -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty()) }
+                here.forEach { studio.muse.app.platform.edit.ContentLibrary.register(it, java.io.File(dir, it)) }
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 1.0, selectedId = null, content = cat, contentHere = here.toSet()))
+                when (state) {
+                    "c_fonts" -> {
+                        c.act(EditAction.AddText); val tid = c.ui.value.selectedId!!
+                        c.act(EditAction.EditText(tid, "Привет, Lisbon"))
+                        val st = (c.project!!.tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).style
+                        c.act(EditAction.SetTextStyle(tid, st.copy(font = studio.muse.core.edit.Font.UNBOUNDED, weight = 900)))
+                        c.act(EditAction.Open(Panel.TEXT))
+                    }
+                    "c_sfx" -> { c.act(EditAction.Open(Panel.AUDIO)) }
+                    else -> c.act(EditAction.Open(Panel.OVERLAY))
+                }
+                ui = c.ui.value.copy(message = null)
+                host = host.copy(contentUrl = { path -> java.io.File(dir, path).absolutePath }, addContent = {}, soundPlaying = if (state == "c_sfx") "content:uisfx/cinematic-success" else null)
+            }
             "m_reverse" -> {
                 // The reversed copy already in the edit: the toggle swaps to it.
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true)).let { o ->
@@ -313,6 +339,14 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 else if (state == "m_curves") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
                     // The curves editor on its own (in the phone sheet it sits below the fold).
                     CurvesEditor(ui.project!!.mainClips[0].look?.curves, true) {}
+                }
+                else if (state == "c_stickers" || state == "c_sfx") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
+                    // The pickers on their own (in the sheet they sit under the panel's other tools).
+                    androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        SuiteLabel(if (state == "c_sfx") "Sound effects" else "Stickers")
+                        if (state == "c_sfx") SoundEffectPicker(ui.content!!, host.soundPlaying, {}, {})
+                        else StickerPicker(ui.content!!, host.contentUrl, {})
+                    }
                 }
                 else if (state == "m_hsl") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
                     // The HSL section on its own (in the phone sheet it sits below the fold), on the red band.

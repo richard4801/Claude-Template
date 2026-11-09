@@ -51,7 +51,7 @@ describe('edit content library', () => {
     expect(contentItem('content:twemoji/1f600')!.item.name).toBe('grinning face');
     expect(contentItem('content:twemoji/nope')).toBeNull();
     expect(contentItem('music_upbeat_01')).toBeNull();
-    expect(contentFile('content:uisfx/glass-select')).toMatch(/sfx\/uisfx\/glass-select\.m4a$/);
+    expect(contentFile('content:uisfx/glass-notification')).toMatch(/sfx\/uisfx\/glass-notification\.m4a$/);
     expect(contentFont('jetbrainsMono', 900)).toMatch(/jetbrainsMono_900\.ttf$/);
     expect(contentFont('caveat', 500)).toMatch(/caveat_400\.ttf$/);
     expect(contentFont('sans', 400)).toBeNull();
@@ -61,7 +61,7 @@ describe('edit content library', () => {
     const studio = ((await a.ctx.db.execute(sql`select studio_id from users limit 1`)) as any).rows[0].studio_id;
     await a.ctx.db.insert(takes).values({ id: 'take_c', studioId: studio, userId: null, kind: 'take', jobId: null, modelId: null, index: 1, of: 1, title: 't', label: 'HD',
       engineLabel: '', cost: 0, seed: 0, status: 'test', thumb: null, prompt: '', mediaKey: 'c/take_c.mp4', media: { durationSec: 6 }, createdAt: Date.now() });
-    const project = (sticker: string, fx = 'content:uisfx/glass-select') => {
+    const project = (sticker: string, fx = 'content:uisfx/glass-notification') => {
       const p = M.fromV1({ version: 1, sourceTakeId: 'take_c', sourceDurationSec: 6, segments: [{ inSec: 0, outSec: 6, speed: 1 }], mute: false }, { width: 1080, height: 1920, fps: 30 });
       p.assets.push({ id: 'st', kind: 'image', library: sticker, width: 160, height: 160 }, { id: 'fx', kind: 'audio', library: fx, durationSec: 0.5 });
       p.tracks.push({ id: 'im', kind: 'image', items: [{ id: 'i1', asset: 'st', startSec: 0, durationSec: 2 }] }, { id: 'sf', kind: 'sfx', items: [{ id: 'a1', asset: 'fx', startSec: 1, inSec: 0, outSec: 0.5 }] } as M.Track);
