@@ -123,10 +123,17 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             val a = assets[c.asset]
             if (a == null || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) bad("$f.caption.asset", "must be a video or audio asset")
             if (c.words.size > EditLimits.MAX_WORDS) bad("$f.caption.words", "at most ${EditLimits.MAX_WORDS} words")
-            c.words.forEachIndexed { j, w ->
-                if (w.text.isEmpty() || w.text.length > 60) bad("$f.caption.words.$j.text", "must be 1–60 characters")
-                num("$f.caption.words.$j.startSec", w.startSec, 0.0, 36_000.0, false)
-                num("$f.caption.words.$j.endSec", w.endSec, w.startSec, 36_000.0, false)
+            fun words(ws: List<CaptionWord>, g: String) = ws.forEachIndexed { j, w ->
+                if (w.text.isEmpty() || w.text.length > 60) bad("$g.$j.text", "must be 1–60 characters")
+                num("$g.$j.startSec", w.startSec, 0.0, 36_000.0, false)
+                num("$g.$j.endSec", w.endSec, w.startSec, 36_000.0, false)
+            }
+            words(c.words, "$f.caption.words")
+            c.language?.let { if (!LANGUAGE_CODE.matches(it)) bad("$f.caption.language", "must be a language code") }
+            c.original?.let { o ->
+                if (o.words.size > EditLimits.MAX_WORDS) bad("$f.caption.original.words", "at most ${EditLimits.MAX_WORDS} words")
+                words(o.words, "$f.caption.original.words")
+                o.language?.let { if (!LANGUAGE_CODE.matches(it)) bad("$f.caption.original.language", "must be a language code") }
             }
             textStyle("$f.caption.style", c.style.text, ownFont = false)
             color("$f.caption.style.highlightColor", c.style.highlightColor, false)

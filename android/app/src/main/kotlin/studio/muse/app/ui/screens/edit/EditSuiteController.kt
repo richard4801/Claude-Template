@@ -275,6 +275,11 @@ sealed interface EditAction {
     data class Stabilize(val on: Boolean) : EditAction
     /** Smooth slow motion (2026-11-09, paid): [lengthSec] of the clip's source from the playhead, made [factor]× slower. */
     data class SlowmoPrice(val factor: Int, val lengthSec: Double) : EditAction
+    /** Translated captions (2026-11-09, paid): the captions in [language]; [best] is the higher-quality option. */
+    data class TranslatePrice(val language: String, val best: Boolean) : EditAction
+    data class Translate(val language: String, val best: Boolean) : EditAction
+    /** Translated captions: show the words in [language] (the translation's or the original's; null: the original's if it had none). */
+    data class CaptionOriginal(val language: String?) : EditAction
     data class Slowmo(val factor: Int, val lengthSec: Double) : EditAction
     /** HSL per hue on the picture the Adjust panel acts on: [band]'s [field] (hue, sat or light) to [value] (−1…1); a null [band] resets every band. */
     data class SetHsl(val band: studio.muse.core.edit.HueBand?, val field: String = "", val value: Double = 0.0, val done: Boolean = true) : EditAction
@@ -434,7 +439,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -889,6 +894,14 @@ class EditSuiteController(
             is EditAction.Stabilize -> stabilize(u, a.on)
             is EditAction.SlowmoPrice -> slowmoRange(u, a.lengthSec)?.let { (_, asset, r) -> estimate("slowmo", slowmoOptions(a.factor, r), sourceOf(asset)) }
             is EditAction.Slowmo -> slowmo(u, a.factor, a.lengthSec)
+            is EditAction.TranslatePrice -> captionSource()?.let { estimate("translate", translateOptions(a.language, a.best), it) }
+            is EditAction.Translate -> translate(a.language, a.best)
+            // Two languages, either shown: switching swaps the words with the kept ones.
+            is EditAction.CaptionOriginal -> change { p ->
+                val t = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION } ?: return@change null
+                val ct = t.caption?.takeIf { it.original != null } ?: return@change null
+                if (ct.language == a.language) null else p.copy(tracks = p.tracks.map { if (it === t) it.copy(caption = studio.muse.core.edit.swapCaptionOriginal(ct)) else it })
+            }
             is EditAction.ApplyReframe -> {
                 if (a.keys.isEmpty()) return
                 val moving = a.keys.size > 1
@@ -1088,7 +1101,7 @@ class EditSuiteController(
             val (result, err) = if (model == null) backend.run(kind, src, options, progress) else backend.run(kind, src, options, model, progress)
             setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
             if (result != null) {
-                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; "stabilize" -> "Stabilise"; "slowmo" -> "Smooth slow motion"; else -> "Edit" }
+                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; "stabilize" -> "Stabilise"; "slowmo" -> "Smooth slow motion"; "translate" -> "Translate captions"; else -> "Edit" }
                 apply(result)
             } else if (err != null) say(err)
         }
@@ -1110,7 +1123,12 @@ class EditSuiteController(
                 CaptionWord(text, s, maxOf(s, e))
             }
             if (words.isEmpty()) say("No speech found in this video")
-            else if (change { SuiteOps.withCaptions(it, asset.id, words) }) say("Captions added · ${words.size} words")
+            else {
+                // The speech's language, kept on the track (translated captions name it).
+                val lang = (r["language"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) }
+                if (change { pp -> SuiteOps.withCaptions(pp, asset.id, words).let { np -> np.copy(tracks = np.tracks.map { t -> if (t.kind == TrackKind.CAPTION) t.copy(caption = t.caption?.copy(language = lang, original = null)) else t }) } })
+                    say("Captions added · ${words.size} words")
+            }
         }
     }
 
@@ -1378,6 +1396,42 @@ class EditSuiteController(
                 }) say(done)
             val id = newId
             if (id != null && url != null) backend.assetArrived(id, url)
+        }
+    }
+
+    /** The caption track's asset as a helper source (translate works from that video's speech). */
+    private fun captionSource(): EditorSourceDto? = project?.let { p -> p.tracks.firstOrNull { it.kind == TrackKind.CAPTION }?.caption?.let { sourceOf(p.asset(it.asset)) } }
+
+    private fun translateOptions(language: String, best: Boolean) = buildJsonObject { put("targetLanguage", language); put("quality", if (best) "best" else "standard") }
+
+    /**
+     * Translated captions (paid, the price on the button): the server translates the speech's captions into [language],
+     * timed word by word; the track keeps the words they came from, so either language can be shown. Style and the
+     * rest of the track stay.
+     */
+    private fun translate(language: String, best: Boolean) {
+        val p = project ?: return
+        val ct = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION }?.caption ?: return say("Add captions first")
+        if (ct.language == language) return say("The captions are already in this language")
+        runAi("translate", translateOptions(language, best), sourceOf(p.asset(ct.asset))) { r ->
+            val words = (r["words"] as? JsonArray).orEmpty().mapNotNull { w ->
+                val o = w as? JsonObject ?: return@mapNotNull null
+                val text = (o["text"] as? JsonPrimitive)?.content?.trim()?.take(60)?.ifEmpty { null } ?: return@mapNotNull null
+                val s = (o["startSec"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
+                val e = (o["endSec"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
+                CaptionWord(text, s, maxOf(s, e))
+            }
+            val lang = (r["language"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) } ?: language
+            val from = (r["sourceLanguage"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) }
+            if (words.isEmpty()) return@runAi say("Couldn't translate these captions")
+            if (change(refused = "Couldn't translate these captions") { pp ->
+                    val t = pp.tracks.firstOrNull { it.kind == TrackKind.CAPTION } ?: return@change null
+                    val cur = t.caption ?: return@change null
+                    // While the speech's own language is shown, the kept words are an earlier translation: dropped, so the
+                    // speech's words stay the original (otherwise the first original is kept).
+                    val base = if (cur.original != null && from != null && cur.language == from) cur.copy(original = null) else cur
+                    pp.copy(tracks = pp.tracks.map { if (it === t) it.copy(caption = studio.muse.core.edit.translateCaptions(base, lang, words, from)) else it })
+                }) say("Captions translated · ${words.size} words")
         }
     }
 

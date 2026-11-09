@@ -12,7 +12,7 @@ the vendors' pages as read on 2026-11-09 (links below); anything not confirmed o
 | **Stabilisation** | Our server, ffmpeg vidstab | $0 | M | Crops the edges a little; doesn't fix rolling-shutter wobble |
 | **Auto reframe (follow faces)** | On the device: ML Kit (Android), Vision (Mac) | $0 | M | Picking the right face when several people talk |
 | **Translated captions** | Claude Haiku via our server (Sonnet as "high quality") | ≈ $0.10 (Haiku) to ≈ $2 (Sonnet) | S | Word timing in the new language is spread evenly, not exact |
-| **AI music** | ElevenLabs Music API (licensed training data) | ≈ $23 | M | Licence terms must be read before launch |
+| ~~**AI music**~~ | **Dropped by the owner 2026-11-09** (see §5) | — | — | — |
 | **HDR export** | Mac first (AVFoundation), Android later | $0 | M (Mac), L (Android) | Few Android phones support it; social apps often flatten HDR |
 | **C2PA content credentials** | c2pa SDKs + an SSL.com certificate | $0–500 a year | M, plus weeks of paperwork | TikTok, Instagram and YouTube strip it on upload |
 
@@ -87,7 +87,26 @@ inside a line are spread evenly.
 - **Build size:** S. A server route, one prompt, a language picker and a "translated" caption track.
 - **Recommendation:** Claude Haiku, practically free at our volume, with Sonnet as an optional "best quality" setting.
 
-## 5. AI music
+**Owner's decisions, 2026-11-09 (built by WS16):**
+- **Translation stays on our direct Claude path** (Haiku 5.5 standard, Sonnet 5.5 best). AssemblyAI's built-in translation
+  returns text with no word timing, and its LLM Gateway charges about 10× our direct Claude rate, so no gateway route.
+- **The minimum charge stays $0.01** per translation.
+- **Captions (transcription) go through AssemblyAI** when `ASSEMBLYAI_API_KEY` is set. It's a model the owner can pick in
+  Default models (purpose captions; cuts use it too), and the default once the key is set. Universal-3.5 Pro covers its
+  18 languages at $0.21/hr, and Universal-2 the rest at $0.15/hr. The job settles on the audio length × the model used.
+- **EU host by default** (`ASSEMBLYAI_API_URL` = https://api.eu.assemblyai.com): the same price, and per AssemblyAI's
+  docs EU files are never used for model training. Each transcript is deleted at AssemblyAI as soon as its words are stored.
+- **No live test from the server side:** the owner's first real Captions run in the app is the check.
+
+## 5. AI music: Dropped by the owner 2026-11-09
+
+**Not being built.** Nothing was built on the server: no job, no stubs, no key. The research below is kept for the
+record. The finding that decided it (WS16, from the ElevenLabs Music Terms, read 2026-11-09):
+- The self-serve plans are for individuals or small companies only (Scale: fewer than 10 employees; Business: fewer than 50).
+- Model resale is barred below Enterprise. Members prompting through our app could count as access for third parties
+  (§4.3, §4.8), so building it would have needed written confirmation from ElevenLabs or an Enterprise plan.
+- The plain ordinary music track (members' own audio) is unaffected.
+
 
 **Licences matter more than price here: the music ends up in members' public posts.**
 

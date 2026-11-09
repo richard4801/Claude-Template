@@ -226,6 +226,13 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'font asset with a size', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', width: 10 }); }), ok: false, field: 'edits.assets.3.width' },
   { name: 'font asset name empty', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: ' ' }); }), ok: false, field: 'edits.assets.3.name' },
   { name: 'font asset name too long', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'x'.repeat(81) }); }), ok: false, field: 'edits.assets.3.name' },
+  // Translated captions (2026-11-09).
+  { name: 'translated captions ok', project: mut(p => { const c = captionTrack(); c.caption!.language = 'es'; c.caption!.original = { language: 'en', words: [{ text: 'hello', startSec: 0.1, endSec: 0.5 }] }; p.tracks.push(c); }), ok: true },
+  { name: 'caption language region ok', project: mut(p => { const c = captionTrack(); c.caption!.language = 'pt-BR'; p.tracks.push(c); }), ok: true },
+  { name: 'caption language bad', project: mut(p => { const c = captionTrack(); c.caption!.language = 'Spanish'; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.language' },
+  { name: 'caption original language bad', project: mut(p => { const c = captionTrack(); c.caption!.original = { language: 'EN', words: [] }; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.original.language' },
+  { name: 'caption original word empty', project: mut(p => { const c = captionTrack(); c.caption!.original = { words: [{ text: '', startSec: 0, endSec: 1 }] }; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.original.words.0.text' },
+  { name: 'caption original word backwards', project: mut(p => { const c = captionTrack(); c.caption!.original = { words: [{ text: 'a', startSec: 2, endSec: 1 }] }; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.original.words.0.endSec' },
   { name: 'own font on captions', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font' }); const c = captionTrack(); (c.caption!.style as M.TextStyle).fontAsset = 'fnt'; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.style.fontAsset' },
   { name: 'adjust item on a video track', project: mut(p => { p.tracks.push({ id: 'ovx', kind: 'video', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
   { name: 'video clip on an adjust track', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'v9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 2 }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
@@ -535,6 +542,12 @@ const derived = {
   clip: derivedClip,
   swaps: (['stabilize', null] as ('stabilize' | null)[]).map(op => ({ op, copy: op ? 'src_st' : 'src', clip: M.deriveClip(derivedClip, op ? 'src_st' : 'src', op) })),
 };
+// Translated captions (M): translateCaptions, then again into another language, then swapCaptionOriginal there and back.
+const capBase: M.CaptionTrack = { asset: 'src', words: [{ text: 'Hello', startSec: 0.2, endSec: 0.6 }, { text: 'world', startSec: 0.6, endSec: 1.1 }], style: CAPTION_STYLES.highlight! };
+const capEs = M.translateCaptions(capBase, 'es', [{ text: 'Hola', startSec: 0.2, endSec: 0.6 }, { text: 'mundo', startSec: 0.6, endSec: 1.1 }], 'en');
+const capFr = M.translateCaptions(capEs, 'fr', [{ text: 'Bonjour', startSec: 0.2, endSec: 0.7 }, { text: 'le', startSec: 0.7, endSec: 0.8 }, { text: 'monde', startSec: 0.8, endSec: 1.1 }], 'en');
+const captionTranslate = { base: capBase, es: capEs, fr: capFr, frOriginal: M.swapCaptionOriginal(capFr), frBack: M.swapCaptionOriginal(M.swapCaptionOriginal(capFr)), baseSwap: M.swapCaptionOriginal(capBase),
+  noSource: M.translateCaptions(capBase, 'de', [{ text: 'Hallo', startSec: 0.2, endSec: 1.1 }]) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -579,7 +592,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, derived, slowmo, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { reverse, derived, slowmo, captionTranslate, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

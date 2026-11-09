@@ -100,7 +100,9 @@ object EditJson {
                 }
             },
             caption = o.objOrNull("caption")?.let { c ->
-                CaptionTrack(c.str("asset"), c.arr("words").map { (e, f) -> Obj.of(e, f).let { w -> CaptionWord(w.str("text"), w.num("startSec"), w.num("endSec")) } }, captionStyle(c.obj("style")))
+                fun words(ws: List<Pair<JsonElement, String>>) = ws.map { (e, f) -> Obj.of(e, f).let { w -> CaptionWord(w.str("text"), w.num("startSec"), w.num("endSec")) } }
+                CaptionTrack(c.str("asset"), words(c.arr("words")), captionStyle(c.obj("style")), c.strOrNull("language"),
+                    c.objOrNull("original")?.let { o -> CaptionOriginal(o.strOrNull("language"), words(o.arr("words"))) })
             },
             duck = o.objOrNull("duck")?.let { d ->
                 Duck(d.numOrNull("level"), d.numOrNull("fadeSec"), d.arr("under").map { (e, f) -> Obj.wire<DuckUnder>(e, f, "must list voice and/or speech") },
@@ -269,6 +271,11 @@ object EditJson {
                 put("asset", c.asset)
                 put("words", JsonArray(c.words.map { w -> buildJsonObject { put("text", w.text); num("startSec", w.startSec); num("endSec", w.endSec) } }))
                 put("style", encodeCaptionStyle(c.style))
+                str("language", c.language)
+                c.original?.let { o -> put("original", buildJsonObject {
+                    str("language", o.language)
+                    put("words", JsonArray(o.words.map { w -> buildJsonObject { put("text", w.text); num("startSec", w.startSec); num("endSec", w.endSec) } }))
+                }) }
             })
         }
         t.duck?.let { d ->

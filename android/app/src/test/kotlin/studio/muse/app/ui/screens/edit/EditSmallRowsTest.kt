@@ -492,6 +492,27 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun translatedCaptions() = runTest {
+        val c = controller()
+        c.act(EditAction.AutoCaptions); advanceUntilIdle()
+        fun ct() = c.p().tracks.first { it.kind == TrackKind.CAPTION }.caption!!
+        val en = ct().words
+        assertEquals("en", ct().language)
+        c.act(EditAction.TranslatePrice("es", false)); advanceUntilIdle()
+        assertTrue(c.ui.value.ai["translate"]?.price != null)
+        c.act(EditAction.Translate("es", false)); advanceUntilIdle()
+        assertEquals("es", ct().language); assertEquals(en, ct().original!!.words); assertEquals("en", ct().original!!.language)
+        assertTrue(ct().words.first().text.endsWith("·es"))
+        valid(c.p())
+        // Show the original, then translate into French from there: English stays the original.
+        c.act(EditAction.CaptionOriginal("en"))
+        assertEquals(en, ct().words); assertEquals("es", ct().original!!.language)
+        c.act(EditAction.Translate("fr", true)); advanceUntilIdle()
+        assertEquals("fr", ct().language); assertEquals(en, ct().original!!.words)
+        c.act(EditAction.CaptionOriginal("en")); assertEquals(en, ct().words)
+        valid(c.p())
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

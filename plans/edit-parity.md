@@ -94,7 +94,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |
 | Caption language choice | Has | Missing | S | Server parameter. Android: Captions → Spoken language (Detect or one of 14), sent as the job's `options.language`. |
-| Translated / bilingual captions | Missing | Partial | M | Server job (LLM). Mac: Translate on the Mac (macOS 15, on-device, WS9); not bilingual |
+| Translated / bilingual captions | Has | Partial | M | Owner-approved 2026-11-09. Server job `translate` (paid, Standard / Best quality, price on the button), words come back timed; `CaptionTrack.language` + `original` keep both languages, switchable (shared fixture `captionTranslate`). Android: Captions → Language (x_translate). Not shown two at once. Mac: Translate on the Mac (macOS 15, on-device, WS9) |
 | Edit caption text (fix a word) | Has | Has | S | You can cut words but not retype them. Mac: Double-click a word. Android: Captions → Words → Tap to fix text. |
 | Filler and silence removal, edit by transcript | Has | Has | — | |
 | Text-to-speech voice-over | Missing | Missing | L | Needs a TTS vendor decision. Voices are **Content**. |

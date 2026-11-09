@@ -1212,6 +1212,328 @@
    "result": null
   }
  ],
+ "captionTranslate": {
+  "base": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Hello",
+     "startSec": 0.2,
+     "endSec": 0.6
+    },
+    {
+     "text": "world",
+     "startSec": 0.6,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   }
+  },
+  "es": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Hola",
+     "startSec": 0.2,
+     "endSec": 0.6
+    },
+    {
+     "text": "mundo",
+     "startSec": 0.6,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   },
+   "language": "es",
+   "original": {
+    "language": "en",
+    "words": [
+     {
+      "text": "Hello",
+      "startSec": 0.2,
+      "endSec": 0.6
+     },
+     {
+      "text": "world",
+      "startSec": 0.6,
+      "endSec": 1.1
+     }
+    ]
+   }
+  },
+  "fr": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Bonjour",
+     "startSec": 0.2,
+     "endSec": 0.7
+    },
+    {
+     "text": "le",
+     "startSec": 0.7,
+     "endSec": 0.8
+    },
+    {
+     "text": "monde",
+     "startSec": 0.8,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   },
+   "language": "fr",
+   "original": {
+    "language": "en",
+    "words": [
+     {
+      "text": "Hello",
+      "startSec": 0.2,
+      "endSec": 0.6
+     },
+     {
+      "text": "world",
+      "startSec": 0.6,
+      "endSec": 1.1
+     }
+    ]
+   }
+  },
+  "frOriginal": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Hello",
+     "startSec": 0.2,
+     "endSec": 0.6
+    },
+    {
+     "text": "world",
+     "startSec": 0.6,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   },
+   "language": "en",
+   "original": {
+    "language": "fr",
+    "words": [
+     {
+      "text": "Bonjour",
+      "startSec": 0.2,
+      "endSec": 0.7
+     },
+     {
+      "text": "le",
+      "startSec": 0.7,
+      "endSec": 0.8
+     },
+     {
+      "text": "monde",
+      "startSec": 0.8,
+      "endSec": 1.1
+     }
+    ]
+   }
+  },
+  "frBack": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Bonjour",
+     "startSec": 0.2,
+     "endSec": 0.7
+    },
+    {
+     "text": "le",
+     "startSec": 0.7,
+     "endSec": 0.8
+    },
+    {
+     "text": "monde",
+     "startSec": 0.8,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   },
+   "language": "fr",
+   "original": {
+    "language": "en",
+    "words": [
+     {
+      "text": "Hello",
+      "startSec": 0.2,
+      "endSec": 0.6
+     },
+     {
+      "text": "world",
+      "startSec": 0.6,
+      "endSec": 1.1
+     }
+    ]
+   }
+  },
+  "baseSwap": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Hello",
+     "startSec": 0.2,
+     "endSec": 0.6
+    },
+    {
+     "text": "world",
+     "startSec": 0.6,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   }
+  },
+  "noSource": {
+   "asset": "src",
+   "words": [
+    {
+     "text": "Hallo",
+     "startSec": 0.2,
+     "endSec": 1.1
+    }
+   ],
+   "style": {
+    "font": "sans",
+    "weight": 900,
+    "sizePct": 0.045,
+    "color": "#FFFFFF",
+    "align": "center",
+    "maxWidthPct": 0.85,
+    "lineHeight": 1.15,
+    "stroke": {
+     "color": "#000000",
+     "widthPct": 0.12
+    },
+    "preset": "highlight",
+    "highlightColor": "#FFE600",
+    "y": 0.72,
+    "wordsPerPage": 3,
+    "maxLines": 2
+   },
+   "language": "de",
+   "original": {
+    "words": [
+     {
+      "text": "Hello",
+      "startSec": 0.2,
+      "endSec": 0.6
+     },
+     {
+      "text": "world",
+      "startSec": 0.6,
+      "endSec": 1.1
+     }
+    ]
+   }
+  }
+ },
  "adjustLayers": {
   "project": {
    "version": 2,

@@ -2,6 +2,7 @@
 // MUSE can run, per purpose; validation of an owner's override (`engineModel` / `imageModel`); and the studio's default
 // model per purpose (suite_settings.engine_defaults). Members only ever see custom models the owner made available, by
 // display name, never a provider or model ref.
+import { ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from '../editor/assemblyai.js';
 import { eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError, badRequest } from '../errors.js';
@@ -138,6 +139,10 @@ export class ModelChoice {
         limits: { ...noLimits, resolutions: sizes.map(z => ({ id: z.id, label: z.label })) }, resolution: sizes[0]!.id,
         price: { basis: 'per_output_second', usd: Math.min(...sizes.map(z => prices[z.id]!.usdPerSec)) }, inputs: NO_INPUTS });
     const ed = editorAi(this.ctx), pr = ed.provider;
+    // AssemblyAI first: with its key set it is the built-in default for captions (and cuts).
+    if (ed.assembly.configured())
+      out.push({ model: ASSEMBLY_MODEL, name: 'AssemblyAI Universal', kind: 'tool', purposes: ['captions'], custom: false, provider: 'assemblyai', notice: null,
+        limits: noLimits, resolution: null, price: { basis: 'per_second', usd: r4(ASSEMBLY_MAX_RATE * ed.markup) }, inputs: NO_INPUTS });
     for (const purpose of ['matte', 'track', 'captions', 'denoise'] as const) {
       const k = TOOL_MODEL_KIND[purpose], model = pr.models[k];
       // $ per second of source media, for a one-minute clip (start-up included), after the editor markup.

@@ -25023,6 +25023,1947 @@
   "field": "edits.assets.3.name"
  },
  {
+  "name": "translated captions ok",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 10,
+       "speed": 1,
+       "filter": {
+        "id": "film",
+        "amount": 0.7
+       },
+       "adjust": {
+        "exposure": 0.2
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0.5,
+       "outSec": 5,
+       "speed": 1,
+       "fit": "contain",
+       "transform": {
+        "x": 0.75,
+        "y": 0.25,
+        "scale": 0.4
+       },
+       "chroma": {
+        "color": "#00FF00",
+        "similarity": 0.4,
+        "smoothness": 0.08,
+        "spill": 0.5
+       },
+       "volume": 0,
+       "keyframes": {
+        "scale": [
+         {
+          "t": 0,
+          "v": 0.2,
+          "ease": "easeOut"
+         },
+         {
+          "t": 0.5,
+          "v": 0.4
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 2,
+       "transform": {
+        "x": 0.1,
+        "y": 0.1,
+        "scale": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.4
+       },
+       "animOut": {
+        "kind": "fade",
+        "durationSec": 0.5
+       },
+       "filter": {
+        "id": "mono",
+        "amount": 1
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 3,
+       "text": "Wait for it…",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.35
+       },
+       "template": "hook-bold"
+      },
+      {
+       "id": "t2",
+       "startSec": 3,
+       "durationSec": 4,
+       "text": "Things nobody tells you about…",
+       "style": {
+        "font": "mono",
+        "weight": 700,
+        "sizePct": 0.035,
+        "color": "#FFFFFF",
+        "align": "left",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "background": {
+         "color": "#000000",
+         "opacity": 0.6,
+         "paddingPct": 0.3,
+         "radiusPct": 0.1
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "typewriter",
+        "durationSec": 1.5
+       },
+       "animOut": {
+        "kind": "slideDown",
+        "durationSec": 0.5
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      },
+      "language": "es",
+      "original": {
+       "language": "en",
+       "words": [
+        {
+         "text": "hello",
+         "startSec": 0.1,
+         "endSec": 0.5
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "ok": true
+ },
+ {
+  "name": "caption language region ok",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 10,
+       "speed": 1,
+       "filter": {
+        "id": "film",
+        "amount": 0.7
+       },
+       "adjust": {
+        "exposure": 0.2
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0.5,
+       "outSec": 5,
+       "speed": 1,
+       "fit": "contain",
+       "transform": {
+        "x": 0.75,
+        "y": 0.25,
+        "scale": 0.4
+       },
+       "chroma": {
+        "color": "#00FF00",
+        "similarity": 0.4,
+        "smoothness": 0.08,
+        "spill": 0.5
+       },
+       "volume": 0,
+       "keyframes": {
+        "scale": [
+         {
+          "t": 0,
+          "v": 0.2,
+          "ease": "easeOut"
+         },
+         {
+          "t": 0.5,
+          "v": 0.4
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 2,
+       "transform": {
+        "x": 0.1,
+        "y": 0.1,
+        "scale": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.4
+       },
+       "animOut": {
+        "kind": "fade",
+        "durationSec": 0.5
+       },
+       "filter": {
+        "id": "mono",
+        "amount": 1
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 3,
+       "text": "Wait for it…",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.35
+       },
+       "template": "hook-bold"
+      },
+      {
+       "id": "t2",
+       "startSec": 3,
+       "durationSec": 4,
+       "text": "Things nobody tells you about…",
+       "style": {
+        "font": "mono",
+        "weight": 700,
+        "sizePct": 0.035,
+        "color": "#FFFFFF",
+        "align": "left",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "background": {
+         "color": "#000000",
+         "opacity": 0.6,
+         "paddingPct": 0.3,
+         "radiusPct": 0.1
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "typewriter",
+        "durationSec": 1.5
+       },
+       "animOut": {
+        "kind": "slideDown",
+        "durationSec": 0.5
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      },
+      "language": "pt-BR"
+     }
+    }
+   ]
+  },
+  "ok": true
+ },
+ {
+  "name": "caption language bad",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 10,
+       "speed": 1,
+       "filter": {
+        "id": "film",
+        "amount": 0.7
+       },
+       "adjust": {
+        "exposure": 0.2
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0.5,
+       "outSec": 5,
+       "speed": 1,
+       "fit": "contain",
+       "transform": {
+        "x": 0.75,
+        "y": 0.25,
+        "scale": 0.4
+       },
+       "chroma": {
+        "color": "#00FF00",
+        "similarity": 0.4,
+        "smoothness": 0.08,
+        "spill": 0.5
+       },
+       "volume": 0,
+       "keyframes": {
+        "scale": [
+         {
+          "t": 0,
+          "v": 0.2,
+          "ease": "easeOut"
+         },
+         {
+          "t": 0.5,
+          "v": 0.4
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 2,
+       "transform": {
+        "x": 0.1,
+        "y": 0.1,
+        "scale": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.4
+       },
+       "animOut": {
+        "kind": "fade",
+        "durationSec": 0.5
+       },
+       "filter": {
+        "id": "mono",
+        "amount": 1
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 3,
+       "text": "Wait for it…",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.35
+       },
+       "template": "hook-bold"
+      },
+      {
+       "id": "t2",
+       "startSec": 3,
+       "durationSec": 4,
+       "text": "Things nobody tells you about…",
+       "style": {
+        "font": "mono",
+        "weight": 700,
+        "sizePct": 0.035,
+        "color": "#FFFFFF",
+        "align": "left",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "background": {
+         "color": "#000000",
+         "opacity": 0.6,
+         "paddingPct": 0.3,
+         "radiusPct": 0.1
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "typewriter",
+        "durationSec": 1.5
+       },
+       "animOut": {
+        "kind": "slideDown",
+        "durationSec": 0.5
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      },
+      "language": "Spanish"
+     }
+    }
+   ]
+  },
+  "ok": false,
+  "field": "edits.tracks.4.caption.language"
+ },
+ {
+  "name": "caption original language bad",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 10,
+       "speed": 1,
+       "filter": {
+        "id": "film",
+        "amount": 0.7
+       },
+       "adjust": {
+        "exposure": 0.2
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0.5,
+       "outSec": 5,
+       "speed": 1,
+       "fit": "contain",
+       "transform": {
+        "x": 0.75,
+        "y": 0.25,
+        "scale": 0.4
+       },
+       "chroma": {
+        "color": "#00FF00",
+        "similarity": 0.4,
+        "smoothness": 0.08,
+        "spill": 0.5
+       },
+       "volume": 0,
+       "keyframes": {
+        "scale": [
+         {
+          "t": 0,
+          "v": 0.2,
+          "ease": "easeOut"
+         },
+         {
+          "t": 0.5,
+          "v": 0.4
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 2,
+       "transform": {
+        "x": 0.1,
+        "y": 0.1,
+        "scale": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.4
+       },
+       "animOut": {
+        "kind": "fade",
+        "durationSec": 0.5
+       },
+       "filter": {
+        "id": "mono",
+        "amount": 1
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 3,
+       "text": "Wait for it…",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.35
+       },
+       "template": "hook-bold"
+      },
+      {
+       "id": "t2",
+       "startSec": 3,
+       "durationSec": 4,
+       "text": "Things nobody tells you about…",
+       "style": {
+        "font": "mono",
+        "weight": 700,
+        "sizePct": 0.035,
+        "color": "#FFFFFF",
+        "align": "left",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "background": {
+         "color": "#000000",
+         "opacity": 0.6,
+         "paddingPct": 0.3,
+         "radiusPct": 0.1
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "typewriter",
+        "durationSec": 1.5
+       },
+       "animOut": {
+        "kind": "slideDown",
+        "durationSec": 0.5
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      },
+      "original": {
+       "language": "EN",
+       "words": []
+      }
+     }
+    }
+   ]
+  },
+  "ok": false,
+  "field": "edits.tracks.4.caption.original.language"
+ },
+ {
+  "name": "caption original word empty",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 10,
+       "speed": 1,
+       "filter": {
+        "id": "film",
+        "amount": 0.7
+       },
+       "adjust": {
+        "exposure": 0.2
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0.5,
+       "outSec": 5,
+       "speed": 1,
+       "fit": "contain",
+       "transform": {
+        "x": 0.75,
+        "y": 0.25,
+        "scale": 0.4
+       },
+       "chroma": {
+        "color": "#00FF00",
+        "similarity": 0.4,
+        "smoothness": 0.08,
+        "spill": 0.5
+       },
+       "volume": 0,
+       "keyframes": {
+        "scale": [
+         {
+          "t": 0,
+          "v": 0.2,
+          "ease": "easeOut"
+         },
+         {
+          "t": 0.5,
+          "v": 0.4
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 2,
+       "transform": {
+        "x": 0.1,
+        "y": 0.1,
+        "scale": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.4
+       },
+       "animOut": {
+        "kind": "fade",
+        "durationSec": 0.5
+       },
+       "filter": {
+        "id": "mono",
+        "amount": 1
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 3,
+       "text": "Wait for it…",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.35
+       },
+       "template": "hook-bold"
+      },
+      {
+       "id": "t2",
+       "startSec": 3,
+       "durationSec": 4,
+       "text": "Things nobody tells you about…",
+       "style": {
+        "font": "mono",
+        "weight": 700,
+        "sizePct": 0.035,
+        "color": "#FFFFFF",
+        "align": "left",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "background": {
+         "color": "#000000",
+         "opacity": 0.6,
+         "paddingPct": 0.3,
+         "radiusPct": 0.1
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "typewriter",
+        "durationSec": 1.5
+       },
+       "animOut": {
+        "kind": "slideDown",
+        "durationSec": 0.5
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      },
+      "original": {
+       "words": [
+        {
+         "text": "",
+         "startSec": 0,
+         "endSec": 1
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "ok": false,
+  "field": "edits.tracks.4.caption.original.words.0.text"
+ },
+ {
+  "name": "caption original word backwards",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 10,
+       "speed": 1,
+       "filter": {
+        "id": "film",
+        "amount": 0.7
+       },
+       "adjust": {
+        "exposure": 0.2
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0.5,
+       "outSec": 5,
+       "speed": 1,
+       "fit": "contain",
+       "transform": {
+        "x": 0.75,
+        "y": 0.25,
+        "scale": 0.4
+       },
+       "chroma": {
+        "color": "#00FF00",
+        "similarity": 0.4,
+        "smoothness": 0.08,
+        "spill": 0.5
+       },
+       "volume": 0,
+       "keyframes": {
+        "scale": [
+         {
+          "t": 0,
+          "v": 0.2,
+          "ease": "easeOut"
+         },
+         {
+          "t": 0.5,
+          "v": 0.4
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 2,
+       "transform": {
+        "x": 0.1,
+        "y": 0.1,
+        "scale": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.4
+       },
+       "animOut": {
+        "kind": "fade",
+        "durationSec": 0.5
+       },
+       "filter": {
+        "id": "mono",
+        "amount": 1
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 3,
+       "text": "Wait for it…",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "pop",
+        "durationSec": 0.35
+       },
+       "template": "hook-bold"
+      },
+      {
+       "id": "t2",
+       "startSec": 3,
+       "durationSec": 4,
+       "text": "Things nobody tells you about…",
+       "style": {
+        "font": "mono",
+        "weight": 700,
+        "sizePct": 0.035,
+        "color": "#FFFFFF",
+        "align": "left",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "background": {
+         "color": "#000000",
+         "opacity": 0.6,
+         "paddingPct": 0.3,
+         "radiusPct": 0.1
+        }
+       },
+       "transform": {
+        "x": 0.5,
+        "y": 0.2
+       },
+       "animIn": {
+        "kind": "typewriter",
+        "durationSec": 1.5
+       },
+       "animOut": {
+        "kind": "slideDown",
+        "durationSec": 0.5
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      },
+      "original": {
+       "words": [
+        {
+         "text": "a",
+         "startSec": 2,
+         "endSec": 1
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "ok": false,
+  "field": "edits.tracks.4.caption.original.words.0.endSec"
+ },
+ {
   "name": "own font on captions",
   "project": {
    "version": 2,

@@ -232,6 +232,37 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun captionTranslate() {
+        val d = fn["captionTranslate"]!!.obj
+        fun projectWith(cap: JsonElement) = buildJsonObject {
+            put("version", 2); put("sourceTakeId", "t")
+            put("canvas", buildJsonObject { put("width", 1080); put("height", 1920); put("fps", 30); put("background", "#000000") })
+            put("assets", buildJsonArray { add(buildJsonObject { put("id", "src"); put("kind", "video"); put("take", "t"); put("durationSec", 20) }) })
+            put("tracks", buildJsonArray {
+                add(buildJsonObject { put("id", "main"); put("kind", "main"); put("items", buildJsonArray { add(buildJsonObject { put("id", "c"); put("asset", "src"); put("inSec", 0); put("outSec", 5); put("speed", 1) }) }) })
+                add(buildJsonObject { put("id", "cap"); put("kind", "caption"); put("items", buildJsonArray {}); put("caption", cap) })
+            })
+        }
+        fun capOf(e: JsonElement): CaptionTrack = EditJson.parse(projectWith(e)).tracks[1].caption!!
+        fun enc(ct: CaptionTrack): JsonElement {
+            val base = EditJson.parse(projectWith(d["base"]!!))
+            val p = base.copy(tracks = base.tracks.map { if (it.kind == TrackKind.CAPTION) it.copy(caption = ct) else it })
+            validate(p)
+            return (EditJson.encode(p) as JsonObject)["tracks"]!!.arr[1].obj["caption"]!!
+        }
+        fun words(vararg w: Triple<String, Double, Double>) = w.map { CaptionWord(it.first, it.second, it.third) }
+        val base = capOf(d["base"]!!)
+        val es = translateCaptions(base, "es", words(Triple("Hola", .2, .6), Triple("mundo", .6, 1.1)), "en")
+        assertJson("es", d["es"], enc(es))
+        val fr = translateCaptions(es, "fr", words(Triple("Bonjour", .2, .7), Triple("le", .7, .8), Triple("monde", .8, 1.1)), "en")
+        assertJson("fr", d["fr"], enc(fr))
+        assertJson("frOriginal", d["frOriginal"], enc(swapCaptionOriginal(fr)))
+        assertJson("frBack", d["frBack"], enc(swapCaptionOriginal(swapCaptionOriginal(fr))))
+        assertJson("baseSwap", d["baseSwap"], enc(swapCaptionOriginal(base)))
+        assertJson("noSource", d["noSource"], enc(translateCaptions(base, "de", words(Triple("Hallo", .2, 1.1)))))
+        assertEquals(capOf(d["fr"]!!), fr) // round trip
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj
