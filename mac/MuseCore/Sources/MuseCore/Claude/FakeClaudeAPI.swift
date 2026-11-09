@@ -74,13 +74,14 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
 
     /// The Suite's list key for a draft (set by tests and demo mode as the server reads it from the shared draft).
-    public var suiteToolOf: (String) -> String = { _ in "shot" }
+    public var suiteToolOf: @Sendable (String) async -> String = { _ in "shot" }
 
     private func thread(contextKind: String, contextId: String, new: Bool) async throws -> ClaudeThread {
         guard ["camera", "edit", "recreate", "suite"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
         // A recreate thread is on one of the owner's references (rx_…), else 404 (as the server).
         if contextKind == "recreate", !contextId.hasPrefix("rx_") { throw ApiError("not_found", "Reference not found") }
-        let key = contextKind == "suite" ? "suite:\(suiteToolOf(contextId))" : "\(contextKind):\(contextId)"
+        var key = "\(contextKind):\(contextId)"
+        if contextKind == "suite" { key = "suite:\(await suiteToolOf(contextId))" }
         return locked {
             if !new, let t = threads.values.filter({ $0.contextKind == contextKind && $0.contextId == contextId }).max(by: { ($0.updatedAt, $0.id) < ($1.updatedAt, $1.id) }) { return t }
             let brief: ClaudeBrief? = switch contextKind {

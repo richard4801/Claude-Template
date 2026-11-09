@@ -42,7 +42,7 @@ extension SnapshotRunner {
             write()
             return
         }
-        fakeChat.suiteToolOf = { [weak fakeMuse] id in fakeMuse?.demoAssistTool(id) ?? "shot" }
+        fakeChat.suiteToolOf = { id in await fakeMuse.demoAssistTool(id) ?? "shot" }
         _ = await until(15) { svc.info.ready }
 
         // 1. One message, one bubble (the Suite's context line in front, as in the owner's screenshot).
