@@ -60,7 +60,7 @@ fun SuiteEnginesScreen() {
     LaunchedEffect(owner) { if (owner) { if (store.catalog.value == null) store.load(); store.loadSettings() } }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Engines", onBack = { nav.back() })
+            TopBar("Price corrections", onBack = { nav.back() })
             if (!owner) { Column(Modifier.padding(16.dp)) { NoteBox("Only the studio owner can see this.") }; return@Column }
             val inputs = cat?.tier(shot.quality)?.slots ?: studio.muse.app.data.SuiteInputs.NONE
             val req = shot.request(slots, inputs, recast)
@@ -72,7 +72,7 @@ fun SuiteEnginesScreen() {
             }.value
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    T("Engines", m.type.h3, m.t.ink, Modifier.weight(1f)); SBadge("Owner only", "busy")
+                    T("Models and prices", m.type.h3, m.t.ink, Modifier.weight(1f)); SBadge("Owner only", "busy")
                 }
                 Tiny("Members only ever see Draft · Standard · HD · Cinema. This shows what each tier runs today.")
                 cat?.tiers?.forEach { t ->

@@ -359,7 +359,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                         if (live && problem == null && photo == null && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS)
                             MenuItem("clock", "Queue this shot") { scope.launch { store.queueShot(req) } } else null,
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
-                        if (owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
+                        if (owner) MenuItem("quality", "Models and prices (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                     ))
                 }
                 if (showFeed) SuiteFeedView(photo = d.tool == ComposerTool.PHOTO, wide = wide, onOpen = { j -> nav.go(Routes.suiteTake(j)) }, modifier = Modifier.weight(1f))

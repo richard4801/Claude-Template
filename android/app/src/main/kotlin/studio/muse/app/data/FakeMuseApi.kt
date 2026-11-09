@@ -1023,7 +1023,7 @@ class FakeMuseApi(
     override suspend fun setWarmGpu(req: WarmRequest): WarmGpu = lock.withLock {
         when {
             req.extend == true -> {
-                if (!warm.on) throw ApiException("not_warm", "The add-on engine is off")
+                if (!warm.on) throw ApiException("not_warm", "The GPU is off")
                 val v = warmView()
                 warm = if (v.autoOffReason == "cap" && warm.canExtend) warm.copy(maxMinutes = warm.maxMinutes * 2, canExtend = false) else warm.copy(readyAt = now().takeIf { warm.state == "warm" } ?: warm.readyAt)
             }

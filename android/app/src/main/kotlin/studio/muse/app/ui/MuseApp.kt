@@ -139,6 +139,12 @@ object Routes {
     const val SHARE = "share"
     /** WS7: Settings → Default models (owner): what Auto uses per kind of work. */
     const val DEFAULT_MODELS = "default-models"
+    /** Settings redesign (2026-11-09): one page per section. */
+    const val SETTINGS_ACCOUNT = "settings/account"; const val SETTINGS_STUDIO = "settings/studio"; const val SETTINGS_AI = "settings/ai"
+    const val SETTINGS_PROVIDERS = "settings/providers"; const val SETTINGS_APPS = "settings/apps"; const val SETTINGS_ADVANCED = "settings/advanced"
+    const val SETTINGS_GPUS = "settings/gpus"; const val SETTINGS_MODEL_STATUS = "settings/model-status"
+    const val PROVIDER_MODELS = "settings/providers/{id}"
+    fun providerModels(id: String) = "settings/providers/$id"
     const val CAMERA_STAGE = "camera-stage"; const val EDIT = "edit"; const val EDIT_TAKE = "edit/{id}"; const val CONNECTIONS = "connections"
     fun editTake(takeId: String) = "edit/$takeId"
 
@@ -265,6 +271,15 @@ fun MuseApp(
                     composable(Routes.EDIT) { studio.muse.app.ui.screens.edit.EditSuiteScreen(null, onBack = { n.back() }) }
                     composable(Routes.SHARE) { studio.muse.app.ui.screens.ShareChooserScreen() } // WS7
                     composable(Routes.DEFAULT_MODELS) { studio.muse.app.ui.screens.DefaultModelsScreen() } // WS7
+                    composable(Routes.SETTINGS_ACCOUNT) { studio.muse.app.ui.screens.AccountSettingsScreen() }
+                    composable(Routes.SETTINGS_STUDIO) { studio.muse.app.ui.screens.StudioSectionScreen() }
+                    composable(Routes.SETTINGS_AI) { studio.muse.app.ui.screens.AiSpendingScreen() }
+                    composable(Routes.SETTINGS_PROVIDERS) { studio.muse.app.ui.screens.ProvidersScreen() }
+                    composable(Routes.SETTINGS_APPS) { studio.muse.app.ui.screens.AppsDevicesScreen() }
+                    composable(Routes.SETTINGS_ADVANCED) { studio.muse.app.ui.screens.AdvancedSettingsScreen() }
+                    composable(Routes.SETTINGS_GPUS) { studio.muse.app.ui.screens.OwnGpusScreen() }
+                    composable(Routes.SETTINGS_MODEL_STATUS) { studio.muse.app.ui.screens.ModelStatusScreen() }
+                    composable(Routes.PROVIDER_MODELS) { e -> studio.muse.app.ui.screens.ProviderModelsScreen(e.arguments?.getString("id").orEmpty()) }
                     composable(Routes.EDIT_TAKE) { e -> studio.muse.app.ui.screens.edit.EditSuiteScreen(e.arguments?.getString("id"), onBack = { n.back() }) }
                     composable(Routes.CONNECTIONS) { studio.muse.app.ui.screens.camera.ConnectionsScreen(onBack = { n.back() }) }
                     composable(Routes.LORA) { LoraScreen() }

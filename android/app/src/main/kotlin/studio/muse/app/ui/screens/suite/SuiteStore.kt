@@ -126,12 +126,20 @@ class SuiteStore(private val c: AppContainer) {
         return null
     }
 
+    private var startAtApplied = false
+
     suspend fun load() {
         try {
             val cat = c.repo.api.suiteCatalog()
             catalog.value = if (owner) cat else SuiteRules.memberSafe(cat)
             catalogError.value = null
             composer.update { d -> d.copy(quality = if (d.quality in cat.tiers.map { t -> t.id } || cat.tiers.isEmpty()) d.quality else cat.defaultQuality).fit(cat) }
+            // Settings → Studio → Start at: new shots start on the chosen quality (once per session, when the catalog has it).
+            if (!startAtApplied) {
+                startAtApplied = true
+                val q = c.prefs.value.startAt
+                if (cat.tiers.any { it.id == q && it.available }) composer.update { it.copy(quality = q).fit(cat) }
+            }
             if (board.value == null && c.repo.demo) board.value = demoBoard()
         } catch (e: ApiException) {
             catalogError.value = ErrorText.of(e)
