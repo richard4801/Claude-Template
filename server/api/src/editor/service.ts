@@ -25,6 +25,7 @@ import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError
 import { FalProvider } from '../suite/providers.js';
 import { SLOWMO_LIMITS, SLOWMO_MODEL, cutRange, falInterpolate, retime, slowmoComputeSec, slowmoUsd, type SlowmoFactor } from './slowmo.js';
 import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
+import { EXPORT_LANGUAGES, exportNotice } from './scripts.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
@@ -44,6 +45,9 @@ const LANG_RE = /^[a-z]{2}$/;
 export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
 export const MAX_KEEP_POINTS = 10;
 export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
+
+/** The languages translate offers: those the export draws today. */
+const translateTargets = () => Object.keys(TRANSLATE_LANGUAGES).filter(l => EXPORT_LANGUAGES.has(l));
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -75,7 +79,8 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
     if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
   }
   if (kind === 'translate') {
-    if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage]) throw badRequest(`options.targetLanguage: one of ${Object.keys(TRANSLATE_LANGUAGES).join(', ')}`);
+    // Only languages the export can draw (scripts.ts): the others would show in the app but vanish from exports.
+    if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage] || !EXPORT_LANGUAGES.has(o.targetLanguage)) throw badRequest(`options.targetLanguage: one of ${translateTargets().join(', ')}`);
     out.targetLanguage = o.targetLanguage;
     if (o.sourceLanguage !== undefined) { if (typeof o.sourceLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.sourceLanguage]) throw badRequest('options.sourceLanguage: a language code'); out.sourceLanguage = o.sourceLanguage; }
     if (o.lines !== undefined) {
@@ -365,7 +370,9 @@ export class EditorAiService {
       };
       if (row.kind === 'captions') {
         const t = await transcript();
-        result = { language: t.language, words: t.words, durationSec: d, reused: !!reuse };
+        // Captions in a script the export can't draw yet say so (the apps show `exportNotice` with the track).
+        const notice = exportNotice(t.language, t.words);
+        result = { language: t.language, words: t.words, durationSec: d, reused: !!reuse, ...(notice ? { exportNotice: notice } : {}) };
       } else if (row.kind === 'beats') {
         const samples = await this.withLocalInput(src.key, input => decodeMono(this.ctx.config.FFMPEG_PATH, input));
         await this.patch(id, { progress: 70 });
@@ -623,7 +630,7 @@ export class EditorAiService {
       beats: { available: true, free: true },
       stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
       slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
-      translate: { available: paid && !!this.translator(), languages: Object.keys(TRANSLATE_LANGUAGES), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
+      translate: { available: paid && !!this.translator(), languages: translateTargets(), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }
