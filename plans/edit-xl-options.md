@@ -126,3 +126,16 @@ This attaches a signed "made with MUSE, AI used here" record to exported files.
 - **Reality check:** in an October 2025 test, **none of eight major platforms kept the credentials** on uploaded video ([IPTC](https://iptc.org/news/ai-disclosure-on-social-media-a-work-in-progress/)). It proves origin for the downloaded file, not the posted one.
 - **Build size:** M, about 1–2 weeks to sign exports, plus weeks of conformance paperwork. The signing key must stay on the server or in hardware, never in the app.
 - **Recommendation:** wait. Low visible value today. Revisit if a platform starts keeping credentials, or if AI-disclosure rules require it.
+
+## Owner's decision (2026-11-09)
+
+**Approved to build, in this order:**
+1. **Stabilisation:** ffmpeg vidstab as a server job (WS16), Android UI (WS8).
+2. **Translated captions:** server job (WS16) with Claude Haiku by default and a Sonnet "best quality" option; Android UI (WS8).
+3. **Auto reframe that follows faces:** Android on the device with ML Kit (WS8).
+4. **Smooth slow motion on Android:** hosted fal.ai RIFE as a server job (WS16), priced and confirmed per job like the other paid helpers; Android UI (WS8).
+5. **AI music (ElevenLabs):** server (WS16), only after WS16 reports on ElevenLabs' licence terms; Android UI (WS8).
+
+**Not now:** HDR export on Android (only if members ask) and C2PA content credentials.
+
+Each job's API is agreed with WS16, and each contract change with WS9, before it's built.
