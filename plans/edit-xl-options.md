@@ -186,3 +186,12 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
   drop C2PA/uuid boxes). Photos: re-save without EXIF/XMP/ICC tags. Applied where takes, photos, Suite results and
   exports are stored. Then the "Label as AI-generated" switch adds MUSE's own label only when on. Pixel watermarks
   (e.g. SynthID) are not touched. Posts stay labelled by default.
+
+## Owner bugs to fix FIRST after the token reset (2026-11-09, Mac Edit)
+1. Mac preview + export draw a large black soft oval over the CENTRE of the picture, in black and white, on a take whose
+   Look is Classic B&W. The timeline thumbnails show the clip normally, and deleting clips doesn't remove it. Likely the
+   Look's vignette drawn inverted (the centre darkened) in the Mac compositor (WS9's cached vignette map / maskAt/lookAt).
+   The owner can't select or remove it. Reproduce with a B&W-look take, fix, add a pixel probe (centre bright, corners
+   darker), and check Android and the server render the same.
+2. Mac Export only saves a version to the Library; it must also save the file to the Mac (Save panel, default
+   ~/Downloads or Movies/MUSE) with "Show in Finder".
