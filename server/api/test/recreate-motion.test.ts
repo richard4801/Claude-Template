@@ -1,6 +1,9 @@
 // workstream 1 · the owner's slideshow bug (prod, 2026-11-08): a 29.7 s, 7-shot, 182 BPM TikTok recreated with the
 // studio's own video takes came out as one still frame per shot sliding to the beat. End to end on real, MOVING takes:
 // analyse → match → apply → the server's own render; every slot of the render must move (its frames change), never a still.
+// CPU-heavy (ffmpeg fixtures, analysis, a render): alone ~30 s, but 5–10× slower on a busy box (full suite with
+// --maxWorkers=2, or after a gradle build), so the waits are generous and a failure says which step, after how long,
+// and what the reference and the render reported (2026-11-09: three unexplained failures in loaded full runs).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,10 +14,24 @@ import { takes, uploads, users } from '../src/db/schema.js';
 import * as M from '../src/editor/model.js';
 import { probe } from '../src/replicate/media.js';
 import { putObject } from '../src/storage/objects.js';
-import { makeApp, people, until, type Client } from './helpers.js';
+import { makeApp, people, type Client } from './helpers.js';
 import { ENC, ff, hasFfmpeg } from './recreate-fixture.js';
 
 const W = 270, H = 480, FPS = 30;
+/** Waits on a busy machine: analysis, the render, and the whole test (minutes, not seconds). */
+const WAIT = { setup: 900_000, analyse: 600_000, render: 600_000, test: 1_500_000 };
+
+/** Polls [get] until [done] says so; on timeout, the error carries the last thing it saw. */
+async function waitFor<T>(what: string, get: () => Promise<T>, done: (v: T) => boolean, ms: number): Promise<T> {
+  const t0 = Date.now();
+  let last: T | undefined;
+  for (;;) {
+    last = await get();
+    if (done(last)) return last;
+    if (Date.now() - t0 > ms) throw new Error(`${what}: still not done after ${Math.round(ms / 1000)} s · last seen ${JSON.stringify(last).slice(0, 600)}`);
+    await new Promise(r => setTimeout(r, 250));
+  }
+}
 /** 7 shots, 29.7 s (182 BPM): a long near-still wide first shot, then fast stylised shots. */
 const SHOTS: { src: string; sec: number; still?: boolean }[] = [
   { src: 'testsrc2', sec: 10.6, still: true }, { src: 'mandelbrot', sec: 2.6 }, { src: 'life=ratio=0.3:seed=3:mold=8', sec: 3.3 },
@@ -42,6 +59,7 @@ function diffAt(file: string, a: number, b: number) {
 describe.skipIf(!hasFfmpeg)('Recreate · built edits move (no slideshow)', () => {
   let a: Awaited<ReturnType<typeof makeApp>>, owner: Client, dir: string, studioId: string, refFile: string;
   beforeAll(async () => {
+    const t0 = Date.now();
     a = await makeApp({ RECREATE_POSE: 'false', TESSERACT_PATH: '' });
     ({ owner } = await people(a, 0) as any);
     const [u] = await a.ctx.db.select().from(users).where(eq(users.id, owner.id));
@@ -65,19 +83,35 @@ describe.skipIf(!hasFfmpeg)('Recreate · built edits move (no slideshow)', () =>
     // A photo of the studio (kind "shot"): never a candidate for a video slot.
     await a.ctx.db.insert(takes).values({ id: 's_photo', studioId, userId: owner.id, kind: 'shot', jobId: null, modelId: null, index: 1, of: 1, title: 'photo', label: '', engineLabel: '', cost: 0, seed: 0,
       status: 'final', thumb: null, prompt: '', mediaKey: 'u/motion/photo.jpg', media: { width: 1080, height: 1920 }, createdAt: Date.now() });
-  }, 300_000);
+    console.info(`recreate-motion: fixtures ready in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  }, WAIT.setup);
   afterAll(async () => { await a?.close(); if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
 
   it('analyse → match → apply → render: every clip is a video take, and every slot of the render moves', async () => {
+    // Diagnostics: the step we're in, how long each took, and the last reference / render state seen.
+    const t0 = Date.now(), times: string[] = [];
+    let step = 'start', at = t0, refSeen: unknown = null, previewSeen: unknown = null;
+    const next = (name: string) => { times.push(`${step} ${((Date.now() - at) / 1000).toFixed(1)} s`); step = name; at = Date.now(); };
+    try { await body(); } catch (e) {
+      console.error(`recreate-motion failed in step "${step}" after ${((Date.now() - t0) / 1000).toFixed(1)} s (${times.join(', ')})\n  reference: ${JSON.stringify(refSeen)?.slice(0, 800)}\n  preview: ${JSON.stringify(previewSeen)?.slice(0, 800)}`);
+      throw e;
+    }
+    next('end');
+    console.info(`recreate-motion: ${times.join(', ')}`);
+
+    async function body() {
+    next('analyse');
     const [up] = await a.ctx.db.select().from(uploads).where(eq(uploads.storageKey, 'u/motion/ref.mp4'));
     const created = (await owner.req('POST', '/v1/recreate/references', { uploadId: up!.id, name: 'Fast stylised' })).body;
-    const ref = await until(async () => { const r = (await owner.req('GET', `/v1/recreate/references/${created.id}`)).body; return r.state === 'ready' || r.state === 'failed' ? r : null; }, 180_000);
+    const ref = await waitFor('analysis', async () => (refSeen = (await owner.req('GET', `/v1/recreate/references/${created.id}`)).body) as any, r => r.state === 'ready' || r.state === 'failed', WAIT.analyse);
+    refSeen = { id: ref.id, state: ref.state, error: ref.error, slots: ref.recipe?.slots?.length };
     expect(ref.state, ref.error).toBe('ready');
     const slots = ref.recipe.slots as { id: string; startSec: number; endSec: number; speed: { ramp: string } }[];
     console.info('slots', slots.map(s => `${s.startSec.toFixed(2)}–${s.endSec.toFixed(2)} ${s.speed.ramp}`).join(' | '));
     expect(slots).toHaveLength(SHOTS.length); // the flash didn't merge or split shots
     expect((ref.recipe.transitions as { kind: string; atSec: number }[]).some(t => t.kind === 'flash' && Math.abs(t.atSec - 13.2) < 0.1)).toBe(true);
 
+    next('match + apply');
     const m = (await owner.req('POST', `/v1/recreate/references/${ref.id}/match`, {})).body;
     expect(Object.values(m.assignment ?? {})).not.toContain('s_photo');
     for (const s of m.slots) for (const c of s.candidates ?? []) expect(c.takeId).not.toBe('s_photo');
@@ -97,11 +131,13 @@ describe.skipIf(!hasFfmpeg)('Recreate · built edits move (no slideshow)', () =>
     }
 
     // The server's own render of the built edit (what Compare and the export show).
+    next('render');
     await owner.req('POST', `/v1/edit-sessions/${session.id}/preview`, {});
-    const ready = await until(async () => { const r = (await owner.req('GET', `/v1/edit-sessions/${session.id}/preview`)).body; return r.state === 'ready' || r.state === 'failed' ? r : null; }, 240_000);
+    const ready = await waitFor('preview render', async () => (previewSeen = (await owner.req('GET', `/v1/edit-sessions/${session.id}/preview`)).body) as any, r => r.state === 'ready' || r.state === 'failed', WAIT.render);
     // It used to fail here whenever a transition came after the second shot (xfade after concat: timebases differed).
     expect(clips.slice(2).some(c => c.transitionIn)).toBe(true);
     expect(ready.state, JSON.stringify(ready)).toBe('ready');
+    next('motion check');
     const u = new URL(ready.url, 'http://x');
     const got = await a.app.inject({ method: 'GET', url: u.pathname + u.search, headers: { authorization: `Bearer ${owner.token}` } });
     const file = path.join(dir, 'preview.mp4');
@@ -111,5 +147,6 @@ describe.skipIf(!hasFfmpeg)('Recreate · built edits move (no slideshow)', () =>
       const d = diffAt(file, a0, b0);
       expect(d, `${s.id} ${s.startSec}–${s.endSec}: the picture must change inside the slot`).toBeGreaterThan(2);
     }
-  }, 600_000);
+    }
+  }, WAIT.test);
 });

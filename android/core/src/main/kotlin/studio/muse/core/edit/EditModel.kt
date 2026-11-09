@@ -699,7 +699,7 @@ private fun srtTime(t: Double): String {
 fun toSrt(p: EditProject): String {
     val ct = captionTrack(p) ?: return ""
     return captionPages(p).mapIndexed { i, pg ->
-        val text = pg.words.joinToString(" ") { it.text }
+        val text = captionText(pg.words.map { it.text }, ct.language)
         "${i + 1}\n${srtTime(pg.startSec)} --> ${srtTime(pg.endSec)}\n${if (ct.style.text.uppercase == true) text.uppercase() else text}\n"
     }.joinToString("\n")
 }

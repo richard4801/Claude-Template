@@ -151,7 +151,8 @@ data class Flash(val startSec: Double, val endSec: Double, val kind: TransitionK
 /** A composition-level overlay, drawn in list order (later on top). */
 sealed interface OverlayPiece
 data class TextPiece(val trackId: String, val item: TextItem, val startSec: Double, val endSec: Double) : OverlayPiece
-data class CaptionPiece(val trackId: String, val style: CaptionStyle, val pages: List<CaptionPage>) : OverlayPiece
+/** [language]: the words' language (unspaced scripts join without spaces; right-to-left ones read from the right). */
+data class CaptionPiece(val trackId: String, val style: CaptionStyle, val pages: List<CaptionPage>, val language: String? = null) : OverlayPiece
 data class FlashPiece(val flash: Flash) : OverlayPiece
 
 /** Where a layer's picture goes at one moment: centre in canvas fractions, scale, clockwise degrees, alpha. */
@@ -512,7 +513,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
             }
             TrackKind.CAPTION -> if (t.hidden != true && t.caption != null) {
                 val pages = captionPages(p)
-                if (pages.isNotEmpty()) overlays += CaptionPiece(t.id, t.caption.style, pages)
+                if (pages.isNotEmpty()) overlays += CaptionPiece(t.id, t.caption.style, pages, t.caption.language)
             }
             TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX -> {
                 val clips = t.items.mapNotNull { it ->

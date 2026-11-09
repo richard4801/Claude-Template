@@ -548,6 +548,14 @@ const capEs = M.translateCaptions(capBase, 'es', [{ text: 'Hola', startSec: 0.2,
 const capFr = M.translateCaptions(capEs, 'fr', [{ text: 'Bonjour', startSec: 0.2, endSec: 0.7 }, { text: 'le', startSec: 0.7, endSec: 0.8 }, { text: 'monde', startSec: 0.8, endSec: 1.1 }], 'en');
 const captionTranslate = { base: capBase, es: capEs, fr: capFr, frOriginal: M.swapCaptionOriginal(capFr), frBack: M.swapCaptionOriginal(M.swapCaptionOriginal(capFr)), baseSwap: M.swapCaptionOriginal(capBase),
   noSource: M.translateCaptions(capBase, 'de', [{ text: 'Hallo', startSec: 0.2, endSec: 1.1 }]) };
+// Captions in other scripts (M): the joiner and RTL per language, a page's text, and the .srt of a Japanese track.
+const joinWords = [{ text: '今日は' }, { text: 'いい' }, { text: '天気' }];
+const jaProject = (() => { const q = JSON.parse(JSON.stringify(projects.find(x => x.project.tracks.some(t => t.kind === 'caption'))!.project)) as M.EditProject; const t = q.tracks.find(x => x.kind === 'caption')!; t.caption!.language = 'ja';
+  t.caption!.words = t.caption!.words.map((w, i) => ({ ...w, text: ['今日は', 'いい', '天気', 'ですね', '本当に', 'そう', 'です', 'よ'][i % 8]! })); return q; })();
+const captionScripts = {
+  languages: ['en', 'ja', 'zh', 'zh-TW', 'th', 'ko', 'ar', 'he', 'hi', 'ru', 'pt-BR', null].map(l => ({ language: l, joiner: M.captionJoiner(l ?? undefined), rtl: M.isRtlLanguage(l ?? undefined), text: M.captionText(joinWords, l ?? undefined) })),
+  srtJa: { project: jaProject, srt: M.toSrt(jaProject) },
+};
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -592,7 +600,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, derived, slowmo, captionTranslate, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { reverse, derived, slowmo, captionTranslate, captionScripts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

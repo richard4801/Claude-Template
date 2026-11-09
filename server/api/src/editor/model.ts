@@ -103,6 +103,16 @@ export type CaptionWord = { text: string; startSec: number; endSec: number };
 export type CaptionTrack = { asset: string; words: CaptionWord[]; style: CaptionStyle; language?: string; original?: CaptionOriginal };
 export type CaptionOriginal = { language?: string; words: CaptionWord[] };
 export const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Z]{2})?$/;
+/** Languages written without spaces between words: their caption pages join words with nothing between. */
+export const UNSPACED_LANGUAGES: readonly string[] = ['ja', 'zh', 'th', 'lo', 'km', 'my'];
+/** Languages written right to left (a caption page reads from the right; the words keep their order). */
+export const RTL_LANGUAGES: readonly string[] = ['ar', 'he', 'fa', 'ur'];
+const baseLang = (language?: string) => language?.split('-')[0];
+/** What goes between a caption page's words: nothing for unspaced languages, else a space. */
+export const captionJoiner = (language?: string) => UNSPACED_LANGUAGES.includes(baseLang(language) ?? '') ? '' : ' ';
+export const isRtlLanguage = (language?: string) => RTL_LANGUAGES.includes(baseLang(language) ?? '');
+/** A caption page's text in [language] (words joined by captionJoiner). */
+export const captionText = (words: { text: string }[], language?: string) => words.map(w => w.text).join(captionJoiner(language));
 /** The caption track shown in its original words (and back): words and language swap with [original]'s. Unchanged without one. */
 export function swapCaptionOriginal(ct: CaptionTrack): CaptionTrack {
   if (!ct.original) return ct;
@@ -852,7 +862,7 @@ export function toSrt(p: EditProject): string {
   const ct = p.tracks.find(t => t.kind === 'caption' && t.caption)?.caption;
   if (!ct) return '';
   return captionPages(p).map((pg, i) => {
-    const text = pg.words.map(w => w.text).join(' ');
+    const text = captionText(pg.words, ct.language);
     return `${i + 1}\n${srtTime(pg.startSec)} --> ${srtTime(pg.endSec)}\n${ct.style.uppercase ? text.toUpperCase() : text}\n`;
   }).join('\n');
 }

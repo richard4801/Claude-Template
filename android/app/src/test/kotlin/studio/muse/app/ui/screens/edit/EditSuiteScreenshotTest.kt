@@ -265,7 +265,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                     override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) =
                         studio.muse.app.data.EditorEstimate(kind, 0.01, 1.0) to null
                     override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
-                }, ui.copy(project = withCaps, playheadSec = 1.0, selectedId = null))
+                }, ui.copy(translateLanguages = listOf("en" to "English", "es" to "Spanish", "fr" to "French", "de" to "German", "pt" to "Portuguese", "ru" to "Russian"), project = withCaps, playheadSec = 1.0, selectedId = null))
                 c.act(EditAction.Open(Panel.CAPTIONS)); c.act(EditAction.CaptionTab("Language")); c.act(EditAction.TranslatePrice("fr", false))
                 kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(200) }
                 ui = c.ui.value.copy(message = null)

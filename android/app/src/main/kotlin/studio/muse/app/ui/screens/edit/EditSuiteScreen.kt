@@ -315,8 +315,19 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
      * WS1 guardrails (`GET /v1/editor/features`): paid helpers switched off by the owner read "Turned off by the studio
      * owner" (or the server's reason); a helper the server can't run yet (the cut-out on the mock) reads "Coming soon".
      */
+    private var features: kotlinx.serialization.json.JsonObject? = null
+    private suspend fun features() = features ?: c.repo.api.editorFeatures()?.also { features = it }
+
+    override suspend fun translateLanguages(): List<Pair<String, String>> {
+        val t = features()?.get("translate") as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+        if ((t["available"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "false") return emptyList()
+        val langs = t["languages"] as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+        return langs.mapNotNull { (code, name) -> (name as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { code to it } }
+            .filter { studio.muse.core.edit.LANGUAGE_CODE.matches(it.first) }
+    }
+
     override suspend fun helpersOff(): Map<String, String> {
-        val f = c.repo.api.editorFeatures() ?: return emptyMap()
+        val f = features() ?: return emptyMap()
         fun obj(k: String) = f[k] as? kotlinx.serialization.json.JsonObject
         fun off(o: kotlinx.serialization.json.JsonObject?) = (o?.get("available") as? kotlinx.serialization.json.JsonPrimitive)?.content == "false"
         fun note(o: kotlinx.serialization.json.JsonObject?, k: String) = (o?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
