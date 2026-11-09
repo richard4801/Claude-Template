@@ -321,7 +321,7 @@ struct ComposerMediaPane: View {
         .clipShape(shape)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Starting")
-        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage busy") } }
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage starting") } }
     }
 
     /// No take yet: the shape's outline, centred, with the hint inside and the shape and length under it.

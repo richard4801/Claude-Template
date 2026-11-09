@@ -29,6 +29,9 @@ extension SnapshotRunner {
             return ok()
         }
         func frame(_ key: String) -> Bool { state.composerFrames[key] != nil }
+        // "Starting…" (Generate pressed) and the job's own generating state draw under separate keys: one view's
+        // onDisappear would clear the other's if they shared one.
+        func generating() -> Bool { frame("stage starting") || frame("stage busy") }
         func carousel(_ n: Int) -> Bool { state.composerFrames.keys.contains { $0.hasPrefix("stage carousel ") && $0.hasSuffix("/\(n)") } }
         lines.append("START suite stage check")
         write()
@@ -41,7 +44,7 @@ extension SnapshotRunner {
         await store.estimatePhoto()
         let before = Set(store.jobs.map(\.id))
         store.generatePhoto()
-        let busy = await until(3) { frame("stage busy") }
+        let busy = await until(3) { generating() }
         let started = await until(5) { store.stageJob(.photo).map { !before.contains($0.id) } ?? false }
         let pj = store.stageJob(.photo)
         line(busy && started && pj?.isPhoto == true, "photo_generating",
@@ -82,7 +85,7 @@ extension SnapshotRunner {
         try? await Task.sleep(for: .milliseconds(800))
         let vBefore = Set(store.jobs.map(\.id))
         store.generateShot()
-        let vBusy = await until(3) { frame("stage busy") }
+        let vBusy = await until(3) { generating() }
         let vStarted = await until(6) { store.stageJob(.shot).map { !vBefore.contains($0.id) } ?? false }
         let sj = store.stageJob(.shot)
         line(vBusy && vStarted, "shot_generating", "busy \(vBusy) · job \(sj?.id ?? "none") \(sj?.state ?? "")")
@@ -90,7 +93,7 @@ extension SnapshotRunner {
         try? await Task.sleep(for: .seconds(1))
         store.openTool(.shot)
         store.suite.feedOpen = false
-        let vBack = await until(5) { store.stageJob(.shot)?.id == sj?.id && (frame("stage busy") || (sj?.isDone ?? false)) }
+        let vBack = await until(5) { store.stageJob(.shot)?.id == sj?.id && (frame("stage busy") || (store.stageJob(.shot)?.isDone ?? false)) }
         line(sj != nil && vBack, "shot_return", "stage job \(store.stageJob(.shot)?.id ?? "none")")
         if let id = sj?.id {
             store.go(.queue)
