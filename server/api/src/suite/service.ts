@@ -198,7 +198,7 @@ export class SuiteService {
         const scale = p.models?.[m.id]?.priceScale ?? 1, tiers = tiersOf(m.id);
         const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
         // WS13: what this model can be picked for (plans/model-choice.md); the hosted H3 family also swaps.
-        const purposes = [...videoPurposes(m), ...(this.ctx.replicate.configured && SWAP_ENGINES.some(e => e.id === m.id && e.runs === 'replicate') ? ['swap' as const] : [])];
+        const purposes = [...videoPurposes(m), ...(SWAP_ENGINES.some(e => e.id === m.id && (e.runs === 'replicate' ? this.ctx.replicate.configured : e.runs === 'higgsfield' && this.providers.higgsfield.configured())) ? ['swap' as const] : [])];
         return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, purposes, tier: tiers[0] ?? null, tiers, resolution,
           resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
           perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
