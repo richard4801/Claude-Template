@@ -1102,15 +1102,19 @@ public struct EditSuiteState: Sendable {
 
     /// Adds an audio clip (music / voice-over / sound effect) at `at` (default: music at 0, others at the playhead).
     @discardableResult
-    public mutating func addAudio(_ asset: E.Asset, kind: E.TrackKind, at: Double? = nil) -> Bool {
-        guard kind.isAudio, asset.kind == .audio || asset.kind == .video, let d = asset.durationSec, d >= E.minClipSourceSec else { return false }
+    /// `trimStart` drops the file's first seconds (a voice-over recorded over playback: the output's delay).
+    public mutating func addAudio(_ asset: E.Asset, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) -> Bool {
+        guard kind.isAudio, asset.kind == .audio || asset.kind == .video, let full = asset.durationSec else { return false }
+        let skip = E.r6(max(0, min(trimStart, full - E.minClipSourceSec)))
+        let d = full - skip
+        guard d >= E.minClipSourceSec else { return false }
         let start = at ?? (kind == .music ? 0 : playhead)
         var newId: String?
         let ok = apply { p in
             var q = p.addingAsset(asset)
             let id = q.newId(kind == .music ? "m" : kind == .voice ? "vo" : "fx")
             let len = min(d, max(E.minClipSourceSec, E.durationSec(q) - start))
-            let clip = E.AudioClip(id: id, asset: asset.id, startSec: E.r6(start), inSec: 0, outSec: E.r6(len),
+            let clip = E.AudioClip(id: id, asset: asset.id, startSec: E.r6(start), inSec: skip, outSec: E.r6(skip + len),
                                    fadeOutSec: kind == .music ? min(1, len / 4) : nil)
             for t in q.tracks where t.kind == kind {
                 if let r = q.adding(.audio(clip), toTrack: t.id) { newId = id; return r }

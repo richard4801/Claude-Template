@@ -142,4 +142,18 @@ extension EditSuiteParityTests {
         XCTAssertFalse(s.changeSelected { it in if case .video(var c) = it { c.animIn = E.Anim(kind: .typewriter, durationSec: 0.5); it = .video(c) } },
                        "typewriter is for text: refused")
     }
+
+    /// Recording over playback (design pass, owner-approved): the take lands where recording started, its first seconds
+    /// (the output's delay) trimmed.
+    func testVoiceOverAtItsStartWithTheDelayTrimmed() {
+        var s = fresh()
+        s.playhead = 7
+        let vo = E.Asset(id: "vo1", kind: .audio, upload: "u9", durationSec: 2.5, hasAudio: true)
+        XCTAssertTrue(s.addAudio(vo, kind: .voice, at: 2, trimStart: 0.15))
+        let c = s.project.tracks.first { $0.kind == .voice }?.items.first?.audioClip
+        XCTAssertEqual(c?.startSec, 2)
+        XCTAssertEqual(c?.inSec, 0.15)
+        XCTAssertEqual(c?.outSec ?? 0, 2.5, accuracy: 1e-9)
+        valid(s)
+    }
 }

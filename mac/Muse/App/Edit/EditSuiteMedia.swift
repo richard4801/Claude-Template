@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import AppKit
 import MuseCore
 import Vision
@@ -61,6 +62,54 @@ enum EditSuiteMedia {
         var out = [Double](); out.reserveCapacity(w * h * 3)
         for i in 0..<(w * h) { for c in 0..<3 { out.append(Double(px[i * 4 + c]) / 255) } }
         return out
+    }
+
+    // MARK: The Mac's sound output (recording a voice-over over playback)
+
+    private static func outputProperty<T>(_ device: AudioObjectID, _ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope,
+                                          _ initial: T) -> T? {
+        var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var value = initial
+        var size = UInt32(MemoryLayout<T>.size)
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
+    private static var defaultOutput: AudioObjectID? {
+        outputProperty(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, scope: kAudioObjectPropertyScopeGlobal,
+                       AudioObjectID(0)).flatMap { $0 == 0 ? nil : $0 }
+    }
+
+    /// Whether the sound goes somewhere the microphone won't hear it: headphones, Bluetooth or USB (the design pass: playing
+    /// the video while recording is on by default only then).
+    static var outputIsPrivate: Bool {
+        guard let dev = defaultOutput else { return false }
+        let transport = outputProperty(dev, kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal, UInt32(0)) ?? 0
+        if [kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE, kAudioDeviceTransportTypeUSB].contains(transport) { return true }
+        // The built-in jack: its data source says headphones ('hdpn').
+        let source = outputProperty(dev, kAudioDevicePropertyDataSource, scope: kAudioDevicePropertyScopeOutput, UInt32(0)) ?? 0
+        return source == 0x6864_706E
+    }
+
+    /// How late the Mac's sound output plays what it's given, in seconds (device + safety offset + stream latency + one
+    /// buffer): a voice-over recorded over playback is shifted by this, so lips stay in sync on Bluetooth.
+    static var outputLatencySec: Double {
+        guard let dev = defaultOutput else { return 0 }
+        let rate = outputProperty(dev, kAudioDevicePropertyNominalSampleRate, scope: kAudioObjectPropertyScopeGlobal, Float64(0)) ?? 0
+        guard rate > 0 else { return 0 }
+        let out = kAudioDevicePropertyScopeOutput
+        var frames = Double(outputProperty(dev, kAudioDevicePropertyLatency, scope: out, UInt32(0)) ?? 0)
+        frames += Double(outputProperty(dev, kAudioDevicePropertySafetyOffset, scope: out, UInt32(0)) ?? 0)
+        frames += Double(outputProperty(dev, kAudioDevicePropertyBufferFrameSize, scope: out, UInt32(0)) ?? 0)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: out, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        if AudioObjectGetPropertyDataSize(dev, &addr, 0, nil, &size) == noErr, size >= UInt32(MemoryLayout<AudioStreamID>.size) {
+            var streams = [AudioStreamID](repeating: 0, count: Int(size) / MemoryLayout<AudioStreamID>.size)
+            if AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &streams) == noErr, let first = streams.first, first != 0 {
+                frames += Double(outputProperty(first, kAudioStreamPropertyLatency, scope: kAudioObjectPropertyScopeGlobal, UInt32(0)) ?? 0)
+            }
+        }
+        return min(0.5, frames / rate)
     }
 
     /// What the waveform asks the reader for: 16-bit little-endian interleaved PCM at the track's own sample rate and channel

@@ -384,6 +384,32 @@ extension SnapshotRunner {
             check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
         }
 
+        step("Key colour from the picture (eyedropper)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1)
+        s.edit { $0.changeVisual { $0.chroma = E.Chroma(color: "#2BD15F", similarity: 0.4, smoothness: 0.08, spill: 0.5) } }
+        await s.toggleKeyPick()
+        check("picking", s.pickingKeyColour, s.lastError ?? "")
+        let cw = Double(s.project.canvas.width), chh = Double(s.project.canvas.height)
+        s.pickKeyColour(canvasX: cw / 2, canvasY: chh / 2)
+        let picked = s.project.mainClips.first?.chroma?.color ?? ""
+        let pr = Int(picked.dropFirst().prefix(2), radix: 16) ?? 0, pg = Int(picked.dropFirst(3).prefix(2), radix: 16) ?? 255
+        check("project: the key colour is the take's red", !s.pickingKeyColour && pr > 150 && pg < 90, picked)
+        for _ in 0..<2 { s.undo() }
+
+        step("A large picture goes up at 2048 px")
+        let big = FileManager.default.temporaryDirectory.appendingPathComponent("big-\(UUID().uuidString).png")
+        if let ctx = CGContext(data: nil, width: 3000, height: 1000, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 0.5)); ctx.fill(CGRect(x: 0, y: 0, width: 3000, height: 1000))
+            if let img = ctx.makeImage(), let d = CGImageDestinationCreateWithURL(big as CFURL, "public.png" as CFString, 1, nil) {
+                CGImageDestinationAddImage(d, img, nil); _ = CGImageDestinationFinalize(d)
+            }
+        }
+        let resized = try? EditSuiteSession.pictureForUpload(big, ext: "png")
+        check("2048 × 683, still a PNG", resized.map { $0.2 == 2048 && abs($0.3 - 683) <= 1 && $0.1 == "image/png" } ?? false,
+              resized.map { "\($0.2) × \($0.3) \($0.1)" } ?? "failed")
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }

@@ -471,6 +471,11 @@ struct MaskPanel: View {
                     if let ck {
                         SuiteSwatch(hex: ck.color, label: "Key colour") { c in session.edit { s in s.changeVisual { $0.chroma?.color = c } } }
                         Text(ck.color).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                        // Design pass (owner-approved): the key colour from the picture itself.
+                        SuiteToolButton(title: session.pickingKeyColour ? "Cancel picking" : "Pick from video", icon: "drop", plain: true) {
+                            Task { await session.toggleKeyPick() }
+                        }
+                        .help("Click on the preview to key out that colour (Esc cancels)")
                     }
                     MToggle(isOn: Binding(get: { ck != nil }, set: { on in
                         session.edit { s in s.changeVisual { $0.chroma = on ? EditV2.Chroma(color: "#2BD15F", similarity: 0.4, smoothness: 0.08, spill: 0.5) : nil } }

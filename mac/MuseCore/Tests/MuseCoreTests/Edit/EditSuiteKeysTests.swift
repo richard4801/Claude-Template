@@ -111,4 +111,35 @@ final class EditSuiteKeysTests: XCTestCase {
         XCTAssertNil(a.temperature)
         XCTAssertNil(a.tint)
     }
+
+    func testSourcePointInvertsFitFlipAndCrop() throws {
+        var s = fresh()
+        s.selection = s.project.mainClips[0].id
+        // Same shape as the canvas, cover: the canvas centre is the source centre, a corner its corner.
+        let mid = try XCTUnwrap(s.sourcePoint(canvasX: 540, canvasY: 960, sourceWidth: 1080, sourceHeight: 1920))
+        XCTAssertEqual(mid.u, 0.5, accuracy: 1e-9); XCTAssertEqual(mid.v, 0.5, accuracy: 1e-9)
+        let tl = try XCTUnwrap(s.sourcePoint(canvasX: 108, canvasY: 192, sourceWidth: 1080, sourceHeight: 1920))
+        XCTAssertEqual(tl.u, 0.1, accuracy: 1e-9); XCTAssertEqual(tl.v, 0.1, accuracy: 1e-9)
+        // Mirrored: the left of the canvas is the right of the source.
+        XCTAssertTrue(s.setFlip(x: true))
+        let m = try XCTUnwrap(s.sourcePoint(canvasX: 108, canvasY: 192, sourceWidth: 1080, sourceHeight: 1920))
+        XCTAssertEqual(m.u, 0.9, accuracy: 1e-9)
+        XCTAssertTrue(s.setFlip(x: false))
+        // Cropped left by 0.2: the canvas's left edge is 0.2 into the source.
+        XCTAssertTrue(s.setCrop(.left, 0.2))
+        let c = try XCTUnwrap(s.sourcePoint(canvasX: 0.5, canvasY: 960, sourceWidth: 1080, sourceHeight: 1920))
+        XCTAssertGreaterThanOrEqual(c.u, 0.2 - 1e-3)
+        // Scaled down to half: the corner of the canvas is off the clip.
+        XCTAssertTrue(s.setVisualValue(.scale, 0.5))
+        XCTAssertNil(s.sourcePoint(canvasX: 5, canvasY: 5, sourceWidth: 1080, sourceHeight: 1920))
+    }
+
+    func testSetKeyColourNeedsAKey() {
+        var s = fresh()
+        s.selection = s.project.mainClips[0].id
+        XCTAssertFalse(s.setKeyColour("#00ff00"))
+        XCTAssertTrue(s.changeVisual { $0.chroma = E.Chroma(color: "#2BD15F", similarity: 0.4, smoothness: 0.08, spill: 0.5) })
+        XCTAssertTrue(s.setKeyColour("#00ff00"))
+        XCTAssertEqual(s.project.mainClips[0].chroma?.color, "#00FF00")
+    }
 }

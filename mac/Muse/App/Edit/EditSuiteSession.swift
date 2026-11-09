@@ -1,4 +1,6 @@
 import AVFoundation
+import UniformTypeIdentifiers
+import ImageIO
 import AppKit
 import MuseCore
 import Observation
@@ -495,7 +497,7 @@ final class EditSuiteSession {
     }
 
     /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row.
-    func importAudio(_ url: URL, kind: E.TrackKind) async {
+    func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
         guard isReady else { return }
         do {
             let asset = AVURLAsset(url: url)
@@ -508,7 +510,7 @@ final class EditSuiteSession {
             files[id] = url
             state.assetNames[id] = url.deletingPathExtension().lastPathComponent
             notice = nil
-            edit { $0.addAudio(a, kind: kind) }
+            edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
         } catch {
             notice = nil
             lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
@@ -523,15 +525,18 @@ final class EditSuiteSession {
         let ext = url.pathExtension.lowercased()
         do {
             if Self.pictureTypes[ext] != nil {
-                guard let img = NSImage(contentsOf: url), let rep = img.representations.first else { throw ApiError("bad_media", "That picture can't be opened") }
+                guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
+                // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
+                let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: ext)
                 notice = "Uploading \(url.lastPathComponent)…"
-                let up = try await api.uploadEditorFile(url, contentType: Self.pictureTypes[ext]!, purpose: nil, progress: nil)
+                let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
                 let id = project.newId("p")
-                let a = E.Asset(id: id, kind: .image, upload: up, width: max(1, rep.pixelsWide), height: max(1, rep.pixelsHigh))
-                files[id] = url
+                let a = E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
+                files[id] = file
                 state.assetNames[id] = url.deletingPathExtension().lastPathComponent
                 notice = nil
-                edit { $0.addImage(a) }
+                // Selected, with the Video tab (Transform, blend, keyframes) open so it can be placed straight away.
+                if edit({ $0.addImage(a) }) { view { $0.tab = .video } }
                 return
             }
             let info = try await VideoEditEngine.info(AVURLAsset(url: url))
@@ -554,6 +559,28 @@ final class EditSuiteSession {
     }
 
     /// Picture types an editor upload takes (server `/v1/editor/uploads/presign`).
+    /// The file to upload for a picture: itself, or a copy at 2048 px on the long side when larger (PNG stays PNG, others
+    /// become JPEG), upright. Returns the file, its content type and its pixel size.
+    static func pictureForUpload(_ url: URL, ext: String) throws -> (URL, String, Int, Int) {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { throw ApiError("bad_media", "That picture can't be opened") }
+        var w = (props[kCGImagePropertyPixelWidth] as? Int) ?? 0, h = (props[kCGImagePropertyPixelHeight] as? Int) ?? 0
+        if let o = props[kCGImagePropertyOrientation] as? Int, o >= 5 { swap(&w, &h) }
+        let maxSide = 2048
+        guard max(w, h) > maxSide else { return (url, pictureTypes[ext] ?? "image/jpeg", max(1, w), max(1, h)) }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                     kCGImageSourceThumbnailMaxPixelSize: maxSide]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { throw ApiError("bad_media", "That picture can't be opened") }
+        let png = ext == "png"
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("pic-\(UUID().uuidString).\(png ? "png" : "jpg")")
+        guard let dest = CGImageDestinationCreateWithURL(out as CFURL, (png ? UTType.png : UTType.jpeg).identifier as CFString, 1, nil) else {
+            throw ApiError("bad_media", "That picture can't be resized")
+        }
+        CGImageDestinationAddImage(dest, cg, png ? nil : [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ApiError("bad_media", "That picture can't be resized") }
+        return (out, png ? "image/png" : "image/jpeg", cg.width, cg.height)
+    }
+
     static let pictureTypes: [String: String] = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "webp": "image/webp"]
 
     /// Pictures in this edit (the Stickers tab lists them to add again).
@@ -564,15 +591,28 @@ final class EditSuiteSession {
     /// True while a voice-over is being recorded from the Mac's microphone.
     var isRecordingVO = false
     @ObservationIgnored private var voRecorder: AVAudioRecorder?
+    /// Where the recording started on the timeline (the take lands there), and the output delay to trim when the video played.
+    @ObservationIgnored private var voStart: Double = 0
+    @ObservationIgnored private var voTrim: Double = 0
+    /// Design pass (owner-approved 2026-11-09): play the video, with the edit's sound, while recording. Remembered once
+    /// chosen; until then on only when the sound goes to headphones, Bluetooth or USB, so the microphone doesn't hear it.
+    var voPlayback: Bool = (UserDefaults.standard.object(forKey: "edit.voPlayback") as? Bool) ?? EditSuiteMedia.outputIsPrivate {
+        didSet { UserDefaults.standard.set(voPlayback, forKey: "edit.voPlayback") }
+    }
+    /// When recording began (the timeline's red bar grows from voStart by the time since).
+    var voStartedAt: Date?
+    var voStartSec: Double { voStart }
 
     /// Starts recording a voice-over (asks for the microphone the first time), or stops and adds it to the voice row.
     @MainActor
     func toggleRecordVO() async {
         if let r = voRecorder {
             r.stop()
+            if playing { pause() }
             voRecorder = nil
             isRecordingVO = false
-            await importAudio(r.url, kind: .voice)
+            voStartedAt = nil
+            await importAudio(r.url, kind: .voice, at: voStart, trimStart: voTrim)
             return
         }
         guard isReady else { return }
@@ -591,9 +631,17 @@ final class EditSuiteSession {
                                        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
         do {
             let r = try AVAudioRecorder(url: url, settings: settings)
+            if playing { pause() }
+            // At the very end there's nothing to play over: start from the top (as Play does).
+            if voPlayback, playhead >= duration - 0.05 { seek(0) }
+            voStart = playhead
+            // Over playback: the voice answers what the user hears, which the output plays this late.
+            voTrim = voPlayback ? EditSuiteMedia.outputLatencySec : 0
             guard r.record() else { throw ApiError("record_failed", "Couldn't start recording") }
+            if voPlayback { play(rate: 1) }
             voRecorder = r
             isRecordingVO = true
+            voStartedAt = Date()
         } catch {
             lastError = (error as? ApiError)?.message ?? "Couldn't start recording"
         }
@@ -1003,6 +1051,64 @@ final class EditSuiteSession {
         var changed = 0
         edit { s in changed = s.evenVolume(levels: levels); return changed > 0 }
         if changed > 0 { notice = "Evened out \(changed) clip\(changed == 1 ? "" : "s")" }
+    }
+
+    // MARK: Key colour from the picture (design pass, owner-approved 2026-11-09)
+
+    /// The selected clip's source frame under the playhead, before its look (the pixels the key compares), while picking.
+    struct KeyPickFrame { let width: Int; let height: Int; let rgba: [UInt8] }
+    var pickingKeyColour = false
+    @ObservationIgnored private(set) var keyPickFrame: KeyPickFrame?
+
+    /// "Pick from video": pauses, reads the clip's source frame at the playhead, then waits for a click on the preview.
+    /// Picking again (or Esc) cancels.
+    func toggleKeyPick() async {
+        if pickingKeyColour { pickingKeyColour = false; keyPickFrame = nil; return }
+        guard let c = state.selectedVideo, c.chroma != nil, let url = files[c.asset], let loc = project.locate(c.id) else { return }
+        pause()
+        let track = project.tracks[loc.track]
+        let span = E.itemSpan(project, track, track.items[loc.item])
+        let local = min(max(0, playhead - span.startSec), span.endSec - span.startSec)
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 1280, height: 1280)
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        guard let cg = try? await gen.image(at: CMTime(seconds: E.clipSourceAt(c, local), preferredTimescale: 600)).image else {
+            lastError = "Couldn't read this clip's picture"; return
+        }
+        let w = cg.width, h = cg.height
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        keyPickFrame = KeyPickFrame(width: w, height: h, rgba: px)
+        pickingKeyColour = true
+    }
+
+    /// The colour under a canvas point (pixels, top-left origin): a 3 × 3 average of the source frame, as #RRGGBB.
+    func keyColour(canvasX x: Double, canvasY y: Double) -> String? {
+        guard let f = keyPickFrame,
+              let p = state.sourcePoint(canvasX: x, canvasY: y, sourceWidth: Double(f.width), sourceHeight: Double(f.height)) else { return nil }
+        let cx = min(f.width - 1, max(0, Int(p.u * Double(f.width)))), cy = min(f.height - 1, max(0, Int(p.v * Double(f.height))))
+        var sum = [0, 0, 0], n = 0
+        for dy in -1...1 { for dx in -1...1 {
+            let xx = cx + dx, yy = cy + dy
+            guard xx >= 0, yy >= 0, xx < f.width, yy < f.height else { continue }
+            let i = (yy * f.width + xx) * 4
+            sum[0] += Int(f.rgba[i]); sum[1] += Int(f.rgba[i + 1]); sum[2] += Int(f.rgba[i + 2]); n += 1
+        } }
+        guard n > 0 else { return nil }
+        return String(format: "#%02X%02X%02X", sum[0] / n, sum[1] / n, sum[2] / n)
+    }
+
+    /// Sets the key colour from a click on the preview (one undo step) and leaves picking.
+    func pickKeyColour(canvasX x: Double, canvasY y: Double) {
+        guard let hex = keyColour(canvasX: x, canvasY: y) else { notice = "Click on the clip itself"; return }
+        edit { $0.setKeyColour(hex) }
+        pickingKeyColour = false
+        keyPickFrame = nil
     }
 
     // MARK: Style kits (parity, shared kit engine)

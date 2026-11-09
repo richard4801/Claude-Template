@@ -171,4 +171,36 @@ extension EditSuiteState {
         guard next != v.adjust else { return false }
         return changeVisual { $0.adjust = next }
     }
+
+    // MARK: Key colour from the picture (design pass, owner-approved: the chroma eyedropper)
+
+    /// Where a canvas point (pixels, top-left origin) falls on the selected video clip's own source frame, as 0–1 of its width
+    /// and height (before crop), at the playhead: the inverse of its fit, flip, scale, rotation and position. Nil when the
+    /// point is off the clip or nothing fitting is selected.
+    public func sourcePoint(canvasX x: Double, canvasY y: Double, sourceWidth sw: Double, sourceHeight sh: Double) -> (u: Double, v: Double)? {
+        guard let c = selectedVideo, sw > 0, sh > 0 else { return nil }
+        let cr = c.crop
+        let l = cr?.left ?? 0, r = cr?.right ?? 0, t = cr?.top ?? 0, b = cr?.bottom ?? 0
+        let cw = sw * max(0.1, 1 - l - r), ch = sh * max(0.1, 1 - t - b)
+        var tf = c.transform ?? E.Transform()
+        tf.x = visualValue(.x); tf.y = visualValue(.y); tf.scale = visualValue(.scale); tf.rotation = visualValue(.rotation)
+        let fit = c.fit ?? (selectedIsMain ? .cover : .contain)
+        let k = E.itemCorners(canvasWidth: Double(project.canvas.width), canvasHeight: Double(project.canvas.height), w: cw, h: ch, fit: fit, transform: tf)
+        guard k.count == 4 else { return nil }
+        // p = TL + u·(TR − TL) + v·(BL − TL): solve the 2×2 system.
+        let ax = k[1][0] - k[0][0], ay = k[1][1] - k[0][1], bx = k[3][0] - k[0][0], by = k[3][1] - k[0][1]
+        let det = ax * by - ay * bx
+        guard abs(det) > 1e-9 else { return nil }
+        let px = x - k[0][0], py = y - k[0][1]
+        let u = (px * by - py * bx) / det, v = (ax * py - ay * px) / det
+        guard (0...1).contains(u), (0...1).contains(v) else { return nil }
+        return (l + u * (1 - l - r), t + v * (1 - t - b))
+    }
+
+    /// Sets the selected clip's key colour (one undo step); false when it has no chroma key.
+    @discardableResult
+    public mutating func setKeyColour(_ hex: String) -> Bool {
+        guard selectedVideo?.chroma != nil else { return false }
+        return changeChroma { $0.color = hex.uppercased() }
+    }
 }

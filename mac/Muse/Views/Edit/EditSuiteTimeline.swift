@@ -370,6 +370,15 @@ struct TimelineCanvas: View {
             ForEach(blocks) { b in
                 block(b, row: row, locked: locked)
             }
+            // Design pass: while a voice-over records, a red bar grows on the first voice row from where it started.
+            if session.isRecordingVO, row.kind == .voice, session.project.tracks.first(where: { $0.kind == .voice })?.id == row.trackId {
+                let from = session.voStartSec
+                Rectangle().fill(t.roles.danger.opacity(0.55))
+                    .frame(width: max(2, CGFloat(max(0, session.playhead - from)) * z), height: Self.rowHeight(row.kind) - 12)
+                    .offset(x: CGFloat(from) * z, y: 6)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Recording")
+            }
         }
         .opacity(session.project.track(row.trackId)?.hidden == true ? 0.4 : 1)
     }
