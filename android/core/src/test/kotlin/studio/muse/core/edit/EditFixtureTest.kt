@@ -168,10 +168,19 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun autoAdjustTable() {
+        for (c in fn["autoAdjust"]!!.arr) {
+            val o = c.obj
+            val rgb = o["rgb"]!!.arr.map { it.num }.toDoubleArray()
+            val base = (o["base"] as? JsonObject)?.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num, it["highlights"]?.num, it["shadows"]?.num, it["tint"]?.num) }
+            assertJson("autoAdjust ${o["name"]}", o["out"], EditJson.encodeAdjust(autoAdjust(rgb, base)))
+        }
+    }
+
     @Test fun colorKeyframes() {
         for ((i, c) in fn["colorKeys"]!!.arr.withIndex()) {
             val it0 = c.obj["item"]!!.obj
-            val a = it0["adjust"]?.obj?.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num, tint = it["tint"]?.num) }
+            val a = (it0["adjust"] as? JsonObject)?.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num, tint = it["tint"]?.num) }
             val f = (it0["filter"] as? JsonObject)?.let { FilterRef(it["id"]!!.str, it["amount"]!!.num) }
             val keys: Keyframes = it0["keyframes"]!!.obj.entries.associate { (k, v) ->
                 KfProp.entries.first { p -> p.wire == k } to v.arr.map { kf -> Keyframe(kf.obj["t"]!!.num, kf.obj["v"]!!.num, kf.obj["ease"]?.str?.let { e -> Ease.entries.first { x -> x.wire == e } }) }

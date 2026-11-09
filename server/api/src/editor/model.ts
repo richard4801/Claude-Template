@@ -151,6 +151,41 @@ export function adjustAt(item: { adjust?: Adjust; keyframes?: Keyframes }, t: nu
   return out;
 }
 
+/**
+ * Auto adjust (M): one frame's levels ([rgb]: r, g, b, … straight sRGB 0–1, e.g. the frame at 96 px) → a gentle adjust
+ * for the colour matrix, over [base] (its other fields kept). Exposure moves the mean luma towards 0.45 (±0.6 stop);
+ * contrast the 2–98 % spread towards 0.85 (−0.3…0.4); temperature and tint balance red/blue and green half-way;
+ * saturation lifts flat footage (+0.15) and calms very saturated footage (−0.1). Fields that come out 0 are left out.
+ */
+export function autoAdjust(rgb: number[], base?: Adjust): Adjust {
+  const n = Math.floor(rgb.length / 3);
+  if (n === 0) return { ...(base ?? {}) };
+  let r = 0, g = 0, b = 0, chroma = 0;
+  const luma: number[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const R = rgb[i * 3]!, G = rgb[i * 3 + 1]!, B = rgb[i * 3 + 2]!;
+    r += R; g += G; b += B;
+    luma[i] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+    chroma += Math.max(R, G, B) - Math.min(R, G, B);
+  }
+  r /= n; g /= n; b /= n; chroma /= n;
+  luma.sort((x, y) => x - y);
+  const mean = luma.reduce((s, v) => s + v, 0) / n;
+  const lo = luma[clamp(Math.floor(n * 0.02), 0, n - 1)]!, hi = luma[clamp(Math.floor(n * 0.98), 0, n - 1)]!;
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const e = mean > 1e-3 ? clamp(Math.log(0.45 / mean) / Math.log(2), -0.6, 0.6) : 0.6;
+  const spread = hi - lo;
+  const c = spread > 1e-3 ? clamp(0.85 / spread - 1, -0.3, 0.4) : 0;
+  const rb = (r + b) / 2;
+  const t = r + b > 1e-3 ? clamp((b - r) / (0.1 * (r + b)) * 0.5, -1, 1) : 0;
+  const tn = g > 1e-3 ? clamp((g - rb) / (0.1 * g + 0.05 * rb) * 0.5, -1, 1) : 0;
+  const s = chroma < 0.08 ? 0.15 : chroma > 0.35 ? -0.1 : 0;
+  const out: Adjust = { ...(base ?? {}) };
+  const set = (k: 'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint', v: number) => { const x = r2(v); if (x !== 0) out[k] = x; else delete out[k]; };
+  set('exposure', e); set('contrast', c); set('saturation', s); set('temperature', t); set('tint', tn);
+  return out;
+}
+
 // ------------------------------------------------------------------ timeline
 /** Speed at x (0–1) of a curve: smoothstep between points in log speed. */
 export function curveSpeed(c: SpeedCurve, x: number): number {
