@@ -13,7 +13,7 @@ import type { ProviderId } from './registry.js';
 
 const run = promisify(execFile);
 
-export type ProviderStatus = { status: 'running' | 'succeeded' | 'failed' | 'canceled'; url?: string | null; billedSeconds?: number | null; error?: ReplicateError };
+export type ProviderStatus = { status: 'running' | 'succeeded' | 'failed' | 'canceled'; url?: string | null; billedSeconds?: number | null; /** fal: the runner's processing seconds (metrics.inference_time), what fal bills per compute second. */ computeSec?: number | null; error?: ReplicateError };
 export type StartHooks = { cancelled: () => boolean; onWait?: (seconds: number) => void | Promise<void>; /** The planned output length (the mock renders this long when the input has no duration, e.g. recast). */ seconds?: number };
 export interface VideoProvider {
   id: ProviderId;
@@ -70,15 +70,16 @@ export class FalProvider implements VideoProvider {
     const h = JSON.parse(id) as { s: string; r: string };
     const res = await this.fetchFn(h.s, { headers: this.headers(), signal: AbortSignal.timeout(30_000) }).catch(() => null);
     if (!res || !res.ok) return { status: 'running' };
-    const st = (await res.json()) as { status?: string; error?: unknown };
+    const st = (await res.json()) as { status?: string; error?: unknown; metrics?: { inference_time?: number } };
     if (st.status === 'COMPLETED') {
+      const t = Number(st.metrics?.inference_time), computeSec = Number.isFinite(t) && t > 0 ? t : null;
       const out = await this.fetchFn(h.r, { headers: this.headers(), signal: AbortSignal.timeout(30_000) });
       const body = (await out.json().catch(() => ({}))) as { video?: { url?: string }; detail?: unknown };
       if (!out.ok || !body.video?.url) {
         const t = errorText(body.detail ?? st.error ?? `status ${out.status}`);
         return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') };
       }
-      return { status: 'succeeded', url: body.video.url, billedSeconds: null };
+      return { status: 'succeeded', url: body.video.url, billedSeconds: null, computeSec };
     }
     if (st.status === 'FAILED' || st.error) { const t = errorText(st.error); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
     return { status: 'running' };
