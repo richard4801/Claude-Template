@@ -50,7 +50,7 @@ extension SnapshotRunner {
                 store.closeProviderForm()
                 store.settingsPrompts = false
                 show()
-                try? await Task.sleep(for: .seconds(1.8))
+                try? await Task.sleep(for: .seconds(1.2))
                 capture(dir.appendingPathComponent("mac_settings_\(theme.rawValue)_\(name).png"))
             }
         }
