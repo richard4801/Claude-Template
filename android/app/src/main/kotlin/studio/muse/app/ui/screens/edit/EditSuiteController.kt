@@ -283,6 +283,8 @@ sealed interface EditAction {
     /** Translated captions (2026-11-09, paid): the captions in [language]; [best] is the higher-quality option. */
     data class TranslatePrice(val language: String, val best: Boolean) : EditAction
     data class Translate(val language: String, val best: Boolean) : EditAction
+    /** Lyric captions (2026-11-09): captions from the song on the music track (an upload), timed through its clips. */
+    data object LyricCaptions : EditAction
     /** Translated captions: show the words in [language] (the translation's or the original's; null: the original's if it had none). */
     data class CaptionOriginal(val language: String?) : EditAction
     data class Slowmo(val factor: Int, val lengthSec: Double) : EditAction
@@ -444,7 +446,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -795,6 +797,7 @@ class EditSuiteController(
             }
             is EditAction.EditText -> change(done = true) { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(text = a.text.take(500).ifBlank { it.text }) ?: it } }
             EditAction.AutoCaptions -> u.helpersOff["captions"]?.let { say(it) } ?: autoCaptions()
+            EditAction.LyricCaptions -> u.helpersOff["captions"]?.let { say(it) } ?: (songAsset()?.let { autoCaptions(it) } ?: say("Add a song from your files to the music track first"))
             is EditAction.CaptionTab -> _ui.update { it.copy(captionTab = a.tab) }
             is EditAction.CaptionStyleOf -> if (u.captionTrack == null) say("Make captions first · Auto-captions") else change { p -> SuiteOps.captionStyle(p) { SuiteOps.switchPreset(it, a.preset) } }
             is EditAction.CaptionFont -> change { p -> SuiteOps.captionStyle(p) { it.copy(text = it.text.copy(font = a.font, weight = if (a.font == Font.MARKER || a.font == Font.SERIF) 400 else it.text.weight.coerceAtLeast(700))) } }
@@ -1116,9 +1119,12 @@ class EditSuiteController(
     fun cancelAi(key: String) { jobs.remove(key)?.cancel(); setAi(key) { it.copy(running = false) } }
 
     // =================================================================== AI helpers
-    private fun autoCaptions() {
+    /** The music track's song when it can go to the helpers (an upload or a take, not a library track). */
+    private fun songAsset(): Asset? = project?.let { p -> (SuiteOps.musicTrack(p)?.items?.firstOrNull() as? AudioClip)?.let { p.asset(it.asset) }?.takeIf { it.upload != null || it.take != null } }
+
+    private fun autoCaptions(song: Asset? = null) {
         val p = project ?: return
-        val asset = SuiteOps.sourceAsset(p) ?: return
+        val asset = song ?: SuiteOps.sourceAsset(p) ?: return
         val lang = _ui.value.captionLanguage?.let { kotlinx.serialization.json.buildJsonObject { put("language", kotlinx.serialization.json.JsonPrimitive(it)) } }
         runAi("captions", lang, sourceOf(asset)) { r ->
             val words = (r["words"] as? JsonArray).orEmpty().mapNotNull { w ->
@@ -1128,11 +1134,11 @@ class EditSuiteController(
                 val e = (o["endSec"] as? JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
                 CaptionWord(text, s, maxOf(s, e))
             }
-            if (words.isEmpty()) say("No speech found in this video")
+            if (words.isEmpty()) say(if (song != null) "No singing found in this song" else "No speech found in this video")
             else {
                 // The speech's language, kept on the track (translated captions name it).
                 val lang = (r["language"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) }
-                if (change { pp -> SuiteOps.withCaptions(pp, asset.id, words).let { np -> np.copy(tracks = np.tracks.map { t -> if (t.kind == TrackKind.CAPTION) t.copy(caption = t.caption?.copy(language = lang, original = null)) else t }) } })
+                if (change { pp -> SuiteOps.withCaptions(pp, asset.id, words, if (song != null) studio.muse.core.edit.CaptionPreset.KARAOKE else studio.muse.core.edit.CaptionPreset.POP).let { np -> np.copy(tracks = np.tracks.map { t -> if (t.kind == TrackKind.CAPTION) t.copy(caption = t.caption?.copy(language = lang, original = null)) else t }) } })
                     say("Captions added · ${words.size} words")
             }
         }

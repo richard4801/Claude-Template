@@ -787,6 +787,8 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
             }
         }
         ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
+        // Lyric captions: from the song on the music track (one of the member's files), timed with the music.
+        if (ui.helpersOff["captions"] == null && ui.songCaptionable) AiButton("Captions from the song", ui.ai["captions"], { act(EditAction.LyricCaptions) }, icon = "music")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return
     }

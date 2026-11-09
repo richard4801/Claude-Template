@@ -588,6 +588,19 @@ export function captionWords(p: EditProject): TimedWord[] {
       out.push({ text: w.text, startSec: r6(s.startSec + clipTimeAt(c, a)), endSec: r6(s.startSec + clipTimeAt(c, b)), index: idx });
     });
   });
+  // Lyric captions (2026-11-09): the same through the audio clips (music, voice, sound effects) of the caption asset.
+  for (const t of p.tracks) {
+    if (t.kind !== 'music' && t.kind !== 'voice' && t.kind !== 'sfx') continue;
+    for (const c of t.items as AudioClip[]) {
+      if (c.asset !== ct.asset) continue;
+      ct.words.forEach((w, idx) => {
+        const mid = (w.startSec + w.endSec) / 2;
+        if (mid < c.inSec || mid >= c.outSec) return;
+        const a = Math.max(w.startSec, c.inSec), b = Math.min(w.endSec, c.outSec);
+        out.push({ text: w.text, startSec: r6(c.startSec + clipTimeAt(c, a)), endSec: r6(c.startSec + clipTimeAt(c, b)), index: idx });
+      });
+    }
+  }
   return out.sort((a, b) => a.startSec - b.startSec || a.index - b.index);
 }
 
