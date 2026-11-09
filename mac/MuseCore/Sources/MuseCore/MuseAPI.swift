@@ -222,6 +222,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     func updateEditKit(id: String, name: String?, kit: EditV2.StyleKit?) async throws -> EditKit
     /// DELETE /v1/editor/kits/{id}
     func deleteEditKit(id: String) async throws
+    /// GET /v1/editor/content (the content library catalog; nil when this server has none). Types in Edit/EditContent.swift.
+    func editorContent() async throws -> ContentCatalog?
+    /// GET /v1/editor/content/files/<path> (public): the file on this Mac, kept per catalog version.
+    func editorContentFile(_ path: String, version: String) async throws -> URL
     /// POST /v1/editor/uploads/presign {contentType, bytes, purpose?} + PUT → the uploadId (music, voice-over, .cube).
     func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String
     /// POST /v1/editor/luts/validate {uploadId}
