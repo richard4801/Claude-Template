@@ -239,7 +239,10 @@ struct EditSuiteBin: View {
                     .accessibilityLabel("Add sticker \(session.state.assetNames[a.id] ?? "picture")")
                 }
             }
-            SuiteToolButton(title: "Import picture", icon: "image") { importMedia(pictures: true, videos: false) }
+            HStack(spacing: Space.s2) {
+                SuiteToolButton(title: "Import picture", icon: "image") { importMedia(pictures: true, videos: false) }
+                CutoutPictureButton(session: session)
+            }
         }
     }
 

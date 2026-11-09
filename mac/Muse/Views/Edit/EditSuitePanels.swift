@@ -39,7 +39,13 @@ struct VideoPanels: View {
                 AdjustPanel(session: session, visual: v)
                 MaskPanel(session: session, visual: v)
             }
+            // The effects library (WS8 f7226f2) on clips and pictures.
+            if session.state.canHaveEffect { EffectsPanel(session: session) }
             if session.state.selectedIsMain { TransitionsPanel(session: session) }
+            // Cross-dissolve between overlays (WS8 3d62419).
+            if session.state.canDissolve { OverlayDissolvePanel(session: session) }
+            // Cut out a picture (XL helper).
+            if case .image? = session.state.selectedItem { EditPanel(title: "Cut out") { CutoutRow(session: session) } }
         } else {
             InspectorEmpty(text: "Select a clip, an overlay or a sticker on the timeline.")
         }
@@ -868,6 +874,8 @@ struct AudioPanels: View {
         if let snd = session.state.selectedSound { clipPanel(snd) } else {
             InspectorEmpty(text: "Select a clip, voice-over or song for its sound.")
         }
+        // Split voice and music (XL helper) on a video clip with sound.
+        if session.state.selectedVideo != nil { EditPanel(title: "Voice and music") { SeparateRow(session: session) } }
         mixPanel
     }
 

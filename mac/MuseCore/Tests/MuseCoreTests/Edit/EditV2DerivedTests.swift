@@ -242,3 +242,30 @@ extension EditV2DerivedTests {
         }
     }
 }
+
+extension EditV2DerivedTests {
+    func testDissolveAndEffectOnTheSelection() throws {
+        let f = try editorFixture("functions")["overlayFades"]
+        var p = try f["project"].decode(E.Project.self)
+        // Undo the fixture's dissolves so the second item just touches the first.
+        guard let ti = p.tracks.firstIndex(where: { $0.kind == .image }) else { return XCTFail("image track") }
+        if case .image(var im) = p.tracks[ti].items[1] {
+            let prevEnd = E.itemSpan(p, p.tracks[ti], p.tracks[ti].items[0]).endSec
+            im.transitionIn = nil; im.startSec = prevEnd; p.tracks[ti].items[1] = .image(im)
+        }
+        var s = EditSuiteState(p)
+        s.selection = p.tracks[ti].items[1].id
+        XCTAssertTrue(s.canDissolve)
+        XCTAssertTrue(s.setOverlayDissolve(0.5))
+        XCTAssertEqual(s.selectedDissolve?.kind, .fade)
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertTrue(s.setOverlayDissolve(nil))
+        XCTAssertNil(s.selectedDissolve)
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertTrue(s.setEffect(E.Effect(id: "duotone", amount: 0.6, colors: ["#000000", "#FFFFFF"])))
+        XCTAssertEqual(s.selectedEffect?.id, "duotone")
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertTrue(s.setEffect(nil))
+        XCTAssertNil(s.selectedEffect)
+    }
+}

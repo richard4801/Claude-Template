@@ -46,7 +46,7 @@ extension FakeMuseAPI {
     /// A run that would cost money on the server (not the free passes).
     private func isPaid(_ req: EditorJobRequest) -> Bool {
         switch req.kind {
-        case .captions, .matte, .slowmo, .translate: return true
+        case .captions, .matte, .slowmo, .translate, .separate, .cutout: return true
         case .denoise: return req.options?.analyzeOnly != true
         case .cuts, .beats, .reverse, .stabilize: return false
         }
@@ -98,14 +98,14 @@ extension FakeMuseAPI {
     }
 
     public func editorEstimate(_ req: EditorJobRequest) throws -> EditorEstimate {
-        let d = try editorSourceDuration(req.source)
+        let d = req.kind == .cutout ? ((try? editorSourceDuration(req.source)) ?? 1) : try editorSourceDuration(req.source)   // a photo has no length
         try checkGuardrails(req)
         let usd = isPaid(req) ? editorPriceUsd : 0
         return EditorEstimate(kind: req.kind, usd: usd, tokens: usd > 0 ? usd * 100 : 0, free: usd <= 0, reusesTranscript: false, durationSec: d)
     }
 
     public func startEditorJob(_ req: EditorJobRequest) throws -> EditorJob {
-        let d = try editorSourceDuration(req.source)
+        let d = req.kind == .cutout ? ((try? editorSourceDuration(req.source)) ?? 1) : try editorSourceDuration(req.source)   // a photo has no length
         try checkGuardrails(req)
         if req.kind == .reverse && d > 60 { throw ApiError("bad_request", "Reverse works on videos up to 60 s") }
         if req.kind == .slowmo {
@@ -133,6 +133,8 @@ extension FakeMuseAPI {
         case .stabilize: phase = "Steadying"
         case .slowmo: phase = "Slowing down"
         case .translate: phase = "Translating"
+        case .separate: phase = "Separating"
+        case .cutout: phase = "Cutting out"
         }
         let job = EditorJob(id: id, kind: req.kind, state: "running", progress: 5, phase: phase, estimateUsd: 0, costUsd: 0)
         editorJobs[id] = job
@@ -180,6 +182,16 @@ extension FakeMuseAPI {
             // The fake hands back the source itself as the "reversed" or "steadied" copy.
             r.asset = EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
             r.width = 1080; r.height = 1920; r.hasAudio = true
+        case .separate:
+            // The demo hands back the source's sound as both parts.
+            r.vocals = EditorResultAsset(kind: "audio", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
+            r.instrumental = EditorResultAsset(kind: "audio", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
+        case .cutout:
+            // The demo hands back the picture itself, its whole frame as the box.
+            r.asset = EditorResultAsset(kind: "image", upload: req.source.uploadId, take: req.source.takeId, width: 1000, height: 1000)
+            r.box = EditV2.CutoutBox(x: 0, y: 0, w: 1000, h: 1000)
+            r.sourceWidth = 1000; r.sourceHeight = 1000
+            r.mode = req.options?.points?.isEmpty == false ? "tracked" : "person"
         case .translate:
             // The demo "translates" each line by tagging it with the language, timed as the line.
             let lang = req.options?.targetLanguage ?? "es"

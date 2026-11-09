@@ -768,6 +768,8 @@ final class EditSuiteSession {
         case .stabilize: return "Stabilise"
         case .slowmo: return "Smooth slow motion"
         case .translate: return "Translate captions"
+        case .separate: return "Split voice and music"
+        case .cutout: return "Cut out"
         }
     }
 
@@ -1094,6 +1096,89 @@ final class EditSuiteSession {
         if edit({ $0.applySlowmoSelected(copy) }) {
             notice = "\(E.derivedLabel(project, copy.id)) · the slowed part is selected and muted"
         }
+    }
+
+    // MARK: Split voice and music, cut out a picture (XL helpers, WS16 jobs, WS8 shared ops)
+
+    /// The selected clip's sound split by the server (paid, the price first); the clip is muted and the kept part(s)
+    /// land on a voice and / or music track in sync with it.
+    func separateSelected(keep: E.SeparationKeep) async {
+        guard let c = state.selectedVideo, let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Select a video clip with sound"; return }
+        guard a.hasAudio != false else { lastError = "This clip has no sound to split"; return }
+        await run(.separate, source: src) { [weak self] r in
+            Task { @MainActor in await self?.addSeparation(r, clipId: c.id, keep: keep) }
+        }
+    }
+
+    private func addSeparation(_ r: EditorJobResult, clipId: String, keep: E.SeparationKeep) async {
+        guard let v = r.vocals, let i = r.instrumental, v.upload != nil || v.take != nil, i.upload != nil || i.take != nil else {
+            lastError = "Couldn't split this clip's sound"; return
+        }
+        let vid = project.newId("a")
+        let iid = vid + "i"
+        let vocals = E.Asset(id: vid, kind: .audio, take: v.upload == nil ? v.take : nil, upload: v.upload, durationSec: v.durationSec ?? r.durationSec, hasAudio: true, url: v.url, name: "Voice")
+        let instrumental = E.Asset(id: iid, kind: .audio, take: i.upload == nil ? i.take : nil, upload: i.upload, durationSec: i.durationSec ?? r.durationSec, hasAudio: true, url: i.url, name: "Music")
+        for (id, part) in [(vid, v), (iid, i)] {
+            if let link = part.url ?? part.take.flatMap({ lookupTake($0)?.videoUrl }), let u = URL(string: link),
+               let local = try? await EditSuiteMedia.localCopy(u, key: part.upload ?? part.take ?? id) { files[id] = local }
+        }
+        state.assetNames[vid] = "Voice"; state.assetNames[iid] = "Music"
+        view { $0.selection = clipId }
+        if edit({ $0.applySeparationSelected(vocals: vocals, instrumental: instrumental, keep: keep) }) {
+            notice = keep == .both ? "Voice and music on their own rows · the clip is muted" : keep == .vocals ? "Voice only · the clip is muted" : "Music only · the clip is muted"
+        }
+    }
+
+    /// The selected picture cut out by the server (paid): the person, or what `points` keep; it stays where the subject sat.
+    func cutoutSelected(points: [KeepPoint]? = nil) async {
+        guard case .image(let im)? = state.selectedItem, let a = project.asset(im.asset), let src = EditorSource(a) else { lastError = "Select a picture to cut out"; return }
+        await run(.cutout, source: src, options: points.map { EditorJobOptions(points: $0) }) { [weak self] r in
+            Task { @MainActor in await self?.addCutout(r, itemId: im.id) }
+        }
+    }
+
+    private func addCutout(_ r: EditorJobResult, itemId: String?) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't cut that out"; return }
+        let id = project.newId("p")
+        let asset = E.Asset(id: id, kind: .image, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, width: ra.width, height: ra.height, url: ra.url)
+        if let link = ra.url, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? id) { files[id] = local }
+        state.assetNames[id] = "Cut-out"
+        if let itemId, let box = r.box, let sw = r.sourceWidth, let sh = r.sourceHeight {
+            view { $0.selection = itemId }
+            if edit({ $0.applyCutoutSelected(asset, box: box, sourceWidth: sw, sourceHeight: sh) }) { notice = "Cut out · it stays where it was" }
+        } else if edit({ $0.addImage(asset) }) {
+            notice = "Cut-out added at the playhead"
+        }
+    }
+
+    /// "Cut out a picture…" (Stickers): a picture from this Mac, uploaded (JPEG or PNG), cut out, and added at the playhead.
+    func cutoutPicture(_ url: URL) async {
+        do {
+            let ext = url.pathExtension.lowercased()
+            var (file, type, _, _) = try Self.pictureForUpload(url, ext: ext)
+            if type == "image/heic" || type == "image/webp" { (file, type) = try Self.jpegCopy(file) }   // the cut-out takes JPEG or PNG
+            notice = "Uploading \(url.lastPathComponent)…"
+            let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+            notice = nil
+            await run(.cutout, source: EditorSource(uploadId: up)) { [weak self] r in
+                Task { @MainActor in await self?.addCutout(r, itemId: nil) }
+            }
+        } catch {
+            notice = nil
+            lastError = (error as? ApiError)?.message ?? "Couldn't cut out that picture"
+        }
+    }
+
+    /// A JPEG copy of a picture (for helpers that don't take HEIC or WebP).
+    static func jpegCopy(_ url: URL) throws -> (URL, String) {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+            throw ApiError("bad_media", "That picture can't be opened")
+        }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("pic-\(UUID().uuidString).jpg")
+        guard let dest = CGImageDestinationCreateWithURL(out as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { throw ApiError("bad_media", "That picture can't be converted") }
+        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ApiError("bad_media", "That picture can't be converted") }
+        return (out, "image/jpeg")
     }
 
     func setRemoveBackground(_ on: Bool) async {

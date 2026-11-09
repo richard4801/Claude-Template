@@ -14,6 +14,10 @@ public enum EditorJobKind: String, Codable, Hashable, Sendable, CaseIterable {
     case slowmo
     /// Translated captions (XL, WS16 8e126801 / e1e3dd4f): the caption lines in another language, timed per line; paid.
     case translate
+    /// Split voice and music (WS16 d180db0e): vocals and instrumental as two audio uploads; paid.
+    case separate
+    /// Cut out a picture (WS16 b1fa8715): the person, or what the taps pick, as a trimmed PNG; paid.
+    case cutout
 }
 
 /// The media a job works on: a video take of the studio, or an upload of the studio (+ its length).
@@ -105,7 +109,7 @@ extension EditorJobKind {
         case .captions, .cuts: return .captions
         case .matte: return options?.points != nil ? .track : .matte
         case .denoise: return .denoise
-        case .beats, .reverse, .stabilize, .slowmo, .translate: return nil
+        case .beats, .reverse, .stabilize, .slowmo, .translate, .separate, .cutout: return nil
         }
     }
 }
@@ -132,6 +136,9 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
     public var slowmo: Slowmo?
     /// Translated captions (paid): the languages offered (code → name), the qualities, the most words.
     public var translate: Translate?
+    /// Split voice and music, and cut out a picture (paid).
+    public var separate: Helper?
+    public var cutout: Helper?
     public struct Translate: Codable, Hashable, Sendable {
         public var available: Bool?
         public var reason: String?
@@ -163,6 +170,8 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
         case .matte: return matte
         case .denoise: return denoise
         case .stabilize: return stabilize
+        case .separate: return separate
+        case .cutout: return cutout
         case .translate: return translate.map { Helper(available: $0.available, reason: $0.reason) }
         case .slowmo: return slowmo.map { Helper(available: $0.available, reason: $0.reason, maxSec: $0.maxRangeSec) }
         case .cuts, .beats, .reverse: return nil   // the free passes are always offered
@@ -208,8 +217,11 @@ public struct EditorResultAsset: Codable, Hashable, Sendable {
     public var take: String?
     public var url: String?
     public var durationSec: Double?
-    public init(kind: String, upload: String? = nil, take: String? = nil, url: String? = nil, durationSec: Double? = nil) {
-        self.kind = kind; self.upload = upload; self.take = take; self.url = url; self.durationSec = durationSec
+    /// cutout: the PNG's size.
+    public var width: Int?
+    public var height: Int?
+    public init(kind: String, upload: String? = nil, take: String? = nil, url: String? = nil, durationSec: Double? = nil, width: Int? = nil, height: Int? = nil) {
+        self.kind = kind; self.upload = upload; self.take = take; self.url = url; self.durationSec = durationSec; self.width = width; self.height = height
     }
 }
 
@@ -237,6 +249,13 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var alpha: Bool?
     /// "person" | "tracked" (tap to keep)
     public var mode: String?
+    /// separate: the two parts.
+    public var vocals: EditorResultAsset?
+    public var instrumental: EditorResultAsset?
+    /// cutout: where the cut-out sits in the source picture (pixels), and the source's size.
+    public var box: EditV2.CutoutBox?
+    public var sourceWidth: Double?
+    public var sourceHeight: Double?
     public var points: [KeepPoint]?
     public var suggestion: DenoiseSuggestion?
     // translate: the source language, the lines as translated, how many stayed as they were, the quality used

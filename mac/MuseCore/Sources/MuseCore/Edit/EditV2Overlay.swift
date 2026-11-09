@@ -121,3 +121,96 @@ extension EditV2 {
         return q
     }
 }
+
+extension EditSuiteState {
+    // MARK: Effects library (WS8 f7226f2)
+
+    /// The selected video clip's or picture's effect.
+    public var selectedEffect: E.Effect? {
+        switch selectedItem {
+        case .video(let c)?: return c.effect
+        case .image(let im)?: return im.effect
+        default: return nil
+        }
+    }
+    public var canHaveEffect: Bool {
+        switch selectedItem { case .video?, .image?: return true; default: return false }
+    }
+
+    /// Sets (or with nil removes) the selected clip's or picture's effect.
+    @discardableResult
+    public mutating func setEffect(_ e: E.Effect?) -> Bool {
+        changeSelected { it in
+            switch it {
+            case .video(var c): c.effect = e; it = .video(c)
+            case .image(var im): im.effect = e; it = .image(im)
+            default: break
+            }
+        }
+    }
+
+    // MARK: Cross-dissolve between overlays (WS8 3d62419)
+
+    /// The selected overlay's dissolve from the previous item on its track, if it has one.
+    public var selectedDissolve: E.Transition? {
+        guard let tr = selectedTrack, tr.kind == .video || tr.kind == .image else { return nil }
+        switch selectedItem {
+        case .video(let c)?: return c.transitionIn
+        case .image(let im)?: return im.transitionIn
+        default: return nil
+        }
+    }
+
+    /// Whether the selected overlay has a previous item on its track that it touches (or already dissolves from).
+    public var canDissolve: Bool {
+        guard let tr = selectedTrack, tr.kind == .video || tr.kind == .image, let s = selection,
+              let i = tr.items.firstIndex(where: { $0.id == s }), i > 0 else { return false }
+        if selectedDissolve != nil { return true }
+        let prevEnd = E.itemSpan(project, tr, tr.items[i - 1]).endSec
+        return abs(tr.items[i].startSec - prevEnd) <= 0.05
+    }
+
+    /// "Dissolve from previous": on moves the selected overlay `durationSec` earlier so it overlaps the item before by that
+    /// much (at most half of each); off moves it back to where the previous one ends. One undo step.
+    @discardableResult
+    public mutating func setOverlayDissolve(_ durationSec: Double?) -> Bool {
+        guard canDissolve, let tr = selectedTrack, let s = selection, let i = tr.items.firstIndex(where: { $0.id == s }) else { return false }
+        let prevSpan = E.itemSpan(project, tr, tr.items[i - 1])
+        let me = E.itemSpan(project, tr, tr.items[i])
+        var d: Double?
+        if let want = durationSec {
+            let fit = min(want, (prevSpan.endSec - prevSpan.startSec) / 2, (me.endSec - me.startSec) / 2)
+            guard fit >= E.minTransitionSec - 1e-9 else { refuse("Too short to dissolve · each item needs at least twice the dissolve's length"); return false }
+            d = (min(E.maxTransitionSec, fit) * 1000).rounded(.down) / 1000
+        }
+        let start = E.r6(prevSpan.endSec - (d ?? 0))
+        return changeSelected { it in
+            switch it {
+            case .video(var c): c.startSec = start; c.transitionIn = d.map { E.Transition(kind: .fade, durationSec: $0) }; it = .video(c)
+            case .image(var im): im.startSec = start; im.transitionIn = d.map { E.Transition(kind: .fade, durationSec: $0) }; it = .image(im)
+            default: break
+            }
+        }
+    }
+}
+
+extension EditSuiteState {
+    // MARK: Split voice and music, cut out a picture (WS8 b5cb9248)
+
+    /// The selected video clip (main or overlay) split into the kept part(s) with the shared applySeparation; the assets
+    /// are added first. One undo step.
+    @discardableResult
+    public mutating func applySeparationSelected(vocals: E.Asset, instrumental: E.Asset, keep: E.SeparationKeep) -> Bool {
+        guard let c = selectedVideo else { return false }
+        let ok = apply { p in E.applySeparation(p.addingAsset(vocals).addingAsset(instrumental), clipId: c.id, vocals: vocals.id, instrumental: instrumental.id, keep: keep)?.project }
+        if !ok, lastRefusal == nil { refuse("Split voice and music works on a clip at one speed (0.5–2×), without a freeze frame") }
+        return ok
+    }
+
+    /// The selected picture switched to its cut-out with the shared applyCutout (it stays where the subject sat).
+    @discardableResult
+    public mutating func applyCutoutSelected(_ asset: E.Asset, box: E.CutoutBox, sourceWidth: Double, sourceHeight: Double) -> Bool {
+        guard let s = selection else { return false }
+        return apply { p in E.applyCutout(p.addingAsset(asset), itemId: s, assetId: asset.id, box: box, sourceWidth: sourceWidth, sourceHeight: sourceHeight) }
+    }
+}
