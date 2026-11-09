@@ -1,5 +1,7 @@
 # Android Edit · design-pass 2 proposals (WS8, 2026-11-09)
 
+**Owner approved 2026-11-09:** proposals 1–7, as written. Order: effects library, cut to the music, pen mask, save as template, find shorts, brush refine (after the server's image cut-out), upscale in Export. Proposal 8 (teleprompter) was added afterwards and isn't approved yet.
+
 Seven parity rows change what a screen looks like, so they wait for the owner. Each proposal uses the existing Edit
 design language: suite buttons, chips, sliders, the preview and the bottom sheet. None adds a new top-level screen.
 Prices are what members pay (the owner's markup is already in the server's estimate). Every paid helper shows its price

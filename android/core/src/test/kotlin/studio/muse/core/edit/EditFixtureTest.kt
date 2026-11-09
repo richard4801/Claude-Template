@@ -303,6 +303,14 @@ class EditFixtureTest {
                 assertEquals("$id at $t", a.num, overlayFade(p, tr, tr.items.first { it.id == id }, t), 1e-6)
             }
         }
+        // p1's whole alpha (its own fade-out during the overlap): opacity × animation × overlayFade.
+        val pipt = p.tracks.first { it.id == "pipt" }; val c1 = pipt.items[0] as VideoClip
+        for (smp in d["samples"]!!.arr) {
+            val t = smp.obj["t"]!!.num
+            val local = t - itemSpan(p, pipt, c1).startSec
+            val got = (c1.opacity ?: 1.0) * animState(clipLength(c1), c1.animIn, c1.animOut, null, local).opacity * overlayFade(p, pipt, c1, t)
+            assertEquals("p1 composed at $t", smp.obj["p1Composed"]!!.num, got, 1e-6)
+        }
         // The overlay track with a dissolve plays on two layers; mid-dissolve the pair composes as "incoming on top".
         val plan = planRender(p, emptyMap())
         val pip = plan.layers.filter { it.role == LayerRole.OVERLAY && it.trackId == "pipt" }
@@ -311,10 +319,11 @@ class EditFixtureTest {
         val a1 = plan.placement(pip.first { l -> l.clips.any { it.itemId == "p1" } }.index, t).alpha
         val a2 = plan.placement(pip.first { l -> l.clips.any { it.itemId == "p2" } }.index, t).alpha
         val p1First = pip.first { l -> l.clips.any { it.itemId == "p1" } }.index < pip.first { l -> l.clips.any { it.itemId == "p2" } }.index
-        // Wanted: in (0.5) over out (0.5): bg weight (1 − .5)(1 − .5) = .25, either order.
-        val bg = (1 - a1) * (1 - a2)
-        assertEquals(0.25, bg, 1e-6)
-        if (p1First) assertEquals(0.25, a1, 1e-6) else assertEquals(0.5, a2, 1e-6)
+        // Wanted: in (p2) over out (p1 with its own fade-out): the background keeps (1 − out)(1 − in), either order.
+        val smp = d["samples"]!!.arr.first { it.obj["t"]!!.num == t }
+        val aOut = smp.obj["p1Composed"]!!.num; val aIn = smp.obj["alpha"]!!.obj["p2"]!!.num
+        assertEquals((1 - aOut) * (1 - aIn), (1 - a1) * (1 - a2), 1e-6)
+        if (p1First) assertEquals(aOut * (1 - aIn), a1, 1e-6) else assertEquals(aIn, a2, 1e-6)
     }
 
     @Test fun audioSpeedTiming() {

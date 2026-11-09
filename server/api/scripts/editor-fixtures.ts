@@ -577,14 +577,17 @@ const lyricCaptions = { project: lyricProject, words: M.captionWords(lyricProjec
 // and a 2-image track, sampled through the overlaps.
 const fadeProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
   { id: 'pipt', kind: 'video', items: [
-    { id: 'p1', asset: 'pip', startSec: 0, inSec: 0, outSec: 3, speed: 1 },
+    { id: 'p1', asset: 'pip', startSec: 0, inSec: 0, outSec: 3, speed: 1, animOut: { kind: 'fade', durationSec: 0.4 } },
     { id: 'p2', asset: 'pip', startSec: 2.5, inSec: 1, outSec: 4, speed: 1, transitionIn: { kind: 'fade', durationSec: 0.5 } },
     { id: 'p3', asset: 'pip', startSec: 5.5, inSec: 0, outSec: 2, speed: 2 } ] } as M.Track,
   { id: 'imgs', kind: 'image', items: [{ id: 'i1', asset: 'logo', startSec: 1, durationSec: 2 }, { id: 'i2', asset: 'logo', startSec: 2.6, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.4 }, opacity: 0.8 }] } as M.Track,
 ], [src, pip, img]);
 M.validate(fadeProject, FILTERS);
 const overlayFades = { project: fadeProject, samples: [0, 2.4, 2.5, 2.6, 2.75, 2.8, 2.9, 2.99, 3.0, 5.4, 5.5, 6].map(t => ({ t,
-  alpha: Object.fromEntries(fadeProject.tracks.filter(tr => tr.kind === 'video' || tr.kind === 'image').flatMap(tr => tr.items.map(it => [it.id, M.overlayFade(fadeProject, tr, it, t)]))) })) };
+  alpha: Object.fromEntries(fadeProject.tracks.filter(tr => tr.kind === 'video' || tr.kind === 'image').flatMap(tr => tr.items.map(it => [it.id, M.overlayFade(fadeProject, tr, it, t)]))),
+  // The whole alpha of p1 (it has its own fade-out animation during the overlap): opacity × animation × overlayFade.
+  p1Composed: (() => { const tr = fadeProject.tracks[1]!; const c = tr.items[0] as M.VideoClip; const local = t - M.itemSpan(fadeProject, tr, c).startSec;
+    return Math.round((c.opacity ?? 1) * M.animState({ durationSec: M.clipLength(c), animIn: c.animIn, animOut: c.animOut }, local).opacity * M.overlayFade(fadeProject, tr, c, t) * 1e6) / 1e6; })() })) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
