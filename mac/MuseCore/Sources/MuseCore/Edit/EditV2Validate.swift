@@ -97,6 +97,11 @@ private struct Validator {
                 if a.hasAudio != nil { throw bad("\(f).hasAudio", "is not part of a font asset") }
             }
             if let n = a.name, n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || n.utf16.count > 80 { throw bad("\(f).name", "must be 1–80 characters") }
+            // The content library (WS8 929bcf2): `content:<pack>/<item>`, for stickers (image) and sound effects (audio).
+            if let lib = a.library, lib.hasPrefix("content:"),
+               lib.range(of: #"^content:[a-z0-9-]+/[a-z0-9_.-]+$"#, options: .regularExpression) == nil || (a.kind != .image && a.kind != .audio) {
+                throw bad("\(f).library", "unknown content")
+            }
             let refs = [a.take, a.upload, a.library].compactMap { $0 }
             if refs.count != 1 || refs.contains(where: { $0.isEmpty || $0.utf16.count > 100 }) { throw bad(f, "needs exactly one of take, upload or library") }
             try num("\(f).durationSec", a.durationSec, 0.01, 36_000)

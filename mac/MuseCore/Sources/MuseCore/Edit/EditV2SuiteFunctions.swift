@@ -114,9 +114,14 @@ extension EditV2 {
         ("cut", "Cut"), ("fade", "X-fade"), ("zoom", "Zoom"), ("whip", "Whip"), ("slideLeft", "Slide"), ("white", "Flash"), ("glitch", "Glitch"),
         ("spin", "Spin"), ("black", "Dip to black"),
     ]
+    /// Labels for the content pack's kinds (WS8 929bcf2), kept apart from the reference's picker table above.
+    public static let moreTransitionLabels: [(String, String)] = [
+        ("zoomOut", "Zoom out"), ("whipRight", "Whip right"), ("coverLeft", "Cover left"), ("coverRight", "Cover right"),
+        ("coverUp", "Cover up"), ("coverDown", "Cover down"), ("splitFade", "Split fade"),
+    ]
     public static func transitionLabel(_ k: TransitionKind?) -> String {
         let key = k?.rawValue ?? "cut"
-        return transitionLabels.first { $0.0 == key }?.1 ?? key
+        return (transitionLabels + moreTransitionLabels).first { $0.0 == key }?.1 ?? key
     }
 
     // MARK: Voice (audio.ts)
