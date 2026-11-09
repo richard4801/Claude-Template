@@ -25,6 +25,7 @@ import studio.muse.app.ui.screens.suite.applyAssist
 import studio.muse.app.ui.screens.suite.openClaude
 import studio.muse.app.ui.screens.suite.pushComposerToAssist
 import studio.muse.app.ui.screens.suite.removeDraftReference
+import studio.muse.app.ui.screens.suite.undoRig
 import studio.muse.app.ui.screens.suite.composer.ComposerDraft
 import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
 
@@ -66,6 +67,8 @@ class SuiteClaudeTest {
         assertEquals("hd", d.quality)
         assertEquals(8, d.duration)
         assertEquals(c.repo.state.value.models.first().id, d.tokens.character?.id)
+        // "Claude set …" with Undo, as on the Mac.
+        assertEquals("Claude set Character, Prompt and Quality", store.rigUndo.value!!.first)
         val p = store.assist.value!!.pending!!
         assertTrue(p.label.startsWith("Generate · 8 s · $"))
         assertEquals(balance, fake.balance()) // nothing ran before the yes
@@ -136,5 +139,18 @@ class SuiteClaudeTest {
             camera.attach("content://pick/2") { "up_x" }
             assertTrue(camera.ui.value.attachments.isEmpty())
         } finally { scope.cancel() }
+    }
+
+    @Test fun claudesChangesSayWhatAndCanBeUndone() = withSuite { c, fake ->
+        val store = c.suite
+        store.openClaude()
+        val before = store.composer.value
+        ask(c, fake, "A café shot")
+        store.undoRig()
+        assertEquals(before.quality, store.composer.value.quality)
+        assertEquals(null, studio.muse.app.ui.screens.suite.SuiteClaudeWords.claudeSet(emptyList()))
+        assertEquals("Claude set Camera", studio.muse.app.ui.screens.suite.SuiteClaudeWords.claudeSet(listOf("Camera")))
+        assertEquals("Claude set Camera and Light", studio.muse.app.ui.screens.suite.SuiteClaudeWords.claudeSet(listOf("Camera", "Light")))
+        assertEquals(listOf("Fill this in from my idea", "Make it more cinematic", "Explain the settings"), studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions.map { it.first })
     }
 }

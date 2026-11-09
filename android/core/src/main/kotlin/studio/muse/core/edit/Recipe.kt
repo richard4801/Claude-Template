@@ -80,6 +80,8 @@ data class RecipeReference(
     /** Epoch ms; deleted at [expiresAt] unless kept. */
     val createdAt: Long? = null,
     val expiresAt: Long? = null,
+    /** Why it failed, as a code (e.g. "analysis_crashed": the analysis stopped the server twice; Retry runs a lighter one). */
+    val errorCode: String? = null,
 ) {
     /** "kept", "kept 12 days", or null when the dates aren't known. */
     fun keptLine(nowMs: Long = System.currentTimeMillis()): String? = when {
@@ -160,6 +162,7 @@ object RecipeJson {
             id = o.str("id") ?: "", name = name, state = o.str("state") ?: "analyzing", progress = o.num("progress")?.toInt() ?: 0,
             phase = o.str("phase"), error = o.str("error"), recipe = o.obj("recipe")?.let { parse(it, name) },
             durationSec = o.num("durationSec"), keep = o.bool("keep") == true, createdAt = o.num("createdAt")?.toLong(), expiresAt = o.num("expiresAt")?.toLong(),
+            errorCode = o.str("errorCode"),
         )
     }
 

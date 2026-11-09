@@ -62,6 +62,8 @@ fun BoxScope.UpscaleSheet(takeId: String, wide: Boolean, onStarted: (Job) -> Uni
     val soon by store.upscaleSoon.collectAsState()
     val scope = rememberCoroutineScope()
     var busy by remember(takeId) { mutableStateOf<String?>(null) }
+    // WS7/WS13: the owner's upscale model (null = the studio's default).
+    var pick by remember { mutableStateOf(studio.muse.app.ui.screens.ModelPick()) }
     val close = { store.upscaleFor.value = null }
     val take = st.takes.firstOrNull { it.id == takeId }
     if (take == null) { androidx.compose.runtime.LaunchedEffect(takeId) { close() }; return }
@@ -79,6 +81,7 @@ fun BoxScope.UpscaleSheet(takeId: String, wide: Boolean, onStarted: (Job) -> Uni
                     T(up.detail.ifBlank { "Sharper 1080p, 2K or 4K from a finished take" }, m.type.body.copy(fontSize = 12.5.sp), m.t.muted, maxLines = 2)
                 }
             }
+            studio.muse.app.ui.screens.ModelChoiceRow(studio.muse.app.data.ModelPurpose.UPSCALE, pick, { pick = it })
             SheetLabel("Size", if (secs != null) "price for ${FakeSuite.fmtSeconds(Math.round(secs * 10) / 10.0)} s" else null, Modifier.padding(top = 6.dp))
             choices.forEach { ch ->
                 val shape = RoundedCornerShape(12.dp)
@@ -86,7 +89,7 @@ fun BoxScope.UpscaleSheet(takeId: String, wide: Boolean, onStarted: (Job) -> Uni
                     .let { if (busy == ch.id) it.border(2.dp, m.t.accent, shape) else it }
                     .press(enabled = ch.available && busy == null) {
                         busy = ch.id
-                        scope.launch { store.upscale(takeId, ch.id)?.let(onStarted); busy = null }
+                        scope.launch { store.upscale(takeId, ch.id, pick.model)?.let(onStarted); busy = null }
                     }
                     .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Upscale to ${ch.label}, ${ch.priceText}"; if (!ch.available) disabled() }
                     .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

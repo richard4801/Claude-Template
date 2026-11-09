@@ -25,7 +25,7 @@ type Row = typeof editorJobs.$inferSelect;
 export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
-const GPU_SEC = {
+export const GPU_SEC = {
   transcribe: (d: number) => 8 + 0.15 * d,
   matte: (d: number) => 10 + 4 * d,
   track: (d: number) => 15 + 3 * d,
@@ -171,6 +171,13 @@ export class EditorAiService {
     const kind = body?.kind as EditorJobKind;
     if (!EDITOR_KINDS.includes(kind)) throw badRequest(`kind: one of ${EDITOR_KINDS.join(', ')}`);
     const opts = parseOptions(kind, body?.options);
+    // WS13 · owner only: the model for this helper, checked against its candidates (engines/service.ts); today each has one.
+    if (body?.engineModel !== undefined) {
+      if (typeof body.engineModel !== 'string') throw badRequest('engineModel: a model id');
+      const purpose = kind === 'captions' || kind === 'cuts' ? 'captions' : kind === 'matte' ? (opts.points ? 'track' : 'matte') : kind === 'denoise' ? 'denoise' : null;
+      if (!purpose) throw badRequest(`engineModel: ${kind} runs no model`);
+      await (await import('../engines/service.js')).modelChoice(this.ctx).check(u, purpose, body.engineModel);
+    }
     const src = await this.source(u, body?.source);
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);

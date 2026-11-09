@@ -43,7 +43,7 @@ import studio.muse.app.ui.screens.suite.composer.ComposerTool
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
 class SuiteScreenshotTest(private val theme: String, private val screen: String, private val width: Int) {
     companion object {
-        val SCREENS = listOf("hub", "hub_off_owner", "hub_off_member", "swap", "swap_recast", "storyboard", "take_ready", "take_rendering", "take_queued", "take_failed", "engines")
+        val SCREENS = listOf("hub", "hub_recent", "hub_off_owner", "hub_off_member", "swap", "swap_recast", "storyboard", "take_ready", "take_rendering", "take_queued", "take_failed", "engines")
 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
@@ -66,6 +66,8 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
 
     @Test fun capture() {
         if (width == 360) RuntimeEnvironment.setQualifiers("w360dp-h740dp-xhdpi")
+        // The recent takes row (the play badge on each finished take) sits below the fold: a tall window shows it.
+        if (screen == "hub_recent") RuntimeEnvironment.setQualifiers("w${width}dp-h1600dp-xhdpi")
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
         val member = screen == "hub_off_member"
@@ -76,7 +78,7 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
         val now = System.currentTimeMillis()
         runBlocking {
             when (screen) {
-                "hub" -> {
+                "hub", "hub_recent" -> {
                     fake.debugPut(job("jr", "Café morning", "done", 100.0, now = now - 60_000)); take("jr", 1, now).let { fake.debugPutTake(it) }
                     fake.debugPut(job("jp", "Turn to camera", "running", 62.0, take = 2, now = now - 30_000))
                     fake.debugPut(job("jq", "Selfie review", "running", 0.0, queue = 2, now = now))

@@ -48,6 +48,7 @@ import studio.muse.app.ui.TabBar
 import studio.muse.app.ui.components.Cta2
 import studio.muse.app.ui.components.NoteBox
 import studio.muse.app.ui.components.Pill
+import studio.muse.app.ui.components.PlayBadge
 import studio.muse.app.ui.components.RefImage
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.Tiny
@@ -178,7 +179,7 @@ private fun RecentTile(j: Job, takes: List<studio.muse.app.data.Take>, onClick: 
         Box(Modifier.size(72.dp, 128.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else 8.dp))) {
             when (pane.phase) {
                 StagePhase.READY -> { RefImage(takes.firstOrNull()?.thumb ?: j.thumb, Modifier.fillMaxSize(), 20)
-                    Box(Modifier.align(Alignment.BottomCenter).padding(8.dp).size(30.dp).clip(RoundedCornerShape(999.dp)).background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) { Ic("play", 14.dp, Color(0xFF141210)) } }
+                    PlayBadge(compact = true) }
                 StagePhase.RENDERING -> { BlurredStageArt(j.thumb, moving = false); T(pane.percent, m.type.body.copy(fontSize = 22.sp), Color.White, Modifier.align(Alignment.Center)) }
                 StagePhase.QUEUED -> { BlurredStageArt(j.thumb, moving = false); Box(Modifier.align(Alignment.BottomStart).background(Color(0xFF141210)).padding(horizontal = 4.dp, vertical = 2.dp)) {
                     T(pane.badge, m.scale.micro, Color.White, maxLines = 1) } }

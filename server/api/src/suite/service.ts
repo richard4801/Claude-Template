@@ -27,6 +27,11 @@ import { rigCheck } from './rigcheck.js';
 import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
+import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
+import { purposeOfShot, SWAP_ENGINES, videoPurposes } from '../engines/purposes.js';
+
+/** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
+export const STUDIO_DEFAULT_SKIPPED = 'The studio’s chosen engine can’t make this shot · the quality’s usual engine is used';
 
 /**
  * Estimate for removing the vocals of an audio reference (beat-only audio), held with the shot; the job settles the
@@ -192,7 +197,9 @@ export class SuiteService {
       .map(m => {
         const scale = p.models?.[m.id]?.priceScale ?? 1, tiers = tiersOf(m.id);
         const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
-        return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, tier: tiers[0] ?? null, tiers, resolution,
+        // WS13: what this model can be picked for (plans/model-choice.md); the hosted H3 family also swaps.
+        const purposes = [...videoPurposes(m), ...(this.ctx.replicate.configured && SWAP_ENGINES.some(e => e.id === m.id && e.runs === 'replicate') ? ['swap' as const] : [])];
+        return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, purposes, tier: tiers[0] ?? null, tiers, resolution,
           resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
           perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
           perRun: m.byo?.perRunUsd ? Math.round(m.byo.perRunUsd * scale * 10000) / 10000 : null,
@@ -205,12 +212,12 @@ export class SuiteService {
       const n = 3, inMp = P.PHOTO_REF_MP * n;
       const perRun = this.ctx.imageModels.isRecipe('shot', shot.model) ? P.newShotEstimateImages(this.ctx.images.photoPrices(), 2, n)
         : await this.ctx.imageModels.estimate(shot.model, { outMp: 2, inMp }).catch(() => null);
-      image.push({ model: shot.model, name: modelName(shot.model), kind: 'image', custom: false, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
+      image.push({ model: shot.model, name: modelName(shot.model), kind: 'image', custom: false, purposes: ['photo', 'outfit', 'character', 'plate'], tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
         perRun: perRun == null ? null : Math.round(perRun * 10000) / 10000, minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: [],
         inputs: { ...NO_INPUTS, images: Math.min(6, this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS) } });
     }
     for (const c of await this.byo.catalog({ studioId, role: 'owner' } as AuthUser)) if (c.kind === 'image')
-      image.push({ model: c.id, name: c.name, kind: 'image', custom: true, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null, perRun: c.price.usd,
+      image.push({ model: c.id, name: c.name, kind: 'image', custom: true, purposes: ['photo'], tier: null, tiers: [], resolution: null, resolutions: [], perSec: null, perRun: c.price.usd,
         minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: c.aspectRatios, inputs: c.inputs });
     // One price per entry for the picker: per run for per-run custom models and image models, else per second.
     return [...video, ...image].map(e => ({ ...e, price: e.perRun != null ? { basis: 'per_run' as const, usd: e.perRun as number }
@@ -248,16 +255,21 @@ export class SuiteService {
       if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
       await this.byo.checkUse(u, r.engineModel, 'video');
     }
-    if (r.mode === 'swap') return { swap: true as const, ...(await this.swapEstimate(u, r)) };
-    if (r.mode === 'recast' || r.cast?.length) return this.recastPlan(u, r);
-    if (r.mode === 'extend' || r.extend) return this.extendPlan(u, r);
+    // WS13: the owner's override for this purpose (checked: a candidate, owner only), else the studio's default for it.
+    const choice = await modelChoice(this.ctx).choose(u, purposeOfShot(r), r.engineModel);
+    if (r.mode === 'swap') return { swap: true as const, ...(await this.swapEstimate(u, r, choice)) };
+    if (r.mode === 'recast' || r.cast?.length) return this.recastPlan(u, r, choice);
+    if (r.mode === 'extend' || r.extend) return this.extendPlan(u, r, choice);
     const prefs = await this.prefs(u.studioId);
     const character = await this.character(u.studioId, r.modelId, r.outfitId);
     const need = needOf(r, character);
     if (need.mode === 'image' && !need.start && !need.end) throw badRequest('Keyframe shots need a start or end frame');
     if (need.mode === 'reference' && !character?.images.length && !need.extraImages) throw badRequest('Reference shots need a character with a sheet, or reference images');
     if (need.mode === 'text' && !r.prompt.trim()) throw badRequest('Describe the shot');
-    const pick = pickModel(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution, studioId: u.studioId });
+    const o = { prefs, providers: this.available(), studioId: u.studioId };
+    let pick = pickModel(r.quality, need, { ...o, engineModel: choice?.model, resolution: choice?.source === 'request' ? r.resolution : undefined });
+    const skipped = 'error' in pick && choice?.source === 'studio';
+    if (skipped) pick = pickModel(r.quality, need, o);
     if ('error' in pick) {
       const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't make this shot · try another quality, a shorter length or fewer references`);
       (e as any).tried = pick.tried;
@@ -267,6 +279,7 @@ export class SuiteService {
     const talk = await this.resolveSpeaking(u.studioId, r);
     const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
       separationUsd: SEPARATION_ESTIMATE_USD });
+    if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
   }
 
@@ -287,13 +300,15 @@ export class SuiteService {
     throw badRequest('That video isn’t in this studio');
   }
 
-  private async extendPlan(u: AuthUser, r: ShotRequest) {
+  private async extendPlan(u: AuthUser, r: ShotRequest, choice: Choice | null = null) {
     if (!r.extend) throw badRequest('Extend needs the video to continue (extend.video)');
     const source = await this.extendSource(u.studioId, r.extend.video);
     if (!(source.seconds > 0)) throw badRequest('Extend needs the video’s length (extend.video.seconds)');
     const prefs = await this.prefs(u.studioId);
     const need = { direction: r.extend.direction, sourceSeconds: source.seconds, seconds: r.duration, aspect: r.aspectRatio };
-    const pick = pickExtend(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution });
+    let pick = pickExtend(r.quality, need, { prefs, providers: this.available(), engineModel: choice?.model, resolution: choice?.source === 'request' ? r.resolution : undefined });
+    const skipped = 'error' in pick && choice?.source === 'studio';
+    if (skipped) pick = pickExtend(r.quality, need, { prefs, providers: this.available() });
     if ('error' in pick) {
       const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't extend this clip ${r.extend.direction === 'before' ? 'backwards' : 'forwards'} · try another quality or length`);
       (e as any).tried = pick.tried;
@@ -301,10 +316,11 @@ export class SuiteService {
     }
     const texts = await this.ctx.prompts.texts(u.studioId);
     const plan = buildExtendPlan(r, pick, source, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk: { speaking: false, source: 'default' as const } };
   }
 
-  private async recastPlan(u: AuthUser, r: ShotRequest) {
+  private async recastPlan(u: AuthUser, r: ShotRequest, choice: Choice | null = null) {
     if (!r.clipId) throw badRequest('Recast needs the source clip (clipId)');
     if (!r.cast?.length) throw badRequest('Recast needs a cast: who in the clip becomes which character');
     const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, u.studioId)));
@@ -328,13 +344,16 @@ export class SuiteService {
       members.push({ cast: c, character, speaking });
     }
     const need = { people: r.cast.length, seconds: clip.durationSec, crops: r.cast.filter(c => c.faceCrop).length };
-    const pick = pickRecast(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution });
+    let pick = pickRecast(r.quality, need, { prefs, providers: this.available(), engineModel: choice?.model, resolution: choice?.source === 'request' ? r.resolution : undefined });
+    const skipped = 'error' in pick && choice?.source === 'studio';
+    if (skipped) pick = pickRecast(r.quality, need, { prefs, providers: this.available() });
     if ('error' in pick) {
       const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't recast this clip · try another quality, fewer people or a clip of 5–30 s`);
       (e as any).tried = pick.tried;
       throw e;
     }
     const plan = buildRecastPlan(r, members, pick, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     const talk = { speaking: plan.speaking, source: (r.cast.some(c => typeof c.speaking === 'boolean') ? 'switch' : clipTalk?.source ?? 'default') as 'switch' | 'upload' | 'detected' | 'default' };
     return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk };
   }
@@ -421,15 +440,26 @@ export class SuiteService {
     const quality = r.quality === 'cinema' ? 'hd' : r.quality;
     return { title: r.title, modelId: r.modelId, outfitId: r.outfitId ?? '', clipId: r.clipId, engine: 'replicate', quality, takes: r.takes, keepAudio: r.keepAudio ?? true, direction: r.direction };
   }
-  private async swapEstimate(u: AuthUser, r: ShotRequest) {
-    const req = this.swapRequest(r);
-    if (!this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Swap isn't available right now");
+  /**
+   * WS13: swap runs on the chosen swap engine (`engineModel`, else the studio's Swap default): the hosted H3 family, or
+   * Edit / Fast on our GPU. Priced exactly as POST /v1/jobs will price it (the choice is passed on, not chosen again).
+   */
+  private async swapEstimate(u: AuthUser, r: ShotRequest, choice: Choice | null = null) {
+    const req: Record<string, any> = this.swapRequest(r);
+    await applySwapEngine(modelChoice(this.ctx), u, req, undefined, choice);
+    const hosted = req.engine === 'replicate';
+    if (hosted && !this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Swap isn't available right now");
+    if (!hosted && this.ctx.gpu.mode === 'runpod') this.ctx.jobs.requireCapabilities(req.engine as 'h3' | 'viggle');
     const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, req.clipId), eq(clips.studioId, u.studioId)));
     if (!clip) throw notFound('Clip');
-    const rr: P.RenderReq = { engine: 'replicate', quality: req.quality, takes: req.takes, clipSeconds: clip?.durationSec, pricePerSec: this.ctx.jobs.qualityPrice(req.quality) };
+    const rr: P.RenderReq = !choice ? { engine: 'replicate', quality: req.quality, takes: req.takes, clipSeconds: clip?.durationSec, pricePerSec: this.ctx.jobs.qualityPrice(req.quality) }
+      : (await modelChoice(this.ctx).swapQuote(u.studioId, choice.model, req.quality, clip.durationSec, req.takes)).rr;
     const est = P.totalCost(rr);
-    return { req, view: { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds: P.replicateSeconds(rr.clipSeconds), takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
-      buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' ? ['Swap tops out at HD'] : [], rig: [], test: false } };
+    const seconds = hosted ? P.replicateSeconds(rr.clipSeconds) : Math.round(P.lengthSec(rr) * 10) / 10;
+    const view = { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds, takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
+      buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' && hosted ? ['Swap tops out at HD'] : [], rig: [], test: false };
+    if (u.role === 'owner' && choice) Object.assign(view, { engine: { model: choice.model, name: choice.engine.name, provider: choice.engine.provider, source: choice.source, perSec: (rr as { pricePerSec?: number }).pricePerSec ?? null } });
+    return { req, choice, view };
   }
 
   // ------------------------------------------------------------------ create
@@ -440,7 +470,7 @@ export class SuiteService {
     const p = await this.plan(u, r);
     if (p.swap) {
       if (r.dryRun) return { dryRun: true, estimate: p.view };
-      return this.ctx.jobs.create(u, { ...p.req, ...(draft ? { draft } : {}) });
+      return this.ctx.jobs.create(u, { ...p.req, ...(draft ? { draft } : {}) }, { swapChoice: p.choice });
     }
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);

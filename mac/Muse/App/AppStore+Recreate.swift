@@ -83,6 +83,8 @@ final class RecreateState {
     var sessionId: String?
     var built: RecreateBuiltPreview?
     var loadingBuilt = false
+    /// "Your edit" couldn't be prepared (the server's render failed and this Mac can't render it from real video).
+    var builtError: String?
 
     /// How each shot is made (G2): "swap" | "generate" picked here (nil = the server's default, swap), the swaps that use
     /// your own setting instead of the reference's, and each slot's full estimate (method, button label, swap notes).
@@ -174,6 +176,7 @@ final class RecreateState {
     func clearReference() {
         reconnecting = false
         pollLost = nil
+        builtError = nil
         pollTask?.cancel()
         playTask?.cancel()
         fillWatch?.cancel()
@@ -1264,6 +1267,7 @@ extension AppStore {
         let id = recreate.reference?.id
         recreate.built?.close()
         recreate.built = nil
+        recreate.builtError = nil
         recreate.loadingBuilt = true
         defer { recreate.loadingBuilt = false }
         // A server that renders previews: its render of the session's revision (what Export makes too). An older server
@@ -1283,14 +1287,26 @@ extension AppStore {
         }
         do {
             guard let got = try await recreateBuiltProject(), recreate.reference?.id == id else { return }
+            // This Mac renders only from real video: a shot whose file is a still (a poster, a thumbnail) or missing would
+            // play as a slideshow, so the preview says it didn't render instead.
+            for a in got.project.assets where a.kind == .video {
+                guard let f = got.files[a.id], await RecreateBuiltPreview.isPlayableVideo(f) else {
+                    throw ApiError("preview_media", "A shot’s video isn’t on this Mac yet")
+                }
+            }
             let b = RecreateBuiltPreview(project: got.project, files: got.files)
             await b.load()
             guard recreate.reference?.id == id else { b.close(); return }
+            if case .failed = b.phase {
+                b.close()
+                recreate.builtError = "The preview didn’t render"
+                return
+            }
             b.seek(recreate.time)
             recreate.built = b
         } catch {
-            // Compare keeps the stand-in; say why once.
-            showToast("Your edit couldn’t be loaded to play here: \((error as? ApiError)?.message ?? error.localizedDescription)")
+            guard recreate.reference?.id == id else { return }
+            recreate.builtError = "The preview didn’t render"
         }
     }
 

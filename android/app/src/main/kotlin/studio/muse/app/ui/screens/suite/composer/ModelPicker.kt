@@ -62,6 +62,8 @@ data class PickerEngine(
     val kind: String = "video",
     /** The resolution each quality's ladder runs it at (tier id → resolution id). */
     val ladderRes: Map<String, String> = emptyMap(),
+    /** WS13: the purposes it serves (empty = any). */
+    val purposes: List<String> = emptyList(),
 ) {
     val tier: String? get() = tiers.firstOrNull()
 
@@ -126,7 +128,7 @@ object ModelPicker {
         cat.engines?.let { list ->
             return list.filter { it.kind == kind }.map { e ->
                 PickerEngine(e.model, e.name.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
-                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model))
+                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes)
             }
         }
         if (kind != "video") return cat.custom.orEmpty().filter { it.kind == kind }.map { c -> customEngine(c) }
@@ -144,8 +146,10 @@ object ModelPicker {
         c.aspectRatios, c.price?.takeIf { it.basis == "per_second" }?.usd, c.inputs, custom = true, perRun = c.price?.takeIf { it.basis != "per_second" }?.usd, kind = c.kind)
 
     /** The picker's groups for a shot on [quality]: the engines on that quality's ladder first, then the rest, then "Your providers". */
-    fun groups(cat: SuiteCatalog?, quality: String, kind: String = "video"): PickerGroups {
-        val (custom, core) = engines(cat, kind).partition { it.custom }
+    fun groups(cat: SuiteCatalog?, quality: String, kind: String = "video", purpose: String? = null): PickerGroups {
+        // WS13: engines list their purposes; Talking and UGC take narrower lists than Shot. An entry without purposes fits any.
+        val fit = engines(cat, kind).filter { e -> purpose == null || e.purposes.isEmpty() || purpose in e.purposes }
+        val (custom, core) = fit.partition { it.custom }
         val (ladder, others) = core.partition { quality in it.tiers }
         // This quality's ladder in its own order; the others in quality order (Draft → Cinema).
         val ladderOrder = cat?.tier(quality)?.models.orEmpty().map { it.model }
@@ -200,22 +204,30 @@ fun modelMenuItems(d: ComposerDraft, groups: PickerGroups): List<Pair<String, Bo
  * each. One row per engine: name, its lengths and shapes, and its price per second at its resolution.
  */
 @Composable
-fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngine?, String?) -> Unit) {
+fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngine?, String?) -> Unit) =
+    ModelList(d.engineModel, d.resolution, d.quality, groups, "MUSE picks the model for this quality", onPick)
+
+/**
+ * The owner's model list, shared by every surface (WS7): Auto (with [autoLine]), then "On <Quality>" (when there's a
+ * [quality]), "Other models" (or "Models" without a quality) and "Your providers". [selected] / [selectedRes] are the
+ * pinned model and resolution (null = Auto).
+ */
+@Composable
+fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups: PickerGroups, autoLine: String, onPick: (PickerEngine?, String?) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxWidth().testTag("model_picker"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        ModelRow("Auto", "MUSE picks the model for this quality", emptyList(), null, d.engineModel == null, {}) { onPick(null, null) }
-        fun section(title: String, list: List<PickerEngine>) = title to list
+        ModelRow("Auto", autoLine, emptyList(), null, selected == null, {}) { onPick(null, null) }
         listOf(
-            section("On ${SuiteRules.tierLabel(d.quality)}", groups.ladder),
-            section("Other models", groups.others),
-            section("Your providers", groups.custom),
+            (quality?.let { "On ${SuiteRules.tierLabel(it)}" } ?: "") to groups.ladder,
+            (if (quality == null) "Models" else "Other models") to groups.others,
+            "Your providers" to groups.custom,
         ).filter { it.second.isNotEmpty() }.forEach { (title, list) ->
             T(title, m.scale.caption, m.t.muted, Modifier.padding(top = 10.dp, bottom = 2.dp), maxLines = 1)
             list.forEach { e ->
-                val on = e.id == d.engineModel
-                val detail = listOfNotNull(e.tier?.takeIf { d.quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
+                val on = e.id == selected
+                val detail = listOfNotNull(e.tier?.takeIf { quality != null && quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
                 // The chip lit is the resolution it would run at: the pinned one, else this quality's.
-                val res = if (on) d.resolution ?: e.resolutionOn(d.quality) else e.resolutionOn(d.quality)
+                val res = if (on) selectedRes ?: quality?.let(e::resolutionOn) ?: e.resolution else quality?.let(e::resolutionOn) ?: e.resolution
                 ModelRow(e.name, detail, e.chips, res, on, { r -> onPick(e, r) }) { onPick(e, null) }
             }
         }
@@ -267,3 +279,14 @@ fun PhotoModelPill(ui: ComposerUi) {
     }
     MenuPill("cube", cur?.name ?: "Model", "Model, only you see models", items) { i -> p.setImageModel(ordered.getOrNull(i - 1)?.id) }
 }
+
+/** WS13's purpose for a composer tool (its model list): Shot, Talking and UGC ad each have their own. */
+val ComposerTool.modelPurpose: String? get() = when (this) {
+    ComposerTool.SHOT -> "shot"; ComposerTool.TALKING -> "talking"; ComposerTool.UGC -> "ugc"
+    ComposerTool.SWAP -> "swap"; ComposerTool.RECAST -> "recast"; ComposerTool.EXTEND -> "extend"
+    ComposerTool.PHOTO -> "photo"
+    else -> null
+}
+
+/** The draft's model list: a Shot with a Directed camera (the Camera stage's guide) picks from WS13's "guide" models. */
+val ComposerDraft.pickPurpose: String? get() = if (tool == ComposerTool.SHOT && directed != null) "guide" else tool.modelPurpose

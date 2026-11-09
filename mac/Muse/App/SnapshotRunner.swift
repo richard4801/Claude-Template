@@ -756,6 +756,9 @@ enum SnapshotRunner {
             store.closeRecreate()
             try? await Task.sleep(for: .seconds(0.5))
         }
+        // The lanes on a 29.7 s reference with 7 uneven shots (owner test 2026-11-08), at 1280 and 1470 wide.
+        let laneLines = await recreateLanesShots(store, dir: dir, window: w)
+        lines.append(contentsOf: laneLines)
         // The swatches (owner note 1): the analysis's palette, then the strip the Recipe shows.
         if let ref = try? await FakeRecreateAPI().listReferences().first, let raw = ref.recipe?.grade?.swatches {
             let soft = RecreateSwatches.soften(raw)

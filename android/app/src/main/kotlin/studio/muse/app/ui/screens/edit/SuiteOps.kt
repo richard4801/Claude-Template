@@ -171,6 +171,37 @@ object SuiteOps {
         return base.addItem(tid, AudioClip(base.newId(if (kind == TrackKind.VOICE) "v" else "m"), assetId, atSec, 0.0, len))
     }
 
+    /** The name of the track a detached clip sound goes on (a voice track, so music ducks under it). */
+    const val CLIP_SOUND_TRACK = "Clip sound"
+
+    /** Whether main clip [c]'s own sound is there to hear or detach (its asset has sound). */
+    fun hasSound(p: EditProject, c: VideoClip): Boolean = p.asset(c.audioAsset ?: c.asset)?.hasAudio != false
+
+    /**
+     * Detach audio (extract the clip's sound): main clip [clipId]'s sound becomes its own audio clip at the same place
+     * on a "Clip sound" voice track (same source times, volume, fades and voice settings), and the video clip goes
+     * silent, so the sound can be moved, trimmed or kept when the picture is cut. Refused for a silent clip, an already
+     * muted one, and a clip not at 1× (audio clips play at 1×). Returns the project and the new audio clip's id.
+     */
+    fun detachAudio(p: EditProject, clipId: String): Pair<EditProject, String>? {
+        val (t, i) = p.locate(clipId) ?: return null
+        if (t.kind != TrackKind.MAIN) return null
+        val c = t.items[i] as VideoClip
+        if (c.muted == true || c.speedCurve != null || abs(c.speed - 1.0) > 1e-9 || !hasSound(p, c)) return null
+        val span = itemSpan(p, t, c)
+        val len = span.endSec - span.startSec
+        val track = p.tracks.firstOrNull { it.kind == TrackKind.VOICE && it.name == CLIP_SOUND_TRACK && fitsAt(p, it, span.startSec, len) }
+        val base = if (track != null) p else p.copy(tracks = p.tracks + Track(p.newId("sound"), TrackKind.VOICE, name = CLIP_SOUND_TRACK))
+        val tid = track?.id ?: base.tracks.last().id
+        val id = base.newId("a")
+        val audio = AudioClip(id, c.audioAsset ?: c.asset, (span.startSec * 1e6).roundToInt() / 1e6, c.inSec, c.outSec,
+            volume = c.volume, fadeInSec = c.fadeInSec, fadeOutSec = c.fadeOutSec, voiceEffect = c.voiceEffect, enhance = c.enhance,
+            keyframes = c.keyframes?.filterKeys { it == KfProp.VOLUME }?.ifEmpty { null })
+        val added = base.addItem(tid, audio) ?: return null
+        val muted = added.updateItem(clipId) { (it as VideoClip).copy(muted = true, fadeInSec = null, fadeOutSec = null) } ?: return null
+        return muted to id
+    }
+
     private fun fitsAt(p: EditProject, t: Track, at: Double, len: Double) = t.items.none { val s = itemSpan(p, t, it); at < s.endSec && at + len > s.startSec }
 
     fun newAssetId(p: EditProject, prefix: String): String { var k = 1; while (p.assets.any { it.id == "$prefix$k" }) k++; return "$prefix$k" }
@@ -214,6 +245,19 @@ object SuiteOps {
         val id = base.newId("p")
         val clip = VideoClip(id, assetId, 0.0, len, 1.0, startSec = start, fit = Fit.CONTAIN, transform = Transform(0.72, 0.68, 0.4), muted = true)
         return base.addItem(tid, clip)?.let { it to id }
+    }
+
+    /**
+     * Another take (or edited version) added to the end of the main track, whole, as a new clip (its asset is shared
+     * with a PiP of the same take). Returns the project and the new clip's id.
+     */
+    fun appendTake(p: EditProject, takeId: String, durationSec: Double, width: Int? = null, height: Int? = null, hasAudio: Boolean? = true): Pair<EditProject, String>? {
+        if (durationSec < EditLimits.MIN_CLIP_SOURCE_SEC) return null
+        val assetId = p.assets.firstOrNull { it.take == takeId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "take")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, take = takeId, durationSec = durationSec, width = width, height = height, hasAudio = hasAudio))
+        val id = withAsset.newId("c")
+        val clip = VideoClip(id, assetId, 0.0, durationSec, 1.0)
+        return withAsset.addItem(withAsset.main.id, clip, withAsset.main.items.size)?.let { it to id }
     }
 
     /** Sets (null = removes) a look on [ids]. */

@@ -97,6 +97,10 @@ class FakeMuseApi(
     override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700).also { it.suiteTurn = ::demoSuiteTurn } }
     // WS7: bring your own provider (a demo key, a sample catalog, two added models).
     override val providers: FakeProvidersApi by lazy { FakeProvidersApi(now, if (speed == 0.0) 0 else 400) }
+    // WS7: import a video from a link (TikTok, Instagram and YouTube links; the sample clip as the result).
+    override val imports: FakeImportsApi by lazy { FakeImportsApi(now) }
+    // WS7: models per purpose (the demo catalog's engines) and defaults.
+    override val modelChoice: FakeModelsApi by lazy { FakeModelsApi { p -> suite.enginesFor(p.id, p.kind) } }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {
@@ -127,7 +131,7 @@ class FakeMuseApi(
         updated
     }
 
-    override suspend fun fillAngles(modelId: String): FillAnglesResponse {
+    override suspend fun fillAngles(modelId: String, imageModel: String?): FillAnglesResponse {
         val (busy, cost) = lock.withLock {
             val m = model(modelId)
             val missing = m.slots.filter { it.image == null }
@@ -678,7 +682,7 @@ class FakeMuseApi(
      * Upscale (server routes POST /v1/takes/{id}/upscale): a finished render take, a size the features price, held at
      * price × the take's seconds; `upscale_unavailable` (409) while the add-on or the size isn't available.
      */
-    override suspend fun upscale(takeId: String, size: String): Job {
+    override suspend fun upscale(takeId: String, size: String, engineModel: String?): Job {
         val job = lock.withLock {
             val t = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
             if (t.kind != "take") throw ApiException("bad_request", "Only a finished render can be upscaled")
@@ -766,12 +770,12 @@ class FakeMuseApi(
 
     override suspend fun cancelEditorJob(id: String) { lock.withLock { editorJobs[id]?.let { editorJobs[id] = it.copy(state = "cancelled", result = null) } } }
 
-    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, name: String?, onProgress: (Float) -> Unit): Take = lock.withLock {
+    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, name: String?, onProgress: (Float) -> Unit, aiLabel: Boolean): Take = lock.withLock {
         val src = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
         onProgress(1f)
         val dto = EditListDto(2, takeId, 0.0, emptyList(), false).also { it.project = project }
         val t = src.copy(
-            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0,
+            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0, aiLabel = aiLabel,
             videoUrl = "file://" + video.file.absolutePath, durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
             name = versionName(name), // Edit sessions (workstream 3)
         )
@@ -780,6 +784,7 @@ class FakeMuseApi(
         t
     }
 
+    override suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_clip_${++editorSeq}" } // WS7
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_${purpose ?: "audio"}_${++editorSeq}" }
 
     // ---- Edit sessions (workstream 3): in memory, with the server's revision checks (plans/api.md "Edit sessions").
@@ -1275,6 +1280,14 @@ class FakeMuseApi(
         return if (platform == null && strict) RecreateLinkCheck(false, url, code = "link_unsupported", reason = "Paste a TikTok, Instagram Reel or YouTube link")
             else RecreateLinkCheck(true, url, platform ?: "other")
     }
+    /** Demo: a failed reference analysed again (tests mark one failed with [debugFailReference]). */
+    private val failedRefs = HashSet<String>()
+    fun debugFailReference(id: String) = failedRefs.add(id)
+    override suspend fun retryReference(id: String): RecipeReference {
+        if (lock.withLock { !failedRefs.remove(id) }) throw ApiException("not_failed", "This reference isn't failed")
+        lock.withLock { recreatePolls[id] = 0 }
+        return reference(id)
+    }
     /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
     override suspend fun createReferenceFromLink(url: String, name: String?): RecipeReference {
         if ("private" in url) throw ApiException("link_private", "This video is private · save it and share the file instead")
@@ -1290,6 +1303,7 @@ class FakeMuseApi(
     private val recreateNames = HashMap<String, String>()
     override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
+        if (id in failedRefs) return@withLock RecipeReference(id, recreateNames[id] ?: "Reference", "failed", error = "The analysis stopped the server twice · tap Retry for a lighter analysis", errorCode = "analysis_crashed")
         recreatePolls[id] = n + 1
         if (n < recreatePhases.size) RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
         else RecipeJson.reference("""{"id":"$id","name":"${recreateNames[id] ?: "Reference"}","state":"ready","progress":100,"phase":"Done","durationSec":15.0,"keep":false,"createdAt":${now()},"expiresAt":${now() + 30L * 86_400_000},"recipe":${FakeRecipes.cafeTrendJson()}}""")
@@ -1338,7 +1352,7 @@ class FakeMuseApi(
         })
     }
     /** Demo (G2): swap by default (your model into the reference's own segment, $0.41), or a new shot ($0.64). */
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) = lock.withLock {
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) = lock.withLock {
         recreateSlots(id)
         val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
         if (method == "generate") RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)), method = "generate",
@@ -1355,7 +1369,7 @@ class FakeMuseApi(
                 background = bg, swapUsd = if (bg != null && bg.usd > 0) RECREATE_SWAP_PRICE else null, backgroundUsd = bg?.usd?.takeIf { it > 0 })
         }
     }
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) = lock.withLock {
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
         // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").

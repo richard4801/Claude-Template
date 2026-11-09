@@ -33,15 +33,28 @@ class RecreateLocalEdit(context: Context, private val api: MuseApi) {
         val takes = api.listTakes()
         for (a in p.assets) {
             if (a.id in files) continue
-            val url = a.take?.let { id -> takes.firstOrNull { it.id == id }?.videoUrl } ?: continue
+            // Videos only: a take's video file, never its thumbnail or poster.
+            if (a.kind != studio.muse.core.edit.AssetKind.VIDEO) continue
+            val url = a.take?.let { id -> takes.firstOrNull { it.id == id }?.videoUrl }?.takeIf { it.isNotBlank() } ?: continue
             runCatching { engine.fetchSource(url) {} }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()?.let { files[a.id] = it }
         }
         project = p
         return p
     }
 
-    /** True when the built edit has something to play (at least one take on the device). */
-    val playable: Boolean get() = project != null && files.isNotEmpty()
+    /**
+     * True only when every shot on the main track is a video clip whose take's video is on this device: the preview is
+     * the real edit or nothing (owner bug: a slideshow of stills must never stand in for the built edit).
+     */
+    val playable: Boolean get() = project?.let { isRealEdit(it, files.keys) } ?: false
+
+    companion object {
+        fun isRealEdit(p: EditProject, have: Set<String>): Boolean {
+            val main = p.tracks.firstOrNull { it.kind == studio.muse.core.edit.TrackKind.MAIN } ?: return false
+            val clips = main.items.filterIsInstance<studio.muse.core.edit.VideoClip>()
+            return clips.isNotEmpty() && clips.all { it.asset in have } && main.items.none { it is studio.muse.core.edit.ImageItem }
+        }
+    }
 
     /**
      * Exports the built edit to an MP4 with the reference's sound as the guide track ([guide]: the reference video on

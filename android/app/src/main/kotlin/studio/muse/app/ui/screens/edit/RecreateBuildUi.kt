@@ -88,6 +88,11 @@ class RecreateActions(
     val onConfirmTick: (String) -> Unit = {},
     /** "Use your own setting": a studio location for the shot, or null for the place in its brief. */
     val onLocation: (String, String?) -> Unit = { _, _ -> },
+    /** WS7/WS13 (owner): the model for a shot (purpose fill) and for its made background (purpose plate); null = the default. */
+    val onShotModel: (String, String?) -> Unit = { _, _ -> },
+    /** Show the owner's Model rows (the app turns this on; the rows check the owner themselves). */
+    val models: Boolean = false,
+    val onPlateModel: (String, String?) -> Unit = { _, _ -> },
     val onExport: () -> Unit = {},
     /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
     val onClaude: (() -> Unit)? = null,
@@ -111,6 +116,11 @@ class RecreateMedia(
     val edit: androidx.media3.common.Player? = null,
     /** "Preview of the cut" when the server's preview leaves part of the edit out (plans/api.md "The built edit, rendered"). */
     val editLabel: String? = null,
+    /** Each shot's keyframe from the reference (slotId → picture), for the tiles. */
+    val slotThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** The built edit isn't playable yet: "Preparing the preview…" or "The preview didn't render" (with [onRetryEdit]). */
+    val editStatus: String? = null,
+    val onRetryEdit: () -> Unit = {},
 )
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
@@ -362,7 +372,15 @@ private fun Tile(ui: RecreateBuildUi, s: RecipeSlot, i: Int, scores: Boolean, se
         modifier.clip(shape).border(if (selected) 2.dp else 0.dp, if (selected) m.roles.selection else Color.Transparent, shape)
             .press(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = "Shot ${i + 1}, $tag"; this.selected = selected; role = Role.Button },
     ) {
-        StandIn(ui, i, Modifier.fillMaxSize())
+        // The picture: your take's thumbnail when the shot comes from it, else the reference's own frame, else a calm tone.
+        val media = LocalRecreateMedia.current
+        val takeThumb = ui.slotFill(s.id)?.takeId?.let { id -> ui.takes.firstOrNull { it.id == id }?.thumb }
+        val frame = media.slotThumbs[s.id]
+        when {
+            takeThumb != null -> studio.muse.app.ui.components.RefImage(takeThumb, Modifier.fillMaxSize())
+            frame != null -> Image(frame, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else -> StandIn(ui, i, Modifier.fillMaxSize())
+        }
         Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Box(Modifier.clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                 T("${i + 1}", m.scale.micro.tabular(), Color.White, maxLines = 1)
@@ -413,15 +431,23 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
         Box(Modifier.fillMaxWidth().let { if (height != null) it.height(height) else it.weight(1f) }.clip(RoundedCornerShape(m.radii.container)).background(Color.Black).padding(vertical = 12.dp)
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
+                val status = if (yours && built == null) media.editStatus else null
                 when {
                     // The real built edit: its own cuts, speed, camera moves, text and Look, on the reference's timeline.
                     built != null -> SyncedSurface(built, t, ui.playing, muted = true, Modifier.fillMaxSize())
+                    // Built but not playable yet: say so; never pictures or takes standing in for the edit.
+                    status != null -> Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        T(status, m.scale.caption, Color.White, maxLines = 2)
+                        if (status == PREVIEW_FAILED) Box(Modifier.heightIn(min = 48.dp).press(onClick = media.onRetryEdit).padding(horizontal = 12.dp)
+                            .semantics { role = Role.Button; contentDescription = "Retry the preview" }, contentAlignment = Alignment.Center) { T("Retry", m.scale.label, Color.White, maxLines = 1) }
+                    }
                     video != null -> SyncedVideo(video.first, video.second, ui.playing, muted = yours, Modifier.fillMaxSize())
                     picture != null && !yours -> Image(picture, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else -> StandIn(ui, i + (if (yours) 1 else 0), Modifier.fillMaxSize(), icon = false)
                 }
                 // The reference's own video already shows its text; elsewhere the recipe's text stands in for it.
-                if ((yours && built == null) || (!yours && media.reference == null)) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
+                if ((yours && built == null && status == null) || (!yours && media.reference == null)) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
                     val bias = when (x.position) { "Top" -> -.7f; "Middle" -> 0f; else -> .6f }
                     T(x.text, m.scale.caption.copy(fontWeight = FontWeight.Bold), Color.White, Modifier.align(androidx.compose.ui.BiasAlignment(0f, bias)).padding(horizontal = 8.dp), maxLines = 2)
                 }
@@ -559,6 +585,8 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
                 studio.muse.app.ui.screens.edit.learn.LearnChip("Generate a new shot", on = method == "generate") { if (method != "generate") acts.onMethod(s.id, "generate") }
             }
             e?.swapUnavailable?.let { T(it, m.scale.caption, m.roles.caution) }
+            // WS7/WS13: the owner's model for this shot (members never see it); the price follows it.
+            if (acts.models) studio.muse.app.ui.screens.ModelChoiceRow(studio.muse.app.data.ModelPurpose.FILL, studio.muse.app.ui.screens.ModelPick(ui.shotModels[s.id]), { p -> acts.onShotModel(s.id, p.model) })
             if (method == "swap" && e?.method == "swap") {
                 val keep = ui.keepBackground[s.id] ?: e.keepBackground
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press { acts.onKeepBackground(s.id, !keep) }
@@ -578,6 +606,8 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
                         ui.places.forEach { p -> studio.muse.app.ui.screens.edit.learn.LearnChip(p.name, on = picked == p.id) { if (picked != p.id) acts.onLocation(s.id, p.id) } }
                     }
                     e.background?.let { T(it.line, m.scale.caption, m.roles.ink2) }
+                    // A background made from the brief: the owner's image model for it.
+                    if (acts.models && picked == null) studio.muse.app.ui.screens.ModelChoiceRow(studio.muse.app.data.ModelPurpose.PLATE, studio.muse.app.ui.screens.ModelPick(ui.plateModels[s.id]), { p -> acts.onPlateModel(s.id, p.model) })
                 }
             }
             if (method == "generate" && e?.promptFrom != null && e.promptFrom != "brief") T("Write a brief for this shot first for a closer match.", m.scale.caption, m.roles.ink2)

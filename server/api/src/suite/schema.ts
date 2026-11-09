@@ -12,6 +12,8 @@ export const suiteSettings = pgTable('suite_settings', {
   ladder: jsonb('ladder').$type<Partial<Record<Tier, LadderStep[]>>>(),
   capPerJob: doublePrecision('cap_per_job'),
   capPerDay: doublePrecision('cap_per_day'),
+  /** WS13 (migration 0026): the owner's default model per purpose ("always use X for Swap"), src/engines/service.ts. */
+  engineDefaults: jsonb('engine_defaults').$type<Record<string, string>>(),
   updatedBy: text('updated_by'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });

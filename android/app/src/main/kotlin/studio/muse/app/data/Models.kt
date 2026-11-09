@@ -82,6 +82,10 @@ data class CreateModelRequest(val name: String, val age: Int, val niche: String)
 @Serializable
 data class SetSlotRequest(val image: ImageRef?, val source: String = "upload")
 
+/** POST /v1/models/{id}/fill-angles (WS13, owner): the image model for the missing angles; empty body = the default. */
+@Serializable
+data class FillAnglesRequest(val imageModel: String? = null)
+
 /** Outfit set: front, ¾, side, back. mode: describe | photo | own. state: ready | generating. */
 @Serializable
 data class Outfit(
@@ -108,6 +112,8 @@ data class CreateOutfitRequest(
     val mode: String,
     val description: String = "",
     val images: List<ImageRef> = emptyList(),
+    /** WS13 (owner): the image model for the set; null = the studio's default. */
+    val imageModel: String? = null,
 )
 
 /** status: good | bad | info */
@@ -164,6 +170,8 @@ data class JobRequest(
     /** Set by the server on upscale jobs (`engine: "upscale"`): the take being sharpened and the size (1080p | 2k | 4k). */
     val takeId: String? = null,
     val size: String? = null,
+    /** WS13 (owner): Character swap's model on the classic path (h3-open = Edit, viggle = Fast·beta…); null = the default. */
+    val engineModel: String? = null,
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }
@@ -248,6 +256,8 @@ data class Take(
     val parentTakeId: String? = null,
     // Edit suite (workstream 3): a v2 project comes back in the same field (EditsFieldSerializer keeps it in `project`).
     @Serializable(with = EditsFieldSerializer::class) val edits: EditListDto? = null,
+    /** An edited version exported with "Label as AI-generated" (posting uses it for the platform's AI label). */
+    val aiLabel: Boolean = false,
     val fps: Double? = null,
     /** Template shots: the template's id and name, the variation draw seed, and (template owner only) what was drawn. */
     val templateId: String? = null,
@@ -537,7 +547,7 @@ data class AddTopUpRequest(val amountUsd: Double, val note: String? = null, val 
 
 /** POST /v1/takes/{id}/upscale. */
 @Serializable
-data class UpscaleRequest(val size: String)
+data class UpscaleRequest(val size: String, /** WS13 (owner): the upscale model; null = the default. */ val engineModel: String? = null)
 
 /** GET /v1/members (owner). Caps are in USD; null caps follow the studio default. */
 @Serializable
@@ -1168,6 +1178,8 @@ data class TakeVersionV2Request(
     val fps: Double? = null,
     /** Edit sessions (workstream 3): the version's name, 1–80 characters trimmed (Claude's save_version name). */
     val name: String? = null,
+    /** Export's "Label as AI-generated" (off by default): only ever sent as true; null leaves it off. */
+    val aiLabel: Boolean? = null,
 )
 
 /** Edit sessions (workstream 3): a version name as the server takes it (trimmed, at most 80 characters; blank = none). */
