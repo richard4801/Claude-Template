@@ -1063,6 +1063,26 @@ struct SpeedPanel: View {
                     Task { await session.toggleStabilize() }
                 }
                 .disabled(session.features?.isAvailable(.stabilize) == false && !steps.contains("stabilize"))
+                // Smooth slow motion (XL): from the playhead, 2× or 4× with new frames in between (paid; the price is shown first).
+                if session.state.selectedIsMain {
+                    SuiteRule()
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Smooth slow motion").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                        HStack(spacing: Space.s2) {
+                            EditSeg(options: [(2.0, "2×"), (4.0, "4×")], selection: session.slowmoFactor, small: true) { session.slowmoFactor = $0 }
+                            EditSeg(options: [(1.0, "1 s"), (2.0, "2 s"), (4.0, "4 s")], selection: session.slowmoLength, small: true) { session.slowmoLength = $0 }
+                        }
+                        HStack(spacing: Space.s2) {
+                            SuiteToolButton(title: session.isRunning(.slowmo) ? "Slowing down…" : "Slow down from the playhead", icon: "gauge",
+                                            disabled: session.isRunning(.slowmo) || session.features?.isAvailable(.slowmo) == false) {
+                                Task { await session.smoothSlowmo() }
+                            }
+                            if session.isRunning(.slowmo) { ProgressView().controlSize(.small) }
+                        }
+                        Text(session.features?.note(.slowmo) ?? "New frames in between, so it stays smooth. The slowed part is muted.")
+                            .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         } else {
             InspectorEmpty(text: "Select a video clip to change its speed.")

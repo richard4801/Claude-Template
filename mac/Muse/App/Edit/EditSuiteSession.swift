@@ -766,6 +766,7 @@ final class EditSuiteSession {
         case .beats: return "Detect beats"
         case .reverse: return "Reverse"
         case .stabilize: return "Stabilise"
+        case .slowmo: return "Smooth slow motion"
         }
     }
 
@@ -961,6 +962,50 @@ final class EditSuiteSession {
         guard let dropped else { return }
         let on = target.derivedFrom?.kind == .stabilize
         notice = (on ? "Steadied" : "Stabilise off") + (dropped.isEmpty ? "" : " · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)")
+    }
+
+    // MARK: Smooth slow motion (XL): a range of the clip, 2× or 4× slower with new frames in between
+
+    /// 2 or 4, and the length of the range from the playhead (seconds of source).
+    var slowmoFactor: Double = 4
+    var slowmoLength: Double = 2
+
+    /// The selected main clip from the playhead, `slowmoLength` long, slowed `slowmoFactor`×: the copy is made once (the
+    /// paid server job, its price confirmed first) and reused; the clip is split around it with the shared applySlowmo,
+    /// the slowed piece muted and selected.
+    func smoothSlowmo() async {
+        guard let c = state.selectedVideo else { lastError = "Select a clip to slow down"; return }
+        guard let r = state.slowmoRange(lengthSec: slowmoLength) else {
+            lastError = "Smooth slow motion works on a main clip at one speed, at least 0.3 s long"; return
+        }
+        let factor = slowmoFactor
+        if let copy = state.slowmoCopy(of: c.asset, startSec: r.startSec, endSec: r.endSec, factor: factor) { applySlowmo(copy); return }
+        guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Smooth slow motion needs a take or an upload"; return }
+        var o = EditorJobOptions()
+        o.factor = factor; o.startSec = r.startSec; o.endSec = r.endSec
+        await run(.slowmo, source: src, options: o) { [weak self] res in
+            Task { @MainActor in await self?.addSlowmo(res, of: a, startSec: r.startSec, endSec: r.endSec, factor: factor) }
+        }
+    }
+
+    private func addSlowmo(_ r: EditorJobResult, of a: E.Asset, startSec: Double, endSec: Double, factor: Double) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't slow this clip down"; return }
+        let id = project.newId("v")
+        let len = ra.durationSec ?? r.durationSec ?? E.r6((endSec - startSec) * factor)
+        var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: len,
+                           width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: false, url: ra.url)
+        copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .slowmo, startSec: r.startSec ?? startSec, endSec: r.endSec ?? endSec, factor: r.factor ?? factor)
+        let link = ra.url ?? ra.take.flatMap { lookupTake($0)?.videoUrl }
+        if let link, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? ra.take ?? id) { files[id] = local }
+        else if ra.upload == a.upload, ra.take == a.take { files[id] = files[a.id] }   // the fake hands back the source itself
+        state.assetNames[id] = "Smooth \(Int(factor))×"
+        applySlowmo(copy)
+    }
+
+    private func applySlowmo(_ copy: E.Asset) {
+        if edit({ $0.applySlowmoSelected(copy) }) {
+            notice = "\(E.derivedLabel(project, copy.id)) · the slowed part is selected and muted"
+        }
     }
 
     func setRemoveBackground(_ on: Bool) async {

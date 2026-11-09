@@ -119,3 +119,47 @@ extension EditV2 {
         return s.isEmpty ? "" : s.prefix(1).uppercased() + s.dropFirst()
     }
 }
+
+// MARK: Smooth slow motion on the selected clip (as Android: the range is the chosen length from the playhead)
+
+extension EditSuiteState {
+    /// The source range for smooth slow motion: `lengthSec` (0.3–10 s of source) from the playhead, kept inside the
+    /// selected main clip, rounded to 1 ms. Nil when it can't apply (not a main clip, a freeze frame, a speed curve, or the
+    /// clip is shorter than 0.3 s of source).
+    public func slowmoRange(lengthSec: Double) -> (startSec: Double, endSec: Double)? {
+        guard let c = selectedVideo, selectedIsMain, c.holdSec == nil, c.speedCurve == nil, let local = selectedLocalTime else { return nil }
+        let len = min(E.slowmoMaxRangeSec, max(E.slowmoMinRangeSec, lengthSec))
+        guard c.outSec - c.inSec >= E.slowmoMinRangeSec - 1e-9 else { return nil }
+        let ms = { (v: Double) in (v * 1000).rounded() / 1000 }
+        var start = E.clipSourceAt(c, local)
+        var end = min(c.outSec, start + len)
+        if end - start < len { start = max(c.inSec, end - len) }
+        start = ms(max(c.inSec, start)); end = ms(min(c.outSec, end))
+        guard end - start >= E.slowmoMinRangeSec - 1e-9 else { return nil }
+        return (start, end)
+    }
+
+    /// The slowmo copy already in the edit for this asset, range and factor (made once, reused).
+    public func slowmoCopy(of assetId: String, startSec: Double, endSec: Double, factor: Double) -> E.Asset? {
+        project.assets.first {
+            guard let d = $0.derivedFrom, d.kind == .slowmo, d.asset == assetId, d.factor == factor else { return false }
+            return abs((d.startSec ?? -1) - startSec) < 0.0005 && abs((d.endSec ?? -1) - endSec) < 0.0005
+        }
+    }
+
+    /// Splits the selected main clip around `copy` (a slowmo copy of its asset) with the shared applySlowmo; the slowed
+    /// piece is selected. One undo step.
+    @discardableResult
+    public mutating func applySlowmoSelected(_ copy: E.Asset) -> Bool {
+        guard let c = selectedVideo, selectedIsMain else { return false }
+        var newId: String?
+        let ok = apply { p in
+            guard let r = E.applySlowmo(p.addingAsset(copy), clipId: c.id, slowId: copy.id) else { return nil }
+            newId = r.id
+            return r.project
+        }
+        if ok, let newId { selection = newId }
+        if !ok, lastRefusal == nil { refuse("Smooth slow motion works on a main clip at one speed, without a freeze frame") }
+        return ok
+    }
+}

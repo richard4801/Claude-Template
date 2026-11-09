@@ -75,3 +75,30 @@ final class EditV2DerivedTests: XCTestCase {
         XCTAssertNotNil(s.steadiedCopy(of: orig))
     }
 }
+
+extension EditV2DerivedTests {
+    func testSlowmoOnTheSelectedClip() throws {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        let c = s.project.mainClips[0]
+        s.selection = c.id
+        s.playhead = 9   // near the end: the range moves back inside the clip
+        let r = try XCTUnwrap(s.slowmoRange(lengthSec: 2))
+        XCTAssertEqual(r.startSec, 8, accuracy: 1e-9)
+        XCTAssertEqual(r.endSec, 10, accuracy: 1e-9)
+        s.playhead = 3
+        let r2 = try XCTUnwrap(s.slowmoRange(lengthSec: 2))
+        XCTAssertEqual(r2.startSec, 3, accuracy: 1e-9)
+        var copy = E.Asset(id: "src_sm", kind: .video, upload: "u_sm", durationSec: 8, width: 1080, height: 1920, hasAudio: false)
+        copy.derivedFrom = E.DerivedFrom(asset: c.asset, op: .slowmo, startSec: r2.startSec, endSec: r2.endSec, factor: 4)
+        XCTAssertTrue(s.applySlowmoSelected(copy))
+        XCTAssertEqual(s.project.mainClips.count, 3)
+        XCTAssertEqual(s.selectedVideo?.asset, "src_sm")
+        XCTAssertEqual(s.selectedVideo?.muted, true)
+        XCTAssertEqual(E.durationSec(s.project), 10 - 2 + 8, accuracy: 1e-6)
+        XCTAssertEqual(E.derivedLabel(s.project, "src_sm"), "Smooth 4×")
+        XCTAssertNotNil(s.slowmoCopy(of: c.asset, startSec: 3, endSec: 5, factor: 4))
+        XCTAssertNil(E.problem(s.project))
+        s.undo()
+        XCTAssertEqual(s.project.mainClips.count, 1)
+    }
+}

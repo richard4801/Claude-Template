@@ -504,6 +504,26 @@ extension SnapshotRunner {
         check("stabilise: undone", s.project.mainClips == unsteady.mainClips)
         s.lastError = nil
 
+        step("Smooth slow motion: 1 s from 1 s, 4× (the demo job), split around it")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1)
+        s.lastError = nil
+        let unslowed = s.project
+        s.slowmoFactor = 4; s.slowmoLength = 1
+        await s.smoothSlowmo()
+        s.confirmPaid()
+        for _ in 0..<200 where s.isRunning(.slowmo) || (s.state.selectedVideo?.asset == unslowed.mainClips.first?.asset && s.lastError == nil) {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        let slowed = s.state.selectedVideo
+        check("slowmo: the slowed piece plays the copy, muted", slowed.map { E.derivedLabel(s.project, $0.asset) == "Smooth 4×" && $0.muted == true } ?? false,
+              s.lastError ?? "\(String(describing: slowed?.asset))")
+        check("slowmo: the clip is split around it and valid", s.project.mainClips.count == unslowed.mainClips.count + 2 && E.problem(s.project) == nil,
+              "\(s.project.mainClips.count) clips")
+        s.undo()
+        check("slowmo: undone", s.project.mainClips == unslowed.mainClips)
+        s.lastError = nil
+
         step("Auto reframe: Vision runs over the clip (no face in the test take)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.lastError = nil

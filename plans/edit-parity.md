@@ -65,7 +65,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Constant speed 0.1–10×, pitch kept | Has | Has | — | |
 | Speed curves (presets + custom graph) | Has | Has | — | |
-| **Smooth slow-mo (frame interpolation)** | Has | Missing | XL | Owner-approved 2026-11-09. Server job `slowmo` (paid, price on the button), 2× or 4×, 0.3–10 s from the playhead; `Asset.derivedFrom {op:"slowmo"}` plus `applySlowmo` split the clip (shared fixture). Android: Speed sheet, "Smooth slow motion" (x_slowmo). Mac: on-device on macOS 15.4+, the job otherwise (WS9). |
+| **Smooth slow-mo (frame interpolation)** | Has | Has | XL | Owner-approved 2026-11-09. Server job `slowmo` (paid, price on the button), 2× or 4×, 0.3–10 s from the playhead; `Asset.derivedFrom {op:"slowmo"}` plus `applySlowmo` split the clip (shared fixture). Android: Speed sheet, "Smooth slow motion" (x_slowmo). Mac: Speed panel → "Smooth slow motion" (2× / 4×, 1 / 2 / 4 s from the playhead) over the same job, the price confirmed first; the copy is reused, the slowed piece muted and selected (WS9). On-device interpolation on macOS 15.4+ comes next. |
 | Speed on audio-only clips | Has | Has | M | Android: Speed panel on a selected music, voice or effect clip: 0.5–2×, pitch kept (contract: audio speed 0.5–2; beats map through clipTimeAt; server render uses atempo). Mac: Speed on a selected music, voice or effect clip: 0.5–2× (slider and 0.5× / 1× / 1.5× / 2×), pitch kept (spectral); beats, loops and beat marks go through clipTimeAt / clipSourceAt. |
 | Set the duration (speed computed) | Has | Has | S | Android: Speed → Length slider. Mac: Speed → Length slider. |
 
@@ -215,7 +215,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Enhance / upscale | Partial | Partial | — | The Suite has upscale for takes; not in Edit |
 | Relight, retouch / beauty | Missing | Missing | XL | |
 | Text-to-speech | Missing | Missing | L | See Text |
-| Frame interpolation | Has | Missing | XL | See Speed (smooth slow motion) |
+| Frame interpolation | Has | Has | XL | See Speed (smooth slow motion) |
 
 ## 14. Export
 

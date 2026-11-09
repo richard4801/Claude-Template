@@ -10,6 +10,8 @@ public enum EditorJobKind: String, Codable, Hashable, Sendable, CaseIterable {
     case reverse
     /// Stabilise (XL, WS16 d206d37): a steadied copy of the whole source (≤ 3 min), the same length and timing; free.
     case stabilize
+    /// Smooth slow motion (XL, WS16 402c87d5): a source range with frames interpolated, factor× as long, silent; paid.
+    case slowmo
 }
 
 /// The media a job works on: a video take of the studio, or an upload of the studio (+ its length).
@@ -52,6 +54,10 @@ public struct EditorJobOptions: Codable, Hashable, Sendable {
     public var analyzeOnly: Bool?
     /// matte: tap to keep.
     public var points: [KeepPoint]?
+    /// slowmo: 2 or 4, and the source range (0.3–10 s).
+    public var factor: Double?
+    public var startSec: Double?
+    public var endSec: Double?
     public init(language: String? = nil, minSilenceSec: Double? = nil, keepPadSec: Double? = nil, fillers: Bool? = nil, repeats: Bool? = nil,
                 extraFillers: [String]? = nil, fromJobId: String? = nil, silenceOnly: Bool? = nil, noiseDb: Double? = nil, analyzeOnly: Bool? = nil,
                 points: [KeepPoint]? = nil) {
@@ -80,7 +86,7 @@ extension EditorJobKind {
         case .captions, .cuts: return .captions
         case .matte: return options?.points != nil ? .track : .matte
         case .denoise: return .denoise
-        case .beats, .reverse, .stabilize: return nil
+        case .beats, .reverse, .stabilize, .slowmo: return nil
         }
     }
 }
@@ -103,8 +109,19 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
     public var denoise: Helper?
     /// Stabilise (free, up to `maxSec`).
     public var stabilize: Helper?
-    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil, stabilize: Helper? = nil) {
-        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise; self.stabilize = stabilize
+    /// Smooth slow motion (paid; `factors`, `maxRangeSec`).
+    public var slowmo: Slowmo?
+    public struct Slowmo: Codable, Hashable, Sendable {
+        public var available: Bool?
+        public var reason: String?
+        public var factors: [Double]?
+        public var maxRangeSec: Double?
+        public init(available: Bool? = nil, reason: String? = nil, factors: [Double]? = nil, maxRangeSec: Double? = nil) {
+            self.available = available; self.reason = reason; self.factors = factors; self.maxRangeSec = maxRangeSec
+        }
+    }
+    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil, stabilize: Helper? = nil, slowmo: Slowmo? = nil) {
+        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise; self.stabilize = stabilize; self.slowmo = slowmo
     }
     /// Background removal (and tap to keep) can run.
     public var matteAvailable: Bool { isAvailable(.matte) }
@@ -115,6 +132,7 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
         case .matte: return matte
         case .denoise: return denoise
         case .stabilize: return stabilize
+        case .slowmo: return slowmo.map { Helper(available: $0.available, reason: $0.reason, maxSec: $0.maxRangeSec) }
         case .cuts, .beats, .reverse: return nil   // the free passes are always offered
         }
     }
@@ -189,6 +207,11 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var mode: String?
     public var points: [KeepPoint]?
     public var suggestion: DenoiseSuggestion?
+    // slowmo: the factor and source range the copy was made from, and its frame rate
+    public var factor: Double?
+    public var startSec: Double?
+    public var endSec: Double?
+    public var fps: Double?
     // reverse: the reversed copy's picture size and sound
     public var width: Int?
     public var height: Int?
