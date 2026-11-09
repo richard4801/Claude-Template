@@ -214,6 +214,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if (tr.hidden) continue;
     if (tr.kind === 'caption') { if (tr.items.length || tr.caption) unsupported.add('captions'); continue; }
     if (tr.kind === 'video' || tr.kind === 'image') { if (tr.items.length) unsupported.add('overlays'); continue; }
+    if (tr.kind === 'adjust') { if (tr.items.length) unsupported.add('adjustment layers'); continue; }
     if (tr.kind !== 'text') continue;
     for (const it of tr.items as M.TextItem[]) {
       const st = it.style, px = Math.max(6, st.sizePct * H);

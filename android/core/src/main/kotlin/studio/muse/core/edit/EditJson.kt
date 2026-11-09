@@ -94,6 +94,7 @@ object EditJson {
                     TrackKind.IMAGE -> imageItem(io)
                     TrackKind.TEXT -> textItem(io)
                     TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX -> audioClip(io)
+                    TrackKind.ADJUST -> adjustItem(io)
                     TrackKind.CAPTION -> error("unreachable")
                 }
             },
@@ -200,6 +201,10 @@ object EditJson {
     /** Parses a look on its own (e.g. a pack entry); [path] names it in problems. */
     fun parseLook(el: JsonElement, path: String = "look"): Look = lookOf(Obj.of(el, path))
 
+    private fun adjustItem(o: Obj): AdjustItem {
+        for (k in listOf("look", "mask", "transform", "crop", "fit", "asset")) if (o.el(k) != null) o.bad(k, "is not part of an adjustment layer")
+        return AdjustItem(o.str("id"), o.num("startSec"), o.num("durationSec"), adjust(o), filter(o), keyframes(o), o.numOrNull("opacity"))
+    }
     private fun loop(o: Obj) = o.objOrNull("animLoop")?.let { AnimLoop(it.enum("kind", "unknown loop animation"), it.num("periodSec"), it.numOrNull("amount")) }
     private fun anim(o: Obj, key: String) = o.objOrNull(key)?.let { Anim(it.enum("kind", "unknown animation"), it.num("durationSec")) }
 
@@ -260,6 +265,12 @@ object EditJson {
     }
 
     fun encodeItem(it: Item): JsonObject = when (it) {
+        is AdjustItem -> buildJsonObject {
+            put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec)
+            it.adjust?.let { a -> put("adjust", encodeAdjust(a)) }
+            it.filter?.let { f -> put("filter", buildJsonObject { put("id", f.id); num("amount", f.amount) }) }
+            num("opacity", it.opacity); keyframes(it.keyframes)
+        }
         is VideoClip -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("inSec", it.inSec); num("outSec", it.outSec); num("speed", it.speed)
             it.speedCurve?.let { c -> put("speedCurve", encodeSpeedCurve(c)) }

@@ -73,6 +73,31 @@ fun lookAt(look: Look?, keyframes: Keyframes?, t: Double): Look? {
     return l
 }
 
+/**
+ * The adjustment layers' colour at timeline [t] (model.ts `adjustLayerMatrix`): each adjust item on screen (tracks in
+ * order, lower first) mixed with the identity by its strength, multiplied together (the upper applied last). Null when
+ * none is on screen or the result is the identity.
+ */
+fun adjustLayerMatrix(p: EditProject, t: Double, presets: List<FilterPreset> = Presets.FILTERS): List<Double>? {
+    val id = listOf(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    var m = id.toDoubleArray(); var any = false
+    for (tr in p.tracks) {
+        if (tr.kind != TrackKind.ADJUST || tr.hidden == true) continue
+        for (it in tr.items) {
+            val a = it as? AdjustItem ?: continue
+            if (t < a.startSec - 1e-9 || t >= a.startSec + a.durationSec - 1e-9) continue
+            val local = t - a.startSec
+            val s = clamp(propAt(a.keyframes, KfProp.OPACITY, a.opacity ?: 1.0, local), 0.0, 1.0)
+            val c = colorMatrix(adjustAt(a.adjust, a.keyframes, local), a.filter, presets)
+            m = mul(DoubleArray(12) { i -> id[i] + s * (c[i] - id[i]) }, m)
+            any = true
+        }
+    }
+    if (!any) return null
+    val out = m.map { Math.round(it * 1e6) / 1e6 }
+    return out.takeUnless { o -> o.indices.all { kotlin.math.abs(o[it] - id[it]) < 1e-9 } }
+}
+
 /** Whether [keyframes] key any colour property ([KfProp.COLOR]). */
 fun hasColorKeys(keyframes: Keyframes?): Boolean = KfProp.COLOR.any { !keyframes?.get(it).isNullOrEmpty() }
 
@@ -178,6 +203,7 @@ fun itemSpan(p: EditProject, track: Track, item: Item): Span {
         is VideoClip -> (item.startSec ?: Double.NaN) to clipLength(item)
         is AudioClip -> item.startSec to clipLength(item)
         is ImageItem -> item.startSec to item.durationSec
+        is AdjustItem -> item.startSec to item.durationSec
         is TextItem -> item.startSec to item.durationSec
     }
     return Span(r6(start), r6(start + len))

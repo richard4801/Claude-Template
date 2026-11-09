@@ -74,7 +74,9 @@ enum class Fit(override val wire: String) : Wire { COVER("cover"), CONTAIN("cont
 enum class AssetKind(override val wire: String) : Wire { VIDEO("video"), IMAGE("image"), AUDIO("audio"), /** An imported .cube (Looks); always an upload. */ LUT("lut") }
 
 enum class TrackKind(override val wire: String) : Wire {
-    MAIN("main"), VIDEO("video"), IMAGE("image"), TEXT("text"), CAPTION("caption"), MUSIC("music"), VOICE("voice"), SFX("sfx");
+    MAIN("main"), VIDEO("video"), IMAGE("image"), TEXT("text"), CAPTION("caption"), MUSIC("music"), VOICE("voice"), SFX("sfx"),
+    /** Adjustment layers (M): [AdjustItem]s colour the whole picture under the text while on screen. */
+    ADJUST("adjust");
 
     val isAudio: Boolean get() = this == MUSIC || this == VOICE || this == SFX
     /** Tracks whose items are [VideoClip]s. */
@@ -133,6 +135,21 @@ data class Asset(
 
 /** Anything on a track. Which class an item is follows from its track's kind. */
 sealed interface Item { val id: String }
+
+/**
+ * An adjustment layer (M): while on screen, its colour ([adjust] — not highlights/shadows — and [filter], mixed with the
+ * identity by its strength [opacity]) applies to the whole composed picture under the text and captions
+ * ([adjustLayerMatrix]). Keyframes: opacity and the colour properties.
+ */
+data class AdjustItem(
+    override val id: String,
+    val startSec: Double,
+    val durationSec: Double,
+    val adjust: Adjust? = null,
+    val filter: FilterRef? = null,
+    val keyframes: Keyframes? = null,
+    val opacity: Double? = null,
+) : Item
 
 /** Items that draw a picture (video clips and images). */
 sealed interface Visual : Item {

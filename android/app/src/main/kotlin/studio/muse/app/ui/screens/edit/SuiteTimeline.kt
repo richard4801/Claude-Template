@@ -99,7 +99,7 @@ fun lanesOf(p: EditProject, roomy: Boolean = false): List<Lane> {
     fun add(t: Track, h: Float, gap: Float, kind: LaneKind = LaneKind.TRACK) { out += Lane(t, y, h, kind); y += h + gap }
     add(p.main, if (roomy) 60f else 52f, 4f)
     if (p.mainClips.any { SuiteOps.hasSound(p, it) }) add(p.main, if (roomy) 34f else 30f, 8f, LaneKind.CLIP_SOUND)
-    val order = listOf(TrackKind.CAPTION, TrackKind.VIDEO, TrackKind.IMAGE, TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX, TrackKind.TEXT)
+    val order = listOf(TrackKind.CAPTION, TrackKind.ADJUST, TrackKind.VIDEO, TrackKind.IMAGE, TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX, TrackKind.TEXT)
     for (k in order) for (t in p.tracks) if (t.kind == k) add(t,
         if (roomy) when (k) { TrackKind.CAPTION, TrackKind.TEXT -> 28f; else -> 34f }
         else when (k) { TrackKind.CAPTION, TrackKind.TEXT -> 22f; else -> 30f },
@@ -114,12 +114,12 @@ fun laneName(l: Lane): String = if (l.kind == LaneKind.CLIP_SOUND) "Clip sound" 
 fun trackName(t: Track): String = when (t.kind) {
     TrackKind.MAIN -> "Video"; TrackKind.CAPTION -> "Captions"; TrackKind.MUSIC -> "Music"
     TrackKind.VOICE -> if (t.name == SuiteOps.CLIP_SOUND_TRACK) "Detached sound" else "Voice-over"
-    TrackKind.SFX -> "Sound effects"; TrackKind.TEXT -> "Text"; TrackKind.IMAGE -> "Image"; else -> if (t.name == "Cut-out") "Cut-out" else "Overlay"
+    TrackKind.SFX -> "Sound effects"; TrackKind.TEXT -> "Text"; TrackKind.IMAGE -> "Image"; TrackKind.ADJUST -> "Adjustment"; else -> if (t.name == "Cut-out") "Cut-out" else "Overlay"
 }
 
 private fun laneIcon(l: Lane): String = if (l.kind == LaneKind.CLIP_SOUND) "waveform" else when (l.track?.kind) {
     TrackKind.MAIN -> "film-strip"; TrackKind.CAPTION -> "closed-captioning"; TrackKind.MUSIC -> "music"; TrackKind.VOICE -> "mic"
-    TrackKind.SFX -> "waveform"; TrackKind.TEXT -> "text-t"; else -> "layers"
+    TrackKind.SFX -> "waveform"; TrackKind.TEXT -> "text-t"; TrackKind.ADJUST -> "sliders-horizontal"; else -> "layers"
 }
 
 /** Colours of the sound/text lanes (music green, voice violet, clip sound blue-grey, hook rose), darker on dark themes. */
@@ -432,6 +432,12 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             if (r < 0 || l > w) continue
                             chip(measurer, (it as studio.muse.core.edit.TextItem).text, l, r, top, h, colors.hook, if (ui.selectedId == it.id) m.t.accent else Color.Transparent, m.t.ink, m.t.body)
                         }
+                        t.kind == TrackKind.ADJUST -> for (it in t.items) {
+                            val sp = itemSpan(p, t, it)
+                            val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
+                            if (r < 0 || l > w) continue
+                            chip(measurer, "Adjustment", l, r, top, h, m.t.surface2, if (ui.selectedId == it.id) m.t.accent else m.t.line, m.t.ink, m.t.body)
+                        }
                         t.kind == TrackKind.VIDEO || t.kind == TrackKind.IMAGE -> for (it in t.items) {
                             val sp = itemSpan(p, t, it)
                             val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
@@ -546,6 +552,7 @@ private fun tap(o: Offset, width: Float, density: Float, s: EditSuiteUi, lanes: 
     }
     val hit = track?.items?.firstOrNull { val sp = itemSpan(proj, track, it); t >= sp.startSec && t < sp.endSec }
     when {
+        hit is studio.muse.core.edit.AdjustItem && s.selectedId != hit.id -> { act(EditAction.Select(hit.id)); act(EditAction.Open(Panel.FILTERS)) }
         hit != null -> act(EditAction.Select(if (s.selectedId == hit.id) null else hit.id))
         track?.kind == TrackKind.CAPTION -> act(EditAction.Open(Panel.CAPTIONS))
         else -> act(EditAction.Select(null))

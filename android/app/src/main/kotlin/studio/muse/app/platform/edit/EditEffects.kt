@@ -23,7 +23,9 @@ import studio.muse.core.edit.Chroma
 import studio.muse.core.edit.ChromaKey
 import studio.muse.core.edit.EnvelopeCursor
 import studio.muse.core.edit.GainPoint
+import studio.muse.core.edit.EditProject
 import studio.muse.core.edit.RenderPlan
+import studio.muse.core.edit.adjustLayerMatrix
 import studio.muse.core.edit.hexRgb
 import java.nio.ByteBuffer
 
@@ -54,6 +56,16 @@ class TimedColorMatrixEffect(private val at: (Long) -> List<Double>) : RgbMatrix
         return FloatArray(16).also { out -> for (row in 0 until 3) for (col in 0 until 4) out[col * 4 + row] = m[row * 4 + col].toFloat(); out[15] = 1f }
     }
 }
+
+/**
+ * Adjustment layers ([adjustLayerMatrix]) as one composition-level matrix at the frame's timeline time. Identity outside
+ * the layers' spans.
+ */
+@OptIn(UnstableApi::class)
+fun adjustLayerEffect(project: EditProject): TimedColorMatrixEffect =
+    TimedColorMatrixEffect { us -> adjustLayerMatrix(project, us / 1e6) ?: IDENTITY_3X4 }
+
+private val IDENTITY_3X4 = listOf(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
 /** The chroma key (studio.muse.core.edit.ChromaKey, same formula) as a GL shader effect. */
 @OptIn(UnstableApi::class)

@@ -54,6 +54,7 @@ import studio.muse.core.edit.RenderPlan
 import studio.muse.core.edit.StillEntry
 import studio.muse.core.edit.VideoLayer
 import studio.muse.core.edit.AudioClip
+import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.TransitionKind
 import studio.muse.core.edit.VideoClip
 import studio.muse.core.edit.VoiceEffect
@@ -142,7 +143,14 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
         val overlay = EditOverlay(plan)
         return Composition.Builder(sequences)
             .setVideoCompositorSettings(PlanCompositorSettings(plan))
-            .apply { if (overlay.isNeeded) setEffects(Effects(emptyList(), listOf<Effect>(OverlayEffect(listOf(overlay))))) }
+            .apply {
+                val fx = buildList<Effect> {
+                    // Adjustment layers grade everything under them, then text and captions go on top.
+                    if (plan.project.tracks.any { it.kind == TrackKind.ADJUST && it.items.isNotEmpty() }) add(adjustLayerEffect(plan.project))
+                    if (overlay.isNeeded) add(OverlayEffect(listOf(overlay)))
+                }
+                if (fx.isNotEmpty()) setEffects(Effects(emptyList(), fx))
+            }
             .build()
     }
 

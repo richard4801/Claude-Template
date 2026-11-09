@@ -168,6 +168,17 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun adjustmentLayers() {
+        val al = fn["adjustLayers"]!!.obj
+        val p = EditJson.parse(al["project"]!!)
+        assertEquals(null, problemOf(p)?.message)
+        for (sm in al["samples"]!!.arr) {
+            val t = sm.obj["t"]!!.num
+            assertJson("adjustLayer t=$t", sm.obj["matrix"], adjustLayerMatrix(p, t)?.let(::numbers) ?: kotlinx.serialization.json.JsonNull)
+        }
+        assertEquals(al["project"], EditJson.encode(p)) // round trip
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj
