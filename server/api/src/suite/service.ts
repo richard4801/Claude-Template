@@ -420,7 +420,7 @@ export class SuiteService {
     const base = {
       quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
       estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
-      buttonLabel: `Generate · ${plan.seconds} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
+      buttonLabel: `Generate · ${Math.round(plan.seconds * 10) / 10} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
