@@ -73,7 +73,8 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
         highlight: Highlight?, maxLines: Int = Int.MAX_VALUE, flipX: Boolean = false, flipY: Boolean = false,
     ) {
         val w = canvas.width; val h = canvas.height
-        val px = (s.sizePct * h * scale).toFloat().coerceAtLeast(1f)
+        // Laid out at its own size, then the whole block scaled (like the Mac and the server): scaling never re-wraps.
+        val px = (s.sizePct * h).toFloat().coerceAtLeast(1f)
         paint.reset(); paint.isAntiAlias = true
         paint.textSize = px
         paint.typeface = OwnFonts.typeface(OwnFonts.uploadOf(plan.project, s)) ?: typeface(s.font, s.weight)
@@ -103,7 +104,8 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
         canvas.save()
         canvas.translate((cx * w).toFloat(), (cy * h).toFloat())
         canvas.rotate(rotationCw.toFloat())
-        if (flipX || flipY) canvas.scale(if (flipX) -1f else 1f, if (flipY) -1f else 1f) // mirror (wave 1), about the text's centre
+        val k = scale.toFloat().coerceAtLeast(0.001f)
+        canvas.scale(if (flipX) -k else k, if (flipY) -k else k) // the item's scale, and mirror (wave 1), about the text's centre
         // The layout is maxW wide; its text block is centred on the item's position.
         val left = when (s.align) { Align.LEFT -> -lw / 2; Align.CENTER -> -maxW / 2f; Align.RIGHT -> lw / 2 - maxW }
         canvas.translate(left, -lh / 2)
