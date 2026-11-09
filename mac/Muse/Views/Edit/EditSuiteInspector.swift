@@ -166,8 +166,8 @@ struct CaptionsPanel: View {
                         if session.isRunning(.captions) { ProgressView().controlSize(.small) }
                         // Lyric captions: from the song on the music row (the same captions job, on the song).
                         if session.songAsset != nil {
-                            SuiteToolButton(title: "Captions from the song", plain: true,
-                                            disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.captionsFromSong() } }
+                            SuiteToolButton(title: "Captions from the song",
+                                            disabled: session.isRunning(.captions) || !session.helperAvailable(.captions), plain: true) { Task { await session.captionsFromSong() } }
                         }
                         Spacer(minLength: 0)
                         Text(session.estimateLabel(.captions) ?? "").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
