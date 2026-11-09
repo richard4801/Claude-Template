@@ -25,8 +25,8 @@ android {
         applicationId = "studio.muse.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 6
+        versionName = "0.1.5"
         // The live MUSE API (server/api on Railway). Settings → Developer can point the app at another URL
         // (e.g. http://10.0.2.2:8787/ for a local server/api or server/mock from the emulator).
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://angelic-elegance-production-c42b.up.railway.app/\"")
@@ -171,8 +171,11 @@ dependencies {
 abstract class MuseCompositorRemap : AsmClassVisitorFactory<InstrumentationParameters.None> {
     override fun createClassVisitor(classContext: ClassContext, nextClassVisitor: ClassVisitor): ClassVisitor =
         ClassRemapper(nextClassVisitor, SimpleRemapper("androidx/media3/effect/DefaultCompositorGlProgram", "androidx/media3/effect/MuseCompositorGlProgram"))
+    // WS4 (0.1.5 release build): the library class itself is left alone. Remapping it renamed it to MuseCompositorGlProgram
+    // too, so R8 found that type twice ("defined multiple times") and the release build failed; debug builds didn't check.
     override fun isInstrumentable(classData: ClassData): Boolean =
-        classData.className.startsWith("androidx.media3.effect.") && !classData.className.startsWith("androidx.media3.effect.Muse")
+        classData.className.startsWith("androidx.media3.effect.") && !classData.className.startsWith("androidx.media3.effect.Muse") &&
+            classData.className != "androidx.media3.effect.DefaultCompositorGlProgram" && !classData.className.startsWith("androidx.media3.effect.DefaultCompositorGlProgram$")
 }
 androidComponents {
     onVariants { variant ->

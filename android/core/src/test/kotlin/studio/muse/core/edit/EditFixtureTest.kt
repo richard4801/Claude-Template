@@ -168,6 +168,23 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun colorKeyframes() {
+        for ((i, c) in fn["colorKeys"]!!.arr.withIndex()) {
+            val it0 = c.obj["item"]!!.obj
+            val a = it0["adjust"]?.obj?.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num, tint = it["tint"]?.num) }
+            val f = (it0["filter"] as? JsonObject)?.let { FilterRef(it["id"]!!.str, it["amount"]!!.num) }
+            val keys: Keyframes = it0["keyframes"]!!.obj.entries.associate { (k, v) ->
+                KfProp.entries.first { p -> p.wire == k } to v.arr.map { kf -> Keyframe(kf.obj["t"]!!.num, kf.obj["v"]!!.num, kf.obj["ease"]?.str?.let { e -> Ease.entries.first { x -> x.wire == e } }) }
+            }
+            for (sm in c.obj["samples"]!!.arr) {
+                val t = sm.obj["t"]!!.num
+                val got = adjustAt(a, keys, t)
+                assertJson("colorKeys $i adjust t=$t", sm.obj["adjust"], got?.let { EditJson.encodeAdjust(it) } ?: kotlinx.serialization.json.JsonNull)
+                assertJson("colorKeys $i matrix t=$t", sm.obj["matrix"], numbers(colorMatrix(got, f, Presets.FILTERS)))
+            }
+        }
+    }
+
     @Test fun colors() {
         for ((i, c) in fn["colors"]!!.arr.withIndex()) {
             val a = c.obj["adjust"]!!.obj.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num, tint = it["tint"]?.num) }

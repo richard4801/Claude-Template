@@ -110,17 +110,20 @@ struct ComposerBottomBar: View {
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
                     addOnPills(compact: compact)
                 }
+                OwnerModelPill(purpose: tool == .recast ? .recast : .swap, compact: compact) // the owner's model (WS6); members see nothing
             } else if tool == .extend {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
                 if !settingsInRail {
                     lengthPill
                     takesPill
                 }
+                OwnerModelPill(purpose: .extend, compact: compact) // the owner's model (WS6); members see nothing
             } else if tool == .photo {
                 // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
                 let n = store.suite.photo.count
                 listPill("photos", icon: "photo.on.rectangle", value: "\(n)", help: "Photos",
                          options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
+                if store.isOwner { enginePill(compact: compact) } // the owner's photo model (WS6)
             } else {
                 if !settingsInRail {
                     shapePill
@@ -189,14 +192,13 @@ struct ComposerBottomBar: View {
     }
 
     private var shapePill: some View {
-        let ratios = store.suite.catalog?.aspectRatios ?? ComposerBar.shapes
+        let ratios = store.composerShapes // the pinned model's shapes, else the catalog's (WS6)
         return listPill("shape", icon: "rectangle.portrait", value: store.suite.composer.aspect, help: "Shape",
                         options: ratios.map { ($0, $0) }, selected: store.suite.composer.aspect) { store.suite.composer.aspect = $0 }
     }
 
     private var lengthPill: some View {
-        let tier = store.suite.catalog?.tier(store.suite.composer.quality)
-        let range = ComposerBar.lengthRange(tier)
+        let range = store.composerLengthRange // the pinned model's lengths, else the quality's (WS6)
         return pill("length", help: "Length") {
             Ph("clock", 13)
             Text("\(store.suite.composer.duration)s").font(t.body(12.5, .medium))
@@ -207,13 +209,13 @@ struct ComposerBottomBar: View {
                     Spacer()
                     Text("\(store.suite.composer.duration) s").font(t.mono(13, .medium))
                 }
-                Slider(value: Binding(get: { Double(store.suite.composer.duration) }, set: { store.suite.composer.duration = Int($0.rounded()) }),
+                Slider(value: Binding(get: { Double(store.suite.composer.duration) }, set: { store.setComposerLength(Int($0.rounded())) }),
                        in: Double(range.lowerBound)...Double(max(range.upperBound, range.lowerBound + 1)), step: 1) { Text("Length") }
                     .labelsHidden()
                 HStack {
                     Text("\(range.lowerBound) s").font(t.body(11.5)).foregroundStyle(t.muted)
                     Spacer()
-                    Text("\(range.upperBound) s on \(SuiteText.tierLabel(store.suite.composer.quality))").font(t.body(11.5)).foregroundStyle(t.muted)
+                    Text("\(range.upperBound) s on \(store.composerLengthSource)").font(t.body(11.5)).foregroundStyle(t.muted)
                 }
             }
             .padding(16).frame(width: 280)
@@ -233,11 +235,11 @@ struct ComposerBottomBar: View {
         }
     }
 
-    /// Swap's add-ons as pills (Edit, Fast · beta, Upscale), each with its own price; tapping one again goes back to
-    /// the Quality ladder.
+    /// Swap's Upscale pill (on the finished swap take). The Edit and Fast · beta add-ons are models now: the owner picks
+    /// them in the Model list (coordinator decision 2026-11-08, as on Android), so their pills are gone.
     private func addOnPills(compact: Bool) -> some View {
         let pills = SwapAddOns.pills(store.videoFeatures, clipSeconds: store.clip?.durationSec, takes: store.takeCount, lipSync: store.lipSync,
-                                     upscaleSeconds: swapTake?.durationSec)
+                                     upscaleSeconds: swapTake?.durationSec).filter { $0.quality == nil }
         return HStack(spacing: 6) {
             ForEach(pills) { p in addOnPill(p, compact: compact) }
         }
@@ -304,64 +306,23 @@ struct ComposerBottomBar: View {
             .replacingOccurrences(of: "refs", with: "references")
     }
 
-    /// "Engine · MiniMax H3 · 2K" → "MiniMax H3 · 2K".
-    static func engineName(_ label: String) -> String {
-        label.hasPrefix("Engine · ") ? String(label.dropFirst("Engine · ".count)) : label
-    }
-
     /// The finished swap take (a render with a stored file) Upscale works on.
     private var swapTake: Take? { store.takes(of: store.swapJob).first { $0.canUpscale } }
 
-    /// Owner only: pin this shot's engine (one of the quality's models), "Engine · Auto" = the ladder.
+    /// Owner only (owner request 2026-11-08): the shot's model, "Auto" = the quality's ladder. Lists every registry model
+    /// this tool can run with its limits and price (ModelPickerList); members never see it.
     private func enginePill(compact: Bool) -> some View {
-        let tier = store.suite.catalog?.tier(store.suite.composer.quality)
-        let models = ComposerEngines.options(tier)
-        let label = ComposerEngines.label(store.suite.composer, tier)
-        let pinned = store.suite.composer.engineModel != nil
-        // Pinned: the engine's own name ("MiniMax H3 · 2K"), whole, at every width; the full label is the tooltip.
-        return pill("engine", help: label) {
-            Ph("server.rack", 13)
+        let label = store.composerModelLabel
+        let pinned = store.composerPinnedModel != nil
+        // Pinned: the model's own name ("Kling 4.0, 1080p"), whole, at every width.
+        return pill("model", help: "Model: \(label)") {
+            Ph("cpu", 13)
             if pinned || !compact {
-                Text(ComposerBottomBar.engineName(label)).font(t.body(12.5, .medium)).lineLimit(1).fixedSize()
+                Text(pinned ? label : "Model").font(t.body(12.5, .medium)).lineLimit(1).fixedSize()
             }
         } popover: {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Engine (owner)").font(t.scale.label.font).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
-                engineRow("Auto", line: "The \(SuiteText.tierLabel(store.suite.composer.quality)) ladder", on: store.suite.composer.engineModel == nil) {
-                    store.suite.composer = ComposerEngines.pin(store.suite.composer, nil)
-                }
-                ForEach(models, id: \.self) { m in
-                    let on = store.suite.composer.engineModel == m.model && (store.suite.composer.resolution ?? m.resolution) == m.resolution
-                    engineRow("\(m.name) · \(m.resolution)", line: ComposerBar.acceptsLine(m.inputs ?? tier?.slots ?? .none), on: on) {
-                        store.suite.composer = ComposerEngines.pin(store.suite.composer, m)
-                    }
-                }
-                if models.isEmpty { Muted("No engines listed for this quality.").padding(14) }
-            }
-            .padding(.bottom, 6)
-            .frame(minWidth: 280, alignment: .leading)
-            .foregroundStyle(t.ink)
+            ModelPickerList(onPick: { open = nil })
         }
-    }
-
-    private func engineRow(_ title: String, line: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-            open = nil
-        } label: {
-            HStack(spacing: 10) {
-                Ph("checkmark", 11).foregroundStyle(t.accent).opacity(on ? 1 : 0).frame(width: 14)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(t.body(13, on ? .semibold : .regular))
-                    Text(line).font(t.mono(10)).foregroundStyle(t.muted)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(on ? t.bg : .clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     /// Icon + value (the name is the tooltip and the list's title).
@@ -451,19 +412,19 @@ struct QualityPopover: View {
         let pinned = !isSwap && store.suite.composer.engineModel != nil
         VStack(alignment: .leading, spacing: 10) {
             if pinned {
-                let engine = ComposerBottomBar.engineName(ComposerEngines.label(store.suite.composer, store.suite.catalog?.tier(store.suite.composer.quality)))
+                let engine = store.composerModelLabel
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Engine pinned: \(engine). Quality is set by the engine.").font(t.scale.label.font)
+                    Text("Model pinned: \(engine). The price follows the model.").font(t.scale.label.font)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 12) {
                         if let e = store.suite.estimate {
                             Text("\(Pricing.money(e.estimate / Double(max(1, e.takes)))) per take").font(t.scale.caption.font).monospacedDigit()
                         }
                         Button {
-                            store.suite.composer = ComposerEngines.pin(store.suite.composer, nil)
+                            store.pinComposerModel(nil)
                             onPick()
                         } label: {
-                            Text("Unpin").font(t.scale.label.font).foregroundStyle(t.link)
+                            Text("Back to Auto").font(t.scale.label.font).foregroundStyle(t.link)
                         }
                         .buttonStyle(.plain)
                         .help("Back to Auto: the quality's ladder picks the engine")

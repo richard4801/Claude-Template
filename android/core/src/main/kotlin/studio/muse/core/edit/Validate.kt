@@ -135,6 +135,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
                     KfProp.ROTATION -> -3600.0 to 3600.0
                     KfProp.OPACITY -> 0.0 to 1.0
                     KfProp.VOLUME -> 0.0 to 2.0
+                    KfProp.EXPOSURE, KfProp.CONTRAST, KfProp.SATURATION, KfProp.TEMPERATURE, KfProp.TINT -> -1.0 to 1.0
                 }
                 num("$g.v", kf.v, lo, hi, false)
             }
@@ -252,7 +253,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         if (a.kind != AssetKind.IMAGE) bad("$g.asset", "must be image")
         num("$g.startSec", im.startSec, 0.0, 600.0, false); num("$g.durationSec", im.durationSec, EditLimits.MIN_ITEM_SEC, 600.0, false)
         visual(g, im)
-        keyframes("$g.keyframes", im.keyframes, im.durationSec, VISUAL_PROPS)
+        keyframes("$g.keyframes", im.keyframes, im.durationSec, VISUAL_PROPS + KfProp.COLOR)
         anim("$g.animIn", im.animIn, false); anim("$g.animOut", im.animOut, false)
     }
 

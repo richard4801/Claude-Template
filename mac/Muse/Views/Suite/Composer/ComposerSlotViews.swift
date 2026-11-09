@@ -130,7 +130,29 @@ struct ComposerSlotCardView: View {
         }
     }
 
-    @ViewBuilder private var clipSlot: some View {
+    /// The clip, with "Import from a link" on its corner and a dropped link imported (owner 2026-11-08).
+    private var clipSlot: some View {
+        clipTile
+            .overlay(alignment: .topTrailing) {
+                Button { store.openLinkImport(.swap) } label: {
+                    Ph("link", 12).foregroundStyle(t.roles.ink)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(t.roles.canvas.opacity(0.92)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(4)
+                .help("Import a video from a link")
+                .accessibilityLabel("Import a video from a link")
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let u = urls.first else { return false }
+                if u.isFileURL { store.importClip(u); return true }
+                return store.importDroppedLink(u, for: .swap)
+            }
+    }
+
+    @ViewBuilder private var clipTile: some View {
         if let poster = store.clipPoster {
             Button { store.pickClip() } label: {
                 ZStack(alignment: .bottomLeading) {

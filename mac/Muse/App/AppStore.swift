@@ -5,7 +5,7 @@ import SwiftUI
 
 enum Screen: String, CaseIterable {
     // Photoshoot is gone: it is the AI suite's Photo tool (workstream 3); `openPhoto()` is the route to it.
-    case home, models, profile, create, studio, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
+    case home, models, profile, create, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
     // AI suite (workstream 1): the Video suite (hub and modes) and the top-level Edit.
     case suite, edit
 
@@ -16,7 +16,6 @@ enum Screen: String, CaseIterable {
         case .result, .editor: return .gallery
         case .credits: return .settings
         case .template: return .templates
-        case .studio: return .suite // AI suite (workstream 1): the classic studio sits under Video suite
         default: return self
         }
     }
@@ -125,6 +124,8 @@ struct OutfitDraft {
     var state: ShootState = .idle
     var outfitId: String?
     var angles: [ImageRef?] = [nil, nil, nil, nil]
+    /// The angle open full size (ImageLightbox), an index into `lightboxItems`.
+    var viewing: Int?
 }
 
 enum Niches {
@@ -240,6 +241,10 @@ final class AppStore {
     let suite = SuiteState()
     /// "Recreate this edit" in Edit (AppStore+Recreate.swift).
     let recreate = RecreateState()
+    /// "Import a video from a link" (WS6, AppStore+LinkImport.swift).
+    let linkImport = LinkImportState()
+    /// The owner's model picks per purpose and the engine catalog (WS6, AppStore+EngineChoice.swift).
+    let engineChoice = EngineChoiceState()
     /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
     let learn = LearnState()
     /// Library collections (AppStore+LibraryQueue.swift).
@@ -270,7 +275,6 @@ final class AppStore {
     var speakingTouched = false
     var background = "keep"
     var motion = "subtle"
-    var showPrompt = false
     var generating = false
     /// Renders started from the studio this session, oldest first: the stage (its right pane) follows the newest one that is
     /// still for the current clip, model and outfit (`StudioStage`).
@@ -279,7 +283,6 @@ final class AppStore {
     var stageTakeId: String?
     /// POST /v1/takes/{id}/upscale in flight.
     var upscaling = false
-    var clipDropTargeted = false
 
     // MARK: Prompt library versions
 
@@ -703,7 +706,7 @@ final class AppStore {
         if isOwner, e.type == "prompts", let p = LiveEvents.applyPrompts(&promptLibrary, e) { promptChanged(p) }
         // Prompt scripts (workstream 4): a script saved or reset elsewhere; a late `clip` event with the talking detection.
         if isOwner, e.type == "promptScript", let v = LiveEvents.applyPromptScript(&scriptList, e) { promptScriptChanged(v) }
-        if e.type == "clip", let c = e.clip, c.id == clip?.id { clip = c }
+        if e.type == "clip", let c = e.clip, c.id == clip?.id { clip = (api as? HTTPMuseAPI)?.absolutize(c) ?? c }
         if e.type == "settings", let st = e.settings {
             studioSettings = st
             syncQualityWithServer()
@@ -951,7 +954,6 @@ final class AppStore {
         return list.first
     }
 
-    func selectOutfit(_ o: Outfit) { outfitIdByModel[modelId] = o.id }
 
     func neverList(_ m: MuseModel?) -> [String] {
         guard let m else { return [] }
@@ -1021,14 +1023,6 @@ final class AppStore {
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
     /// Clip checks are advice only (owner decision): a failing clip shows a disclaimer but doesn't block generating.
     var generateBlocked: Bool { lowBalance || clip == nil || currentOutfit == nil || generating }
-
-    /// The video prompt as members see it (pro mode / "Show the prompt"): the shared prompt without its steps line part.
-    var videoPrompt: String {
-        let p = PromptEngine.video(VideoPromptInput(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit",
-                                                    performer: clip?.id == SampleData.sampleClip ? .sample : .generic,
-                                                    keepBackground: background == "keep", backgroundMotion: motion, keepAudio: keepAudio, spec: spec))
-        return PromptEngine.memberView(p)
-    }
 
     var runningJob: Job? { jobs.first { $0.isRunning } }
     var activeJobs: [Job] { jobs.filter(\.isActive).sorted { a, b in a.isRunning != b.isRunning ? a.isRunning : a.createdAt < b.createdAt } }

@@ -43,27 +43,7 @@ extension AppStore {
         }
     }
 
-    /// Demo mode only: swaps between the good sample clip and the failing example.
-    func toggleBadSample() {
-        guard isDemo else { return }
-        let bad = !clipBad
-        Task { await useSampleClip(bad: bad) }
-    }
-
-    // MARK: Studio
-
-    func setTakes(_ n: Int) { takeCount = Pricing.clampTakes(n) }
-
-    func resetStudio() {
-        quality = videoFeatures.isAvailable(defaultQuality) ? defaultQuality : videoFeatures.defaultOption
-        takeCount = 1
-        lipSync = false
-        keepAudio = true
-        background = "keep"
-        speaking = PerformerSpeaking.preset(clip) // prompt scripts (workstream 4)
-        speakingTouched = false
-        showToast("Settings reset")
-    }
+    // MARK: Models
 
     func selectModel(_ m: MuseModel) {
         if m.isDraft || m.filled == 0 {
@@ -104,6 +84,7 @@ extension AppStore {
         }
         // Prompt scripts (workstream 4): "Performer is speaking" (off: the server sends the clip without its sound, no lip-sync).
         req.speaking = speaking
+        req.engineModel = enginePick(.swap)?.model // the owner's swap model (WS6)
         submit(req, cost: cost, takes: takeCount)
     }
 
@@ -128,8 +109,9 @@ extension AppStore {
         if let i = jobs.firstIndex(where: { $0.id == j.id }) { jobs[i] = j } else { jobs.insert(j, at: 0) }
     }
 
-    /// Loads a finished job's settings back into the studio ("Retake with changes").
-    func loadIntoStudio(_ j: Job) {
+    /// Loads a finished clip job's settings back into the AI Suite's Swap ("Retake with changes"): the classic studio is
+    /// gone (owner 2026-11-08), Swap is where a model goes into a clip now.
+    func loadIntoSwap(_ j: Job) {
         modelId = j.modelId
         outfitIdByModel[j.modelId] = j.outfitId
         quality = videoFeatures.isAvailable(j.videoQuality) ? j.videoQuality : quality
@@ -138,7 +120,7 @@ extension AppStore {
         lipSync = j.request.lipSync
         background = j.request.background
         motion = j.request.backgroundMotion
-        go(.studio)
+        openTool(.swap)
     }
 
     /// Upscale a finished take (1080p / 2K / 4K): a job held at the size's price × the take's length, followed like any render.
@@ -149,7 +131,7 @@ extension AppStore {
         Task { @MainActor [self] in
             defer { upscaling = false }
             do {
-                let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id))
+                let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id, engineModel: enginePick(.upscale)?.model))
                 upsert(j)
                 balance = try await api.balance()
                 showToast("Upscaling to \(size.label) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
@@ -302,9 +284,9 @@ extension AppStore {
         // A Suite take: its exact composer comes back (Reuse settings, plans/ai-suite-design.md).
         if reuseSettings(t) { return }
         if t.isVideo, let j = job(for: t) {
-            loadIntoStudio(j)
+            loadIntoSwap(j)
         } else if t.isVideo {
-            go(.studio)
+            openTool(.swap)
         } else {
             openPhoto(model: model(for: t)?.id) // a still: the AI suite's Photo tool (workstream 3)
         }
@@ -356,7 +338,7 @@ extension AppStore {
         perform { [self] in
             // No single-slot endpoint: clear the slot, then "fill missing angles" regenerates just that one ($0.02).
             _ = try await api.setSlot(modelId: m.id, slot: angle.rawValue, SetSlotRequest(image: nil, source: "generated"))
-            let r = try await api.fillAngles(modelId: m.id)
+            let r = try await fillAnglesWithPick(m.id)
             replaceModel(r.model)
             balance = try await api.balance()
             showToast("Retaking \(angle.label.lowercased()) from your other images · \(PhotoPricing.label(r.cost))")
@@ -512,7 +494,7 @@ extension AppStore {
         perform { [self] in
             do {
                 let id = try await ensureDraftModel()
-                let r = try await api.fillAngles(modelId: id)
+                let r = try await fillAnglesWithPick(id)
                 replaceModel(r.model)
                 syncDraftSlots(from: r.model)
                 balance = try await api.balance()
@@ -578,8 +560,10 @@ extension AppStore {
                 var refs: [ImageRef] = []
                 for u in draft.images { refs.append(try await uploadImage(u)) }
                 let name = draft.name.isEmpty ? (draft.mode == .describe ? draft.description : draft.mode == .photo ? "Product look" : "My set") : draft.name
-                let o = try await api.createOutfit(CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(32)), mode: draft.mode.rawValue,
-                                                                       description: draft.description, images: refs))
+                var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(32)), mode: draft.mode.rawValue,
+                                              description: draft.description, images: refs)
+                if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
+                let o = try await api.createOutfit(req)
                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
                 outfitSheet?.outfitId = o.id
                 if o.state == "preview" || o.state == "ready" {
@@ -811,7 +795,7 @@ extension AppStore {
 
     var paletteCommands: [PaletteCommand] {
         var all: [PaletteCommand] = [
-            PaletteCommand(title: "New video", icon: "video", shortcut: "⌘N") { [weak self] in self?.go(.studio) },
+            PaletteCommand(title: "New shot", icon: "video", shortcut: "⌘N") { [weak self] in self?.openTool(.shot) },
             PaletteCommand(title: "Photo", icon: "camera", shortcut: "") { [weak self] in self?.openTool(.photo) }, // the AI suite's Photo tool (workstream 3)
             PaletteCommand(title: "Templates", icon: "square.on.square.dashed", shortcut: "⇧⌘T") { [weak self] in self?.openTemplates() },
             PaletteCommand(title: "New template", icon: "plus.square.on.square", shortcut: "") { [weak self] in self?.newTemplate() },
@@ -828,7 +812,7 @@ extension AppStore {
             PaletteCommand(title: "Settings", icon: "slider.horizontal.3", shortcut: "⌘,") { [weak self] in self?.go(.settings) },
             PaletteCommand(title: "Credit", icon: "dollarsign.circle", shortcut: "") { [weak self] in self?.go(.credits) },
             PaletteCommand(title: "New outfit set", icon: "tshirt", shortcut: "") { [weak self] in self?.openOutfitSheet(for: nil) },
-            PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.go(.studio); self?.pickClip() },
+            PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.openTool(.swap); self?.pickClip() },
             PaletteCommand(title: "Run queue", icon: "play.fill", shortcut: "") { [weak self] in self?.runQueue() },
         ]
         if isOwner {

@@ -1117,9 +1117,21 @@ class EditSuiteController(
         }
     }
 
+    private fun adjustField(a: Adjust?, p: KfProp): Double? = when (p) {
+        KfProp.EXPOSURE -> a?.exposure; KfProp.CONTRAST -> a?.contrast; KfProp.SATURATION -> a?.saturation; KfProp.TEMPERATURE -> a?.temperature; KfProp.TINT -> a?.tint; else -> null
+    }
+
     private fun adjust(u: EditSuiteUi, a: EditAction.AdjustField) {
         val id = visualId(u) ?: return
         val v = r2(a.value)
+        // A keyframed colour field: the slider sets its key at the playhead (like the transform's).
+        val kp = KfProp.COLOR.firstOrNull { it.wire == a.field }
+        val vis = project?.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual
+        if (kp != null && !vis?.keyframes?.get(kp).isNullOrEmpty()) {
+            val local = localAt(u, id) ?: return say("Move the playhead over this clip to set its keyframe")
+            change(a.done) { p -> SuiteOps.keyframe(p, id, kp, local, v.coerceIn(-1.0, 1.0), u.keyEase) }
+            return
+        }
         change(a.done) { p ->
             p.updateItem(id) { it ->
                 val vis = it as? studio.muse.core.edit.Visual ?: return@updateItem it
@@ -1199,6 +1211,15 @@ class EditSuiteController(
 
     private fun addKeyframe(u: EditSuiteUi, prop: KfProp) {
         val p = project ?: return
+        if (prop in KfProp.COLOR) {
+            // Colour keyframes: on the picture the Adjust panel acts on, at the value showing now.
+            val id = visualId(u) ?: return
+            val local = localAt(u, id) ?: return say("Move the playhead over this clip to add a keyframe")
+            val vis = p.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual ?: return
+            val v = studio.muse.core.edit.propAt(vis.keyframes, prop, adjustField(vis.adjust, prop) ?: 0.0, local)
+            if (change { SuiteOps.keyframe(it, id, prop, local, v, u.keyEase) }) say("${prop.wire.replaceFirstChar(Char::uppercase)} keyframe at ${"%.1f".format(local)} s")
+            return
+        }
         if (prop == KfProp.VOLUME) {
             val c = soundClip(u) ?: return
             val local = localAt(u, c.id) ?: return say("Move the playhead over this clip to add a keyframe")
@@ -1217,6 +1238,7 @@ class EditSuiteController(
         val static = when (prop) {
             KfProp.X -> tr?.x ?: 0.5; KfProp.Y -> tr?.y ?: 0.5; KfProp.SCALE -> tr?.scale ?: 1.0; KfProp.ROTATION -> tr?.rotation ?: 0.0
             KfProp.OPACITY -> op ?: 1.0; KfProp.VOLUME -> 1.0
+            else -> return
         }
         // The value showing now (the curve's, when the property is already keyframed).
         val v = studio.muse.core.edit.propAt(keys, prop, static, local)

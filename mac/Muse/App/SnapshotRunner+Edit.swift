@@ -93,6 +93,8 @@ extension SnapshotRunner {
         await paidHelpersCheck(store, takeId: "rx_full", note: note)
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.go(.home)
+        // Round 2's new screens (outfit full view, Settings, the model picker): every control pressed once.
+        await screensWalk(store, note: note)
         note("ALL DONE")
     }
 
@@ -312,7 +314,9 @@ extension SnapshotRunner {
                                  // A full-screen window over the app (checked on its own in the Edit operations check).
                                  "Full screen preview (Esc to leave)", "Save this frame as a picture",
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
-                                 "Remove background", "Run the cut-out"]
+                                 "Remove background", "Run the cut-out",
+                                 // The shared link import sheet (WS6) has its own walk (SnapshotRunner+Walk.swift).
+                                 "Import a video from a link"]
         let denyInSheet: Set<String> = ["Export", "Save to Library", "Save GIF…", "Save sound…"]
         let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()

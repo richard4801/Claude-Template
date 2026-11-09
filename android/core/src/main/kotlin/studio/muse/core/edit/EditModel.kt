@@ -49,6 +49,18 @@ fun propAt(keyframes: Keyframes?, prop: KfProp, fallback: Double, t: Double): Do
     return if (!k.isNullOrEmpty()) keyframeValue(k, t) else fallback
 }
 
+/** Whether [keyframes] key any colour property ([KfProp.COLOR]). */
+fun hasColorKeys(keyframes: Keyframes?): Boolean = KfProp.COLOR.any { !keyframes?.get(it).isNullOrEmpty() }
+
+/** The adjust at item-local [t]: each keyed colour property at its keyframes' value there (model.ts `adjustAt`). */
+fun adjustAt(adjust: Adjust?, keyframes: Keyframes?, t: Double): Adjust? {
+    if (!hasColorKeys(keyframes)) return adjust
+    val a = adjust ?: Adjust()
+    fun v(p: KfProp, static: Double?) = if (keyframes?.get(p).isNullOrEmpty()) static else Math.round(propAt(keyframes, p, static ?: 0.0, t) * 1e6) / 1e6
+    return a.copy(exposure = v(KfProp.EXPOSURE, a.exposure), contrast = v(KfProp.CONTRAST, a.contrast), saturation = v(KfProp.SATURATION, a.saturation),
+        temperature = v(KfProp.TEMPERATURE, a.temperature), tint = v(KfProp.TINT, a.tint))
+}
+
 // ------------------------------------------------------------------ timeline
 /** Speed at [x] (0–1) of a curve: smoothstep between points in log speed. */
 fun curveSpeed(c: SpeedCurve, x: Double): Double {

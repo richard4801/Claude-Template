@@ -282,6 +282,8 @@ public struct CreateOutfitRequest: Codable, Sendable {
     public var images: [ImageRef]
     /// Owner only: per-run model override (step → "owner/name").
     public var models: ModelOverrides?
+    /// Owner only: the outfit's image model (EngineChoice.swift, purpose "outfit"); nil = the studio's default.
+    public var imageModel: String?
 
     public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef] = [], models: ModelOverrides? = nil) {
         self.models = (models?.isEmpty ?? true) ? nil : models
@@ -396,6 +398,8 @@ public struct JobRequest: Codable, Hashable, Sendable {
     // sends the resolved value and where it came from (switch | upload | detected | default).
     public var speaking: Bool?
     public var speakingSource: String?
+    /// Owner only (WS13): the classic swap's model, POST /v1/jobs `engineModel`; nil = the studio's default.
+    public var engineModel: String?
 
     public init(title: String, modelId: String, outfitId: String, clipId: String, engine: String = Engine.h3.rawValue, steps: Int = 10,
                 use: String = ClipUse.first.rawValue, takes: Int = 1, keepAudio: Bool = true, lipSync: Bool = false,
