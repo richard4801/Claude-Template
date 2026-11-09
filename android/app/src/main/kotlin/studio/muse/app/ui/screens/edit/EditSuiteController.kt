@@ -1100,7 +1100,7 @@ class EditSuiteController(
                     val x = v.coerceIn(-1.0, 1.0).takeIf { n -> n != 0.0 }
                     val n = when (a.field) {
                         "exposure" -> ad.copy(exposure = x); "contrast" -> ad.copy(contrast = x); "saturation" -> ad.copy(saturation = x)
-                        "temperature" -> ad.copy(temperature = x); "highlights" -> ad.copy(highlights = x); "shadows" -> ad.copy(shadows = x); else -> ad
+                        "temperature" -> ad.copy(temperature = x); "tint" -> ad.copy(tint = x); "highlights" -> ad.copy(highlights = x); "shadows" -> ad.copy(shadows = x); else -> ad
                     }.takeIf { n -> n != Adjust() }
                     when (it) { is VideoClip -> it.copy(adjust = n); is ImageItem -> it.copy(adjust = n); else -> it }
                 }

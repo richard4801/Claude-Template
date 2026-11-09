@@ -163,7 +163,7 @@ object EditJson {
     private fun crop(o: Obj) = o.objOrNull("crop")?.let { Crop(it.numOrNull("left"), it.numOrNull("top"), it.numOrNull("right"), it.numOrNull("bottom")) }
     private fun adjust(o: Obj) = o.objOrNull("adjust")?.let(::adjustOf)
     private fun adjustOf(a: Obj) = Adjust(
-        a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"), a.numOrNull("highlights"), a.numOrNull("shadows"),
+        a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"), a.numOrNull("highlights"), a.numOrNull("shadows"), a.numOrNull("tint"),
     )
     private fun filter(o: Obj) = o.objOrNull("filter")?.let { FilterRef(it.str("id"), it.num("amount")) }
     private fun look(o: Obj) = o.objOrNull("look")?.let(::lookOf)
@@ -316,7 +316,7 @@ object EditJson {
 
     fun encodeAdjust(a: Adjust) = buildJsonObject {
         num("exposure", a.exposure); num("contrast", a.contrast); num("saturation", a.saturation); num("temperature", a.temperature)
-        num("highlights", a.highlights); num("shadows", a.shadows)
+        num("highlights", a.highlights); num("shadows", a.shadows); num("tint", a.tint)
     }
 
 

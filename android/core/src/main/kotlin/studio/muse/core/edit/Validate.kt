@@ -153,7 +153,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         num("$f.opacity", it.opacity, 0.0, 1.0)
         it.adjust?.let { a ->
             num("$f.adjust.exposure", a.exposure, -1.0, 1.0); num("$f.adjust.contrast", a.contrast, -1.0, 1.0)
-            num("$f.adjust.saturation", a.saturation, -1.0, 1.0); num("$f.adjust.temperature", a.temperature, -1.0, 1.0)
+            num("$f.adjust.saturation", a.saturation, -1.0, 1.0); num("$f.adjust.temperature", a.temperature, -1.0, 1.0); num("$f.adjust.tint", a.tint, -1.0, 1.0)
             num("$f.adjust.highlights", a.highlights, -1.0, 1.0); num("$f.adjust.shadows", a.shadows, -1.0, 1.0)
         }
         it.mask?.let { m ->

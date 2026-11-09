@@ -161,6 +161,9 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'text flip ok', project: mut(p => { p.tracks[3].items[0].transform = { ...(p.tracks[3].items[0].transform ?? {}), flipY: true }; }), ok: true },
   { name: 'fill blur ok', project: mut(p => { p.canvas.fill = 'blur'; }), ok: true },
   { name: 'fill unknown', project: mut(p => { p.canvas.fill = 'mirror'; }), ok: false, field: 'edits.canvas.fill' },
+  { name: 'tint ok', project: mut(p => { p.tracks[0].items[0].adjust = { temperature: 0.3, tint: -0.4 }; }), ok: true },
+  { name: 'tint too big', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 1.5 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
+  { name: 'tint not a number', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 'pink' }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
@@ -186,6 +189,9 @@ const anims = animItems.map(item => ({ item, samples: Array.from({ length: 16 },
 const colors = [
   { adjust: {}, filter: null }, { adjust: { exposure: 1 }, filter: null }, { adjust: { contrast: 0.5, saturation: -0.5 }, filter: null },
   { adjust: { temperature: -1 }, filter: null }, ...FILTERS.map(f => ({ adjust: { exposure: -0.1 }, filter: { id: f.id, amount: 0.8 } })),
+  // Green ↔ magenta tint, alone and with the other steps and a preset tint.
+  { adjust: { tint: 1 }, filter: null }, { adjust: { tint: -0.6, temperature: 0.5, contrast: 0.2 }, filter: null },
+  { adjust: { tint: 0.4, saturation: -0.3 }, filter: { id: 'film', amount: 1 } },
 ].map(c => ({ ...c, matrix: M.colorMatrix(c.adjust, c.filter ?? undefined, FILTERS) }));
 const cutsCases = [
   { project: projects[0]!.project, asset: 'src', cuts: [{ startSec: 0.7, endSec: 1.55 }, { startSec: 3.4, endSec: 4.6 }, { startSec: 9.75, endSec: 12 }] },

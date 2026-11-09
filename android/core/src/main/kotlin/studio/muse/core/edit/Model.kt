@@ -95,6 +95,8 @@ data class Adjust(
     val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null,
     /** Edit suite: tone, applied after the colour matrix ([toneAdjust]). */
     val highlights: Double? = null, val shadows: Double? = null,
+    /** Green (−1) ↔ magenta (+1), right after temperature in [colorMatrix]. */
+    val tint: Double? = null,
 )
 data class FilterRef(val id: String, val amount: Double)
 data class Chroma(val color: String, val similarity: Double? = null, val smoothness: Double? = null, val spill: Double? = null)

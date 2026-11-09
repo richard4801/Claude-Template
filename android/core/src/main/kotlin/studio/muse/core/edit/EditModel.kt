@@ -421,7 +421,8 @@ fun effectiveAdjust(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPre
 }
 
 /**
- * One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint), row-major
+ * One 3×4 affine RGB matrix for the item's look (exposure → temperature → green/magenta tint → contrast → saturation →
+ * preset tint), row-major
  * `[r0 r1 r2 r3, g0.., b0..]`, out = M · (r, g, b, 1) on 0–1 values.
  */
 fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset> = Presets.FILTERS): List<Double> {
@@ -432,6 +433,8 @@ fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset>
     m = mul(doubleArrayOf(ex, 0.0, 0.0, 0.0, 0.0, ex, 0.0, 0.0, 0.0, 0.0, ex, 0.0), m)
     val k = a.temperature!!
     m = mul(doubleArrayOf(1 + 0.1 * k, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1 - 0.1 * k, 0.0), m)
+    val g = clamp(adjust?.tint ?: 0.0, -1.0, 1.0)
+    if (g != 0.0) m = mul(doubleArrayOf(1 + 0.05 * g, 0.0, 0.0, 0.0, 0.0, 1 - 0.1 * g, 0.0, 0.0, 0.0, 0.0, 1 + 0.05 * g, 0.0), m)
     val c = 1 + a.contrast!!; val off = 0.5 * (1 - c)
     m = mul(doubleArrayOf(c, 0.0, 0.0, off, 0.0, c, 0.0, off, 0.0, 0.0, c, off), m)
     val s = 1 + a.saturation!!

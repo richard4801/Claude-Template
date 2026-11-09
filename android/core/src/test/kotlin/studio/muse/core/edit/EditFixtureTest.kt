@@ -170,7 +170,7 @@ class EditFixtureTest {
 
     @Test fun colors() {
         for ((i, c) in fn["colors"]!!.arr.withIndex()) {
-            val a = c.obj["adjust"]!!.obj.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num) }
+            val a = c.obj["adjust"]!!.obj.let { Adjust(it["exposure"]?.num, it["contrast"]?.num, it["saturation"]?.num, it["temperature"]?.num, tint = it["tint"]?.num) }
             val f = (c.obj["filter"] as? JsonObject)?.let { FilterRef(it["id"]!!.str, it["amount"]!!.num) }
             assertJson("color $i", c.obj["matrix"], numbers(colorMatrix(a, f, Presets.FILTERS)))
         }

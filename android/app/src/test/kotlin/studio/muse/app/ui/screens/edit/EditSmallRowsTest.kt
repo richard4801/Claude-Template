@@ -195,4 +195,14 @@ class EditSmallRowsTest {
         assertEquals(studio.muse.core.edit.Transform(.25, .5, 1.0), m2.transform)
         valid(c.p())
     }
+
+    @Test fun tintSlider() = runTest {
+        val c = controller()
+        c.act(EditAction.AdjustField("tint", .5))
+        assertEquals(.5, c.p().mainClips[0].adjust!!.tint!!, 1e-9)
+        val m = studio.muse.core.edit.colorMatrix(c.p().mainClips[0].adjust, null)
+        assertEquals(1.025, m[0], 1e-6); assertEquals(.95, m[5], 1e-6) // magenta: less green
+        valid(c.p())
+        c.act(EditAction.AdjustField("tint", 0.0)); assertNull(c.p().mainClips[0].adjust)
+    }
 }

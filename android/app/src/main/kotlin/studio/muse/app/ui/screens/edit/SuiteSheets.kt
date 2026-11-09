@@ -865,6 +865,7 @@ private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
     row("Contrast", "contrast", a?.contrast ?: 0.0)
     row("Saturation", "saturation", a?.saturation ?: 0.0)
     row("Temperature", "temperature", a?.temperature ?: 0.0)
+    row("Tint", "tint", a?.tint ?: 0.0)
     row("Highlights", "highlights", a?.highlights ?: 0.0)
     row("Shadows", "shadows", a?.shadows ?: 0.0)
     // The look's effects (0 = off).
