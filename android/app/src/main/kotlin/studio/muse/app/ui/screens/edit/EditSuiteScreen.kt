@@ -239,6 +239,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var savedVideo by remember { mutableStateOf<Uri?>(null) }
     val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { savedVideo = uri; importing = true } }
+    // "Add a photo": the system photo picker (images only; no storage permission).
+    val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.addPhoto(it) } }
     if (importing) studio.muse.app.ui.screens.ImportLinkDialog(studio.muse.app.ui.screens.ImportPurpose.EDIT, file = savedVideo,
         onClose = { importing = false; savedVideo = null }, onPickFile = { importing = false; video.launch("video/*") }) { v ->
         importing = false; savedVideo = null; vm.addImported(v)
@@ -260,6 +262,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         autoAdjust = vm::autoAdjust,
         saveKit = vm::saveKit,
         deleteKit = vm::deleteKit,
@@ -554,6 +557,33 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             if (f == null) return@launch c.repo.toast("Added · the preview can't show it until it downloads")
             files[a.id] = f
             rebuildPreview(p); loadWaves(p)
+        }
+    }
+
+    /**
+     * "Add a photo" (owner-approved design pass): the picked image, scaled to 2048 px on the long side at most (PNG when
+     * it has transparency, else JPEG), uploaded as an editor asset and placed over the edit at the playhead.
+     */
+    fun addPhoto(uri: Uri) {
+        viewModelScope.launch {
+            controller.update { it.copy(message = "Adding the photo…") }
+            val made = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return@runCatching null
+                    val k = minOf(1f, 2048f / maxOf(src.width, src.height))
+                    val bmp = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(src, maxOf(1, (src.width * k).roundToInt()), maxOf(1, (src.height * k).roundToInt()), true) else src
+                    val png = bmp.hasAlpha()
+                    val f = File(app.cacheDir, "edit-suite/photo_${System.currentTimeMillis()}.${if (png) "png" else "jpg"}").apply { parentFile?.mkdirs() }
+                    f.outputStream().use { bmp.compress(if (png) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                    Triple(f, if (png) "image/png" else "image/jpeg", bmp.width to bmp.height)
+                }.getOrNull()
+            } ?: return@launch c.repo.toast("Couldn't read that photo")
+            val (f, mime, size) = made
+            val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, mime) } }.getOrElse { null to "Couldn't upload · try again" }
+            if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
+            controller.act(EditAction.AddImage(id, size.first, size.second))
+            controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
+            controller.project?.let { rebuildPreview(it) }
         }
     }
 

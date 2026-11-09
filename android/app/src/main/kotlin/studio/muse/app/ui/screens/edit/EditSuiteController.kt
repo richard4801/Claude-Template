@@ -253,6 +253,8 @@ sealed interface EditAction {
     data object CutToBeats : EditAction
     /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
     data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
+    /** A photo from the phone (an editor upload, [width] × [height]) placed over the edit at the playhead. */
+    data class AddImage(val upload: String, val width: Int, val height: Int) : EditAction
     /** The chroma eyedropper on (pauses; the view model loads the frame) or off. */
     data class PickColor(val on: Boolean) : EditAction
     /** The eyedropper's frame: the clip's source picture at the playhead, [w] × [h] ARGB. */
@@ -399,7 +401,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -841,6 +843,13 @@ class EditSuiteController(
                 var n = 0
                 if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
                     say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
+            }
+            is EditAction.AddImage -> {
+                var newId: String? = null
+                if (change(refused = "Couldn't add that photo here") { p -> SuiteOps.addImage(p, a.upload, a.width, a.height, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {
+                    _ui.update { it.copy(selectedId = newId, panel = Panel.TRANSFORM) }
+                    say("Photo added · place it, then keyframe, blend or animate it")
+                }
             }
             is EditAction.PickColor -> {
                 if (!a.on) return _ui.update { it.copy(pick = null) }

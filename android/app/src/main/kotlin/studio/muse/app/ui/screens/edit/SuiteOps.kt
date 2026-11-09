@@ -429,6 +429,24 @@ object SuiteOps {
     }
 
     /**
+     * A photo (an editor upload) placed over the edit at [atSec] (owner-approved design pass): an image item on the first
+     * image track it fits on (else a new one), 3 s long (less near the end), contain-fitted at 40 % scale, centred.
+     * Returns the project and the new item's id.
+     */
+    fun addImage(p: EditProject, uploadId: String, width: Int, height: Int, atSec: Double): Pair<EditProject, String>? {
+        val assetId = newAssetId(p, "img")
+        val withAsset = p.copy(assets = p.assets + Asset(assetId, AssetKind.IMAGE, upload = uploadId, width = width, height = height))
+        val dur = studio.muse.core.edit.durationSec(withAsset)
+        val start = atSec.coerceIn(0.0, maxOf(0.0, dur - EditLimits.MIN_ITEM_SEC))
+        val len = minOf(3.0, maxOf(EditLimits.MIN_ITEM_SEC, dur - start))
+        val base = withAsset.tracks.firstOrNull { t -> t.kind == TrackKind.IMAGE && fitsAt(withAsset, t, start, len) }?.let { withAsset }
+            ?: withAsset.copy(tracks = withAsset.tracks + Track(withAsset.newId("img"), TrackKind.IMAGE, name = "Photos"))
+        val tid = base.tracks.last { t -> t.kind == TrackKind.IMAGE && fitsAt(base, t, start, len) }.id
+        val id = base.newId("i")
+        return base.addItem(tid, ImageItem(id, assetId, Math.round(start * 1000) / 1000.0, Math.round(len * 1000) / 1000.0, fit = Fit.CONTAIN, transform = Transform(0.5, 0.5, 0.4)))?.let { it to id }
+    }
+
+    /**
      * Overlay clip [id] moved onto the main track, at the clip boundary nearest to where it starts (the clips after it
      * move later). It fills the frame there: its overlay placing (position and size, keyframes, opacity, blend, mask,
      * chroma key, cut-out) is dropped; its trim, speed, sound and look stay. An overlay track left empty goes.

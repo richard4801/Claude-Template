@@ -122,6 +122,8 @@ data class SuiteHost(
     val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
+    /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
+    val addPhoto: (() -> Unit)? = null,
     /** Style kits: save this edit's style under a name; delete a saved one. */
     val saveKit: (String) -> Unit = {},
     val deleteKit: (String) -> Unit = {},
@@ -1032,6 +1034,7 @@ private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     T(if (onScreen < 2) "Add an overlay at the playhead, then pick a layout." else "Arranges the $onScreen clips on screen at the playhead.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     SuiteChips(SuiteOps.SplitLayout.entries.map { it.name to it.label }, null, { n -> act(EditAction.SplitScreen(SuiteOps.SplitLayout.valueOf(n))) }, enabled = onScreen >= 2)
     host.importLink?.let { SuiteButton("Add a video from a link", it, Modifier.fillMaxWidth(), icon = "link") }
+    host.addPhoto?.let { SuiteButton("Add a photo", it, Modifier.fillMaxWidth(), icon = "image") }
     SuiteButton("Music from uploads", host.pickAudio, Modifier.fillMaxWidth(), icon = "music")
 }
 
