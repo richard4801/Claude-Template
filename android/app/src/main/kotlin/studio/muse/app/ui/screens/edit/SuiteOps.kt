@@ -34,6 +34,8 @@ import studio.muse.core.edit.clipTimeAt
 import studio.muse.core.edit.ids
 import studio.muse.core.edit.itemSpan
 import studio.muse.core.edit.locate
+import studio.muse.core.edit.removeTrack
+import studio.muse.core.edit.moveMainClip
 import studio.muse.core.edit.newId
 import studio.muse.core.edit.removeItem
 import studio.muse.core.edit.startSecOrNull
@@ -118,13 +120,28 @@ object SuiteOps {
     }
 
     /** Sets keyframe [prop] at item-local [t] to [v] (replacing one within 0.05 s). */
-    fun keyframe(p: EditProject, id: String, prop: KfProp, t: Double, v: Double): EditProject? = p.updateItem(id) { it ->
+    fun keyframe(p: EditProject, id: String, prop: KfProp, t: Double, v: Double, ease: studio.muse.core.edit.Ease? = null): EditProject? = p.updateItem(id) { it ->
         fun keys(k: Map<KfProp, List<Keyframe>>?): Map<KfProp, List<Keyframe>> {
-            val list = (k?.get(prop).orEmpty().filter { abs(it.t - t) > 0.05 } + Keyframe((t * 1000).roundToInt() / 1000.0, v, studio.muse.core.edit.Ease.EASE_IN_OUT)).sortedBy { it.t }
+            val old = k?.get(prop).orEmpty().firstOrNull { abs(it.t - t) <= 0.05 }
+            val list = (k?.get(prop).orEmpty().filter { abs(it.t - t) > 0.05 } + Keyframe(old?.t ?: ((t * 1000).roundToInt() / 1000.0), v, ease ?: old?.ease ?: studio.muse.core.edit.Ease.EASE_IN_OUT)).sortedBy { it.t }
             return (k.orEmpty() + (prop to list))
         }
         when (it) { is VideoClip -> it.copy(keyframes = keys(it.keyframes)); is ImageItem -> it.copy(keyframes = keys(it.keyframes)); is TextItem -> it.copy(keyframes = keys(it.keyframes)); else -> it }
     }
+
+    /** The item's keyframes, changed by [f] (empty lists and maps are dropped). */
+    fun editKeys(p: EditProject, id: String, f: (Map<KfProp, List<Keyframe>>) -> Map<KfProp, List<Keyframe>>): EditProject? = p.updateItem(id) { it ->
+        fun g(k: Map<KfProp, List<Keyframe>>?) = f(k.orEmpty()).filterValues { v -> v.isNotEmpty() }.ifEmpty { null }
+        when (it) { is VideoClip -> it.copy(keyframes = g(it.keyframes)); is ImageItem -> it.copy(keyframes = g(it.keyframes)); is TextItem -> it.copy(keyframes = g(it.keyframes)); is AudioClip -> it.copy(keyframes = g(it.keyframes)) }
+    }
+
+    /** Easing of every keyframe at item-local [t] (±0.05 s). */
+    fun easeAt(p: EditProject, id: String, t: Double, ease: studio.muse.core.edit.Ease): EditProject? =
+        editKeys(p, id) { k -> k.mapValues { (_, l) -> l.map { if (abs(it.t - t) <= 0.05) it.copy(ease = ease) else it } } }
+
+    /** Removes the keyframes at item-local [t] (±0.05 s), of [prop] or of every property. */
+    fun removeKeysAt(p: EditProject, id: String, t: Double, prop: KfProp? = null): EditProject? =
+        editKeys(p, id) { k -> k.mapValues { (pr, l) -> if (prop == null || pr == prop) l.filter { abs(it.t - t) > 0.05 } else l } }
 
     // ------------------------------------------------------------ captions
     fun withCaptions(p: EditProject, assetId: String, words: List<CaptionWord>, preset: CaptionPreset = CaptionPreset.POP): EditProject {
@@ -176,6 +193,11 @@ object SuiteOps {
 
     /** Whether main clip [c]'s own sound is there to hear or detach (its asset has sound). */
     fun hasSound(p: EditProject, c: VideoClip): Boolean = p.asset(c.audioAsset ?: c.asset)?.hasAudio != false
+
+    /** Whether anything in the edit plays sound (a sound-only export needs some): an unmuted clip with sound on an unmuted track. */
+    fun editHasSound(p: EditProject): Boolean = p.tracks.any { t ->
+        t.muted != true && t.items.any { i -> i is MediaClip && i.muted != true && (i !is VideoClip || hasSound(p, i)) && p.asset(i.asset)?.hasAudio != false }
+    }
 
     /**
      * Detach audio (extract the clip's sound): main clip [clipId]'s sound becomes its own audio clip at the same place
@@ -232,6 +254,23 @@ object SuiteOps {
         return base.addItem(tid, item)?.let { it to id }
     }
 
+    /** The style a new plain text starts with: bold sans, white with a soft shadow, centred, 5.5 % of the height. */
+    val DEFAULT_TEXT_STYLE = studio.muse.core.edit.TextStyle(studio.muse.core.edit.Font.SANS, 700, .055, "#FFFFFF", studio.muse.core.edit.Align.CENTER,
+        maxWidthPct = .85, lineHeight = 1.15, shadow = studio.muse.core.edit.Shadow("#000000", .5, .08, .04))
+
+    /** Plain text at [atSec] for 3 s, in the middle of the picture, on a text track where it fits. */
+    fun addText(p: EditProject, atSec: Double, text: String = "Your text", style: studio.muse.core.edit.TextStyle = DEFAULT_TEXT_STYLE): Pair<EditProject, String>? {
+        val dur = studio.muse.core.edit.durationSec(p)
+        val start = atSec.coerceIn(0.0, maxOf(0.0, dur - 0.5))
+        val len = minOf(3.0, maxOf(0.5, dur - start))
+        val base = p.tracks.firstOrNull { t -> t.kind == TrackKind.TEXT && fitsAt(p, t, start, len) }?.let { p } ?: p.copy(tracks = p.tracks + Track(p.newId("text"), TrackKind.TEXT, name = "Text"))
+        val tid = base.tracks.last { t -> t.kind == TrackKind.TEXT && fitsAt(base, t, start, len) }.id
+        val id = base.newId("t")
+        val item = TextItem(id, (start * 1000).roundToInt() / 1000.0, (len * 1000).roundToInt() / 1000.0, text, style, transform = Transform(0.5, 0.5),
+            animIn = studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.FADE, 0.3))
+        return base.addItem(tid, item)?.let { it to id }
+    }
+
     /** Adds a take as a picture-in-picture clip at [atSec] (lower right, 40 %). */
     fun addPip(p: EditProject, takeId: String, durationSec: Double, atSec: Double, width: Int? = null, height: Int? = null): Pair<EditProject, String>? {
         val assetId = p.assets.firstOrNull { it.take == takeId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "pip")
@@ -248,6 +287,42 @@ object SuiteOps {
     }
 
     /**
+     * Overlay clip [id] moved onto the main track, at the clip boundary nearest to where it starts (the clips after it
+     * move later). It fills the frame there: its overlay placing (position and size, keyframes, opacity, blend, mask,
+     * chroma key, cut-out) is dropped; its trim, speed, sound and look stay. An overlay track left empty goes.
+     */
+    fun toMain(p: EditProject, id: String): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        if (t.kind != TrackKind.VIDEO) return null
+        val c = t.items[i] as? VideoClip ?: return null
+        val start = itemSpan(p, t, c).startSec
+        val bounds = listOf(0.0) + timeline(p).map { it.endSec }
+        val at = bounds.indices.minBy { abs(bounds[it] - start) }
+        val moved = c.copy(startSec = null, fit = null, transform = null, keyframes = null, opacity = null, blend = null, mask = null, chroma = null, alphaMatte = null)
+        var q = p.removeItem(id) ?: return null
+        if (q.track(t.id)?.items?.isEmpty() == true) q = q.removeTrack(t.id) ?: q
+        return q.addItem(q.main.id, moved, at)
+    }
+
+    /**
+     * Main clip [id] moved onto an overlay track at the time it played (the main track closes the gap), full frame, so
+     * it can be placed, keyed or blended over the others. The main track keeps at least one clip.
+     */
+    fun toOverlay(p: EditProject, id: String): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        if (t.kind != TrackKind.MAIN || t.items.size < 2) return null
+        val c = t.items[i] as? VideoClip ?: return null
+        val span = itemSpan(p, t, c)
+        val q = p.removeItem(id) ?: return null
+        val len = span.endSec - span.startSec
+        val moved = c.copy(startSec = span.startSec, transitionIn = null)
+        val base = q.tracks.firstOrNull { tr -> tr.kind == TrackKind.VIDEO && fitsAt(q, tr, span.startSec, len) }?.let { q }
+            ?: q.copy(tracks = q.tracks + Track(q.newId("pip"), TrackKind.VIDEO, name = "Overlay"))
+        val tid = base.tracks.last { tr -> tr.kind == TrackKind.VIDEO && fitsAt(base, tr, span.startSec, len) }.id
+        return base.addItem(tid, moved)
+    }
+
+    /**
      * Another take (or edited version) added to the end of the main track, whole, as a new clip (its asset is shared
      * with a PiP of the same take). Returns the project and the new clip's id.
      */
@@ -260,6 +335,141 @@ object SuiteOps {
         return withAsset.addItem(withAsset.main.id, clip, withAsset.main.items.size)?.let { it to id }
     }
 
+    /** An uploaded video (an import from a link) added after the last main clip; the project and the new clip's id. */
+    fun appendUpload(p: EditProject, uploadId: String, durationSec: Double, width: Int? = null, height: Int? = null, hasAudio: Boolean? = true): Pair<EditProject, String>? {
+        if (durationSec < EditLimits.MIN_CLIP_SOURCE_SEC) return null
+        val assetId = p.assets.firstOrNull { it.upload == uploadId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "upload")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, upload = uploadId, durationSec = durationSec, width = width, height = height, hasAudio = hasAudio))
+        val id = withAsset.newId("c")
+        return withAsset.addItem(withAsset.main.id, VideoClip(id, assetId, 0.0, durationSec, 1.0), withAsset.main.items.size)?.let { it to id }
+    }
+
+    // ------------------------------------------------------------ moving and trimming on the timeline
+    /**
+     * Item [id] (not on the main track) moved by [deltaSec] from where it is in [p]; its start or end snaps to the
+     * nearest of [snaps] within [snapSec]. Items on a track stay in time order; an overlap is refused by validation.
+     */
+    fun moveBy(p: EditProject, id: String, deltaSec: Double, snaps: List<Double> = emptyList(), snapSec: Double = 0.0): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        if (t.kind == TrackKind.MAIN) return null
+        val item = t.items[i]
+        val span = itemSpan(p, t, item)
+        val len = span.endSec - span.startSec
+        var start = maxOf(0.0, span.startSec + deltaSec)
+        if (snapSec > 0) {
+            val best = snaps.flatMap { s -> listOf(s to s, (s - len) to s) }.filter { it.first >= 0 }.minByOrNull { abs(it.first - start) }
+            if (best != null && abs(best.first - start) <= snapSec) start = best.first
+        }
+        start = (start * 1000).roundToInt() / 1000.0
+        if (abs(start - span.startSec) < 1e-9) return null
+        val moved = withStart(item, start)
+        val items = t.items.toMutableList().apply { set(i, moved) }.sortedBy { it.startSecOrNull ?: 0.0 }
+        return p.copy(tracks = p.tracks.map { if (it === t) it.copy(items = items) else it })
+    }
+
+    /** Main clip [id] moved to position [toIndex] (transitions that no longer fit are dropped). */
+    fun reorder(p: EditProject, id: String, toIndex: Int): EditProject? {
+        val from = p.main.items.indexOfFirst { it.id == id }
+        if (from < 0) return null
+        return p.moveMainClip(from, toIndex.coerceIn(0, p.main.items.size - 1))
+    }
+
+    /**
+     * Any item trimmed by its [left] or right edge by [deltaSec] of timeline time, measured from its state in [p]:
+     * video/audio clips change their source in/out (a left trim on another track also moves the start, so the
+     * picture stays put); text and images change their start and duration. Clamped to the file and to 0.1 s.
+     */
+    fun trimBy(p: EditProject, id: String, left: Boolean, deltaSec: Double): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        val item = t.items[i]
+        val min = EditLimits.MIN_CLIP_SOURCE_SEC
+        fun r(v: Double) = (v * 1000).roundToInt() / 1000.0
+        val next: Item = when (item) {
+            // A freeze frame's edges change how long it holds.
+            is VideoClip if item.holdSec != null -> item.copy(holdSec = r((item.holdSec!! + if (left) -deltaSec else deltaSec).coerceIn(studio.muse.core.edit.HOLD_MIN_SEC, studio.muse.core.edit.HOLD_MAX_SEC)),
+                startSec = if (left) item.startSec?.let { r(maxOf(0.0, it + deltaSec)) } else item.startSec)
+            is MediaClip -> {
+                val sp = when (item) { is VideoClip -> if (item.speedCurve != null) (item.outSec - item.inSec) / clipLength(item) else item.speed; is AudioClip -> item.speed ?: 1.0 }
+                val dur = p.asset(item.asset)?.durationSec ?: item.outSec
+                if (left) {
+                    val ni = r((item.inSec + deltaSec * sp).coerceIn(0.0, item.outSec - min))
+                    val moved = (ni - item.inSec) / sp
+                    when (item) {
+                        is VideoClip -> item.copy(inSec = ni, startSec = item.startSec?.let { r(maxOf(0.0, it + moved)) })
+                        is AudioClip -> item.copy(inSec = ni, startSec = r(maxOf(0.0, item.startSec + moved)))
+                    }
+                } else {
+                    val no = r((item.outSec + deltaSec * sp).coerceIn(item.inSec + min, dur))
+                    when (item) { is VideoClip -> item.copy(outSec = no); is AudioClip -> item.copy(outSec = no) }
+                }
+            }
+            is TextItem -> if (left) { val d = deltaSec.coerceIn(-item.startSec, item.durationSec - min); item.copy(startSec = r(item.startSec + d), durationSec = r(item.durationSec - d)) }
+                else item.copy(durationSec = r(maxOf(min, item.durationSec + deltaSec)))
+            is ImageItem -> if (left) { val d = deltaSec.coerceIn(-item.startSec, item.durationSec - min); item.copy(startSec = r(item.startSec + d), durationSec = r(item.durationSec - d)) }
+                else item.copy(durationSec = r(maxOf(min, item.durationSec + deltaSec)))
+            else -> return null
+        }
+        if (next == item) return null
+        return p.copy(tracks = p.tracks.map { if (it === t) it.copy(items = it.items.toMutableList().apply { set(i, next) }) else it })
+    }
+
+    /**
+     * Replace: main clip [clipId] plays take [takeId] instead, from its start, for the same source length where the
+     * take is long enough (else the whole take); speed, look, transform, sound settings and transition stay.
+     */
+    fun replaceClip(p: EditProject, clipId: String, takeId: String, durationSec: Double): EditProject? {
+        val c = p.mainClips.firstOrNull { it.id == clipId } ?: return null
+        if (durationSec < EditLimits.MIN_CLIP_SOURCE_SEC) return null
+        val assetId = p.assets.firstOrNull { it.take == takeId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "take")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, take = takeId, durationSec = durationSec, hasAudio = true))
+        val len = if (c.holdSec != null) EditLimits.MIN_CLIP_SOURCE_SEC else minOf(c.outSec - c.inSec, durationSec)
+        return withAsset.updateItem(clipId) { (it as VideoClip).copy(asset = assetId, inSec = 0.0, outSec = (len * 1000).roundToInt() / 1000.0, audioAsset = null, alphaMatte = null) }
+    }
+
+    /** The music clip at timeline [t] (or the selected one): its track and clip. */
+    fun musicAt(p: EditProject, t: Double, selectedId: String?): Pair<Track, AudioClip>? {
+        for (tr in p.tracks) if (tr.kind == TrackKind.MUSIC) for (it in tr.items) {
+            val c = it as AudioClip
+            if (c.id == selectedId) return tr to c
+        }
+        for (tr in p.tracks) if (tr.kind == TrackKind.MUSIC) for (it in tr.items) {
+            val sp = itemSpan(p, tr, it)
+            if (t >= sp.startSec && t < sp.endSec) return tr to (it as AudioClip)
+        }
+        return null
+    }
+
+    /** Another take's sound (its video file, sound only) at [atSec] on a sound effects track. */
+    fun addTakeSound(p: EditProject, takeId: String, durationSec: Double, atSec: Double): Pair<EditProject, String>? {
+        val assetId = p.assets.firstOrNull { it.take == takeId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "take")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, take = takeId, durationSec = durationSec, hasAudio = true))
+        val start = atSec.coerceIn(0.0, maxOf(0.0, studio.muse.core.edit.durationSec(withAsset) - 0.1))
+        val len = minOf(durationSec, maxOf(0.1, studio.muse.core.edit.durationSec(withAsset) - start))
+        val tr = withAsset.tracks.firstOrNull { it.kind == TrackKind.SFX && fitsAt(withAsset, it, start, len) }
+        val base = if (tr != null) withAsset else withAsset.copy(tracks = withAsset.tracks + Track(withAsset.newId("sfx"), TrackKind.SFX, name = "Sound"))
+        val tid = tr?.id ?: base.tracks.last().id
+        val id = base.newId("s")
+        return base.addItem(tid, AudioClip(id, assetId, (start * 1000).roundToInt() / 1000.0, 0.0, (len * 1000).roundToInt() / 1000.0))?.let { it to id }
+    }
+
+    /** Audio clip [id] repeated back to back until the video's end (each copy as long as the original, the last cut short). */
+    fun loopToEnd(p: EditProject, id: String): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        val c = t.items[i] as? AudioClip ?: return null
+        val end = studio.muse.core.edit.durationSec(p)
+        val len = clipLength(c)
+        var at = c.startSec + len
+        var cur = p
+        var n = 2
+        while (at < end - 0.1 && n < 200) {
+            val l = minOf(len, end - at)
+            val copy = c.copy(id = cur.newId(c.id, dotted = true), startSec = (at * 1000).roundToInt() / 1000.0, outSec = ((c.inSec + l) * 1000).roundToInt() / 1000.0, fadeInSec = null)
+            cur = cur.addItem(t.id, copy) ?: break
+            at += l; n++
+        }
+        return if (cur === p) null else cur
+    }
+
     /** Sets (null = removes) a look on [ids]. */
     fun setLook(p: EditProject, ids: List<String>, look: Look?): EditProject? {
         var cur = p
@@ -270,11 +480,9 @@ object SuiteOps {
 
     /** The canvas for [shape] keeping the project's short side. */
     fun ratio(p: EditProject, shape: ExportShape): EditProject? {
-        val short = minOf(p.canvas.width, p.canvas.height)
-        fun even(v: Double) = (v / 2).roundToInt() * 2
-        val (w, h) = if (shape.w <= shape.h) short to even(short.toDouble() * shape.h / shape.w) else even(short.toDouble() * shape.w / shape.h) to short
+        val (w, h) = shape.sizeAt(minOf(p.canvas.width, p.canvas.height))
         if (w == p.canvas.width && h == p.canvas.height) return null
-        return p.copy(canvas = p.canvas.copy(width = w.coerceAtMost(4096), height = h.coerceAtMost(4096)))
+        return p.copy(canvas = p.canvas.copy(width = w, height = h))
     }
 
     // ------------------------------------------------------------ words (edit by text)

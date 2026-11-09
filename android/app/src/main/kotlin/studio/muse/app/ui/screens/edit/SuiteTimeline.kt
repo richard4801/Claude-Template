@@ -177,7 +177,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
 }
 
 /** A gesture's mode once it has moved past the touch slop. */
-private enum class Mode { NONE, SCRUB, VSCROLL, PINCH, TRIM_LEFT, TRIM_RIGHT }
+private enum class Mode { NONE, SCRUB, VSCROLL, PINCH, TRIM_LEFT, TRIM_RIGHT, MOVE }
 
 @Composable
 private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, waves: Map<String, Peaks>, act: (EditAction) -> Unit, lanes: List<Lane>, modifier: Modifier, plus: Boolean) {
@@ -194,6 +194,8 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
     val state by rememberUpdatedState(ui)
     val actNow by rememberUpdatedState(act)
     val lanesNow by rememberUpdatedState(lanes)
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val hapticNow = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) }
 
     // The timeline's own playhead (seconds) and zoom (dp/s): drawn every frame from here while a finger is down or a
     // fling runs; otherwise they follow the editor (playback, undo, the tablet's buttons).
@@ -236,31 +238,45 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val s = state
                             val proj = s.project ?: return@awaitEachGesture
                             val dur = s.duration
+                            val w = size.width.toFloat()
                             val ppsPx = pps.floatValue * density
-                            // A selected main clip's edges are trim handles (24 dp wide targets).
-                            var mode = Mode.NONE
-                            val sel = proj.mainClips.firstOrNull { it.id == s.selectedId }
-                            val mainLane = lanesNow.first()
-                            val yLane = down.position.y / density + vScroll.floatValue
-                            var trimFrom: Pair<Double, Double>? = null
+                            val hit = hitAt(down.position, w, density, proj, lanesNow, view.doubleValue, pps.floatValue, vScroll.floatValue)
+                            // The selected item's edges are trim handles (20 dp either side), on its own lane.
                             var pendingTrim = Mode.NONE
-                            if (sel != null && down.position.y / density > RULER_DP && yLane >= mainLane.top && yLane <= mainLane.top + mainLane.height) {
-                                val sp = timeline(proj).first { it.id == sel.id }
-                                val l = TimelineMath.xOf(sp.startSec, view.doubleValue, size.width.toFloat(), ppsPx)
-                                val r = TimelineMath.xOf(sp.endSec, view.doubleValue, size.width.toFloat(), ppsPx)
+                            val selId = s.selectedId
+                            if (selId != null && hit.lane != null && hit.lane.kind == LaneKind.TRACK && hit.lane.track?.items?.any { it.id == selId } == true) {
+                                val tr = hit.lane.track
+                                val sp = itemSpan(proj, tr, tr.items.first { it.id == selId })
+                                val l = TimelineMath.xOf(sp.startSec, view.doubleValue, w, ppsPx); val r = TimelineMath.xOf(sp.endSec, view.doubleValue, w, ppsPx)
                                 val reach = 20 * density
-                                pendingTrim = when {
-                                    abs(down.position.x - r) <= reach -> Mode.TRIM_RIGHT
-                                    abs(down.position.x - l) <= reach -> Mode.TRIM_LEFT
-                                    else -> Mode.NONE
-                                }
-                                if (pendingTrim != Mode.NONE) trimFrom = sel.inSec to sel.outSec
+                                pendingTrim = when { abs(down.position.x - r) <= reach -> Mode.TRIM_RIGHT; abs(down.position.x - l) <= reach -> Mode.TRIM_LEFT; else -> Mode.NONE }
                             }
                             val tracker = VelocityTracker()
                             tracker.addPosition(down.uptimeMillis, down.position)
-                            var totalX = 0f; var totalY = 0f
                             val slop = viewConfiguration.touchSlop
+                            var mode = Mode.NONE
+                            var last = down.position
                             busy.value = true
+                            // Long-press on an item (finger still): move it (main clips reorder).
+                            if (hit.item != null && pendingTrim == Mode.NONE) {
+                                var lifted = false
+                                val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                    while (true) {
+                                        val ev = awaitPointerEvent()
+                                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.first()
+                                        if (!ch.pressed || ev.changes.count { it.pressed } > 1) { lifted = !ch.pressed; return@withTimeoutOrNull false }
+                                        tracker.addPosition(ch.uptimeMillis, ch.position)
+                                        if ((ch.position - down.position).getDistance() > slop) return@withTimeoutOrNull false
+                                    }
+                                }
+                                if (held == null) { mode = Mode.MOVE; hapticNow(); actNow(EditAction.Select(hit.item.id)) }
+                                else if (lifted) {
+                                    busy.value = false
+                                    tap(down.position, w, density, state, lanesNow, view.doubleValue, pps.floatValue, vScroll.floatValue, actNow)
+                                    return@awaitEachGesture
+                                }
+                            }
+                            var lastIndex = -1
                             while (true) {
                                 val ev = awaitPointerEvent()
                                 val pressed = ev.changes.filter { it.pressed }
@@ -273,10 +289,11 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                     continue
                                 }
                                 if (mode == Mode.PINCH) continue // the second finger lifted: wait for the first one
-                                val ch = pressed.first()
+                                val ch = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
                                 tracker.addPosition(ch.uptimeMillis, ch.position)
-                                val d = ch.positionChange()
-                                totalX += d.x; totalY += d.y
+                                val d = ch.position - last
+                                last = ch.position
+                                val totalX = ch.position.x - down.position.x; val totalY = ch.position.y - down.position.y
                                 if (mode == Mode.NONE && (abs(totalX) > slop || abs(totalY) > slop)) {
                                     mode = when {
                                         pendingTrim != Mode.NONE && abs(totalX) >= abs(totalY) -> pendingTrim
@@ -284,27 +301,33 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                         else -> Mode.SCRUB
                                     }
                                 }
+                                val px = pps.floatValue * density
                                 when (mode) {
-                                    Mode.SCRUB -> { send(TimelineMath.dragged(view.doubleValue, d.x, pps.floatValue * density, dur), false); ch.consume() }
+                                    Mode.SCRUB -> { send(TimelineMath.dragged(view.doubleValue, d.x, px, dur), false); ch.consume() }
                                     Mode.VSCROLL -> { vScroll.floatValue = (vScroll.floatValue - d.y / density).coerceIn(0f, max(0f, contentH - visibleH / density)); ch.consume() }
-                                    Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> {
-                                        val (i0, o0) = trimFrom!!
-                                        val c = sel!!
-                                        val speed = if (c.speedCurve != null) (c.outSec - c.inSec) / clipLength(c) else c.speed
-                                        val (ni, no) = TimelineMath.trimmed(i0, o0, speed, proj.asset(c.asset)?.durationSec ?: o0, mode == Mode.TRIM_LEFT, totalX, pps.floatValue * density)
-                                        actNow(EditAction.Trim(c.id, ni, no, done = false))
+                                    Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = false)); ch.consume() }
+                                    Mode.MOVE -> {
+                                        val item = hit.item!!
+                                        if (hit.lane?.track?.kind == TrackKind.MAIN) {
+                                            val cur = state.project ?: proj
+                                            val t = TimelineMath.timeAt(ch.position.x, view.doubleValue, w, px)
+                                            val idx = timeline(cur).indexOfFirst { t >= it.startSec && t < it.endSec }.let { if (it < 0) (if (t < 0) 0 else cur.main.items.size - 1) else it }
+                                            if (idx != lastIndex) { lastIndex = idx; actNow(EditAction.Reorder(item.id, idx, done = false)) }
+                                        } else actNow(EditAction.MoveBy(item.id, totalX / px.toDouble(), snapSec = 10.0 / pps.floatValue, done = false))
                                         ch.consume()
                                     }
                                     else -> {}
                                 }
                             }
+                            val px = pps.floatValue * density
+                            val totalX = last.x - down.position.x
                             when (mode) {
                                 Mode.PINCH -> { actNow(EditAction.Zoom(pps.floatValue)); send(view.doubleValue, true); busy.value = false }
-                                Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> {
-                                    val c = sel!!; val (i0, o0) = trimFrom!!
-                                    val speed = if (c.speedCurve != null) (c.outSec - c.inSec) / clipLength(c) else c.speed
-                                    val (ni, no) = TimelineMath.trimmed(i0, o0, speed, proj.asset(c.asset)?.durationSec ?: o0, mode == Mode.TRIM_LEFT, totalX, pps.floatValue * density)
-                                    actNow(EditAction.Trim(c.id, ni, no, done = true))
+                                Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = true)); busy.value = false }
+                                Mode.MOVE -> {
+                                    val item = hit.item!!
+                                    if (hit.lane?.track?.kind == TrackKind.MAIN) { if (lastIndex >= 0) actNow(EditAction.Reorder(item.id, lastIndex, done = true)) }
+                                    else actNow(EditAction.MoveBy(item.id, totalX / px.toDouble(), snapSec = 10.0 / pps.floatValue, done = true))
                                     busy.value = false
                                 }
                                 Mode.SCRUB -> {
@@ -312,7 +335,6 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                     if (abs(vx) < 50f * density) { send(view.doubleValue, true); busy.value = false }
                                     else fling = launch {
                                         val start = view.doubleValue
-                                        val px = pps.floatValue * density
                                         try {
                                             AnimationState(0f, -vx).animateDecay(decay) {
                                                 val t = (start + value / px).coerceIn(0.0, state.duration)
@@ -326,7 +348,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                 Mode.VSCROLL -> busy.value = false
                                 Mode.NONE -> {
                                     busy.value = false
-                                    tap(down.position, size.width.toFloat(), density, state, lanesNow, view.doubleValue, pps.floatValue, vScroll.floatValue, actNow)
+                                    tap(down.position, w, density, state, lanesNow, view.doubleValue, pps.floatValue, vScroll.floatValue, actNow)
                                 }
                             }
                         }
@@ -357,8 +379,8 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
                             if (r < 0 || l > w) return@forEachIndexed
                             clipTile(c, l, r, top, h, frames[c.asset].orEmpty(), p.asset(c.asset)?.durationSec ?: 1.0, ppsPx, m.t.surface2)
-                            if (c.speedCurve != null || c.speed != 1.0) {
-                                val lbl = if (c.speedCurve != null) "Curve" else "${trim(c.speed)}×"
+                            if (c.speedCurve != null || c.speed != 1.0 || c.holdSec != null) {
+                                val lbl = if (c.holdSec != null) "${trim(c.holdSec!!)} s" else if (c.speedCurve != null) "Curve" else "${trim(c.speed)}×"
                                 val tl = measurer.measure(lbl, TextStyle(fontFamily = m.t.body, fontSize = 11.sp, color = Color.White, fontFeatureSettings = "tnum"))
                                 drawRect(Color.Black.copy(alpha = .55f), Offset(l + 3 * dp, top + h - tl.size.height - 4 * dp), Size(tl.size.width + 6f * dp, tl.size.height.toFloat()))
                                 drawText(tl, topLeft = Offset(l + 6 * dp, top + h - tl.size.height - 4 * dp))
@@ -408,6 +430,21 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                         else -> {}
                     }
                 }
+                // Trim handles on the selected item of any other lane (the main lane draws its own above).
+                ui.selectedId?.let { sid ->
+                    for (lane in lanes) {
+                        val t = lane.track ?: continue
+                        if (lane.kind != LaneKind.TRACK || t.kind == TrackKind.MAIN || t.kind == TrackKind.CAPTION) continue
+                        val item = t.items.firstOrNull { it.id == sid } ?: continue
+                        val sp = itemSpan(p, t, item)
+                        val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
+                        val top = lane.top * dp - vs; val h = lane.height * dp
+                        for (x in listOf(l, r - 8 * dp)) {
+                            drawRoundRect(m.t.accent, Offset(x, top), Size(8 * dp, h), CornerRadius(3 * dp))
+                            drawRect(Color.White, Offset(x + 3 * dp, top + h / 2 - 5 * dp), Size(2 * dp, 10 * dp))
+                        }
+                    }
+                }
                 // Transition marks on the cuts.
                 val mainLane = lanes.first()
                 p.mainClips.forEachIndexed { i, c ->
@@ -447,6 +484,19 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
     }
 }
 
+/** What is under a point: its lane and the item there (null on the ruler or an empty spot). */
+private data class Hit(val lane: Lane?, val item: studio.muse.core.edit.Item?)
+
+private fun hitAt(o: Offset, width: Float, density: Float, proj: EditProject, lanes: List<Lane>, view: Double, ppsDp: Float, vScrollDp: Float): Hit {
+    if (o.y / density < RULER_DP) return Hit(null, null)
+    val t = TimelineMath.timeAt(o.x, view, width, ppsDp * density)
+    val yDp = o.y / density + vScrollDp
+    val lane = lanes.firstOrNull { yDp >= it.top - 3 && yDp <= it.top + it.height + 3 } ?: return Hit(null, null)
+    if (lane.kind == LaneKind.CLIP_SOUND) return Hit(lane, null)
+    val track = lane.track ?: return Hit(lane, null)
+    return Hit(lane, track.items.firstOrNull { val sp = itemSpan(proj, track, it); t >= sp.startSec && t < sp.endSec })
+}
+
 /** A tap: selects the item under it (the clip-sound lane selects its clip and opens Audio; captions open Captions). */
 private fun tap(o: Offset, width: Float, density: Float, s: EditSuiteUi, lanes: List<Lane>, view: Double, ppsDp: Float, vScrollDp: Float, act: (EditAction) -> Unit) {
     val proj = s.project ?: return
@@ -477,6 +527,7 @@ private fun detachedSounds(p: EditProject): Set<String> {
 
 /** The source second at [local] timeline seconds into [c] (constant speed without allocating). */
 private fun srcAt(c: MediaClip, local: Double): Double {
+    if ((c as? VideoClip)?.holdSec != null) return c.inSec // a freeze frame shows one frame
     val sp = when (c) { is VideoClip -> if (c.speedCurve != null) null else c.speed; is AudioClip -> c.speed ?: 1.0 }
     return if (sp != null) c.inSec + local * sp else clipSourceAt(c, local)
 }
@@ -492,13 +543,13 @@ private fun DrawScope.clipSoundLane(
         if (sp.endSec < tStart || sp.startSec > tEnd) return@forEachIndexed
         val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
         val has = SuiteOps.hasSound(p, c)
-        val silent = c.muted == true || main.muted == true || p.mute == true
+        val silent = c.muted == true || main.muted == true || p.mute == true || c.holdSec != null
         drawRoundRect(if (!has || silent) off else colors.sound, Offset(l, top), Size(r - l, h), CornerRadius(4 * dp))
         if (has) {
             soundBars(c, waves[c.audioAsset ?: c.asset], l, r, top, h, if (silent) muted else colors.soundWave, ppsPx, silent, max(l, 0f), min(r, size.width))
             if (!silent) fadeRamps(c, l, r, top, h, ppsPx, colors.soundWave)
         }
-        val label = when { !has -> "No sound"; c.id in detached -> "Sound detached"; silent -> "Muted"; else -> null }
+        val label = when { !has -> "No sound"; c.holdSec != null -> "Freeze frame"; c.id in detached -> "Sound detached"; silent -> "Muted"; else -> null }
         if (label != null) laneLabel(measurer, label, l, r, top, h, muted, font, off)
         if (selected == c.id) drawRoundRect(accent, Offset(l, top), Size(r - l, h), CornerRadius(4 * dp), style = Stroke(2 * dp))
     }
@@ -581,7 +632,7 @@ private fun DrawScope.chip(
         drawRect(bg, Offset(l, top), Size(r - l, h))
         if (border != Color.Transparent) drawRect(border, Offset(l, top), Size(r - l, h), style = Stroke(1 * density))
         val tl = measurer.measure(text, TextStyle(fontFamily = font, fontSize = 11.sp, color = ink), maxLines = 1, softWrap = false)
-        drawText(tl, topLeft = Offset(max(l, 0f) + 4 * density, top + (h - tl.size.height) / 2))
+        drawText(tl, topLeft = Offset(max(l, 0f) + 12 * density, top + (h - tl.size.height) / 2)) // clear of a trim handle
     }
 }
 

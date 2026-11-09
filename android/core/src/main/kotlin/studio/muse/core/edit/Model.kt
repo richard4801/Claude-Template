@@ -83,7 +83,13 @@ data class Keyframe(val t: Double, val v: Double, val ease: Ease? = null)
 /** Per-property keyframe lists, in JSON order. */
 typealias Keyframes = Map<KfProp, List<Keyframe>>
 
-data class Transform(val x: Double? = null, val y: Double? = null, val scale: Double? = null, val rotation: Double? = null)
+/** [flipX] / [flipY] (wave 1, mirror): mirrored about the picture's centre, after the crop and before scale and rotation. */
+data class Transform(val x: Double? = null, val y: Double? = null, val scale: Double? = null, val rotation: Double? = null, val flipX: Boolean? = null, val flipY: Boolean? = null)
+
+/** Wave 1: how an overlay picture combines with the layers below ([blendPixel]). */
+enum class BlendMode(override val wire: String) : Wire {
+    NORMAL("normal"), MULTIPLY("multiply"), SCREEN("screen"), OVERLAY("overlay"), SOFT_LIGHT("softLight"), DARKEN("darken"), LIGHTEN("lighten"), ADD("add")
+}
 data class Crop(val left: Double? = null, val top: Double? = null, val right: Double? = null, val bottom: Double? = null)
 data class Adjust(
     val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null,
@@ -177,6 +183,10 @@ data class VideoClip(
     val transitionIn: Transition? = null,
     val voiceEffect: VoiceEffect? = null,
     val enhance: Boolean? = null,
+    /** Wave 1, freeze frame: shows the single source frame at [inSec] for this many seconds, silent ([clipLength] = holdSec). */
+    val holdSec: Double? = null,
+    /** Wave 1: overlay (video) tracks only. */
+    val blend: BlendMode? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -197,6 +207,8 @@ data class ImageItem(
     override val mask: Mask? = null,
     val animIn: Anim? = null,
     val animOut: Anim? = null,
+    /** Wave 1: overlay blend mode. */
+    val blend: BlendMode? = null,
 ) : Visual
 
 data class Stroke(val color: String, val widthPct: Double)
@@ -284,7 +296,10 @@ data class Track(
     val duck: Duck? = null,
 )
 
-data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null)
+/** [fill] (wave 1): what shows where a contain-fitted main clip leaves the frame empty: the background colour, or a blur of the clip. */
+enum class CanvasFill(override val wire: String) : Wire { COLOR("color"), BLUR("blur") }
+
+data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null, val fill: CanvasFill? = null)
 
 data class EditProject(
     val version: Int = 2,

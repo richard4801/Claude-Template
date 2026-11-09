@@ -223,3 +223,59 @@ _Spec: `plans/claude-editing.md` A. API: `plans/api.md` "Edit sessions". Referen
 
 ## Not in phase 1
 Speed curves, freeze frame, reverse, masks/blend modes, motion tracking, stabilization, reframe, LUT files (`.cube`), beat detection, TTS, stickers library, Lottie. The schema leaves room (`version`, unknown kinds rejected until added).
+
+## Wave 1 additions (plans/edit-parity.md, owner decision 2026-11-08)
+Contract additions. The project stays `version: 2`, and older apps ignore these fields.
+- Reference: `server/api/src/editor/model.ts`.
+- Fixtures: `functions.json → wave1`, the "wave 1" project in `projects.json`, and validation cases.
+- Ports: Kotlin `core/edit/Wave1.kt` (+ model, JSON, validate); Swift by WS9.
+
+### Mirror
+- `Transform.flipX?`, `flipY?` (only `true` is written). Allowed on video, image and text items.
+- Order: crop → flip → scale → rotate → move.
+- `itemCorners(canvas, w, h, fit, transform)` gives the picture's own corners on the canvas (fixture).
+- Android: a negative overlay scale for the axis; text uses the canvas mirrored about its centre.
+
+### Freeze frame
+- `VideoClip.holdSec` (0.1–30): the clip shows the single source frame at `inSec` for `holdSec` seconds. It is silent.
+- A hold requires speed 1 and no `speedCurve`. Its `outSec` is `inSec + 0.1` (only so the 0.1 s source rule holds).
+- Timing:
+  - `clipLength` = holdSec.
+  - `clipSourceAt` = inSec.
+  - `clipTimeAt` = 0.
+- Captions: `captionWords` skips holds.
+- Cuts: `applyCuts` removes a hold whose frame is inside a cut; otherwise it keeps it unchanged.
+- Split: splitting a hold makes two holds, each at least 0.1 s.
+- Freezing:
+  - The `freeze {at, durationSec=1}` op, and the app's Freeze frame, cut the clip at that frame and insert the hold between the two pieces.
+  - At a clip's edge, the hold goes before or after the clip.
+  - The frame is clamped to the asset's end − 0.1 s.
+- Trimming a hold's edge changes `holdSec`. Transitions in and out of a hold are allowed.
+- Android renders a hold as a one-frame slice of the source at speed `frame / holdSec`. The frame shows until the hold ends, as slow motion does. No frames are invented.
+
+### Blend modes
+- `blend?: normal|multiply|screen|overlay|softLight|darken|lighten|add` on video and image items of overlay tracks. On the main track it is refused.
+- `blendChannel` uses the W3C compositing formulas: overlay is hard-light with the layers swapped; softLight is W3C's D(Cb) form.
+- `blendPixel` = below + (blend − below) × a, where a = the item's alpha × opacity. Values are straight sRGB 0–1.
+- **Android:** Media3 1.11 composites every layer with its package-private `DefaultCompositorGlProgram`, and no app can replace it (Transformer can't even take a custom video graph). The app therefore ships its own copy:
+  - `MuseCompositorGlProgram`, in `app/src/main/java/androidx/media3/effect/`, Apache-2.0.
+  - AGP class instrumentation (`MuseCompositorRemap` in `app/build.gradle.kts`) rewrites Media3's references to the library class to point at it, so the preview player and the export both use it.
+  - A blended layer copies what is drawn so far into a backdrop texture. The blend shader then applies `blendChannel` and the alpha mix; every other layer alpha-blends as before.
+  - The shader is checked against the fixtures on a software GL by `android/tools/check_blend_shader.py` (32/32 cases).
+  - The same compositor can later take overlay transitions, adjustment layers and split-screen.
+- Mac: Core Image.
+
+### Blur fill
+- `Canvas.fill?: color|blur` (default `color` = `background`). With `blur`, the main clip fills the frame behind contain-fitted main clips:
+  - It is cover-fitted, with its look applied but not its transform, crop, mask or key.
+  - It is box-blurred with radius `blurFillRadius` = max(1, round(0.04 × short side)), applied once, separable, clamped to the edge.
+  - RGB is then multiplied by 0.85.
+- During a transition the fill shows the incoming clip from half-way through (`blurFillClip`).
+- Android: a FILL layer behind the main layers. It uses a Gaussian blur with the box's variance (σ = r/√3), then the 0.85 darkening.
+- Main clips get the `fit` choice in the UI (Ratio → "This clip": Fill the frame / Whole picture).
+
+### Edit ops (Claude)
+- `flip {itemId, x?, y?}`
+- `freeze {at, durationSec?}`
+- `blend {itemId, mode}`
+- `fill {kind: color|blur, color?}`

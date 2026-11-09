@@ -178,6 +178,32 @@ The export test therefore checks everything up to the encoder:
 
 On a phone, check scrubbing smoothness, the waveform and recording a voice-over by hand.
 
+## Wave 1 controls (plans/edit-parity.md, 2026-11-08)
+
+Every row is **working** and covered by `EditWave1Test` (**W**) or the core `Wave1FixtureTest`.
+
+| Control | Where | What it changes | Test |
+|---|---|---|---|
+| Long-press + drag an item | Timeline | Text, music, voice and overlays move in time. They snap to the playhead, item edges and beats; one undo step. | W `longPressMove…` |
+| Long-press + drag a main clip | Timeline | Reorders the clips. Transitions that no longer fit are dropped. | W `reorderMainClips` |
+| Trim handles on any selected item | Timeline | Audio: source in/out (a left trim also moves its start). Text and images: start and length. Freeze frames: their length. | W `trimAnyItem…` |
+| Add text, text field | Text | A plain text item at the playhead, 3 s long, fading in. | W `addText…` |
+| Font, weight, alignment, size, colour, letter spacing, capitals, outline (colour, width), shadow, box (colour, opacity) | Text | `TextItem.style`; the export draws every field (`EditOverlay`). | W `addText…` |
+| Animation in / out, with lengths | Text | `animIn` / `animOut` (typewriter is for text only). | W `addText…` |
+| Opacity slider + ◆ | Transform | Opacity, or a key at the playhead once opacity is keyframed. | W `opacityAndVolume…` |
+| Keyframed sliders | Transform | Position, scale and rotation set the key at the playhead. Before, they changed a static value the engine ignores once keyframed. | W |
+| Transform panel on a selected text | Transform | Moves the text. Before, it moved the clip under the playhead (the selection lookup only accepted pictures). | W `addText…` |
+| Easing chips, Remove keyframes here | Transform | Easing of the keys at the playhead and of new keys; removes those keys. | W |
+| ◆ next to Volume | Audio | A volume key at the playhead; the slider then sets it. | W |
+| ◀ ▶ (previous / next frame) | Transport | The playhead ±1 frame. To fit them, Fullscreen moved onto the preview's corner and History (owner only) moved to the top bar. | W `frameSteps` |
+| Save frame as photo | Edit | The frame under the playhead, rendered like the export, saved to Pictures/MUSE. | (device only: MediaStore) |
+| Freeze frame, Freeze frame length | Edit | Inserts a hold of the frame at the playhead (`holdSec`), cutting the clip there. It renders as one slow frame. | W `freezeFrame…`, core fixtures |
+| Flip horizontally / vertically | Transform | `transform.flipX/flipY`. The placement is mirrored, and text too. | W `mirror…`, core fixtures |
+| Background colour swatches | Ratio | `canvas.background`. | W `background…` |
+| Colour / Blur of the clip | Ratio | `canvas.fill`: a blurred, darkened copy of the main clip behind contain-fitted clips (FILL layer). | W `background…`, core fixtures |
+| This clip: Fill the frame / Whole picture | Ratio | The main clip's `fit`. | W `background…` |
+| Blend (overlays) | Transform | Normal, Multiply, Screen, Overlay, Soft light, Darken, Lighten, Add. Drawn by the app's own compositor program (`MuseCompositorGlProgram`), used by both preview and export. | W `blendModes…`, `PlanCompositorSettingsTest`, `android/tools/check_blend_shader.py` |
+
 ## Images (`plans/android-edit/`, all four themes `a`–`d`)
 
 **Before/after pairs** (left is the base branch before WS8, right is now; Roborazzi, 390 dp):
@@ -193,3 +219,4 @@ On a phone, check scrubbing smoothness, the waveform and recording a voice-over 
 - `<theme>_export.png`: Export without the C2PA placeholder.
 - `<theme>_editor.png`: a multi-clip edit with captions, music, voice-over and hook. The waveforms are stand-ins in tests.
 - `<theme>_tablet.png`: tablet, 1280 × 800.
+- Wave 1: `<theme>_w1_timeline.png` (a freeze frame, and a text item selected with its trim handles), `<theme>_w1_text.png` (Add text and the style editor), `<theme>_w1_transform.png` (mirror and opacity), `<theme>_w1_ratio.png` (background colour, blur fill, clip fit).
