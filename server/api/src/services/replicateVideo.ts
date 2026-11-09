@@ -20,6 +20,38 @@ import { mediaToolsAvailable, padTo, probe, restoreAudio, stripAudio, thumbnail 
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 import { modelById } from '../suite/registry.js';
+import { HF_SWAP_MIN_SEC } from '../engines/purposes.js';
+import type { VideoProvider } from '../suite/providers.js';
+
+type Line = Pick<Ctx['replicate'], 'create' | 'get' | 'wait' | 'cancel' | 'download'>;
+/**
+ * Higgsfield (the owner's H3 plan) behind the hosted line's calls: start → poll the status URL → the video. Its failures
+ * come back as the provider's own errors (out of credit, refused, failed), so the job reads them as it reads Replicate's.
+ */
+export function higgsfieldLine(hf: VideoProvider): Line {
+  const pred = async (id: string): Promise<Prediction> => {
+    const s = await hf.get(id);
+    if (s.status === 'failed') throw s.error ?? new ReplicateError('Higgsfield failed', 'failed');
+    return { id, status: s.status === 'running' ? 'processing' : s.status, output: s.url ?? undefined, metrics: s.billedSeconds ? { video_output_duration_seconds: s.billedSeconds } : {} };
+  };
+  return {
+    create: async (ref, input, o) => ({ id: await hf.start(ref, input, { cancelled: () => false, seconds: Number(input.duration) || undefined, onWait: o.onWait }), status: 'starting' }) as Prediction,
+    get: pred,
+    cancel: id => hf.cancel(id),
+    download: (url, file) => hf.download(url, file),
+    wait: async (id, o) => {
+      const t0 = Date.now();
+      for (;;) {
+        const p = await pred(id);
+        if (p.status !== 'processing' && p.status !== 'starting') return p;
+        if (o.cancelled && (await o.cancelled())) return { ...p, status: 'canceled' };
+        if (Date.now() - t0 > o.timeoutMs) throw new ReplicateError('Higgsfield took too long', 'timeout');
+        await o.onPoll?.(p, Date.now() - t0);
+        await new Promise(r => setTimeout(r, o.pollMs));
+      }
+    },
+  } as Line;
+}
 
 /** WS13: the resolution a chosen hosted swap model runs a quality at (its own list; H3 Lite has no 2K). */
 function swapResolution(id: string, quality: P.Quality) {
@@ -114,7 +146,8 @@ export class ReplicateVideo {
   }
 
   private async run(job: JobRow, st: Running) {
-    const c = this.ctx.config, ctx = this.ctx, rep = ctx.replicate;
+    const c = this.ctx.config, ctx = this.ctx;
+    let rep: Line = ctx.replicate;
     const r = job.request;
     const n = Math.max(1, r.takes ?? 1);
     const state: RunState = { takes: [], ...((job.stats as any)?.replicate ?? {}) };
@@ -144,7 +177,9 @@ export class ReplicateVideo {
       await pipeline(obj.body, fs.createWriteStream(src));
       const info = await probe(c.FFPROBE_PATH, src);
       const len = Math.min(P.REPLICATE_MAX_SEC, Number.isFinite(info.duration) && info.duration > 0 ? info.duration : (r.clipSeconds ?? clip.durationSec));
-      const D = P.replicateSeconds(len);
+      // The owner's Higgsfield H3 (swapEngine h3-hf) takes 5–15 s: a shorter clip is padded to 5 s.
+      let onHf = r.swapEngine === 'h3-hf' && ctx.suite.providers.higgsfield.configured();
+      const D = onHf ? Math.max(HF_SWAP_MIN_SEC, P.replicateSeconds(len)) : P.replicateSeconds(len);
       // Lip-sync guard: unless the clip is marked as the performer talking, the model gets the clip without sound (it
       // copies the motion, which already carries the beat) and the original sound goes back on the result.
       // Prompt scripts: the request carries the resolved switch/detection; older jobs fall back to the clip's check.
@@ -174,9 +209,22 @@ export class ReplicateVideo {
       }
       const quality = P.qualityOf(r);
       // WS13: the owner's swap engine (`videoModel`, a hosted H3-family model) replaces the quality's default model.
-      const model = typeof r.videoModel === 'string' && r.videoModel ? r.videoModel : quality === 'draft' ? c.REPLICATE_VIDEO_DRAFT_MODEL : c.REPLICATE_VIDEO_MODEL;
-      const input = { prompt: job.prompt, reference_video_urls: [videoUrl], reference_image_urls: imageUrls, duration: D,
-        ...(r.videoNoResolution ? {} : { resolution: r.swapEngine ? swapResolution(r.swapEngine, quality) : P.QUALITY_INFO[quality].resolution }), ratio: '9:16' };
+      let model = typeof r.videoModel === 'string' && r.videoModel && !(r.swapEngine === 'h3-hf' && !onHf) ? r.videoModel : quality === 'draft' ? c.REPLICATE_VIDEO_DRAFT_MODEL : c.REPLICATE_VIDEO_MODEL;
+      const replicateInput = { prompt: job.prompt, reference_video_urls: [videoUrl], reference_image_urls: imageUrls, duration: D,
+        ...(r.videoNoResolution ? {} : { resolution: r.swapEngine && r.swapEngine !== 'h3-hf' ? swapResolution(r.swapEngine, quality) : r.swapEngine === 'h3-hf' ? '2K' : P.QUALITY_INFO[quality].resolution }), ratio: '9:16' };
+      // Higgsfield's H3 reference-to-video: the clip is the reference video, the model's photos the reference images.
+      let input: Record<string, unknown> = onHf
+        ? { prompt: job.prompt, video_urls: [videoUrl], image_urls: imageUrls, duration: D, resolution: '2K', aspect_ratio: '9:16', aigc_watermark: false }
+        : replicateInput;
+      if (onHf) rep = higgsfieldLine(ctx.suite.providers.higgsfield);
+      /** Higgsfield out of credit, down or busy at the start of a take → that take and the rest run on Replicate H3. */
+      const toReplicate = (e: unknown) => {
+        if (!onHf || !ctx.replicate.configured || !(e instanceof ReplicateError) || !['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)) return false;
+        ctx.log.warn({ job: job.id, err: e.message }, 'Higgsfield swap moved to Replicate H3');
+        ctx.suite.markDown('higgsfield');
+        onHf = false; rep = ctx.replicate; model = c.REPLICATE_VIDEO_MODEL; input = { ...replicateInput, resolution: '2K' };
+        return true;
+      };
       // 4. One prediction per take, one after another.
       const outputs: Record<string, unknown>[] = [];
       const billed: number[] = [];
@@ -189,10 +237,11 @@ export class ReplicateVideo {
         if (ts.id) pred = await rep.get(ts.id).catch(() => null);
         if (!pred || pred.status === 'canceled') {
           if (!(await report(i, 0.03, 'Starting'))) return;
-          pred = await rep.create(model, input, {
+          const start = () => rep.create(model, input, {
             maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled,
             onWait: async s => { await report(i, 0.03, `Waiting to start · retrying in ${s}s`); },
           });
+          try { pred = await start(); } catch (e) { if (!toReplicate(e)) throw e; pred = await start(); }
           ts.id = pred.id;
           await this.saveState(job.id, state);
         }
@@ -238,8 +287,10 @@ export class ReplicateVideo {
       // 5. Done: settle on the seconds Replicate billed.
       const price = r.pricePerSec ?? P.QUALITY_PRICE_DEFAULTS[quality];
       const billedSeconds = billed.reduce((a, b) => a + b, 0);
+      // Higgsfield bills $0.08 per reference image beyond the 5 included, per take (registry h3-hf).
+      const hfExtra = onHf ? 0.08 * Math.max(0, imageUrls.length - 5) * outputs.length : 0;
       await ctx.jobs.complete(job.id, {
-        outputs, actualCostUsd: price * billedSeconds, settleNote: P.videoNote(r, billed),
+        outputs, actualCostUsd: price * billedSeconds + hfExtra, settleNote: P.videoNote(r, billed),
         stats: { ...((job.stats as object | null) ?? {}), replicate: { ...state, billedSeconds, wallSeconds: Math.round((Date.now() - t0) / 1000) } },
       });
     } catch (e) {
