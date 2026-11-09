@@ -79,3 +79,13 @@ on the button and runs only on a tap. The Mac follows the same design with Mac c
 - **Using it:** the Templates sheet on New edit lists them. Picking one asks for media for each slot in order ("Slot 1 · 2.4 s"), and auto-fit trims each pick to its slot. It's the same flow as Recreate's slot fill, so members already know it.
 - **Sharing:** templates are shared within the studio.
 - **Cost:** none.
+
+## 8. Teleprompter / record in Edit
+
+- **Where:** Overlay panel, "Record a clip" under "Add a photo". The camera itself stays the Suite's; this opens it from Edit and comes back.
+- **What the user taps:**
+  1. The front camera opens full screen with an optional script scrolling over the top third. The script comes from the edit's text, the captions, or typed in, and the user can change its speed and size.
+  2. Recording is a big round button with a 3-2-1 count-in. The take shows a red timer while it records.
+  3. "Use this take" uploads it and adds it at the playhead, as a main clip, or as an overlay when the user started from the Overlay panel. Retake throws it away.
+- **Under the hood:** the script scrolls at a steady words-per-minute that the user sets (130 by default), and pauses when they tap the screen.
+- **Cost:** none (the upload is ordinary storage).
