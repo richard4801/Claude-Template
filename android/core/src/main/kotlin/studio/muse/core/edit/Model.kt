@@ -155,7 +155,18 @@ data class Asset(
     val name: String? = null,
     /** A video asset that is another video asset played backwards (the Reverse helper's copy); see [reverseClip]. */
     val reverseOf: String? = null,
+    /**
+     * A video made from another by a helper (owner-approved 2026-11-09). Stabilize: the whole source steadied, the same
+     * length and timing, so a clip switches with only its asset changing ([deriveClip]). Slowmo: the source range
+     * [DerivedFrom.startSec]–[DerivedFrom.endSec] with frames interpolated, factor× as long and silent; a clip is split
+     * around it ([applySlowmo]). Chains are allowed, never cycles; see [sourceOf].
+     */
+    val derivedFrom: DerivedFrom? = null,
 )
+
+enum class DerivedOp(override val wire: String) : Wire { STABILIZE("stabilize"), SLOWMO("slowmo") }
+/** [startSec], [endSec] (source seconds of [asset]) and [factor] (2 or 4) are a slowmo copy's, and only its. */
+data class DerivedFrom(val asset: String, val op: DerivedOp, val startSec: Double? = null, val endSec: Double? = null, val factor: Int? = null)
 
 /** Anything on a track. Which class an item is follows from its track's kind. */
 sealed interface Item { val id: String }

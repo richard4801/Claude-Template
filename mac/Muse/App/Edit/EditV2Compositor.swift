@@ -23,19 +23,35 @@ final class EditV2Instruction: NSObject, AVVideoCompositionInstructionProtocol, 
 
 /// The custom compositor: each frame is drawn by the instruction's scene with Core Image (background, main A/B layers
 /// with their transition, overlays, pictures, text and captions) into a buffer from the render context.
-final class EditV2Compositor: NSObject, AVVideoCompositing, @unchecked Sendable {
+class EditV2Compositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     private let queue = DispatchQueue(label: "studio.muse.edit2.compositor", qos: .userInitiated)
     private let lock = NSLock()
     private var context: AVVideoCompositionRenderContext?
     private var generation = 0
 
+    /// XL HDR export: the HDR subclass reads and writes 10-bit / half-float frames; this one 8-bit BGRA.
+    class var hdr: Bool { false }
+    private static let sdrFormats = [kCVPixelFormatType_32BGRA]
+    private static let hdrSource = [kCVPixelFormatType_64RGBAHalf]
+    private static let hdrOutput = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange]
+
     #if compiler(>=6.0)
-    let sourcePixelBufferAttributes: [String: any Sendable]? = [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA]]
-    let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA]]
+    var sourcePixelBufferAttributes: [String: any Sendable]? {
+        [kCVPixelBufferPixelFormatTypeKey as String: Self.hdr ? Self.hdrSource : Self.sdrFormats]
+    }
+    var requiredPixelBufferAttributesForRenderContext: [String: any Sendable] {
+        [kCVPixelBufferPixelFormatTypeKey as String: Self.hdr ? Self.hdrOutput : Self.sdrFormats]
+    }
     #else
-    let sourcePixelBufferAttributes: [String: Any]? = [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA]]
-    let requiredPixelBufferAttributesForRenderContext: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA]]
+    var sourcePixelBufferAttributes: [String: Any]? {
+        [kCVPixelBufferPixelFormatTypeKey as String: Self.hdr ? Self.hdrSource : Self.sdrFormats]
+    }
+    var requiredPixelBufferAttributesForRenderContext: [String: Any] {
+        [kCVPixelBufferPixelFormatTypeKey as String: Self.hdr ? Self.hdrOutput : Self.sdrFormats]
+    }
     #endif
+    var supportsWideColorSourceFrames: Bool { Self.hdr }
+    var supportsHDRSourceFrames: Bool { Self.hdr }
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
         lock.lock()
@@ -70,6 +86,12 @@ final class EditV2Compositor: NSObject, AVVideoCompositing, @unchecked Sendable 
     }
 }
 
+/// The compositor for HDR export (HEVC 10-bit HLG): HDR and wide-colour sources come in as half floats, frames go out as
+/// 10-bit 4:2:0 tagged BT.2020 / HLG.
+final class EditV2HDRCompositor: EditV2Compositor {
+    override class var hdr: Bool { true }
+}
+
 /// Everything needed to draw any frame of one built project; thread-safe (preview and export may draw at once).
 final class EditV2Scene: @unchecked Sendable {
     typealias E = EditV2
@@ -91,10 +113,15 @@ final class EditV2Scene: @unchecked Sendable {
     private let looks: EditV2LookRenderer
     /// Edit suite: false when captions go out as an .srt instead of being drawn.
     let burnCaptions: Bool
+    /// XL HDR export: colour work on extended sRGB values (highlights above 1 survive the matrices), frames out in HLG.
+    let hdr: Bool
+    private let outSpace: CGColorSpace
 
     init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], matteTracks: [Int: CMPersistentTrackID] = [:],
-         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true) {
+         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false) {
         self.burnCaptions = burnCaptions
+        self.hdr = hdr
+        outSpace = hdr ? (CGColorSpace(name: CGColorSpace.itur_2100_HLG) ?? CGColorSpace(name: CGColorSpace.sRGB)!) : CGColorSpace(name: CGColorSpace.sRGB)!
         self.matteTracks = matteTracks
         self.matted = matted
         self.project = project
@@ -105,7 +132,12 @@ final class EditV2Scene: @unchecked Sendable {
         size = CGSize(width: plan.width, height: plan.height)
         looks = EditV2LookRenderer(imported: sources.luts)
         // Colour work (the item matrices, the chroma cube, blending) on sRGB values, as the contract defines it.
-        ci = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
+        // HDR: the same sRGB primaries, extended (values beyond 0–1 kept), so the contract's maths is unchanged for SDR-range
+        // colours; LUT looks still clip at 1.
+        let working = hdr ? (CGColorSpace(name: CGColorSpace.extendedSRGB) ?? CGColorSpace(name: CGColorSpace.sRGB)!) : CGColorSpace(name: CGColorSpace.sRGB)!
+        var opts: [CIContextOption: Any] = [.workingColorSpace: working, .outputColorSpace: outSpace]
+        if hdr { opts[.workingFormat] = NSNumber(value: CIFormat.RGBAh.rawValue) }
+        ci = CIContext(options: opts)
     }
 
     private func color(_ hex: String, alpha: Double = 1) -> CIColor {
@@ -188,7 +220,7 @@ final class EditV2Scene: @unchecked Sendable {
                 break
             }
         }
-        ci.render(image.cropped(to: canvas), to: out, bounds: canvas, colorSpace: srgb)
+        ci.render(image.cropped(to: canvas), to: out, bounds: canvas, colorSpace: outSpace)
     }
 
     private func sourceImage(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment) -> CIImage? {

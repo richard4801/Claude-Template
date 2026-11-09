@@ -198,6 +198,40 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun derivedCopies() {
+        val d = fn["derived"]!!.obj
+        val p = EditJson.parse(buildJsonObject {
+            put("version", 2); put("sourceTakeId", "tk_1")
+            put("canvas", buildJsonObject { put("width", 1080); put("height", 1920); put("fps", 30); put("background", "#000000") })
+            put("assets", d["assets"]!!)
+            put("tracks", buildJsonArray { add(buildJsonObject { put("id", "main"); put("kind", "main"); put("items", buildJsonArray { add(d["clip"]!!) }) }) })
+        })
+        for (c in d["chains"]!!.arr) {
+            val id = c.obj["asset"]!!.str
+            assertEquals("source $id", c.obj["source"]!!.str, sourceOf(p, id))
+            assertEquals("ops $id", c.obj["ops"]!!.arr.map { it.str }, derivedOps(p, id))
+            assertEquals("label $id", c.obj["label"]!!.str, derivedLabel(p, id))
+        }
+        val clip = p.mainClips.single()
+        for (s in d["swaps"]!!.arr) {
+            val op = (s.obj["op"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.let { w -> DerivedOp.entries.first { it.wire == w } }
+            assertJson("swap $op", s.obj["clip"], EditJson.encodeItem(deriveClip(clip, s.obj["copy"]!!.str, op)))
+        }
+    }
+
+    @Test fun slowmo() {
+        for (c in fn["slowmo"]!!.arr) {
+            val name = c.obj["name"]!!.str
+            val p = EditJson.parse(c.obj["project"]!!)
+            val r = applySlowmo(p, "c1", "src_sm")
+            val want = c.obj["result"]
+            if (want == null || want is JsonNull) { assertEquals(name, null, r); continue }
+            assertEquals(name, want.obj["id"]!!.str, r!!.second)
+            assertJson("slowmo $name", want.obj["project"], EditJson.encode(r.first))
+            validate(r.first)
+        }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

@@ -158,6 +158,103 @@ fun reverseClip(c: VideoClip, reversed: String, durationSec: Double): VideoClip?
         alphaMatte = null, audioAsset = null)
 }
 
+/**
+ * A clip switched to a steadied copy [copy] (op stabilize) or back to its original (op null): only the asset changes,
+ * since the copy has the same length and timing. The steadied frames are moved, so an alpha matte lined up with the
+ * original is dropped (the apps say so).
+ */
+fun deriveClip(c: VideoClip, copy: String, op: DerivedOp?): VideoClip =
+    c.copy(asset = copy, alphaMatte = if (op == DerivedOp.STABILIZE) null else c.alphaMatte)
+
+const val SLOWMO_MIN_RANGE_SEC = 0.3
+const val SLOWMO_MAX_RANGE_SEC = 10.0
+
+/** Keyframes of the item-local window [a, b]: the value at each edge plus the keys between, times from a × [scale]. */
+private fun sliceKeys(k: Keyframes?, a: Double, b: Double, scale: Double): Keyframes? = k?.let { m ->
+    m.filterValues { it.isNotEmpty() }.mapValues { (_, keys) ->
+        val ease = keys.lastOrNull { it.t <= a + 1e-9 }?.ease
+        listOf(Keyframe(0.0, r6(keyframeValue(keys, a)), ease)) +
+            keys.filter { it.t > a + 1e-9 && it.t < b - 1e-9 }.map { it.copy(t = r6((it.t - a) * scale)) } +
+            Keyframe(r6((b - a) * scale), r6(keyframeValue(keys, b)))
+    }
+}
+
+/**
+ * Smooth slow motion: the main clip [clipId] split around the source range of the slowmo copy [slowId] (made from the
+ * clip's own asset, the range inside the clip), the middle piece playing the copy (in 0, out range × factor, speed 1,
+ * muted; no alpha matte or separate sound, which were lined up with the original). Side pieces under 0.1 s of source
+ * are dropped. The first piece keeps the id, transition, fade and animation in; the last the fade and animation out;
+ * keyframes are sliced per piece (the middle's stretched). New ids are the next free `<id>.N`. Returns the project and
+ * the middle piece's id; null when it can't apply (a freeze frame, a speed curve, another asset, outside the clip).
+ */
+fun applySlowmo(p: EditProject, clipId: String, slowId: String): Pair<EditProject, String>? {
+    val main = p.tracks.first { it.kind == TrackKind.MAIN }
+    val i = main.items.indexOfFirst { it.id == clipId }
+    val c = main.items.getOrNull(i) as? VideoClip ?: return null
+    val slow = p.asset(slowId) ?: return null
+    val d = slow.derivedFrom ?: return null
+    if (d.op != DerivedOp.SLOWMO || d.asset != c.asset || c.holdSec != null || c.speedCurve != null) return null
+    val s = d.startSec ?: return null; val e = d.endSec ?: return null; val f = d.factor ?: return null
+    if (s < c.inSec - 1e-6 || e > c.outSec + 1e-6 || e - s < EditLimits.MIN_CLIP_SOURCE_SEC) return null
+    val midLen = r6(minOf((e - s) * f, slow.durationSec ?: Double.POSITIVE_INFINITY))
+    val la = (s - c.inSec) / c.speed; val lb = (e - c.inSec) / c.speed; val len = clipLength(c)
+    val ids = p.tracks.flatMap { t -> t.items.map { it.id } }.toMutableSet()
+    fun nextId(): String { var n = 2; while ("${c.id}.$n" in ids) n++; return "${c.id}.$n".also { ids += it } }
+    val base = c.copy(transitionIn = null, fadeInSec = null, fadeOutSec = null, animIn = null, animOut = null, keyframes = null)
+    val hasBefore = s - c.inSec >= EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9
+    val hasAfter = c.outSec - e >= EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9
+    val pieces = ArrayList<VideoClip>()
+    if (hasBefore) pieces += base.copy(outSec = r6(s), keyframes = sliceKeys(c.keyframes, 0.0, la, 1.0))
+    val midId = if (hasBefore) nextId() else c.id
+    pieces += base.copy(id = midId, asset = slowId, inSec = 0.0, outSec = midLen, speed = 1.0, muted = true, alphaMatte = null, audioAsset = null,
+        keyframes = sliceKeys(c.keyframes, la, lb, if (lb > la) midLen / (lb - la) else 1.0))
+    if (hasAfter) pieces += base.copy(id = nextId(), inSec = r6(e), keyframes = sliceKeys(c.keyframes, lb, len, 1.0))
+    pieces[0] = pieces[0].copy(transitionIn = c.transitionIn, fadeInSec = c.fadeInSec, animIn = c.animIn)
+    pieces[pieces.size - 1] = pieces.last().copy(fadeOutSec = c.fadeOutSec, animOut = c.animOut)
+    val items = main.items.take(i) + pieces + main.items.drop(i + 1)
+    return p.copy(tracks = p.tracks.map { if (it === main) main.copy(items = items) else it }) to midId
+}
+
+/** The helper steps from the original to [assetId], in the order applied ("stabilize", "slowmo", "reverse"). */
+fun derivedOps(p: EditProject, assetId: String): List<String> {
+    val ops = ArrayList<String>()
+    var a = p.asset(assetId)
+    var n = 0
+    while (a != null && n++ < 8) {
+        val d = a.derivedFrom
+        a = if (d != null) { ops += d.op.wire; p.asset(d.asset) }
+            else if (a.reverseOf != null) { ops += "reverse"; p.asset(a.reverseOf!!) }
+            else break
+    }
+    return ops.reversed()
+}
+
+/** The original video an asset was made from (itself when it's not a copy). */
+fun sourceOf(p: EditProject, assetId: String): String {
+    var id = assetId
+    repeat(8) {
+        val a = p.asset(id)
+        val next = a?.derivedFrom?.asset ?: a?.reverseOf
+        if (next == null || p.asset(next) == null) return id
+        id = next
+    }
+    return id
+}
+
+/** The clip's helper label in the order applied, e.g. "Steadied, reversed"; "" for an original. */
+fun derivedLabel(p: EditProject, assetId: String): String {
+    val words = ArrayList<String>()
+    var a = p.asset(assetId)
+    var n = 0
+    while (a != null && n++ < 8) {
+        val d = a.derivedFrom
+        a = if (d != null) { words += if (d.op == DerivedOp.STABILIZE) "steadied" else "smooth ${d.factor}×"; p.asset(d.asset) }
+            else if (a.reverseOf != null) { words += "reversed"; p.asset(a.reverseOf!!) }
+            else break
+    }
+    return words.reversed().joinToString(", ").replaceFirstChar { it.uppercase() }
+}
+
 fun clipLength(c: MediaClip): Double = (c as? VideoClip)?.holdSec ?: clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 /** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */

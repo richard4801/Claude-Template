@@ -194,7 +194,8 @@ const projectKeys: Table<M.EditProject> = { version: meta('always 2'), sourceTak
   tracks: nested, mute: { mut: (_o, p) => { p.mute = true; } } };
 const assetKeys: Table<M.Asset> = { id: meta('an id'), kind: meta('the kind of file'), take: meta('a reference the caller resolves into files'), upload: meta('a reference the caller resolves into files'),
   library: meta('a reference the caller resolves into files (missing → listed)'), reverseOf: meta('the reversed copy is a file of its own; clips play it as any asset'), url: meta('a reference the caller resolves into files'), durationSec: meta('the file is probed'),
-  width: meta('the file is probed'), height: meta('the file is probed'), hasAudio: meta('the file is probed'), name: meta('display only') };
+  width: meta('the file is probed'), height: meta('the file is probed'), hasAudio: meta('the file is probed'), name: meta('display only'),
+  derivedFrom: meta('a steadied or slowed copy is a file of its own; clips play it as any asset') };
 
 // ------------------------------------------------------------------ every place a field can be
 /** coveredBy: while the whole place is listed under this name, its fields are too. */

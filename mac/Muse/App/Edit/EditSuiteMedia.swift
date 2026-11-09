@@ -170,6 +170,45 @@ enum EditSuiteMedia {
         }.value
     }
 
+    /// Auto reframe (XL): the face to follow in a clip, five times a second (at most 300 frames, decoded at 480 px), as
+    /// Android's Reframe.kt: the largest face first, then the one nearest the last (|Δx| + 0.5 · (1 − width)); a frame
+    /// without a face is a sample with no x (the position holds).
+    static func faceTrack(_ url: URL, clip c: EditV2.VideoClip, progress: @escaping @MainActor (Double) -> Void) async -> [EditV2.FaceSample] {
+        let len = EditV2.clipLength(c)
+        guard len > 0 else { return [] }
+        let n = max(2, min(300, Int((len * 5).rounded(.up)) + 1))
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 480, height: 480)
+        gen.requestedTimeToleranceBefore = CMTime(seconds: 0.04, preferredTimescale: 600)
+        gen.requestedTimeToleranceAfter = CMTime(seconds: 0.04, preferredTimescale: 600)
+        var out: [EditV2.FaceSample] = []
+        var last: Double?
+        for i in 0..<n {
+            if Task.isCancelled { return [] }
+            let t = len * Double(i) / Double(n - 1)
+            let src = EditV2.clipSourceAt(c, t)
+            var faces: [CGRect] = []
+            if let cg = try? await gen.image(at: CMTime(seconds: src, preferredTimescale: 600)).image {
+                faces = await Task.detached(priority: .userInitiated) { () -> [CGRect] in
+                    let req = VNDetectFaceRectanglesRequest()
+                    guard (try? VNImageRequestHandler(cgImage: cg, options: [:]).perform([req])) != nil else { return [] }
+                    return (req.results ?? []).map(\.boundingBox)
+                }.value
+            }
+            let pick: CGRect?
+            if let l = last {
+                pick = faces.min { abs(Double($0.midX) - l) + 0.5 * (1 - Double($0.width)) < abs(Double($1.midX) - l) + 0.5 * (1 - Double($1.width)) }
+            } else {
+                pick = faces.max { $0.width * $0.height < $1.width * $1.height }
+            }
+            if let f = pick { last = Double(f.midX) }
+            out.append(EditV2.FaceSample(t: t, x: pick.map { Double($0.midX) }))
+            await progress(Double(i + 1) / Double(n))
+        }
+        return out
+    }
+
     /// Face framing for every main clip (by clip id), for EditSuiteState.setRatio.
     static func framing(_ p: EditV2.Project, files: [String: URL]) async -> [String: Double] {
         var out: [String: Double] = [:]

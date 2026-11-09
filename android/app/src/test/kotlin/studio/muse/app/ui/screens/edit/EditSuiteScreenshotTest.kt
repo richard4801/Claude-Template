@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -221,6 +221,12 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 ui = c.ui.value.copy(message = null)
                 host = host.copy(contentUrl = { path -> java.io.File(dir, path).absolutePath }, addContent = {}, soundPlaying = if (state == "c_sfx") "content:uisfx/cinematic-success" else null)
             }
+            "x_reframe" -> {
+                // A 16:9 take in a 9:16 edit, half-way through finding faces.
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1920, 1080, 30.0, true)).let { it.copy(canvas = it.canvas.copy(width = 1080, height = 1920)) }
+                ui = ui.copy(project = one, playheadSec = 1.0, selectedId = one.mainClips[0].id, panel = Panel.TRANSFORM, reframing = 0.45f)
+                host = host.copy(reframe = {})
+            }
             "m_reverse" -> {
                 // The reversed copy already in the edit: the toggle swaps to it.
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true)).let { o ->
@@ -232,6 +238,21 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 }, ui.copy(project = one, playheadSec = 1.0, selectedId = null))
                 c.act(EditAction.Select(one.mainClips[0].id)); c.act(EditAction.Reverse(true)); c.act(EditAction.Speed(1.5))
                 c.act(EditAction.Open(Panel.SPEED))
+                ui = c.ui.value.copy(message = null)
+            }
+            "x_slowmo" -> {
+                // Steadied (the copy already in the edit), and smooth slow motion priced for 1.5 s at 4×.
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true)).let { o ->
+                    o.copy(assets = o.assets + o.assets.first().copy(id = "src_st", take = null, upload = "up_st", derivedFrom = studio.muse.core.edit.DerivedFrom(o.assets.first().id, studio.muse.core.edit.DerivedOp.STABILIZE)))
+                }
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) =
+                        studio.muse.app.data.EditorEstimate(kind, 0.06, 6.0) to null
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 2.0, selectedId = null))
+                c.act(EditAction.Select(one.mainClips[0].id)); c.act(EditAction.Stabilize(true))
+                c.act(EditAction.Open(Panel.SPEED)); c.act(EditAction.SlowmoPrice(2, 2.0))
+                kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(200) }
                 ui = c.ui.value.copy(message = null)
             }
             "m_hsl" -> {

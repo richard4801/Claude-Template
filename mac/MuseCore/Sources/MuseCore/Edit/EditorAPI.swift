@@ -8,6 +8,8 @@ public enum EditorJobKind: String, Codable, Hashable, Sendable, CaseIterable {
     case captions, cuts, matte, denoise, beats
     /// Reverse (WS8 cb5413e): a reversed copy of the whole source (≤ 60 s), local and free.
     case reverse
+    /// Stabilise (XL, WS16 d206d37): a steadied copy of the whole source (≤ 3 min), the same length and timing; free.
+    case stabilize
 }
 
 /// The media a job works on: a video take of the studio, or an upload of the studio (+ its length).
@@ -78,7 +80,7 @@ extension EditorJobKind {
         case .captions, .cuts: return .captions
         case .matte: return options?.points != nil ? .track : .matte
         case .denoise: return .denoise
-        case .beats, .reverse: return nil
+        case .beats, .reverse, .stabilize: return nil
         }
     }
 }
@@ -99,8 +101,10 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
     public var captions: Helper?
     public var matte: Helper?
     public var denoise: Helper?
-    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil) {
-        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise
+    /// Stabilise (free, up to `maxSec`).
+    public var stabilize: Helper?
+    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil, stabilize: Helper? = nil) {
+        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise; self.stabilize = stabilize
     }
     /// Background removal (and tap to keep) can run.
     public var matteAvailable: Bool { isAvailable(.matte) }
@@ -110,13 +114,14 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
         case .captions: return captions
         case .matte: return matte
         case .denoise: return denoise
+        case .stabilize: return stabilize
         case .cuts, .beats, .reverse: return nil   // the free passes are always offered
         }
     }
     private var paidOn: Bool { paid?.available != false }
     public func isAvailable(_ k: EditorJobKind) -> Bool {
         guard let h = helper(k) else { return true }
-        return h.available != false && (paidOn || k == .cuts || k == .beats || k == .reverse)
+        return h.available != false && (paidOn || k == .cuts || k == .beats || k == .reverse || k == .stabilize)
     }
     /// Why a helper can't run, in plain words: the owner's switch, else "Coming soon" (background removal not ready yet).
     public func note(_ k: EditorJobKind) -> String? {

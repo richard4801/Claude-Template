@@ -335,12 +335,31 @@ extension EditV2 {
         public var name: String?
         /// Reverse (WS8 cb5413e): this video asset is that video asset played backwards.
         public var reverseOf: String?
+        /// A video asset made from another by a helper (WS8 2df521a): stabilize (same length and timing) or slowmo (a range
+        /// with frames interpolated, factor× as long, silent).
+        public var derivedFrom: DerivedFrom?
         public init(id: String, kind: AssetKind, take: String? = nil, upload: String? = nil, library: String? = nil, durationSec: Double? = nil,
                     width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil, name: String? = nil) {
             self.id = id; self.kind = kind; self.take = take; self.upload = upload; self.library = library; self.durationSec = durationSec
             self.width = width; self.height = height; self.hasAudio = hasAudio; self.url = url; self.name = name
         }
     }
+
+    public enum DerivedOp: String, Codable, Hashable, Sendable, CaseIterable { case stabilize, slowmo }
+    /// How a helper copy was made. `op` stays a string so validation can name an unknown one; the range fields belong to
+    /// slowmo only (validation refuses them on a steadied copy).
+    public struct DerivedFrom: Codable, Hashable, Sendable {
+        public var asset: String
+        public var op: String
+        public var startSec: Double?
+        public var endSec: Double?
+        public var factor: Double?
+        public init(asset: String, op: DerivedOp, startSec: Double? = nil, endSec: Double? = nil, factor: Double? = nil) {
+            self.asset = asset; self.op = op.rawValue; self.startSec = startSec; self.endSec = endSec; self.factor = factor
+        }
+        public var kind: DerivedOp? { DerivedOp(rawValue: op) }
+    }
+    public static let slowmoFactors: [Double] = [2, 4], slowmoMinRangeSec = 0.3, slowmoMaxRangeSec = 10.0
 
     /// A clip on the main track (back to back, no startSec) or an overlay video (`video` track, with startSec).
     public struct VideoClip: Codable, Hashable, Sendable, Identifiable {

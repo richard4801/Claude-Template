@@ -765,6 +765,7 @@ final class EditSuiteSession {
         case .cuts: return "Cut silences"
         case .beats: return "Detect beats"
         case .reverse: return "Reverse"
+        case .stabilize: return "Stabilise"
         }
     }
 
@@ -892,6 +893,7 @@ final class EditSuiteSession {
     /// separate sound are aligned to the original's frames, so they're dropped (and the notice says so).
     func toggleReverse() async {
         guard let c = state.selectedVideo else { lastError = "Select a clip to reverse"; return }
+        if let last = state.blockingStep(for: "reverse") { lastError = "Turn off \(EditSuiteState.stepName(last)) first"; return }
         if let orig = state.reversedFrom, let a = project.asset(orig) { switchReverse(to: a); return }
         if let copy = state.reversedCopy(of: c.asset) { switchReverse(to: copy); return }
         guard c.holdSec == nil else { lastError = "A freeze frame has nothing to reverse"; return }
@@ -921,6 +923,44 @@ final class EditSuiteSession {
         let backwards = target.reverseOf != nil
         if dropped.isEmpty { notice = backwards ? "Plays backwards" : "Plays forwards again" }
         else { notice = "\(backwards ? "Plays backwards" : "Plays forwards again") · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)" }
+    }
+
+    /// Stabilise (XL, WS16's free job, WS8's derivedFrom): the selected clip plays a steadied copy of its source, made once
+    /// by the server (up to 3 minutes) and kept in the edit; toggling back switches to the original at once. Only the last
+    /// helper step switches off. The steadied frames move, so background removal is dropped (the notice says so).
+    func toggleStabilize() async {
+        guard let c = state.selectedVideo else { lastError = "Select a clip to steady"; return }
+        if let last = state.blockingStep(for: "stabilize") { lastError = "Turn off \(EditSuiteState.stepName(last)) first"; return }
+        if let orig = state.steadiedFrom, let a = project.asset(orig) { switchStabilize(to: a); return }
+        if let copy = state.steadiedCopy(of: c.asset) { switchStabilize(to: copy); return }
+        guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Stabilise needs a take or an upload"; return }
+        if let max = features?.stabilize?.maxSec, let d = a.durationSec, d > max + 0.01 {
+            lastError = "Stabilise works on videos up to \(Int(max / 60)) minutes"; return
+        }
+        await run(.stabilize, source: src) { [weak self] r in
+            Task { @MainActor in await self?.addSteadied(r, of: a) }
+        }
+    }
+
+    private func addSteadied(_ r: EditorJobResult, of a: E.Asset) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't steady this clip"; return }
+        let id = project.newId("v")
+        var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: ra.durationSec ?? r.durationSec ?? a.durationSec,
+                           width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: r.hasAudio ?? a.hasAudio, url: ra.url)
+        copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .stabilize)
+        let link = ra.url ?? ra.take.flatMap { lookupTake($0)?.videoUrl }
+        if let link, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? ra.take ?? id) { files[id] = local }
+        else if ra.upload == a.upload, ra.take == a.take { files[id] = files[a.id] }   // the fake hands back the source itself
+        state.assetNames[id] = "Steadied"
+        switchStabilize(to: copy)
+    }
+
+    private func switchStabilize(to target: E.Asset) {
+        var dropped: [String]?
+        edit { s in dropped = s.stabilizeSelected(to: target); return dropped != nil }
+        guard let dropped else { return }
+        let on = target.derivedFrom?.kind == .stabilize
+        notice = (on ? "Steadied" : "Stabilise off") + (dropped.isEmpty ? "" : " · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)")
     }
 
     func setRemoveBackground(_ on: Bool) async {
@@ -1260,6 +1300,27 @@ final class EditSuiteSession {
         edit { s in s.changeVisual { v in v.look = look } }
     }
 
+    // MARK: Auto reframe (XL, owner-approved): the selected clip follows a face, on this Mac (Vision)
+
+    /// 0…1 while faces are being found in the selected clip; nil otherwise.
+    var reframeProgress: Double?
+    @ObservationIgnored private var reframeTask: Task<Void, Never>?
+
+    func followFaces() {
+        guard reframeProgress == nil, let c = state.selectedVideo, let url = files[c.asset] else { return }
+        reframeProgress = 0
+        reframeTask = Task { [weak self] in
+            let samples = await EditSuiteMedia.faceTrack(url, clip: c) { v in self?.reframeProgress = v }
+            guard let self, !Task.isCancelled else { self?.reframeProgress = nil; return }
+            self.reframeProgress = nil
+            // The clip may have changed meanwhile: only the same clip, unchanged.
+            guard self.state.selectedVideo == c else { self.lastError = "The clip changed while finding faces · try again"; return }
+            if self.edit({ $0.followFaces(samples) }) { self.notice = "The clip follows the face · \(self.state.selectedVideo?.keyframes?.x?.count ?? 0) keys" }
+        }
+    }
+
+    func cancelFollowFaces() { reframeTask?.cancel(); reframeTask = nil; reframeProgress = nil }
+
     // MARK: Style kits (parity, shared kit engine)
 
     /// The studio's saved style kits (members: their own), newest first; nil until loaded.
@@ -1364,15 +1425,16 @@ final class EditSuiteSession {
                 // Captions go out as an .srt only next to a saved file; the Library's video always carries them burnt in
                 // (Mac Edit audit: "Save to Library" with .SRT lost the captions).
                 let burn = settings.captions == .burnIn || saveFileTo == nil
-                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn)
+                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn, hdr: settings.hdr)
                 let onProgress: @MainActor (Double) -> Void = { [weak self] v in
                     if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
                 }
-                if settings.bitrate == .recommended {
+                if settings.bitrate == .recommended, !settings.hdr {
                     try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc, progress: onProgress)
                 } else {
-                    // A chosen bitrate (parity): reader → writer at the size estimate's rate × the choice.
-                    try await EditV2Engine.write(built, to: file, hevc: settings.codec == .hevc, bitrate: settings.videoBitrate, progress: onProgress)
+                    // A chosen bitrate (parity), or HDR (HEVC Main 10, HLG): reader → writer at the size estimate's rate.
+                    try await EditV2Engine.write(built, to: file, hevc: settings.effectiveCodec == .hevc, bitrate: settings.videoBitrate,
+                                                 hdr: settings.hdr, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)
