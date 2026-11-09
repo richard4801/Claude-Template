@@ -71,6 +71,19 @@ struct TransformPanel: View {
             row("Scale", value: sc, range: 0.1...4, prop: .scale, fmt: { "\(Int(($0 * 100).rounded()))%" }) { n in session.edit { $0.setVisualValue(.scale, n) } }
             row("Rotation", value: rot, range: -180...180, prop: .rotation, fmt: { "\(Int($0.rounded()))°" }) { n in session.edit { $0.setVisualValue(.rotation, n) } }
             row("Opacity", value: op, range: 0...1, prop: .opacity, fmt: { "\(Int(($0 * 100).rounded()))%" }) { n in session.edit { $0.setVisualValue(.opacity, n) } }
+            if s.selectedVideo != nil {
+                // Auto reframe (XL, owner-approved): Vision finds the face on this Mac; the clip gets position keys.
+                HStack(spacing: Space.s2) {
+                    if let p = session.reframeProgress {
+                        ProgressView(value: p).frame(maxWidth: 120)
+                        Text("Finding faces…").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        SuiteToolButton(title: "Stop", plain: true) { session.cancelFollowFaces() }
+                    } else {
+                        SuiteToolButton(title: "Follow faces", icon: "user") { session.followFaces() }
+                            .help("Keeps the main face centred as it moves, with position keyframes")
+                    }
+                }
+            }
             if visual.keyframes.map({ !$0.isEmpty }) == true {
                 VStack(alignment: .leading, spacing: Space.s2) {
                     Text("Ease").font(t.scale.label.font).foregroundStyle(t.roles.ink)

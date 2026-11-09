@@ -185,7 +185,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Background colour | Has | Has | S | `canvas.background` exists; no picker. Mac: Video → Background colour on main clips (wave 1). Android: Ratio → Background (wave 1). |
 | Background blur fill | Has | Has | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). Mac: Video → Background: Blur (wave 1). |
 | Fit / fill per clip | Has | Has | S | Model `fit`; no toggle. Mac: Transform → Frame: Fill / Fit (wave 1). Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
-| Auto reframe (faces) | Partial | Has | M | Re-centring on ratio change exists; face-aware reframe is in the spec but not on Android. Mac: Vision faces on a ratio change |
+| Auto reframe (faces) | Partial | Has | M | Re-centring on ratio change exists; face-aware reframe is in the spec but not on Android. Mac: Vision faces on a ratio change; and Transform → "Follow faces": Vision finds the main face 5×/s on this Mac and the clip gets x keyframes that keep it centred without showing an edge, with the same smoothing, dead zone and thinning as Android (Reframe.kt) (WS9, XL owner-approved). |
 
 ## 11. Stickers
 

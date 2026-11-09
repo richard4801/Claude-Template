@@ -1260,6 +1260,27 @@ final class EditSuiteSession {
         edit { s in s.changeVisual { v in v.look = look } }
     }
 
+    // MARK: Auto reframe (XL, owner-approved): the selected clip follows a face, on this Mac (Vision)
+
+    /// 0…1 while faces are being found in the selected clip; nil otherwise.
+    var reframeProgress: Double?
+    @ObservationIgnored private var reframeTask: Task<Void, Never>?
+
+    func followFaces() {
+        guard reframeProgress == nil, let c = state.selectedVideo, let url = files[c.asset] else { return }
+        reframeProgress = 0
+        reframeTask = Task { [weak self] in
+            let samples = await EditSuiteMedia.faceTrack(url, clip: c) { v in self?.reframeProgress = v }
+            guard let self, !Task.isCancelled else { self?.reframeProgress = nil; return }
+            self.reframeProgress = nil
+            // The clip may have changed meanwhile: only the same clip, unchanged.
+            guard self.state.selectedVideo == c else { self.lastError = "The clip changed while finding faces · try again"; return }
+            if self.edit({ $0.followFaces(samples) }) { self.notice = "The clip follows the face · \(self.state.selectedVideo?.keyframes?.x?.count ?? 0) keys" }
+        }
+    }
+
+    func cancelFollowFaces() { reframeTask?.cancel(); reframeTask = nil; reframeProgress = nil }
+
     // MARK: Style kits (parity, shared kit engine)
 
     /// The studio's saved style kits (members: their own), newest first; nil until loaded.
