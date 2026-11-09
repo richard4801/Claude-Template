@@ -130,6 +130,7 @@ object EditJson {
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
         keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), animLoop = loop(o),
         blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
+        transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
     )
 
     private fun textItem(o: Obj) = TextItem(
@@ -307,6 +308,7 @@ object EditJson {
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
             anim("animIn", it.animIn); anim("animOut", it.animOut); str("blend", it.blend?.wire); loop(it.animLoop)
+            it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
         }
         is TextItem -> buildJsonObject {
             put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec); put("text", it.text); put("style", encodeTextStyle(it.style))

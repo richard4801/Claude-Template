@@ -283,6 +283,8 @@ data class ImageItem(
     /** Wave 1: overlay blend mode. */
     val blend: BlendMode? = null,
     val animLoop: AnimLoop? = null,
+    /** A cross-dissolve from the previous item on its track (kind fade; the item overlaps it by its length); see [overlayFade]. */
+    val transitionIn: Transition? = null,
 ) : Visual
 
 data class Stroke(val color: String, val widthPct: Double)

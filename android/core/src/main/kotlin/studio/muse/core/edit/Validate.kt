@@ -162,7 +162,16 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             }
             if (t.kind != TrackKind.MAIN) {
                 val s = when (it) { is VideoClip -> it.startSec ?: Double.NaN; is AudioClip -> it.startSec; is ImageItem -> it.startSec; is TextItem -> it.startSec; is AdjustItem -> it.startSec }
-                if (s < prevEnd - EditLimits.OVERLAP_SLACK_SEC) bad("$g.startSec", "items on a track must be in order and not overlap")
+                // Cross-dissolve between overlays (2026-11-09): the one allowed overlap, by exactly the transition's length.
+                val tr = when (it) { is VideoClip -> it.transitionIn; is ImageItem -> it.transitionIn; else -> null }
+                if (tr != null) {
+                    if (ii == 0) bad("$g.transitionIn", "the first item has no transition")
+                    if (tr.kind != TransitionKind.FADE) bad("$g.transitionIn.kind", "only a cross-dissolve on overlay tracks")
+                    num("$g.transitionIn.durationSec", tr.durationSec, EditLimits.MIN_TRANSITION_SEC, EditLimits.MAX_TRANSITION_SEC, false)
+                    val ps = itemSpan(p, t, t.items[ii - 1]); val me = itemSpan(p, t, it)
+                    if (kotlin.math.abs(s - (ps.endSec - tr.durationSec)) > 0.01) bad("$g.transitionIn.durationSec", "must overlap the previous item by its length")
+                    if (tr.durationSec > (me.endSec - me.startSec) / 2 + 1e-9 || tr.durationSec > (ps.endSec - ps.startSec) / 2 + 1e-9) bad("$g.transitionIn.durationSec", "at most half of each item")
+                } else if (s < prevEnd - EditLimits.OVERLAP_SLACK_SEC) bad("$g.startSec", "items on a track must be in order and not overlap")
                 prevEnd = itemSpan(p, t, it).endSec
             }
         }
@@ -322,7 +331,6 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
                 if (tr.durationSec > clipLength(c) / 2 + 1e-9 || tr.durationSec > clipLength(prev) / 2 + 1e-9) bad("$g.transitionIn.durationSec", "at most half of each clip")
             }
         } else {
-            if (c.transitionIn != null) bad("$g.transitionIn", "transitions are on the main track only")
             num("$g.startSec", c.startSec, 0.0, 600.0, false)
         }
     }

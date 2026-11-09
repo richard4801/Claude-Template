@@ -76,7 +76,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Transitions (cut, fade, dip to black/white, slide, push, zoom, whip, spin, glitch) | Has | Has | — | 9 types, own design. Android: 7 more kinds (zoom out, whip right, cover left/right/up/down, split fade), contract 2026-11-09, as presets in Effects → More transitions. |
 | Duration, apply to all | Has | Has | — | |
 | More transition types | Has | Has | M each | Functional, but the value is in a curated set: **Content** Android: the seven kinds and 12 in-house presets under More transitions (content library, WS8). Mac: seven more kinds (zoom out, whip right, cover ×4, split fade) and 12 in-house presets as chips (content library, WS9). |
-| Transitions on overlay tracks | Partial | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut` (no cross-dissolve between overlays). |
+| Transitions on overlay tracks | Has | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut`, and (2026-11-09) a cross-dissolve from the previous item on the track: `transitionIn` fade on overlay clips and images, the item overlapping the previous one by its length (`overlayFade`, shared fixture `overlayFades`); a dissolving track plays on two layers. Transform → "Dissolve from previous". Server render: WS16. Mac: WS9 |
 | Clip in/out animations (video) | Has | Has | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). Mac: Animate panel on any video clip, main or overlay (`animIn`/`animOut`), preview and export. |
 
 ## 4. Text, captions and animation

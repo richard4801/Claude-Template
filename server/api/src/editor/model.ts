@@ -78,7 +78,9 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
   animLoop?: AnimLoop };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
-export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop };
+export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop;
+  /** A cross-dissolve from the previous item on its track (kind fade; the item overlaps it by durationSec); see overlayFade. */
+  transitionIn?: Transition };
 /** The six bundled families, then the content library's (catalog `fonts` pack; Cyrillic and Latin Extended). */
 export type FontFamily = 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'
   | 'inter' | 'montserrat' | 'robotoCondensed' | 'playfair' | 'unbounded' | 'rubik' | 'jetbrainsMono' | 'caveat' | 'oswald';
@@ -421,6 +423,25 @@ export function derivedLabel(p: Pick<EditProject, 'assets'>, assetId: string): s
   }
   const s = words.reverse().join(', ');
   return s ? s[0]!.toUpperCase() + s.slice(1) : '';
+}
+
+/**
+ * Cross-dissolve between overlays: the alpha multiplier of [item] on overlay [track] at timeline [t] (after keyframes
+ * and animation, before blend). An item with a fade transitionIn rises over its first durationSec; the item before it
+ * falls over the same overlap. 1 elsewhere.
+ */
+export function overlayFade(p: EditProject, track: Track, item: Item, t: number): number {
+  if (track.kind !== 'video' && track.kind !== 'image') return 1;
+  const i = track.items.findIndex(x => x.id === item.id);
+  if (i < 0) return 1;
+  const me = itemSpan(p, track, item);
+  let a = 1;
+  const tin = (item as { transitionIn?: Transition }).transitionIn;
+  if (tin && i > 0 && t < me.startSec + tin.durationSec) a *= clamp((t - me.startSec) / tin.durationSec, 0, 1);
+  const next = track.items[i + 1];
+  const tn = next && (next as { transitionIn?: Transition }).transitionIn;
+  if (next && tn) { const ns = itemSpan(p, track, next).startSec; if (t >= ns) a *= clamp(1 - (t - ns) / tn.durationSec, 0, 1); }
+  return r6(a);
 }
 
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
@@ -1297,7 +1318,6 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
               bad(`${g}.transitionIn.durationSec`, 'at most half of each clip');
           }
         } else {
-          if (c.transitionIn !== undefined) bad(`${g}.transitionIn`, 'transitions are on the main track only');
           num(`${g}.startSec`, c.startSec, 0, 600, false);
         }
       } else if (t.kind === 'image') {
@@ -1337,7 +1357,17 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
       }
       if (t.kind !== 'main') {
         const s = (it as { startSec: number }).startSec;
-        if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, 'items on a track must be in order and not overlap');
+        // Cross-dissolve between overlays (2026-11-09): the one allowed overlap, by exactly the transition's length.
+        const tr = (t.kind === 'video' || t.kind === 'image') ? (it as { transitionIn?: Transition }).transitionIn : undefined;
+        if (tr !== undefined) {
+          if (ii === 0) bad(`${g}.transitionIn`, 'the first item has no transition');
+          if (tr.kind !== 'fade') bad(`${g}.transitionIn.kind`, 'only a cross-dissolve on overlay tracks');
+          num(`${g}.transitionIn.durationSec`, tr.durationSec, LIMITS.minTransitionSec, LIMITS.maxTransitionSec, false);
+          const prev = t.items[ii - 1]!; const ps = itemSpan(p, t, prev); const me = itemSpan(p, t, it);
+          if (Math.abs(s - (ps.endSec - tr.durationSec)) > 0.01) bad(`${g}.transitionIn.durationSec`, 'must overlap the previous item by its length');
+          if (tr.durationSec > (me.endSec - me.startSec) / 2 + 1e-9 || tr.durationSec > (ps.endSec - ps.startSec) / 2 + 1e-9) bad(`${g}.transitionIn.durationSec`, 'at most half of each item');
+        } else if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, 'items on a track must be in order and not overlap');
+        if ((t.kind === 'text' || t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') && (it as { transitionIn?: unknown }).transitionIn !== undefined) bad(`${g}.transitionIn`, 'transitions are on the main track and overlays only');
         const span = itemSpan(p, t, it);
         prevEnd = span.endSec;
       }

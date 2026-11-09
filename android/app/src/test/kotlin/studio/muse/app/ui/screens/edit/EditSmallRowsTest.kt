@@ -530,6 +530,25 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun overlayDissolve() = runTest {
+        val c = controller()
+        val p0 = c.p()
+        val logo = studio.muse.core.edit.Asset("logo", studio.muse.core.edit.AssetKind.IMAGE, upload = "up_logo", width = 512, height = 512)
+        val imgs = studio.muse.core.edit.Track("imgs", TrackKind.IMAGE, items = listOf(
+            studio.muse.core.edit.ImageItem("i1", "logo", 1.0, 2.0), studio.muse.core.edit.ImageItem("i2", "logo", 3.0, 2.0)))
+        c.load(p0.copy(assets = p0.assets + logo, tracks = p0.tracks + imgs), "T", "take_1", null, false)
+        c.act(EditAction.OverlayDissolve("i2", .5))
+        fun i2() = c.p().tracks.first { it.id == "imgs" }.items[1] as studio.muse.core.edit.ImageItem
+        assertEquals(2.5, i2().startSec, 1e-9); assertEquals(.5, i2().transitionIn!!.durationSec, 1e-9)
+        valid(c.p())
+        c.act(EditAction.OverlayDissolve("i2", 5.0)) // capped at half of each item
+        assertEquals(1.0, i2().transitionIn!!.durationSec, 1e-9); assertEquals(2.0, i2().startSec, 1e-9)
+        valid(c.p())
+        c.act(EditAction.OverlayDissolve("i2", null))
+        assertEquals(3.0, i2().startSec, 1e-9); assertNull(i2().transitionIn)
+        c.act(EditAction.OverlayDissolve("i1", .5)); assertEquals("A dissolve needs a clip right before this one on its track", c.ui.value.message)
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

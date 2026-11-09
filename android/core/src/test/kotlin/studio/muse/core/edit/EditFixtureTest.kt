@@ -292,6 +292,31 @@ class EditFixtureTest {
         wp.forEachIndexed { i, pg -> assertEquals(pg.obj["startSec"]!!.num, pages[i].startSec, 1e-6); assertEquals(pg.obj["endSec"]!!.num, pages[i].endSec, 1e-6) }
     }
 
+    @Test fun overlayFades() {
+        val d = fn["overlayFades"]!!.obj
+        val p = EditJson.parse(d["project"]!!)
+        validate(p)
+        for (smp in d["samples"]!!.arr) {
+            val t = smp.obj["t"]!!.num
+            for ((id, a) in smp.obj["alpha"]!!.obj) {
+                val tr = p.tracks.first { tr -> tr.items.any { it.id == id } }
+                assertEquals("$id at $t", a.num, overlayFade(p, tr, tr.items.first { it.id == id }, t), 1e-6)
+            }
+        }
+        // The overlay track with a dissolve plays on two layers; mid-dissolve the pair composes as "incoming on top".
+        val plan = planRender(p, emptyMap())
+        val pip = plan.layers.filter { it.role == LayerRole.OVERLAY && it.trackId == "pipt" }
+        assertEquals(2, pip.size)
+        val t = 2.75
+        val a1 = plan.placement(pip.first { l -> l.clips.any { it.itemId == "p1" } }.index, t).alpha
+        val a2 = plan.placement(pip.first { l -> l.clips.any { it.itemId == "p2" } }.index, t).alpha
+        val p1First = pip.first { l -> l.clips.any { it.itemId == "p1" } }.index < pip.first { l -> l.clips.any { it.itemId == "p2" } }.index
+        // Wanted: in (0.5) over out (0.5): bg weight (1 − .5)(1 − .5) = .25, either order.
+        val bg = (1 - a1) * (1 - a2)
+        assertEquals(0.25, bg, 1e-6)
+        if (p1First) assertEquals(0.25, a1, 1e-6) else assertEquals(0.5, a2, 1e-6)
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

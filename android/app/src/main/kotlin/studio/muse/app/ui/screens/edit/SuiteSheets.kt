@@ -516,6 +516,8 @@ private fun TransformBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) ->
         is studio.muse.core.edit.ImageItem -> { AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act); LoopPicker(item.id, item.animLoop, act) }
         else -> {}
     }
+    // Cross-dissolve from the previous item on this overlay track (it must touch it, or already dissolve from it).
+    if (item is VideoClip && overlayTrack || item is studio.muse.core.edit.ImageItem) ui.project?.let { p -> DissolveRow(p, item, act) }
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     if (!keys.isNullOrEmpty()) {
         SuiteLabel("Easing")
@@ -908,6 +910,18 @@ private fun LanguageBody(ui: EditSuiteUi, ct: studio.muse.core.edit.CaptionTrack
             SuiteButton(job?.price?.let { "Translate · $it" } ?: "Translate", { act(EditAction.Translate(target, best)) }, Modifier.fillMaxWidth(), enabled = job?.price != null, primary = true)
         }
     }
+}
+
+/** "Dissolve from previous": on, the item moves earlier by the length and fades in over the item before it. */
+@Composable
+private fun DissolveRow(p: EditProject, item: studio.muse.core.edit.Item, act: (EditAction) -> Unit) {
+    val m = muse
+    val tr = when (item) { is VideoClip -> item.transitionIn; is studio.muse.core.edit.ImageItem -> item.transitionIn; else -> null }
+    if (tr == null && SuiteOps.dissolvePrevious(p, item.id) == null) return
+    OptRow("Dissolve from previous", if (tr != null) "Fades in over the clip before it" else "Fades in over the clip before it, which it touches", tr != null,
+        { act(EditAction.OverlayDissolve(item.id, if (tr != null) null else .5)) })
+    if (tr != null) SuiteSlider(((tr.durationSec - .1) / 1.9).toFloat(), { f, done -> act(EditAction.OverlayDissolve(item.id, Math.round((.1 + f * 1.9) * 10) / 10.0, done)) },
+        label = "Dissolve length", valueText = "${fmt1(tr.durationSec)} s")
 }
 
 @Composable

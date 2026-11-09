@@ -215,6 +215,23 @@ fun applySlowmo(p: EditProject, clipId: String, slowId: String): Pair<EditProjec
     return p.copy(tracks = p.tracks.map { if (it === main) main.copy(items = items) else it }) to midId
 }
 
+/**
+ * Cross-dissolve between overlays: the alpha multiplier of [item] on overlay [track] at timeline [t] (after keyframes
+ * and animation, before blend). An item with a fade transitionIn rises over its first durationSec; the item before it
+ * falls over the same overlap. 1 elsewhere (meaningful while the item is on screen).
+ */
+fun overlayFade(p: EditProject, track: Track, item: Item, t: Double): Double {
+    if (track.kind != TrackKind.VIDEO && track.kind != TrackKind.IMAGE) return 1.0
+    val i = track.items.indexOfFirst { it.id == item.id }
+    if (i < 0) return 1.0
+    fun tin(x: Item) = when (x) { is VideoClip -> x.transitionIn; is ImageItem -> x.transitionIn; else -> null }
+    val me = itemSpan(p, track, item)
+    var a = 1.0
+    tin(item)?.let { tr -> if (i > 0 && t < me.startSec + tr.durationSec) a *= ((t - me.startSec) / tr.durationSec).coerceIn(0.0, 1.0) }
+    track.items.getOrNull(i + 1)?.let { n -> tin(n)?.let { tr -> val ns = itemSpan(p, track, n).startSec; if (t >= ns) a *= (1 - (t - ns) / tr.durationSec).coerceIn(0.0, 1.0) } }
+    return r6(a)
+}
+
 /** The helper steps from the original to [assetId], in the order applied ("stabilize", "slowmo", "reverse"). */
 fun derivedOps(p: EditProject, assetId: String): List<String> {
     val ops = ArrayList<String>()

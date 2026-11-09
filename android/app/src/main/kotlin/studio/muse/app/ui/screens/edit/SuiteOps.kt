@@ -174,6 +174,38 @@ object SuiteOps {
         editKeys(p, id) { k -> k.mapValues { (pr, l) -> if (prop == null || pr == prop) l.filter { abs(it.t - t) > 0.05 } else l } }
 
     // ------------------------------------------------------------ captions
+    /** The overlay item before [itemId] on its track when it ends where [itemId] starts (a cross-dissolve can join them). */
+    fun dissolvePrevious(p: EditProject, itemId: String): studio.muse.core.edit.Item? {
+        val t = p.tracks.firstOrNull { tr -> tr.items.any { it.id == itemId } }?.takeIf { it.kind == TrackKind.VIDEO || it.kind == TrackKind.IMAGE } ?: return null
+        val i = t.items.indexOfFirst { it.id == itemId }
+        val prev = t.items.getOrNull(i - 1) ?: return null
+        val me = studio.muse.core.edit.itemSpan(p, t, t.items[i]); val ps = studio.muse.core.edit.itemSpan(p, t, prev)
+        return prev.takeIf { kotlin.math.abs(me.startSec - ps.endSec) <= 0.01 }
+    }
+
+    /**
+     * Cross-dissolve on an overlay item: [sec] sets it (the item starts [sec] before the previous one ends, keeping its
+     * length; capped at half of each), null removes it (the item moves back to touch the previous one). Null if it can't.
+     */
+    fun overlayDissolve(p: EditProject, itemId: String, sec: Double?): EditProject? {
+        val t = p.tracks.firstOrNull { tr -> tr.items.any { it.id == itemId } }?.takeIf { it.kind == TrackKind.VIDEO || it.kind == TrackKind.IMAGE } ?: return null
+        val i = t.items.indexOfFirst { it.id == itemId }
+        if (i <= 0) return null
+        val item = t.items[i]
+        val cur = when (item) { is VideoClip -> item.transitionIn; is studio.muse.core.edit.ImageItem -> item.transitionIn; else -> null }?.durationSec ?: 0.0
+        val ps = studio.muse.core.edit.itemSpan(p, t, t.items[i - 1]); val me = studio.muse.core.edit.itemSpan(p, t, item)
+        if (cur == 0.0 && kotlin.math.abs(me.startSec - ps.endSec) > 0.01) return null
+        val d = sec?.coerceIn(EditLimits.MIN_TRANSITION_SEC, minOf(EditLimits.MAX_TRANSITION_SEC, (me.endSec - me.startSec) / 2, (ps.endSec - ps.startSec) / 2))
+        val start = Math.round((ps.endSec - (d ?: 0.0)) * 1e6) / 1e6
+        val tr = d?.let { studio.muse.core.edit.Transition(studio.muse.core.edit.TransitionKind.FADE, Math.round(it * 1000) / 1000.0) }
+        val moved: studio.muse.core.edit.Item = when (item) {
+            is VideoClip -> item.copy(startSec = start, transitionIn = tr)
+            is studio.muse.core.edit.ImageItem -> item.copy(startSec = start, transitionIn = tr)
+            else -> return null
+        }
+        return p.copy(tracks = p.tracks.map { if (it === t) it.copy(items = it.items.map { x -> if (x.id == itemId) moved else x }) else it })
+    }
+
     fun withCaptions(p: EditProject, assetId: String, words: List<CaptionWord>, preset: CaptionPreset = CaptionPreset.POP): EditProject {
         val existing = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION }
         val style = existing?.caption?.style ?: Presets.CAPTION_STYLES.getValue(preset)

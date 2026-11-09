@@ -128,7 +128,8 @@ const clipFields = (main: boolean) => ({
     : { ...nest('animLoop', loopFields) }),
 });
 const imageKeys: Table<M.ImageItem> = { id: meta('an id'), asset: set('asset', 'im'), startSec: set('startSec', 0.4), durationSec: set('durationSec', 0.5), blend: set('blend', 'multiply'),
-  animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested };
+  animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
+  transitionIn: meta('overlay cross-dissolve (2026-11-09): needs a previous item it overlaps; the render follows (WS16)') };
 const imageFields = { startSec: imageKeys.startSec, durationSec: imageKeys.durationSec, blend: imageKeys.blend,
   ...visualFields(['x', 'y', 'scale', 'rotation', 'opacity', ...M.COLOR_KF_PROPS, ...M.MASK_KF_PROPS, ...M.LOOK_KF_PROPS], 'cover'),
   ...nest('animIn', animFields('animIn')), ...nest('animOut', animFields('animOut')), ...nest('animLoop', loopFields) };

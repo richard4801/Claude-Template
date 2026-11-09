@@ -204,6 +204,13 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'reversed image', project: mut(p => { p.assets.push({ id: 'img_rev', kind: 'image', upload: 'up_imgrev', reverseOf: 'src' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
   { name: 'reversed asset chain', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'src' }, { id: 'src_rev2', kind: 'video', upload: 'up_rev2', reverseOf: 'src_rev' }); }), ok: false, field: 'edits.assets.4.reverseOf' },
   { name: 'reversed asset missing', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'nope' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
+  // Cross-dissolve between overlays (2026-11-09): imgs i1 is 0–2; i2 overlaps it by its transition's length.
+  { name: 'overlay dissolve ok', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.5 } }); }), ok: true },
+  { name: 'overlay dissolve wrong overlap', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.8, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.5 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.durationSec' },
+  { name: 'overlay dissolve not a fade', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2, transitionIn: { kind: 'whip', durationSec: 0.5 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.kind' },
+  { name: 'overlay dissolve too long', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 0.8, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 1.2 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.durationSec' },
+  { name: 'overlay dissolve on the first item', project: mut(p => { p.tracks[2].items[0].transitionIn = { kind: 'fade', durationSec: 0.5 }; }), ok: false, field: 'edits.tracks.2.items.0.transitionIn' },
+  { name: 'overlay overlap without a dissolve', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2 }); }), ok: false, field: 'edits.tracks.2.items.1.startSec' },
   // Derived copies (stabilize/slowmo, 2026-11-09).
   { name: 'stabilized asset ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', durationSec: 10, derivedFrom: { asset: 'src', op: 'stabilize' } }); }), ok: true },
   { name: 'stabilized then reversed ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'src', op: 'stabilize' } }, { id: 'src_st_rev', kind: 'video', upload: 'up_strev', reverseOf: 'src_st' }); }), ok: true },
@@ -566,6 +573,18 @@ const lyricProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
   [src, songUp]);
 M.validate(lyricProject, FILTERS);
 const lyricCaptions = { project: lyricProject, words: M.captionWords(lyricProject), pages: M.captionPages(lyricProject) };
+// Cross-dissolve between overlays (M): overlayFade on a 3-clip video track (p2 dissolves in from p1; p3 just follows)
+// and a 2-image track, sampled through the overlaps.
+const fadeProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
+  { id: 'pipt', kind: 'video', items: [
+    { id: 'p1', asset: 'pip', startSec: 0, inSec: 0, outSec: 3, speed: 1 },
+    { id: 'p2', asset: 'pip', startSec: 2.5, inSec: 1, outSec: 4, speed: 1, transitionIn: { kind: 'fade', durationSec: 0.5 } },
+    { id: 'p3', asset: 'pip', startSec: 5.5, inSec: 0, outSec: 2, speed: 2 } ] } as M.Track,
+  { id: 'imgs', kind: 'image', items: [{ id: 'i1', asset: 'logo', startSec: 1, durationSec: 2 }, { id: 'i2', asset: 'logo', startSec: 2.6, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.4 }, opacity: 0.8 }] } as M.Track,
+], [src, pip, img]);
+M.validate(fadeProject, FILTERS);
+const overlayFades = { project: fadeProject, samples: [0, 2.4, 2.5, 2.6, 2.75, 2.8, 2.9, 2.99, 3.0, 5.4, 5.5, 6].map(t => ({ t,
+  alpha: Object.fromEntries(fadeProject.tracks.filter(tr => tr.kind === 'video' || tr.kind === 'image').flatMap(tr => tr.items.map(it => [it.id, M.overlayFade(fadeProject, tr, it, t)]))) })) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -610,7 +629,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

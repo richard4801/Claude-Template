@@ -285,6 +285,8 @@ sealed interface EditAction {
     data class Translate(val language: String, val best: Boolean) : EditAction
     /** Lyric captions (2026-11-09): captions from the song on the music track (an upload), timed through its clips. */
     data object LyricCaptions : EditAction
+    /** Cross-dissolve between overlays (2026-11-09): [sec] on (its length), null off; [done] = one undo step at the end of a drag. */
+    data class OverlayDissolve(val itemId: String, val sec: Double?, val done: Boolean = true) : EditAction
     /** Translated captions: show the words in [language] (the translation's or the original's; null: the original's if it had none). */
     data class CaptionOriginal(val language: String?) : EditAction
     data class Slowmo(val factor: Int, val lengthSec: Double) : EditAction
@@ -446,7 +448,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; is EditAction.OverlayDissolve -> "Dissolve"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -904,6 +906,7 @@ class EditSuiteController(
             is EditAction.Slowmo -> slowmo(u, a.factor, a.lengthSec)
             is EditAction.TranslatePrice -> captionSource()?.let { estimate("translate", translateOptions(a.language, a.best), it) }
             is EditAction.Translate -> translate(a.language, a.best)
+            is EditAction.OverlayDissolve -> change(a.done, refused = "A dissolve needs a clip right before this one on its track") { p -> SuiteOps.overlayDissolve(p, a.itemId, a.sec) }
             // Two languages, either shown: switching swaps the words with the kept ones.
             is EditAction.CaptionOriginal -> change { p ->
                 val t = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION } ?: return@change null
