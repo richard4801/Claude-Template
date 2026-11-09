@@ -207,6 +207,7 @@ const Env = z.object({
   // with this secret (32 bytes: 64 hex characters or base64). Unset = keys can't be added and custom models don't run.
   PROVIDER_KEYS_SECRET: str(),
   FAL_PLATFORM_URL: z.string().default('https://api.fal.ai/v1'),
+  MUAPI_API_URL: z.string().default('https://api.muapi.ai/api/v1'),
   FAL_COST_PER_IMAGE: num(0.03),
   IMAGE_TIMEOUT_SEC: num(180),
 

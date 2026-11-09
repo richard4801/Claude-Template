@@ -66,7 +66,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Constant speed 0.1–10×, pitch kept | Has | Has | — | |
 | Speed curves (presets + custom graph) | Has | Has | — | |
 | **Smooth slow-mo (frame interpolation)** | Missing | Missing | XL | Needs a model choice (server job like denoise, or on-device). The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
-| Speed on audio-only clips | Has | Missing | M | Android: Speed panel on a selected music, voice or effect clip: 0.5–2×, pitch kept (contract: audio speed 0.5–2; beats map through clipTimeAt; server render uses atempo). |
+| Speed on audio-only clips | Has | Has | M | Android: Speed panel on a selected music, voice or effect clip: 0.5–2×, pitch kept (contract: audio speed 0.5–2; beats map through clipTimeAt; server render uses atempo). Mac: Speed on a selected music, voice or effect clip: 0.5–2× (slider and 0.5× / 1× / 1.5× / 2×), pitch kept (spectral); beats, loops and beat marks go through clipTimeAt / clipSourceAt. |
 | Set the duration (speed computed) | Has | Has | S | Android: Speed → Length slider. Mac: Speed → Length slider. |
 
 ## 3. Transitions
@@ -89,7 +89,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Import own fonts | Has | Missing | M | Android: Text → Font → "Your font…" (system file picker, .ttf/.otf up to 10 MB, checked and named on the phone); each of the edit's fonts is a chip named from the file. Contract: a `font` asset (upload, optional `name`) and `TextStyle.fontAsset` on text items (captions keep the six families; `font` stays the fallback; kits drop it). Server: `purpose: "font"` presign, `/v1/editor/uploads/font-check`, saved edits check the file, the render draws with it. Screenshot: android-edit/m6_own_font.png. |
 | Text templates / hooks | Has | Has | — | 10 hooks; more is **Content** |
 | In/out text animations | Has | Has | S | The model has 7 kinds; there is no picker. Mac: Animate panel. Android: In / out picker with lengths (wave 1). |
-| Loop animations | Has | Missing | M | Android: Loop under Animation in / out (Text panel; Transform for overlays and photos): pulse, sway, float, spin, blink, with speed and amount (`animLoop`, `loopState`). Not on main clips. |
+| Loop animations | Has | Has | M | Android: Loop under Animation in / out (Text panel; Transform for overlays and photos): pulse, sway, float, spin, blink, with speed and amount (`animLoop`, `loopState`). Not on main clips. Mac: Animate → Loop (None, Pulse, Sway, Float, Spin, Blink) with Speed and Amount, on overlays, pictures and text; moving a clip to the main track drops it (shared fixtures). |
 | Keyframed text | Has | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet. Android: The Transform panel acts on the selected text (wave 1 fixed it moving the clip). |
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |

@@ -384,6 +384,19 @@ extension SnapshotRunner {
             check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
         }
 
+        step("Loop animation (blink on an overlay)")
+        s.seek(0.5)
+        s.addTake(blue, overlay: true)
+        s.edit { $0.setFit(.cover) }
+        s.edit { $0.setVisualValue(.scale, 1) }
+        s.edit { $0.setVisualValue(.x, 0.5) }
+        s.edit { $0.setVisualValue(.y, 0.5) }
+        s.edit { $0.setLoop(E.AnimLoop(kind: .blink, periodSec: 1, amount: 1)) }
+        check("project: a blink loop on the overlay", s.state.selectedLoop?.kind == .blink && E.problem(s.project) == nil)
+        let lb = await previewPixel(s, at: 0.5), lr = await previewPixel(s, at: 1.0)
+        check("preview: the overlay at rest, then gone half a cycle in", isBlue(lb) && isRed(lr), "\(describe(lb)) then \(describe(lr))")
+        for _ in 0..<6 { s.undo() }
+
         step("Look keyframes (vignette 0 → 1)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.seek(0.5); s.edit { $0.addKeyframe(.vignette, value: 0) }

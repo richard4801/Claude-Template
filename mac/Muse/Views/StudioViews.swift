@@ -136,7 +136,7 @@ struct CreditsView: View {
         let w = store.wallet
         ScreenPage(maxWidth: 960) {
             ScreenTitle("Credit", subtitle: store.isOwner ? "Your balance, the studio's balance and its top-ups" : "Your balance and what you've spent") {
-                if store.isOwner { RButton("Send credit") { store.go(.members) }.help("Send credit to a member") }
+                if store.isOwner { RButton("Send credit") { store.openSettings(.members) }.help("Send credit to a member") }
             }
             if !loaded && w == nil && store.jobs.isEmpty {
                 FigureSkeleton(count: 4)
@@ -245,8 +245,8 @@ struct StudioBalanceSection: View {
             }
         }
         HStack(spacing: Space.s4) {
-            RButton("Members", kind: .plain) { store.go(.members) }
-            RButton("Engines", kind: .plain) { store.openSettings(.engines) }
+            RButton("Members", kind: .plain) { store.openSettings(.members) }
+            RButton("Engines", kind: .plain) { store.openSettings(.spending) }
         }
         .padding(.top, Space.s5)
     }
@@ -266,6 +266,8 @@ struct StudioBalanceSection: View {
 
 // MARK: - Members
 
+/// Settings → Members (owner): the studio's people, their credit and daily caps, and invitations. Since the Settings
+/// redesign (2026-11-09) it is a Settings section, not a page of its own.
 struct MembersView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -276,11 +278,13 @@ struct MembersView: View {
         let b = store.balance
         let people = store.members.sorted { x, y in x.isOwner != y.isOwner ? x.isOwner : x.createdAt < y.createdAt }
         let others = people.filter { !$0.isOwner }
-        ScreenPage(maxWidth: 1040) {
-            ScreenTitle("Members", subtitle: "People in your studio, their credit and their daily caps") {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Space.s3) {
                 RButton("Invite someone", kind: .action) { inviteOpen = true }
                     .popover(isPresented: $inviteOpen, arrowEdge: .bottom) { InviteForm() }
+                Text(ScreenCopy.count(others.count, "member")).scaled(t.scale.caption, t.roles.ink2)
             }
+            .padding(.bottom, Space.s4)
             if people.isEmpty && !settled {
                 FigureSkeleton(count: 3)
             } else if !people.isEmpty {
@@ -581,7 +585,7 @@ struct StudioSettingsSection: View {
         } else {
             SectionTitle("Studio", top: 0)
             EmptyState("No studio settings on this server", "Spend caps come with the full MUSE server. Point MUSE at it under Developer.",
-                       actionTitle: "Open Developer") { store.settingsSection = .developer }
+                       actionTitle: "Open Developer") { store.openSettings(.advanced) }
         }
     }
 
@@ -724,7 +728,7 @@ struct EnginesSettingsSection: View {
         } else {
             SectionTitle("Engines", top: 0)
             EmptyState("No engine settings on this server", "Engine status and limits come with the full MUSE server. Point MUSE at it under Developer.",
-                       actionTitle: "Open Developer") { store.settingsSection = .developer }
+                       actionTitle: "Open Developer") { store.openSettings(.advanced) }
         }
     }
 

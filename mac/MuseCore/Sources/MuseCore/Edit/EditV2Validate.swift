@@ -178,6 +178,8 @@ private struct Validator {
                     }
                     try anim("\(g).animIn", c.animIn, text: false)
                     try anim("\(g).animOut", c.animOut, text: false)
+                    if c.animLoop != nil && t.kind == .main { throw bad("\(g).animLoop", "loop animations are for overlays, images and text") }
+                    try loop("\(g).animLoop", c.animLoop)
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
                         try num("\(g).chroma.similarity", ck.similarity, 0, 1)
@@ -208,6 +210,7 @@ private struct Validator {
                     try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: im.mask != nil)
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
+                    try loop("\(g).animLoop", im.animLoop)
                 case (.text, .text(let tx)):
                     let n = tx.text.utf16.count
                     if n < 1 || n > E.maxText { throw bad("\(g).text", "must be 1–\(E.maxText) characters") }
@@ -219,11 +222,13 @@ private struct Validator {
                     try kfs("\(g).keyframes", tx.keyframes, tx.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
                     try anim("\(g).animIn", tx.animIn, text: true)
                     try anim("\(g).animOut", tx.animOut, text: true)
+                    try loop("\(g).animLoop", tx.animLoop)
                 case (.music, .audio(let c)), (.voice, .audio(let c)), (.sfx, .audio(let c)):
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video],
                                  voice: c.voiceEffect)
                     try num("\(g).startSec", c.startSec, 0, 600, optional: false)
-                    if let s = c.speed, s != 1 { throw bad("\(g).speed", "audio clips play at 1×") }
+                    // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept.
+                    try num("\(g).speed", c.speed, 0.5, 2)
                     try kfs("\(g).keyframes", c.keyframes, E.clipLength(c), allowed: [.volume])
                     if let b = c.beats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).beats", "must be up to 2000 times") }
                     if let b = c.strongBeats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).strongBeats", "must be up to 2000 times") }
@@ -327,6 +332,13 @@ private struct Validator {
                 try num("\(g).v", kf.v, range.0, range.1, optional: false)
             }
         }
+    }
+
+    func loop(_ f: String, _ l: EditV2.AnimLoop?) throws {
+        guard let l else { return }
+        if !EditV2.LoopKind.all.contains(l.kind) { throw bad("\(f).kind", "unknown loop animation") }
+        try num("\(f).periodSec", l.periodSec, 0.2, 5, optional: false)
+        if let a = l.amount { try num("\(f).amount", a, 0, 1, optional: false) }
     }
 
     func anim(_ f: String, _ a: EditV2.Anim?, text: Bool) throws {

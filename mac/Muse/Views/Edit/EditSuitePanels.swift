@@ -900,6 +900,18 @@ struct SpeedPanel: View {
                 Text("Holds this frame, silent. Drag its edges on the timeline to change the length.")
                     .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }
+        } else if let sp = session.state.selectedAudioSpeed {
+            // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept; no curves for sound.
+            EditPanel(title: "Speed") {
+                SuiteSlider("Speed", value: sp, range: 0.5...2, format: { String(format: "%.2f×", $0) }) { v in session.edit { $0.setAudioSpeed(v) } }
+                FlowLayout(spacing: 6) {
+                    ForEach([0.5, 1, 1.5, 2], id: \.self) { v in
+                        Chip(v == 1 ? "1×" : String(format: "%g×", v), on: abs(sp - v) < 0.001) { session.edit { $0.setAudioSpeed(v) } }
+                    }
+                }
+                Text("The pitch stays the same. Its length on the timeline follows the speed.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
         } else if let c = session.state.selectedVideo {
             EditPanel(title: "Speed") {
                 EditSeg(options: [(false, "Constant"), (true, "Curve")], selection: c.speedCurve != nil) { curve in
