@@ -873,10 +873,9 @@ extension SnapshotRunner {
             }
         }
         let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
-        // CIImage rows go bottom-up; the pattern's row 0 is the top (v pointing down).
-        var flipped: [Float] = []
-        for y in (0..<H).reversed() { flipped += floats[(y * W * 4)..<((y + 1) * W * 4)] }
-        let img = CIImage(bitmapData: flipped.withUnsafeBufferPointer { Data(buffer: $0) }, bytesPerRow: W * 16, size: CGSize(width: W, height: H), format: .RGBAf, colorSpace: srgb)
+        // Bitmap data's first row is the image's top (as the pattern's row 0, v pointing down); render(toBitmap:) writes
+        // the top row first too, so neither is flipped.
+        let img = CIImage(bitmapData: floats.withUnsafeBufferPointer { Data(buffer: $0) }, bytesPerRow: W * 16, size: CGSize(width: W, height: H), format: .RGBAf, colorSpace: srgb)
         let ctx = CIContext(options: [.workingColorSpace: srgb, .outputColorSpace: srgb])
         let sampler = EditV2.imageSampler(width: W, height: H, px)
         for id in EditV2.effectIds {
@@ -889,8 +888,7 @@ extension SnapshotRunner {
             for y in 0..<H {
                 for x in 0..<W {
                     let ref = EditV2.effectPixel(e, t: 0.37, width: Double(W), height: Double(H), u: (Double(x) + 0.5) / Double(W), v: (Double(y) + 0.5) / Double(H), sample: sampler)
-                    let row = H - 1 - y
-                    let o = row * W * 4 + x * 4
+                    let o = y * W * 4 + x * 4
                     let d = max(abs(Double(buf[o]) - ref.x), abs(Double(buf[o + 1]) - ref.y), abs(Double(buf[o + 2]) - ref.z))
                     worst = max(worst, d)
                     if d <= 3.0 / 255 { good += 1 } else if firstBad.count < 3 {
