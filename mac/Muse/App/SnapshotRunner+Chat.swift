@@ -95,7 +95,8 @@ extension SnapshotRunner {
             store.suite.claude.open = false
 
             NSLog("[snapshot] chat recreate %@", theme.rawValue)
-            // Recreate: Claude beside the Recipe.
+            // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does).
+            store.openEdit(takeId: nil)
             store.openRecreate()
             try? await Task.sleep(for: .seconds(1))
             let refs = (try? await store.recreateAPI.listReferences()) ?? []
@@ -163,9 +164,11 @@ extension SnapshotRunner {
             }
             if let h1 = heights[1], let h4 = heights[4], let h12 = heights[12] {
                 let grows = h4 >= h1 + line * 2.5
-                let capped = h12 <= line * 8 + 14 && h12 >= h4
+                // The field: 8 lines, the text view's insets (12) and the field's own padding (8).
+                let cap = line * 8 + 20
+                let capped = h12 <= cap + 2 && h12 >= h4
                 lines.append("\(grows ? "FITS" : "CUT") chat_composer_grows \(width)x\(height) c 1 line \(Int(h1)) pt, 4 lines \(Int(h4)) pt (line \(String(format: "%.1f", line)) pt)")
-                lines.append("\(capped ? "FITS" : "CUT") chat_composer_caps \(width)x\(height) c 12 lines \(Int(h12)) pt, at most 8 lines (\(Int(line * 8 + 12)) pt), then it scrolls")
+                lines.append("\(capped ? "FITS" : "CUT") chat_composer_caps \(width)x\(height) c 12 lines \(Int(h12)) pt, at most 8 lines (\(Int(cap)) pt), then it scrolls")
             }
         }
         state.chatComposerText = nil
