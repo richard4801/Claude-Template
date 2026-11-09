@@ -752,6 +752,8 @@ class FakeMuseApi(
             "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
             // Tap to keep has its own price: GPU 15 + 3·d seconds (plans/api.md).
             "matte" -> if (req.options?.get("points") != null) maxOf(0.01, Math.round((15 + 3 * d) * 0.0004 * 100) / 100.0) else maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
+            "separate" -> maxOf(0.01, Math.round((5 + 0.3 * d) * 0.00025 * 100) / 100.0)
+            "cutout" -> 0.01
             "denoise" -> if ((req.options?.get("analyzeOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") 0.0 else maxOf(0.01, Math.round((5 + 0.3 * d) * 0.00025 * 100) / 100.0)
             else -> 0.02
         }
@@ -761,7 +763,7 @@ class FakeMuseApi(
     override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
         checkKeepPoints(req)
         // WS1 guardrails: paid helpers switched off by the owner (the free ones, cuts and beats, still run).
-        if (!editorSettingsDemo.on && req.kind in listOf("captions", "matte", "denoise", "translate", "slowmo")) throw ApiException("editor_paid_off", "AI editing helpers are switched off for this studio")
+        if (!editorSettingsDemo.on && req.kind in listOf("captions", "matte", "denoise", "translate", "slowmo", "separate", "cutout")) throw ApiException("editor_paid_off", "AI editing helpers are switched off for this studio")
         if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
         val d = editorDuration(req.source)
         val id = "ej_${++editorSeq}"
@@ -1345,7 +1347,8 @@ class FakeMuseApi(
     override suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject = lock.withLock {
         val on = editorSettingsDemo.on
         fun avail(b: Boolean) = kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(b)))
-        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "translate" to kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(on),
+        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "separate" to avail(on), "cutout" to avail(on),
+            "translate" to kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(on),
             // Only what the export draws (Latin and Cyrillic for now; WS16).
             "languages" to kotlinx.serialization.json.JsonObject(listOf("en" to "English", "es" to "Spanish", "pt" to "Portuguese", "fr" to "French", "de" to "German", "it" to "Italian",
                 "nl" to "Dutch", "pl" to "Polish", "tr" to "Turkish", "ru" to "Russian", "uk" to "Ukrainian").associate { (k, v) -> k to kotlinx.serialization.json.JsonPrimitive(v) }))),
@@ -1875,6 +1878,18 @@ object FakeEditorResults {
                 val beats = generateSequence(0.21) { it + period }.takeWhile { it < d }.map(::r3).toList()
                 obj("bpm" to p(118), "beats" to JsonArray(beats.map(::p)), "strong" to JsonArray(beats.filterIndexed { i, _ -> i % 4 == 0 }.map(::p)), "durationSec" to p(d))
             }
+            // Split voice and music (demo): two audio uploads the length of the source.
+            "separate" -> obj(
+                "vocals" to obj("kind" to p("audio"), "upload" to p("up_vocals_$id"), "durationSec" to p(d)),
+                "instrumental" to obj("kind" to p("audio"), "upload" to p("up_instr_$id"), "durationSec" to p(d)),
+                "durationSec" to p(d), "reused" to p(false),
+            )
+            // Cut out a picture (demo): a 600×900 subject from a 1200×1600 photo.
+            "cutout" -> obj(
+                "asset" to obj("kind" to p("image"), "upload" to p("up_cut_$id"), "width" to p(600), "height" to p(900)),
+                "width" to p(600), "height" to p(900), "box" to obj("x" to p(300), "y" to p(350), "w" to p(600), "h" to p(900)),
+                "sourceWidth" to p(1200), "sourceHeight" to p(1600), "mode" to p("person"),
+            )
             "denoise" -> obj(
                 "asset" to obj("kind" to p("audio"), "upload" to p("up_voice_$id"), "durationSec" to p(d)),
                 "suggestion" to obj("level" to p("light"), "reason" to p("Some background hum")),

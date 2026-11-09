@@ -530,6 +530,56 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun overlayDissolve() = runTest {
+        val c = controller()
+        val p0 = c.p()
+        val logo = studio.muse.core.edit.Asset("logo", studio.muse.core.edit.AssetKind.IMAGE, upload = "up_logo", width = 512, height = 512)
+        val imgs = studio.muse.core.edit.Track("imgs", TrackKind.IMAGE, items = listOf(
+            studio.muse.core.edit.ImageItem("i1", "logo", 1.0, 2.0), studio.muse.core.edit.ImageItem("i2", "logo", 3.0, 2.0)))
+        c.load(p0.copy(assets = p0.assets + logo, tracks = p0.tracks + imgs), "T", "take_1", null, false)
+        c.act(EditAction.OverlayDissolve("i2", .5))
+        fun i2() = c.p().tracks.first { it.id == "imgs" }.items[1] as studio.muse.core.edit.ImageItem
+        assertEquals(2.5, i2().startSec, 1e-9); assertEquals(.5, i2().transitionIn!!.durationSec, 1e-9)
+        valid(c.p())
+        c.act(EditAction.OverlayDissolve("i2", 5.0)) // capped at half of each item
+        assertEquals(1.0, i2().transitionIn!!.durationSec, 1e-9); assertEquals(2.0, i2().startSec, 1e-9)
+        valid(c.p())
+        c.act(EditAction.OverlayDissolve("i2", null))
+        assertEquals(3.0, i2().startSec, 1e-9); assertNull(i2().transitionIn)
+        c.act(EditAction.OverlayDissolve("i1", .5)); assertEquals("A dissolve needs a clip right before this one on its track", c.ui.value.message)
+    }
+
+    @Test fun splitVoiceAndMusic() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.SeparatePrice); advanceUntilIdle()
+        assertTrue(c.ui.value.ai["separate"]?.price != null)
+        c.act(EditAction.Separate(studio.muse.core.edit.SeparationKeep.BOTH)); advanceUntilIdle()
+        assertEquals(true, c.p().mainClips[0].muted)
+        val voc = c.p().tracks.first { it.kind == TrackKind.VOICE }.items.single() as AudioClip
+        assertEquals(clip.inSec, voc.inSec, 1e-9); assertEquals(clip.outSec, voc.outSec, 1e-9); assertEquals(0.0, voc.startSec, 1e-9)
+        assertTrue(c.p().tracks.any { t -> t.kind == TrackKind.MUSIC && t.items.any { (it as AudioClip).asset == c.p().assets.last().id } })
+        valid(c.p())
+    }
+
+    @Test fun cutOutAPhoto() = runTest {
+        val c = controller()
+        val p0 = c.p()
+        val photo = studio.muse.core.edit.Asset("ph", studio.muse.core.edit.AssetKind.IMAGE, upload = "up_ph", width = 1200, height = 1600)
+        val imgs = studio.muse.core.edit.Track("imgs", TrackKind.IMAGE, items = listOf(studio.muse.core.edit.ImageItem("i1", "ph", 0.0, 3.0, transform = studio.muse.core.edit.Transform(.5, .5, .5))))
+        c.load(p0.copy(assets = p0.assets + photo, tracks = p0.tracks + imgs), "T", "take_1", null, false)
+        c.act(EditAction.Select("i1"))
+        c.act(EditAction.CutoutPrice); advanceUntilIdle()
+        assertTrue(c.ui.value.ai["cutout"]?.price != null)
+        c.act(EditAction.Cutout); advanceUntilIdle()
+        val im = c.p().tracks.first { it.id == "imgs" }.items[0] as studio.muse.core.edit.ImageItem
+        assertTrue(im.asset.startsWith("cutout"))
+        // The subject was centred in the photo, so it stays centred; half as wide as the photo → half the size.
+        assertEquals(.5, im.transform!!.x!!, 1e-6); assertEquals(.5, im.transform!!.y!!, 1e-6)
+        valid(c.p())
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

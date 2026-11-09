@@ -19,7 +19,9 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   app.patch('/v1/claude/settings', owner, async req => claude.setSettings(req.user, req.body));
   app.post('/v1/claude/mac/heartbeat', owner, async req => claude.heartbeat(req.user, req.body));
   app.post('/v1/claude/threads', owner, async req => claude.openThread(req.user, req.body));
+  app.get('/v1/claude/threads', owner, async req => claude.list(req.user, req.query)); // WS18: a place's list of chats
   app.get<P>('/v1/claude/threads/:id', owner, async req => claude.get(req.user, req.params.id));
+  app.delete<P>('/v1/claude/threads/:id', owner, async req => claude.deleteThread(req.user, req.params.id));
   app.patch<P>('/v1/claude/threads/:id', owner, async req => claude.patchThread(req.user, req.params.id, req.body));
   app.post<P>('/v1/claude/threads/:id/messages', owner, async (req, reply) => {
     try {

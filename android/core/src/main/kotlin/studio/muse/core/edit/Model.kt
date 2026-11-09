@@ -199,6 +199,8 @@ sealed interface Visual : Item {
     val look: Look?
     /** Edit suite: a shape mask multiplied into the item's alpha (after chroma key). */
     val mask: Mask?
+    /** The effects library (2026-11-09): one picture effect, after the look, before the mask and transform ([Effects]). */
+    val effect: Effect? get() = null
 }
 
 /** Items with source in/out times and a sound (video clips and audio clips). */
@@ -260,6 +262,7 @@ data class VideoClip(
     val animOut: Anim? = null,
     /** A repeating animation (overlay clips only): [loopState]. */
     val animLoop: AnimLoop? = null,
+    override val effect: Effect? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -283,6 +286,9 @@ data class ImageItem(
     /** Wave 1: overlay blend mode. */
     val blend: BlendMode? = null,
     val animLoop: AnimLoop? = null,
+    /** A cross-dissolve from the previous item on its track (kind fade; the item overlaps it by its length); see [overlayFade]. */
+    val transitionIn: Transition? = null,
+    override val effect: Effect? = null,
 ) : Visual
 
 data class Stroke(val color: String, val widthPct: Double)

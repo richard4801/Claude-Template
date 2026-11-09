@@ -46,7 +46,7 @@ export function suiteOptions() {
     style: { genre: pick(GENRES), era: pick(ERAS), tempo: pick(TEMPOS), format: pick(UGC_FORMATS) },
     moves: MOVES.map(m => ({ id: m.id, label: m.label, description: m.description, category: m.category })),
     moveRules: 'At most 2 moves; a second must be a different kind (never with static, time or aerial moves). Intensity 0–1 (default 0.5).',
-    bar: { tool: ['shot'], quality: [...QUALITIES], aspect: [...ASPECTS], duration: '2–30 s (whole seconds)', takes: '1–4', sound: 'true = native sound where the model makes it' },
+    bar: { tool: 'the composer\'s own (the draft keeps it; suite_request_shot only for shot)', count: 'Photo: 1–4 stills', quality: [...QUALITIES], aspect: [...ASPECTS], duration: '2–30 s (whole seconds)', takes: '1–4', sound: 'true = native sound where the model makes it' },
     notes: 'Leave a row out for Auto. Only these ids are accepted.',
   };
 }
@@ -112,6 +112,8 @@ export const SetBody = z.object({
   moves: z.array(z.object({ id: z.string().max(40), intensity: z.number().min(0).max(1).optional() }).strict()).max(2).optional(),
   quality: z.enum(QUALITIES).optional(), aspect: z.enum(ASPECTS).optional(), duration: z.number().int().min(2).max(30).optional(), takes: z.number().int().min(1).max(4).optional(),
   sound: z.boolean().optional(), speaking: z.boolean().nullable().optional(),
+  /** WS18: Photo's number of stills. */
+  count: z.number().int().min(1).max(4).optional(),
 }).strict();
 export type SetInput = z.infer<typeof SetBody>;
 
@@ -193,9 +195,11 @@ export class SuiteAssist {
       toks = [...toks.filter(x => x.t !== 'move'), ...ms.map(({ o, intensity }) => ({ t: 'move' as const, id: o.id, label: o.label, category: o.category, intensity: Math.round(intensity * 100), key: ++key }))];
     }
     if (b.rig !== undefined) d.rig = { ...checkVisibleRig(RigSchema.parse(b.rig)) };
-    for (const k of ['quality', 'aspect', 'duration', 'takes', 'sound'] as const) if (b[k] !== undefined) (d as Record<string, unknown>)[k] = b[k];
+    for (const k of ['quality', 'aspect', 'duration', 'takes', 'sound', 'count'] as const) if (b[k] !== undefined) (d as Record<string, unknown>)[k] = b[k];
     if (b.speaking !== undefined) { if (b.speaking === null) delete d.speaking; else d.speaking = b.speaking; }
-    d.tool = 'shot';
+    // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
+    // change Claude made outside Shot, because it only lays a draft over the composer of the same tool.
+    if (!d.tool) d.tool = 'shot';
     (d as Record<string, unknown>).tokens = toks;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
@@ -244,6 +248,8 @@ export class SuiteAssist {
   }
   /** suite_request_shot with confirm: the owner is asked in the app; their yes runs the shot at this price at most. */
   async ask(u: AuthUser, id: string) {
+    const tool = ((await this.row(u, id)).draft as { tool?: string }).tool ?? 'shot';
+    if (tool !== 'shot') throw new ApiError(409, 'not_a_shot', 'Claude can ask to generate a Shot only · in this composer the owner presses Generate');
     const e = await this.estimate(u, id) as { estimate: { estimate?: number; ok?: boolean; message?: string; buttonLabel?: string } };
     if (e.estimate.ok === false) throw new ApiError(402, 'caps', e.estimate.message ?? 'A spending cap stops this shot');
     const usd = Number(e.estimate.estimate) || 0;

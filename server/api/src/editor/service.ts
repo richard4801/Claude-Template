@@ -26,10 +26,11 @@ import { FalProvider } from '../suite/providers.js';
 import { SLOWMO_LIMITS, SLOWMO_MODEL, cutRange, falInterpolate, retime, slowmoComputeSec, slowmoUsd, type SlowmoFactor } from './slowmo.js';
 import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
 import { exportLanguages, exportNotice } from './scripts.js';
+import { CUTOUT_LIMITS, composeCutout, prepareStill } from './cutout.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate', 'cutout'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
@@ -38,7 +39,7 @@ export const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', briefs: 'Writing the briefs' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', separate: 'Splitting voice and music', cutout: 'Cutting out', briefs: 'Writing the briefs' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
@@ -67,14 +68,15 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
       out.extraFillers = o.extraFillers;
     }
   }
-  if (kind === 'matte' && o.points !== undefined) {
+  if ((kind === 'matte' || kind === 'cutout') && o.points !== undefined) {
     // workstream 1: tap to keep. The subject under the points is tracked through the clip.
     if (!Array.isArray(o.points) || !o.points.length || o.points.length > MAX_KEEP_POINTS) throw badRequest(`options.points: 1 to ${MAX_KEEP_POINTS} points`);
     out.points = o.points.map((q: any, i: number) => {
       if (!q || typeof q !== 'object') throw badRequest(`options.points.${i}: {x, y, t?, keep?}`);
       const n = (k: string, lo: number, hi: number, d?: number) => { const v = q[k] ?? d; if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) throw badRequest(`options.points.${i}.${k}: from ${lo} to ${hi}`); return Math.round(v * 10000) / 10000; };
       if (q.keep !== undefined && typeof q.keep !== 'boolean') throw badRequest(`options.points.${i}.keep: true or false`);
-      return { x: n('x', 0, 1), y: n('y', 0, 1), t: n('t', 0, EDITOR_LIMITS.maxMatteSec, 0), keep: q.keep !== false };
+      // A still has one moment: its points are all at t = 0.
+      return { x: n('x', 0, 1), y: n('y', 0, 1), t: kind === 'cutout' ? 0 : n('t', 0, EDITOR_LIMITS.maxMatteSec, 0), keep: q.keep !== false };
     });
     if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
   }
@@ -222,6 +224,13 @@ export class EditorAiService {
       await (await import('../engines/service.js')).modelChoice(this.ctx).check(u, purpose, body.engineModel);
     }
     const requested = typeof body?.engineModel === 'string' ? body.engineModel : null;
+    if (kind === 'cutout') {
+      // A still's cut-out (a sticker): the person matte, or with taps the object tracker, on a one-second clip of it.
+      if (!this.matteAvailable) throw badRequest('Background removal is coming soon');
+      const src = await this.imageSource(u, body?.source), sec = CUTOUT_LIMITS.clipSec, p = this.provider;
+      const usd = opts.points ? GPU_SEC.track(sec) * p.rates.track : GPU_SEC.matte(sec) * p.rates.matte;
+      return { kind, opts, src, reuse: null, usd: usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0 };
+    }
     const src = await this.source(u, body?.source);
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
@@ -253,6 +262,12 @@ export class EditorAiService {
       const sz = src.size;
       return { kind, opts, src, reuse, usd: slowmoUsd(slowmoComputeSec(opts.endSec! - opts.startSec!, sz?.fps ?? 30, opts.factor!, sz?.width ?? 1080, sz?.height ?? 1920), this.markup) };
     }
+    if (kind === 'separate') {
+      // Voice and music as two audio files (one split, priced like the voice clean-up). Not while production runs the mock.
+      if (!this.matteAvailable) throw badRequest('Splitting voice and music is coming soon');
+      if (await this.separateBefore(u.studioId, src.key)) return { kind, opts, src, reuse, usd: 0 };
+      return { kind, opts, src, reuse, usd: Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(GPU_SEC.separate(d) * this.provider.rates.separate * this.markup * 10000) / 10000) };
+    }
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
     let usd = 0, transcriber: string | null = null;
@@ -278,7 +293,7 @@ export class EditorAiService {
     const e = await this.estimate(u, body);
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
+    const models = e.kind === 'cutout' ? (e.usd > 0 ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : []) : e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     try {
@@ -336,6 +351,57 @@ export class EditorAiService {
     const c = await (await import('../engines/service.js')).modelChoice(this.ctx).choose(u, 'captions', requested);
     if (c && (c.model !== ASSEMBLY_MODEL || this.assembly.configured())) return c.model;
     return this.assembly.configured() ? ASSEMBLY_MODEL : this.provider.models.transcribe;
+  }
+  /** A photo to cut out: a still take (kind "shot") or an image upload. */
+  async imageSource(u: AuthUser, s: any): Promise<{ source: EditorSource; key: string; contentType: string; size?: { width: number; height: number } }> {
+    if (!s || typeof s !== 'object') throw badRequest('source: {takeId} or {uploadId} of a photo');
+    if (typeof s.takeId === 'string') {
+      const [t] = await this.ctx.db.select().from(takes).where(and(eq(takes.id, s.takeId), eq(takes.studioId, u.studioId)));
+      if (!t) throw notFound('Take');
+      const md = (t.media ?? {}) as { width?: number; height?: number; contentType?: string; durationSec?: number };
+      const ct = md.contentType ?? (/\.(png)$/i.test(t.mediaKey ?? '') ? 'image/png' : /\.(jpe?g)$/i.test(t.mediaKey ?? '') ? 'image/jpeg' : /\.webp$/i.test(t.mediaKey ?? '') ? 'image/webp' : '');
+      if (!t.mediaKey || !ct.startsWith('image/')) throw badRequest('source.takeId: must be a photo');
+      return { source: { takeId: t.id, durationSec: 0 }, key: t.mediaKey, contentType: ct, ...(md.width && md.height ? { size: { width: md.width, height: md.height } } : {}) };
+    }
+    if (typeof s.uploadId === 'string') {
+      const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, s.uploadId), eq(uploads.studioId, u.studioId)));
+      if (!up) throw notFound('Upload');
+      if (!/^image\/(png|jpeg|webp)$/.test(up.contentType)) throw badRequest('source.uploadId: must be a photo (PNG, JPEG or WebP)');
+      if (!(await this.ctx.storage.head(up.storageKey))) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
+      return { source: { uploadId: up.id, durationSec: 0 }, key: up.storageKey, contentType: up.contentType };
+    }
+    throw badRequest('source: {takeId} or {uploadId} of a photo');
+  }
+
+  /**
+   * The cut-out: the photo upright and at most 2048 px as a one-second clip (stored for the helper to fetch, deleted
+   * after), the matte (person, or the tapped object at frame 0), then its alpha on the photo, trimmed: a PNG upload.
+   */
+  private async cutout(u: AuthUser, src: { key: string; source: EditorSource }, o: JobOptions, _url: string, hooks: Hooks, temps: string[]) {
+    const ffmpeg = this.ctx.config.FFMPEG_PATH, p = this.provider;
+    const [still, clip, mask, out] = ['png', 'mp4', 'png', 'png'].map(ext => path.join(os.tmpdir(), `${uid('cut')}.${ext}`)) as [string, string, string, string];
+    temps.push(still, clip, mask, out);
+    const size = await this.withLocalInput(src.key, input => prepareStill(ffmpeg, input, still, clip));
+    const key = `t/${uid('cutin')}.mp4`;
+    await this.ctx.storage.putStream(key, fs.createReadStream(clip), 'video/mp4', fs.statSync(clip).size);
+    let made: { file: string | null; gpuSec: number | null };
+    try {
+      const url = await this.ctx.storage.presignGet(key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
+      made = o.points?.length
+        ? await p.track(url, CUTOUT_LIMITS.clipSec, o.points.map(q => ({ x: q.x * (size.width - 1), y: q.y * (size.height - 1), frame: 0, keep: q.keep })), hooks)
+        : await p.matte(url, CUTOUT_LIMITS.clipSec, hooks);
+    } finally { await this.ctx.storage.delete(key).catch(() => {}); }
+    if (made.file) temps.push(made.file);
+    if (!made.file) throw new ReplicateError('The background removal returned nothing', 'failed');
+    const c = await composeCutout(ffmpeg, still, made.file, mask, out);
+    const asset = await this.store(u, src, out, 'image/png', 'image', 0);
+    return { gpuSec: made.gpuSec, result: { asset: { ...asset, width: c.width, height: c.height }, width: c.width, height: c.height, box: c.box, sourceWidth: size.width, sourceHeight: size.height } as Record<string, unknown> };
+  }
+
+  /** The last finished voice/music split of this source in the studio (reused, free). */
+  private async separateBefore(studioId: string, key: string) {
+    const [prev] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'separate'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(1);
+    return prev?.result ? prev : null;
   }
   private vidstab: Promise<boolean> | null = null;
   /** Whether this server's ffmpeg can stabilise (checked once). */
@@ -407,6 +473,22 @@ export class EditorAiService {
           const r = await this.slowmo(row, u, src, o, temps);
           result = r.result;
           if (r.computeSec != null) spentUsd = slowmoUsd(r.computeSec, this.markup);
+        }
+      } else if (row.kind === 'cutout') {
+        const tracked = !!o.points?.length;
+        const c = await this.cutout(u, src, o, url, hooks, temps);
+        gpuSec = c.gpuSec; rate = tracked ? p.rates.track : p.rates.matte;
+        result = { ...c.result, mode: tracked ? 'tracked' : 'person', ...(tracked ? { points: o.points } : {}) };
+      } else if (row.kind === 'separate') {
+        const prev = await this.separateBefore(u.studioId, src.key);
+        if (prev) { result = { ...(prev.result as Record<string, unknown>), reused: true }; spentUsd = 0; }
+        else {
+          const out = await p.separateBoth(url, d, hooks);
+          temps.push(...[out.vocals.file, out.instrumental.file].filter((f): f is string => !!f));
+          gpuSec = out.gpuSec; rate = p.rates.separate;
+          const vocals = await this.store(u, src, out.vocals.file, out.vocals.contentType, 'audio', d);
+          const instrumental = await this.store(u, src, out.instrumental.file, out.instrumental.contentType, 'audio', d);
+          result = { vocals, instrumental, durationSec: d, reused: false };
         }
       } else if (row.kind === 'translate') {
         const q = o.quality ?? 'standard';
@@ -522,9 +604,9 @@ export class EditorAiService {
   }
 
   /** Stores a produced file as an upload of the studio (bytes copied, never re-encoded); the mock points at the source. */
-  private async store(u: AuthUser, src: { key: string; source: EditorSource }, file: string | null, contentType: string, kind: 'video' | 'audio', durationSec: number) {
+  private async store(u: AuthUser, src: { key: string; source: EditorSource }, file: string | null, contentType: string, kind: 'video' | 'audio' | 'image', durationSec: number) {
     if (!file) return { kind, ...(src.source.takeId ? { take: src.source.takeId } : { upload: src.source.uploadId }), url: `${this.ctx.config.PUBLIC_URL ?? ''}/uploads/${src.key}`, durationSec };
-    const ext = contentType === 'video/mp4' ? 'mp4' : contentType === 'audio/wav' ? 'wav' : contentType === 'audio/flac' ? 'flac' : contentType === 'audio/mp4' ? 'm4a' : 'mp3';
+    const ext = contentType === 'image/png' ? 'png' : contentType === 'video/mp4' ? 'mp4' : contentType === 'audio/wav' ? 'wav' : contentType === 'audio/flac' ? 'flac' : contentType === 'audio/mp4' ? 'm4a' : 'mp3';
     const key = `g/${uid('edit')}.${ext}`;
     await putFile(this.ctx, { key, file, studioId: u.studioId, kind: 'generated', userId: u.id, contentType });
     const [up] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(eq(uploads.storageKey, key));
@@ -629,6 +711,8 @@ export class EditorAiService {
       denoise: { available: paid },
       beats: { available: true, free: true },
       stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
+      separate: { available: paid && this.matteAvailable },
+      cutout: { available: paid && this.matteAvailable, maxPoints: MAX_KEEP_POINTS },
       slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
       translate: { available: paid && !!this.translator(), languages: translateTargets(), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,

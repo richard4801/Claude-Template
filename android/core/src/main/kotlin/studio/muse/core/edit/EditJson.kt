@@ -116,7 +116,7 @@ object EditJson {
         speedCurve = o.objOrNull("speedCurve")?.let(::speedCurveOf), startSec = o.numOrNull("startSec"), volume = o.numOrNull("volume"), muted = o.boolOrNull("muted"),
         fadeInSec = o.numOrNull("fadeInSec"), fadeOutSec = o.numOrNull("fadeOutSec"), audioAsset = o.strOrNull("audioAsset"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), effect = effect(o),
         voiceEffect = o.enumOrNull("voiceEffect", "one of ${VoiceEffect.entries.joinToString(", ") { it.wire }}"), enhance = o.boolOrNull("enhance"),
         chroma = o.objOrNull("chroma")?.let { Chroma(it.str("color"), it.numOrNull("similarity"), it.numOrNull("smoothness"), it.numOrNull("spill")) },
         alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
@@ -130,7 +130,13 @@ object EditJson {
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
         keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), animLoop = loop(o),
         blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
+        transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
+        effect = effect(o),
     )
+
+    private fun effect(o: Obj) = o.objOrNull("effect")?.let { e ->
+        Effect(e.enum("id", "unknown effect"), e.num("amount"), e.numOrNull("speed"), e.arrOrNull("colors")?.map { (el, _) -> (el as kotlinx.serialization.json.JsonPrimitive).content })
+    }
 
     private fun textItem(o: Obj) = TextItem(
         id = o.str("id"), startSec = o.num("startSec"), durationSec = o.num("durationSec"), text = o.str("text"), style = textStyle(o.obj("style")),
@@ -307,6 +313,7 @@ object EditJson {
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
             anim("animIn", it.animIn); anim("animOut", it.animOut); str("blend", it.blend?.wire); loop(it.animLoop)
+            it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
         }
         is TextItem -> buildJsonObject {
             put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec); put("text", it.text); put("style", encodeTextStyle(it.style))
@@ -322,6 +329,7 @@ object EditJson {
     }
 
     private fun JsonObjectBuilder.visual(v: Visual) {
+        v.effect?.let { e -> put("effect", buildJsonObject { put("id", e.id.wire); num("amount", e.amount); num("speed", e.speed); e.colors?.let { cs -> put("colors", JsonArray(cs.map { kotlinx.serialization.json.JsonPrimitive(it) })) } }) }
         v.fit?.let { put("fit", it.wire) }
         transform(v.transform)
         v.crop?.let { c -> put("crop", buildJsonObject { num("left", c.left); num("top", c.top); num("right", c.right); num("bottom", c.bottom) }) }

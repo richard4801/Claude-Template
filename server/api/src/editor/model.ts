@@ -3,6 +3,7 @@
 // case in test/fixtures/editor/*.json (scripts/editor-fixtures.ts writes them from these functions). Pure: no I/O.
 
 import { hash01, lookProblem, type Look } from './look.js';
+import { EFFECT_IDS, type Effect } from './effects.js';
 
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
@@ -61,7 +62,9 @@ export type DerivedFrom = { asset: string; op: 'stabilize' } | { asset: string; 
 export const DERIVED_OPS: readonly DerivedOp[] = ['stabilize', 'slowmo'];
 export const SLOWMO = { factors: [2, 4] as const, minRangeSec: 0.3, maxRangeSec: 10 };
 
-type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
+/** The effects library (2026-11-09): one picture effect on a clip or image, after its look, before its mask and transform (effects.ts). */
+export type { Effect } from './effects.js';
+type Visual = { effect?: Effect; fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
 /** Voice processing on a clip with sound (Edit suite audio panel). */
 type Voice = { voiceEffect?: VoiceEffect; enhance?: boolean };
 export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: number; outSec: number; speed: number; speedCurve?: SpeedCurve; startSec?: number;
@@ -78,7 +81,9 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
   animLoop?: AnimLoop };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
-export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop };
+export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop;
+  /** A cross-dissolve from the previous item on its track (kind fade; the item overlaps it by durationSec); see overlayFade. */
+  transitionIn?: Transition };
 /** The six bundled families, then the content library's (catalog `fonts` pack; Cyrillic and Latin Extended). */
 export type FontFamily = 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'
   | 'inter' | 'montserrat' | 'robotoCondensed' | 'playfair' | 'unbounded' | 'rubik' | 'jetbrainsMono' | 'caveat' | 'oswald';
@@ -421,6 +426,89 @@ export function derivedLabel(p: Pick<EditProject, 'assets'>, assetId: string): s
   }
   const s = words.reverse().join(', ');
   return s ? s[0]!.toUpperCase() + s.slice(1) : '';
+}
+
+/**
+ * Cross-dissolve between overlays: the alpha multiplier of [item] on overlay [track] at timeline [t] (after keyframes
+ * and animation, before blend). An item with a fade transitionIn rises over its first durationSec; the item before it
+ * falls over the same overlap. 1 elsewhere.
+ */
+export function overlayFade(p: EditProject, track: Track, item: Item, t: number): number {
+  if (track.kind !== 'video' && track.kind !== 'image') return 1;
+  const i = track.items.findIndex(x => x.id === item.id);
+  if (i < 0) return 1;
+  const me = itemSpan(p, track, item);
+  let a = 1;
+  const tin = (item as { transitionIn?: Transition }).transitionIn;
+  if (tin && i > 0 && t < me.startSec + tin.durationSec) a *= clamp((t - me.startSec) / tin.durationSec, 0, 1);
+  const next = track.items[i + 1];
+  const tn = next && (next as { transitionIn?: Transition }).transitionIn;
+  if (next && tn) { const ns = itemSpan(p, track, next).startSec; if (t >= ns) a *= clamp(1 - (t - ns) / tn.durationSec, 0, 1); }
+  return r6(a);
+}
+
+/**
+ * Split voice and music (the `separate` helper, 2026-11-09): clip [clipId] (main or overlay video) is muted and the kept
+ * part(s) go on audio tracks in sync with it: vocals on a voice track, instrumental on a music track (the first of that
+ * kind free over the clip's span, else a new one), each with the clip's inSec/outSec and speed, starting where the clip
+ * starts on the timeline. The assets (kind audio) must already be in the project. Null for a freeze frame, a speed
+ * curve, a speed outside 0.5–2 (audio's range), or when a new track would pass the track limit.
+ */
+export function applySeparation(p: EditProject, clipId: string, vocals: string, instrumental: string, keep: 'vocals' | 'instrumental' | 'both'): { project: EditProject; ids: string[] } | null {
+  const track = p.tracks.find(t => (t.kind === 'main' || t.kind === 'video') && t.items.some(i => i.id === clipId));
+  const c = track?.items.find(i => i.id === clipId) as VideoClip | undefined;
+  if (!track || !c || c.holdSec !== undefined || c.speedCurve || (c.speed ?? 1) < 0.5 - 1e-9 || (c.speed ?? 1) > 2 + 1e-9) return null;
+  const span = itemSpan(p, track, c);
+  let tracks = p.tracks.map(t => (t === track ? { ...t, items: t.items.map(i => (i.id === clipId ? { ...i, muted: true } : i)) } : t));
+  const ids: string[] = [];
+  const taken = new Set(p.tracks.flatMap(t => [t.id, ...t.items.map(i => i.id)]));
+  const fresh = (base: string) => { let n = 1; while (taken.has(`${base}${n}`)) n++; const id = `${base}${n}`; taken.add(id); return id; };
+  const parts: ['voice' | 'music', string][] = [];
+  if (keep !== 'instrumental') parts.push(['voice', vocals]);
+  if (keep !== 'vocals') parts.push(['music', instrumental]);
+  for (const [kind, asset] of parts) {
+    const clip: AudioClip = { id: fresh(kind === 'voice' ? 'vocals' : 'instr'), asset, startSec: r6(span.startSec), inSec: c.inSec, outSec: c.outSec, ...((c.speed ?? 1) !== 1 ? { speed: c.speed } : {}) };
+    const free = (t: Track) => t.items.every(i => { const sp = itemSpan({ ...p, tracks }, t, i); return sp.endSec <= span.startSec + LIMITS.overlapSlackSec || sp.startSec >= span.endSec - LIMITS.overlapSlackSec; });
+    const at = tracks.findIndex(t => t.kind === kind && free(t));
+    if (at >= 0) {
+      tracks = tracks.map((t, k) => (k === at ? { ...t, items: [...t.items, clip].sort((a, b) => (a as AudioClip).startSec - (b as AudioClip).startSec) } : t));
+    } else {
+      if (tracks.length >= LIMITS.maxTracks) return null;
+      tracks = [...tracks, { id: fresh(kind), kind, items: [clip] }];
+    }
+    ids.push(clip.id);
+  }
+  return { project: { ...p, tracks }, ids };
+}
+
+/**
+ * Cut out a picture (the `cutout` helper, 2026-11-09): image item [itemId] switches to the cut-out [assetId] (a PNG of
+ * the subject, [box] {x, y, w, h} in the source picture's [sourceWidth]×[sourceHeight] pixels) and stays exactly where
+ * the subject sat: scale and x/y move so the cut-out covers the box's place. The crop is dropped (the cut-out is
+ * already trimmed); mask, look, blend and animations stay. Scale keys are multiplied by the same ratio and x/y keys
+ * get the same offset (worked out at the base scale, so it's exact without scale keys). Null if it isn't an image item.
+ */
+export function applyCutout(p: EditProject, itemId: string, assetId: string, box: { x: number; y: number; w: number; h: number }, sourceWidth: number, sourceHeight: number): EditProject | null {
+  const track = p.tracks.find(t => t.kind === 'image' && t.items.some(i => i.id === itemId));
+  const im = track?.items.find(i => i.id === itemId) as ImageItem | undefined;
+  if (!track || !im || sourceWidth <= 0 || sourceHeight <= 0 || box.w <= 0 || box.h <= 0) return null;
+  const cv = p.canvas.width / p.canvas.height;
+  const fw = (w: number, h: number) => (im.fit === 'cover' ? Math.max(1, (w / h) / cv) : Math.min(1, (w / h) / cv));
+  const tr = im.transform ?? {};
+  const scale = tr.scale ?? 1, rot = (tr.rotation ?? 0) * Math.PI / 180;
+  const k = fw(sourceWidth, sourceHeight) * scale / sourceWidth; // canvas widths per source pixel
+  const scale2 = box.w * k / fw(box.w, box.h);
+  let dx = (box.x + box.w / 2 - sourceWidth / 2) * k, dy = (box.y + box.h / 2 - sourceHeight / 2) * k * cv;
+  if (tr.flipX) dx = -dx; if (tr.flipY) dy = -dy;
+  // Rotate the offset (clockwise degrees) in pixels, then back to canvas fractions.
+  const px = dx * p.canvas.width, py = dy * p.canvas.height;
+  const ox = (px * Math.cos(rot) - py * Math.sin(rot)) / p.canvas.width, oy = (px * Math.sin(rot) + py * Math.cos(rot)) / p.canvas.height;
+  const ratio = scale2 / scale;
+  const keys = im.keyframes ? Object.fromEntries(Object.entries(im.keyframes).map(([prop, ks]) => [prop, (ks as Keyframe[]).map(kf =>
+    prop === 'scale' ? { ...kf, v: r6(kf.v * ratio) } : prop === 'x' ? { ...kf, v: r6(kf.v + ox) } : prop === 'y' ? { ...kf, v: r6(kf.v + oy) } : kf)])) as Keyframes : undefined;
+  const { crop: _c, ...rest } = im;
+  const next: ImageItem = { ...rest, asset: assetId, transform: { ...tr, x: r6((tr.x ?? 0.5) + ox), y: r6((tr.y ?? 0.5) + oy), scale: r6(scale2) }, ...(keys ? { keyframes: keys } : {}) };
+  return { ...p, tracks: p.tracks.map(t => (t === track ? { ...t, items: t.items.map(i => (i.id === itemId ? next : i)) } : t)) };
 }
 
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
@@ -1146,6 +1234,17 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   };
   const visual = (f: string, it: Visual, len: number) => {
     if (it.fit !== undefined && it.fit !== 'cover' && it.fit !== 'contain') bad(`${f}.fit`, 'must be cover or contain');
+    if (it.effect !== undefined) {
+      const e = it.effect;
+      if (!e || typeof e !== 'object' || !EFFECT_IDS.includes(e.id)) bad(`${f}.effect.id`, 'unknown effect');
+      num(`${f}.effect.amount`, e.amount, 0, 1, false);
+      num(`${f}.effect.speed`, e.speed, 0.1, 4);
+      if (e.colors !== undefined) {
+        if (e.id !== 'duotone') bad(`${f}.effect.colors`, 'only for duotone');
+        if (!Array.isArray(e.colors) || e.colors.length !== 2) bad(`${f}.effect.colors`, 'must be two colours');
+        e.colors.forEach((c, i) => color(`${f}.effect.colors.${i}`, c, false));
+      }
+    }
     if (it.transform !== undefined) {
       num(`${f}.transform.x`, it.transform.x, -2, 3); num(`${f}.transform.y`, it.transform.y, -2, 3);
       num(`${f}.transform.scale`, it.transform.scale, 0.05, 10); num(`${f}.transform.rotation`, it.transform.rotation, -3600, 3600);
@@ -1297,7 +1396,6 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
               bad(`${g}.transitionIn.durationSec`, 'at most half of each clip');
           }
         } else {
-          if (c.transitionIn !== undefined) bad(`${g}.transitionIn`, 'transitions are on the main track only');
           num(`${g}.startSec`, c.startSec, 0, 600, false);
         }
       } else if (t.kind === 'image') {
@@ -1337,7 +1435,17 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
       }
       if (t.kind !== 'main') {
         const s = (it as { startSec: number }).startSec;
-        if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, 'items on a track must be in order and not overlap');
+        // Cross-dissolve between overlays (2026-11-09): the one allowed overlap, by exactly the transition's length.
+        const tr = (t.kind === 'video' || t.kind === 'image') ? (it as { transitionIn?: Transition }).transitionIn : undefined;
+        if (tr !== undefined) {
+          if (ii === 0) bad(`${g}.transitionIn`, 'the first item has no transition');
+          if (tr.kind !== 'fade') bad(`${g}.transitionIn.kind`, 'only a cross-dissolve on overlay tracks');
+          num(`${g}.transitionIn.durationSec`, tr.durationSec, LIMITS.minTransitionSec, LIMITS.maxTransitionSec, false);
+          const prev = t.items[ii - 1]!; const ps = itemSpan(p, t, prev); const me = itemSpan(p, t, it);
+          if (Math.abs(s - (ps.endSec - tr.durationSec)) > 0.01) bad(`${g}.transitionIn.durationSec`, 'must overlap the previous item by its length');
+          if (tr.durationSec > (me.endSec - me.startSec) / 2 + 1e-9 || tr.durationSec > (ps.endSec - ps.startSec) / 2 + 1e-9) bad(`${g}.transitionIn.durationSec`, 'at most half of each item');
+        } else if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, 'items on a track must be in order and not overlap');
+        if ((t.kind === 'text' || t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') && (it as { transitionIn?: unknown }).transitionIn !== undefined) bad(`${g}.transitionIn`, 'transitions are on the main track and overlays only');
         const span = itemSpan(p, t, it);
         prevEnd = span.endSec;
       }

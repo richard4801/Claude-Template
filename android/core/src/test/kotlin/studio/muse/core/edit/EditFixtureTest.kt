@@ -292,6 +292,81 @@ class EditFixtureTest {
         wp.forEachIndexed { i, pg -> assertEquals(pg.obj["startSec"]!!.num, pages[i].startSec, 1e-6); assertEquals(pg.obj["endSec"]!!.num, pages[i].endSec, 1e-6) }
     }
 
+    @Test fun overlayFades() {
+        val d = fn["overlayFades"]!!.obj
+        val p = EditJson.parse(d["project"]!!)
+        validate(p)
+        for (smp in d["samples"]!!.arr) {
+            val t = smp.obj["t"]!!.num
+            for ((id, a) in smp.obj["alpha"]!!.obj) {
+                val tr = p.tracks.first { tr -> tr.items.any { it.id == id } }
+                assertEquals("$id at $t", a.num, overlayFade(p, tr, tr.items.first { it.id == id }, t), 1e-6)
+            }
+        }
+        // p1's whole alpha (its own fade-out during the overlap): opacity × animation × overlayFade.
+        val pipt = p.tracks.first { it.id == "pipt" }; val c1 = pipt.items[0] as VideoClip
+        for (smp in d["samples"]!!.arr) {
+            val t = smp.obj["t"]!!.num
+            val local = t - itemSpan(p, pipt, c1).startSec
+            val got = (c1.opacity ?: 1.0) * animState(clipLength(c1), c1.animIn, c1.animOut, null, local).opacity * overlayFade(p, pipt, c1, t)
+            assertEquals("p1 composed at $t", smp.obj["p1Composed"]!!.num, got, 1e-6)
+        }
+        // The overlay track with a dissolve plays on two layers; mid-dissolve the pair composes as "incoming on top".
+        val plan = planRender(p, emptyMap())
+        val pip = plan.layers.filter { it.role == LayerRole.OVERLAY && it.trackId == "pipt" }
+        assertEquals(2, pip.size)
+        val t = 2.75
+        val a1 = plan.placement(pip.first { l -> l.clips.any { it.itemId == "p1" } }.index, t).alpha
+        val a2 = plan.placement(pip.first { l -> l.clips.any { it.itemId == "p2" } }.index, t).alpha
+        val p1First = pip.first { l -> l.clips.any { it.itemId == "p1" } }.index < pip.first { l -> l.clips.any { it.itemId == "p2" } }.index
+        // Wanted: in (p2) over out (p1 with its own fade-out): the background keeps (1 − out)(1 − in), either order.
+        val smp = d["samples"]!!.arr.first { it.obj["t"]!!.num == t }
+        val aOut = smp.obj["p1Composed"]!!.num; val aIn = smp.obj["alpha"]!!.obj["p2"]!!.num
+        assertEquals((1 - aOut) * (1 - aIn), (1 - a1) * (1 - a2), 1e-6)
+        if (p1First) assertEquals(aOut * (1 - aIn), a1, 1e-6) else assertEquals(aIn, a2, 1e-6)
+    }
+
+    @Test fun separation() {
+        val d = fn["separation"]!!.obj
+        val p = EditJson.parse(d["project"]!!)
+        for (c in d["cases"]!!.arr) {
+            val keep = SeparationKeep.valueOf(c.obj["keep"]!!.str.uppercase())
+            val r = applySeparation(p, c.obj["clip"]!!.str, "voc", "ins", keep)
+            val want = c.obj["result"]
+            if (want == null || want is JsonNull) { assertEquals("${c.obj["clip"]} $keep", null, r); continue }
+            assertEquals(want.obj["ids"]!!.arr.map { it.str }, r!!.second)
+            assertJson("separation ${c.obj["clip"]} $keep", want.obj["project"], EditJson.encode(r.first))
+            validate(r.first)
+        }
+    }
+
+    @Test fun cutouts() {
+        for (c in fn["cutouts"]!!.arr) {
+            val p = EditJson.parse(c.obj["project"]!!)
+            val b = c.obj["box"]!!.obj
+            val r = applyCutout(p, "i1", "cut", listOf(b["x"]!!.num, b["y"]!!.num, b["w"]!!.num, b["h"]!!.num), c.obj["sourceWidth"]!!.num, c.obj["sourceHeight"]!!.num)
+            assertJson("cutout ${c.obj["name"]!!.str}", c.obj["result"], EditJson.encode(r!!))
+            validate(r)
+        }
+    }
+
+    @Test fun effectsLibrary() {
+        val d = fn["effects"]!!.obj
+        val w = d["width"]!!.num.toInt(); val h = d["height"]!!.num.toInt()
+        assertEquals(d["perm"]!!.arr.map { it.num.toInt() }, Effects.PERM.toList())
+        val sample = Effects.sampler(w, h, d["pattern"]!!.arr.map { px -> px.arr.map { it.num }.toDoubleArray() })
+        for (c in d["cases"]!!.arr) {
+            val e = c.obj["effect"]!!.obj
+            val fx = Effect(EffectId.entries.first { it.wire == e["id"]!!.str }, e["amount"]!!.num, e["speed"]?.num, e["colors"]?.arr?.map { it.str })
+            val t = c.obj["t"]!!.num
+            for (smp in c.obj["samples"]!!.arr) {
+                val got = Effects.pixel(fx, t, w, h, smp.obj["u"]!!.num, smp.obj["v"]!!.num, sample)
+                val want = smp.obj["rgb"]!!.arr.map { it.num }
+                for (q in 0..2) assertEquals("${fx.id} a=${fx.amount} t=$t at ${smp.obj["u"]},${smp.obj["v"]} [$q]", want[q], got[q], 2e-6)
+            }
+        }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

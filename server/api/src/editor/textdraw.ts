@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import bidiModule from 'bidi-js';
 import opentype from 'opentype.js';
 import sharp from 'sharp';
 import * as M from './model.js';
@@ -39,8 +40,86 @@ export function cjkKind(text: string, language?: string | null): CjkKind | null 
 export const UNSPACED_LANGUAGES = new Set(['ja', 'zh', 'th']);
 /** How many CJK faces are parsed right now (tests: only the one needed, none after a render). */
 export function cjkLoaded() { return [...faces.keys()].filter(k => k.startsWith(CJK_DIR) && faces.get(k)).length; }
-/** Drops the parsed CJK faces (call when a render's text is drawn). */
-export function releaseCjk() { for (const k of [...faces.keys()]) if (k.startsWith(CJK_DIR)) faces.delete(k); }
+/** Drops the parsed CJK and script faces and their shapers (call when a render's text is drawn). */
+export function releaseCjk() {
+  for (const k of [...faces.keys()]) if (k.startsWith(CJK_DIR)) faces.delete(k);
+  hbFonts.clear();
+}
+
+/**
+ * Scripts that need shaping (plans/edit-xl-options.md §4, step 3): Arabic (joining forms, right to left), Hebrew (right
+ * to left), Devanagari (conjuncts, reordered vowel signs) and Thai (stacked marks). A word containing one is shaped as
+ * a whole by HarfBuzz (harfbuzzjs, WebAssembly) with that script's Noto face (they also carry Latin, digits and
+ * punctuation); the outlines come from the same file through opentype.js, so glyph ids match. A line's words are then
+ * put in display order by their Unicode bidi levels (bidi-js), so right-to-left captions read right to left and the
+ * numbers and Latin words inside them stay left to right. Letter spacing isn't added inside shaped words (it would
+ * break Arabic joining).
+ */
+export type ShapedKind = 'arabic' | 'hebrew' | 'devanagari' | 'thai';
+const SHAPED: [ShapedKind, RegExp][] = [
+  ['arabic', /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/u], ['hebrew', /[֐-׿יִ-ﭏ]/u],
+  ['devanagari', /[ऀ-ॿ꣠-ꣿ]/u], ['thai', /[฀-๿]/u],
+];
+export const scriptFile = (k: ShapedKind, bold: boolean) => path.join(CJK_DIR, `NotoSans${k[0]!.toUpperCase()}${k.slice(1)}-${bold ? 'Bold' : 'Regular'}.ttf`);
+/** The script a word needs shaped in, or null. */
+export function shapedKind(text: string): ShapedKind | null { return SHAPED.find(([, re]) => re.test(text))?.[0] ?? null; }
+/** Put in `missing` when a word needed shaping but the shaper wasn't loaded (ensureShaper): drawn letter by letter. */
+export const UNSHAPED = 'unshaped script';
+
+type Hb = typeof import('harfbuzzjs');
+let hb: Hb | null = null;
+/** Loads HarfBuzz (once; a few MB of WebAssembly). The render calls it before drawing text. */
+export async function ensureShaper() { hb ??= await import('harfbuzzjs'); }
+/** A HarfBuzz font; harfbuzzjs frees its WebAssembly objects when they're collected (no destroy in v1). */
+type HbFont = { font: InstanceType<Hb['Font']>; upem: number };
+const hbFonts = new Map<string, HbFont | null>();
+function hbFont(file: string): HbFont | null {
+  if (hbFonts.has(file)) return hbFonts.get(file)!;
+  let r: HbFont | null = null;
+  if (hb) {
+    try {
+      const b = fs.readFileSync(file), blob = new hb.Blob(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)), fc = new hb.Face(blob), font = new hb.Font(fc);
+      r = { font, upem: fc.upem };
+    } catch { r = null; }
+  }
+  hbFonts.set(file, r);
+  return r;
+}
+/** A word shaped by HarfBuzz with [file]: outline at baseline 0 in display order, or null when it can't be. */
+function shapeComplex(text: string, file: string, px: number, missing: Set<string>): Shaped | null {
+  const ot = face(file), hf = hbFont(file);
+  if (!hb || !ot || !hf) return null;
+  const buf = new hb.Buffer(); // freed when collected
+  buf.addText(text); buf.guessSegmentProperties(); hb.shape(hf.font, buf);
+  const info = buf.getGlyphInfos(), pos = buf.getGlyphPositions(), k = px / hf.upem;
+  let x = 0, d = '';
+  info.forEach((g, i) => {
+    const p = pos[i]!;
+    if (!g.codepoint) { const ch = String.fromCodePoint(text.codePointAt(g.cluster) ?? 0x20); if (!/\s/.test(ch)) missing.add(ch); }
+    else d += ot.glyphs.get(g.codepoint).getPath(x + p.xOffset * k, -p.yOffset * k, px).toPathData(2);
+    x += p.xAdvance * k;
+  });
+  return { d, width: x };
+}
+
+// bidi-js is CommonJS: at run time the default import is the factory itself (its typings describe an ES default).
+const bidi = ((bidiModule as unknown as { default?: () => unknown }).default ?? bidiModule as unknown as () => unknown)() as { getEmbeddingLevels(text: string, dir: 'auto' | 'ltr' | 'rtl'): { levels: Uint8Array } };
+/** Display order of one line's words from their bidi levels (UAX #9 rule L2, a word taking its first letter's level). */
+function visualOrder<T>(words: T[], levels: number[]): T[] {
+  const out = words.map((w, i) => ({ w, l: levels[i] ?? 0 }));
+  const max = Math.max(0, ...out.map(x => x.l)), minOdd = Math.min(...out.map(x => x.l).filter(l => l % 2 === 1), Infinity);
+  if (!Number.isFinite(minOdd)) return words;
+  for (let lv = max; lv >= minOdd; lv--) {
+    for (let i = 0; i < out.length;) {
+      if (out[i]!.l < lv) { i++; continue; }
+      let j = i;
+      while (j < out.length && out[j]!.l >= lv) j++;
+      out.splice(i, j - i, ...out.slice(i, j).reverse());
+      i = j;
+    }
+  }
+  return out.map(x => x.w);
+}
 
 /** Put in `missing` when an emoji is drawn: the fonts here have it in one colour (outline), the apps in full colour. */
 export const EMOJI = 'colour emoji';
@@ -61,7 +140,7 @@ const xmlAttr = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 /** A word (or run of words) and how it is drawn. */
 export type Run = { text: string; color: string; scale?: number; box?: string; marker?: string };
-type Word = { d: string; width: number; run: Run; scale: number };
+type Word = { d: string; width: number; run: Run; scale: number; text: string; level: number };
 type Shaped = { d: string; width: number };
 
 /** One word as an outline at baseline 0: glyphs from the font, or the fallback where it lacks one; kerned, tracked. */
@@ -109,10 +188,24 @@ export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number,
     r.text.split('\n').forEach((part, i) => {
       if (i > 0) paras.push([]);
       for (const w of part.split(/[ \t]+/).filter(Boolean)) {
-        const k = r.scale ?? 1, sh = shape(w, font, fallbacks, px * k, tracking * k, o.missing);
-        paras.at(-1)!.push({ d: sh.d, width: sh.width, run: r, scale: k });
+        const k = r.scale ?? 1, sk = shapedKind(w);
+        // Arabic, Hebrew, Devanagari, Thai: the whole word shaped with its script's face (unless the member's font has it all).
+        let sh: Shaped | null = null;
+        if (sk && [...w].some(ch => !font.charToGlyphIndex(ch))) {
+          sh = shapeComplex(w, scriptFile(sk, bold), px * k, o.missing) ?? shapeComplex(w, scriptFile(sk, !bold), px * k, o.missing);
+          if (!sh) o.missing.add(UNSHAPED);
+        }
+        sh ??= shape(w, font, fallbacks, px * k, tracking * k, o.missing);
+        paras.at(-1)!.push({ d: sh.d, width: sh.width, run: r, scale: k, text: w, level: 0 });
       }
     });
+  }
+  // Bidi levels per word (its first letter's), per paragraph: right-to-left words and paragraphs read right to left.
+  for (const para of paras) {
+    if (!para.some(w => /[֐-ࣿיִ-﷿ﹰ-﻿]/u.test(w.text))) continue;
+    const text = para.map(w => w.text).join(' '), lv = bidi.getEmbeddingLevels(text, 'auto').levels;
+    let at = 0;
+    for (const w of para) { w.level = lv[at] ?? 0; at += w.text.length + 1; }
   }
   const lines: Word[][] = [];
   for (const para of paras) {
@@ -123,6 +216,8 @@ export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number,
     }
     lines.push(line);
   }
+  // Line breaks are found in reading order; each line is then drawn in display order.
+  for (let i = 0; i < lines.length; i++) if (lines[i]!.some(w => w.level > 0)) lines[i] = visualOrder(lines[i]!, lines[i]!.map(w => w.level));
   const shown = lines.slice(0, o.maxLines ?? lines.length);
   const asc = (font.ascender / font.unitsPerEm) * px, natural = ((font.ascender - font.descender) / font.unitsPerEm) * px;
   const mult = (s.lineHeight ?? 1.15) / 1.15;

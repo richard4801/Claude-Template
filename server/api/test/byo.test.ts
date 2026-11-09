@@ -324,7 +324,10 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       const lite = engines.find((e: any) => e.model === 'h3-lite');
       expect(lite).toMatchObject({ kind: 'video', custom: false, tier: 'draft', resolution: '768P', perSec: 0.02, perRun: null, price: { basis: 'per_second', usd: 0.02 } });
       expect(engines.find((e: any) => e.model === 'h3-open')).toBeUndefined(); // licence-blocked
-      expect(engines.filter((e: any) => e.kind === 'image').map((e: any) => [e.name, e.custom])).toEqual([[expect.any(String), false], ['House Still', true]]);
+      // Every image model the owner can pick (owner 2026-11-09): the curated FLUX.2 family, then the studio's own.
+      const imgs = engines.filter((e: any) => e.kind === 'image').map((e: any) => [e.name, e.custom]);
+      expect(imgs.filter(([, c]: any) => !c).map(([n]: any) => n)).toEqual(expect.arrayContaining(['FLUX.2 [pro]', 'FLUX.2 [max]', 'FLUX.2 [flex]', 'FLUX.2 [dev]']));
+      expect(imgs.at(-1)).toEqual(['House Still', true]);
       expect(engines.find((e: any) => e.model === im.id).perRun).toBeCloseTo(0.05, 6);
       expect((await member!.req('GET', '/v1/suite/catalog')).body.engines).toBeUndefined();
 

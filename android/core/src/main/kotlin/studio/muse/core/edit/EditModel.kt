@@ -215,6 +215,83 @@ fun applySlowmo(p: EditProject, clipId: String, slowId: String): Pair<EditProjec
     return p.copy(tracks = p.tracks.map { if (it === main) main.copy(items = items) else it }) to midId
 }
 
+/**
+ * Cross-dissolve between overlays: the alpha multiplier of [item] on overlay [track] at timeline [t] (after keyframes
+ * and animation, before blend). An item with a fade transitionIn rises over its first durationSec; the item before it
+ * falls over the same overlap. 1 elsewhere (meaningful while the item is on screen).
+ */
+fun overlayFade(p: EditProject, track: Track, item: Item, t: Double): Double {
+    if (track.kind != TrackKind.VIDEO && track.kind != TrackKind.IMAGE) return 1.0
+    val i = track.items.indexOfFirst { it.id == item.id }
+    if (i < 0) return 1.0
+    fun tin(x: Item) = when (x) { is VideoClip -> x.transitionIn; is ImageItem -> x.transitionIn; else -> null }
+    val me = itemSpan(p, track, item)
+    var a = 1.0
+    tin(item)?.let { tr -> if (i > 0 && t < me.startSec + tr.durationSec) a *= ((t - me.startSec) / tr.durationSec).coerceIn(0.0, 1.0) }
+    track.items.getOrNull(i + 1)?.let { n -> tin(n)?.let { tr -> val ns = itemSpan(p, track, n).startSec; if (t >= ns) a *= (1 - (t - ns) / tr.durationSec).coerceIn(0.0, 1.0) } }
+    return r6(a)
+}
+
+enum class SeparationKeep { VOCALS, INSTRUMENTAL, BOTH }
+
+/**
+ * Split voice and music (the `separate` helper, 2026-11-09): clip [clipId] (main or overlay video) is muted and the kept
+ * part(s) go on audio tracks in sync with it: vocals on a voice track, instrumental on a music track (the first of that
+ * kind free over the clip's span, else a new one), each with the clip's in/out and speed, starting where the clip starts.
+ * Returns the project and the new clip ids; null for a freeze frame, a speed curve, a speed outside 0.5–2, or no room.
+ */
+fun applySeparation(p: EditProject, clipId: String, vocals: String, instrumental: String, keep: SeparationKeep): Pair<EditProject, List<String>>? {
+    val track = p.tracks.firstOrNull { t -> (t.kind == TrackKind.MAIN || t.kind == TrackKind.VIDEO) && t.items.any { it.id == clipId } } ?: return null
+    val c = track.items.first { it.id == clipId } as? VideoClip ?: return null
+    if (c.holdSec != null || c.speedCurve != null || c.speed < 0.5 - 1e-9 || c.speed > 2 + 1e-9) return null
+    val span = itemSpan(p, track, c)
+    var tracks = p.tracks.map { t -> if (t === track) t.copy(items = t.items.map { if (it.id == clipId) c.copy(muted = true) else it }) else t }
+    val taken = p.tracks.flatMap { t -> listOf(t.id) + t.items.map { it.id } }.toMutableSet()
+    fun fresh(base: String): String { var n = 1; while ("$base$n" in taken) n++; return "$base$n".also { taken += it } }
+    val ids = ArrayList<String>()
+    val parts = buildList { if (keep != SeparationKeep.INSTRUMENTAL) add(TrackKind.VOICE to vocals); if (keep != SeparationKeep.VOCALS) add(TrackKind.MUSIC to instrumental) }
+    for ((kind, asset) in parts) {
+        val clip = AudioClip(fresh(if (kind == TrackKind.VOICE) "vocals" else "instr"), asset, r6(span.startSec), c.inSec, c.outSec, speed = c.speed.takeIf { it != 1.0 })
+        val cur = p.copy(tracks = tracks)
+        fun free(t: Track) = t.items.all { val sp = itemSpan(cur, t, it); sp.endSec <= span.startSec + EditLimits.OVERLAP_SLACK_SEC || sp.startSec >= span.endSec - EditLimits.OVERLAP_SLACK_SEC }
+        val at = tracks.indexOfFirst { it.kind == kind && free(it) }
+        tracks = if (at >= 0) tracks.mapIndexed { k, t -> if (k == at) t.copy(items = (t.items + clip).sortedBy { (it as AudioClip).startSec }) else t }
+        else { if (tracks.size >= EditLimits.MAX_TRACKS) return null; tracks + Track(fresh(kind.wire), kind, items = listOf(clip)) }
+        ids += clip.id
+    }
+    return p.copy(tracks = tracks) to ids
+}
+
+/**
+ * Cut out a picture (the `cutout` helper, 2026-11-09): image item [itemId] switches to the cut-out [assetId] (the subject,
+ * trimmed; [box] = x, y, w, h in the source picture's [sourceWidth]×[sourceHeight] pixels) and stays exactly where the
+ * subject sat (scale and x/y move); the crop is dropped. Scale keys × the same ratio, x/y keys + the same offset.
+ */
+fun applyCutout(p: EditProject, itemId: String, assetId: String, box: List<Double>, sourceWidth: Double, sourceHeight: Double): EditProject? {
+    val track = p.tracks.firstOrNull { t -> t.kind == TrackKind.IMAGE && t.items.any { it.id == itemId } } ?: return null
+    val im = track.items.first { it.id == itemId } as? ImageItem ?: return null
+    val (bx, by, bw, bh) = box
+    if (sourceWidth <= 0 || sourceHeight <= 0 || bw <= 0 || bh <= 0) return null
+    val cv = p.canvas.width.toDouble() / p.canvas.height
+    fun fw(w: Double, h: Double) = if (im.fit == Fit.COVER) max(1.0, (w / h) / cv) else min(1.0, (w / h) / cv)
+    val tr = im.transform ?: Transform()
+    val scale = tr.scale ?: 1.0; val rot = Math.toRadians(tr.rotation ?: 0.0)
+    val k = fw(sourceWidth, sourceHeight) * scale / sourceWidth
+    val scale2 = bw * k / fw(bw, bh)
+    var dx = (bx + bw / 2 - sourceWidth / 2) * k; var dy = (by + bh / 2 - sourceHeight / 2) * k * cv
+    if (tr.flipX == true) dx = -dx
+    if (tr.flipY == true) dy = -dy
+    val px = dx * p.canvas.width; val py = dy * p.canvas.height
+    val ox = (px * kotlin.math.cos(rot) - py * kotlin.math.sin(rot)) / p.canvas.width
+    val oy = (px * kotlin.math.sin(rot) + py * kotlin.math.cos(rot)) / p.canvas.height
+    val ratio = scale2 / scale
+    val keys = im.keyframes?.mapValues { (prop, ks) -> ks.map { kf -> when (prop) {
+        KfProp.SCALE -> kf.copy(v = r6(kf.v * ratio)); KfProp.X -> kf.copy(v = r6(kf.v + ox)); KfProp.Y -> kf.copy(v = r6(kf.v + oy)); else -> kf } } }
+    val next = im.copy(asset = assetId, crop = null, keyframes = keys,
+        transform = tr.copy(x = r6((tr.x ?: 0.5) + ox), y = r6((tr.y ?: 0.5) + oy), scale = r6(scale2)))
+    return p.copy(tracks = p.tracks.map { t -> if (t === track) t.copy(items = t.items.map { if (it.id == itemId) next else it }) else t })
+}
+
 /** The helper steps from the original to [assetId], in the order applied ("stabilize", "slowmo", "reverse"). */
 fun derivedOps(p: EditProject, assetId: String): List<String> {
     val ops = ArrayList<String>()

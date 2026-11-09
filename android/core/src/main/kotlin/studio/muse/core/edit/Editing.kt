@@ -41,7 +41,9 @@ private fun EditProject.fits(track: Track, items: List<Item>): Boolean {
     val t = track.copy(items = items)
     for (it in items) {
         val s = it.startSecOrNull ?: return false
-        if (s < 0 || s < prevEnd - EditLimits.OVERLAP_SLACK_SEC) return false
+        // A cross-dissolve's item overlaps the one before by its length (overlays only).
+        val d = when (it) { is VideoClip -> it.transitionIn?.durationSec; is ImageItem -> it.transitionIn?.durationSec; else -> null } ?: 0.0
+        if (s < 0 || s < prevEnd - d - 0.01 - EditLimits.OVERLAP_SLACK_SEC) return false
         prevEnd = itemSpan(this, t, it).endSec
     }
     return true

@@ -1,7 +1,7 @@
 // Claude chat threads on the owner's Claude plan (plans/api.md "Claude on the owner's plan"). The owner's Mac runs Claude
 // Code and mirrors each turn here; the phone's messages become turns the Mac claims and answers (the Blender relay's
 // queue/claim pattern). The server never runs Claude itself, except the opt-in API-key fallback (camera threads).
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -87,6 +87,7 @@ export class ClaudeService {
 
   // ------------------------------------------------------------------ threads
   private threadView = (t: ThreadRow) => compact({ id: t.id, contextKind: t.contextKind, contextId: t.contextId, claudeSessionId: t.claudeSessionId ?? undefined,
+    contextKey: t.contextKey ?? undefined, title: t.title ?? undefined, // WS18: the chat's list and name
     createdAt: t.createdAt, updatedAt: t.updatedAt, brief: threadBrief(t.contextKind, t.contextId) });
   private async messageView(m: MessageRow) {
     return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ?? undefined,
@@ -102,22 +103,64 @@ export class ClaudeService {
     return t;
   }
 
+  /**
+   * POST /v1/claude/threads {contextKind, contextId, new?, title?}: the context's most recent chat (made if there is none),
+   * or with `new: true` a new chat in the same list (WS18: each place keeps a list of chats the owner switches between).
+   */
   async openThread(u: AuthUser, body: unknown) {
-    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit', 'recreate', 'suite']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/) }).strict(), body);
+    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit', 'recreate', 'suite']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+      new: z.boolean().optional(), title: z.string().trim().max(TITLE_MAX).optional() }).strict(), body);
     if (b.contextKind === 'camera') await this.camera.row(u, b.contextId);
     // workstream 1: a Recreate thread is about one of the owner's references.
     if (b.contextKind === 'recreate') await (await import('../recreate/references.js')).recreateOf(this.ctx).row(u, b.contextId);
-    if (b.contextKind === 'suite') await (await import('../suite/assist.js')).assistOf(this.ctx).row(u, b.contextId); // workstream 1: Claude in the AI Suite
+    let key = `${b.contextKind}:${b.contextId}`;
+    if (b.contextKind === 'suite') { // workstream 1: Claude in the AI Suite; WS18: its chats are listed by the composer's tool
+      const a = await (await import('../suite/assist.js')).assistOf(this.ctx).row(u, b.contextId);
+      key = suiteKey((a.draft as { tool?: unknown }).tool);
+    }
     const where = and(eq(claudeThreads.ownerId, u.id), eq(claudeThreads.contextKind, b.contextKind), eq(claudeThreads.contextId, b.contextId));
-    const [found] = await this.db.select().from(claudeThreads).where(where);
-    if (found) return this.threadView(found);
+    if (!b.new) {
+      const [found] = await this.db.select().from(claudeThreads).where(where).orderBy(desc(claudeThreads.updatedAt)).limit(1);
+      if (found) {
+        if (found.contextKey) return this.threadView(found);
+        const [n] = await this.db.update(claudeThreads).set({ contextKey: key }).where(eq(claudeThreads.id, found.id)).returning();
+        return this.threadView(n!);
+      }
+    }
     const now = Date.now();
-    const [t] = await this.db.insert(claudeThreads).values({ id: uid('ct'), studioId: u.studioId, ownerId: u.id, contextKind: b.contextKind, contextId: b.contextId, createdAt: now, updatedAt: now })
-      .onConflictDoNothing().returning();
-    const row = t ?? (await this.db.select().from(claudeThreads).where(where))[0]!;
-    const view = this.threadView(row);
+    const [t] = await this.db.insert(claudeThreads).values({ id: uid('ct'), studioId: u.studioId, ownerId: u.id, contextKind: b.contextKind, contextId: b.contextId,
+      contextKey: key, title: b.title || null, createdAt: now, updatedAt: now }).returning();
+    const view = this.threadView(t!);
     void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'thread', thread: view });
     return view;
+  }
+
+  /**
+   * GET /v1/claude/threads?key=suite:photo (WS18): the chats of one list, newest first, each with its title (the owner's,
+   * else the first message's words), when it was last used and how many messages it has. Owner only, like every thread.
+   */
+  async list(u: AuthUser, query: unknown) {
+    const q = parse(z.object({ key: z.string().regex(KEY_RE), limit: z.coerce.number().int().min(1).max(100).optional() }).strict(), query ?? {});
+    const rows = await this.db.select().from(claudeThreads).where(and(eq(claudeThreads.ownerId, u.id), eq(claudeThreads.contextKey, q.key)))
+      .orderBy(desc(claudeThreads.updatedAt)).limit(q.limit ?? 50);
+    const counts = rows.length ? await this.db.select({ threadId: claudeMessages.threadId, n: sql<number>`count(*)::int` }).from(claudeMessages)
+      .where(and(inArray(claudeMessages.threadId, rows.map(r => r.id)), ne(claudeMessages.role, 'tool'))).groupBy(claudeMessages.threadId) : [];
+    const n = new Map(counts.map(c => [c.threadId, Number(c.n)]));
+    return { key: q.key, threads: rows.map(r => ({ ...this.threadView(r), messageCount: n.get(r.id) ?? 0 })) };
+  }
+
+  /** DELETE /v1/claude/threads/{id} (WS18): the chat and its messages. A turn still running in it is stopped. */
+  async deleteThread(u: AuthUser, id: string) {
+    const t = await this.thread(u, id);
+    const open = await this.db.select().from(claudeTurns).where(and(eq(claudeTurns.threadId, t.id), inArray(claudeTurns.state, ['queued', 'running'])));
+    for (const turn of open) {
+      const timer = this.timers.get(turn.id); if (timer) { clearTimeout(timer); this.timers.delete(turn.id); }
+      if (turn.state === 'running') void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'stop', turnId: turn.id });
+    }
+    await this.db.delete(claudeThreads).where(eq(claudeThreads.id, t.id));
+    void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'threadDeleted', threadId: t.id, contextKey: t.contextKey ?? undefined });
+    if (open.length) void this.emitStatus(u);
+    return { ok: true, id: t.id };
   }
 
   async get(u: AuthUser, id: string) {
@@ -127,16 +170,36 @@ export class ClaudeService {
     return { ...this.threadView(t), messages: await Promise.all(rows.map(m => this.messageView(m))), ...(active ? { activeTurn: await this.turnView(active) } : {}) };
   }
 
+  /** PATCH {claudeSessionId?, title?}: the Mac's Claude Code session, or the owner's name for the chat (WS18; "" goes back to the automatic one). */
   async patchThread(u: AuthUser, id: string, body: unknown) {
-    const b = parse(z.object({ claudeSessionId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/) }).strict(), body);
+    const b = parse(z.object({ claudeSessionId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional(), title: z.string().trim().max(TITLE_MAX).optional() }).strict()
+      .refine(x => x.claudeSessionId !== undefined || x.title !== undefined, 'claudeSessionId or title'), body);
     const t = await this.thread(u, id);
-    const [n] = await this.db.update(claudeThreads).set({ claudeSessionId: b.claudeSessionId, updatedAt: Date.now() }).where(eq(claudeThreads.id, t.id)).returning();
-    return this.threadView(n!);
+    const set: Partial<ThreadRow> = {};
+    if (b.claudeSessionId !== undefined) { set.claudeSessionId = b.claudeSessionId; set.updatedAt = Date.now(); }
+    if (b.title !== undefined) set.title = b.title || (await this.firstWords(t.id)); // a rename doesn't move the chat up the list
+    const [n] = await this.db.update(claudeThreads).set(set).where(eq(claudeThreads.id, t.id)).returning();
+    const view = this.threadView(n!);
+    if (b.title !== undefined) void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'thread', thread: view });
+    return view;
+  }
+
+  /** The automatic title: the first message's words (without the app's context line), or none yet. */
+  private async firstWords(threadId: string) {
+    const [m] = await this.db.select({ text: claudeMessages.text }).from(claudeMessages).where(and(eq(claudeMessages.threadId, threadId), eq(claudeMessages.role, 'user')))
+      .orderBy(claudeMessages.createdAt).limit(1);
+    return m ? autoTitle(m.text) : null;
   }
 
   private async addMessage(u: AuthUser, threadId: string, m: Omit<typeof claudeMessages.$inferInsert, 'id' | 'threadId' | 'createdAt'>) {
     const [row] = await this.db.insert(claudeMessages).values({ id: uid('cm'), threadId, createdAt: Date.now(), ...m }).returning();
-    await this.db.update(claudeThreads).set({ updatedAt: Date.now() }).where(eq(claudeThreads.id, threadId));
+    // WS18: the chat's first words name it until the owner renames it.
+    const title = m.role === 'user' ? autoTitle(m.text ?? '') : null;
+    const [th] = await this.db.update(claudeThreads).set({ updatedAt: Date.now() }).where(eq(claudeThreads.id, threadId)).returning();
+    if (title && th && !th.title) {
+      const [named] = await this.db.update(claudeThreads).set({ title }).where(and(eq(claudeThreads.id, threadId), isNull(claudeThreads.title))).returning();
+      if (named) void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'thread', thread: this.threadView(named) });
+    }
     const message = await this.messageView(row!);
     void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'message', threadId, message });
     return message;
@@ -278,6 +341,33 @@ export class ClaudeService {
 }
 
 export type { CameraAssetKind };
+
+// ------------------------------------------------------------------ WS18: lists of chats
+export const TITLE_MAX = 80;
+/** A list's key: `suite:<tool>` or `<kind>:<contextId>`. */
+export const KEY_RE = /^(suite|camera|edit|recreate):[A-Za-z0-9_-]{1,80}$/;
+/** The AI Suite's list for a composer tool (Shot, Photo, Talking, …); anything unknown is Shot's. */
+export function suiteKey(tool: unknown) {
+  const t = typeof tool === 'string' && /^[a-z]{1,20}$/.test(tool) ? tool : 'shot';
+  return `suite:${t}`;
+}
+/**
+ * A chat's automatic title from its first message: the app's context line (`[Suite …]`, `[Recreate …]`) and any ids or
+ * paths left out, one line, at most 60 characters cut at a word.
+ */
+export function autoTitle(text: string): string | null {
+  let lines = text.split('\n');
+  while (lines.length && /^\s*\[.*\]\s*$/.test(lines[0]!)) lines = lines.slice(1);
+  let s = lines.join(' ')
+    .replace(/<[^>]{0,200}>/g, ' ')
+    .replace(/\b(?:sa|ct|cm|tu|es|cs|tk|up|img)_[A-Za-z0-9]{4,}\b/g, ' ')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, ' ')
+    .replace(/(?:~|\/)[\w.-]*\/[\w./-]+/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  if (s.length > 60) { const cut = s.slice(0, 60); const sp = cut.lastIndexOf(' '); s = (sp > 30 ? cut.slice(0, sp) : cut).replace(/[\s,.;:–-]+$/, '') + '…'; }
+  return s;
+}
 
 /**
  * workstream 1: what Claude on the owner's Mac starts a Recreate or Edit thread with: the role, the MUSE tools for it
