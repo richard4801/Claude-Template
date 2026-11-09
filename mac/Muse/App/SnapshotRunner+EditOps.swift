@@ -587,7 +587,9 @@ extension SnapshotRunner {
             gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
             let frame = try? await gen.image(at: CMTime(seconds: 1.5, preferredTimescale: 600)).image
             let px = frame.flatMap { pixel($0, 0.5, 0.5) }
-            check("export HDR: the picture", isRed(px), describe(px))
+            // SDR content sits at HLG reference white (BT.2408, 75 %), below HDR peak, so it reads darker when decoded to
+            // SDR (rgb(150, 1, 10) on CI): check the hue, not the brightness.
+            check("export HDR: the picture", px.map { $0.r > 100 && $0.g < 50 && $0.b < 50 } ?? false, describe(px))
         }
     }
 
