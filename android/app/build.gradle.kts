@@ -171,8 +171,11 @@ dependencies {
 abstract class MuseCompositorRemap : AsmClassVisitorFactory<InstrumentationParameters.None> {
     override fun createClassVisitor(classContext: ClassContext, nextClassVisitor: ClassVisitor): ClassVisitor =
         ClassRemapper(nextClassVisitor, SimpleRemapper("androidx/media3/effect/DefaultCompositorGlProgram", "androidx/media3/effect/MuseCompositorGlProgram"))
+    // WS4 (0.1.5 release build): the library class itself is left alone. Remapping it renamed it to MuseCompositorGlProgram
+    // too, so R8 found that type twice ("defined multiple times") and the release build failed; debug builds didn't check.
     override fun isInstrumentable(classData: ClassData): Boolean =
-        classData.className.startsWith("androidx.media3.effect.") && !classData.className.startsWith("androidx.media3.effect.Muse")
+        classData.className.startsWith("androidx.media3.effect.") && !classData.className.startsWith("androidx.media3.effect.Muse") &&
+            classData.className != "androidx.media3.effect.DefaultCompositorGlProgram" && !classData.className.startsWith("androidx.media3.effect.DefaultCompositorGlProgram$")
 }
 androidComponents {
     onVariants { variant ->
