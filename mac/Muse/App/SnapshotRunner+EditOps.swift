@@ -885,6 +885,7 @@ extension SnapshotRunner {
             var buf = [Float](repeating: 0, count: W * H * 4)
             buf.withUnsafeMutableBytes { ctx.render(out, toBitmap: $0.baseAddress!, rowBytes: W * 16, bounds: CGRect(x: 0, y: 0, width: W, height: H), format: .RGBAf, colorSpace: srgb) }
             var good = 0, worst = 0.0
+            var firstBad: [String] = []
             for y in 0..<H {
                 for x in 0..<W {
                     let ref = EditV2.effectPixel(e, t: 0.37, width: Double(W), height: Double(H), u: (Double(x) + 0.5) / Double(W), v: (Double(y) + 0.5) / Double(H), sample: sampler)
@@ -892,10 +893,32 @@ extension SnapshotRunner {
                     let o = row * W * 4 + x * 4
                     let d = max(abs(Double(buf[o]) - ref.x), abs(Double(buf[o + 1]) - ref.y), abs(Double(buf[o + 2]) - ref.z))
                     worst = max(worst, d)
-                    if d <= 3.0 / 255 { good += 1 }
+                    if d <= 3.0 / 255 { good += 1 } else if firstBad.count < 3 {
+                        firstBad.append(String(format: "(%d,%d) got %.3f %.3f %.3f want %.3f %.3f %.3f", x, y, buf[o], buf[o + 1], buf[o + 2], ref.x, ref.y, ref.z))
+                    }
                 }
             }
-            check("effects: \(id) matches the reference", Double(good) / Double(W * H) >= 0.95, String(format: "%d/%d within 3/255, worst %.3f", good, W * H, worst))
+            check("effects: \(id) matches the reference", Double(good) / Double(W * H) >= 0.95,
+                  String(format: "%d/%d within 3/255, worst %.3f; ", good, W * H, worst) + firstBad.joined(separator: "; "))
+        }
+        // Diagnostic: the permutation as the kernel reads it (nearest, 256×1, no colour management).
+        let readK = CIKernel(source: """
+            kernel vec4 musePermRead(sampler perm) {
+                vec2 d = destCoord();
+                float v = sample(perm, samplerTransform(perm, vec2(floor(d.x) + 0.5, 0.5))).r;
+                return vec4(v, v, v, 1.0);
+            }
+            """)
+        if let readK, let out = readK.apply(extent: CGRect(x: 0, y: 0, width: 256, height: 1), roiCallback: { _, _ in CGRect(x: 0, y: 0, width: 256, height: 1) },
+                                           arguments: [EditV2EffectRenderer.perm]) {
+            var pb = [Float](repeating: 0, count: 256 * 4)
+            pb.withUnsafeMutableBytes { ctx.render(out, toBitmap: $0.baseAddress!, rowBytes: 256 * 16, bounds: CGRect(x: 0, y: 0, width: 256, height: 1), format: .RGBAf, colorSpace: nil) }
+            let got = (0..<256).map { Int((pb[$0 * 4] * 255).rounded()) }
+            let bad = (0..<256).filter { got[$0] != EditV2.effectPerm[$0] }
+            check("effects: the kernel reads Perlin's permutation exactly", bad.isEmpty,
+                  "\(bad.count) wrong; first: " + bad.prefix(6).map { "[\($0)] got \(got[$0]) want \(EditV2.effectPerm[$0])" }.joined(separator: ", "))
+        } else {
+            check("effects: the permutation readback kernel compiles", false, "nil")
         }
     }
 }

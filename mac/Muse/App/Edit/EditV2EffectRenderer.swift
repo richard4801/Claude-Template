@@ -8,7 +8,7 @@ import MuseCore
 /// before its mask and transform.
 enum EditV2EffectRenderer {
     /// Perlin's permutation as a 256×1 single-channel image, no colour management (values exact).
-    private static let perm: CIImage = {
+    static let perm: CIImage = {
         let bytes = Data(EditV2.effectPerm.map { UInt8($0) })
         return CIImage(bitmapData: bytes, bytesPerRow: 256, size: CGSize(width: 256, height: 1), format: .R8, colorSpace: nil)
             .samplingNearest()
@@ -79,8 +79,8 @@ enum EditV2EffectRenderer {
                 }
                 return acc;
             } else if (id < 5.5) { // mirror
-                float u2 = u < 0.5 ? u : 1.0 - u;
-                float v2 = a >= 0.5 ? (v < 0.5 ? v : 1.0 - v) : v;
+                float u2 = min(u, 1.0 - u);
+                float v2 = mix(v, min(v, 1.0 - v), step(0.5, a));
                 return museS(src, size, u2, v2);
             } else if (id < 6.5) { // pixelate
                 float n = floor(160.0 - 150.0 * a + 0.5), cw = 1.0 / n, ch = cw * W / H;
