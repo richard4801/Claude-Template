@@ -181,3 +181,8 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
 - Declined: a per-download unique hash, micro-scaling/gamma shifts and audio pitch/tempo tweaks (they only serve to evade
   duplicate/fingerprint detection). Offered instead: a server download log for real tracking.
 - Later (tokens): a studio default in Settings for both switches; EU AI Act check for machine-readable marking.
+- **First job after the token reset (owner asked 2026-11-09):** required metadata cleanup on every generated file MUSE
+  stores or exports. Videos: lossless remux without any metadata (ffmpeg -map_metadata -1 -map_chapters -1 -c copy,
+  drop C2PA/uuid boxes). Photos: re-save without EXIF/XMP/ICC tags. Applied where takes, photos, Suite results and
+  exports are stored. Then the "Label as AI-generated" switch adds MUSE's own label only when on. Pixel watermarks
+  (e.g. SynthID) are not touched. Posts stay labelled by default.
