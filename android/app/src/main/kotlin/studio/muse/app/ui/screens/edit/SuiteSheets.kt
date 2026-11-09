@@ -1043,6 +1043,42 @@ private fun AdjustLayerBody(ui: EditSuiteUi, layer: studio.muse.core.edit.Adjust
     row("Strength", KfProp.OPACITY, layer.opacity ?: 1.0, false)
 }
 
+/** HSL per hue: pick a band (a colour dot), then its hue, saturation and luminance. */
+@Composable
+internal fun HslSection(hsl: studio.muse.core.edit.Hsl?, enabled: Boolean, act: (EditAction) -> Unit) {
+    val m = muse
+    var band by remember { mutableStateOf(studio.muse.core.edit.HueBand.RED) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SuiteLabel("HSL", Modifier.weight(1f))
+        if (!hsl.isNullOrEmpty()) T("Reset HSL", m.type.tiny.copy(fontSize = 12.5.sp), m.t.ink, Modifier.press { act(EditAction.SetHsl(null)) }.padding(vertical = 12.dp).semantics { contentDescription = "Reset HSL" })
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        studio.muse.core.edit.HueBand.entries.forEach { b ->
+            val on = b == band
+            val set = hsl?.get(b)?.let { it != studio.muse.core.edit.HslBand() } == true
+            Box(Modifier.size(40.dp).press { band = b }.semantics { contentDescription = "${b.wire.replaceFirstChar(Char::uppercase)}${if (set) ", changed" else ""}" }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(if (on) 26.dp else 20.dp).clip(androidx.compose.foundation.shape.CircleShape).background(HUE_DOT.getValue(b))
+                    .border(if (on) 2.dp else 0.dp, if (on) m.t.ink else Color.Transparent, androidx.compose.foundation.shape.CircleShape))
+                if (set && !on) Box(Modifier.align(Alignment.BottomCenter).size(4.dp).clip(androidx.compose.foundation.shape.CircleShape).background(m.t.ink))
+            }
+        }
+    }
+    val cur = hsl?.get(band)
+    @Composable
+    fun s(label: String, field: String, value: Double) =
+        SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.SetHsl(band, field, f * 2.0 - 1, done)) }, label = "${band.wire.replaceFirstChar(Char::uppercase)} ${label.lowercase()}", valueText = signed((value * 100).roundToInt()), enabled = enabled)
+    s("Hue", "hue", cur?.hue ?: 0.0)
+    s("Saturation", "sat", cur?.sat ?: 0.0)
+    s("Luminance", "light", cur?.light ?: 0.0)
+}
+
+private val HUE_DOT = mapOf(
+    studio.muse.core.edit.HueBand.RED to Color(0xFFE5483B), studio.muse.core.edit.HueBand.ORANGE to Color(0xFFF08A2C),
+    studio.muse.core.edit.HueBand.YELLOW to Color(0xFFF2D13A), studio.muse.core.edit.HueBand.GREEN to Color(0xFF4CB653),
+    studio.muse.core.edit.HueBand.AQUA to Color(0xFF3CC4C9), studio.muse.core.edit.HueBand.BLUE to Color(0xFF3A6FE0),
+    studio.muse.core.edit.HueBand.PURPLE to Color(0xFF8A4FD8), studio.muse.core.edit.HueBand.MAGENTA to Color(0xFFD94BB2),
+)
+
 /** A stand-in swatch per category while thumbnails render. */
 private fun lookSwatch(l: LookChoice): List<Color> = when (l.category) {
     "film" -> listOf(Color(0xFF6B5A3E), Color(0xFFD9B98A)); "moody" -> listOf(Color(0xFF1F2B2E), Color(0xFF51666B)); "warm" -> listOf(Color(0xFF8A4B22), Color(0xFFF2B36B))
@@ -1079,6 +1115,7 @@ private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit, l
     row("Tint", "tint", a?.tint ?: 0.0)
     row("Highlights", "highlights", a?.highlights ?: 0.0)
     row("Shadows", "shadows", a?.shadows ?: 0.0)
+    HslSection(v?.look?.hsl, v != null, act)
     // The look's effects (0 = off).
     val lk = v?.look
     @Composable

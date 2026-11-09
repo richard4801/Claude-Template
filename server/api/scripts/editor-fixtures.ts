@@ -143,6 +143,10 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'voice effect bad', project: mut(p => { p.tracks[0].items[0].voiceEffect = 'robot'; }), ok: false, field: 'edits.tracks.0.items.0.voiceEffect' },
   { name: 'adjust highlights', project: mut(p => { p.tracks[0].items[0].adjust = { highlights: -0.4, shadows: 2 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.shadows' },
   { name: 'palette look unknown without palettes', project: mut(p => { p.tracks[0].items[0].look = { lut: 'palette:teal_neon', strength: 0.8 }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
+  { name: 'look hsl ok', project: mut(p => { p.tracks[0].items[0].look = { hsl: { orange: { sat: -0.3, light: 0.2 }, blue: {} } }; }), ok: true },
+  { name: 'look hsl unknown colour', project: mut(p => { p.tracks[0].items[0].look = { hsl: { cyan: { sat: 0.3 } } as never }; }), ok: false, field: 'edits.tracks.0.items.0.look.hsl.cyan' },
+  { name: 'look hsl out of range', project: mut(p => { p.tracks[0].items[0].look = { hsl: { red: { light: 1.5 } } }; }), ok: false, field: 'edits.tracks.0.items.0.look.hsl.red.light' },
+  { name: 'look hsl unknown setting', project: mut(p => { p.tracks[0].items[0].look = { hsl: { red: { luma: 0.2 } as never } }; }), ok: false, field: 'edits.tracks.0.items.0.look.hsl.red.luma' },
   { name: 'look ok', project: mut(p => { p.tracks[0].items[0].look = { ...packLook('film-cine'), curves: { rgb: [[0, 0.05], [1, 0.95]] } }; }), ok: true },
   { name: 'look with imported lut', project: mut(p => { p.assets.push({ id: 'cube1', kind: 'lut', upload: 'up_cube' }); p.tracks[2].items[0].look = { lut: 'cube1', strength: 0.6 }; }), ok: true },
   { name: 'look unknown pack', project: mut(p => { p.tracks[0].items[0].look = { lut: 'pack:nope' }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
@@ -310,6 +314,17 @@ addRender('vignette dark + grain', { vignette: { amount: 0.6, size: 0.3, softnes
 addRender('vignette light + leak', { vignette: { amount: -0.5 }, leak: { kind: 'rose', amount: 0.7, angle: 140 } }, { frame: 45 });
 addRender('everything', { lut: 'pack:test5', strength: 0.8, curves: { rgb: [[0, 0], [0.5, 0.55], [1, 1]] }, lift: 0.3, sharpen: 0.4, chromatic: 0.5,
   halation: { amount: 0.4 }, leak: { kind: 'amber', amount: 0.4 }, vignette: { amount: 0.4 }, grain: { amount: 0.4, size: 2 } }, { matrix: M1, lut: 'test5', frame: 12 });
+addRender('hsl + curves + lut', { lut: 'pack:test5', strength: 0.7, curves: { rgb: [[0, 0.02], [1, 0.98]] }, hsl: { orange: { sat: -0.4, light: 0.3 }, blue: { hue: 0.5, sat: 0.6 }, green: { light: -0.8 } } }, { lut: 'test5' });
+// HSL per hue (look step 4b): three settings over sample colours.
+const hslSettings: K.Hsl[] = [
+  { red: { hue: 1 } },
+  { orange: { sat: -0.5, light: 0.4 }, yellow: { sat: 0.3 }, aqua: { hue: -0.6, light: -0.5 } },
+  { red: { sat: -1 }, orange: { sat: -1 }, yellow: { sat: -1 }, green: { sat: -1 }, aqua: { sat: -1 }, blue: { sat: -1 }, purple: { sat: -1 }, magenta: { sat: 1, hue: 0.3 } },
+];
+const hslColours: [number, number, number][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [0, 1, 1], [1, 0, 1], [0.89, 0.62, 0.48], [0.55, 0.36, 0.26],
+  [0.5, 0.5, 0.5], [0.05, 0.1, 0.2], [0.95, 0.9, 0.8], [0.9, 0.45, 0.1]];
+const hsl = hslSettings.map(h => { const f = K.hslFn(h)!; return { hsl: h, samples: hslColours.map(c => ({ rgb: c, out: f(c).map(v => Math.round(v * 1e6) / 1e6) })) }; });
+const hueWeights = [0, 15, 30, 45, 90, 150, 210, 255, 285, 330, 359].map(h => ({ h, w: K.hueWeights(h).map(v => Math.round(v * 1e6) / 1e6) }));
 const curvesCases = [[[0, 0], [1, 1]], [[0, 0.1], [0.25, 0.2], [0.5, 0.6], [0.75, 0.8], [1, 0.9]], [[0.1, 0], [0.4, 0.9], [0.45, 0.95], [0.9, 1]], [[0, 1], [0.5, 0.2], [1, 0]]] as K.CurvePoint[][];
 const looks = {
   image: { width: pic.width, height: pic.height, data: Array.from(pic.data, r4) },
@@ -317,6 +332,7 @@ const looks = {
   cubes: { test5: small },
   lutSamples: [...[[0, 0, 0], [1, 1, 1], [0.5, 0.25, 0.75], [0.13, 0.87, 0.42], [0.99, 0.01, 0.5]].map(c => ({ lut: 'test5', rgb: c, out: K.lutSample(smallLut, c[0]!, c[1]!, c[2]!).map(r4) })),
     ...[[0.2, 0.3, 0.4], [0.8, 0.6, 0.5], [0.95, 0.85, 0.75]].map(c => ({ lut: 'pack:film-gold', rgb: c, out: K.lutSample(goldLut, c[0]!, c[1]!, c[2]!).map(r4) }))],
+  hsl, hueWeights,
   curves: curvesCases.map(pts => { const f = K.curveFn(pts)!; return { points: pts, samples: Array.from({ length: 21 }, (_, i) => [i / 20, r4(f(i / 20))]) }; }),
   hash: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [5, 7, 3], [1023, 767, 59], [12345, 6789, 100000]].map(([x, y, f]) => ({ x, y, frame: f, v: K.hash01(x!, y!, f!) })),
   vignette: [{ amount: 0.5 }, { amount: 0.5, size: 0.2, softness: 0.3 }].map(v => ({ vignette: v, samples: [[0.5, 0.5], [0, 0], [1, 0.5], [0.25, 0.75], [0.9, 0.1]].map(([u, w]) => [u, w, r4(K.vignetteMask(v as K.Vignette, u!, w!))]) })),
