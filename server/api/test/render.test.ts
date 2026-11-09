@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as M from '../src/editor/model.js';
-import { atempo, glitchShifts, glitchSwitch, kfExpr, renderProject, wrap } from '../src/editor/render.js';
+import { adjustRuns, atempo, glitchShifts, glitchSwitch, kfExpr, renderProject, wrap } from '../src/editor/render.js';
 import { grabFrame } from '../src/recreate/frames.js';
 import { probe } from '../src/replicate/media.js';
 import { ENC, ff, hasFfmpeg } from './recreate-fixture.js';
@@ -103,6 +103,41 @@ describe.skipIf(!hasFfmpeg)('render an edit project (ffmpeg)', () => {
     expect(white).toBeGreaterThan(50);
     const [rb, gb] = await px(out, 0.1, 0.5, 0.5);
     expect(rb).toBeGreaterThan(200); expect(gb).toBeLessThan(60);
+  }, 120_000);
+
+  it('adjustment layers: graded inside their span only, under the text; keyed ones in short runs', async () => {
+    const p = project();
+    // 0.2–0.5 s: no colour (red → grey; clip 2 fades in from 0.6); 1.6–2.2 s: half strength, then fading in over a keyed opacity.
+    p.tracks.push({ id: 'adj', kind: 'adjust', items: [
+      { id: 'ad1', startSec: 0.2, durationSec: 0.3, adjust: { saturation: -1 } },
+      { id: 'ad2', startSec: 1.6, durationSec: 0.6, adjust: { exposure: -1 }, keyframes: { opacity: [{ t: 0, v: 0 }, { t: 0.6, v: 1 }] } },
+    ] } as M.Track);
+    M.validate(p);
+    const runs = adjustRuns(p);
+    expect(runs[0]).toMatchObject({ a: 0.2, b: 0.5 }); // a constant layer is one run
+    expect(runs.filter(r => r.a >= 1.6).length).toBeGreaterThan(3); // a keyed one is sampled
+    expect(runs.every((r, i) => i === 0 || r.a >= runs[i - 1]!.b - 1e-9)).toBe(true);
+    const out = path.join(dir, 'adjust.mp4');
+    const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, files, out, { maxSide: 640 });
+    expect(r.unsupported).not.toContain('adjustment layers');
+    const [r0, g0] = await px(out, 0.1, 0.1, 0.1); // before: red
+    expect(r0).toBeGreaterThan(200); expect(g0).toBeLessThan(60);
+    const [r1, g1, b1] = await px(out, 0.35, 0.1, 0.1); // inside: grey
+    expect(Math.abs(r1 - g1)).toBeLessThan(25); expect(Math.abs(r1 - b1)).toBeLessThan(25);
+    const [r2, g2] = await px(out, 0.56, 0.1, 0.1); // after: red again
+    expect(r2).toBeGreaterThan(200); expect(g2).toBeLessThan(60);
+    // The text stays white over the grey (the layer is under it).
+    const f = await grabFrame('ffmpeg', out, 0.35, W, H);
+    let white = 0;
+    for (let y = Math.round(H * 0.45); y < Math.round(H * 0.55); y++) for (let x = Math.round(W * 0.3); x < Math.round(W * 0.7); x++) {
+      const i = (y * W + x) * 3; if (f.rgb[i]! > 230 && f.rgb[i + 1]! > 230 && f.rgb[i + 2]! > 230) white++;
+    }
+    expect(white).toBeGreaterThan(50);
+    // The keyed layer darkens more as it goes on.
+    const tl = M.timeline(p);
+    const early = await px(out, 1.65, 0.1, 0.1), late = await px(out, 2.15, 0.1, 0.1);
+    expect(tl[1]!.startSec).toBeLessThan(1.6);
+    expect(Math.max(...late)).toBeLessThan(Math.max(...early) - 30);
   }, 120_000);
 
   it('a glitch is a hard switch at the middle (no mixing), jittered and colour-split, with the same length and cut times as any transition', async () => {
