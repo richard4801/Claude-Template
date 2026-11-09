@@ -257,6 +257,7 @@ final class EditSuiteSession {
     /// "That doesn't fit: the text would run into the next one" style message for a refused change.
     static func refusalText(_ p: E.EditProblem) -> String {
         let f = p.field
+        if f == "user" { return p.message }
         if f.hasSuffix("startSec") || f.hasSuffix("durationSec") || p.message.contains("overlap") {
             return "That doesn't fit there · it would overlap the next item on its row"
         }
@@ -970,6 +971,12 @@ final class EditSuiteSession {
             if let request { answerRequest(request, .failed(exportProblem ?? "The Mac is busy · try again in a moment")) }
             return
         }
+        // Sound only and GIF (parity): a file on this Mac, nothing saved to the Library.
+        if settings.format != .video {
+            guard let dest = saveFileTo else { return }
+            exportOther(settings, to: dest)
+            return
+        }
         requestInExport = request
         pause()
         var p = project
@@ -992,8 +999,14 @@ final class EditSuiteSession {
                 // (Mac Edit audit: "Save to Library" with .SRT lost the captions).
                 let burn = settings.captions == .burnIn || saveFileTo == nil
                 let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn)
-                try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc) { [weak self] v in
+                let onProgress: @MainActor (Double) -> Void = { [weak self] v in
                     if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
+                }
+                if settings.bitrate == .recommended {
+                    try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc, progress: onProgress)
+                } else {
+                    // A chosen bitrate (parity): reader → writer at the size estimate's rate × the choice.
+                    try await EditV2Engine.write(built, to: file, hevc: settings.codec == .hevc, bitrate: settings.videoBitrate, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)
@@ -1038,12 +1051,59 @@ final class EditSuiteSession {
         }
     }
 
+    /// What the export makes now (the progress card's words).
+    private(set) var exportFormat: EditSuite.ExportFormat = .video
+
+    /// Sound only (.m4a) or GIF to a file on this Mac.
+    private func exportOther(_ settings: EditSuite.ExportSettings, to dest: URL) {
+        pause()
+        var p = project
+        if settings.format == .gif {
+            guard duration <= EditSuite.ExportFormat.gifMaxSec + 0.05 else { lastError = "GIFs are up to 30 s · trim the edit or export a video"; return }
+        } else {
+            let size = settings.size
+            p.canvas.width = size.width
+            p.canvas.height = size.height
+        }
+        let files = self.files
+        lastError = nil
+        exportFormat = settings.format
+        exportPhase = .rendering(0)
+        exportTask = Task { [weak self] in
+            do {
+                let sources = try await EditV2Engine.load(p, files: files)
+                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: true)
+                let onProgress: @MainActor (Double) -> Void = { [weak self] v in
+                    if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
+                }
+                if settings.format == .gif {
+                    try await EditV2Engine.writeGif(built, to: dest, progress: onProgress)
+                } else {
+                    try await EditV2Engine.write(built, to: dest, audioOnly: true, progress: onProgress)
+                }
+                guard let self else { return }
+                self.exportPhase = .idle
+                self.exportFormat = .video
+                self.lastExport = dest
+                self.notice = settings.format == .gif ? "Saved the GIF" : "Saved the sound file"
+            } catch {
+                guard let self else { return }
+                self.exportPhase = .idle
+                self.exportFormat = .video
+                if !(error is CancellationError) && !Task.isCancelled {
+                    self.lastError = (error as? ApiError)?.message ?? "Couldn't export the edit"
+                }
+            }
+        }
+    }
+
     func cancelExport() {
         if let r = requestInExport { answerRequest(r, .failed("The owner cancelled the export")) }
         requestInExport = nil
         exportTask?.cancel()
         exportTask = nil
         exportPhase = .idle
+        exportFormat = .video
     }
 
     /// "v3 · saved just now" / "v3 · unsaved changes".

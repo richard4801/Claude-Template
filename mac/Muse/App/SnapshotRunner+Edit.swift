@@ -313,7 +313,7 @@ extension SnapshotRunner {
                                  "Full screen preview (Esc to leave)", "Save this frame as a picture",
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
                                  "Remove background", "Run the cut-out"]
-        let denyInSheet: Set<String> = ["Export", "Save to Library"]
+        let denyInSheet: Set<String> = ["Export", "Save to Library", "Save GIF…", "Save sound…"]
         let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()
         var presses = 0, nudges = 0

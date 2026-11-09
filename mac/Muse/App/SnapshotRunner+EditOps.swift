@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import ImageIO
 import MuseCore
 
 /// Edit operations check (Mac CI, Mac Edit audit 2026-11-08, plans/mac-edit-audit.md). The click-through proves no control
@@ -42,6 +43,7 @@ extension SnapshotRunner {
         guard s.isReady else { note("FAIL the edit didn't open (\(s.phase))"); s.close(); note("ALL DONE"); return }
         await operations(s, blue: made[1], log: log)
         await exportCheck(s, media: media, log: log)
+        await formatsCheck(s, media: media, log: log)
         s.close()
         note("ALL DONE")
     }
@@ -253,6 +255,28 @@ extension SnapshotRunner {
         check("project: two volume keys", s.project.mainClips.first?.keyframes?.volume?.count == 2)
         s.undo(); s.undo()
 
+        step("Overlay ⇄ main track")
+        s.seek(0)
+        s.addTake(blue)
+        if let bid = s.project.mainClips.last?.id {
+            s.view { $0.selection = bid }
+            s.edit { $0.moveToOverlay() }
+            check("project: blue on an overlay track, main back to 4 s", s.project.tracks.contains { $0.kind == .video && $0.items.contains { $0.id == bid } } && abs(s.duration - 4) < 0.05,
+                  "\(s.duration)")
+            s.edit { $0.moveToMain() }
+            check("project: back on the main track", s.project.mainClips.contains { $0.id == bid } && !s.project.tracks.contains { $0.kind == .video })
+            let qm2 = await previewPixel(s, at: 5)
+            check("preview: blue after the take", isBlue(qm2), describe(qm2))
+            s.undo(); s.undo()
+        }
+        s.undo()
+
+        step("Ratio 4:3")
+        await s.setRatio(.fourThree)
+        let sz43 = await previewSize(s)
+        check("preview 4:3", sz43.map { abs($0.width / $0.height - 4.0 / 3.0) < 0.01 } ?? false, "\(String(describing: sz43))")
+        s.undo()
+
         // Parity wave 1 (contract): mirror, freeze frame, blend, blur fill.
         step("Mirror")
         s.view { $0.selection = s.project.mainClips.first?.id }
@@ -376,6 +400,65 @@ extension SnapshotRunner {
         if let silent = await exportFile(s, media: media, name: "muted", labelAI: false, note: note) {
             let rms = await audioRMS(silent.url, from: 0.2, to: 2.8)
             check("export: muted is silent", rms < 0.005, String(format: "RMS %.4f", rms))
+        }
+    }
+
+    /// Parity formats: a video at a chosen bitrate (the reader → writer path), Sound only (.m4a) and GIF.
+    @MainActor
+    static func formatsCheck(_ s: EditSuiteSession, media: URL, log: OpsLog) async {
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check(name, ok, detail) }
+        log.note("STEP export formats: bitrate, Sound only, GIF")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.changeSound { $0.muted = nil; $0.volume = nil } }
+        // A video at "Higher quality" goes through the writer (AVAssetExportSession has no bitrate).
+        var hi = s.state.export
+        hi.ratio = .portrait; hi.resolution = .p720; hi.fps = 30; hi.codec = .h264; hi.bitrate = .higher
+        let hiURL = media.appendingPathComponent("export-hi.mp4")
+        try? FileManager.default.removeItem(at: hiURL)
+        var savedHi = false
+        s.export(hi, saveFileTo: hiURL) { _ in savedHi = true }
+        for _ in 0..<600 where !savedHi && !(s.exportPhase == .idle && s.lastError != nil) { try? await Task.sleep(for: .milliseconds(100)) }
+        if savedHi {
+            let a = AVURLAsset(url: hiURL)
+            let d = (try? await a.load(.duration).seconds) ?? 0
+            let vt = try? await a.loadTracks(withMediaType: .video).first
+            let size = (try? await vt?.load(.naturalSize)) ?? .zero
+            check("bitrate export: 3 s, 720 × 1280", abs(d - 3) < 0.15 && Int(size.width) == 720 && Int(size.height) == 1280, "\(d) s, \(size)")
+            let gen = AVAssetImageGenerator(asset: a)
+            gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
+            let px = (try? await gen.image(at: CMTime(seconds: 1.5, preferredTimescale: 600)).image).flatMap { pixel($0, 0.5, 0.5) }
+            check("bitrate export: the picture", isRed(px), describe(px))
+            let rms = await audioRMS(hiURL, from: 1, to: 2)
+            check("bitrate export: the sound", rms > 0.09 && rms < 0.2, String(format: "RMS %.3f", rms))
+        } else { check("bitrate export finished", false, s.lastError ?? "timed out") }
+
+        // Sound only and GIF save a file on this Mac (no version).
+        func other(_ format: EditSuite.ExportFormat, _ name: String) async -> URL? {
+            var e = s.state.export
+            e.format = format
+            let url = media.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: url)
+            s.export(e, saveFileTo: url) { _ in }
+            try? await Task.sleep(for: .milliseconds(300))
+            for _ in 0..<600 where s.exportPhase != .idle { try? await Task.sleep(for: .milliseconds(100)) }
+            guard FileManager.default.fileExists(atPath: url.path) else { check("\(format.label) export finished", false, s.lastError ?? "no file"); return nil }
+            return url
+        }
+        if let m4a = await other(.sound, "export-sound.m4a") {
+            let a = AVURLAsset(url: m4a)
+            let d = (try? await a.load(.duration).seconds) ?? 0
+            let vids = (try? await a.loadTracks(withMediaType: .video).count) ?? -1
+            let rms = await audioRMS(m4a, from: 1, to: 2)
+            check("Sound only: 3 s of the mix, no picture", abs(d - 3) < 0.15 && vids == 0 && rms > 0.09 && rms < 0.2, String(format: "%.2f s, %d video tracks, RMS %.3f", d, vids, rms))
+        }
+        if let gif = await other(.gif, "export.gif") {
+            let src = CGImageSourceCreateWithURL(gif as CFURL, nil)
+            let n = src.map { CGImageSourceGetCount($0) } ?? 0
+            let first = src.flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+            let short = first.map { min($0.width, $0.height) } ?? 0
+            let px = first.flatMap { pixel($0, 0.5, 0.5) }
+            let want = min(480, min(s.project.canvas.width, s.project.canvas.height))   // never upscaled
+            check("GIF: 15 frames a second, 480 px at most, the picture", abs(n - 45) <= 2 && short == want && isRed(px), "\(n) frames, short side \(short) (want \(want)), \(describe(px))")
         }
     }
 

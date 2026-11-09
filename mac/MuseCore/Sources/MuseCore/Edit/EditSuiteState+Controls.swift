@@ -423,3 +423,63 @@ extension EditSuiteState {
         }
     }
 }
+
+// MARK: Overlay ⇄ main track (parity, as Android's SuiteOps.toMain / toOverlay)
+
+extension EditSuiteState {
+    /// Whether the selected clip can move to the other kind of track: an overlay clip to main, or a main clip (not the last
+    /// one) to an overlay track.
+    public var selectedTrackSwap: (toMain: Bool, possible: Bool)? {
+        guard let t = selectedTrack, selectedVideo != nil else { return nil }
+        if t.kind == .video { return (true, true) }
+        if t.kind == .main { return (false, t.items.count >= 2) }
+        return nil
+    }
+
+    /// "Move to main track": the overlay clip goes to the main-track clip boundary nearest where it starts, filling the frame
+    /// there (its overlay placing, keyframes, opacity, blend, mask, chroma key and cut-out are dropped; trim, speed, sound and
+    /// look stay). An overlay track left empty goes.
+    @discardableResult
+    public mutating func moveToMain() -> Bool {
+        guard let id = selection else { return false }
+        let ok = apply { p in
+            guard let (ti, ii) = p.locate(id), p.tracks[ti].kind == .video, case .video(var c) = p.tracks[ti].items[ii], let main = p.mainTrack else { return nil }
+            let tid = p.tracks[ti].id
+            let start = E.itemSpan(p, p.tracks[ti], p.tracks[ti].items[ii]).startSec
+            let bounds = [0.0] + E.timeline(p).map(\.endSec)
+            let at = bounds.indices.min { abs(bounds[$0] - start) < abs(bounds[$1] - start) } ?? bounds.count - 1
+            c.startSec = nil; c.fit = nil; c.transform = nil; c.keyframes = nil; c.opacity = nil; c.blend = nil
+            c.mask = nil; c.chroma = nil; c.alphaMatte = nil
+            guard var q = p.removing(id) else { return nil }
+            if q.track(tid)?.items.isEmpty == true { q = q.removingTrack(tid) ?? q }
+            return q.adding(.video(c), toTrack: main.id, index: at)
+        }
+        if ok { selection = id }
+        return ok
+    }
+
+    /// "Move to an overlay track": the main clip plays at the time it played (the main track closes the gap), full frame, on
+    /// the first overlay track it fits on, or a new one named "Overlay". The main track keeps at least one clip.
+    @discardableResult
+    public mutating func moveToOverlay() -> Bool {
+        guard let id = selection else { return false }
+        let ok = apply { p in
+            guard let (ti, ii) = p.locate(id), p.tracks[ti].kind == .main, p.tracks[ti].items.count >= 2,
+                  case .video(var c) = p.tracks[ti].items[ii] else { return nil }
+            let span = E.itemSpan(p, p.tracks[ti], p.tracks[ti].items[ii])
+            guard var q = p.removing(id) else { return nil }
+            c.startSec = E.r6(span.startSec)
+            c.transitionIn = nil
+            for t in q.tracks where t.kind == .video {
+                if let r = q.adding(.video(c), toTrack: t.id) { return r }
+            }
+            guard let r = q.addingTrack(.video, name: "Overlay") else { return nil }
+            q = r.project
+            return q.adding(.video(c), toTrack: r.trackId)
+        }
+        if ok { selection = id } else if selectedTrack?.kind == .main, (selectedTrack?.items.count ?? 0) < 2 {
+            refuse("The main track needs at least one clip")
+        }
+        return ok
+    }
+}

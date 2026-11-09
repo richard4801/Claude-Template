@@ -89,6 +89,13 @@ struct TransformPanel: View {
                 .accessibilityValue(s.selectedFlip.y ? "On" : "Off")
                 Spacer(minLength: 0)
             }
+            if let swap = s.selectedTrackSwap {
+                // Parity (as Android): a clip between the main track and an overlay track.
+                SuiteToolButton(title: swap.toMain ? "Move to main track" : "Move to an overlay track", icon: "stack", disabled: !swap.possible, plain: true) {
+                    if swap.toMain { session.edit { $0.moveToMain() } } else { session.edit { $0.moveToOverlay() } }
+                }
+                .help(swap.possible ? "" : "The main track needs at least one clip")
+            }
             if !isText {
                 VStack(alignment: .leading, spacing: Space.s2) {
                     Text("Frame").font(t.scale.label.font).foregroundStyle(t.roles.ink)
