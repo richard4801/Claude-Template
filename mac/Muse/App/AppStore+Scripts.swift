@@ -19,11 +19,6 @@ extension AppStore {
         if other { speakingTouched = false }
     }
 
-    func setSpeaking(_ on: Bool) {
-        speaking = on
-        speakingTouched = true
-    }
-
     // MARK: Scripts list
 
     func loadScripts() async {

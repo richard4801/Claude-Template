@@ -15,6 +15,7 @@ struct RootView: View {
                 Shell()
             }
             if store.outfitSheet != nil { OutfitSheetView().transition(.opacity) }
+            if store.linkImport.open { LinkImportSheet().transition(.opacity) } // import a video from a link (WS6)
             if store.postDraft != nil { PostSheetView().transition(.opacity) }
             if store.templateForm != nil { TemplateSheetView().transition(.opacity) }
             if store.enhanceDraft != nil { EnhanceSheetView().transition(.opacity) }
@@ -73,11 +74,12 @@ struct Shell: View {
         case .models: ModelsView()
         case .profile: ProfileView()
         case .create: CreateModelView()
-        case .studio: StudioView()
         case .queue: QueueView()
         case .gallery: GalleryView()
         case .result: ResultView()
-        case .settings: SettingsView()
+        case .settings:
+            // Review mode only: the proposed Settings (plans/settings-redesign.md) for the owner's approval.
+            if let mock = SnapshotRunner.state.settingsMock { SettingsMockView(state: mock) } else { SettingsView() }
         case .credits: CreditsView()
         case .lora: LoraView()
         case .posts: PostsView()
@@ -272,7 +274,6 @@ struct Sidebar: View {
             } else {
                 Divider().padding(.vertical, 8)
             }
-            NavRow(icon: "plus", title: "New video", on: false, compact: compact, trailing: .key("⌘N")) { store.go(.studio) }
             NavRow(icon: "person.badge.plus", title: "New model", on: store.screen == .create, compact: compact, trailing: .none) { store.go(.create) }
             if store.isOwner {
                 if !compact {

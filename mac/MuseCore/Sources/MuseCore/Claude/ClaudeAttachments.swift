@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking // Linux (MuseCore builds and tests there too)
+#endif
 
 /// An image saved on this Mac for a Claude Code turn: its path and the upload id Claude passes to the suite tools.
 public struct ClaudeAttachmentFile: Hashable, Sendable {

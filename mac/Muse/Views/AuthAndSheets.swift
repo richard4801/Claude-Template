@@ -174,7 +174,7 @@ struct OutfitSheetView: View {
                         }
                         Spacer()
                         RIconButton(systemName: "xmark", help: "Close") { withAnimation { store.outfitSheet = nil } }
-                            .keyboardShortcut(.cancelAction)
+                            .keyboardShortcut(d.viewing == nil ? .cancelAction : nil) // Escape closes the full view first
                     }
                     RSeg(OutfitMode.allCases.map { ($0, $0.label) }, selection: Binding(get: { d.mode }, set: { m in
                         store.outfitSheet?.mode = m
@@ -197,12 +197,14 @@ struct OutfitSheetView: View {
                                 switch d.state {
                                 case .busy: SkeletonBlock(ratio: 0.75, radius: t.radii.container)
                                 case .done:
-                                    MediaFrame(ref: d.angles.indices.contains(i) ? d.angles[i] : nil, ratio: 0.75) {
-                                        if d.mode != .own { StateTag("AI", .onMedia) }
+                                    viewable(d, i) {
+                                        MediaFrame(ref: d.angles.indices.contains(i) ? d.angles[i] : nil, ratio: 0.75) {
+                                            if d.mode != .own { StateTag("AI", .onMedia) }
+                                        }
                                     }
                                 case .idle:
                                     if d.mode == .own && d.images.indices.contains(i) {
-                                        MediaFrame(ref: ImageRef(url: d.images[i].absoluteString), ratio: 0.75)
+                                        viewable(d, i) { MediaFrame(ref: ImageRef(url: d.images[i].absoluteString), ratio: 0.75) }
                                     } else {
                                         Color.clear.aspectRatio(0.75, contentMode: .fit)
                                             .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
@@ -219,8 +221,9 @@ struct OutfitSheetView: View {
                         if d.state == .done {
                             if d.mode != .own { RButton("Retake · \(Pricing.money(store.outfitSetEstimate))") { store.outfitGenerate() } }
                             RButton("Save outfit", kind: .action) { store.outfitSave() }
-                                .keyboardShortcut(.defaultAction)
+                                .keyboardShortcut(d.viewing == nil ? .defaultAction : nil)
                         } else {
+                            if d.mode != .own { OwnerModelPill(purpose: .outfit) } // the owner's outfit model (WS6)
                             RButton(d.mode == .own ? "Use my images" : "Make 4 angles · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy) {
                                 store.outfitGenerate()
                             }
@@ -229,7 +232,41 @@ struct OutfitSheetView: View {
                 }
                 .padding(Space.s6)
                 .floatingPanel(width: 760)
+                // The angles full size (owner 2026-11-08): zoom, ← →, Escape.
+                ImageLightbox(items: Self.lightboxItems(d),
+                              index: Binding(get: { store.outfitSheet?.viewing }, set: { store.outfitSheet?.viewing = $0 }))
             }
+        }
+    }
+
+    static let angleLabels = ["Front", "¾", "Side", "Back"]
+
+    /// The angles that have an image, in order: generated ones once done, your own images before that.
+    static func lightboxItems(_ d: OutfitDraft) -> [LightboxItem] {
+        (0..<4).compactMap { i -> LightboxItem? in
+            let ref: ImageRef?
+            if d.state == .done {
+                ref = d.angles.indices.contains(i) ? d.angles[i] : nil
+            } else if d.state == .idle, d.mode == .own, d.images.indices.contains(i) {
+                ref = ImageRef(url: d.images[i].absoluteString)
+            } else {
+                ref = nil
+            }
+            return ref.map { LightboxItem(label: angleLabels[i] == "¾" ? "Three-quarter" : angleLabels[i], ref: $0) }
+        }
+    }
+
+    /// An angle tile that opens the full view when it has an image.
+    @ViewBuilder private func viewable<Content: View>(_ d: OutfitDraft, _ i: Int, @ViewBuilder _ tile: () -> Content) -> some View {
+        let items = Self.lightboxItems(d)
+        let label = Self.angleLabels[i] == "¾" ? "Three-quarter" : Self.angleLabels[i]
+        if let at = items.firstIndex(where: { $0.label == label }) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { store.outfitSheet?.viewing = at } } label: { tile() }
+                .buttonStyle(.plain)
+                .help("View \(label.lowercased()) full size")
+                .accessibilityLabel("View \(label.lowercased()) full size")
+        } else {
+            tile()
         }
     }
 
