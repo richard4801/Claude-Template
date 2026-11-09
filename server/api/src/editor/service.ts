@@ -20,10 +20,11 @@ import { mediaToolsAvailable, probe } from '../replicate/media.js';
 import { detectSilences, silenceCuts } from './silence.js';
 import { decodeMono, detectBeats } from './audio.js';
 import { REVERSE_LIMITS, reverseVideo } from './reverse.js';
+import { STABILIZE_LIMITS, stabilizeVideo, vidstabAvailable } from './stabilize.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
@@ -32,7 +33,7 @@ export const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', briefs: 'Writing the briefs' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', briefs: 'Writing the briefs' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
@@ -186,7 +187,9 @@ export class EditorAiService {
     if (kind === 'matte' && !this.matteAvailable) throw badRequest('Background removal is coming soon');
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
     if (kind === 'reverse' && d > REVERSE_LIMITS.maxSec) throw badRequest(`source: reverse works on videos up to ${REVERSE_LIMITS.maxSec} s`);
-    const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats' || kind === 'reverse';
+    if (kind === 'stabilize' && d > STABILIZE_LIMITS.maxSec) throw badRequest(`source: stabilise works on videos up to ${STABILIZE_LIMITS.maxSec / 60} minutes`);
+    if (kind === 'stabilize' && !(await this.stabilizeAvailable())) throw badRequest('kind: stabilise is not available on this server');
+    const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats' || kind === 'reverse' || kind === 'stabilize';
     if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest(kind === 'beats' ? 'kind: beat detection is not available on this server' : kind === 'reverse' ? 'kind: reverse is not available on this server' : 'options.silenceOnly: not available on this server');
     const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, opts) : null;
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
@@ -232,6 +235,17 @@ export class EditorAiService {
     this.running++;
   }
   private free() { this.running--; this.waiting.shift()?.(); }
+  /** Heavy local ffmpeg jobs (reverse, stabilise) run one at a time: each can take ~200 MB of the 512 MB box. */
+  private localBusy = false;
+  private localWaiting: (() => void)[] = [];
+  private async localSlot() {
+    if (!this.localBusy) { this.localBusy = true; return; }
+    await new Promise<void>(r => this.localWaiting.push(r));
+  }
+  private localFree() { const next = this.localWaiting.shift(); if (next) next(); else this.localBusy = false; }
+  private vidstab: Promise<boolean> | null = null;
+  /** Whether this server's ffmpeg can stabilise (checked once). */
+  stabilizeAvailable() { return (this.vidstab ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH).then(ok => ok && vidstabAvailable(this.ctx.config.FFMPEG_PATH))); }
 
   private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource; size?: { width: number; height: number; fps?: number } }, reuse: { words: Word[]; language: string } | null) {
     const id = row.id, d = src.source.durationSec, o = row.options as JobOptions, p = this.provider;
@@ -261,20 +275,26 @@ export class EditorAiService {
         const samples = await this.withLocalInput(src.key, input => decodeMono(this.ctx.config.FFMPEG_PATH, input));
         await this.patch(id, { progress: 70 });
         result = { ...detectBeats(samples), durationSec: d };
-      } else if (row.kind === 'reverse') {
-        // The same source reversed before (by anyone in the studio) is reused.
-        const [prev] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, u.studioId), eq(editorJobs.kind, 'reverse'), eq(editorJobs.mediaKey, src.key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(1);
+      } else if (row.kind === 'reverse' || row.kind === 'stabilize') {
+        // The same source reversed / steadied before (by anyone in the studio) is reused.
+        const [prev] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, u.studioId), eq(editorJobs.kind, row.kind), eq(editorJobs.mediaKey, src.key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(1);
         if (prev?.result) result = { ...(prev.result as Record<string, unknown>), reused: true };
         else {
-          const info = await this.withLocalInput(src.key, f => probe(this.ctx.config.FFPROBE_PATH, f));
-          // The duration a client sends for an upload isn't trusted: the reverse filters hold the whole file in memory.
-          if (!(info.duration > 0) || info.duration > REVERSE_LIMITS.maxSec + 0.5) throw new ReplicateError(`Reverse works on videos up to ${REVERSE_LIMITS.maxSec} s`, 'failed');
-          const out = path.join(os.tmpdir(), `${uid('rev')}.mp4`);
-          file = out;
-          await this.withLocalInput(src.key, input => reverseVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration));
-          await this.patch(id, { progress: 90 });
-          const asset = await this.store(u, src, out, 'video/mp4', 'video', d);
-          result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d };
+          // One heavy local ffmpeg job at a time (the 512 MB box).
+          await this.localSlot();
+          try {
+            const info = await this.withLocalInput(src.key, f => probe(this.ctx.config.FFPROBE_PATH, f));
+            // The duration a client sends for an upload isn't trusted: it decides how long the job may take.
+            const max = row.kind === 'reverse' ? REVERSE_LIMITS.maxSec : STABILIZE_LIMITS.maxSec;
+            if (!(info.duration > 0) || info.duration > max + 0.5) throw new ReplicateError(row.kind === 'reverse' ? `Reverse works on videos up to ${max} s` : `Stabilise works on videos up to ${max / 60} minutes`, 'failed');
+            const out = path.join(os.tmpdir(), `${uid(row.kind === 'reverse' ? 'rev' : 'stab')}.mp4`);
+            file = out;
+            await this.withLocalInput(src.key, input => row.kind === 'reverse' ? reverseVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration)
+              : stabilizeVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration));
+            await this.patch(id, { progress: 90 });
+            const asset = await this.store(u, src, out, 'video/mp4', 'video', d);
+            result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d };
+          } finally { this.localFree(); }
         }
       } else if (row.kind === 'cuts' && o.silenceOnly) {
         const minSilenceSec = o.minSilenceSec ?? CUT_DEFAULTS.minSilenceSec, keepPadSec = o.keepPadSec ?? CUT_DEFAULTS.keepPadSec;
@@ -308,7 +328,7 @@ export class EditorAiService {
       if (!cancelled) this.ctx.log.warn({ err: (e as Error).message, job: id, kind: row.kind }, 'editor job failed');
       const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
         : e instanceof ReplicateError && e.kind === 'out_of_credit' ? 'The studio is out of AI credit · ask the owner'
-        : e instanceof ReplicateError && row.kind === 'reverse' && e.message.startsWith('Reverse works') ? e.message : 'Something went wrong · try again';
+        : e instanceof ReplicateError && (row.kind === 'reverse' || row.kind === 'stabilize') && /^(Reverse|Stabilise) works/.test(e.message) ? e.message : 'Something went wrong · try again';
       await this.patch(id, { state: cancelled ? 'cancelled' : 'failed', phase: msg, error: msg, finishedAt: Date.now() }).catch(() => {});
     } finally {
       rmQuiet(file);
@@ -445,6 +465,7 @@ export class EditorAiService {
       matte: { available: paid && this.matteAvailable, maxSec: EDITOR_LIMITS.maxMatteSec },
       denoise: { available: paid },
       beats: { available: true, free: true },
+      stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }

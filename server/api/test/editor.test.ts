@@ -565,6 +565,37 @@ describe('reverse (local ffmpeg)', () => {
   }, 60_000);
 });
 
+describe('stabilise (local ffmpeg vid.stab)', () => {
+  it('steadies a shaky video for free, stores it as a video asset, reuses the result, refuses long sources', async () => {
+    const a = await makeApp();
+    try {
+      const { owner } = await people(a, 0) as any;
+      const file = path.join(a.dir, 'shaky.mp4');
+      try {
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=240x400:r=30:d=2', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+          '-filter_complex', "[0]trim=end_frame=1,loop=loop=-1:size=1,setpts=N/30/TB,crop=180:320:x='30+20*sin(n*1.7)':y='40+20*cos(n*1.3)',trim=duration=2[v]",
+          '-map', '[v]', '-map', '1:a', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-y', file]);
+      } catch { return; }
+      expect((await owner.req('GET', '/v1/editor/features')).body.stabilize).toMatchObject({ available: true, free: true });
+      const p = (await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'video/mp4' })).body;
+      const u = new URL(p.url);
+      await a.app.inject({ method: 'PUT', url: u.pathname + u.search, headers: { 'content-type': 'video/mp4' }, payload: fs.readFileSync(file) });
+      const source = { uploadId: p.uploadId, durationSec: 2 };
+      expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'stabilize', source })).body).toMatchObject({ free: true, usd: 0 });
+      const j = (await owner.req('POST', '/v1/editor/jobs', { kind: 'stabilize', source })).body;
+      const r = await until(async () => { const x = (await owner.req('GET', `/v1/editor/jobs/${j.id}`)).body; return x.state !== 'running' ? x : null; });
+      expect(r.state, JSON.stringify(r)).toBe('done');
+      expect(r.costUsd).toBe(0);
+      expect(r.result).toMatchObject({ width: 180, height: 320, hasAudio: true, asset: { kind: 'video' } });
+      const j2 = (await owner.req('POST', '/v1/editor/jobs', { kind: 'stabilize', source })).body;
+      const r2 = await until(async () => { const x = (await owner.req('GET', `/v1/editor/jobs/${j2.id}`)).body; return x.state !== 'running' ? x : null; });
+      expect(r2.result).toMatchObject({ reused: true, asset: { upload: r.result.asset.upload } });
+      const long = await owner.req('POST', '/v1/editor/estimate', { kind: 'stabilize', source: { uploadId: p.uploadId, durationSec: 181 } });
+      expect(long.status).toBe(400); expect(long.body.error).toMatch(/up to 3 minutes/);
+    } finally { await a.close(); }
+  }, 120_000);
+});
+
 // Wave 1 (plans/edit-parity.md): freeze frames, mirror, blend modes, blur fill.
 describe('editor wave 1', () => {
   it('a hold lasts holdSec, shows one frame, is silent and has no caption words', async () => {
