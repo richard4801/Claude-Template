@@ -85,7 +85,9 @@ extension SnapshotRunner {
         store.setEnginePick(.swap, nil)
         // Import a video from a link (demo mode imports at once, nothing is downloaded or spent). "Choose a file instead"
         // opens a modal file panel, so it's skipped.
+        // Only the sheet's own buttons: after an import the clip tile's label changes, and it opens a file panel.
         await walkScreen("link_import", ax: ax, minimum: 3, deny: ["Choose a file instead"],
+                         only: { ["Close", "Cancel", "Import", "Stop"].contains($0) },
                          required: ["Import", "Cancel"],
                          base: { store.openTool(.swap) },
                          open: { store.openLinkImport(.swap); store.linkImport.text = demoImportLink },
