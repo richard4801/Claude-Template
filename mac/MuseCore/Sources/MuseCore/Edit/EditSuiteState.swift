@@ -190,8 +190,13 @@ public enum EditSuite {
         /// Parity (as Android): what the export makes, and the video bitrate.
         public var format: ExportFormat = .video
         public var bitrate: Bitrate = .recommended
+        /// XL (owner-approved 2026-11-09, Mac first): HDR video, HEVC 10-bit HLG (BT.2020). A video only; always HEVC.
+        public var hdr = false
         public init() {}
         public static let frameRates = [24, 30, 60]
+
+        /// The codec the file is written with: HDR is HEVC whatever `codec` says.
+        public var effectiveCodec: Codec { hdr && format == .video ? .hevc : codec }
 
         public var size: (width: Int, height: Int) { ratio.canvas(shortSide: resolution.rawValue) }
 
@@ -208,7 +213,8 @@ public enum EditSuite {
             let s = Double(resolution.rawValue)
             let px = Double(size.width * size.height) / (s * s * 16 / 9)
             let f = fps >= 60 ? 1.4 : fps <= 24 ? 0.9 : 1
-            return base * px * f * (codec == .hevc ? 0.6 : 1) * bitrate.factor
+            // HDR's 10 bits cost about a fifth more than 8-bit HEVC.
+            return base * px * f * (effectiveCodec == .hevc ? 0.6 : 1) * (hdr && format == .video ? 1.2 : 1) * bitrate.factor
         }
 
         /// Roughly how big the file will be (bytes): video at `videoBitrate` + 128 kbps AAC.
@@ -227,7 +233,7 @@ public enum EditSuite {
         /// "0:18 · 1080 × 1920 · 30 fps"
         public func summary(durationSec d: Double) -> String {
             let (w, h) = size
-            return "\(EditSuite.clock(d)) · \(w) × \(h) · \(fps) fps"
+            return "\(EditSuite.clock(d)) · \(w) × \(h) · \(fps) fps" + (hdr && format == .video ? " · HDR" : "")
         }
     }
 

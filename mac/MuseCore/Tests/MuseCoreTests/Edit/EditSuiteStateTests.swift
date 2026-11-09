@@ -296,6 +296,12 @@ final class EditSuiteStateTests: XCTestCase {
         var ex = EditSuite.ExportSettings()
         XCTAssertEqual(ex.summary(durationSec: 18), "0:18 · 1080 × 1920 · 30 fps")
         XCTAssertEqual(ex.sizeLabel(durationSec: 18), "≈ 36 MB")
+        ex.hdr = true
+        XCTAssertEqual(ex.effectiveCodec, .hevc)
+        XCTAssertEqual(ex.summary(durationSec: 18), "0:18 · 1080 × 1920 · 30 fps · HDR")
+        XCTAssertEqual(ex.videoBitrate, 16e6 * 0.6 * 1.2, accuracy: 1)
+        ex.hdr = false
+        XCTAssertEqual(ex.effectiveCodec, .h264)
         ex.codec = .hevc
         XCTAssertLessThan(ex.estimatedBytes(durationSec: 18), 30_000_000)
         XCTAssertEqual(EditorEstimate.label(free: true, usd: 0.3), "Free")

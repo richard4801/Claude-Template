@@ -106,7 +106,8 @@ enum EditV2Engine {
 
     /// The composition, video composition (custom compositor) and audio mix for a project. `burnCaptions` false leaves the
     /// captions out of the picture (they go out as an .srt).
-    static func build(_ project: EditV2.Project, sources: Sources, burnCaptions: Bool = true) throws -> Built {
+    /// `hdr` (XL HDR export): the HDR compositor, frames tagged BT.2020 / HLG.
+    static func build(_ project: EditV2.Project, sources: Sources, burnCaptions: Bool = true, hdr: Bool = false) throws -> Built {
         let plan = EditV2.renderPlan(project, media: sources.infos)
         guard plan.durationSec > 0 else { throw ApiError("edit_empty", "This edit has nothing to play") }
         let comp = AVMutableComposition()
@@ -237,9 +238,14 @@ enum EditV2Engine {
         }
 
         let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, matteTracks: matteIds, matted: matted, sources: sources,
-                                burnCaptions: burnCaptions)
+                                burnCaptions: burnCaptions, hdr: hdr)
         let vc = AVMutableVideoComposition()
-        vc.customVideoCompositorClass = EditV2Compositor.self
+        vc.customVideoCompositorClass = hdr ? EditV2HDRCompositor.self : EditV2Compositor.self
+        if hdr {
+            vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_2020
+            vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_2100_HLG
+            vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_2020
+        }
         // A zero or odd render size makes AVFoundation refuse (or raise on) the video composition.
         vc.renderSize = CGSize(width: max(2, plan.width / 2 * 2), height: max(2, plan.height / 2 * 2))
         let fps = plan.fps.isFinite && plan.fps > 0 ? min(plan.fps, 240) : 30

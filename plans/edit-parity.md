@@ -138,7 +138,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Body and face effects | Missing | Missing | XL | Segmentation and tracking; mostly **Content** |
 | Adjustment keyframes | Has | Has | M | Android: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint in Filters → Adjust (KfProp exposure…tint, `adjustAt`; the colour matrix runs per frame). Highlights, shadows and look effects are not keyframable yet. Mac: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint; a keyed slider sets its key at the playhead (shared fixtures). |
 | AI restyle (generative) | Missing | Missing | XL | MUSE's Suite does generation. Re-styling an edit is a model question. |
-| HDR editing / export | Missing | Missing | L | |
+| HDR editing / export | Missing | Partial | L | Mac: HDR footage keeps its highlights through the edit when exporting HDR (extended-range colour; LUT looks still clip at white); the preview stays SDR (WS9, XL owner-approved). |
 
 ## 7. Keyframes
 
@@ -185,7 +185,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Background colour | Has | Has | S | `canvas.background` exists; no picker. Mac: Video → Background colour on main clips (wave 1). Android: Ratio → Background (wave 1). |
 | Background blur fill | Has | Has | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). Mac: Video → Background: Blur (wave 1). |
 | Fit / fill per clip | Has | Has | S | Model `fit`; no toggle. Mac: Transform → Frame: Fill / Fit (wave 1). Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
-| Auto reframe (faces) | Has | Has | M | Owner-approved 2026-11-09. Android: Follow faces (ML Kit on the phone, 5 samples a second → smoothed x keyframes, `Reframe` in core; x_reframe). Mac: Vision faces, the same steps |
+| Auto reframe (faces) | Has | Has | M | Owner-approved 2026-11-09. Android: Follow faces (ML Kit on the phone, 5 samples a second → smoothed x keyframes, `Reframe` in core; x_reframe). Mac: Vision faces on a ratio change; and Transform → "Follow faces": Vision finds the main face 5×/s on this Mac and the clip gets x keyframes that keep it centred without showing an edge, with the same smoothing, dead zone and thinning as Android (Reframe.kt) (WS9, XL owner-approved). |
 
 ## 11. Stickers
 
@@ -211,7 +211,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Claude edits the project (shared session) | Has | Has | — | Others' "AI assistant" equivalent; MUSE's is deeper |
 | Auto-edit / AutoCut from clips and music | Missing | Missing | L | Claude plus beats could drive it |
 | Long video to shorts | Missing | Missing | L | |
-| Stabilisation | Has | Missing | L | Owner-approved 2026-11-09. Server job `stabilize` (free, up to 3 min); `Asset.derivedFrom {op:"stabilize"}` is the same length, so the clip only switches asset (shared fixture). Android: Speed sheet, "Stabilise". Mac: WS9 |
+| Stabilisation | Has | Has | L | Owner-approved 2026-11-09. Server job `stabilize` (free, up to 3 min); `Asset.derivedFrom {op:"stabilize"}` is the same length, so the clip only switches asset (shared fixture). Android: Speed sheet, "Stabilise". Mac: Speed panel → "Stabilise" over the same job; only the last helper step switches off ("Turn off Reverse first"); background removal is dropped and the notice says so (WS9). |
 | Enhance / upscale | Partial | Partial | — | The Suite has upscale for takes; not in Edit |
 | Relight, retouch / beauty | Missing | Missing | XL | |
 | Text-to-speech | Missing | Missing | L | See Text |
@@ -227,7 +227,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Label as AI-generated | Has | Has | — | Sent with the version (fixed in WS8). Mac: Sent with the version (WS9) |
 | Content Credentials (C2PA) | Missing | Missing | L | Signing needs a certificate decision. The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
 | 2K, bitrate choice | Has | Has | S | Android: 2K, and Smaller file / Recommended / Higher quality bitrate (0.6× / 1× / 1.6× of ~0.12 bit per pixel per frame). Mac: 2K, and Smaller file / Recommended / Higher quality (reader → writer export at the bitrate). |
-| HDR export | Missing | Missing | L | |
+| HDR export | Missing | Has | L | Mac: Export → "HDR (HLG)": HEVC Main 10, BT.2020 / HLG, through the reader → writer path; checked in CI (codec, tags, picture) (WS9, XL owner-approved, Mac first). |
 | Share straight to TikTok / IG / Shorts | Partial | Partial | — | MUSE Socials (posting) |
 | GIF / audio-only export | Has | Has | S each | No competitor confirmed either. Android: Export → Sound only (.m4a, AAC 192 kbit/s, into Music/MUSE) and GIF (loops, 15 fps, 480 px short side, up to 30 s, into Pictures/MUSE); both saved to the phone only, not as versions. Mac: Export → Format: Sound only (.m4a, AAC 192 kbit/s) and GIF (loops, 15 fps, 480 px, up to 30 s), saved to a file you pick. |
 | Watermark | n/a | n/a | — | MUSE adds none |

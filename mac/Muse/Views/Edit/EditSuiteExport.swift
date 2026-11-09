@@ -108,7 +108,8 @@ struct EditSuiteExportSheet: View {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
                             SuiteLabel("Codec")
-                            EditSeg(options: EditSuite.Codec.allCases.map { ($0, $0.label) }, selection: settings.codec, height: 32) { settings.codec = $0 }
+                            EditSeg(options: EditSuite.Codec.allCases.map { ($0, $0.label) }, selection: settings.effectiveCodec, height: 32) { settings.codec = $0 }
+                                .disabled(settings.hdr)
                         }
                         VStack(alignment: .leading, spacing: 8) {
                             SuiteLabel("Captions")
@@ -117,6 +118,9 @@ struct EditSuiteExportSheet: View {
                                 .opacity(session.project.captionTrack == nil ? 0.5 : 1)
                         }
                     }
+                    // XL (owner-approved, Mac first): HDR video. HEVC only; most social apps show it as SDR.
+                    SuiteToggleRow(title: "HDR (HLG)", hint: "10-bit HEVC that keeps the bright highlights of HDR footage. Many apps show it as standard video.",
+                                   isOn: settings.hdr) { settings.hdr = $0 }
                     VStack(alignment: .leading, spacing: 8) {
                         SuiteLabel("Bitrate")
                         EditSeg(options: EditSuite.Bitrate.allCases.map { ($0, $0.label) }, selection: settings.bitrate, height: 32) { settings.bitrate = $0 }
