@@ -93,6 +93,8 @@ import studio.muse.app.ui.screens.suite.answerClaude
 import studio.muse.app.ui.screens.suite.askClaude
 import studio.muse.app.ui.screens.suite.applyAssist
 import studio.muse.app.ui.screens.suite.openClaude
+import studio.muse.app.ui.screens.suite.claudeHooks
+import studio.muse.app.ui.screens.suite.claudeToolDone
 import studio.muse.app.ui.screens.suite.pushComposerToAssist
 import studio.muse.app.ui.screens.suite.removeDraftReference
 import studio.muse.app.ui.screens.suite.applyDefaultRigIfAny
