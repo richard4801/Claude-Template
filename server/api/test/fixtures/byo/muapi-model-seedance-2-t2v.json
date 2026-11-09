@@ -1,0 +1,129 @@
+{
+ "name": "seedance-2-t2v",
+ "description": "SD 2.0 is the latest multimodal video generation model by ByteDance, offering advanced camera control, native audio-video sync, and high-resolution output. Selectable output resolution (480p/720p) — price scales with the resolution chosen.",
+ "category": "Text to Video",
+ "family": "sd-v2.0",
+ "group_of": "video",
+ "domain": "ai",
+ "cost": 0.75,
+ "cost_currency": "USD",
+ "cost_strategy": "seedance-2.0-cost",
+ "dynamic_pricing": true,
+ "endpoint": "/api/v1/seedance-2-t2v",
+ "endpoint_url": "seedance-v2.0-t2v",
+ "is_enabled": 1,
+ "is_coming_soon": false,
+ "input_fields": [
+  "prompt",
+  "resolution",
+  "aspect_ratio",
+  "duration",
+  "quality"
+ ],
+ "required_fields": [
+  "prompt"
+ ],
+ "estimate_endpoint": "/api/v1/models/seedance-2-t2v/estimate-cost",
+ "input_schema": {
+  "schemas": {
+   "input_data": {
+    "x-order-properties": [
+     "prompt",
+     "resolution",
+     "aspect_ratio",
+     "duration",
+     "quality"
+    ],
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "examples": [
+       "A determined penguin straps itself into a homemade rocket sled on an icy mountain. The rocket ignites with a massive burst and launches the penguin across the frozen landscape at insane speed, blasting through snowdrifts and leaving a fiery trail behind."
+      ],
+      "type": "string",
+      "title": "Prompt",
+      "description": "Text prompt describing the video. To use a fictional character, reference it inline with @character:<id> (the request_id from a completed Seedance 2 Character generation). Multiple characters are supported. Example: '@character:ab539e5f walks on the beach at sunset'."
+     },
+     "resolution": {
+      "enum": [
+       "480p",
+       "720p"
+      ],
+      "type": "string",
+      "title": "Resolution",
+      "name": "resolution",
+      "description": "Output resolution. Price scales with resolution: 480p is cheaper than 720p.",
+      "default": "720p"
+     },
+     "aspect_ratio": {
+      "enum": [
+       "16:9",
+       "9:16",
+       "4:3",
+       "3:4"
+      ],
+      "title": "Aspect Ratio",
+      "type": "string",
+      "default": "16:9"
+     },
+     "duration": {
+      "enum": [
+       5,
+       10,
+       15
+      ],
+      "title": "Duration",
+      "type": "integer",
+      "default": 5
+     },
+     "quality": {
+      "enum": [
+       "high",
+       "basic"
+      ],
+      "title": "Quality",
+      "type": "string",
+      "default": "basic"
+     }
+    },
+    "required": [
+     "prompt"
+    ],
+    "endpoint_url": "seedance-v2.0-t2v",
+    "title": "BaseInput"
+   },
+   "output_data": {
+    "type": "object",
+    "properties": {
+     "video": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/seedance-v2.0-t2v.mp4"
+      ],
+      "type": "string",
+      "title": "Video"
+     }
+    },
+    "title": "Seedance2Output",
+    "required": [
+     "video"
+    ]
+   }
+  }
+ },
+ "output_schema": {
+  "schemas": {
+   "type": "object",
+   "properties": {
+    "output": {
+     "type": "object",
+     "properties": {
+      "video_url": {
+       "type": "string",
+       "title": "Video URL"
+      }
+     }
+    }
+   }
+  }
+ }
+}
