@@ -824,6 +824,7 @@ final class EditSuiteSession {
             }
             if job.isDone, let r = job.result {
                 if k == .captions { transcriptJobId = job.id }
+                if k == .captions || k == .translate { captionExportNotice = r.exportNotice }
                 apply(r)
             } else if job.state == "failed" {
                 lastError = job.error ?? "That didn't work · try again"
@@ -969,11 +970,14 @@ final class EditSuiteSession {
 
     var translateTarget = "es"
     var translateQuality = "standard"
+    /// The server's note about exporting these captions (WS16: a script its export can't draw yet), shown with them.
+    var captionExportNotice: String?
 
     /// The languages to offer (the server's, by name), or a short list when it doesn't say.
     var translateLanguages: [(code: String, name: String)] {
+        // The server's list (only scripts its export draws, WS16 0cfa277e); a short safe list when it doesn't say.
         let l = features?.translate?.languages ?? ["es": "Spanish", "fr": "French", "de": "German", "pt-BR": "Portuguese (Brazil)", "it": "Italian",
-                                                   "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "ru": "Russian", "en": "English"]
+                                                   "ru": "Russian", "en": "English"]
         return l.map { ($0.key, $0.value) }.sorted { $0.name < $1.name }
     }
 

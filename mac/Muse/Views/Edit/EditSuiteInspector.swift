@@ -488,6 +488,9 @@ struct TranslateCaptionsRow: View {
                 }
                 Spacer(minLength: 0)
             }
+            if let n = session.captionExportNotice {
+                Text(n).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .sheet(isPresented: $showSheet) { EditSuiteTranslateSheet(session: session) }
     }

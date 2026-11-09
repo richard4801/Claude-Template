@@ -49,6 +49,11 @@ struct EditSuiteTranslateSheet: View {
                 SuiteToolButton(title: running || session.isRunning(.translate) ? "Translating…" : "Translate", icon: "chat-circle-text", accent: true,
                                 disabled: running || session.isRunning(.translate) || (how != "device" && session.features?.isAvailable(.translate) == false)) { start() }
             }
+            // On this Mac any script draws; the server's export only the languages it lists (WS16 0cfa277e).
+            if how == "device", let server = session.features?.translate?.languages, server[target] == nil {
+                Text("Exports made on this Mac show it; the server's export can't draw this script yet.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
             if how != "device", let note = session.features?.note(.translate) {
                 Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             }

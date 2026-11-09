@@ -243,6 +243,8 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var sourceLanguage: String?
     public var lines: [TranslateLine]?
     public var untranslatedLines: Int?
+    /// captions / translate: a note about the export (a script the server's export can't draw yet), shown with the captions.
+    public var exportNotice: String?
     public var quality: String?
     // slowmo: the factor and source range the copy was made from, and its frame rate
     public var factor: Double?
