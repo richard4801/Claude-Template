@@ -160,6 +160,11 @@ extension AppStore {
     }
 
     func retry(_ j: Job) {
+        if j.isPhoto { // WS19: a Photo run is made again from the Photo composer (its request isn't a job request)
+            hiddenFailures.insert(j.id)
+            openTool(.photo)
+            return
+        }
         perform { [self] in
             let n = try await api.createJob(j.request)
             upsert(n)
@@ -194,7 +199,7 @@ extension AppStore {
     }
 
     func watch(_ j: Job) {
-        if let t = takes.first(where: { $0.jobId == j.id }) { openTake(t.id) } else { showToast(j.isDone ? "No take found for this job" : j.progressLine) }
+        if let t = takes(of: j).first { openTake(t.id) } else { showToast(j.isDone ? "No take found for this job" : j.progressLine) }
     }
 
     func copy(_ text: String, toast message: String = "Prompt copied") {

@@ -117,6 +117,7 @@ extension AppStore {
             let j = try await api.suiteCreateShot(req)
             upsert(j)
             suite.shotJobIds.append(j.id)
+            rememberStage(j.id, tool: .extend)
             balance = try await api.balance()
             showToast("Extending · \(j.engineLabel) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in self?.go(.queue) }
         }

@@ -24,6 +24,13 @@ extension HTTPMuseAPI {
     public func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take] {
         (try await suiteCall("POST", "v1/suite/photos", body: body(req)) as PhotoResult).takes.map(absolutize)
     }
+    public func suiteStartPhotos(_ req: PhotoRequest) async throws -> Job {
+        var o = (try JSONSerialization.jsonObject(with: body(req)) as? [String: Any]) ?? [:]
+        o["async"] = true
+        let r: PhotoResult = try await suiteCall("POST", "v1/suite/photos", body: try JSONSerialization.data(withJSONObject: o))
+        guard let j = r.job else { throw ApiError("bad_response", "The server didn't start the photos") }
+        return absolutize(j)
+    }
     public func suiteCreateShot(_ req: ShotRequest) async throws -> Job {
         var r = req
         r.dryRun = nil

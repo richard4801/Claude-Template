@@ -5,7 +5,7 @@ import SwiftUI
 // AI suite · the Photo tool (workstream 3, plans/video-composer.md "Photo tool"). Photoshoot folded into the composer:
 // CHARACTER and her outfit, an optional PRODUCT (the composer's image slot, as in UGC ad), up to 3 REFERENCES (pose, look,
 // scene), the Style / Camera / Look / Lighting chips and a Photos 1–4 count. The price comes from
-// POST /v1/suite/photos/estimate; Generate posts /v1/suite/photos and the stills open in the normal result view.
+// POST /v1/suite/photos/estimate; Generate starts /v1/suite/photos as a job (WS19) and the stills land on the stage.
 // Old Photoshoot routes (a model's Photo button, a template's Use, a saved outfit, Retake on a still) land here.
 
 extension AppStore {
@@ -95,13 +95,12 @@ extension AppStore {
             defer { suite.generating = false }
             var req = req
             req.draft = ComposerDrafts.draft(suite.composer, photo: suite.photo) // Reuse settings
-            let shots = try await api.suiteCreatePhotos(req)
-            for s in shots.reversed() where !takes.contains(where: { $0.id == s.id }) { takes.insert(s, at: 0) }
-            fresh.formUnion(shots.map(\.id))
+            // WS19: the run is a job: the stage and the Queue follow it, and the stills land on the stage (and the Library).
+            let j = try await api.suiteStartPhotos(req)
+            upsert(j)
+            rememberStage(j.id, tool: .photo)
             balance = try await api.balance()
-            // The stills open in the normal result view; the rest are in the Gallery's tests.
-            if let first = shots.first { openTake(first.id) }
-            showToast("\(shots.count) photo\(shots.count == 1 ? "" : "s") saved to the Library")
+            showToast("Making \(PhotoEstimate.photos(max(1, j.request.takes))) · \(Pricing.money(j.cost))", action: "Open queue") { [weak self] in self?.go(.queue) }
         }
     }
 

@@ -497,6 +497,7 @@ extension AppStore {
                 if approve, let jid = r.jobId {
                     if let s = try? await self.api.suiteShot(id: jid) { upsert(s.job) }
                     suite.shotJobIds.append(jid)
+                    rememberStage(jid)
                     if let b = try? await self.api.balance() { balance = b }
                     showToast("Rendering · \(Pricing.money(p.maxUsd)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in self?.go(.queue) }
                 } else if !approve {

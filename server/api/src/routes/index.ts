@@ -579,12 +579,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   /** Runs a planned shoot: holds, generates, grades and saves the stills (`/v1/shoots` and the suite's Photo tool). */
-  async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: { noun?: string; draft?: Draft | null } = {}) {
+  /** `started`: called once the price is held (the photo job then runs on its own); `made`: each still done (template shoots). */
+  type ShootHooks = { noun?: string; draft?: Draft | null; started?: () => void; made?: (n: number, of: number) => void };
+  async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: ShootHooks = {}) {
     const noun = o2.noun ?? 'Photo', billNoun = o2.noun ?? 'Photo'; // Photoshoot is gone: legacy /v1/shoots takes are "Photo" too
-    if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun, o2.draft);
+    if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun, o2.draft, o2);
     const { b, m, o, count, plan } = s;
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
+    o2.started?.();
     const prompt = s.custom ?? s.built.text;
     const seed = b.seed ?? s.built.seed ?? undefined;
     let r;
@@ -616,13 +619,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Photo', billNoun = 'Photo', draft: Draft | null = null) {
+  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Photo', billNoun = 'Photo', draft: Draft | null = null, hooks: ShootHooks = {}) {
     const { b, m, o, count, plan, identity, product } = s;
     // A `filter` on the request replaces the template's own look for these stills.
     const t = filter ? { ...s.t, layers: { ...s.t.layers, afterEffects: { ...(s.t.layers.afterEffects ?? {}), look: filter } } } : s.t;
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(u), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
+    hooks.started?.();
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
     try {
@@ -639,6 +643,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
           layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, refs: s.refsIn.length ? s.refsIn : null, createdAt: now + n, draft,
         });
+        if (n + 1 < count) hooks.made?.(n + 1, count);
       }
     } catch (e) {
       await bill.fail();
@@ -684,10 +689,52 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null,
       ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.custom ?? s.built.text }) };
   });
+  // Every photo run is a job (WS19): a `render` row with request.engine 'photo', so the Queue, the hub and the Suite's
+  // stage show it while it runs, like a video. The stills stay jobless takes (the Library's as before); the job lists
+  // their ids. `async: true` (the Mac app) answers with the running job once the price is held; without it the call
+  // waits and answers with the takes, as before, plus the job.
+  const photoPhase = (count: number, made = 0) => count > 1 ? `Making photo ${made + 1} of ${count}` : 'Making your photo';
+  // A restart drops the run: photo jobs still running from before it end as failed (their bill was never finished).
+  void db.update(jobs).set({ state: 'failed', error: 'Interrupted · try again', phase: 'Failed', finishedAt: Date.now() })
+    .where(and(eq(jobs.state, 'running'), sql`${jobs.request}->>'engine' = 'photo'`)).catch(() => {});
   app.post('/v1/suite/photos', async req => {
     const draft = draftOf(req.body); // AI suite (workstream 1): every still keeps the composer draft ("Reuse settings")
-    const { s, graded } = await photoPlan(req.user, req.body);
-    return { tool: 'photo', takes: await runShoot(req, s, graded?.filter, { noun: 'Photo', draft }) };
+    const { async: background, ...body } = (req.body ?? {}) as Record<string, unknown>;
+    const wait = background !== true;
+    const { s, graded } = await photoPlan(req.user, body);
+    const u = req.user, count = s.count, cost = count * s.plan.perShot, now = Date.now();
+    const row: typeof jobs.$inferInsert = {
+      id: uid('j'), studioId: u.studioId, userId: u.id, kind: 'render', title: `Photo · ${count} photo${count === 1 ? '' : 's'}`, modelId: s.m.id, modelName: s.m.name,
+      outfitId: s.o?.id ?? '', request: { engine: 'photo', tool: 'photo', takes: count, count, engineLabel: 'Photo' }, state: 'running', progress: 2,
+      take: 1, totalSteps: count, phase: photoPhase(count), cost, prompt: s.kind === 'template' ? s.t.name : (s.custom ?? s.built.text), seed: 0,
+      thumb: s.o?.angles?.[0] ?? s.m.slots[0]?.image ?? null, createdAt: now, startedAt: now, ...(draft ? { draft } : {}),
+    };
+    const set = async (f: Partial<typeof jobs.$inferInsert>, extra: Record<string, unknown> = {}) => {
+      const [j] = await db.update(jobs).set(f).where(and(eq(jobs.id, row.id!), eq(jobs.state, 'running'))).returning();
+      if (j) ctx.jobs.emitJob(j, extra);
+      return j ?? (await ctx.jobs.get(row.id!));
+    };
+    let held!: () => void;
+    const holding = new Promise<void>(r => { held = r; });
+    const run = runShoot(req, s, graded?.filter, { noun: 'Photo', draft, started: () => held(),
+      made: (n, of) => { void set({ progress: Math.round((n / of) * 100), take: n + 1, step: n, phase: photoPhase(of, n) }); } });
+    await Promise.race([holding, run]); // the bill refused: nothing was held and no job is made (the error goes back)
+    const [j0] = await db.insert(jobs).values(row).returning();
+    ctx.jobs.emitJob(j0!);
+    const finished = run.then(async out => {
+      const j = await set({ state: 'done', progress: 100, step: count, phase: 'Done', finishedAt: Date.now(), thumb: out[0]?.thumb ?? row.thumb,
+        stats: { photo: { takeIds: out.map(t => t.id) } } }, { takes: out });
+      return { out, j };
+    }, async e => {
+      await set({ state: 'failed', error: String((e as Error)?.message ?? '').slice(0, 200) || 'It didn’t finish', refunded: cost, phase: 'Failed', finishedAt: Date.now() });
+      throw e;
+    });
+    if (!wait) {
+      finished.catch(() => {}); // the job carries the failure
+      return { tool: 'photo', takes: [], job: ctx.jobs.view(j0!) };
+    }
+    const { out, j } = await finished;
+    return { tool: 'photo', takes: out, job: j ? ctx.jobs.view(j) : undefined };
   });
 
   // ------------------------------------------------------------------ photo templates

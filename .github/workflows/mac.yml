@@ -166,6 +166,17 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped early"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # The owner's Suite stage report (WS19): Photo × 4 shows generating, then a carousel of four on the stage, still
+      # there after leaving and after a restart, with a Queue row; Shot the same (SnapshotRunner+SuiteStage.swift).
+      - name: Suite stage check
+        working-directory: mac
+        run: |
+          f=snapshots/suite-stage-check.txt
+          if [ ! -f "$f" ]; then echo "no suite-stage-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped early"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # When review mode stops early, the crash report says where (thread, frames, exception).
       - name: Crash report
         if: failure()
