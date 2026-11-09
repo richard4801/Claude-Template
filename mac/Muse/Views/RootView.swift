@@ -37,35 +37,48 @@ struct RootView: View {
     }
 }
 
-/// Title bar + sidebar + the current screen.
-struct Shell: View {
+/// Review mode only: an AppKit view inside each screen, so the runner can list the screens actually in the window
+/// (`SnapshotRunner.screensInWindow`), whatever SwiftUI's state says.
+struct ScreenProbe: NSViewRepresentable {
+    let name: String
+    final class Probe: NSView {
+        var name = ""
+        static var all = NSHashTable<Probe>.weakObjects()
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { Probe.all.add(self) } else { Probe.all.remove(self) }
+        }
+    }
+    func makeNSView(context: Context) -> Probe {
+        let v = Probe()
+        v.name = name
+        return v
+    }
+    func updateNSView(_ v: Probe, context: Context) {}
+}
+
+/// The current screen. Its own view, so it reads `store.screen` in its own body (not inside Shell's GeometryReader
+/// closure) and always redraws when the screen changes (plans/claude-chat-mac.md, "the old screen stays drawn").
+struct ScreenHost: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
 
     var body: some View {
-        GeometryReader { g in
-            VStack(spacing: 0) {
-                TitleBar()
-                HStack(spacing: 0) {
-                    // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
-                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
-                    ZStack(alignment: .top) {
-                        screen
-                            .id(store.screen)
-                            .transition(MotionStyle.of(t.id).transition)
-                        if let msg = store.offlineMessage {
-                            // Offline: what happened, and where to fix it. Floats over the screen like a toast.
-                            InlineNotice(msg, tone: .caution, actionTitle: "Check connection") { store.openSettings(.advanced) }
-                                .frame(maxWidth: 560)
-                                .museFloat(t)
-                                .padding(.top, Space.s3)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                }
+        ZStack(alignment: .top) {
+            screen
+                .background { if SnapshotRunner.probing { ScreenProbe(name: "\(store.screen)") } }
+                .id(store.screen)
+                .transition(MotionStyle.of(t.id).screenTransition)
+            if let msg = store.offlineMessage {
+                // Offline: what happened, and where to fix it. Floats over the screen like a toast.
+                InlineNotice(msg, tone: .caution, actionTitle: "Check connection") { store.openSettings(.advanced) }
+                    .frame(maxWidth: 560)
+                    .museFloat(t)
+                    .padding(.top, Space.s3)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 
     @ViewBuilder private var screen: some View {
@@ -89,6 +102,26 @@ struct Shell: View {
         case .edit: EditSuiteView(takeId: store.suite.editTakeId)
         }
     }
+}
+
+/// Title bar + sidebar + the current screen.
+struct Shell: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        GeometryReader { g in
+            VStack(spacing: 0) {
+                TitleBar()
+                HStack(spacing: 0) {
+                    // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
+                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
+                    ScreenHost()
+                }
+            }
+        }
+    }
+
 }
 
 /// Lets the custom title bar drag the window.
