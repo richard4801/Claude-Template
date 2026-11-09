@@ -184,13 +184,13 @@ extension SnapshotRunner {
 
     /// The old screen must never stay drawn after a screen change (plans/claude-chat-mac.md, "the old screen stays
     /// drawn"). In themes C and D: a live chat overlay with the sample thread closes in the same tick as `openEdit` +
-    /// `openRecreate`; about 1 s later the window must hold exactly one screen, `store.screen` (ScreenProbe). One line per
+    /// `openRecreate` (five tries each); about 1 s later the window must hold exactly one screen, `store.screen` (ScreenProbe). One line per
     /// try in fit-check.txt: `FITS stale_screen …` or `CUT stale_screen …`.
     static func staleScreenCheck(_ store: AppStore) async -> [String] {
         var out: [String] = []
         for theme in [ThemeID.c, .d] {
             store.themeID = theme
-            for attempt in 1...3 {
+            for attempt in 1...5 {
                 NSLog("[snapshot] stale screen %@ try %d: home, chat up", theme.rawValue, attempt)
                 store.closeRecreate()
                 store.go(.home)
