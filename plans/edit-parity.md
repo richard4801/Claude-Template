@@ -75,7 +75,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Transitions (cut, fade, dip to black/white, slide, push, zoom, whip, spin, glitch) | Has | Has | — | 9 types, own design. Android: 7 more kinds (zoom out, whip right, cover left/right/up/down, split fade), contract 2026-11-09, as presets in Effects → More transitions. |
 | Duration, apply to all | Has | Has | — | |
-| More transition types | Partial | Has | M each | Functional, but the value is in a curated set: **Content** Mac: seven more kinds (zoom out, whip right, cover ×4, split fade) and 12 in-house presets as chips (content library, WS9). |
+| More transition types | Has | Has | M each | Functional, but the value is in a curated set: **Content** Android: the seven kinds and 12 in-house presets under More transitions (content library, WS8). Mac: seven more kinds (zoom out, whip right, cover ×4, split fade) and 12 in-house presets as chips (content library, WS9). |
 | Transitions on overlay tracks | Partial | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut` (no cross-dissolve between overlays). |
 | Clip in/out animations (video) | Has | Has | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). Mac: Animate panel on any video clip, main or overlay (`animIn`/`animOut`), preview and export. |
 
@@ -146,7 +146,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Position, scale, rotation | Has | Has | — | Mac: Sliders set the key at the playhead once keyed (fixed in WS9) |
 | Opacity | Has | Has | S | Engine yes; no button. Android: Transform → Opacity with ◆ (wave 1). |
-| Volume | Partial | Has | S | See Audio. Mac: See Audio (wave 1) |
+| Volume | Has | Has | S | See Audio. Android: volume keyframes with easing (wave 1). Mac: See Audio (wave 1) |
 | Look / adjust / mask / crop keyframes | Partial | Partial | M each | Android: adjust (colour keys), mask (x, y, size, rotation, feather; Effects → Mask ◆) and the finishing look (vignette, grain, light leak; Filters → Adjust ◆) keyframe; `maskAt` / `lookAt`. Crop keyframes deferred: Media3 crops are static per clip (scale / x / y keys cover push-ins). Mac: adjust (colour ◆ in Adjust), mask (◆ beside Feather, Size, Rotation, Position X and Y) and the finishing look (◆ beside Vignette, Grain, Light leak), the same `maskAt` / `lookAt` (shared fixtures); crop deferred as on Android. |
 | Easing choice | Has | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold. Android: Linear, ease in, ease out, smooth, hold (wave 1). |
 | Keyframe list / move / delete on the timeline | Has | Has | M | Engine has `remove_keyframe`. Android: the selected item's ◆ on its timeline lane, dragged to move; Transform → Previous / Next keyframe, Remove keyframes here. Mac: the selected item's ◆ on its timeline block, dragged to move every property's key at that time; previous / next key, delete at the playhead. |
@@ -185,7 +185,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Background colour | Has | Has | S | `canvas.background` exists; no picker. Mac: Video → Background colour on main clips (wave 1). Android: Ratio → Background (wave 1). |
 | Background blur fill | Has | Has | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). Mac: Video → Background: Blur (wave 1). |
 | Fit / fill per clip | Has | Has | S | Model `fit`; no toggle. Mac: Transform → Frame: Fill / Fit (wave 1). Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
-| Auto reframe (faces) | Partial | Has | M | Re-centring on ratio change exists; face-aware reframe is in the spec but not on Android. Mac: Vision faces on a ratio change |
+| Auto reframe (faces) | Has | Has | M | Owner-approved 2026-11-09. Android: Follow faces (ML Kit on the phone, 5 samples a second → smoothed x keyframes, `Reframe` in core; x_reframe). Mac: Vision faces, the same steps |
 
 ## 11. Stickers
 

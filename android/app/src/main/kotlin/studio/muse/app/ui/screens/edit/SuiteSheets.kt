@@ -891,7 +891,7 @@ private fun LanguageBody(ui: EditSuiteUi, ct: studio.muse.core.edit.CaptionTrack
         choices.forEach { (code, label) -> SuiteChip(label, code == target, { target = code }, enabled = job?.running != true) }
     }
     SuiteSeg(listOf("standard" to "Standard", "best" to "Best quality"), if (best) "best" else "standard", { best = it == "best" }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
-    T("Word timings follow the speech. Your style stays; word fixes apply to the language shown.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    T("Translates the captions as shown, word fixes included. Timing follows the speech; your style stays.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     when {
         job?.running == true -> T("${job.phase.ifEmpty { "Translating" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
         else -> {

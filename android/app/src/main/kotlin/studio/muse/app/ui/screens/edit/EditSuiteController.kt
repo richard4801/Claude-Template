@@ -1402,7 +1402,27 @@ class EditSuiteController(
     /** The caption track's asset as a helper source (translate works from that video's speech). */
     private fun captionSource(): EditorSourceDto? = project?.let { p -> p.tracks.firstOrNull { it.kind == TrackKind.CAPTION }?.caption?.let { sourceOf(p.asset(it.asset)) } }
 
-    private fun translateOptions(language: String, best: Boolean) = buildJsonObject { put("targetLanguage", language); put("quality", if (best) "best" else "standard") }
+    /**
+     * The captions as shown (word fixes included) go with the request as lines, so the server translates those rather
+     * than its own transcript: a line breaks at a pause over 0.7 s, after . ! or ?, or at 10 words.
+     */
+    private fun translateOptions(language: String, best: Boolean) = buildJsonObject {
+        put("targetLanguage", language); put("quality", if (best) "best" else "standard")
+        val ct = project?.tracks?.firstOrNull { it.kind == TrackKind.CAPTION }?.caption ?: return@buildJsonObject
+        ct.language?.let { put("sourceLanguage", it) }
+        put("lines", buildJsonArray { captionLines(ct.words).forEachIndexed { i, l -> add(buildJsonObject { put("id", "l${i + 1}"); put("text", l.joinToString(" ") { it.text }.take(300)); put("startSec", l.first().startSec); put("endSec", l.last().endSec) }) } })
+    }
+
+    private fun captionLines(words: List<CaptionWord>): List<List<CaptionWord>> {
+        val out = ArrayList<List<CaptionWord>>(); var cur = ArrayList<CaptionWord>()
+        for (w in words) {
+            val prev = cur.lastOrNull()
+            if (prev != null && (w.startSec - prev.endSec > 0.7 || prev.text.trimEnd().lastOrNull() in setOf('.', '!', '?') || cur.size >= 10)) { out += cur; cur = ArrayList() }
+            cur += w
+        }
+        if (cur.isNotEmpty()) out += cur
+        return out.take(2000)
+    }
 
     /**
      * Translated captions (paid, the price on the button): the server translates the speech's captions into [language],
@@ -1422,15 +1442,13 @@ class EditSuiteController(
                 CaptionWord(text, s, maxOf(s, e))
             }
             val lang = (r["language"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) } ?: language
-            val from = (r["sourceLanguage"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) }
             if (words.isEmpty()) return@runAi say("Couldn't translate these captions")
             if (change(refused = "Couldn't translate these captions") { pp ->
                     val t = pp.tracks.firstOrNull { it.kind == TrackKind.CAPTION } ?: return@change null
                     val cur = t.caption ?: return@change null
-                    // While the speech's own language is shown, the kept words are an earlier translation: dropped, so the
-                    // speech's words stay the original (otherwise the first original is kept).
-                    val base = if (cur.original != null && from != null && cur.language == from) cur.copy(original = null) else cur
-                    pp.copy(tracks = pp.tracks.map { if (it === t) it.copy(caption = studio.muse.core.edit.translateCaptions(base, lang, words, from)) else it })
+                    // The captions as shown are what was translated: they become the kept words (an earlier pair is replaced).
+                    val base = cur.copy(original = null)
+                    pp.copy(tracks = pp.tracks.map { if (it === t) it.copy(caption = studio.muse.core.edit.translateCaptions(base, lang, words)) else it })
                 }) say("Captions translated · ${words.size} words")
         }
     }

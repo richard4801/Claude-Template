@@ -1842,7 +1842,14 @@ object FakeEditorResults {
             // Translated captions (demo): the same timings, each word tagged with the target language.
             "translate" -> {
                 val lang = (options?.get("targetLanguage") as? JsonPrimitive)?.content ?: "es"
-                obj("language" to p(lang), "sourceLanguage" to p("en"), "words" to JsonArray(ws.map { (w, s, e) -> obj("text" to p("$w·$lang"), "startSec" to p(s), "endSec" to p(e)) }),
+                // With lines (the captions as shown), their words; else the transcript's.
+                val given = (options?.get("lines") as? JsonArray)?.flatMap { l ->
+                    val o = l as JsonObject
+                    val t = (o["text"] as JsonPrimitive).content.split(' ').filter { it.isNotBlank() }
+                    val s0 = (o["startSec"] as JsonPrimitive).content.toDouble(); val e0 = (o["endSec"] as JsonPrimitive).content.toDouble()
+                    t.mapIndexed { i, w -> Triple(w, r3(s0 + (e0 - s0) * i / t.size), r3(s0 + (e0 - s0) * (i + 1) / t.size)) }
+                }
+                obj("language" to p(lang), "sourceLanguage" to p((options?.get("sourceLanguage") as? JsonPrimitive)?.content ?: "en"), "words" to JsonArray((given ?: ws).map { (w, s, e) -> obj("text" to p("${w.substringBefore('·')}·$lang"), "startSec" to p(s), "endSec" to p(e)) }),
                     "quality" to p((options?.get("quality") as? JsonPrimitive)?.content ?: "standard"), "durationSec" to p(d))
             }
             "cuts" -> {
