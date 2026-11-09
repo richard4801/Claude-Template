@@ -127,7 +127,7 @@ fun AccountSettingsScreen() {
             // Model names are owner-only; the owner sees the licence attribution.
             Caption(if (s.prefs.owner) "MiniMax H3 licence terms apply." else "Third-party model licence terms apply.")
         }
-        if (s.prefs.owner) SettingsGroup("Show advanced settings") {
+        if (s.prefs.owner) Column {
             RowItem("Show advanced settings", "Server, testing and performance tools", onClick = { vm.showAdvanced(!s.prefs.showAdvanced) }) {
                 Toggle(s.prefs.showAdvanced, { vm.showAdvanced(!s.prefs.showAdvanced) })
             }
@@ -160,7 +160,7 @@ fun StudioSectionScreen() {
             }
             SettingsGroup("Links") { LinkRulesRow() }
             SettingsGroup("Archived models") {
-                RowItem("Archived models", "Hidden from every list. Their photos, renders and posts are kept.",
+                RowItem("Show archived models", "Hidden from every list. Their photos, renders and posts are kept.",
                     onClick = { nav.go(Routes.ARCHIVED) }) { Chevron() }
             }
         }
