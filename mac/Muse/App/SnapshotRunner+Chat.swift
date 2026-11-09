@@ -18,6 +18,8 @@ extension SnapshotRunner {
             state.chatComposerText = nil
             state.chatAttach = false
             state.overlay = nil
+            // Let the overlay go before the screen changes: both in one tick can leave the old screen drawn.
+            try? await Task.sleep(for: .seconds(0.8))
         }
         guard let w = mainWindow else {
             lines.append("CUT chat not drawn (no window)")
@@ -89,6 +91,12 @@ extension SnapshotRunner {
             // animates and can lose a tick on the runner, so the shot checks the chat is up and tries again (up to 3 times).
             var recreateDrawn = false
             for attempt in 1...3 where !recreateDrawn {
+                if attempt > 1 {
+                    // A screen change that didn't draw: pass through another screen so the next one is a fresh change.
+                    store.closeRecreate()
+                    store.go(.gallery)
+                    try? await Task.sleep(for: .seconds(1.5))
+                }
                 store.openEdit(takeId: nil)
                 try? await Task.sleep(for: .seconds(1))
                 store.openRecreate()
@@ -111,9 +119,19 @@ extension SnapshotRunner {
             NSLog("[snapshot] chat edit %@", theme.rawValue)
             // Edit: the editor's Claude panel on its Chat tab.
             if let take {
-                state.claudeTab = 0
-                store.openEdit(takeId: take.id)
-                try? await Task.sleep(for: .seconds(7))
+                var editDrawn = false
+                for attempt in 1...3 where !editDrawn {
+                    if attempt > 1 {
+                        state.claudeTab = nil
+                        store.go(.gallery)
+                        try? await Task.sleep(for: .seconds(1.5))
+                    }
+                    state.claudeTab = 0
+                    store.openEdit(takeId: take.id)
+                    try? await Task.sleep(for: .seconds(7))
+                    editDrawn = state.composerFrames["chat composer"] != nil
+                    NSLog("[snapshot] chat edit %@ try %d: drawn %d, screen %@", theme.rawValue, attempt, editDrawn ? 1 : 0, "\(store.screen)")
+                }
                 lines.append(drawnLine("claude_edit", theme, needsReply: true))
                 capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_edit.png"))
                 state.claudeTab = nil
