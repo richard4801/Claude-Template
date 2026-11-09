@@ -199,7 +199,7 @@ fun AccountsScreen() {
 data class PostDraft(
     val platforms: List<String> = emptyList(),
     val caption: String = "",
-    val aiLabel: Boolean = false,
+    val aiLabel: Boolean = true, // owner 2026-11-09: every post is labelled AI-generated unless switched off
     val paidPartnership: Boolean = false,
     val later: Boolean = false,
     val slot: Int = 0,

@@ -174,3 +174,10 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
 - **Now (server, done):** custom provider image models (Muapi, fal, Replicate keys) run at the largest size the model offers; a size it refuses for the shape (e.g. Seedream 2K at 9:16) steps down to the next. FLUX keeps its current size (priced by megapixels).
 - **4K today:** Enhance → Realism Off, Upscale 4× (Clarity Upscaler) on any finished photo.
 - **Next, when tokens reset (owner asked to save this):** a size picker in the Photo composer (1K / 2K / 4K, only the sizes the picked model offers, price on the button), Mac + Android, plus "7 shapes" relabelled as "7 aspect ratios" in the model picker.
+
+## Export files and AI labels (owner 2026-11-09)
+- Export files stay clean: the in-file AI label is the per-export choice "Label as AI-generated" (off unless turned on).
+- Posts: "Mark as AI-generated" (the platform's own AI label) is now ON by default on Android and Mac; it can be switched off per post.
+- Declined: a per-download unique hash, micro-scaling/gamma shifts and audio pitch/tempo tweaks (they only serve to evade
+  duplicate/fingerprint detection). Offered instead: a server download log for real tracking.
+- Later (tokens): a studio default in Settings for both switches; EU AI Act check for machine-readable marking.

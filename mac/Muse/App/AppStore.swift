@@ -88,7 +88,7 @@ struct PostDraft {
     var modelId: String
     var platforms: [Platform]
     var caption = ""
-    var aiLabel = false
+    var aiLabel = true // owner 2026-11-09: every post is labelled AI-generated unless switched off
     var paidPartnership = false
     var schedule = false
     var when: Date
