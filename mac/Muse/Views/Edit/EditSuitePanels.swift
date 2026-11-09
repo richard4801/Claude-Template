@@ -363,6 +363,7 @@ struct AdjustPanel: View {
             SuiteSlider("Contrast", value: a.contrast ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.contrast = v } }
             SuiteSlider("Saturation", value: a.saturation ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.saturation = v } }
             SuiteSlider("Temperature", value: a.temperature ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.temperature = v } }
+            SuiteSlider("Tint", value: a.tint ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.tint = abs(v) < 0.005 ? nil : (v * 100).rounded() / 100 } }
             SuiteSlider("Highlights", value: a.highlights ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.highlights = v } }
             SuiteSlider("Shadows", value: a.shadows ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.shadows = v } }
             // The look's effects (parity): 0 removes each.

@@ -274,6 +274,7 @@ private struct Validator {
             try num("\(f).adjust.contrast", a.contrast, -1, 1)
             try num("\(f).adjust.saturation", a.saturation, -1, 1)
             try num("\(f).adjust.temperature", a.temperature, -1, 1)
+            try num("\(f).adjust.tint", a.tint, -1, 1)
             try num("\(f).adjust.highlights", a.highlights, -1, 1)
             try num("\(f).adjust.shadows", a.shadows, -1, 1)
         }

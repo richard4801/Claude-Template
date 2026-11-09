@@ -97,10 +97,12 @@ extension EditV2 {
         /// Edit suite: tone after the colour matrix (`toneAdjust`), −1…1.
         public var highlights: Double?
         public var shadows: Double?
+        /// Parity: green (−1) ↔ magenta (+1), right after temperature in the colour matrix.
+        public var tint: Double?
         public init(exposure: Double? = nil, contrast: Double? = nil, saturation: Double? = nil, temperature: Double? = nil,
-                    highlights: Double? = nil, shadows: Double? = nil) {
+                    highlights: Double? = nil, shadows: Double? = nil, tint: Double? = nil) {
             self.exposure = exposure; self.contrast = contrast; self.saturation = saturation; self.temperature = temperature
-            self.highlights = highlights; self.shadows = shadows
+            self.highlights = highlights; self.shadows = shadows; self.tint = tint
         }
     }
 
