@@ -174,6 +174,7 @@ struct CaptionsPanel: View {
                 SuiteLabel("Style", trailing: style == nil ? nil : "Word-by-word")
                 CaptionStyleGrid(session: session)
                 ContentCaptionChips(session: session)
+                if style != nil { TranslateCaptionsRow(session: session) }
             }
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
@@ -459,5 +460,35 @@ struct AnimPanel: View {
         case .zoom: return "Zoom"
         case .typewriter: return "Typewriter"
         }
+    }
+}
+
+
+/// Translated captions (XL, owner-approved): the captions' language, "Translate…" (the sheet: on this Mac free, or the
+/// server's Standard / Best quality with the price shown first), and "Show <language>" once translated.
+struct TranslateCaptionsRow: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    @State private var showSheet = false
+
+    var body: some View {
+        let s = session.state
+        let name = { (code: String?) -> String? in code.map { c in session.translateLanguages.first { $0.code == c }?.name
+            ?? EditSuiteTranslateSheet.languages.first { $0.0 == c }?.1 ?? c } }
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SuiteLabel("Language", trailing: name(s.captionLanguage))
+            HStack(spacing: Space.s2) {
+                SuiteToolButton(title: session.isRunning(.translate) ? "Translating…" : "Translate…", icon: "chat-circle-text",
+                                disabled: session.isRunning(.translate)) { showSheet = true }
+                if session.isRunning(.translate) { ProgressView().controlSize(.small) }
+                if s.captionsTranslated {
+                    // The other set of words (the original, or the translation once switched back).
+                    SuiteToolButton(title: "Show \(name(s.captionOriginalLanguage) ?? "original")", plain: true) { session.edit { $0.swapCaptionOriginal() } }
+                        .help("Switches the captions between the two languages")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .sheet(isPresented: $showSheet) { EditSuiteTranslateSheet(session: session) }
     }
 }

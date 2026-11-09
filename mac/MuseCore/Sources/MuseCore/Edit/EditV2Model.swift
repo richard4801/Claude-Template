@@ -635,7 +635,42 @@ extension EditV2 {
         public var asset: String
         public var words: [CaptionWord]
         public var style: CaptionStyle
-        public init(asset: String, words: [CaptionWord], style: CaptionStyle) { self.asset = asset; self.words = words; self.style = style }
+        /// Translated captions (WS8 cac2bb0): the words' language (e.g. "es"), and the words they were translated from.
+        public var language: String?
+        public var original: CaptionOriginal?
+        public init(asset: String, words: [CaptionWord], style: CaptionStyle, language: String? = nil, original: CaptionOriginal? = nil) {
+            self.asset = asset; self.words = words; self.style = style; self.language = language; self.original = original
+        }
+    }
+
+    public struct CaptionOriginal: Codable, Hashable, Sendable {
+        public var language: String?
+        public var words: [CaptionWord]
+        public init(language: String? = nil, words: [CaptionWord]) { self.language = language; self.words = words }
+    }
+
+    public static let languageCodePattern = #"^[a-z]{2,3}(-[A-Z]{2})?$"#
+    public static func isLanguageCode(_ s: String) -> Bool { s.range(of: languageCodePattern, options: .regularExpression) != nil }
+
+    /// The caption track shown in its original words (and back): words and language swap with `original`'s; unchanged
+    /// without one.
+    public static func swapCaptionOriginal(_ ct: CaptionTrack) -> CaptionTrack {
+        guard let o = ct.original else { return ct }
+        var out = ct
+        out.words = o.words
+        out.language = o.language
+        out.original = CaptionOriginal(language: ct.language, words: ct.words)
+        return out
+    }
+
+    /// The caption track with translated `words` in `language`; the first original is kept (translating again replaces
+    /// only the translation).
+    public static func translateCaptions(_ ct: CaptionTrack, language: String, words: [CaptionWord], sourceLanguage: String? = nil) -> CaptionTrack {
+        var out = ct
+        out.original = ct.original ?? CaptionOriginal(language: ct.language ?? sourceLanguage, words: ct.words)
+        out.words = words
+        out.language = language
+        return out
     }
 
     public enum DuckSource: String, Codable, Hashable, Sendable { case voice, speech }

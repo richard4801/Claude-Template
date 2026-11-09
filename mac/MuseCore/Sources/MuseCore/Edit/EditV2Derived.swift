@@ -163,3 +163,49 @@ extension EditSuiteState {
         return ok
     }
 }
+
+// MARK: Translated captions (XL, WS8 cac2bb0 / WS16 translate)
+
+extension EditSuiteState {
+    /// The caption lines to translate, as shown (edits included), from the original words when the captions are already
+    /// translated: `wordsPerPage` words a line (3 when the style doesn't say), ids "0", "1"…
+    public var captionLinesToTranslate: [TranslateLine] {
+        guard let ct = project.captionTrack else { return [] }
+        let words = ct.original?.words ?? ct.words
+        let per = max(1, Int(ct.style.wordsPerPage ?? 3))
+        return stride(from: 0, to: words.count, by: per).enumerated().map { n, i in
+            let w = words[i..<min(words.count, i + per)]
+            return TranslateLine(id: String(n), text: w.map(\.text).joined(separator: " "), startSec: w.first!.startSec, endSec: w.last!.endSec)
+        }
+    }
+
+    /// The captions' language as shown, and the original's when translated.
+    public var captionLanguage: String? { project.captionTrack?.language }
+    public var captionOriginalLanguage: String? { project.captionTrack?.original?.language }
+    public var captionsTranslated: Bool { project.captionTrack?.original != nil }
+
+    /// The caption track in `language` with the server's timed `words` (the first original kept). One undo step.
+    @discardableResult
+    public mutating func setCaptionTranslation(language: String, words: [E.Word], sourceLanguage: String?) -> Bool {
+        let cw = words.prefix(E.maxWords).map { E.CaptionWord(text: String($0.text.prefix(60)), startSec: $0.startSec, endSec: max($0.startSec, $0.endSec)) }
+            .filter { !$0.text.isEmpty }
+        guard !cw.isEmpty else { refuse("The translation came back empty"); return false }
+        return apply { p in
+            guard let i = p.tracks.firstIndex(where: { $0.kind == .caption && $0.caption != nil }) else { return nil }
+            var q = p
+            q.tracks[i].caption = E.translateCaptions(p.tracks[i].caption!, language: language, words: Array(cw), sourceLanguage: sourceLanguage)
+            return q
+        }
+    }
+
+    /// "Show original" / back: the captions swap with the words they were translated from.
+    @discardableResult
+    public mutating func swapCaptionOriginal() -> Bool {
+        apply { p in
+            guard let i = p.tracks.firstIndex(where: { $0.kind == .caption && $0.caption?.original != nil }) else { return nil }
+            var q = p
+            q.tracks[i].caption = E.swapCaptionOriginal(p.tracks[i].caption!)
+            return q
+        }
+    }
+}

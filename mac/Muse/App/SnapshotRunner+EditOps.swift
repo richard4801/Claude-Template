@@ -524,6 +524,24 @@ extension SnapshotRunner {
         check("slowmo: undone", s.project.mainClips == unslowed.mainClips)
         s.lastError = nil
 
+        step("Translated captions: the demo job, then Show original")
+        let uncaptioned = s.project
+        if let asset = s.project.mainClips.first?.asset {
+            s.edit { $0.setCaptions(words: [E.Word(text: "Hello", startSec: 0.2, endSec: 0.6), E.Word(text: "world", startSec: 0.6, endSec: 1.1)], assetId: asset) }
+            s.lastError = nil
+            s.translateTarget = "fr"
+            await s.translateCaptions()
+            s.confirmPaid()
+            for _ in 0..<200 where s.isRunning(.translate) || (s.state.captionLanguage == nil && s.lastError == nil) { try? await Task.sleep(for: .milliseconds(100)) }
+            check("translate: captions in French, the English kept", s.state.captionLanguage == "fr" && s.state.captionsTranslated && E.problem(s.project) == nil,
+                  s.lastError ?? "\(String(describing: s.state.captionLanguage))")
+            s.edit { $0.swapCaptionOriginal() }
+            check("translate: Show original", s.project.captionTrack?.words.first?.text == "Hello")
+            for _ in 0..<3 { s.undo() }
+            check("translate: undone", s.project == uncaptioned)
+            s.lastError = nil
+        }
+
         step("Auto reframe: Vision runs over the clip (no face in the test take)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.lastError = nil

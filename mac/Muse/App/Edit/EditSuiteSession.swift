@@ -767,6 +767,7 @@ final class EditSuiteSession {
         case .reverse: return "Reverse"
         case .stabilize: return "Stabilise"
         case .slowmo: return "Smooth slow motion"
+        case .translate: return "Translate captions"
         }
     }
 
@@ -962,6 +963,42 @@ final class EditSuiteSession {
         guard let dropped else { return }
         let on = target.derivedFrom?.kind == .stabilize
         notice = (on ? "Steadied" : "Stabilise off") + (dropped.isEmpty ? "" : " · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)")
+    }
+
+    // MARK: Translated captions (XL): the caption lines as shown, in another language, timed by the server (paid)
+
+    var translateTarget = "es"
+    var translateQuality = "standard"
+
+    /// The languages to offer (the server's, by name), or a short list when it doesn't say.
+    var translateLanguages: [(code: String, name: String)] {
+        let l = features?.translate?.languages ?? ["es": "Spanish", "fr": "French", "de": "German", "pt-BR": "Portuguese (Brazil)", "it": "Italian",
+                                                   "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "ru": "Russian", "en": "English"]
+        return l.map { ($0.key, $0.value) }.sorted { $0.name < $1.name }
+    }
+
+    func translateCaptions() async {
+        guard let ct = project.captionTrack else { lastError = "Make captions first"; return }
+        guard let a = project.asset(ct.asset), let src = EditorSource(a) else { lastError = "Translate needs captions from a take or an upload"; return }
+        let lines = state.captionLinesToTranslate
+        guard !lines.isEmpty else { lastError = "There are no caption words to translate"; return }
+        let target = translateTarget
+        var o = EditorJobOptions()
+        o.targetLanguage = target
+        o.sourceLanguage = ct.original?.language ?? ct.language
+        o.quality = translateQuality
+        o.lines = lines
+        await run(.translate, source: src, options: o) { [weak self] r in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let words = r.words, !words.isEmpty else { self.lastError = "The translation came back empty · try again"; return }
+                if self.edit({ $0.setCaptionTranslation(language: r.language ?? target, words: words, sourceLanguage: r.sourceLanguage) }) {
+                    let name = self.translateLanguages.first { $0.code == (r.language ?? target) }?.name ?? (r.language ?? target)
+                    let kept = (r.untranslatedLines ?? 0) > 0 ? " · \(r.untranslatedLines!) lines kept as they were" : ""
+                    self.notice = "Captions in \(name)\(kept)"
+                }
+            }
+        }
     }
 
     // MARK: Smooth slow motion (XL): a range of the clip, 2× or 4× slower with new frames in between

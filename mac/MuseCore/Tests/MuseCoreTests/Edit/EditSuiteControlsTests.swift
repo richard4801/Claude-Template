@@ -464,6 +464,14 @@ extension EditSuiteControlsTests {
         XCTAssertFalse(s.translateCaptions(["only one"]), "chunk count must match")
         XCTAssertTrue(s.undo())
         XCTAssertEqual(s.project, before)
+        // With a language: the English stays as the original, and translating again starts from it.
+        XCTAssertTrue(s.translateCaptions(["Hola.", "¿Cómo estás tú?"], language: "es"))
+        XCTAssertEqual(s.project.captionTrack?.language, "es")
+        XCTAssertEqual(s.project.captionTrack?.original?.words.first?.text, "Hello")
+        XCTAssertEqual(s.captionChunks.map(\.text), ["Hello there.", "How are you?"])
+        XCTAssertTrue(s.translateCaptions(["Bonjour.", "Comment ça va ?"], language: "fr"))
+        XCTAssertEqual(s.project.captionTrack?.original?.words.count, 5)
+        XCTAssertNil(EditV2.problem(s.project))
     }
 }
 

@@ -102,3 +102,52 @@ extension EditV2DerivedTests {
         XCTAssertEqual(s.project.mainClips.count, 1)
     }
 }
+
+extension EditV2DerivedTests {
+    /// Translated captions (functions.json → captionTranslate, WS8 cac2bb0).
+    func testCaptionTranslate() throws {
+        let f = try editorFixture("functions")["captionTranslate"]
+        func ct(_ k: String) throws -> E.CaptionTrack { try f[k].decode(E.CaptionTrack.self) }
+        func same(_ got: E.CaptionTrack, _ k: String) throws {
+            let d = jsonDiff(try JV.of(got), f[k]); XCTAssert(d.isEmpty, "\(k): " + d.prefix(4).joined(separator: "; "))
+        }
+        let base = try ct("base"), es = try ct("es"), fr = try ct("fr")
+        try same(E.translateCaptions(base, language: "es", words: es.words, sourceLanguage: "en"), "es")
+        try same(E.translateCaptions(es, language: "fr", words: fr.words, sourceLanguage: "en"), "fr")
+        try same(E.swapCaptionOriginal(fr), "frOriginal")
+        try same(E.swapCaptionOriginal(E.swapCaptionOriginal(fr)), "frBack")
+        try same(E.swapCaptionOriginal(base), "baseSwap")
+        try same(E.translateCaptions(base, language: "de", words: try ct("noSource").words), "noSource")
+    }
+}
+
+extension EditV2DerivedTests {
+    func testTranslateTheCaptions() async throws {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 6), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        let asset = s.project.mainClips[0].asset
+        XCTAssertTrue(s.setCaptions(words: [E.Word(text: "Hello", startSec: 0, endSec: 0.5), E.Word(text: "big", startSec: 0.5, endSec: 1),
+                                            E.Word(text: "world", startSec: 1, endSec: 1.5), E.Word(text: "again", startSec: 1.5, endSec: 2)], assetId: asset))
+        let lines = s.captionLinesToTranslate
+        XCTAssertEqual(lines.map(\.id), lines.indices.map { String($0) })
+        XCTAssertEqual(lines.map(\.text).joined(separator: " "), "Hello big world again")
+        // The demo job: the lines come back tagged and timed.
+        let api = FakeMuseAPI(genDelay: 0.01)
+        var o = EditorJobOptions(); o.targetLanguage = "es"; o.sourceLanguage = "en"; o.lines = lines
+        var job = try await api.startEditorJob(EditorJobRequest(kind: .translate, source: EditorSource(takeId: nil, uploadId: "u", durationSec: 6), options: o))
+        for _ in 0..<100 where job.isRunning { try await Task.sleep(nanoseconds: 20_000_000); job = try await api.editorJob(id: job.id) }
+        let r = try XCTUnwrap(job.result)
+        XCTAssertEqual(r.lines?.first?.translated?.hasPrefix("[es]"), true)
+        XCTAssertTrue(s.setCaptionTranslation(language: "es", words: try XCTUnwrap(r.words), sourceLanguage: r.sourceLanguage))
+        XCTAssertEqual(s.captionLanguage, "es")
+        XCTAssertEqual(s.captionOriginalLanguage, "en")
+        XCTAssertEqual(s.project.captionTrack?.original?.words.first?.text, "Hello")
+        XCTAssertNil(E.problem(s.project))
+        // Translating again works from the original (the lines are the English ones).
+        XCTAssertEqual(s.captionLinesToTranslate.first?.text.hasPrefix("Hello"), true)
+        XCTAssertTrue(s.swapCaptionOriginal())
+        XCTAssertEqual(s.captionLanguage, "en")
+        XCTAssertEqual(s.project.captionTrack?.words.first?.text, "Hello")
+        XCTAssertTrue(s.swapCaptionOriginal())
+        XCTAssertEqual(s.captionLanguage, "es")
+    }
+}

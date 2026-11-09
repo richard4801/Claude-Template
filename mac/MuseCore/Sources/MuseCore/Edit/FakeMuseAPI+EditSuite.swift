@@ -46,7 +46,7 @@ extension FakeMuseAPI {
     /// A run that would cost money on the server (not the free passes).
     private func isPaid(_ req: EditorJobRequest) -> Bool {
         switch req.kind {
-        case .captions, .matte, .slowmo: return true
+        case .captions, .matte, .slowmo, .translate: return true
         case .denoise: return req.options?.analyzeOnly != true
         case .cuts, .beats, .reverse, .stabilize: return false
         }
@@ -132,6 +132,7 @@ extension FakeMuseAPI {
         case .reverse: phase = "Reversing"
         case .stabilize: phase = "Steadying"
         case .slowmo: phase = "Slowing down"
+        case .translate: phase = "Translating"
         }
         let job = EditorJob(id: id, kind: req.kind, state: "running", progress: 5, phase: phase, estimateUsd: 0, costUsd: 0)
         editorJobs[id] = job
@@ -179,6 +180,21 @@ extension FakeMuseAPI {
             // The fake hands back the source itself as the "reversed" or "steadied" copy.
             r.asset = EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
             r.width = 1080; r.height = 1920; r.hasAudio = true
+        case .translate:
+            // The demo "translates" each line by tagging it with the language, timed as the line.
+            let lang = req.options?.targetLanguage ?? "es"
+            let lines = req.options?.lines ?? [TranslateLine(id: "0", text: "Hello world", startSec: 0, endSec: min(d, 2))]
+            r.language = lang
+            r.sourceLanguage = req.options?.sourceLanguage ?? "en"
+            r.quality = req.options?.quality ?? "standard"
+            r.lines = lines.map { var l = $0; l.translated = "[\(lang)] " + l.text; return l }
+            r.untranslatedLines = 0
+            r.words = lines.flatMap { l -> [EditV2.Word] in
+                let texts = ["[\(lang)]"] + l.text.split(separator: " ").map(String.init)
+                let step = (l.endSec - l.startSec) / Double(max(1, texts.count))
+                return texts.enumerated().map { i, t in EditV2.Word(text: String(t.prefix(60)), startSec: EditV2.r3(l.startSec + Double(i) * step),
+                                                                    endSec: EditV2.r3(l.startSec + Double(i + 1) * step)) }
+            }
         case .slowmo:
             // The fake hands back the source itself, at the length the copy would have.
             let o = req.options!

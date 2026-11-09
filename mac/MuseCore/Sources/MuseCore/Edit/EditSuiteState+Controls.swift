@@ -224,8 +224,11 @@ extension EditSuite {
 
 extension EditSuiteState {
     /// The caption words in sentence-sized chunks, for translation.
+    /// Already translated: the chunks of the original words, so translating again starts from them.
     public var captionChunks: [EditSuite.CaptionChunk] {
-        guard let words = project.captionTrack?.words, !words.isEmpty else { return [] }
+        guard let ct = project.captionTrack else { return [] }
+        let words = ct.original?.words ?? ct.words
+        guard !words.isEmpty else { return [] }
         var out: [EditSuite.CaptionChunk] = []
         var start = 0
         for i in words.indices {
@@ -243,13 +246,16 @@ extension EditSuiteState {
 
     /// Replaces each chunk's words with its translation (same order as `captionChunks`), spread over the chunk's time by
     /// length, so the captions keep their timing and cuts still move them. One undo step. Empty translations keep the original.
+    /// With `language` (a language code; XL translated captions, WS8 cac2bb0) the words they came from are kept as the
+    /// track's original, so "Show original" can switch back.
     @discardableResult
-    public mutating func translateCaptions(_ translations: [String]) -> Bool {
+    public mutating func translateCaptions(_ translations: [String], language: String? = nil) -> Bool {
         let chunks = captionChunks
         guard let ct = project.captionTrack, chunks.count == translations.count, !chunks.isEmpty else { return false }
+        let source = ct.original?.words ?? ct.words
         var words: [E.CaptionWord] = []
         for (c, tr) in zip(chunks, translations) {
-            let src = Array(ct.words[c.indices])
+            let src = Array(source[c.indices])
             let parts = tr.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init).filter { !$0.isEmpty }
             guard !parts.isEmpty, let a = src.first?.startSec, let b = src.last?.endSec, b > a else { words += src; continue }
             let total = Double(parts.reduce(0) { $0 + $1.count + 1 })
@@ -264,7 +270,11 @@ extension EditSuiteState {
         return apply { p in
             guard let i = p.tracks.firstIndex(where: { $0.kind == .caption && $0.caption != nil }) else { return nil }
             var q = p
-            q.tracks[i].caption!.words = capped
+            if let language, E.isLanguageCode(language) {
+                q.tracks[i].caption = E.translateCaptions(p.tracks[i].caption!, language: language, words: capped)
+            } else {
+                q.tracks[i].caption!.words = capped
+            }
             return q
         }
     }

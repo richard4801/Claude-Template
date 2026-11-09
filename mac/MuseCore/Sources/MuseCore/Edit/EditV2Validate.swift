@@ -173,11 +173,21 @@ private struct Validator {
                 guard let c = t.caption else { throw bad("\(f).caption", "is required") }
                 if let a = assets[c.asset], a.kind == .video || a.kind == .audio {} else { throw bad("\(f).caption.asset", "must be a video or audio asset") }
                 if c.words.count > E.maxWords { throw bad("\(f).caption.words", "at most \(E.maxWords) words") }
-                for (j, w) in c.words.enumerated() {
-                    let n = w.text.utf16.count
-                    if n < 1 || n > 60 { throw bad("\(f).caption.words.\(j).text", "must be 1–60 characters") }
-                    try num("\(f).caption.words.\(j).startSec", w.startSec, 0, 36_000, optional: false)
-                    try num("\(f).caption.words.\(j).endSec", w.endSec, w.startSec, 36_000, optional: false)
+                func words(_ ws: [E.CaptionWord], _ g: String) throws {
+                    for (j, w) in ws.enumerated() {
+                        let n = w.text.utf16.count
+                        if n < 1 || n > 60 { throw bad("\(g).\(j).text", "must be 1–60 characters") }
+                        try num("\(g).\(j).startSec", w.startSec, 0, 36_000, optional: false)
+                        try num("\(g).\(j).endSec", w.endSec, w.startSec, 36_000, optional: false)
+                    }
+                }
+                try words(c.words, "\(f).caption.words")
+                // Translated captions (WS8 cac2bb0).
+                if let l = c.language, !E.isLanguageCode(l) { throw bad("\(f).caption.language", "must be a language code") }
+                if let o = c.original {
+                    if o.words.count > E.maxWords { throw bad("\(f).caption.original.words", "at most \(E.maxWords) words") }
+                    try words(o.words, "\(f).caption.original.words")
+                    if let l = o.language, !E.isLanguageCode(l) { throw bad("\(f).caption.original.language", "must be a language code") }
                 }
                 try textStyle("\(f).caption.style", c.style.textStyle, ownFont: false)
                 try color("\(f).caption.style.highlightColor", c.style.highlightColor, optional: false)
