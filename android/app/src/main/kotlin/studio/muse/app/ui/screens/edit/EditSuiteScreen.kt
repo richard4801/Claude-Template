@@ -227,6 +227,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     val soundPlaying by vm.soundPlaying.collectAsState()
     val frames by vm.frames.collectAsState()
     val thumbs by vm.lookThumbs.collectAsState()
+    val fxThumbs by vm.effectThumbs.collectAsState()
     val player by vm.player.collectAsState()
     val waves by vm.waves.collectAsState()
     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); vm.controller.act(EditAction.ClearMessage) } }
@@ -263,6 +264,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         export = vm::export,
         cancelExport = vm::cancelExport,
         lookThumbs = thumbs,
+        effectThumbs = fxThumbs,
+        renderEffectThumbs = vm::renderEffectThumbs,
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
@@ -930,6 +933,22 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                     controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
                 }
             }
+        }
+    }
+
+    private val _fxThumbs = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+    val effectThumbs: StateFlow<Map<String, ImageBitmap>> = _fxThumbs.asStateFlow()
+
+    /** Effect tiles: each effect (at 80 %) on a small frame under the playhead, on the CPU reference (once per editor). */
+    fun renderEffectThumbs() {
+        if (_fxThumbs.value.isNotEmpty()) return
+        val f = sourceFile ?: return
+        viewModelScope.launch {
+            val frame = runCatching { engine.frames(f, listOf(controller.ui.value.playheadSec.coerceAtLeast(0.1)), 120).firstOrNull() }.getOrNull() ?: return@launch
+            val map = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching { studio.muse.app.platform.edit.EffectThumbnails.render(frame, controller.ui.value.playheadSec) }.getOrNull()
+            } ?: return@launch
+            _fxThumbs.value = map.mapValues { it.value.asImageBitmap() }
         }
     }
 
