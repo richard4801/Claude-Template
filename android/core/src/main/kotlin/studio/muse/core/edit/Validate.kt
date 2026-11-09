@@ -284,7 +284,8 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     private fun audioClip(g: String, c: AudioClip) {
         clipBase(g, c, setOf(AssetKind.AUDIO, AssetKind.VIDEO))
         num("$g.startSec", c.startSec, 0.0, 600.0, false)
-        if (c.speed != null && c.speed != 1.0) bad("$g.speed", "audio clips play at 1×")
+        // Audio speed (M): 0.5–2×, pitch kept; timeline length = (outSec − inSec) / speed.
+        num("$g.speed", c.speed, 0.5, 2.0)
         keyframes("$g.keyframes", c.keyframes, clipLength(c), setOf(KfProp.VOLUME))
         c.beats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.beats", "must be up to 2000 times") }
         c.strongBeats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.strongBeats", "must be up to 2000 times") }

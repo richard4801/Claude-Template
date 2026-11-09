@@ -182,6 +182,8 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'loop on main', project: mut(p => { p.tracks[0].items[0].animLoop = { kind: 'pulse', periodSec: 1 }; }), ok: false, field: 'edits.tracks.0.items.0.animLoop' },
   { name: 'loop kind unknown', project: mut(p => { p.tracks[3].items[0].animLoop = { kind: 'wobble', periodSec: 1 }; }), ok: false, field: 'edits.tracks.3.items.0.animLoop.kind' },
   { name: 'loop period too short', project: mut(p => { p.tracks[2].items[0].animLoop = { kind: 'spin', periodSec: 0.1 }; }), ok: false, field: 'edits.tracks.2.items.0.animLoop.periodSec' },
+  { name: 'audio speed ok', project: mut(p => { p.assets.push({ id: 'mus9', kind: 'audio', upload: 'up_m9', durationSec: 20 }); p.tracks.push({ id: 'mu9', kind: 'music', items: [{ id: 'a9', asset: 'mus9', startSec: 0, inSec: 0, outSec: 9, speed: 1.5 }] }); }), ok: true },
+  { name: 'audio speed too fast', project: mut(p => { p.assets.push({ id: 'mus9', kind: 'audio', upload: 'up_m9', durationSec: 20 }); p.tracks.push({ id: 'mu9', kind: 'music', items: [{ id: 'a9', asset: 'mus9', startSec: 0, inSec: 0, outSec: 9, speed: 3 }] }); }), ok: false, field: 'edits.tracks.4.items.0.speed' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
@@ -429,6 +431,13 @@ const loopCases = [
   { kind: 'spin', periodSec: 4, amount: 0 }, { kind: 'blink', periodSec: 0.8, amount: 0.9 },
 ] as M.AnimLoop[];
 const loops = loopCases.map(loop => ({ loop, samples: [0, 0.1, 0.25, 0.5, 0.75, 1, 1.3, 2.2, 5].map(t => ({ t, state: M.loopState(loop, t) })) }));
+// Audio speed (M): timing of music and voice clips at speed ≠ 1 (beats mapped through clipTimeAt).
+const audioSpeedClips = [
+  { id: 'm', asset: 'mus', startSec: 1, inSec: 2, outSec: 14, speed: 1.5, beats: [2, 2.5, 3.1, 6, 13.9] },
+  { id: 'v', asset: 'vo', startSec: 0.5, inSec: 0, outSec: 3, speed: 0.75, fadeInSec: 0.2 },
+] as M.AudioClip[];
+const audioSpeed = audioSpeedClips.map(c => ({ clip: c, length: M.clipLength(c), beatsOnTimeline: (c.beats ?? []).map(b => Math.round((c.startSec + M.clipTimeAt(c, b)) * 1e6) / 1e6),
+  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })) }));
 const wave1 = projects[projects.length - 1]!.project;
 const holdClip = (wave1.tracks[0]!.items[1]) as M.VideoClip;
 const holdFns = { clip: holdClip, length: M.clipLength(holdClip), sourceAt: [0, 0.7, 1.5].map(t => ({ t, src: M.clipSourceAt(holdClip, t) })), timeAt: M.clipTimeAt(holdClip, 4.05),
@@ -447,7 +456,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

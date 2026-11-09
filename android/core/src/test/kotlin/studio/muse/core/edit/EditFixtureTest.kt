@@ -168,6 +168,18 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun audioSpeedTiming() {
+        for (c in fn["audioSpeed"]!!.arr) {
+            val o = c.obj["clip"]!!.obj
+            val clip = AudioClip(o["id"]!!.str, o["asset"]!!.str, o["startSec"]!!.num, o["inSec"]!!.num, o["outSec"]!!.num, speed = o["speed"]?.num,
+                beats = o["beats"]?.arr?.map { it.num })
+            assertEquals(c.obj["length"]!!.num, clipLength(clip), 1e-9)
+            val beats = c.obj["beatsOnTimeline"]!!.arr.map { it.num }
+            assertEquals(beats, clip.beats.orEmpty().map { Math.round((clip.startSec + clipTimeAt(clip, it)) * 1e6) / 1e6 })
+            for (sm in c.obj["sourceAt"]!!.arr) assertEquals(sm.obj["src"]!!.num, clipSourceAt(clip, sm.obj["t"]!!.num), 1e-9)
+        }
+    }
+
     @Test fun loopAnimations() {
         for ((i, c) in fn["loops"]!!.arr.withIndex()) {
             val lo = c.obj["loop"]!!.obj
