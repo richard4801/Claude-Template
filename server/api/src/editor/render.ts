@@ -41,11 +41,6 @@ const FONTS: Partial<Record<M.TextStyle['font'], Record<'regular' | 'bold' | 'bl
 export const fontFile = (f: M.TextStyle['font'], weight: number) => (FONTS[f] ? null : contentFont(f, weight)) ??
   path.join(FONT_DIR, `${(FONTS[f] ?? FONTS.sans!)[weight >= 900 ? 'black' : weight >= 700 ? 'bold' : 'regular']}.ttf`);
 
-/** The editor transition → ffmpeg xfade (ffmpeg 5.1 names). */
-const XFADE: Partial<Record<M.TransitionKind, string>> = { // kinds without one draw as a fade
-  fade: 'fade', black: 'fadeblack', white: 'fadewhite', slideLeft: 'slideleft', slideRight: 'slideright', slideUp: 'slideup', slideDown: 'slidedown',
-  zoom: 'zoomin', whip: 'smoothleft', spin: 'radial', glitch: 'pixelize',
-};
 
 /**
  * The editor's glitch as the apps draw it (model.ts transitionState): a hard switch at the middle of the transition,
@@ -543,7 +538,52 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       // Exactly the clip's frames in the window (rounded once from the timeline, so cuts never drift).
       g.push(`[${tag}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=${pix},setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
     }
-    // Joined: a cut is a concat, a transition an xfade at the clip's place (transitions never straddle windows).
+    // Joined: a cut is a concat; a transition is drawn as model.ts transitionState says (transitions never straddle windows).
+    const pix = fillOn ? 'yuva420p' : 'yuv420p';
+    const flashes: { at: number; d: number; kind: 'black' | 'white' }[] = [];
+    /**
+     * The transition from the joined picture `A` (frames up to at + d) to clip `B`, d frames from `at`: the d frames are
+     * the background (or nothing, under a blur fill), the outgoing clip and the incoming one on top, each moved, scaled,
+     * turned and faded by transitionState (perspective and alpha by expression), whip blur and RGB split frame by frame
+     * (android TransitionFxEffect: a horizontal box over ±4 % of the width, red and blue ±2 % apart). Black and white
+     * switch at half-way; their colour is drawn over the overlays later (android FlashPiece).
+     */
+    const transition = (A: string, B: string, at: number, d: number, kind: M.TransitionKind, tag: string, out: string) => {
+      g.push(`[${A}]split[${tag}h][${tag}t]`, `[${tag}h]trim=end_frame=${at}[${tag}h2]`, `[${tag}t]trim=start_frame=${at}:end_frame=${at + d},setpts=N/${FPS}/TB[${tag}A]`,
+        `[${B}]split[${tag}bh][${tag}br]`, `[${tag}bh]trim=end_frame=${d},setpts=N/${FPS}/TB[${tag}B]`, `[${tag}br]trim=start_frame=${d},setpts=N/${FPS}/TB[${tag}R]`);
+      const flash = kind === 'black' || kind === 'white';
+      const ex = L.transitionExprs(flash ? 'glitch' : kind, `(in/${d})`), exT = L.transitionExprs(flash ? 'glitch' : kind, `(T*${FPS}/${d})`);
+      const side = (src: string, which: 'a' | 'b') => {
+        let s = src;
+        const e = ex[which], st = Array.from({ length: d }, (_, k) => M.transitionState(kind, k / d)[which]);
+        if (st.some(x => x.blur > 0)) {
+          const cmds = st.map((x, k) => `${n4(k / FPS)} avgblur@${tag}${which} sizeX ${Math.max(1, Math.round(0.04 * W * x.blur))}`).join(';');
+          g.push(`[${s}]format=gbrp,sendcmd=c='${cmds}',avgblur@${tag}${which}=sizeX=1:sizeY=1[${tag}${which}bl]`);
+          s = `${tag}${which}bl`;
+        }
+        if (st.some(x => x.rgbSplit > 0)) {
+          const cmds = st.map((x, k) => { const sp = Math.round(0.02 * W * x.rgbSplit); return `${n4(k / FPS)} rgbashift@${tag}${which} rh ${sp}, rgbashift@${tag}${which} bh ${-sp}`; }).join(';');
+          g.push(`[${s}]format=gbrp,sendcmd=c='${cmds}',rgbashift@${tag}${which}=rh=0:bh=0:edge=smear[${tag}${which}rs]`);
+          s = `${tag}${which}rs`;
+        }
+        if (e.dx !== '0' || e.dy !== '0' || e.scale !== '1' || e.rotation !== '0') {
+          const cs = L.cornerExprs({ x: `0.5+(${e.dx})`, y: `0.5+(${e.dy})`, scale: e.scale, rotation: e.rotation, alpha: '1' }, W, H, W, H, W, H, W + 2, H + 2, false, false);
+          g.push(`[${s}]format=gbrap,pad=${W + 2}:${H + 2}:1:1:color=black@0,perspective=sense=destination:eval=frame:${cs.map((x, j) => `${['x', 'y'][j % 2]}${Math.floor(j / 2)}='${x}'`).join(':')},crop=${W}:${H}:0:0[${tag}${which}pl]`);
+          s = `${tag}${which}pl`;
+        }
+        if (e.opacity !== '1') {
+          g.push(`color=c=white:s=2x2:r=${FPS}:d=${n4(d / FPS + 1)},format=gray,geq=lum='255*clip(${exT[which].opacity},0,1)',scale=${W}:${H}:flags=neighbor,trim=end_frame=${d}[${tag}${which}op]`,
+            `[${s}]format=yuva420p,split[${tag}${which}o1][${tag}${which}o2]`, `[${tag}${which}o1]alphaextract[${tag}${which}oa]`,
+            `[${tag}${which}oa][${tag}${which}op]lut2=c0='x*y/255'[${tag}${which}om]`, `[${tag}${which}o2][${tag}${which}om]alphamerge[${tag}${which}o]`);
+          s = `${tag}${which}o`;
+        }
+        return s;
+      };
+      const a = side(`${tag}A`, 'a'), b = side(`${tag}B`, 'b');
+      const bg = fillOn ? `color=c=black@0:s=${W}x${H}:r=${FPS}:d=${n4(d / FPS + 1)},format=rgba,format=yuva420p` : `color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(d / FPS + 1)},format=yuv420p`;
+      g.push(`${bg},trim=end_frame=${d}[${tag}bg]`, `[${tag}bg][${a}]overlay=0:0:format=yuv420:eof_action=pass[${tag}x]`, `[${tag}x][${b}]overlay=0:0:format=yuv420:eof_action=pass,format=${pix},setsar=1,settb=AVTB[${tag}T]`,
+        `[${tag}h2][${tag}T][${tag}R]concat=n=3:v=1:a=0[${out}]`);
+    };
     let acc = `v${mine[0]!.i}`;
     const glitches: { start: number; d: number }[] = [];
     for (const { c, i } of mine.slice(1)) {
@@ -551,7 +591,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       const d = t && tl[i]!.transitionSec > 0 ? fr(tl[i - 1]!.endSec) - fr(tl[i]!.startSec) : 0;
       const at = fr(tl[i]!.startSec) - F0;
       if (t?.kind === 'glitch' && d >= 2) { g.push(...glitchSwitch(acc, `v${i}`, next, at, d, i, FPS)); glitches.push({ start: at, d }); }
-      else if (t && d > 0) g.push(`[${acc}][v${i}]xfade=transition=${XFADE[t.kind] ?? 'fade'}:duration=${n4(d / FPS)}:offset=${n4(at / FPS)}[${next}]`);
+      else if (t && d > 0) { transition(acc, `v${i}`, at, d, t.kind, `tr${i}`, next); if (t.kind === 'black' || t.kind === 'white') flashes.push({ at, d, kind: t.kind }); }
       else g.push(`[${acc}][v${i}]concat=n=2:v=1:a=0[${next}]`);
       acc = next;
     }
@@ -601,6 +641,14 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       g.push(`[${acc}]${st.join(',')},format=yuv420p[adj]`);
       acc = 'adj';
     }
+    // Black and white transitions' colour, over the pictures and overlays, under the text: alpha 1 − |1 − 2p|.
+    flashes.forEach((fl, k) => {
+      g.push(`color=c=white:s=2x2:r=${FPS}:d=${n4(fl.d / FPS + 1)},format=gray,geq=lum='255*clip(1-abs(1-2*T*${FPS}/${fl.d}),0,1)',scale=${W}:${H}:flags=neighbor,trim=end_frame=${fl.d}[fl${k}a]`,
+        `color=c=${fl.kind === 'white' ? 'white' : 'black'}:s=${W}x${H}:r=${FPS}:d=${n4(fl.d / FPS + 1)},format=yuv420p,trim=end_frame=${fl.d}[fl${k}c]`,
+        `[fl${k}c][fl${k}a]alphamerge,setpts=PTS+${n4(fl.at / FPS)}/TB[fl${k}]`,
+        `[${acc}][fl${k}]overlay=0:0:format=yuv420:eof_action=pass:enable='between(t,${n4(fl.at / FPS)},${n4((fl.at + fl.d - 0.5) / FPS)})'[fl${k}x]`);
+      acc = `fl${k}x`;
+    });
     // Text and captions, above every picture (textdraw.ts): the window's stretch of the stills, overlaid once.
     if (textCrop && textSeq.slice(F0, F1).some(k => k >= 0)) {
       const seq: { still: number; frames: number }[] = [];
@@ -659,7 +707,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     for (const tr of p.tracks.filter(t => (t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') && !t.muted)) {
       for (const it of tr.items as M.AudioClip[]) {
         const asset = p.assets.find(a => a.id === it.asset), file = asset && files[asset.id];
-        if (!asset || !file || it.muted) { if (asset?.library && !it.muted) unsupported.add('library music'); continue; }
+        if (!asset || !file || it.muted) { if (asset?.library && !it.muted) unsupported.add('library sounds that are not on the server'); continue; }
         const env = sizes[asset.id]?.hasAudio ? envelope(it, tr.id) : null;
         if (!env) continue;
         const k = ainput(file);
@@ -678,7 +726,9 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   }
 
   // ---------------------------------------------------------------- the pictures, window by window, then joined
-  const q = o.quality === 'export' ? ['-preset', 'veryfast', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
+  // Export: x264's frame threads and lookahead held ~190 MB at 1080 × 1920; sliced threads and a 5-frame lookahead
+  // halve that (the box has 512 MB) for ~50 % more encode time.
+  const q = o.quality === 'export' ? ['-preset', 'veryfast', '-x264-params', 'sliced-threads=1:rc-lookahead=5:sync-lookahead=0', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
   const chunkFiles = windows.map(() => tmpName('part', 'mp4'));
   temp.push(...chunkFiles);
   const chunks = windows.map(([F0, F1], i) => chunk(F0, F1, chunkFiles[i]!));

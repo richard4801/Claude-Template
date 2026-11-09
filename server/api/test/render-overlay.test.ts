@@ -195,6 +195,22 @@ describe.skipIf(!hasFfmpeg)('render overlays (ffmpeg)', () => {
     expect(Math.abs((await (await import('../src/replicate/media.js')).probe('ffprobe', out)).duration - 2)).toBeLessThan(0.1);
   }, 60_000);
 
+  it('content library: a sticker (transparent PNG) and a sound effect from the bundled packs draw and play', async () => {
+    const { contentFile, catalog } = await import('../src/editor/content.js');
+    const sticker = catalog()!.packs.find(x => x.kind === 'stickers')!, sfx = catalog()!.packs.find(x => x.kind === 'sfx')!;
+    const st = `content:${sticker.id}/${sticker.items[0]!.id}`, fx = `content:${sfx.id}/${sfx.items.find(i => (i.durationSec as number) >= 1)!.id}`;
+    files.st = contentFile(st)!; files.fx = contentFile(fx)!;
+    const p = project({ id: 'img', kind: 'image', items: [{ id: 'i1', asset: 'st', startSec: 0, durationSec: 2, transform: { scale: 0.5 } } as M.ImageItem] },
+      { id: 'sfx', kind: 'sfx', items: [{ id: 's1', asset: 'fx', startSec: 0.2, inSec: 0, outSec: 0.8 } as M.AudioClip] });
+    p.assets.push({ id: 'st', kind: 'image', library: st }, { id: 'fx', kind: 'audio', library: fx });
+    const { out, r } = await render(p, 'content', 'project');
+    expect(r.unsupported).toEqual([]);
+    expect(grey(await px(out, 1, 0.02, 0.02))).toBe(true); // the sticker's transparent surround shows the clip
+    expect(grey(await px(out, 1, 0.5, 0.5))).toBe(false); // the emoji is drawn in the middle
+    expect(rms(out, 0.25, 0.75)).toBeGreaterThan(0.002);
+    delete files.st; delete files.fx;
+  }, 60_000);
+
   it('blur fill: the clip blurred and darkened where it leaves the frame; through a fade it switches half-way, not mixed', async () => {
     for (const [id, c] of [['wr', 'red'], ['wb', 'blue']] as const) {
       files[id] = path.join(dir, `${id}.mp4`);

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as M from '../src/editor/model.js';
 import { CAPTION_STYLES } from '../src/editor/presets.js';
-import { renderProject } from '../src/editor/render.js';
+import { fontFile, renderProject } from '../src/editor/render.js';
 import * as TD from '../src/editor/textdraw.js';
 import { grabFrame } from '../src/recreate/frames.js';
 import { ENC, ff, hasFfmpeg } from './recreate-fixture.js';
@@ -24,6 +24,11 @@ describe('text blocks (unit)', () => {
     const tall = TD.drawBlock([{ text: 'one two three four', color: '#FFFFFF' }], { ...style, lineHeight: 2.3 }, 50, 200, font, { missing, id: 'c' })!;
     expect(tall.height / two.height).toBeCloseTo(2, 1);
     expect(missing.size).toBe(0);
+    // The content library's families have Cyrillic of their own.
+    const own = new Set<string>(), inter = TD.face(fontFile('inter', 900))!;
+    expect(inter.charToGlyphIndex('Ж')).toBeGreaterThan(0);
+    TD.drawBlock([{ text: 'Привет', color: '#FFFFFF' }], { ...style, font: 'inter', weight: 900 }, 50, 1000, fontFile('inter', 900), { missing: own, id: 'e' });
+    expect(own.size).toBe(0);
     if (fs.existsSync(TD.FALLBACK_FONTS.regular)) {
       TD.drawBlock([{ text: 'Привет 😀 𓀀', color: '#FFFFFF' }], style, 50, 1000, font, { missing, id: 'd' });
       expect([...missing].sort()).toEqual([TD.EMOJI, '𓀀']); // Cyrillic from the fallback face; the emoji in one colour; the hieroglyph from none

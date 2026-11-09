@@ -131,6 +131,38 @@ export function sweep(item: { transform?: M.Transform; keyframes?: M.Keyframes; 
   return box;
 }
 
+// ------------------------------------------------------------------ transitions (model.ts transitionState)
+export type SideExpr = { dx: string; dy: string; scale: string; rotation: string; opacity: string };
+/**
+ * model.ts transitionState as expressions of the progress `p` (0–1): the outgoing (a) and incoming (b) clips' offset
+ * (canvas widths / heights), scale, rotation (°) and opacity. Blur and RGB split come from transitionState itself
+ * (frame by frame). The glitch is drawn on its own (glitchSwitch).
+ */
+export function transitionExprs(kind: M.TransitionKind, p: string): { a: SideExpr; b: SideExpr } {
+  const e = `if(lt(${p},0.5),2*pow(${p},2),1-pow(2-2*${p},2)/2)`, e3 = `if(lt(${p},0.5),4*pow(${p},3),1-pow(2-2*${p},3)/2)`;
+  const S = (o: Partial<SideExpr> = {}): SideExpr => ({ dx: '0', dy: '0', scale: '1', rotation: '0', opacity: '1', ...o });
+  const before = `lt(${p},0.5)`, after = `gte(${p},0.5)`;
+  switch (kind) {
+    case 'fade': return { a: S(), b: S({ opacity: p }) };
+    case 'black': case 'white': return { a: S({ opacity: `max(0,1-2*${p})` }), b: S({ opacity: `max(0,2*${p}-1)` }) };
+    case 'slideLeft': return { a: S({ dx: `-(${e})` }), b: S({ dx: `1-(${e})` }) };
+    case 'slideRight': return { a: S({ dx: e }), b: S({ dx: `-(1-(${e}))` }) };
+    case 'slideUp': return { a: S({ dy: `-(${e})` }), b: S({ dy: `1-(${e})` }) };
+    case 'slideDown': return { a: S({ dy: e }), b: S({ dy: `-(1-(${e}))` }) };
+    case 'zoom': return { a: S({ scale: `1+0.25*(${e})`, opacity: `1-${p}` }), b: S({ opacity: p }) };
+    case 'whip': return { a: S({ dx: `-(${e3})` }), b: S({ dx: `1-(${e3})` }) };
+    case 'spin': return { a: S({ rotation: `180*(${e})`, scale: `1-0.6*(${e})`, opacity: before }), b: S({ rotation: `-180*(1-(${e}))`, scale: `0.4+0.6*(${e})`, opacity: after }) };
+    case 'glitch': return { a: S({ opacity: before }), b: S({ opacity: after }) };
+    case 'zoomOut': return { a: S({ scale: `1-0.2*(${e})`, opacity: `1-${p}` }), b: S({ scale: `1.2-0.2*(${e})`, opacity: p }) };
+    case 'whipRight': return { a: S({ dx: e3 }), b: S({ dx: `-(1-(${e3}))` }) };
+    case 'coverLeft': return { a: S(), b: S({ dx: `1-(${e})` }) };
+    case 'coverRight': return { a: S(), b: S({ dx: `-(1-(${e}))` }) };
+    case 'coverUp': return { a: S(), b: S({ dy: `1-(${e})` }) };
+    case 'coverDown': return { a: S(), b: S({ dy: `-(1-(${e}))` }) };
+    case 'splitFade': return { a: S(), b: S({ opacity: p }) };
+  }
+}
+
 // ------------------------------------------------------------------ colour: one 3D LUT
 /**
  * The item's colour as a 33³ .cube (look.ts renderLook steps 3–6 on the item's own frame): colour matrix (adjust +

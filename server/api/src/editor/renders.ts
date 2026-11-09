@@ -10,6 +10,7 @@ import { and, eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
 import { uid } from '../lib/util.js';
+import { contentFile } from './content.js';
 import type * as M from './model.js';
 import { renderProject, type RenderOptions } from './render.js';
 import { editSessionsOf } from './sessions.js';
@@ -32,7 +33,8 @@ export class EditRenders {
       let key: string | null = null;
       if (a.take) key = (await this.ctx.db.select({ k: takes.mediaKey }).from(takes).where(and(eq(takes.id, a.take), eq(takes.studioId, studioId))))[0]?.k ?? null;
       else if (a.upload) key = (await this.ctx.db.select({ k: uploads.storageKey }).from(uploads).where(and(eq(uploads.id, a.upload), eq(uploads.studioId, studioId))))[0]?.k ?? null;
-      if (!key) continue;
+      // Content library stickers and sound effects (content:<pack>/<item>) are bundled files.
+      if (!key) { const f = a.library ? contentFile(a.library) : null; if (f && fs.existsSync(f)) out[a.id] = f; continue; }
       out[a.id] = await this.local(key, dir, a.kind === 'font' || a.kind === 'lut'); // read by the server itself
     }
     return out;
