@@ -91,6 +91,26 @@ extension EditV2 {
         return m.map(r6)
     }
 
+    /// The adjustment layers' colour at timeline `t` (model.ts adjustLayerMatrix): each adjust item on screen, tracks in
+    /// order (hidden ones skipped), its matrix mixed with the identity by its strength, multiplied so the upper applies
+    /// last. Nil when none is on screen or the result is the identity.
+    public static func adjustLayerMatrix(_ p: Project, _ t: Double, presets: [FilterPreset] = filters) -> [Double]? {
+        var m = identity, any = false
+        for tr in p.tracks where tr.kind == .adjust && tr.hidden != true {
+            for case .adjust(let it) in tr.items {
+                if t < it.startSec - 1e-9 || t >= it.startSec + it.durationSec - 1e-9 { continue }
+                let local = t - it.startSec
+                let s = clamp(propAt(it.keyframes, .opacity, fallback: it.opacity ?? 1, local), 0, 1)
+                let c = colorMatrix(adjustAt(it.adjust, it.keyframes, local), it.filter, presets: presets)
+                m = mul((0..<12).map { identity[$0] + s * (c[$0] - identity[$0]) }, m)
+                any = true
+            }
+        }
+        guard any else { return nil }
+        let out = m.map(r6)
+        return zip(out, identity).allSatisfy { abs($0 - $1) < 1e-9 } ? nil : out
+    }
+
     /// Is this matrix the identity (nothing to draw)?
     public static func isIdentity(_ m: [Double]) -> Bool { m.count == 12 && zip(m, identity).allSatisfy { abs($0 - $1) < 1e-9 } }
 

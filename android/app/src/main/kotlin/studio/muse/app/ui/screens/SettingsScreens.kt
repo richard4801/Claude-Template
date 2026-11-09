@@ -153,6 +153,8 @@ fun SettingsScreen() {
             if (s.prefs.email.isNotBlank()) Caption(s.prefs.email + if (s.prefs.owner) ", owner" else ", member of ${s.prefs.studioName.ifBlank { "the studio" }}")
             Column {
                 SettingsSection.visible(s.prefs.owner, s.prefs.showAdvanced).forEach { sec ->
+                    // Advanced sits apart at the bottom of the list (as on the Mac).
+                    if (sec == SettingsSection.ADVANCED) androidx.compose.foundation.layout.Spacer(Modifier.height(MuseSpace.s5))
                     RowItem(sec.title, sec.line, onClick = { nav.go(sec.route) }, modifier = Modifier.testTag("section_${sec.name.lowercase()}")) {
                         if (sec == SettingsSection.AI) RowValue(creditLabel(s.wallet, s.balance))
                         Chevron()

@@ -235,7 +235,7 @@ public actor ClaudeRelay {
         var req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: ClaudeAttachmentPrompt.text(job.text, images), resume: sessions[tid],
                                    blender: await blender(), systemPrompt: systemPrompt(threadId: tid))
         req.shownText = job.text
-        req.uploadIds = job.files.map(\.uploadId)
+        req.uploadIds = job.files.map(\.uploadId).filter { !$0.isEmpty }
         if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }
         let onEvent = self.onEvent
         let turnId = job.turnId

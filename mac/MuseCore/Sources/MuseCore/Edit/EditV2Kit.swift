@@ -55,7 +55,8 @@ extension EditV2 {
         }
         kit.transition = main.first { $0.transitionIn != nil }?.transitionIn
         kit.captionStyle = p.tracks.first { $0.kind == .caption && $0.caption != nil }?.caption?.style
-        if let t = p.tracks.first(where: { $0.kind == .text && !$0.items.isEmpty }), case .text(let tx) = t.items[0] { kit.textStyle = tx.style }
+        // An own font's asset id belongs to its edit: the kit carries only the fallback family (WS8 6ccd9aa).
+        if let t = p.tracks.first(where: { $0.kind == .text && !$0.items.isEmpty }), case .text(let tx) = t.items[0] { kit.textStyle = tx.style.with(fontAsset: nil) }
         kit.background = p.canvas.background
         kit.fill = p.canvas.fill
         return kit

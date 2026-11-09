@@ -183,6 +183,10 @@ private fun AddProviderForm(s: ProvidersState, vm: ProvidersViewModel?) {
                 SecureKeyField(null, k.keyHint.ifBlank { "Paste the key" }, s.busy, s.error, s.keysReady, { key -> vm?.add(kind, key) },
                     note = "Saved encrypted on the MUSE server, checked with ${k.label.ifBlank { k.kind }} first. Afterwards you only see its last 4 characters.",
                     onCancel = { vm?.adding(false) })
+                k.keyUrl?.takeIf { it.startsWith("https://") }?.let { url ->
+                    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+                    TextAction("Where to find your ${k.label.ifBlank { k.kind }} key", { runCatching { uri.openUri(url) } })
+                }
             }
         }
     }
@@ -274,7 +278,7 @@ internal fun ProviderModelsContent(
         when {
             s.loading -> SkeletonLines(5)
             s.error != null -> ErrorState("Can't load the models", s.error, action = null)
-            shown.isEmpty() -> Caption(if (s.filter == "on") "No models are on yet. Switch one on to pick it per shot." else "No models match.")
+            shown.isEmpty() -> Caption(if (s.filter == "on") "No models switched on yet." else "No models match.")
             else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
                 items(shown, key = { it.ref }) { mdl -> ProviderModelRow(mdl, onToggle, onRename) }
             }
@@ -294,14 +298,17 @@ private fun ProviderModelRow(mdl: ProviderCatalogModel, onToggle: (ProviderCatal
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "${mdl.name}, ${mdl.ref}" }) {
                 T(mdl.name.ifBlank { mdl.ref }, m.scale.body, m.roles.ink, maxLines = 1)
-                T(listOfNotNull(mdl.ref, if (mdl.kind == "video") "Video" else "Image", price).joinToString(", "), m.scale.caption, m.roles.ink2, maxLines = 1)
-                if (!mdl.ready) T("Needs setup: ${mdl.missing.joinToString(", ").ifBlank { "details" }}", m.scale.caption, m.roles.caution, maxLines = 1)
+                T(listOfNotNull(if (mdl.kind == "video") "Video" else "Image", mdl.ref, price).joinToString(", "), m.scale.caption, m.roles.ink2, maxLines = 1)
+                if (!mdl.ready) T("Needs a setting MUSE can't fill in yet: ${mdl.missing.joinToString(", ").ifBlank { "details" }}", m.scale.caption, m.roles.caution, maxLines = 2)
             }
             Toggle(on, { onToggle(mdl, !on) }, Modifier.semantics { contentDescription = "Use ${mdl.name}" })
         }
-        if (renaming) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-            Input(name, { name = it.take(60) }, Modifier.weight(1f), calm = true)
-            TextAction("Save", { onRename(mdl, name); renaming = false })
+        if (renaming) Labeled("Rename model") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                Input(name, { name = it.take(60) }, Modifier.weight(1f), calm = true)
+                TextAction("Save", { onRename(mdl, name); renaming = false })
+            }
+            Caption("The name you see in the AI Suite's model picker.")
         } else TextAction("Rename", { renaming = true })
     }
 }

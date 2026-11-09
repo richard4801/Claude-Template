@@ -34,7 +34,7 @@ final class EditV2KitTests: XCTestCase {
 
     func testValidateKit() throws {
         let cases = k["validate"].array
-        XCTAssertEqual(cases.count, 15)
+        XCTAssertEqual(cases.count, 16)
         for c in cases {
             let json = try JSONDecoder().decode(JSONValue.self, from: try JSONEncoder().encode(c["kit"]))
             do {
@@ -44,6 +44,15 @@ final class EditV2KitTests: XCTestCase {
                 XCTAssertEqual(e.field, c["field"].string, "\(c["kit"]): \(e)")
             }
         }
+    }
+
+    /// Own fonts (WS8 6ccd9aa): kitOf drops the font asset id; the fallback family stays (functions.json → kits.ownFont).
+    func testKitOfDropsAnOwnFont() throws {
+        let c = k["ownFont"]
+        let p = try c["project"].decode(E.Project.self)
+        XCTAssertNil(E.problem(p))
+        let d = jsonDiff(try JV.of(E.kitOf(p)), c["kit"])
+        XCTAssert(d.isEmpty, d.prefix(5).joined(separator: "; "))
     }
 
     func testPartsLabel() {

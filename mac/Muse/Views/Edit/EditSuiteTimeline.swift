@@ -246,6 +246,7 @@ struct TimelineCanvas: View {
         case .music: return "music-notes"
         case .voice: return "microphone"
         case .sfx: return "speaker-high"
+        case .adjust: return "sliders-horizontal"
         }
     }
 
@@ -405,6 +406,7 @@ struct TimelineCanvas: View {
         case .voice: return Color(hex: 0x6E6AE0).opacity(0.18)
         case .music: return Color(hex: 0x2F9E57).opacity(0.18)
         case .sfx: return Color(hex: 0xF2A93B).opacity(0.25)
+        case .adjust: return t.roles.accent.opacity(0.1)
         }
     }
 

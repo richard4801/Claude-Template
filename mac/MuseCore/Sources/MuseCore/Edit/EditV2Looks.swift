@@ -102,6 +102,8 @@ extension EditV2 {
         /// 0–1, the LUT blended with the picture (default 1).
         public var strength: Double?
         public var curves: Curves?
+        /// Step 4b (WS8 9afb6aa): per hue band, hue / sat / light −1…1. Kept as plain keys so validation can name bad ones.
+        public var hsl: Hsl?
         /// 0–1, faded blacks.
         public var lift: Double?
         public var sharpen: Double?
@@ -120,12 +122,13 @@ extension EditV2 {
             self.halation = halation; self.leak = leak; self.vignette = vignette; self.grain = grain
         }
 
-        enum CodingKeys: String, CodingKey, CaseIterable { case lut, strength, curves, lift, sharpen, chromatic, halation, leak, vignette, grain }
+        enum CodingKeys: String, CodingKey, CaseIterable { case lut, strength, curves, hsl, lift, sharpen, chromatic, halation, leak, vignette, grain }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             lut = try c.decodeIfPresent(String.self, forKey: .lut)
             strength = try c.decodeIfPresent(Double.self, forKey: .strength)
             curves = try c.decodeIfPresent(Curves.self, forKey: .curves)
+            hsl = try c.decodeIfPresent(Hsl.self, forKey: .hsl)
             lift = try c.decodeIfPresent(Double.self, forKey: .lift)
             sharpen = try c.decodeIfPresent(Double.self, forKey: .sharpen)
             chromatic = try c.decodeIfPresent(Double.self, forKey: .chromatic)
@@ -140,6 +143,7 @@ extension EditV2 {
             try c.encodeIfPresent(lut, forKey: .lut)
             try c.encodeIfPresent(strength, forKey: .strength)
             try c.encodeIfPresent(curves, forKey: .curves)
+            try c.encodeIfPresent(hsl, forKey: .hsl)
             try c.encodeIfPresent(lift, forKey: .lift)
             try c.encodeIfPresent(sharpen, forKey: .sharpen)
             try c.encodeIfPresent(chromatic, forKey: .chromatic)
@@ -157,7 +161,7 @@ extension EditV2 {
         public var lutAssetId: String? { lut.flatMap { $0.hasPrefix("pack:") || $0.hasPrefix("palette:") ? nil : $0 } }
 
         /// The colour-only part (curves, LUT, strength, lift): what the per-item colour cube bakes.
-        public var colorPart: ColorPart { ColorPart(lut: lut, strength: strength, curves: curves, lift: lift) }
+        public var colorPart: ColorPart { ColorPart(lut: lut, strength: strength, curves: curves, hsl: hsl, lift: lift) }
         public var hasSpatialSteps: Bool {
             (sharpen ?? 0) > 0 || (chromatic ?? 0) > 0 || (halation?.amount ?? 0) > 0 || (leak?.amount ?? 0) > 0
                 || (vignette.map { $0.amount != 0 } ?? false) || (grain?.amount ?? 0) > 0
@@ -167,6 +171,7 @@ extension EditV2 {
             public var lut: String?
             public var strength: Double?
             public var curves: Curves?
+            public var hsl: Hsl?
             public var lift: Double?
         }
     }
@@ -374,6 +379,70 @@ extension EditV2 {
         }
     }
 
+    // MARK: HSL per hue (look step 4b, look.ts hslFn)
+
+    /// Per hue band: "hue" (±1 = ±30°), "sat", "light", each −1…1.
+    public typealias Hsl = [String: [String: Double]]
+    /// The bands and their centres in degrees, in order (weights are linear between neighbours, wrapping at 360).
+    public static let hueBands: [(String, Double)] = [("red", 0), ("orange", 30), ("yellow", 60), ("green", 120), ("aqua", 180), ("blue", 240),
+                                                       ("purple", 270), ("magenta", 300)]
+
+    /// Each band's weight at hue `h` (degrees), summing to 1.
+    public static func hueWeights(_ h: Double) -> [Double] {
+        var w = [Double](repeating: 0, count: hueBands.count)
+        let x = (h.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        for i in hueBands.indices {
+            let a = hueBands[i].1, b = i + 1 < hueBands.count ? hueBands[i + 1].1 : 360
+            if x >= a && x < b { let t = (x - a) / (b - a); w[i] = 1 - t; w[(i + 1) % hueBands.count] += t; break }
+        }
+        return w
+    }
+
+    static func rgbToHsl(_ r: Double, _ g: Double, _ b: Double) -> (Double, Double, Double) {
+        let mx = max(r, g, b), mn = min(r, g, b), l = (mx + mn) / 2, d = mx - mn
+        if d < 1e-9 { return (0, 0, l) }
+        let s = d / (1 - abs(2 * l - 1))
+        let h = mx == r ? 60 * ((g - b) / d).truncatingRemainder(dividingBy: 6) : mx == g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4)
+        return ((h + 360).truncatingRemainder(dividingBy: 360), min(1, s), l)
+    }
+
+    static func hslToRgb(_ h: Double, _ s: Double, _ l: Double) -> SIMD3<Double> {
+        let c = (1 - abs(2 * l - 1)) * s
+        let hp = ((h.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)) / 60
+        let x = c * (1 - abs(hp.truncatingRemainder(dividingBy: 2) - 1)), m = l - c / 2
+        let (r, g, b): (Double, Double, Double) = hp < 1 ? (c, x, 0) : hp < 2 ? (x, c, 0) : hp < 3 ? (0, c, x) : hp < 4 ? (0, x, c) : hp < 5 ? (x, 0, c) : (c, 0, x)
+        return SIMD3(clamp(r + m, 0, 1), clamp(g + m, 0, 1), clamp(b + m, 0, 1))
+    }
+
+    /// HSL per hue band: hue += Σ w·hue·30°, saturation ×= 1 + Σ w·sat, lightness += Σ w·light·s·l·(1−l)·2 (greys,
+    /// black and white never move). Nil when nothing is set.
+    public static func hslFn(_ hsl: Hsl?) -> ((SIMD3<Double>) -> SIMD3<Double>)? {
+        guard let hsl else { return nil }
+        let bands = hueBands.map { hsl[$0.0] ?? [:] }
+        guard bands.contains(where: { ($0["hue"] ?? 0) != 0 || ($0["sat"] ?? 0) != 0 || ($0["light"] ?? 0) != 0 }) else { return nil }
+        return { rgb in
+            let (h, s, l) = rgbToHsl(rgb.x, rgb.y, rgb.z)
+            if s < 1e-6 { return rgb }
+            let w = hueWeights(h)
+            var dh = 0.0, ds = 0.0, dl = 0.0
+            for i in bands.indices where w[i] != 0 {
+                dh += w[i] * (bands[i]["hue"] ?? 0) * 30; ds += w[i] * (bands[i]["sat"] ?? 0); dl += w[i] * (bands[i]["light"] ?? 0)
+            }
+            return hslToRgb(h + dh, clamp(s * (1 + ds), 0, 1), clamp(l + dl * s * l * (1 - l) * 2, 0, 1))
+        }
+    }
+
+    /// Steps 4 and 4b together: the curves, then HSL per hue; nil when neither does anything.
+    public static func curvesAndHslFn(_ look: Look?) -> ((SIMD3<Double>) -> SIMD3<Double>)? {
+        let c = curvesFn(look?.curves), h = hslFn(look?.hsl)
+        switch (c, h) {
+        case (nil, nil): return nil
+        case (let c?, nil): return c
+        case (nil, let h?): return h
+        case (let c?, let h?): return { h(c($0)) }
+        }
+    }
+
     /// The four curves applied together (master, then the channel's own), clamped; nil when there is nothing to do.
     public static func curvesFn(_ c: Curves?) -> ((SIMD3<Double>) -> SIMD3<Double>)? {
         guard let c else { return nil }
@@ -513,7 +582,7 @@ extension EditV2 {
         }
         // 2. chromatic aberration (red out, blue in, from the centre)
         let ca = clamp(look.chromatic ?? 0, 0, 1) * 0.006
-        let curves = curvesFn(look.curves)
+        let curves = curvesAndHslFn(look)
         let strength = clamp(look.strength ?? 1, 0, 1)
         let lift = 0.12 * clamp(look.lift ?? 0, 0, 1)
         var out = [Float](repeating: 0, count: w * h * 3)
@@ -610,6 +679,15 @@ extension EditV2 {
                 }
             }
             if let k = c.unknownKeys.first { return EditProblem("curves.\(k)", "unknown curve") }
+        }
+        if let hsl = l.hsl {
+            for k in hsl.keys.sorted() {
+                guard hueBands.contains(where: { $0.0 == k }) else { return EditProblem("hsl.\(k)", "unknown colour") }
+                for (key, v) in hsl[k]!.sorted(by: { $0.key < $1.key }) {
+                    guard ["hue", "sat", "light"].contains(key) else { return EditProblem("hsl.\(k).\(key)", "is not an HSL setting") }
+                    if let p = num("hsl.\(k).\(key)", v, -1, 1) { return p }
+                }
+            }
         }
         if let g = l.grain, let p = num("grain.amount", g.amount, 0, 1, optional: false) ?? num("grain.size", g.size, 0.5, 3) { return p }
         if let v = l.vignette, let p = num("vignette.amount", v.amount, -1, 1, optional: false) ?? num("vignette.size", v.size, 0, 1)
