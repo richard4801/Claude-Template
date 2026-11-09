@@ -192,8 +192,8 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Sticker / GIF / emoji library | Has | Has | M (function) | **Content**, built: 1,899 Twemoji stickers (CC BY 4.0, attributed) as 160 px PNG. Android: Overlay → Stickers: search (names and CLDR words), category chips, a tap places it at the playhead (3 s, 30 %) like a photo, so it keyframes, animates and blends. No GIFs. Screenshot: android-edit/c_stickers.png. Mac: Bin → Stickers, the Twemoji set (CC BY 4.0), searchable by category; a click places one at the playhead. Licences in Settings → About (WS9). |
-| Own image or cut-out as a sticker | Missing | Partial | M | Uses the image items and the matte. Mac: Own pictures (WS9); a cut-out isn't a sticker yet |
-| Sticker animation and keyframes | Partial | Has | — | Comes with image items |
+| Own image or cut-out as a sticker | Partial | Partial | M | Uses the image items and the matte. Android: own pictures through Overlay → Add a photo (an image item: transform, keyframes, animations, blend); a cut-out isn't a sticker yet (background removal runs on videos). Mac: Own pictures (WS9); a cut-out isn't a sticker yet |
+| Sticker animation and keyframes | Has | Has | — | Comes with image items. Android: animation in / out / loop and transform keyframes on image items (wave 1, M) |
 
 ## 12. Templates
 
