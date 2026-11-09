@@ -176,6 +176,8 @@ private struct Validator {
                     if let m = c.alphaMatte {
                         if let a = assets[m.asset], a.kind == .video {} else { throw bad("\(g).alphaMatte.asset", "must be a video asset") }
                     }
+                    try anim("\(g).animIn", c.animIn, text: false)
+                    try anim("\(g).animOut", c.animOut, text: false)
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
                         try num("\(g).chroma.similarity", ck.similarity, 0, 1)

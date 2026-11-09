@@ -270,6 +270,9 @@ extension EditV2 {
         public var holdSec: Double?
         /// Wave 1: overlay tracks only.
         public var blend: BlendMode?
+        /// In / out animation (as pictures: fade, pop, slideUp, slideDown, zoom), main or overlay; animState over clipLength.
+        public var animIn: Anim?
+        public var animOut: Anim?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,

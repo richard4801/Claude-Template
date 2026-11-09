@@ -254,7 +254,10 @@ extension EditV2 {
     }
 
     public static func placement(_ c: VideoClip, local t: Double) -> Placement {
-        placement(transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, t)
+        // Video in / out animations: the same animState as pictures, over the clip's length.
+        let a = (c.animIn != nil || c.animOut != nil)
+            ? animState(durationSec: clipLength(c), animIn: c.animIn, animOut: c.animOut, text: nil, t) : nil
+        return placement(transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, anim: a, t)
     }
     public static func placement(_ im: ImageItem, local t: Double) -> Placement {
         placement(transform: im.transform, opacity: im.opacity, keyframes: im.keyframes, anim: animState(im, t), t)

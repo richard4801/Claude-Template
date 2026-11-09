@@ -128,3 +128,18 @@ final class EditSuiteParityTests: XCTestCase {
         valid(s)
     }
 }
+
+extension EditSuiteParityTests {
+    /// Contract (WS8 c41b39a): video clips animate in and out like pictures, over the clip's length.
+    func testVideoClipAnimations() throws {
+        var s = fresh()
+        XCTAssertTrue(s.changeSelected { it in if case .video(var c) = it { c.animIn = E.Anim(kind: .fade, durationSec: 0.5); c.animOut = E.Anim(kind: .zoom, durationSec: 0.4); it = .video(c) } })
+        valid(s)
+        let c = try XCTUnwrap(s.selectedVideo)
+        XCTAssertEqual(E.placement(c, local: 0).opacity, 0, accuracy: 1e-6, "fades in from nothing")
+        XCTAssertEqual(E.placement(c, local: 5).opacity, 1, accuracy: 1e-6)
+        XCTAssertLessThan(E.placement(c, local: 9.9).opacity, 1, "zooms out at the end")
+        XCTAssertFalse(s.changeSelected { it in if case .video(var c) = it { c.animIn = E.Anim(kind: .typewriter, durationSec: 0.5); it = .video(c) } },
+                       "typewriter is for text: refused")
+    }
+}
