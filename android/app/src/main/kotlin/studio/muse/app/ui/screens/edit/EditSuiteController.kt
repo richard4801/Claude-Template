@@ -137,6 +137,8 @@ sealed interface EditAction {
     data class SetOpacity(val opacity: Double, val done: Boolean = true) : EditAction
     /** Mirror the selected picture or text (null leaves that axis as it is). */
     data class Mirror(val x: Boolean? = null, val y: Boolean? = null) : EditAction
+    /** The selected overlay's blend mode over what is below it (normal = none). */
+    data class SetBlend(val mode: studio.muse.core.edit.BlendMode) : EditAction
     /** Freeze frame: a hold of the frame under the playhead, [durationSec] long, cut into the main track. */
     data class Freeze(val durationSec: Double = 1.0) : EditAction
     /** The selected freeze frame's length. */
@@ -341,7 +343,7 @@ class EditSuiteController(
         is EditAction.Trim, is EditAction.TrimBy -> "Trim"; is EditAction.MoveBy -> "Move"; is EditAction.Reorder -> "Reorder"; EditAction.DetachAudio -> "Detach audio"; is EditAction.MuteClip -> if (a.muted) "Mute" else "Unmute"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
         is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe, is EditAction.RemoveKeyframes, is EditAction.KeyEase -> "Keyframe"; is EditAction.SetOpacity -> "Opacity"; is EditAction.Background, is EditAction.Fill -> "Background";
-        is EditAction.Mirror -> "Mirror"; is EditAction.Freeze, is EditAction.HoldLength -> "Freeze frame"; is EditAction.ClipFit -> "Fit"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
+        is EditAction.Mirror -> "Mirror"; is EditAction.SetBlend -> "Blend"; is EditAction.Freeze, is EditAction.HoldLength -> "Freeze frame"; is EditAction.ClipFit -> "Fit"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
         EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
@@ -514,6 +516,12 @@ class EditSuiteController(
                     val tr = when (it) { is studio.muse.core.edit.Visual -> it.transform; is TextItem -> it.transform; else -> null } ?: Transform()
                     withTransform(it, tr.copy(flipX = (a.x ?: (tr.flipX == true)).takeIf { v -> v }, flipY = (a.y ?: (tr.flipY == true)).takeIf { v -> v }))
                 } }
+            }
+            is EditAction.SetBlend -> {
+                val (t, item) = u.selection ?: return say("Pick an overlay to blend")
+                if (t.kind != TrackKind.VIDEO && t.kind != TrackKind.IMAGE) return say("Only overlays blend with what is below them")
+                val b = a.mode.takeIf { it != studio.muse.core.edit.BlendMode.NORMAL }
+                change { p -> p.updateItem(item.id) { when (it) { is VideoClip -> it.copy(blend = b); is ImageItem -> it.copy(blend = b); else -> it } } }
             }
             is EditAction.Freeze -> {
                 var newId: String? = null

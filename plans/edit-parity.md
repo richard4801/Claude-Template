@@ -171,7 +171,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Overlay video / PiP; add another take to the end | Has | Has | — | Fixed in WS8 |
 | Overlay photos / images | Partial | Has | S | The model has image items; the phone can't pick a photo yet. Mac: Import picture (WS9) |
 | Opacity | Has | Has | S | Model yes; no slider. Android: Transform → Opacity with ◆ (wave 1). |
-| **Blend modes** (multiply, screen, overlay, soft light, …) | Partial | Missing | M | New compositor mode (GL / Core Image) and a contract field. Android: Contract and reference done (wave 1); Android rendering needs a custom compositor (L), no control until then. |
+| **Blend modes** (multiply, screen, overlay, soft light, …) | Has | Missing | M | New compositor mode (GL / Core Image) and a contract field. Android: Transform → Blend on overlays, drawn by MUSE's own compositor program in preview and export (wave 1). |
 | Move an overlay to the main track and back | Missing | Missing | S | |
 | Split-screen layouts | Missing | Missing | M | |
 | Motion tracking (text or sticker follows an object) | Missing | Missing | XL | Tracker model |

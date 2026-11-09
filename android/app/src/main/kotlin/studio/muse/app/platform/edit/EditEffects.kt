@@ -159,7 +159,10 @@ class LayerOverlaySettings(
     private val alpha: Float, private val anchorX: Float, private val anchorY: Float, private val scale: Float, private val rotationCcw: Float,
     /** Wave 1, mirror: −1 flips that axis (about the picture's centre, before the rotation). */
     private val signX: Float = 1f, private val signY: Float = 1f,
-) : OverlaySettings {
+    /** Wave 1: the blend mode (BlendMode.ordinal; 0 = normal), read by MuseCompositorGlProgram. */
+    private val blendMode: Int = 0,
+) : OverlaySettings, androidx.media3.effect.MuseBlendOverlay {
+    override fun getBlendMode() = blendMode
     override fun getAlphaScale() = alpha
     override fun getBackgroundFrameAnchor(): Pair<Float, Float> = Pair.create(anchorX, anchorY)
     override fun getOverlayFrameAnchor(): Pair<Float, Float> = Pair.create(0f, 0f)
@@ -189,6 +192,7 @@ class PlanCompositorSettings(private val plan: RenderPlan) : VideoCompositorSett
             alpha = p.alpha.coerceIn(0.0, 1.0).toFloat(), anchorX = (2 * p.centerX - 1).toFloat(), anchorY = (1 - 2 * p.centerY).toFloat(),
             scale = (p.scale * base).toFloat(), rotationCcw = (-p.rotationCw).toFloat(),
             signX = if (p.flipX) -1f else 1f, signY = if (p.flipY) -1f else 1f,
+            blendMode = p.blend?.ordinal ?: 0,
         )
     }
 

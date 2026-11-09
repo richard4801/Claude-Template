@@ -257,7 +257,13 @@ Contract additions. The project stays `version: 2`, and older apps ignore these 
 - `blend?: normal|multiply|screen|overlay|softLight|darken|lighten|add` on video and image items of overlay tracks. On the main track it is refused.
 - `blendChannel` uses the W3C compositing formulas: overlay is hard-light with the layers swapped; softLight is W3C's D(Cb) form.
 - `blendPixel` = below + (blend − below) × a, where a = the item's alpha × opacity. Values are straight sRGB 0–1.
-- **Android: not rendered yet.** Media3 1.11's compositor can't be replaced (it only alpha-blends), so blending needs a custom video graph (size L). Until then, the Android editor shows no blend control. Mac: Core Image.
+- **Android:** Media3 1.11 composites every layer with its package-private `DefaultCompositorGlProgram`, and no app can replace it (Transformer can't even take a custom video graph). The app therefore ships its own copy:
+  - `MuseCompositorGlProgram`, in `app/src/main/java/androidx/media3/effect/`, Apache-2.0.
+  - AGP class instrumentation (`MuseCompositorRemap` in `app/build.gradle.kts`) rewrites Media3's references to the library class to point at it, so the preview player and the export both use it.
+  - A blended layer copies what is drawn so far into a backdrop texture. The blend shader then applies `blendChannel` and the alpha mix; every other layer alpha-blends as before.
+  - The shader is checked against the fixtures on a software GL by `android/tools/check_blend_shader.py` (32/32 cases).
+  - The same compositor can later take overlay transitions, adjustment layers and split-screen.
+- Mac: Core Image.
 
 ### Blur fill
 - `Canvas.fill?: color|blur` (default `color` = `background`). With `blur`, the main clip fills the frame behind contain-fitted main clips:

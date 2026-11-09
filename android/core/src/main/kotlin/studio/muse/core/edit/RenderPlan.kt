@@ -140,6 +140,8 @@ data class Placement(
     val blur: Double = 0.0, val rgbSplit: Double = 0.0,
     /** Wave 1, mirror: the picture flipped about its centre (before scale and rotation). */
     val flipX: Boolean = false, val flipY: Boolean = false,
+    /** Wave 1: an overlay's blend mode over the layers below it (null = normal). */
+    val blend: BlendMode? = null,
 ) {
     companion object { val HIDDEN = Placement(0.0, 0.5, 0.5, 1.0, 0.0) }
 }
@@ -211,9 +213,9 @@ data class RenderPlan(
             is ImageItem -> {
                 val b = basePlacement(item, local)
                 val a = animState(item, local)
-                b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy)
+                b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy, blend = item.blend)
             }
-            is VideoClip -> basePlacement(item, local)
+            is VideoClip -> basePlacement(item, local).copy(blend = item.blend)
             else -> Placement.HIDDEN
         }
     }

@@ -208,4 +208,22 @@ class EditWave1Test {
         c.act(EditAction.Select(c.p().mainClips[1].id)); c.act(EditAction.Speed(2.0))
         assertEquals(before, c.p()); assertNotNull(c.ui.value.message)
     }
+
+    // ------------------------------------------------------------------ blend modes
+    @Test fun blendModesReachTheCompositor() = runTest {
+        val c = controller()
+        c.act(EditAction.Select(c.p().mainClips[0].id)); c.act(EditAction.SetBlend(studio.muse.core.edit.BlendMode.SCREEN))
+        assertNull(c.p().mainClips[0].blend); assertEquals("Only overlays blend with what is below them", c.ui.value.message)
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddPip(TakeChoice("t2", "B", "Edit", null, 4.0, false, true)))
+        val pip = c.ui.value.selectedId!!
+        c.act(EditAction.SetBlend(studio.muse.core.edit.BlendMode.SOFT_LIGHT))
+        val clip = c.p().tracks.first { it.kind == TrackKind.VIDEO }.items.single() as VideoClip
+        assertEquals(studio.muse.core.edit.BlendMode.SOFT_LIGHT, clip.blend)
+        valid(c.p())
+        val plan = planRender(c.p(), infos + (clip.asset to MediaInfo(4.0, 1080, 1920, 30.0, true)))
+        val layer = plan.layers.indexOfFirst { it.role == LayerRole.OVERLAY }
+        assertEquals(studio.muse.core.edit.BlendMode.SOFT_LIGHT, plan.placement(layer, 2.0).blend)
+        c.act(EditAction.SetBlend(studio.muse.core.edit.BlendMode.NORMAL)); assertNull((c.p().tracks.first { it.kind == TrackKind.VIDEO }.items.single() as VideoClip).blend)
+        assertEquals(pip, c.ui.value.selectedId)
+    }
 }

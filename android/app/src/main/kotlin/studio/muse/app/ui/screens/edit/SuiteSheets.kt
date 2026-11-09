@@ -81,6 +81,7 @@ import studio.muse.core.edit.MediaClip
 import studio.muse.core.edit.Presets
 import studio.muse.core.edit.SpeedPreset
 import studio.muse.core.edit.TextItem
+import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.Transform
 import studio.muse.core.edit.TransitionKind
 import studio.muse.core.edit.VideoClip
@@ -147,6 +148,10 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
         }
     }
 }
+
+private val BLENDS = listOf(studio.muse.core.edit.BlendMode.NORMAL to "Normal", studio.muse.core.edit.BlendMode.MULTIPLY to "Multiply", studio.muse.core.edit.BlendMode.SCREEN to "Screen",
+    studio.muse.core.edit.BlendMode.OVERLAY to "Overlay", studio.muse.core.edit.BlendMode.SOFT_LIGHT to "Soft light", studio.muse.core.edit.BlendMode.DARKEN to "Darken",
+    studio.muse.core.edit.BlendMode.LIGHTEN to "Lighten", studio.muse.core.edit.BlendMode.ADD to "Add")
 
 private const val GREEN_KEY = "#2BD15F"
 private const val BLUE_KEY = "#2B5BD1"
@@ -321,6 +326,13 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         Box(Modifier.size(48.dp).press { act(EditAction.AddKeyframe(KfProp.OPACITY)) }.semantics { contentDescription = "Keyframe Opacity" }, contentAlignment = Alignment.Center) {
             EIc(if (keys?.get(KfProp.OPACITY).isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys?.get(KfProp.OPACITY).isNullOrEmpty()) m.t.muted else m.t.accent)
         }
+    }
+    // Blend (overlays only): how the picture combines with what is below it.
+    val overlayTrack = p.tracks.firstOrNull { t -> t.items.any { it.id == id } }?.kind?.let { it == TrackKind.VIDEO || it == TrackKind.IMAGE } == true
+    if (overlayTrack && item is Visual) {
+        SuiteLabel("Blend")
+        val cur = when (item) { is VideoClip -> item.blend; is studio.muse.core.edit.ImageItem -> item.blend; else -> null } ?: studio.muse.core.edit.BlendMode.NORMAL
+        SuiteChips(BLENDS.map { it.first.wire to it.second }, cur.wire, { w -> act(EditAction.SetBlend(studio.muse.core.edit.BlendMode.entries.first { it.wire == w })) })
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         SuiteChip("Flip horizontally", tr.flipX == true, { act(EditAction.Mirror(x = tr.flipX != true)) })

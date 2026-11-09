@@ -202,8 +202,7 @@ Every row is **working** and covered by `EditWave1Test` (**W**) or the core `Wav
 | Background colour swatches | Ratio | `canvas.background`. | W `background…` |
 | Colour / Blur of the clip | Ratio | `canvas.fill`: a blurred, darkened copy of the main clip behind contain-fitted clips (FILL layer). | W `background…`, core fixtures |
 | This clip: Fill the frame / Whole picture | Ratio | The main clip's `fit`. | W `background…` |
-
-**Not on Android yet:** blend modes. They are in the contract and the reference, and the Mac renders them. Media3 1.11 doesn't allow a custom compositor, so Android needs its own video graph (size L). Until then there is no blend control on Android, so there is no placeholder.
+| Blend (overlays) | Transform | Normal, Multiply, Screen, Overlay, Soft light, Darken, Lighten, Add. Drawn by the app's own compositor program (`MuseCompositorGlProgram`), used by both preview and export. | W `blendModes…`, `PlanCompositorSettingsTest`, `android/tools/check_blend_shader.py` |
 
 ## Images (`plans/android-edit/`, all four themes `a`–`d`)
 
