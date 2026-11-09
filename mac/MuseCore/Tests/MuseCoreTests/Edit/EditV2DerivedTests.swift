@@ -227,17 +227,22 @@ extension EditV2DerivedTests {
     func testEffectsReference() throws {
         let f = try editorFixture("functions")["effects"]
         XCTAssertEqual(f["perm"].array.compactMap(\.double).map(Int.init), E.effectPerm)
-        let W = Int(try XCTUnwrap(f["width"].double)), H = Int(try XCTUnwrap(f["height"].double))
-        let px = f["pattern"].array.map { E.RGB($0[0].double!, $0[1].double!, $0[2].double!) }
-        let sample = E.imageSampler(width: W, height: H, px)
+        // The pattern is sampled bilinearly between pixel centres; each case tells the effect its own frame size.
+        let pat = f["pattern"]
+        let PW = Int(try XCTUnwrap(pat["width"].double)), PH = Int(try XCTUnwrap(pat["height"].double))
+        let px = pat["pixels"].array.map { E.RGB($0[0].double!, $0[1].double!, $0[2].double!) }
+        XCTAssertEqual(px.count, PW * PH)
+        let sample = E.imageSampler(width: PW, height: PH, px)
         let cases = f["cases"].array
-        XCTAssertEqual(cases.count, E.effectIds.count * 4)
+        XCTAssertEqual(Set(cases.map { "\($0["width"].double ?? 0)x\($0["height"].double ?? 0)" }).count, 2, "both frame shapes")
+        XCTAssertEqual(cases.count % E.effectIds.count, 0)
         for c in cases {
             let e = try c["effect"].decode(E.Effect.self), t = try XCTUnwrap(c["t"].double)
+            let W = try XCTUnwrap(c["width"].double), H = try XCTUnwrap(c["height"].double)
             for s in c["samples"].array {
-                let got = E.effectPixel(e, t: t, width: Double(W), height: Double(H), u: s["u"].double!, v: s["v"].double!, sample: sample)
+                let got = E.effectPixel(e, t: t, width: W, height: H, u: s["u"].double!, v: s["v"].double!, sample: sample)
                 let want = s["rgb"].array.compactMap(\.double)
-                for k in 0..<3 { XCTAssertEqual(got[k], want[k], accuracy: 2e-6, "\(e.id) a=\(e.amount) t=\(t) at \(s["u"].double!),\(s["v"].double!)") }
+                for k in 0..<3 { XCTAssertEqual(got[k], want[k], accuracy: 2e-6, "\(e.id) \(W)x\(H) a=\(e.amount) t=\(t) at \(s["u"].double!),\(s["v"].double!)") }
             }
         }
     }

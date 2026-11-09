@@ -43,6 +43,7 @@ import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.Transition
 import studio.muse.core.edit.TransitionKind
 import studio.muse.core.edit.VideoClip
+import studio.muse.core.edit.updateItem
 import studio.muse.core.edit.problemOf
 
 /**
@@ -74,7 +75,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo", "x_translate").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo", "x_translate", "x_effects").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -152,6 +153,15 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
             "speed" -> {
                 p = SuiteOps.setCurve(p, "c2", SpeedCurve(SpeedPreset.HERO, SPEED_PRESETS.getValue(SpeedPreset.HERO)))!!
                 ui = ui.copy(project = p, panel = Panel.SPEED, selectedId = "c2", speedCurveTab = true)
+            }
+            "x_effects" -> {
+                // The effects library: VHS on the clip, the tiles rendered on a small gradient frame (CPU reference).
+                p = p.updateItem("c2") { (it as VideoClip).copy(effect = studio.muse.core.edit.Effect(studio.muse.core.edit.EffectId.VHS, .7, 1.5)) }!!
+                ui = ui.copy(project = p, panel = Panel.EFFECTS, effectsTab = "Effects", selectedId = "c2")
+                val fw = 72; val fh = 48
+                val frame = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
+                for (y in 0 until fh) for (x in 0 until fw) frame.setPixel(x, y, android.graphics.Color.rgb(60 + 150 * x / fw, 70 + 90 * y / fh, 120 + 100 * (fw - x) / fw))
+                host = host.copy(effectThumbs = studio.muse.app.platform.edit.EffectThumbnails.render(frame, 0.4).mapValues { it.value.asImageBitmap() })
             }
             "looks" -> {
                 p = SuiteOps.setLook(p, listOf("c2"), lib.pack.packLook("cine-teal-orange")!!.copy(strength = .7))!!

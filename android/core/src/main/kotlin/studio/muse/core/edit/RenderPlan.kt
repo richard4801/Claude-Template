@@ -66,6 +66,8 @@ data class VideoLook(
     val colorKeys: ColorKeys? = null,
     /** Mask and look keyframes (M): the mask and the finishing look per frame ([MotionKeys]), null when none are keyed. */
     val motionKeys: MotionKeys? = null,
+    /** The effects library: the item's picture effect (after the look, before the mask), null when none or amount 0. */
+    val effect: Effect? = null,
 )
 
 /** An item's mask and look when their keyframes move them ([maskAt] / [lookAt] at item-local seconds). */
@@ -401,7 +403,8 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         val sw = max(1, inf.width).toDouble(); val sh = max(1, inf.height).toDouble()
         var cw = sw * (1 - l - r); var ch = sh * (1 - t - b)
         val fit = v.fit ?: defaultFit
-        val geometryStatic = v.keyframes.orEmpty().keys.none { it == KfProp.X || it == KfProp.Y || it == KfProp.SCALE || it == KfProp.ROTATION } &&
+        // An effect works on the clip's whole (cropped) frame, so cover-fit isn't pre-cropped to the canvas then.
+        val geometryStatic = (v.effect?.takeIf { it.amount > 0 } == null) && v.keyframes.orEmpty().keys.none { it == KfProp.X || it == KfProp.Y || it == KfProp.SCALE || it == KfProp.ROTATION } &&
             (v.transform == null || (v.transform!!.x ?: 0.5) == 0.5 && (v.transform!!.y ?: 0.5) == 0.5 && (v.transform!!.scale ?: 1.0) == 1.0 && (v.transform!!.rotation ?: 0.0) == 0.0)
         val tw: Int; val th: Int; var base = 1.0
         if (fit == Fit.COVER && geometryStatic) {
@@ -423,7 +426,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         val motion = v.keyframes?.filterKeys { it in KfProp.MASK || it in KfProp.LOOK }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
             ?.let { MotionKeys(v.mask, v.look, it) }?.takeIf { it.masked || it.looked }
         return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte,
-            colorKeys = colorKeys, motionKeys = motion)
+            colorKeys = colorKeys, motionKeys = motion, effect = v.effect?.takeIf { it.amount > 0 })
     }
 
     /** A clip limited to the project's end; null when it starts after it. */

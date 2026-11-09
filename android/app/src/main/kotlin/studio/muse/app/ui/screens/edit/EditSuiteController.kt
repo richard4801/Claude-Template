@@ -290,6 +290,8 @@ sealed interface EditAction {
     data class Separate(val keep: studio.muse.core.edit.SeparationKeep) : EditAction
     /** Cut out a picture (2026-11-09, paid): the selected photo becomes its subject, staying where it sat. */
     data object CutoutPrice : EditAction
+    /** The effects library (2026-11-09): the selected picture's effect (null removes it); [done] ends a slider drag. */
+    data class SetEffect(val effect: studio.muse.core.edit.Effect?, val done: Boolean = true) : EditAction
     data object Cutout : EditAction
     /** Cross-dissolve between overlays (2026-11-09): [sec] on (its length), null off; [done] = one undo step at the end of a drag. */
     data class OverlayDissolve(val itemId: String, val sec: Double?, val done: Boolean = true) : EditAction
@@ -454,7 +456,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; EditAction.SeparatePrice, is EditAction.Separate -> "Split voice and music"; EditAction.CutoutPrice, EditAction.Cutout -> "Cut out"; is EditAction.OverlayDissolve -> "Dissolve"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; EditAction.SeparatePrice, is EditAction.Separate -> "Split voice and music"; EditAction.CutoutPrice, EditAction.Cutout -> "Cut out"; is EditAction.SetEffect -> "Effect"; is EditAction.OverlayDissolve -> "Dissolve"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -916,6 +918,9 @@ class EditSuiteController(
             is EditAction.Separate -> u.helpersOff["separate"]?.let { say(it) } ?: separate(u, a.keep)
             EditAction.CutoutPrice -> (u.selection?.second as? studio.muse.core.edit.ImageItem)?.let { im -> estimate("cutout", null, sourceOf(project?.asset(im.asset))) }
             EditAction.Cutout -> u.helpersOff["cutout"]?.let { say(it) } ?: cutout(u)
+            is EditAction.SetEffect -> visualId(u)?.let { id ->
+                change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(effect = a.effect); is studio.muse.core.edit.ImageItem -> it.copy(effect = a.effect); else -> it } } }
+            } ?: say("Pick a clip or a photo")
             is EditAction.OverlayDissolve -> change(a.done, refused = "A dissolve needs a clip right before this one on its track") { p -> SuiteOps.overlayDissolve(p, a.itemId, a.sec) }
             // Two languages, either shown: switching swaps the words with the kept ones.
             is EditAction.CaptionOriginal -> change { p ->

@@ -580,6 +580,19 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun pictureEffect() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.SetEffect(studio.muse.core.edit.Effect(studio.muse.core.edit.EffectId.GLITCH, .5, 2.0)))
+        assertEquals(studio.muse.core.edit.EffectId.GLITCH, c.p().mainClips[0].effect!!.id)
+        c.act(EditAction.SetEffect(studio.muse.core.edit.Effect(studio.muse.core.edit.EffectId.DUOTONE, 1.0, colors = listOf("#003344", "#FFE600"))))
+        valid(c.p())
+        // The plan carries it to the engine (and a cover clip isn't pre-cropped then).
+        assertEquals(studio.muse.core.edit.EffectId.DUOTONE, studio.muse.core.edit.planRender(c.p(), emptyMap()).layers.flatMap { it.clips }.first { it.itemId == id }.look!!.effect!!.id)
+        c.act(EditAction.SetEffect(null)); assertNull(c.p().mainClips[0].effect)
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

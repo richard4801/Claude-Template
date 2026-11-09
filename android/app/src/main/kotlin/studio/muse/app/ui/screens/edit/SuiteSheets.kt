@@ -106,6 +106,7 @@ import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import studio.muse.core.edit.EffectId
 
 /** Things a sheet asks the platform for (files, the recorder, rendering). Screenshots pass the defaults. */
 data class SuiteHost(
@@ -116,6 +117,11 @@ data class SuiteHost(
     val export: (toPhone: Boolean) -> Unit = {},
     val cancelExport: () -> Unit = {},
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** After an export: opens Post for the saved version (its take id). */
+    val post: ((String) -> Unit)? = null,
+    /** The effects library's tiles: each effect on the frame under the playhead (id or "none" → picture). */
+    val effectThumbs: Map<String, ImageBitmap> = emptyMap(),
+    val renderEffectThumbs: (() -> Unit)? = null,
     /** Decoded sound levels per asset id, for the timeline's sound lanes. */
     val waves: Map<String, Peaks> = emptyMap(),
     /**
@@ -992,11 +998,67 @@ private fun WordsBody(ui: EditSuiteUi, p: EditProject, act: (EditAction) -> Unit
 }
 
 // ======================================================================= Effects: transitions, mask & green screen (E2)
+/** The picture the look / effect tools act on: the selected video or photo, else the active main clip. */
+private fun currentVisualOf(ui: EditSuiteUi): studio.muse.core.edit.Visual? =
+    (ui.selection?.second?.takeIf { it is VideoClip || it is studio.muse.core.edit.ImageItem } ?: ui.activeClip) as? studio.muse.core.edit.Visual
+
+private val EFFECT_LABELS = listOf(EffectId.GLITCH to "Glitch", EffectId.VHS to "VHS", EffectId.FILM to "Retro film", EffectId.BLUR to "Blur",
+    EffectId.ZOOM_BLUR to "Zoom blur", EffectId.MIRROR to "Mirror", EffectId.PIXELATE to "Pixelate", EffectId.POSTERIZE to "Posterise", EffectId.DUOTONE to "Duotone",
+    EffectId.SHAKE to "Shake", EffectId.FLASH to "Flash", EffectId.RAIN to "Rain on glass")
+
+/**
+ * The effects library on the selected clip or photo: tiles with live thumbnails (the frame under the playhead), then
+ * Amount, Speed for the moving ones, and the two colours for duotone. One effect per picture.
+ */
+@Composable
+private fun PictureEffectsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
+    val m = muse
+    val item = currentVisualOf(ui) ?: return T("Pick a clip or a photo", m.type.body, m.t.muted)
+    val cur = item.effect
+    LaunchedEffect(Unit) { host.renderEffectThumbs?.invoke() }
+    (listOf<Pair<EffectId?, String>>(null to "None") + EFFECT_LABELS).chunked(3).forEach { row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            row.forEach { (id, label) ->
+                val on = cur?.id == id
+                Column(Modifier.weight(1f).press { act(EditAction.SetEffect(id?.let { e -> studio.muse.core.edit.Effect(e, cur?.amount ?: .6, cur?.speed?.takeIf { e.timed }) })) }
+                    .semantics { contentDescription = "Effect $label" }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1.5f).background(m.t.surface2).border(if (on) 2.dp else 0.dp, if (on) m.t.ink else Color.Transparent)) {
+                        val bmp = host.effectThumbs[id?.wire ?: "none"]
+                        if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                    T(label, m.type.tiny.copy(fontSize = 11.5.sp), if (on) m.t.ink else m.t.muted, maxLines = 1)
+                }
+            }
+            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+    if (cur == null) return
+    SuiteSlider(cur.amount.toFloat(), { f, done -> act(EditAction.SetEffect(cur.copy(amount = Math.round(f * 100) / 100.0), done)) }, label = "Amount", valueText = "${(cur.amount * 100).roundToInt()}")
+    if (cur.id.timed) {
+        val sp = cur.speed ?: 1.0
+        SuiteSlider(((sp - .1) / 3.9).toFloat(), { f, done -> act(EditAction.SetEffect(cur.copy(speed = Math.round((.1 + f * 3.9) * 10) / 10.0), done)) }, label = "Speed", valueText = "${fmt1(sp)}×")
+    }
+    if (cur.id == EffectId.DUOTONE) {
+        val cs = cur.colors ?: studio.muse.core.edit.Effects.DUOTONE_DEFAULT
+        val pairs = listOf(listOf("#1B1464", "#FF6B6B"), listOf("#003344", "#FFE600"), listOf("#2B0A3D", "#3EE6C1"), listOf("#111111", "#F2E8D5"))
+        SuiteLabel("Colours")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            pairs.forEach { pr ->
+                val sel = pr.map { it.uppercase() } == cs.map { it.uppercase() }
+                Box(Modifier.size(40.dp).border(if (sel) 2.dp else 1.dp, if (sel) m.t.ink else m.t.line).padding(3.dp).background(Brush.linearGradient(pr.map { colorOf(it) }))
+                    .press { act(EditAction.SetEffect(cur.copy(colors = pr.takeUnless { it == studio.muse.core.edit.Effects.DUOTONE_DEFAULT }))) }.semantics { contentDescription = "Duotone ${pr[0]} and ${pr[1]}" })
+            }
+        }
+    }
+    T("Effects sit on top of the look, and under the mask", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+}
+
 @Composable
 private fun EffectsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
-    SuiteSeg(listOf("Transitions" to "Transitions", "Mask" to "Mask & key"), ui.effectsTab, { act(EditAction.EffectsTab(it)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    SuiteSeg(listOf("Transitions" to "Transitions", "Effects" to "Effects", "Mask" to "Mask & key"), ui.effectsTab, { act(EditAction.EffectsTab(it)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
     if (ui.effectsTab == "Mask") return MaskBody(ui, host, act)
+    if (ui.effectsTab == "Effects") return PictureEffectsBody(ui, host, act)
     val c = ui.activeClip
     val idx = ui.project?.mainClips?.indexOfFirst { it.id == c?.id } ?: -1
     val cur = c?.transitionIn
