@@ -1,0 +1,218 @@
+{
+ "models": [
+  {
+   "name": "creatify-lipsync",
+   "description": "Realistic lipsync video - optimized for speed, quality, and consistency.",
+   "category": "Audio to Video",
+   "family": "lipsync",
+   "group_of": "avatar",
+   "domain": "ai",
+   "cost": 0.04,
+   "cost_currency": "USD",
+   "cost_strategy": "creatify-lipsync",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/creatify-lipsync",
+   "endpoint_url": "creatify-lipsync",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "audio_url",
+    "video_url"
+   ],
+   "required_fields": [
+    "audio_url",
+    "video_url"
+   ],
+   "estimate_endpoint": "/api/v1/models/creatify-lipsync/estimate-cost"
+  },
+  {
+   "name": "bytedance-seedream-v4-edit",
+   "description": "Seedream v4 Edit refines or transforms existing images based on a new prompt and a reference. Instead of masking, you provide a source image and describe how it should be altered — adjusting style, details, or replacing elements while keeping the subject consistent.",
+   "category": "Image to Image",
+   "family": "seedream",
+   "group_of": "image",
+   "domain": "ai",
+   "cost": 0.04,
+   "cost_currency": "USD",
+   "cost_strategy": "seedream-v4",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/bytedance-seedream-v4-edit",
+   "endpoint_url": "bytedance-seedream-edit-v4",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "prompt",
+    "images_list",
+    "aspect_ratio",
+    "resolution",
+    "num_images"
+   ],
+   "required_fields": [
+    "prompt",
+    "images_list"
+   ],
+   "estimate_endpoint": "/api/v1/models/bytedance-seedream-v4-edit/estimate-cost"
+  },
+  {
+   "name": "happy-horse-1-image-to-video",
+   "description": "Happy Horse 1.0 Image to Video — bring still images to life with fluid, expressive animation. Selectable output resolution (720p/1080p) — price scales with the resolution chosen.",
+   "category": "Image to Video",
+   "family": "happy-horse-1",
+   "group_of": "video",
+   "domain": "ai",
+   "cost": 0.9,
+   "cost_currency": "USD",
+   "cost_strategy": "happy-horse-1-i2v-res-cost",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/happy-horse-1-image-to-video",
+   "endpoint_url": "happy-horse-1-image-to-video",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "prompt",
+    "resolution",
+    "images_list",
+    "aspect_ratio",
+    "duration"
+   ],
+   "required_fields": [
+    "prompt",
+    "images_list"
+   ],
+   "estimate_endpoint": "/api/v1/models/happy-horse-1-image-to-video/estimate-cost"
+  },
+  {
+   "name": "kling-v2.1-pro-i2v",
+   "description": "Kling 2.1 Pro is the high-end version of Kuaishou’s video generation model, offering enhanced realism, longer motion sequences, and cinematic quality. In I2V mode, it animates static images with fluid environmental effects.",
+   "category": "Image to Video",
+   "family": "kling-v2.1",
+   "group_of": "video",
+   "domain": "ai",
+   "cost": 0.4,
+   "cost_currency": "USD",
+   "cost_strategy": "kling-v2.1-pro-video",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/kling-v2.1-pro-i2v",
+   "endpoint_url": "kling-v2.1-pro-i2v",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "prompt",
+    "image_url",
+    "last_image",
+    "aspect_ratio",
+    "duration"
+   ],
+   "required_fields": [
+    "prompt",
+    "image_url"
+   ],
+   "estimate_endpoint": "/api/v1/models/kling-v2.1-pro-i2v/estimate-cost"
+  },
+  {
+   "name": "flux-3-dev",
+   "description": "FLUX 3 Dev is the faster, lower-cost variant of Black Forest Labs' FLUX 3 frontier model, planned for open-weight release. It trades a small amount of peak fidelity for significantly reduced latency and price, making it well suited for rapid iteration, prototyping, and high-volume text-to-image generation.",
+   "category": "Text to Image",
+   "family": "flux-3",
+   "group_of": "image",
+   "domain": "ai",
+   "cost": 0.025,
+   "cost_currency": "USD",
+   "cost_strategy": "flux-3-dev",
+   "dynamic_pricing": false,
+   "endpoint": "/api/v1/flux-3-dev",
+   "endpoint_url": "flux-3-dev",
+   "is_enabled": 1,
+   "is_coming_soon": true,
+   "input_fields": [
+    "prompt",
+    "resolution",
+    "aspect_ratio"
+   ],
+   "required_fields": [
+    "prompt"
+   ],
+   "estimate_endpoint": null
+  },
+  {
+   "name": "nano-banana",
+   "description": "Nano Banana is an advanced AI model excelling in natural language-driven image generation and editing. It produces hyper-realistic, physics-aware visuals with seamless style transformations.",
+   "category": "Text to Image",
+   "family": "nano",
+   "group_of": "image",
+   "domain": "ai",
+   "cost": 0.03,
+   "cost_currency": "USD",
+   "cost_strategy": "nano-banana",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/nano-banana",
+   "endpoint_url": "nano-banana",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "prompt",
+    "aspect_ratio"
+   ],
+   "required_fields": [
+    "prompt"
+   ],
+   "estimate_endpoint": "/api/v1/models/nano-banana/estimate-cost"
+  },
+  {
+   "name": "seedance-2-t2v",
+   "description": "SD 2.0 is the latest multimodal video generation model by ByteDance, offering advanced camera control, native audio-video sync, and high-resolution output. Selectable output resolution (480p/720p) — price scales with the resolution chosen.",
+   "category": "Text to Video",
+   "family": "sd-v2.0",
+   "group_of": "video",
+   "domain": "ai",
+   "cost": 0.75,
+   "cost_currency": "USD",
+   "cost_strategy": "seedance-2.0-cost",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/seedance-2-t2v",
+   "endpoint_url": "seedance-v2.0-t2v",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "prompt",
+    "resolution",
+    "aspect_ratio",
+    "duration",
+    "quality"
+   ],
+   "required_fields": [
+    "prompt"
+   ],
+   "estimate_endpoint": "/api/v1/models/seedance-2-t2v/estimate-cost"
+  },
+  {
+   "name": "gpt-5-2",
+   "description": "GPT 5.2 is a lightweight reasoning model with fast response times and deep coding capabilities. Supports image inputs, system prompts, web search capabilities, and reasoning effort control. Pricing: $1.25/M input tokens, $9.00/M output tokens.",
+   "category": "Text to Text",
+   "family": "text-generation",
+   "group_of": "text",
+   "domain": "ai",
+   "cost": 0.00023,
+   "cost_currency": "USD",
+   "cost_strategy": "gpt-5-2",
+   "dynamic_pricing": true,
+   "endpoint": "/api/v1/gpt-5-2",
+   "endpoint_url": "gpt-5-2",
+   "is_enabled": 1,
+   "is_coming_soon": false,
+   "input_fields": [
+    "prompt",
+    "image_url",
+    "system_prompt",
+    "web_search_switch",
+    "reasoning_effort"
+   ],
+   "required_fields": [
+    "prompt"
+   ],
+   "estimate_endpoint": "/api/v1/models/gpt-5-2/estimate-cost"
+  }
+ ],
+ "total": 8,
+ "currency": "USD"
+}
