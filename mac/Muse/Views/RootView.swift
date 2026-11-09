@@ -55,7 +55,7 @@ struct Shell: View {
                             .transition(MotionStyle.of(t.id).transition)
                         if let msg = store.offlineMessage {
                             // Offline: what happened, and where to fix it. Floats over the screen like a toast.
-                            InlineNotice(msg, tone: .caution, actionTitle: "Check connection") { store.openSettings(.developer) }
+                            InlineNotice(msg, tone: .caution, actionTitle: "Check connection") { store.openSettings(.advanced) }
                                 .frame(maxWidth: 560)
                                 .museFloat(t)
                                 .padding(.top, Space.s3)
@@ -77,13 +77,10 @@ struct Shell: View {
         case .queue: QueueView()
         case .gallery: GalleryView()
         case .result: ResultView()
-        case .settings:
-            // Review mode only: the proposed Settings (plans/settings-redesign.md) for the owner's approval.
-            if let mock = SnapshotRunner.state.settingsMock { SettingsMockView(state: mock) } else { SettingsView() }
+        case .settings: SettingsView()
         case .credits: CreditsView()
         case .lora: LoraView()
         case .posts: PostsView()
-        case .members: MembersView()
         case .templates: TemplatesView()
         case .template: TemplateDetailView()
         case .editor: VideoEditorView()
@@ -202,8 +199,8 @@ struct TitleBar: View {
                     Divider()
                     Button("Credit · \(Pricing.money(store.creditUsd))") { store.go(.credits) }
                     if store.isOwner {
-                        Button("Members") { store.go(.members) }
-                        Button("Invite someone…") { store.go(.members) }
+                        Button("Members") { store.openSettings(.members) }
+                        Button("Invite someone…") { store.openSettings(.members) }
                     }
                     Button("Settings") { store.go(.settings) }
                     Divider()
@@ -275,14 +272,7 @@ struct Sidebar: View {
                 Divider().padding(.vertical, 8)
             }
             NavRow(icon: "person.badge.plus", title: "New model", on: store.screen == .create, compact: compact, trailing: .none) { store.go(.create) }
-            if store.isOwner {
-                if !compact {
-                    groupLabel("Studio")
-                } else {
-                    Divider().padding(.vertical, 8)
-                }
-                NavRow(icon: "person.2", title: "Members", on: store.screen == .members, compact: compact, trailing: .key("⌘8")) { store.go(.members) }
-            }
+            // Members is a Settings section now (owner decision 2026-11-09); ⌘8 still opens it.
             Spacer()
             NavRow(icon: "slider.horizontal.3", title: "Settings", on: store.screen.navParent == .settings, compact: compact, trailing: .key("⌘,")) { store.go(.settings) }
             if !compact { BalanceBox().padding(.top, 8) }

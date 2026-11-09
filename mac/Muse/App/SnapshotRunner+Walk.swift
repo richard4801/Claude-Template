@@ -83,6 +83,25 @@ extension SnapshotRunner {
              : "FAIL engine_list_swap: picked a model the swap list doesn't have (\(swapPick ?? ""))")
         state.overlay = nil
         store.setEnginePick(.swap, nil)
+        // Settings (owner-approved redesign 2026-11-09): every section's controls, minus anything that signs out, removes,
+        // opens another app or a web page, changes the server, starts Blender, or hides Advanced / changes the theme.
+        UserDefaults.standard.set(true, forKey: "showAdvancedSettings")
+        let settingsDeny = ["Sign out", "Remove", "Revoke", "Fail next render", "Reload", "Test connection", "Reconnect", "Use the MUSE server",
+                            "Sound and banners", "Open System Settings", "Setup guide", "Where to find", "How to install", "Run Blender", "New token",
+                            "Theme:", "Show advanced settings", "Send a test notification", "Invite someone", "Add credit", "Open credit", "Copy",
+                            "Install Claude Code", "Open claude.ai", "Sign in", "Use this engine"]
+        let sectionTitles = Set(SettingsSection.allCases.map(\.title))
+        for section in SettingsSection.allCases {
+            // Advanced: every control changes the server or the data (all skipped), so the walk checks it opens.
+            await walkScreen("settings_\(section.rawValue)", ax: ax, minimum: section == .advanced ? 0 : 1, deny: settingsDeny, denyExact: sectionTitles.union(["MUSE server", "Demo mode (no server)"]),
+                             base: { store.go(.home) },
+                             open: { store.openSettings(section) },
+                             isOpen: { store.screen == .settings && store.settingsSection == section },
+                             note: note)
+            store.closeProviderForm()
+            store.settingsPrompts = false
+        }
+        UserDefaults.standard.set(false, forKey: "showAdvancedSettings")
         // Import a video from a link (demo mode imports at once, nothing is downloaded or spent). "Choose a file instead"
         // opens a modal file panel, so it's skipped.
         // Only the sheet's own buttons: after an import the clip tile's label changes, and it opens a file panel.

@@ -817,10 +817,10 @@ extension AppStore {
         ]
         if isOwner {
             let owner: [PaletteCommand] = [
-                PaletteCommand(title: "Members", icon: "person.2", shortcut: "⌘8") { [weak self] in self?.go(.members) },
-                PaletteCommand(title: "Invite someone", icon: "envelope", shortcut: "") { [weak self] in self?.go(.members) },
-                PaletteCommand(title: "Studio settings", icon: "building.2", shortcut: "") { [weak self] in self?.openSettings(.studio) },
-                PaletteCommand(title: "Engines", icon: "server.rack", shortcut: "") { [weak self] in self?.openSettings(.engines) },
+                PaletteCommand(title: "Members", icon: "person.2", shortcut: "⌘8") { [weak self] in self?.openSettings(.members) },
+                PaletteCommand(title: "Invite someone", icon: "envelope", shortcut: "") { [weak self] in self?.openSettings(.members) },
+                PaletteCommand(title: "Spend caps", icon: "building.2", shortcut: "") { [weak self] in self?.openSettings(.spending) },
+                PaletteCommand(title: "Models", icon: "cpu", shortcut: "") { [weak self] in self?.openSettings(.spending) },
                 PaletteCommand(title: "Add a top-up", icon: "plus.circle", shortcut: "") { [weak self] in self?.go(.credits) },
             ]
             all += owner
