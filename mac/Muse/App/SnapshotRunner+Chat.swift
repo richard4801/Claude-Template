@@ -85,22 +85,27 @@ extension SnapshotRunner {
             state.overlay = nil
 
             NSLog("[snapshot] chat recreate %@", theme.rawValue)
-            // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does).
-            store.openEdit(takeId: nil)
-            store.openRecreate()
-            try? await Task.sleep(for: .seconds(1))
-            let refs = (try? await store.recreateAPI.listReferences()) ?? []
-            if let ref = refs.first(where: { $0.id == "rx_demo" }) ?? refs.first(where: { $0.recipe != nil }) {
+            // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does). The screen change
+            // animates and can lose a tick on the runner, so the shot checks the chat is up and tries again (up to 3 times).
+            var recreateDrawn = false
+            for attempt in 1...3 where !recreateDrawn {
+                store.openEdit(takeId: nil)
+                try? await Task.sleep(for: .seconds(1))
+                store.openRecreate()
+                try? await Task.sleep(for: .seconds(1))
+                let refs = (try? await store.recreateAPI.listReferences()) ?? []
+                guard let ref = refs.first(where: { $0.id == "rx_demo" }) ?? refs.first(where: { $0.recipe != nil }) else { continue }
                 await store.openRecreateReference(ref.id)
-                store.toggleRecreateClaude()
+                if !store.recreate.claudeOpen { store.toggleRecreateClaude() }
                 try? await Task.sleep(for: .seconds(2.5))
-                lines.append(drawnLine("claude_recreate", theme, needsReply: true))
-                capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_recreate.png"))
-                store.recreate.closeClaude()
-                store.leaveRecreateReference()
-            } else {
-                lines.append("CUT claude_recreate 1280x800 \(theme.rawValue) no demo reference")
+                recreateDrawn = store.recreate.open && state.composerFrames["chat composer"] != nil
+                NSLog("[snapshot] chat recreate %@ try %d: open %d, reference %@, claude %d, screen %@", theme.rawValue, attempt,
+                      store.recreate.open ? 1 : 0, store.recreate.reference?.id ?? "none", store.recreate.claudeOpen ? 1 : 0, "\(store.screen)")
             }
+            lines.append(drawnLine("claude_recreate", theme, needsReply: true))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_recreate.png"))
+            store.recreate.closeClaude()
+            store.leaveRecreateReference()
             store.closeRecreate()
 
             NSLog("[snapshot] chat edit %@", theme.rawValue)
