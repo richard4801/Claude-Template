@@ -236,16 +236,19 @@ public struct TakeVersionV2Request: Codable, Sendable, Equatable {
     public var fps: Double?
     /// The version's name (1–80 characters after trimming; Claude's `save_version` name). Left out when empty.
     public var name: String?
+    /// The export sheet's "Label as AI-generated" (sent only when on; the server stores it on the version).
+    public var aiLabel: Bool?
     public init(uploadId: String, thumbUploadId: String? = nil, thumb: ImageRef? = nil, edits: EditV2.Project, durationSec: Double, width: Int, height: Int,
-                fps: Double? = nil, name: String? = nil) {
+                fps: Double? = nil, name: String? = nil, aiLabel: Bool = false) {
         self.uploadId = uploadId; self.thumbUploadId = thumbUploadId; self.thumb = thumb; self.edits = edits; self.durationSec = durationSec
         self.width = width; self.height = height; self.fps = fps; self.name = TakeVersionV2Request.versionName(name)
+        self.aiLabel = aiLabel ? true : nil
     }
 
-    public static func make(_ upload: EditedUpload, video: EditedVideo, edits: EditV2.Project, name: String? = nil) -> TakeVersionV2Request {
+    public static func make(_ upload: EditedUpload, video: EditedVideo, edits: EditV2.Project, name: String? = nil, aiLabel: Bool = false) -> TakeVersionV2Request {
         TakeVersionV2Request(uploadId: upload.uploadId, thumbUploadId: upload.thumbUploadId, thumb: upload.thumbUploadId == nil ? upload.thumb : nil,
                              edits: edits, durationSec: (video.durationSec * 1000).rounded() / 1000, width: video.width, height: video.height,
-                             fps: video.fps.map { ($0 * 100).rounded() / 100 }, name: name)
+                             fps: video.fps.map { ($0 * 100).rounded() / 100 }, name: name, aiLabel: aiLabel)
     }
 
     /// The server's rule for a version name: trimmed, 1–80 characters (longer is cut at 80), nil when empty.

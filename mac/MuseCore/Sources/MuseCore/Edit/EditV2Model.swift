@@ -63,10 +63,21 @@ extension EditV2 {
         public var y: Double?
         public var scale: Double?
         public var rotation: Double?
-        public init(x: Double? = nil, y: Double? = nil, scale: Double? = nil, rotation: Double? = nil) {
-            self.x = x; self.y = y; self.scale = scale; self.rotation = rotation
+        /// Wave 1 (mirror): the picture mirrored about its own centre, after the crop and before scale and rotation. Only true is written.
+        public var flipX: Bool?
+        public var flipY: Bool?
+        public init(x: Double? = nil, y: Double? = nil, scale: Double? = nil, rotation: Double? = nil, flipX: Bool? = nil, flipY: Bool? = nil) {
+            self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.flipX = flipX; self.flipY = flipY
         }
     }
+
+    /// Wave 1: how a picture on an overlay track combines with the layers below it (`blendPixel`).
+    public enum BlendMode: String, Codable, Hashable, Sendable, CaseIterable {
+        case normal, multiply, screen, overlay, softLight, darken, lighten, add
+    }
+
+    /// Wave 1: what shows where a contain-fitted main clip leaves the frame empty.
+    public enum CanvasFill: String, Codable, Hashable, Sendable { case color, blur }
 
     public struct Crop: Codable, Hashable, Sendable {
         public var left: Double?
@@ -253,6 +264,10 @@ extension EditV2 {
         public var enhance: Bool?
         /// Remove background (workstream 1 contract, 2026-11-08): a grey matte video aligned with `asset`; its luma is the alpha.
         public var alphaMatte: AlphaMatte?
+        /// Wave 1, freeze frame: the clip shows the single source frame at inSec for holdSec seconds, silent (clipLength = holdSec).
+        public var holdSec: Double?
+        /// Wave 1: overlay tracks only.
+        public var blend: BlendMode?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,
@@ -284,6 +299,8 @@ extension EditV2 {
         public var animOut: Anim?
         /// Edit suite.
         public var mask: Mask?
+        /// Wave 1.
+        public var blend: BlendMode?
         public init(id: String, asset: String, startSec: Double, durationSec: Double, fit: Fit? = nil, transform: Transform? = nil, crop: Crop? = nil,
                     opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil, adjust: Adjust? = nil, look: Look? = nil,
                     animIn: Anim? = nil, animOut: Anim? = nil, mask: Mask? = nil) {
@@ -630,8 +647,10 @@ extension EditV2 {
         public var fps: Double
         /// "#RRGGBB", default black.
         public var background: String?
-        public init(width: Int, height: Int, fps: Double, background: String? = nil) {
-            self.width = width; self.height = height; self.fps = fps; self.background = background
+        /// Wave 1: the background colour (nil / color) or a blurred copy of the main clip (blur) behind contain-fitted clips.
+        public var fill: CanvasFill?
+        public init(width: Int, height: Int, fps: Double, background: String? = nil, fill: CanvasFill? = nil) {
+            self.width = width; self.height = height; self.fps = fps; self.background = background; self.fill = fill
         }
     }
 

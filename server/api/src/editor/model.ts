@@ -9,7 +9,10 @@ export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
 export type Keyframe = { t: number; v: number; ease?: Ease };
 export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
 export type Keyframes = Partial<Record<KfProp, Keyframe[]>>;
-export type Transform = { x?: number; y?: number; scale?: number; rotation?: number };
+/** flipX / flipY (wave 1, mirror): the picture mirrored about its own centre, after the crop and before scale and rotation. */
+export type Transform = { x?: number; y?: number; scale?: number; rotation?: number; flipX?: boolean; flipY?: boolean };
+/** Wave 1: how a picture on an overlay track combines with the layers below it (blendPixel). */
+export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'softLight' | 'darken' | 'lighten' | 'add';
 export type Crop = { left?: number; top?: number; right?: number; bottom?: number };
 export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number;
   /** Edit suite (phase 2): tone, applied after the colour matrix (`toneAdjust`). */ highlights?: number; shadows?: number };
@@ -36,10 +39,14 @@ type Voice = { voiceEffect?: VoiceEffect; enhance?: boolean };
 export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: number; outSec: number; speed: number; speedCurve?: SpeedCurve; startSec?: number;
   volume?: number; muted?: boolean; fadeInSec?: number; fadeOutSec?: number; audioAsset?: string; chroma?: Chroma; transitionIn?: Transition;
   /** workstream 1: an alpha matte video (grey, white = keep) aligned with this clip's own asset, applied as its alpha. */
-  alphaMatte?: AlphaMatte };
+  alphaMatte?: AlphaMatte;
+  /** Wave 1, freeze frame: the clip shows the single source frame at inSec for holdSec seconds, silent (clipLength = holdSec). */
+  holdSec?: number;
+  /** Wave 1: overlay tracks only. */
+  blend?: BlendMode };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
-export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim };
+export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode };
 export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
   align: 'left' | 'center' | 'right'; maxWidthPct?: number; lineHeight?: number; letterSpacing?: number; uppercase?: boolean;
   stroke?: { color: string; widthPct: number }; shadow?: { color: string; opacity: number; blurPct: number; dyPct: number };
@@ -57,7 +64,8 @@ export type TrackKind = 'main' | 'video' | 'image' | 'text' | 'caption' | 'music
 export type Item = VideoClip | ImageItem | TextItem | AudioClip;
 export type Track = { id: string; kind: TrackKind; name?: string; muted?: boolean; hidden?: boolean; volume?: number; items: Item[];
   caption?: CaptionTrack; duck?: Duck };
-export type Canvas = { width: number; height: number; fps: number; background?: string };
+/** fill (wave 1): what shows where a contain-fitted main clip leaves the frame empty: the background colour (default) or a blurred copy of the clip (blurFill). */
+export type Canvas = { width: number; height: number; fps: number; background?: string; fill?: 'color' | 'blur' };
 export type EditProject = { version: 2; sourceTakeId: string; canvas: Canvas; assets: Asset[]; tracks: Track[]; mute?: boolean };
 
 export type V1Segment = { inSec: number; outSec: number; speed: number; muted?: boolean };
@@ -71,6 +79,9 @@ export const LIMITS = {
 export const V1_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom', 'whip', 'spin', 'glitch'];
 export const MASK_SHAPES: MaskShape[] = ['linear', 'mirror', 'circle', 'rect', 'heart', 'star'];
+export const BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'softLight', 'darken', 'lighten', 'add'];
+/** Freeze frame: a hold lasts 0.1–30 s. */
+export const HOLD_MIN_SEC = 0.1, HOLD_MAX_SEC = 30;
 export const VOICE_EFFECTS: VoiceEffect[] = ['none', 'warm', 'radio', 'phone', 'deep'];
 export const CURVE_PIECES = 48;
 /** Speed-curve presets (x = position in the clip's kept source, speed ×). */
@@ -138,15 +149,19 @@ export function curveSpeed(c: SpeedCurve, x: number): number {
 }
 export type Piece = { inSec: number; outSec: number; speed: number };
 /** A clip as constant-speed pieces: one piece, or CURVE_PIECES equal source pieces of a speed curve (each at the curve's speed at its middle). Engines render these. */
-export function speedPieces(c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }): Piece[] {
+type Timed = { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve; holdSec?: number };
+export function speedPieces(c: Timed): Piece[] {
+  if (c.holdSec !== undefined) return [{ inSec: c.inSec, outSec: c.inSec, speed: 1 }];
   if (!c.speedCurve) return [{ inSec: c.inSec, outSec: c.outSec, speed: c.speed ?? 1 }];
   const n = CURVE_PIECES, len = (c.outSec - c.inSec) / n;
   return Array.from({ length: n }, (_, i) => ({ inSec: r6(c.inSec + i * len), outSec: r6(i === n - 1 ? c.outSec : c.inSec + (i + 1) * len), speed: r6(curveSpeed(c.speedCurve!, (i + 0.5) / n)) }));
 }
-export const clipLength = (c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }) =>
+/** A hold (freeze frame) lasts holdSec whatever its source range. */
+export const clipLength = (c: Timed) => c.holdSec !== undefined ? c.holdSec :
   c.speedCurve ? speedPieces(c).reduce((s, p) => s + (p.outSec - p.inSec) / p.speed, 0) : (c.outSec - c.inSec) / (c.speed ?? 1);
 /** Seconds from the clip's start on the timeline at source time `sec` (clamped to the clip). */
-export function clipTimeAt(c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }, sec: number): number {
+export function clipTimeAt(c: Timed, sec: number): number {
+  if (c.holdSec !== undefined) return 0;
   let acc = 0;
   for (const p of speedPieces(c)) {
     if (sec <= p.outSec) return acc + Math.max(0, sec - p.inSec) / p.speed;
@@ -155,7 +170,8 @@ export function clipTimeAt(c: { inSec: number; outSec: number; speed?: number; s
   return acc;
 }
 /** Source time at `t` seconds from the clip's start on the timeline (the inverse of clipTimeAt; clamped to the clip). */
-export function clipSourceAt(c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }, t: number): number {
+export function clipSourceAt(c: Timed, t: number): number {
+  if (c.holdSec !== undefined) return c.inSec;
   let acc = 0;
   for (const p of speedPieces(c)) {
     const len = (p.outSec - p.inSec) / p.speed;
@@ -253,6 +269,8 @@ export function applyCuts(p: EditProject, assetId: string, cuts: Range[]): EditP
   const items: VideoClip[] = [];
   for (const it of main.items as VideoClip[]) {
     if (it.asset !== assetId) { items.push(it); continue; }
+    // A hold (freeze frame) has no source span: it goes when a cut covers its frame, else it stays as it is.
+    if (it.holdSec !== undefined) { if (!rs.some(r => it.inSec >= r.startSec && it.inSec < r.endSec)) items.push(it); continue; }
     let pieces: Range[] = [{ startSec: it.inSec, endSec: it.outSec }];
     for (const r of rs) {
       pieces = pieces.flatMap(pc => {
@@ -294,7 +312,7 @@ export function captionWords(p: EditProject): TimedWord[] {
   const spans = timeline(p);
   const out: TimedWord[] = [];
   (mainTrack(p).items as VideoClip[]).forEach((c, i) => {
-    if (c.asset !== ct.asset) return;
+    if (c.asset !== ct.asset || c.holdSec !== undefined) return; // a hold has no speech
     const s = spans[i]!;
     ct.words.forEach((w, idx) => {
       const mid = (w.startSec + w.endSec) / 2;
@@ -463,6 +481,85 @@ const smoothstep = (a: number, b: number, x: number) => { const t = clamp((x - a
 const srtTime = (t: number) => { const ms = Math.round(Math.max(0, t) * 1000); const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
 /** The captions as an .srt file (one cue per caption page; upper case when the style says so). Empty without captions. */
+// ------------------------------------------------------------------ wave 1: mirror, blend modes, blur fill
+/** One channel of the W3C compositing blend functions: top = the item (Cs), below = the backdrop (Cb), both 0–1. */
+export function blendChannel(mode: BlendMode, top: number, below: number): number {
+  const s = top, b = below;
+  switch (mode) {
+    case 'normal': return s;
+    case 'multiply': return b * s;
+    case 'screen': return b + s - b * s;
+    case 'overlay': return b <= 0.5 ? 2 * b * s : 1 - 2 * (1 - b) * (1 - s);           // = hard-light with the layers swapped
+    case 'softLight': {
+      if (s <= 0.5) return b - (1 - 2 * s) * b * (1 - b);
+      const d = b <= 0.25 ? ((16 * b - 12) * b + 4) * b : Math.sqrt(b);
+      return b + (2 * s - 1) * (d - b);
+    }
+    case 'darken': return Math.min(b, s);
+    case 'lighten': return Math.max(b, s);
+    case 'add': return Math.min(1, b + s);
+  }
+}
+/**
+ * A pixel of a blended item over what is below it: the blend on straight (not premultiplied) sRGB 0–1, then mixed in by the
+ * item's coverage a = alpha (chroma key / matte / mask) × opacity: result = below + (blend − below) × a.
+ */
+export function blendPixel(mode: BlendMode, top: [number, number, number], below: [number, number, number], a: number): [number, number, number] {
+  return [0, 1, 2].map(i => r6(below[i]! + (clamp(blendChannel(mode, top[i]!, below[i]!), 0, 1) - below[i]!) * clamp(a, 0, 1))) as [number, number, number];
+}
+/**
+ * Where an item's picture corners land on the canvas (pixels): the picture (after its crop, w × h px) is fitted (cover / contain)
+ * to the canvas, mirrored about its centre (flipX / flipY), scaled, rotated clockwise and moved to (x, y). Corners are the
+ * picture's own top-left, top-right, bottom-right, bottom-left, so a flip shows as swapped corners. Order: crop → flip → scale → rotate → move.
+ */
+export function itemCorners(canvas: { width: number; height: number }, w: number, h: number, fit: Fit, t: Transform = {}): [number, number][] {
+  const k = fit === 'cover' ? Math.max(canvas.width / w, canvas.height / h) : Math.min(canvas.width / w, canvas.height / h);
+  const sc = t.scale ?? 1, hw = (w * k * sc) / 2, hh = (h * k * sc) / 2;
+  const fx = t.flipX ? -1 : 1, fy = t.flipY ? -1 : 1;
+  const a = ((t.rotation ?? 0) * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const cx = (t.x ?? 0.5) * canvas.width, cy = (t.y ?? 0.5) * canvas.height;
+  return ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([u, v]) => {
+    const px = u * hw * fx, py = v * hh * fy;
+    return [r6(cx + px * cos - py * sin), r6(cy + px * sin + py * cos)] as [number, number];
+  });
+}
+/** Blur fill: the box-blur radius in pixels for a canvas (applied once, separable, clamp to edge), then RGB × BLUR_FILL_DARKEN. */
+export const blurFillRadius = (canvas: { width: number; height: number }) => Math.max(1, Math.round(0.04 * Math.min(canvas.width, canvas.height)));
+export const BLUR_FILL_DARKEN = 0.85;
+/**
+ * The blur fill of a frame (wave 1): the main clip's picture cover-fitted to the canvas (its look applied, not its transform),
+ * box-blurred and darkened. During a transition it is the incoming clip's frame once progress ≥ 0.5, else the outgoing one's.
+ * rgb: w × h × 3 floats 0–1 (the cover-fitted frame); returns the fill, same layout.
+ */
+export function blurFill(rgb: number[], w: number, h: number, radius: number): number[] {
+  const box = (src: number[], horiz: boolean): number[] => {
+    const out = new Array(src.length).fill(0);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) {
+        const xx = horiz ? clamp(x + k, 0, w - 1) : x, yy = horiz ? y : clamp(y + k, 0, h - 1);
+        sum += src[(yy * w + xx) * 3 + c]!;
+      }
+      out[(y * w + x) * 3 + c] = sum / (2 * radius + 1);
+    }
+    return out;
+  };
+  return box(box(rgb, true), false).map(v => r6(v * BLUR_FILL_DARKEN));
+}
+/** The timeline time whose main-clip frame the blur fill uses at t (the incoming clip from half-way through a transition). */
+export function blurFillClip(p: EditProject, t: number): { clipId: string; local: number } | null {
+  const spans = timeline(p);
+  let pick: MainSpan | undefined;
+  for (let i = 0; i < spans.length; i++) {
+    const s = spans[i]!;
+    if (t < s.startSec - 1e-9 || t > s.endSec + 1e-9) continue;
+    const next = spans[i + 1];
+    if (next && t >= next.startSec && next.transitionSec > 0) { pick = (t - next.startSec) / next.transitionSec >= 0.5 ? next : s; break; }
+    pick = s; break;
+  }
+  return pick ? { clipId: pick.id, local: r6(t - pick.startSec) } : null;
+}
+
 export function toSrt(p: EditProject): string {
   const ct = p.tracks.find(t => t.kind === 'caption' && t.caption)?.caption;
   if (!ct) return '';
@@ -522,7 +619,7 @@ export function duckRegions(p: EditProject, duck: Duck): Range[] {
 
 /** Base gain of a clip at timeline t, without ducking (volume, keyframes, fades, transition crossfade). */
 function baseGain(p: EditProject, track: Track, item: VideoClip | AudioClip, t: number): number {
-  if (p.mute || track.muted || item.muted) return 0;
+  if (p.mute || track.muted || item.muted || ('holdSec' in item && item.holdSec !== undefined)) return 0; // a hold is silent
   const span = itemSpan(p, track, item);
   if (t < span.startSec - 1e-9 || t > span.endSec + 1e-9) return 0;
   const local = t - span.startSec, len = span.endSec - span.startSec;
@@ -622,6 +719,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   if (!cv || typeof cv !== 'object') bad('edits.canvas', 'is required');
   num('edits.canvas.width', cv.width, 16, 4096, false); num('edits.canvas.height', cv.height, 16, 4096, false); num('edits.canvas.fps', cv.fps, 1, 120, false);
   color('edits.canvas.background', cv.background);
+  if (cv.fill !== undefined && cv.fill !== 'color' && cv.fill !== 'blur') bad('edits.canvas.fill', 'must be color or blur');
   if (!Array.isArray(p.assets) || p.assets.length > LIMITS.maxAssets) bad('edits.assets', `must be a list of at most ${LIMITS.maxAssets}`);
   const assets = new Map<string, Asset>();
   p.assets.forEach((a, i) => {
@@ -668,6 +766,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (it.transform !== undefined) {
       num(`${f}.transform.x`, it.transform.x, -2, 3); num(`${f}.transform.y`, it.transform.y, -2, 3);
       num(`${f}.transform.scale`, it.transform.scale, 0.05, 10); num(`${f}.transform.rotation`, it.transform.rotation, -3600, 3600);
+      flips(`${f}.transform`, it.transform);
     }
     if (it.crop !== undefined) for (const s of ['left', 'top', 'right', 'bottom'] as const) num(`${f}.crop.${s}`, it.crop[s], 0, 0.45);
     num(`${f}.opacity`, it.opacity, 0, 1);
@@ -684,6 +783,15 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     }
     const lp = lookProblem(it.look, assetKinds, lookIds, paletteIds);
     if (lp) bad(lp.field ? `${f}.look.${lp.field}` : `${f}.look`, lp.message);
+  };
+  const flips = (f: string, t: Transform) => {
+    if (t.flipX !== undefined && typeof t.flipX !== 'boolean') bad(`${f}.flipX`, 'must be true or false');
+    if (t.flipY !== undefined && typeof t.flipY !== 'boolean') bad(`${f}.flipY`, 'must be true or false');
+  };
+  const blend = (f: string, b: BlendMode | undefined, overlay: boolean) => {
+    if (b === undefined) return;
+    if (!BLEND_MODES.includes(b)) bad(`${f}.blend`, `one of ${BLEND_MODES.join(', ')}`);
+    if (!overlay) bad(`${f}.blend`, 'only on overlay tracks (video, image)');
   };
   const anim = (f: string, a: Anim | undefined, text: boolean) => {
     if (a === undefined) return;
@@ -747,6 +855,11 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         const c = it as VideoClip;
         clipBase(g, c, ['video']);
         num(`${g}.speed`, c.speed, LIMITS.minSpeed, LIMITS.maxSpeed, false);
+        if (c.holdSec !== undefined) {
+          num(`${g}.holdSec`, c.holdSec, HOLD_MIN_SEC, HOLD_MAX_SEC, false);
+          if (c.speed !== 1 || c.speedCurve !== undefined) bad(`${g}.holdSec`, 'a freeze frame plays at 1× without a speed curve');
+        }
+        blend(g, c.blend, t.kind === 'video');
         if (c.speedCurve !== undefined) {
           const sc = c.speedCurve;
           if (!sc || !['montage', 'hero', 'bullet', 'flashIn', 'flashOut', 'custom'].includes(sc.preset)) bad(`${g}.speedCurve.preset`, 'unknown preset');
@@ -795,6 +908,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         if (a!.kind !== 'image') bad(`${g}.asset`, 'must be image');
         num(`${g}.startSec`, im.startSec, 0, 600, false); num(`${g}.durationSec`, im.durationSec, LIMITS.minItemSec, 600, false);
         visual(g, im, im.durationSec);
+        blend(g, im.blend, true);
         kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
         anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false);
       } else if (t.kind === 'text') {

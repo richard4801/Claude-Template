@@ -138,6 +138,8 @@ final class EditSuiteSession {
     }
 
     var project: E.Project { state.project }
+    /// The preview's player item shows the current project (review mode's Edit operations check waits for it).
+    var previewIsCurrent: Bool { builtProject == project && player.currentItem != nil }
     var duration: Double { state.duration }
     var isReady: Bool { phase == .ready }
     var busy: Bool { exportPhase != .idle }
@@ -167,6 +169,7 @@ final class EditSuiteSession {
             }
             project.sourceTakeId = sourceTakeId
             state = EditSuiteState(project)
+            state.paletteIds = EditV2LookLibrary.shared.paletteIds
             state.markSaved()
             for a in project.assets {
                 if a.take == sourceTakeId { files[a.id] = local }
@@ -229,6 +232,8 @@ final class EditSuiteSession {
         let ok = f(&next)
         state = next
         playhead = state.playhead
+        // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
+        if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
         if state.project != before { projectChanged() }
         return ok
     }
@@ -248,6 +253,17 @@ final class EditSuiteSession {
     }
 
     func endGesture() { state.endGesture() }
+
+    /// "That doesn't fit: the text would run into the next one" style message for a refused change.
+    static func refusalText(_ p: E.EditProblem) -> String {
+        let f = p.field
+        if f.hasSuffix("startSec") || f.hasSuffix("durationSec") || p.message.contains("overlap") {
+            return "That doesn't fit there · it would overlap the next item on its row"
+        }
+        if f.contains("transition") { return "That transition doesn't fit · make the clips longer or the transition shorter" }
+        if f.contains("duration") || f.contains("speed") { return "That would make the edit too short or too long (0.5 s to 10 min)" }
+        return "That change isn't possible here (\(p.message))"
+    }
 
     /// View-only changes (selection, zoom, tabs, snapping…).
     func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next }   // a copy, as in edit (exclusivity)
@@ -303,7 +319,7 @@ final class EditSuiteSession {
                 _ = await self.player.seek(to: CMTime(seconds: self.playhead, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 if wasPlaying { self.player.play() }
             } catch {
-                self.lastError = (error as? ApiError)?.message ?? "Couldn't update the preview"
+                self.lastError = (error as? ApiError)?.message ?? "Couldn't update the preview (\(error.localizedDescription))"
             }
         }
     }
@@ -383,6 +399,23 @@ final class EditSuiteSession {
         seek(playhead + Double(dir) / max(1, project.canvas.fps))
     }
 
+    /// Writes the edit's frame at timeline `t` (the preview's render: looks, text, captions) as a PNG. Nil on success, else why.
+    func saveFrame(at t: Double, to url: URL) async -> String? {
+        guard let item = player.currentItem else { return "The preview isn't ready yet" }
+        let gen = AVAssetImageGenerator(asset: item.asset)
+        gen.videoComposition = item.videoComposition
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        do {
+            let cg = try await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)).image
+            guard let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else { return "Couldn't make the picture" }
+            try data.write(to: url)
+            return nil
+        } catch {
+            return "Couldn't save the frame (\(error.localizedDescription))"
+        }
+    }
+
     // MARK: Media (strips, waveforms, Looks thumbnails)
 
     private func refreshMedia() {
@@ -460,6 +493,50 @@ final class EditSuiteSession {
             lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
         }
     }
+
+    /// A video or picture from this Mac (Uploads / Stickers): uploaded as an editor upload, then added like a take (a video at
+    /// the end of the main track, or as an overlay at the playhead) or as a picture at the playhead (Mac Edit audit: the
+    /// Uploads tab could only take sounds, and pictures had no way in).
+    func importMedia(_ url: URL, overlay: Bool = false) async {
+        guard isReady else { return }
+        let ext = url.pathExtension.lowercased()
+        do {
+            if Self.pictureTypes[ext] != nil {
+                guard let img = NSImage(contentsOf: url), let rep = img.representations.first else { throw ApiError("bad_media", "That picture can't be opened") }
+                notice = "Uploading \(url.lastPathComponent)…"
+                let up = try await api.uploadEditorFile(url, contentType: Self.pictureTypes[ext]!, purpose: nil, progress: nil)
+                let id = project.newId("p")
+                let a = E.Asset(id: id, kind: .image, upload: up, width: max(1, rep.pixelsWide), height: max(1, rep.pixelsHigh))
+                files[id] = url
+                state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+                notice = nil
+                edit { $0.addImage(a) }
+                return
+            }
+            let info = try await VideoEditEngine.info(AVURLAsset(url: url))
+            guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
+            notice = "Uploading \(url.lastPathComponent)…"
+            let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
+            let id = project.newId("v")
+            let audioTracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
+            let sound = !audioTracks.isEmpty
+            let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
+                            hasAudio: sound)
+            files[id] = url
+            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+            notice = nil
+            edit { $0.addVideo(a, overlay: overlay) }
+        } catch {
+            notice = nil
+            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
+        }
+    }
+
+    /// Picture types an editor upload takes (server `/v1/editor/uploads/presign`).
+    static let pictureTypes: [String: String] = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "webp": "image/webp"]
+
+    /// Pictures in this edit (the Stickers tab lists them to add again).
+    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image } }
 
     // MARK: Record VO (Edit suite, workstream 3)
 
@@ -911,7 +988,10 @@ final class EditSuiteSession {
                 guard let self else { return }
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let sources = try await EditV2Engine.load(p, files: files)
-                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: settings.captions == .burnIn)
+                // Captions go out as an .srt only next to a saved file; the Library's video always carries them burnt in
+                // (Mac Edit audit: "Save to Library" with .SRT lost the captions).
+                let burn = settings.captions == .burnIn || saveFileTo == nil
+                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn)
                 try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc) { [weak self] v in
                     if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
                 }
@@ -933,7 +1013,7 @@ final class EditSuiteSession {
                     }
                 })
                 // Claude's save request may name the version.
-                let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p, name: request?.name))
+                let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p, name: request?.name, aiLabel: settings.labelAI))
                 try? FileManager.default.removeItem(at: file)
                 self.exportPhase = .idle
                 self.savedAt = Date()

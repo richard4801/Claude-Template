@@ -169,6 +169,7 @@ extension EditV2 {
     /// Base gain of a clip at timeline t, without ducking (volume, keyframes, fades, transition crossfade).
     private static func baseGain(_ p: Project, _ track: Track, _ item: Item, _ s: Sound, _ spans: [MainSpan], _ t: Double) -> Double {
         if p.mute == true || track.muted == true || s.muted == true { return 0 }
+        if case .video(let v) = item, v.holdSec != nil { return 0 }   // wave 1: a freeze frame is silent
         let span = itemSpan(p, track, item)
         if t < span.startSec - 1e-9 || t > span.endSec + 1e-9 { return 0 }
         let local = t - span.startSec, len = span.endSec - span.startSec

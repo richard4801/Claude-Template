@@ -82,6 +82,7 @@ private struct Validator {
         try num("edits.canvas.height", cv.height, 16, 4096, optional: false)
         try num("edits.canvas.fps", cv.fps, 1, 120, optional: false)
         try color("edits.canvas.background", cv.background)
+        // Wave 1: canvas.fill is typed (color / blur): anything else fails decoding.
         if p.assets.count > E.maxAssets { throw bad("edits.assets", "must be a list of at most \(E.maxAssets)") }
         for (i, a) in p.assets.enumerated() {
             let f = "edits.assets.\(i)"
@@ -149,6 +150,12 @@ private struct Validator {
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.video],
                                  voice: c.voiceEffect)
                     try num("\(g).speed", c.speed, E.minSpeed, E.maxSpeed, optional: false)
+                    // Wave 1: a freeze frame plays at 1× without a speed curve; blend modes on overlay tracks only.
+                    if let h = c.holdSec {
+                        try num("\(g).holdSec", h, E.holdMinSec, E.holdMaxSec, optional: false)
+                        if c.speed != 1 || c.speedCurve != nil { throw bad("\(g).holdSec", "a freeze frame plays at 1× without a speed curve") }
+                    }
+                    if c.blend != nil, t.kind != .video { throw bad("\(g).blend", "only on overlay tracks (video, image)") }
                     if let sc = c.speedCurve {
                         if !E.SpeedPreset.all.contains(sc.preset) { throw bad("\(g).speedCurve.preset", "unknown preset") }
                         if sc.points.count < 2 || sc.points.count > 16 { throw bad("\(g).speedCurve.points", "2–16 points") }

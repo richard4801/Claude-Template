@@ -210,6 +210,8 @@ extension AppStore {
         let connected = accounts(for: m).map(\.platform)
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             postDraft = PostDraft(takeId: take.id, modelId: m.id, platforms: Array(connected.prefix(2)), when: PostTime.suggestions()[0])
+            // A version exported with "Label as AI-generated" starts with the AI label on (Mac Edit audit 2026-11-08).
+            if take.aiLabel == true { postDraft?.aiLabel = true }
         }
     }
 

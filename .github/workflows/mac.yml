@@ -119,6 +119,18 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # Every Edit operation must WORK, not just not crash (Mac Edit audit 2026-11-08, plans/mac-edit-audit.md): each runs
+      # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
+      # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
+      - name: Edit operations and export check
+        working-directory: mac
+        run: |
+          f=snapshots/edit-ops-check.txt
+          if [ ! -f "$f" ]; then echo "no edit-ops-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^STEP' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # When review mode stops early, the crash report says where (thread, frames, exception).
       - name: Crash report
         if: failure()

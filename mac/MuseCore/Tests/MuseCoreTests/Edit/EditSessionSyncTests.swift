@@ -258,6 +258,7 @@ final class EditSessionSyncTests: XCTestCase {
         XCTAssertEqual(graded.mainClips.first?.look, E.Look(lut: "palette:film-gold", strength: 1))
         // Reversible like any look.
         var s = EditSuiteState(fresh)
+        s.paletteIds = ["film-gold"]   // the app's shipped suite looks (the validity guard refuses unknown ones)
         s.apply { _ in graded }
         XCTAssertTrue(s.undo())
         XCTAssertNil(s.project.mainClips.first?.look)

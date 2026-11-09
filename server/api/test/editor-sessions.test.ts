@@ -56,6 +56,10 @@ describe('edit ops', () => {
     add_music: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 1 }],
     ratio: [{ op: 'ratio', ratio: '1:1' }],
     patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
+    flip: [{ op: 'flip', itemId: 'p1', x: true }, { op: 'flip', itemId: 'i1', y: true }],
+    freeze: [{ op: 'freeze', at: 2, durationSec: 1.2 }],
+    blend: [{ op: 'blend', itemId: 'p1', mode: 'overlay' }],
+    fill: [{ op: 'fill', kind: 'blur', color: '#202020' }],
   };
   it('every op changes the project, stays valid, and its inverse patch restores it', () => {
     for (const name of OP_NAMES) {
