@@ -71,3 +71,26 @@ class GifAndExportFormatTest {
         assertEquals(240_000L, a.estimatedBytes(10.0)); assertEquals("This edit has no sound to export", a.refusal(5.0, false))
     }
 }
+
+/** Auto adjust: a dark, flat, warm-and-green frame gets brighter, more contrast, cooler and less green. */
+class AutoAdjustTest {
+    @Test fun correctsADarkWarmGreenFrame() {
+        val rgb = DoubleArray(300 * 3) { i -> val k = i / 3; val v = 0.15 + 0.1 * (k % 10) / 10.0; when (i % 3) { 0 -> v * 1.2; 1 -> v * 1.15; else -> v * 0.8 } }
+        val a = autoAdjust(rgb)
+        assertTrue("brighter ${a.exposure}", a.exposure!! > 0.3)
+        assertTrue("more contrast ${a.contrast}", a.contrast!! > 0.3)
+        assertTrue("cooler ${a.temperature}", a.temperature!! < 0)
+        assertTrue("less green ${a.tint}", a.tint!! > 0)
+        // Its white balance (temperature and tint alone) brings blue up against red.
+        val m = colorMatrix(Adjust(temperature = a.temperature, tint = a.tint), null)
+        val out = DoubleArray(3) { c -> m[c * 4] * 0.2 * 1.2 + m[c * 4 + 1] * 0.2 * 1.15 + m[c * 4 + 2] * 0.2 * 0.8 + m[c * 4 + 3] }
+        assertTrue(out[2] / out[0] > 0.8 / 1.2)
+    }
+
+    @Test fun aBalancedFrameStaysAlmostAsItIs() {
+        val rgb = DoubleArray(1000 * 3) { i -> val k = i / 3; (k % 100) / 99.0 * 0.92 + 0.04 }
+        val a = autoAdjust(rgb, Adjust(highlights = .2))
+        assertEquals(.2, a.highlights!!, 0.0)
+        assertTrue("${a}", kotlin.math.abs(a.exposure ?: 0.0) <= 0.2 && a.temperature == null && a.tint == null)
+    }
+}

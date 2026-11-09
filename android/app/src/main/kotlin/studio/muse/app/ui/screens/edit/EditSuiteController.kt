@@ -134,6 +134,14 @@ sealed interface EditAction {
     data class RemoveKeyframes(val prop: KfProp? = null) : EditAction
     /** Easing of the keyframes at the playhead, and of the next ones added. */
     data class KeyEase(val ease: studio.muse.core.edit.Ease) : EditAction
+    /** The selected item's keyframes at item-local [fromT] dragged by [deltaSec] on the timeline (one undo step). */
+    data class MoveKey(val itemId: String, val fromT: Double, val deltaSec: Double, val done: Boolean = true) : EditAction
+    /** A tone curve of the picture's look ([points] null or the straight line: none). */
+    data class SetCurve(val channel: studio.muse.core.edit.CurveChannel, val points: List<studio.muse.core.edit.CurvePoint>?, val done: Boolean = true) : EditAction
+    /** Auto adjust: the picture under the playhead's levels ([rgb], straight 0–1) → its adjust ([studio.muse.core.edit.autoAdjust]). */
+    class AutoAdjust(val rgb: DoubleArray) : EditAction
+    /** The playhead to the selected item's previous / next keyframe. */
+    data class KeyNav(val next: Boolean) : EditAction
     /** Opacity of the selected picture or text (a keyframe at the playhead when opacity is keyframed). */
     data class SetOpacity(val opacity: Double, val done: Boolean = true) : EditAction
     /** Mirror the selected picture or text (null leaves that axis as it is). */
@@ -367,7 +375,7 @@ class EditSuiteController(
         EditAction.Split -> "Split"; EditAction.Delete -> "Delete"; EditAction.Duplicate -> "Duplicate"
         is EditAction.Trim, is EditAction.TrimBy -> "Trim"; is EditAction.MoveBy -> "Move"; is EditAction.Reorder -> "Reorder"; EditAction.DetachAudio -> "Detach audio"; is EditAction.MuteClip -> if (a.muted) "Mute" else "Unmute"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
-        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe, is EditAction.RemoveKeyframes, is EditAction.KeyEase -> "Keyframe"; is EditAction.SetOpacity -> "Opacity"; is EditAction.Background, is EditAction.Fill -> "Background";
+        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe, is EditAction.RemoveKeyframes, is EditAction.KeyEase, is EditAction.MoveKey -> "Keyframe"; is EditAction.SetOpacity -> "Opacity"; is EditAction.Background, is EditAction.Fill -> "Background";
         is EditAction.Mirror -> "Mirror"; EditAction.MarkBeat, EditAction.ClearBeats -> "Beats"; is EditAction.AddTakeSound -> "Sound"; EditAction.LoopAudio -> "Loop"; is EditAction.CaptionWordText -> "Caption word"; is EditAction.Slip -> "Slip"; is EditAction.ReplaceClip -> "Replace"; is EditAction.SetBlend -> "Blend"; is EditAction.Freeze, is EditAction.HoldLength -> "Freeze frame"; is EditAction.ClipFit -> "Fit"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
         EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
@@ -379,7 +387,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -528,6 +536,20 @@ class EditSuiteController(
                 val id = transformId(u) ?: return
                 val local = localAt(u, id) ?: return say("Move the playhead over this item")
                 if (!change { SuiteOps.removeKeysAt(it, id, local, a.prop) }) say("No keyframe at the playhead")
+            }
+            is EditAction.MoveKey -> {
+                val base = dragBase ?: project ?: return
+                val next = SuiteOps.moveKeysAt(base, a.itemId, a.fromT, a.deltaSec)
+                if (next == null) { if (a.done) endDrag() } else change(a.done) { next }
+            }
+            is EditAction.KeyNav -> {
+                val p0 = project ?: return
+                val id = u.selectedId ?: transformId(u) ?: return
+                val (tr, i) = p0.locate(id) ?: return
+                val start = itemSpan(p0, tr, tr.items[i]).startSec
+                val times = SuiteOps.keyTimes(tr.items[i]).map { start + it }
+                val t = if (a.next) times.firstOrNull { it > u.playheadSec + 0.01 } else times.lastOrNull { it < u.playheadSec - 0.01 }
+                if (t == null) say(if (a.next) "No keyframe after the playhead" else "No keyframe before the playhead") else act(EditAction.Scrub(t, end = true))
             }
             is EditAction.KeyEase -> {
                 _ui.update { it.copy(keyEase = a.ease) }
@@ -712,6 +734,27 @@ class EditSuiteController(
             }
             is EditAction.ImportedCube -> importedCube(u, a)
             is EditAction.AdjustField -> adjust(u, a)
+            is EditAction.AutoAdjust -> {
+                val id = visualId(u) ?: return
+                if (change(refused = "Couldn't adjust this picture") { p ->
+                        p.updateItem(id) { when (it) { is VideoClip -> it.copy(adjust = studio.muse.core.edit.autoAdjust(a.rgb, it.adjust).takeIf { n -> n != Adjust() }); is ImageItem -> it.copy(adjust = studio.muse.core.edit.autoAdjust(a.rgb, it.adjust).takeIf { n -> n != Adjust() }); else -> it } }
+                    }) say("Adjusted · fine-tune with the sliders")
+                else say("This picture already looks balanced")
+            }
+            is EditAction.SetCurve -> {
+                val id = visualId(u) ?: return
+                val pts = a.points?.map { studio.muse.core.edit.CurvePoint(r3(it.x.coerceIn(0.0, 1.0)), r3(it.y.coerceIn(0.0, 1.0))) }?.sortedBy { it.x }
+                    ?.takeUnless { it.size == 2 && it[0] == studio.muse.core.edit.CurvePoint(0.0, 0.0) && it[1] == studio.muse.core.edit.CurvePoint(1.0, 1.0) }
+                change(a.done, "That curve can't be used · keep points apart") { p ->
+                    p.updateItem(id) { it ->
+                        val vis = it as? studio.muse.core.edit.Visual ?: return@updateItem it
+                        val l = vis.look ?: Look()
+                        val curves = (l.curves.orEmpty() - a.channel).let { c -> if (pts != null) c + (a.channel to pts) else c }.ifEmpty { null }
+                        val look = l.copy(curves = curves).takeIf { n -> n != Look() }
+                        when (it) { is VideoClip -> it.copy(look = look); is ImageItem -> it.copy(look = look); else -> it }
+                    }
+                }
+            }
 
             is EditAction.AddPip -> {
                 var newId: String? = null

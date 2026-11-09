@@ -2,6 +2,10 @@ package studio.muse.app.ui.screens.edit
 
 import android.graphics.Bitmap
 import android.os.Looper
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -70,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -178,6 +182,16 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 }
                 ui = c.ui.value.copy(message = null)
             }
+            "m_curves" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 0.0, selectedId = null))
+                c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, listOf(studio.muse.core.edit.CurvePoint(0.0, 0.06), studio.muse.core.edit.CurvePoint(0.3, 0.24), studio.muse.core.edit.CurvePoint(0.72, 0.8), studio.muse.core.edit.CurvePoint(1.0, 0.96))))
+                c.act(EditAction.Open(Panel.FILTERS))
+                ui = c.ui.value.copy(message = null, filtersTab = "Adjust")
+            }
             "m_split" -> {
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
                 val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
@@ -220,6 +234,10 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                         TakeChoice("t3", "Living-room dance", "Edit", ImageRef.asset("g_side"), 7.0, false, false),
                     ), onBack = {}, onOpen = {},
                 )
+                else if (state == "m_curves") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
+                    // The curves editor on its own (in the phone sheet it sits below the fold).
+                    CurvesEditor(ui.project!!.mainClips[0].look?.curves, true) {}
+                }
                 else EditSuiteContent(ui, frames(), host, act = {}, onClose = {}) { mod -> RefImage(ui.poster, mod, 30) }
             }
         }
