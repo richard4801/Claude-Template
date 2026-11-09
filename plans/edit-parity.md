@@ -129,7 +129,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Looks / filters with intensity | Has | Has | — | 32 original looks. More is **Content**, which MUSE can make itself (`lookpack.ts`). |
 | .cube LUT import | Has | Has | — | |
 | Exposure, contrast, saturation, temperature, highlights, shadows, grain | Has | Has | — | |
-| Tint | Missing | Missing | S | |
+| Tint | Has | Missing | S | Android: Filters → Adjust → Tint (`adjust.tint`, green ↔ magenta, after temperature in the colour matrix). |
 | Vignette, sharpen, halation, light leak, chromatic aberration | Has | Partial | S | Engine `look` has them; there are no sliders. Mac: Engine only. Android: Filters → Adjust: vignette, sharpen, fade, glow, light leak, colour fringe, grain. |
 | Curves | Partial | Partial | M | Engine has curves; no editor. Mac: Engine only |
 | HSL (per-hue) | Missing | Missing | L | New engine stage (all three platforms) |

@@ -15,6 +15,7 @@ export type Transform = { x?: number; y?: number; scale?: number; rotation?: num
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'softLight' | 'darken' | 'lighten' | 'add';
 export type Crop = { left?: number; top?: number; right?: number; bottom?: number };
 export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number;
+  /** Green (−1) ↔ magenta (+1), right after temperature in the colour matrix. */ tint?: number;
   /** Edit suite (phase 2): tone, applied after the colour matrix (`toneAdjust`). */ highlights?: number; shadows?: number };
 export type FilterRef = { id: string; amount: number };
 export type Chroma = { color: string; similarity?: number; smoothness?: number; spill?: number };
@@ -569,13 +570,15 @@ export function toSrt(p: EditProject): string {
   }).join('\n');
 }
 
-/** One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint). */
+/** One 3×4 affine RGB matrix for the item's look (exposure → temperature → green/magenta tint → contrast → saturation → preset tint). */
 export function colorMatrix(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): number[] {
   const { adjust: a, tint } = effectiveAdjust(adjust, filter, presets);
   let m = ID;
   const ex = Math.pow(2, a.exposure);
   m = mul([ex, 0, 0, 0, 0, ex, 0, 0, 0, 0, ex, 0], m);
   m = mul([1 + 0.1 * a.temperature, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 - 0.1 * a.temperature, 0], m);
+  const g = clamp(adjust?.tint ?? 0, -1, 1);
+  if (g !== 0) m = mul([1 + 0.05 * g, 0, 0, 0, 0, 1 - 0.1 * g, 0, 0, 0, 0, 1 + 0.05 * g, 0], m);
   const c = 1 + a.contrast, off = 0.5 * (1 - c);
   m = mul([c, 0, 0, off, 0, c, 0, off, 0, 0, c, off], m);
   const s = 1 + a.saturation;
@@ -770,7 +773,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     }
     if (it.crop !== undefined) for (const s of ['left', 'top', 'right', 'bottom'] as const) num(`${f}.crop.${s}`, it.crop[s], 0, 0.45);
     num(`${f}.opacity`, it.opacity, 0, 1);
-    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature', 'highlights', 'shadows'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
+    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature', 'tint', 'highlights', 'shadows'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
     if (it.mask !== undefined) {
       if (!it.mask || !MASK_SHAPES.includes(it.mask.shape)) bad(`${f}.mask.shape`, `one of ${MASK_SHAPES.join(', ')}`);
       num(`${f}.mask.x`, it.mask.x, -1, 2); num(`${f}.mask.y`, it.mask.y, -1, 2); num(`${f}.mask.width`, it.mask.width, 0.01, 3); num(`${f}.mask.height`, it.mask.height, 0.01, 3);
