@@ -262,6 +262,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         autoAdjust = vm::autoAdjust,
         saveKit = vm::saveKit,
@@ -697,6 +698,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         } catch (e: Exception) { r.release(); f.delete(); c.repo.toast("Couldn't start the microphone · try again"); return }
         recorder = r; voFile = f
         controller.update { it.copy(recordingAt = it.playheadSec) }
+        // Hearing the video while recording: the preview plays from the playhead with the edit's sound.
+        val route = outputRoute()
+        voLatency = if (controller.ui.value.voPlayback ?: route.headphones) route.latencySec else null
+        if (voLatency != null) controller.setPlayback(controller.ui.value.playheadSec, true)
     }
 
     /** Stops the voice-over and adds it to the Voice-over lane where recording started. */
@@ -705,11 +710,33 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val f = voFile
         val at = controller.ui.value.recordingAt
         recorder = null; voFile = null
+        val lag = voLatency ?: 0.0
+        voLatency = null
+        if (controller.ui.value.playing) pause()
         val ok = runCatching { r.stop() }.isSuccess
         r.release()
         controller.update { it.copy(recordingAt = null) }
         if (!ok || f == null || f.length() == 0L) { f?.delete(); c.repo.toast("That recording was too short · hold on a little longer"); return }
-        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at)
+        // Heard late by the output's latency, the voice is late by it too: the take goes that much earlier.
+        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at?.let { maxOf(0.0, it - lag) })
+    }
+
+    /** While recording with the video playing: the output route's latency (s); null when the video isn't playing. */
+    private var voLatency: Double? = null
+
+    data class OutputRoute(val headphones: Boolean, val latencySec: Double)
+
+    /**
+     * The current audio output: headphones (wired, USB, Bluetooth) or the speaker, and its latency. Android has no
+     * public output-latency API, so the latency is the typical figure for the route (Bluetooth about 200 ms, wired and
+     * USB about 20 ms); measured per route on a device later if the takes drift.
+     */
+    fun outputRoute(): OutputRoute {
+        val am = app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+        val outs = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
+        val bt = outs.any { it == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || (Build.VERSION.SDK_INT >= 31 && it == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET) }
+        val wired = outs.any { it == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET || it == android.media.AudioDeviceInfo.TYPE_USB_HEADSET }
+        return OutputRoute(bt || wired, if (bt) 0.2 else if (wired) 0.02 else 0.0)
     }
 
     fun importCube(uri: Uri) {

@@ -253,6 +253,8 @@ sealed interface EditAction {
     data object CutToBeats : EditAction
     /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
     data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
+    /** "Play the video while recording" on or off. */
+    data class VoPlayback(val on: Boolean) : EditAction
     /** A photo from the phone (an editor upload, [width] × [height]) placed over the edit at the playhead. */
     data class AddImage(val upload: String, val width: Int, val height: Int) : EditAction
     /** The chroma eyedropper on (pauses; the view model loads the frame) or off. */
@@ -844,6 +846,7 @@ class EditSuiteController(
                 if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
                     say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
             }
+            is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
             is EditAction.AddImage -> {
                 var newId: String? = null
                 if (change(refused = "Couldn't add that photo here") { p -> SuiteOps.addImage(p, a.upload, a.width, a.height, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {

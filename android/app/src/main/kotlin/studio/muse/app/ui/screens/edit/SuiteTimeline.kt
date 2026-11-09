@@ -498,6 +498,11 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                 k++
             }
             drawRect(m.t.line, Offset(0f, RULER_DP * dp - 1 * dp), Size(w, 1 * dp))
+            // Recording a voice-over: a red bar along the ruler from where it started to the playhead.
+            ui.recordingAt?.let { from ->
+                val l = xOf(from); val r = xOf(maxOf(from, view.doubleValue))
+                if (r > l) drawRect(Color(0xFFE5484D), Offset(l, RULER_DP * dp - 5 * dp), Size(r - l, 4 * dp))
+            }
             // The playhead, fixed in the centre, with a small head on the ruler.
             val cx = w / 2f
             drawRect(m.t.ink, Offset(cx - 1 * dp, 0f), Size(2 * dp, size.height))

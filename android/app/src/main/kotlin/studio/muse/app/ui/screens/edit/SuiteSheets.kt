@@ -122,6 +122,8 @@ data class SuiteHost(
     val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
+    /** Whether headphones (wired, USB or Bluetooth) are connected: "Play the video while recording" defaults to it. */
+    val headphones: Boolean = false,
     /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
     val addPhoto: (() -> Unit)? = null,
     /** Style kits: save this edit's style under a name; delete a saved one. */
@@ -540,6 +542,10 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
         SuiteButton("Music from uploads", host.pickAudio, Modifier.weight(1f), icon = "music")
         SuiteButton(if (ui.recordingAt != null) "Stop recording" else "Record VO", host.recordVo, Modifier.weight(1f), icon = "mic", primary = ui.recordingAt != null)
     }
+    // Hearing the video while recording (owner-approved design pass): on by default with headphones, off on the speaker.
+    val playAlong = ui.voPlayback ?: host.headphones
+    OptRow("Play the video while recording", if (host.headphones) "You'll hear it in your headphones" else "Off on the speaker, so the mic doesn't pick it up", playAlong,
+        { act(EditAction.VoPlayback(!playAlong)) })
 }
 
 private fun r1(v: Double) = Math.round(v * 10) / 10.0
