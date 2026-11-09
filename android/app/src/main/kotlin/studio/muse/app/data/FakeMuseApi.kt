@@ -1345,7 +1345,11 @@ class FakeMuseApi(
     override suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject = lock.withLock {
         val on = editorSettingsDemo.on
         fun avail(b: Boolean) = kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(b)))
-        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "translate" to avail(on), "slowmo" to avail(on), "cuts" to avail(true)))
+        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "translate" to kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(on),
+            // Only what the export draws (Latin and Cyrillic for now; WS16).
+            "languages" to kotlinx.serialization.json.JsonObject(listOf("en" to "English", "es" to "Spanish", "pt" to "Portuguese", "fr" to "French", "de" to "German", "it" to "Italian",
+                "nl" to "Dutch", "pl" to "Polish", "tr" to "Turkish", "ru" to "Russian", "uk" to "Ukrainian").associate { (k, v) -> k to kotlinx.serialization.json.JsonPrimitive(v) }))),
+            "slowmo" to avail(on), "cuts" to avail(true)))
     }
 
     override suspend fun matchReference(id: String, modelId: String?) { lock.withLock { recreateSlots(id) } }

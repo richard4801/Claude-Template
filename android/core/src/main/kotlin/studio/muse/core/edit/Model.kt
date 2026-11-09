@@ -363,6 +363,16 @@ data class CaptionOriginal(val language: String? = null, val words: List<Caption
 
 val LANGUAGE_CODE = Regex("^[a-z]{2,3}(-[A-Z]{2})?$")
 
+/** Languages written without spaces between words: their caption pages join words with nothing between. */
+val UNSPACED_LANGUAGES = setOf("ja", "zh", "th", "lo", "km", "my")
+/** Languages written right to left (a caption page reads from the right; the words keep their order). */
+val RTL_LANGUAGES = setOf("ar", "he", "fa", "ur")
+/** What goes between a caption page's words: nothing for unspaced languages, else a space. */
+fun captionJoiner(language: String?): String = if (language?.substringBefore('-') in UNSPACED_LANGUAGES) "" else " "
+fun isRtlLanguage(language: String?): Boolean = language?.substringBefore('-') in RTL_LANGUAGES
+/** A caption page's text in [language] (words joined by [captionJoiner]). */
+fun captionText(words: List<String>, language: String?): String = words.joinToString(captionJoiner(language))
+
 /** The caption track shown in its original words (and back): words and language swap with [CaptionTrack.original]'s. */
 fun swapCaptionOriginal(ct: CaptionTrack): CaptionTrack {
     val o = ct.original ?: return ct

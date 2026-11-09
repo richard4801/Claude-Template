@@ -1534,6 +1534,247 @@
    }
   }
  },
+ "captionScripts": {
+  "languages": [
+   {
+    "language": "en",
+    "joiner": " ",
+    "rtl": false,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": "ja",
+    "joiner": "",
+    "rtl": false,
+    "text": "今日はいい天気"
+   },
+   {
+    "language": "zh",
+    "joiner": "",
+    "rtl": false,
+    "text": "今日はいい天気"
+   },
+   {
+    "language": "zh-TW",
+    "joiner": "",
+    "rtl": false,
+    "text": "今日はいい天気"
+   },
+   {
+    "language": "th",
+    "joiner": "",
+    "rtl": false,
+    "text": "今日はいい天気"
+   },
+   {
+    "language": "ko",
+    "joiner": " ",
+    "rtl": false,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": "ar",
+    "joiner": " ",
+    "rtl": true,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": "he",
+    "joiner": " ",
+    "rtl": true,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": "hi",
+    "joiner": " ",
+    "rtl": false,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": "ru",
+    "joiner": " ",
+    "rtl": false,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": "pt-BR",
+    "joiner": " ",
+    "rtl": false,
+    "text": "今日は いい 天気"
+   },
+   {
+    "language": null,
+    "joiner": " ",
+    "rtl": false,
+    "text": "今日は いい 天気"
+   }
+  ],
+  "srtJa": {
+   "project": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 3.5,
+        "speed": 1
+       },
+       {
+        "id": "c2",
+        "asset": "src",
+        "inSec": 4.5,
+        "outSec": 10,
+        "speed": 1.5
+       }
+      ]
+     },
+     {
+      "id": "cap",
+      "kind": "caption",
+      "items": [],
+      "caption": {
+       "asset": "src",
+       "words": [
+        {
+         "text": "今日は",
+         "startSec": 0.2,
+         "endSec": 0.5
+        },
+        {
+         "text": "いい",
+         "startSec": 0.55,
+         "endSec": 0.7
+        },
+        {
+         "text": "天気",
+         "startSec": 0.9,
+         "endSec": 1.2
+        },
+        {
+         "text": "ですね",
+         "startSec": 1.6,
+         "endSec": 1.8
+        },
+        {
+         "text": "本当に",
+         "startSec": 1.85,
+         "endSec": 2.3
+        },
+        {
+         "text": "そう",
+         "startSec": 2.35,
+         "endSec": 2.7
+        },
+        {
+         "text": "です",
+         "startSec": 2.75,
+         "endSec": 2.9
+        },
+        {
+         "text": "よ",
+         "startSec": 2.95,
+         "endSec": 3.4
+        },
+        {
+         "text": "今日は",
+         "startSec": 4.6,
+         "endSec": 5.1
+        },
+        {
+         "text": "いい",
+         "startSec": 5.2,
+         "endSec": 5.4
+        },
+        {
+         "text": "天気",
+         "startSec": 5.6,
+         "endSec": 5.7
+        },
+        {
+         "text": "ですね",
+         "startSec": 5.75,
+         "endSec": 5.95
+        },
+        {
+         "text": "本当に",
+         "startSec": 6,
+         "endSec": 6.1
+        },
+        {
+         "text": "そう",
+         "startSec": 6.15,
+         "endSec": 6.5
+        },
+        {
+         "text": "です",
+         "startSec": 6.55,
+         "endSec": 6.9
+        },
+        {
+         "text": "よ",
+         "startSec": 6.95,
+         "endSec": 7.4
+        },
+        {
+         "text": "今日は",
+         "startSec": 8,
+         "endSec": 8.2
+        },
+        {
+         "text": "いい",
+         "startSec": 8.25,
+         "endSec": 8.9
+        }
+       ],
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.045,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.12
+        },
+        "preset": "highlight",
+        "highlightColor": "#FFE600",
+        "y": 0.72,
+        "wordsPerPage": 3,
+        "maxLines": 2
+       },
+       "language": "ja"
+      }
+     }
+    ]
+   },
+   "srt": "1\n00:00:00,200 --> 00:00:01,600\n今日はいい天気\n\n2\n00:00:01,600 --> 00:00:02,750\nですね本当にそう\n\n3\n00:00:02,750 --> 00:00:03,967\nですよ今日は\n\n4\n00:00:03,967 --> 00:00:04,500\nいい天気ですね\n\n5\n00:00:04,500 --> 00:00:05,133\n本当にそうです\n\n6\n00:00:05,133 --> 00:00:06,833\nよ今日はいい\n"
+  }
+ },
  "adjustLayers": {
   "project": {
    "version": 2,

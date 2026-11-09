@@ -92,6 +92,11 @@ interface EditBackend {
      * paid.available and each helper's available): captions, matte, denoise. Empty = all available.
      */
     suspend fun helpersOff(): Map<String, String> = emptyMap()
+    /**
+     * The languages translated captions can go into (`GET /v1/editor/features` translate.languages, code → name): only
+     * those the export draws correctly. Empty = none offered.
+     */
+    suspend fun translateLanguages(): List<Pair<String, String>> = emptyList()
 }
 
 /** Everything the editor can be asked to do (one sealed list, so the screen is a pure function of state + [act]). */
@@ -1035,7 +1040,8 @@ class EditSuiteController(
         helpersChecked = true
         scope.launch {
             val off = runCatching { backend.helpersOff() }.getOrDefault(emptyMap())
-            _ui.update { it.copy(helpersOff = off, matteOff = off["matte"], keep = if (off["matte"] != null) null else it.keep) }
+            val langs = runCatching { backend.translateLanguages() }.getOrDefault(emptyList())
+            _ui.update { it.copy(helpersOff = off, matteOff = off["matte"], keep = if (off["matte"] != null) null else it.keep, translateLanguages = langs) }
             then()
         }
     }

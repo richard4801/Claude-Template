@@ -59,14 +59,15 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
             }
             is CaptionPiece -> plan.captionFrame(piece, t)?.let { f ->
                 val st = piece.style
-                drawText(canvas, f.words.joinToString(" "), st.text, 0.5, st.y ?: 0.72, 1.0, 0.0, f.alpha,
-                    highlight = Highlight(f.words, f.highlighted, f.boxed, if (f.boxed == null) f.active else null, f.activeScale, hexArgb(st.highlightColor), f.stripe),
+                val sep = studio.muse.core.edit.captionJoiner(piece.language)
+                drawText(canvas, f.words.joinToString(sep), st.text, 0.5, st.y ?: 0.72, 1.0, 0.0, f.alpha,
+                    highlight = Highlight(f.words, f.highlighted, f.boxed, if (f.boxed == null) f.active else null, f.activeScale, hexArgb(st.highlightColor), f.stripe, sep.length),
                     maxLines = st.maxLines ?: 2)
             }
         }
     }
 
-    private class Highlight(val words: List<String>, val on: List<Boolean>, val boxed: Int?, val scaled: Int?, val scale: Double, val color: Int, val stripe: Int? = null)
+    private class Highlight(val words: List<String>, val on: List<Boolean>, val boxed: Int?, val scaled: Int?, val scale: Double, val color: Int, val stripe: Int? = null, val sep: Int = 1)
 
     private fun drawText(
         canvas: Canvas, text: String, s: TextStyle, cx: Double, cy: Double, scale: Double, rotationCw: Double, alpha: Double,
@@ -91,7 +92,7 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
                 if (highlight.on.getOrElse(k) { false }) spanned.setSpan(ForegroundColorSpan(highlight.color), at, at + word.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 if (highlight.scaled == k && highlight.scale != 1.0) for (sp in listOf(sized, spanned))
                     sp.setSpan(RelativeSizeSpan(highlight.scale.toFloat()), at, at + word.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                at += word.length + 1
+                at += word.length + highlight.sep
             }
         }
         val align = when (s.align) { Align.LEFT -> Layout.Alignment.ALIGN_NORMAL; Align.CENTER -> Layout.Alignment.ALIGN_CENTER; Align.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE }

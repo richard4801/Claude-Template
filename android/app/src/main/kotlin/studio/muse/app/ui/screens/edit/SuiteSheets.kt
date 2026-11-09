@@ -864,7 +864,8 @@ private fun Swatch(hex: String, on: Boolean, onClick: () -> Unit) {
 }
 
 /** Edit by text: the transcript, word-timed; tapping a word cuts it out of the video (fillers in red, cut words struck). */
-private fun languageName(code: String?) = code?.let { c -> CAPTION_LANGUAGES.firstOrNull { it.first == c.substringBefore('-') }?.second ?: c } ?: "Original"
+private fun languageName(code: String?, extra: List<Pair<String, String>> = emptyList()) = code?.let { c ->
+    (extra + CAPTION_LANGUAGES).firstOrNull { it.first == c }?.second ?: (extra + CAPTION_LANGUAGES).firstOrNull { it.first == c.substringBefore('-') }?.second ?: c } ?: "Original"
 
 /**
  * Translated captions (paid): pick a language and a quality, the price on the button; the words come back timed, and
@@ -875,13 +876,15 @@ private fun LanguageBody(ui: EditSuiteUi, ct: studio.muse.core.edit.CaptionTrack
     val m = muse
     ct.original?.let { o ->
         SuiteLabel("Showing")
-        SuiteSeg(listOf("cur" to languageName(ct.language), "other" to languageName(o.language)), "cur", { if (it == "other") act(EditAction.CaptionOriginal(o.language)) },
+        SuiteSeg(listOf("cur" to languageName(ct.language, ui.translateLanguages), "other" to languageName(o.language, ui.translateLanguages)), "cur", { if (it == "other") act(EditAction.CaptionOriginal(o.language)) },
             Modifier.fillMaxWidth(), height = 34.dp, fill = true)
     }
     ui.helpersOff["translate"]?.let { return ComingSoon("Translate captions", it) }
     // Not the language shown, nor the kept one (the switch above shows that).
     val have = setOfNotNull(ct.language, ct.original?.language).map { it.substringBefore('-') }
-    val choices = CAPTION_LANGUAGES.filter { it.first != "auto" && it.first !in have }
+    // The server's list: only languages the export draws correctly.
+    val choices = ui.translateLanguages.filter { it.first.substringBefore('-') !in have }
+    if (choices.isEmpty()) return ComingSoon("Translate captions", "No other languages can be translated to yet")
     var target by rememberSaveable { mutableStateOf(choices.firstOrNull()?.first ?: "es") }
     var best by rememberSaveable { mutableStateOf(false) }
     val job = ui.ai["translate"]

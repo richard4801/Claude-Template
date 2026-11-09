@@ -263,6 +263,19 @@ class EditFixtureTest {
         assertEquals(capOf(d["fr"]!!), fr) // round trip
     }
 
+    @Test fun captionScripts() {
+        val d = fn["captionScripts"]!!.obj
+        val words = listOf("今日は", "いい", "天気")
+        for (c in d["languages"]!!.arr) {
+            val lang = (c.obj["language"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+            assertEquals("joiner $lang", c.obj["joiner"]!!.str, captionJoiner(lang))
+            assertEquals("rtl $lang", (c.obj["rtl"] as JsonPrimitive).content == "true", isRtlLanguage(lang))
+            assertEquals("text $lang", c.obj["text"]!!.str, captionText(words, lang))
+        }
+        val srt = d["srtJa"]!!.obj
+        assertEquals(srt["srt"]!!.str, toSrt(EditJson.parse(srt["project"]!!)))
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj
