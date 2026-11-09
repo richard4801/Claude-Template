@@ -415,6 +415,21 @@ extension AdjustPanel {
     }
 }
 
+/// The owner's model for an Edit helper (WS6's OwnerModelPill, "model picks everywhere"); members see nothing. A new pick
+/// asks for the helper's price again (`kind`), since models can cost differently.
+struct HelperModelPill: View {
+    @Bindable var session: EditSuiteSession
+    var purpose: EnginePurpose
+    var kind: EditorJobKind?
+
+    var body: some View {
+        OwnerModelPill(purpose: purpose, selection: Binding(get: { session.helperModels[purpose] }, set: { m in
+            session.helperModels[purpose] = m
+            if let kind { Task { await session.loadEstimate(kind) } }
+        }), compact: true)
+    }
+}
+
 struct MaskPanel: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
@@ -475,9 +490,12 @@ struct MaskPanel: View {
                     // Not ready yet ("Coming soon"), or the owner switched paid helpers off: say so instead of offering a no-op.
                     HelperUnavailableRow(title: "Remove background", note: session.helperNote(.matte))
                 } else {
-                    SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
-                                   busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
-                        Task { await session.setRemoveBackground(on) }
+                    HStack(spacing: Space.s2) {
+                        SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
+                                       busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
+                            Task { await session.setRemoveBackground(on) }
+                        }
+                        HelperModelPill(session: session, purpose: .matte, kind: .matte)
                     }
                     .task(id: session.state.selection) { await session.loadEstimate(.matte) }
                     HelperNote(text: session.helperNotes[.matte])
@@ -559,6 +577,7 @@ struct KeepPicker: View {
                             Task { await session.runKeep() }
                         }
                         SuiteToolButton(title: "Not now", plain: true) { session.keepPick?.confirming = false }
+                        HelperModelPill(session: session, purpose: .track, kind: nil)
                     }
                 }
             } else {
@@ -733,9 +752,12 @@ struct AudioPanels: View {
             if !session.helperAvailable(.denoise) && !denoised {
                 HelperUnavailableRow(title: "Noise reduction", note: session.helperNote(.denoise))
             } else {
-                SuiteToggleRow(title: "Noise reduction", hint: "Removes background noise and music", isOn: denoised,
-                               busy: session.isRunning(.denoise), trailingNote: session.estimateLabel(.denoise)) { on in
-                    Task { await session.setNoiseReduction(on) }
+                HStack(spacing: Space.s2) {
+                    SuiteToggleRow(title: "Noise reduction", hint: "Removes background noise and music", isOn: denoised,
+                                   busy: session.isRunning(.denoise), trailingNote: session.estimateLabel(.denoise)) { on in
+                        Task { await session.setNoiseReduction(on) }
+                    }
+                    HelperModelPill(session: session, purpose: .denoise, kind: .denoise)
                 }
                 .task(id: session.state.selection) { await session.loadEstimate(.denoise) }
                 HelperNote(text: session.helperNotes[.denoise])

@@ -682,7 +682,7 @@ final class EditSuiteSession {
 
     func loadEstimate(_ k: EditorJobKind, source: EditorSource? = nil, options: EditorJobOptions? = nil) async {
         guard let src = source ?? mainSourceAsset.flatMap({ EditorSource($0) }) else { return }
-        if let e = try? await api.editorEstimate(EditorJobRequest(kind: k, source: src, options: options)) { estimates[k] = e }
+        if let e = try? await api.editorEstimate(EditorJobRequest(kind: k, source: src, options: options, engineModel: model(k, options))) { estimates[k] = e }
     }
 
     func refreshFeatures() async {
@@ -717,13 +717,19 @@ final class EditSuiteSession {
 
     /// Starts a job, polls it until it ends and hands the result to `apply` (on success). A helper that costs money asks
     /// first (`paidAsk`: its price, Run or Cancel) unless `confirmed` (tap to keep confirms in its own panel).
+    /// The owner's model picks for the Edit helpers (OwnerModelPill beside each; members never set one): purpose → model id.
+    var helperModels: [EnginePurpose: String] = [:]
+
+    /// The model a helper job asks for (nil = the studio's default).
+    private func model(_ k: EditorJobKind, _ options: EditorJobOptions?) -> String? { k.enginePurpose(options).flatMap { helperModels[$0] } }
+
     private func run(_ k: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, confirmed: Bool = false,
                      apply: @escaping (EditorJobResult) -> Void) async {
         guard !isRunning(k) else { return }
         helperNotes[k] = nil
         if !confirmed {
             do {
-                let e = try await api.editorEstimate(EditorJobRequest(kind: k, source: source, options: options))
+                let e = try await api.editorEstimate(EditorJobRequest(kind: k, source: source, options: options, engineModel: model(k, options)))
                 if !e.free && e.usd > 0 {
                     paidAsk = PaidAsk(kind: k, title: Self.helperTitle(k), price: e.label) { [weak self] in
                         await self?.run(k, source: source, options: options, confirmed: true, apply: apply)
@@ -737,7 +743,7 @@ final class EditSuiteSession {
             }
         }
         do {
-            var job = try await api.startEditorJob(EditorJobRequest(kind: k, source: source, options: options))
+            var job = try await api.startEditorJob(EditorJobRequest(kind: k, source: source, options: options, engineModel: model(k, options)))
             jobs[k] = job
             while job.isRunning {
                 try await Task.sleep(nanoseconds: 700_000_000)
@@ -909,7 +915,7 @@ final class EditSuiteSession {
     /// The price of cutting out what was picked (asked with the same points the job will get).
     func loadKeepEstimate() async {
         guard let k = keepPick, k.canRun, let a = project.asset(k.assetId), let src = EditorSource(a) else { keepEstimate = nil; return }
-        let e = try? await api.editorEstimate(EditorJobRequest(kind: .matte, source: src, options: k.options))
+        let e = try? await api.editorEstimate(EditorJobRequest(kind: .matte, source: src, options: k.options, engineModel: model(.matte, k.options)))
         if keepPick?.points == k.points { keepEstimate = e }
     }
 

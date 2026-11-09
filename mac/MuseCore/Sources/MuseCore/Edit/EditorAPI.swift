@@ -61,7 +61,24 @@ public struct EditorJobRequest: Codable, Hashable, Sendable {
     public var kind: EditorJobKind
     public var source: EditorSource
     public var options: EditorJobOptions?
-    public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil) { self.kind = kind; self.source = source; self.options = options }
+    /// Owner only (WS13): the helper's model, checked by the server against its candidates; nil = the studio's default.
+    public var engineModel: String?
+    public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, engineModel: String? = nil) {
+        self.kind = kind; self.source = source; self.options = options; self.engineModel = engineModel
+    }
+}
+
+extension EditorJobKind {
+    /// The model purpose behind a helper (server editor/service.ts): captions and cuts transcribe, matte cuts out (track
+    /// when it follows picked points), denoise separates; beats run no model.
+    public func enginePurpose(_ options: EditorJobOptions?) -> EnginePurpose? {
+        switch self {
+        case .captions, .cuts: return .captions
+        case .matte: return options?.points != nil ? .track : .matte
+        case .denoise: return .denoise
+        case .beats: return nil
+        }
+    }
 }
 
 /// GET /v1/editor/features: what the server can do now (paid helpers switched off by the owner, background removal not

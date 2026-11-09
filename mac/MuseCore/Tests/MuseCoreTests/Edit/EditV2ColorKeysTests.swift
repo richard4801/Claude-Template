@@ -47,3 +47,20 @@ final class EditV2ColorKeysTests: XCTestCase {
         XCTAssertFalse(s.setVisualValue(.volume, 1))
     }
 }
+
+/// The owner's model pick on Edit helpers (WS13 engineModel): the purpose each helper runs, and the field on the wire.
+final class EditorHelperModelTests: XCTestCase {
+    func testPurposesAndEncoding() throws {
+        XCTAssertEqual(EditorJobKind.captions.enginePurpose(nil), .captions)
+        XCTAssertEqual(EditorJobKind.cuts.enginePurpose(nil), .captions)
+        XCTAssertEqual(EditorJobKind.matte.enginePurpose(nil), .matte)
+        XCTAssertEqual(EditorJobKind.matte.enginePurpose(EditorJobOptions(points: [])), .track)
+        XCTAssertEqual(EditorJobKind.denoise.enginePurpose(nil), .denoise)
+        XCTAssertNil(EditorJobKind.beats.enginePurpose(nil))
+        let src = EditorSource(takeId: "tk", durationSec: 3)
+        let plain = String(decoding: try JSONEncoder().encode(EditorJobRequest(kind: .denoise, source: src)), as: UTF8.self)
+        XCTAssertFalse(plain.contains("engineModel"), "no pick: the studio's default, field left out")
+        let picked = String(decoding: try JSONEncoder().encode(EditorJobRequest(kind: .denoise, source: src, engineModel: "m1")), as: UTF8.self)
+        XCTAssertTrue(picked.contains("\"engineModel\":\"m1\""))
+    }
+}
