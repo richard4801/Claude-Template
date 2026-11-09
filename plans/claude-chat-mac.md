@@ -98,7 +98,7 @@ The shared parts are in `mac/Muse/Views/Claude/`: `ChatTranscriptView` (rows, st
   - same leak rules;
   - same markdown coverage.
 
-## The old screen stayed drawn after a screen change (root cause found)
+## Fixed: the old screen stayed drawn after a screen change
 _Seen only in review mode on the CI runner (macOS 15), four times over five runs; not reproduced by hand. For the owner of `RootView` and screen switching._
 
 **What happens.** After `store.go(…)` (or `openEdit`, which calls it), the sidebar shows the new screen as selected, and `store.screen` has the new value, but the main area keeps drawing the old screen. Seen:
@@ -126,7 +126,7 @@ By hand, the nearest equivalent is to open a Claude panel, then click a sidebar 
 
 **Workaround in review mode only.** The chat shots pause 0.8 s after the overlay closes. Recreate and Edit retry through another screen if their chat isn't drawn, up to three times, and log each try.
 
-**Status (WS17): root cause found; fix pending two green Mac CI runs.** The first fix (ScreenHost alone, CI 42594641852) wasn't enough. Prod's runs at 231387e and 0d2b123 failed `stale_screen d`, and WS9's composer fit check drew Library under Video suite.
+**Fixed (WS17): two green Mac CI runs with the fix. Run 42610578768 (C and D, 20/20) and run 42619282851 (all four themes, 40/40). The race showed up again in run 42619282851, theme B try 5 and theme D try 9 (`bodies [home@e, edit@e+1]`), and the screenEpoch redraw drew the right screen both times.** The first fix (ScreenHost alone, CI 42594641852) wasn't enough. Prod's runs at 231387e and 0d2b123 failed `stale_screen d`, and WS9's composer fit check drew Library under Video suite.
 
 **Root cause: a missed Observation update.**
 - `AppStore` is `@Observable`. Observation tells SwiftUI about a change on `willSet`, before the new value is stored.
