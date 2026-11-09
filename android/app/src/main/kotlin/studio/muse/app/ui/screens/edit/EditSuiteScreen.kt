@@ -102,6 +102,8 @@ import studio.muse.core.edit.Track
 import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.VideoClip
 import studio.muse.core.edit.exportProject
+import studio.muse.core.edit.itemSpan
+import studio.muse.core.edit.locate
 import studio.muse.core.edit.fromV1
 import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.toSrt
@@ -258,6 +260,9 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        autoAdjust = vm::autoAdjust,
+        saveKit = vm::saveKit,
+        deleteKit = vm::deleteKit,
         modelRow = { purpose ->
             studio.muse.app.data.ModelPurpose.of(purpose)?.let { mp ->
                 studio.muse.app.ui.screens.ModelChoiceRow(mp, studio.muse.app.ui.screens.ModelPick(ui.helperModels[purpose]), onPick = { pick -> vm.controller.act(EditAction.PickModel(purpose, pick.model)) })
@@ -366,6 +371,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     init {
         load()
+        loadKits()
         viewModelScope.launch {
             controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
                 if (p == null) return@collect
@@ -376,6 +382,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             }
         }
         viewModelScope.launch { controller.ui.map { it.playing }.distinctUntilChanged().collect { on -> _player.value?.let { if (on) it.play() else it.pause() } } }
+        // The chroma eyedropper: its frame once it opens (the source picture at the playhead, 720 px).
+        viewModelScope.launch {
+            controller.ui.map { it.pick?.takeIf { pk -> pk.argb == null }?.clipId }.distinctUntilChanged().collect { id ->
+                if (id == null) return@collect
+                val fr = sourceFrame(id, 720)
+                if (fr == null) { controller.act(EditAction.PickColor(false)); c.repo.toast("This clip's file isn't on the phone yet") }
+                else controller.act(EditAction.PickFrame(fr.first, fr.second, fr.third))
+            }
+        }
         viewModelScope.launch {
             // Scrubbing: the preview follows the playhead frame by frame. Seeks are conflated (only the latest position
             // waits while one is being decoded), so a fast drag never queues up stale frames; when the finger stops,
@@ -539,6 +554,73 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             if (f == null) return@launch c.repo.toast("Added · the preview can't show it until it downloads")
             files[a.id] = f
             rebuildPreview(p); loadWaves(p)
+        }
+    }
+
+    // ------------------------------------------------------------ style kits
+    private fun kitsOf(list: List<studio.muse.app.data.EditKit>) = list.mapNotNull { k -> runCatching { KitChoice(k.id, k.name, studio.muse.core.edit.parseKit(k.kit)) }.getOrNull() }
+
+    fun loadKits() {
+        viewModelScope.launch {
+            runCatching { c.repo.api.editKits() }
+                .onSuccess { l -> controller.update { it.copy(kits = kitsOf(l), kitsNote = null) } }
+                .onFailure { e -> controller.update { it.copy(kitsNote = (e as? studio.muse.app.data.ApiException)?.message ?: "Couldn't load your style kits") } }
+        }
+    }
+
+    /** Saves the edit's style ([studio.muse.core.edit.kitOf]) as kit [name]. */
+    fun saveKit(name: String) {
+        val p = controller.project ?: return
+        val kit = studio.muse.core.edit.kitOf(p)
+        if (kit.isEmpty) return c.repo.toast("This edit has no style to save yet · add a look, colour, transition or captions")
+        viewModelScope.launch {
+            runCatching { c.repo.api.saveEditKit(name.trim().take(60).ifEmpty { "${controller.ui.value.title} style" }, studio.muse.core.edit.encodeKit(kit)) }
+                .onSuccess { c.repo.toast("Saved “${it.name}”"); loadKits() }
+                .onFailure { e -> c.repo.toast((e as? studio.muse.app.data.ApiException)?.message ?: "Couldn't save the style kit · try again") }
+        }
+    }
+
+    fun deleteKit(id: String) {
+        viewModelScope.launch {
+            runCatching { c.repo.api.deleteEditKit(id) }.onSuccess { loadKits() }.onFailure { c.repo.toast("Couldn't delete that style kit · try again") }
+        }
+    }
+
+    /**
+     * Auto adjust: the selected picture's (or the clip under the playhead's) source frame at the playhead, read small
+     * (96 px) from its file, then the controller's [EditAction.AutoAdjust].
+     */
+    fun autoAdjust() {
+        val u = controller.ui.value
+        val clip = (u.selection?.second as? VideoClip) ?: u.activeClip ?: return c.repo.toast("Select a clip to adjust")
+        viewModelScope.launch {
+            val (_, _, px) = sourceFrame(clip.id, 96) ?: return@launch c.repo.toast("Couldn't read this frame · try another spot")
+            controller.act(EditAction.AutoAdjust(DoubleArray(px.size * 3) { j -> ((px[j / 3] shr (16 - 8 * (j % 3))) and 0xFF) / 255.0 }))
+        }
+    }
+
+    /**
+     * Clip [clipId]'s source frame at the playhead (before its look), at most [maxSide] px on the long side, as ARGB: for
+     * Auto adjust and the chroma eyedropper. Null when the clip's file isn't on the phone or the frame can't be read.
+     */
+    private suspend fun sourceFrame(clipId: String, maxSide: Int): Triple<Int, Int, IntArray>? {
+        val p = controller.project ?: return null
+        val (tr, i) = p.locate(clipId) ?: return null
+        val clip = tr.items[i] as? VideoClip ?: return null
+        val f = files[clip.asset] ?: return null
+        val local = (controller.ui.value.playheadSec - itemSpan(p, tr, clip).startSec).coerceAtLeast(0.0)
+        val src = studio.muse.core.edit.clipSourceAt(clip, local)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(f.absolutePath)
+                    val bmp = r.getFrameAtTime((src * 1_000_000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST) ?: return@runCatching null
+                    val k = minOf(1f, maxSide.toFloat() / maxOf(bmp.width, bmp.height))
+                    val small = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).roundToInt()), maxOf(1, (bmp.height * k).roundToInt()), true) else bmp
+                    Triple(small.width, small.height, IntArray(small.width * small.height).also { small.getPixels(it, 0, small.width, 0, 0, small.width, small.height) })
+                } finally { r.release() }
+            }.getOrNull()
         }
     }
 

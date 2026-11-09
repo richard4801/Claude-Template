@@ -7,7 +7,16 @@ import { hash01, lookProblem, type Look } from './look.js';
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
 export type Keyframe = { t: number; v: number; ease?: Ease };
-export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
+export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume' | ColorKfProp | MaskKfProp | LookKfProp;
+/** Mask keyframes (M): replace the mask's field over time (`maskAt`); only on items with a mask. */
+export type MaskKfProp = 'maskX' | 'maskY' | 'maskWidth' | 'maskHeight' | 'maskRotation' | 'maskFeather';
+export const MASK_KF_PROPS: MaskKfProp[] = ['maskX', 'maskY', 'maskWidth', 'maskHeight', 'maskRotation', 'maskFeather'];
+/** Look keyframes (M): the finishing effects' amounts over time (`lookAt`); keying one the look lacks adds it. */
+export type LookKfProp = 'vignette' | 'grain' | 'leak';
+export const LOOK_KF_PROPS: LookKfProp[] = ['vignette', 'grain', 'leak'];
+/** Colour keyframes (M): replace the adjust field's static value over time (`adjustAt`). Video clips and images. */
+export type ColorKfProp = 'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint';
+export const COLOR_KF_PROPS: ColorKfProp[] = ['exposure', 'contrast', 'saturation', 'temperature', 'tint'];
 export type Keyframes = Partial<Record<KfProp, Keyframe[]>>;
 /** flipX / flipY (wave 1, mirror): the picture mirrored about its own centre, after the crop and before scale and rotation. */
 export type Transform = { x?: number; y?: number; scale?: number; rotation?: number; flipX?: boolean; flipY?: boolean };
@@ -15,6 +24,7 @@ export type Transform = { x?: number; y?: number; scale?: number; rotation?: num
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'softLight' | 'darken' | 'lighten' | 'add';
 export type Crop = { left?: number; top?: number; right?: number; bottom?: number };
 export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number;
+  /** Green (−1) ↔ magenta (+1), right after temperature in the colour matrix. */ tint?: number;
   /** Edit suite (phase 2): tone, applied after the colour matrix (`toneAdjust`). */ highlights?: number; shadows?: number };
 export type FilterRef = { id: string; amount: number };
 export type Chroma = { color: string; similarity?: number; smoothness?: number; spill?: number };
@@ -43,7 +53,9 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
   /** Wave 1, freeze frame: the clip shows the single source frame at inSec for holdSec seconds, silent (clipLength = holdSec). */
   holdSec?: number;
   /** Wave 1: overlay tracks only. */
-  blend?: BlendMode };
+  blend?: BlendMode;
+  /** In / out animation (as images: fade, pop, slideUp, slideDown, zoom), main or overlay; [animState] over clipLength. */
+  animIn?: Anim; animOut?: Anim };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode };
@@ -134,6 +146,76 @@ export function keyframeValue(keys: Keyframe[], t: number): number {
 export function propAt(item: { keyframes?: Keyframes }, prop: KfProp, fallback: number, t: number) {
   const k = item.keyframes?.[prop];
   return k && k.length ? keyframeValue(k, t) : fallback;
+}
+
+/** The item's adjust at item-local t: each keyed colour property ([COLOR_KF_PROPS]) at its keyframes' value there. */
+export function adjustAt(item: { adjust?: Adjust; keyframes?: Keyframes }, t: number): Adjust | undefined {
+  const keyed = COLOR_KF_PROPS.filter(p => item.keyframes?.[p]?.length);
+  if (!keyed.length) return item.adjust;
+  const out: Adjust = { ...(item.adjust ?? {}) };
+  for (const p of keyed) out[p] = r6(propAt(item, p, item.adjust?.[p] ?? 0, t));
+  return out;
+}
+
+/**
+ * Auto adjust (M): one frame's levels ([rgb]: r, g, b, … straight sRGB 0–1, e.g. the frame at 96 px) → a gentle adjust
+ * for the colour matrix, over [base] (its other fields kept). Exposure moves the mean luma towards 0.45 (±0.6 stop);
+ * contrast the 2–98 % spread towards 0.85 (−0.3…0.4); temperature and tint balance red/blue and green half-way;
+ * saturation lifts flat footage (+0.15) and calms very saturated footage (−0.1). Fields that come out 0 are left out.
+ */
+export function autoAdjust(rgb: number[], base?: Adjust): Adjust {
+  const n = Math.floor(rgb.length / 3);
+  if (n === 0) return { ...(base ?? {}) };
+  let r = 0, g = 0, b = 0, chroma = 0;
+  const luma: number[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const R = rgb[i * 3]!, G = rgb[i * 3 + 1]!, B = rgb[i * 3 + 2]!;
+    r += R; g += G; b += B;
+    luma[i] = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+    chroma += Math.max(R, G, B) - Math.min(R, G, B);
+  }
+  r /= n; g /= n; b /= n; chroma /= n;
+  luma.sort((x, y) => x - y);
+  const mean = luma.reduce((s, v) => s + v, 0) / n;
+  const lo = luma[clamp(Math.floor(n * 0.02), 0, n - 1)]!, hi = luma[clamp(Math.floor(n * 0.98), 0, n - 1)]!;
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const e = mean > 1e-3 ? clamp(Math.log(0.45 / mean) / Math.log(2), -0.6, 0.6) : 0.6;
+  const spread = hi - lo;
+  const c = spread > 1e-3 ? clamp(0.85 / spread - 1, -0.3, 0.4) : 0;
+  const rb = (r + b) / 2;
+  const t = r + b > 1e-3 ? clamp((b - r) / (0.1 * (r + b)) * 0.5, -1, 1) : 0;
+  const tn = g > 1e-3 ? clamp((g - rb) / (0.1 * g + 0.05 * rb) * 0.5, -1, 1) : 0;
+  const s = chroma < 0.08 ? 0.15 : chroma > 0.35 ? -0.1 : 0;
+  const out: Adjust = { ...(base ?? {}) };
+  const set = (k: 'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint', v: number) => { const x = r2(v); if (x !== 0) out[k] = x; else delete out[k]; };
+  set('exposure', e); set('contrast', c); set('saturation', s); set('temperature', t); set('tint', tn);
+  return out;
+}
+
+const keyed = (item: { keyframes?: Keyframes }, p: KfProp) => !!item.keyframes?.[p]?.length;
+
+/** The item's mask at item-local t: each keyed mask field ([MASK_KF_PROPS]) at its keyframes' value there. */
+export function maskAt(item: { mask?: Mask; keyframes?: Keyframes }, t: number): Mask | undefined {
+  const m = item.mask;
+  if (!m || !MASK_KF_PROPS.some(p => keyed(item, p))) return m;
+  const out: Mask = { ...m };
+  const f: [MaskKfProp, 'x' | 'y' | 'width' | 'height' | 'rotation' | 'feather', number][] = [
+    ['maskX', 'x', 0.5], ['maskY', 'y', 0.5], ['maskWidth', 'width', 0.5], ['maskHeight', 'height', 0.5], ['maskRotation', 'rotation', 0], ['maskFeather', 'feather', 0.1]];
+  for (const [p, k, d] of f) if (keyed(item, p)) out[k] = r6(propAt(item, p, m[k] ?? d, t));
+  return out;
+}
+
+/**
+ * The item's look at item-local t: each keyed finishing amount ([LOOK_KF_PROPS]) at its keyframes' value there. A keyed
+ * effect the look lacks is added with only its amount (a leak as kind 'warm'), so the renderer's defaults apply.
+ */
+export function lookAt(item: { look?: Look; keyframes?: Keyframes }, t: number): Look | undefined {
+  if (!LOOK_KF_PROPS.some(p => keyed(item, p))) return item.look;
+  const out: Look = { ...(item.look ?? {}) };
+  if (keyed(item, 'vignette')) out.vignette = { ...(out.vignette ?? {}), amount: r6(propAt(item, 'vignette', out.vignette?.amount ?? 0, t)) };
+  if (keyed(item, 'grain')) out.grain = { ...(out.grain ?? {}), amount: r6(propAt(item, 'grain', out.grain?.amount ?? 0, t)) };
+  if (keyed(item, 'leak')) out.leak = { kind: 'warm', ...(out.leak ?? {}), amount: r6(propAt(item, 'leak', out.leak?.amount ?? 0, t)) };
+  return out;
 }
 
 // ------------------------------------------------------------------ timeline
@@ -569,13 +651,15 @@ export function toSrt(p: EditProject): string {
   }).join('\n');
 }
 
-/** One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint). */
+/** One 3×4 affine RGB matrix for the item's look (exposure → temperature → green/magenta tint → contrast → saturation → preset tint). */
 export function colorMatrix(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): number[] {
   const { adjust: a, tint } = effectiveAdjust(adjust, filter, presets);
   let m = ID;
   const ex = Math.pow(2, a.exposure);
   m = mul([ex, 0, 0, 0, 0, ex, 0, 0, 0, 0, ex, 0], m);
   m = mul([1 + 0.1 * a.temperature, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 - 0.1 * a.temperature, 0], m);
+  const g = clamp(adjust?.tint ?? 0, -1, 1);
+  if (g !== 0) m = mul([1 + 0.05 * g, 0, 0, 0, 0, 1 - 0.1 * g, 0, 0, 0, 0, 1 + 0.05 * g, 0], m);
   const c = 1 + a.contrast, off = 0.5 * (1 - c);
   m = mul([c, 0, 0, off, 0, c, 0, off, 0, 0, c, off], m);
   const s = 1 + a.saturation;
@@ -743,11 +827,12 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   let total = 0;
   const filterIds = new Set(presets.map(x => x.id));
 
-  const kfs = (f: string, k: Keyframes | undefined, len: number, allowed: KfProp[]) => {
+  const kfs = (f: string, k: Keyframes | undefined, len: number, allowed: KfProp[], hasMask = false) => {
     if (k === undefined) return;
     if (typeof k !== 'object' || k === null) bad(f, 'must be an object');
     for (const [prop, list] of Object.entries(k)) {
       if (!allowed.includes(prop as KfProp)) bad(`${f}.${prop}`, 'is not a keyframe property here');
+      if ((MASK_KF_PROPS as string[]).includes(prop) && !hasMask) bad(`${f}.${prop}`, 'needs a mask');
       if (!Array.isArray(list) || list.length > LIMITS.maxKeyframes) bad(`${f}.${prop}`, `at most ${LIMITS.maxKeyframes} keyframes`);
       let prev = -Infinity;
       (list as Keyframe[]).forEach((kf, j) => {
@@ -755,7 +840,10 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.t`, kf.t, 0, len + LIMITS.endSlackSec, false);
         if (kf.t < prev) bad(`${g}.t`, 'keyframes must be in time order');
         prev = kf.t;
-        const range: Record<KfProp, [number, number]> = { x: [-2, 3], y: [-2, 3], scale: [0.05, 10], rotation: [-3600, 3600], opacity: [0, 1], volume: [0, 2] };
+        const range: Record<KfProp, [number, number]> = { x: [-2, 3], y: [-2, 3], scale: [0.05, 10], rotation: [-3600, 3600], opacity: [0, 1], volume: [0, 2],
+          exposure: [-1, 1], contrast: [-1, 1], saturation: [-1, 1], temperature: [-1, 1], tint: [-1, 1],
+          maskX: [-1, 2], maskY: [-1, 2], maskWidth: [0.01, 3], maskHeight: [0.01, 3], maskRotation: [-360, 360], maskFeather: [0, 1],
+          vignette: [-1, 1], grain: [0, 1], leak: [0, 1] };
         num(`${g}.v`, kf.v, range[prop as KfProp][0], range[prop as KfProp][1], false);
         if (kf.ease !== undefined && !['linear', 'easeIn', 'easeOut', 'easeInOut', 'hold'].includes(kf.ease)) bad(`${g}.ease`, 'unknown ease');
       });
@@ -770,7 +858,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     }
     if (it.crop !== undefined) for (const s of ['left', 'top', 'right', 'bottom'] as const) num(`${f}.crop.${s}`, it.crop[s], 0, 0.45);
     num(`${f}.opacity`, it.opacity, 0, 1);
-    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature', 'highlights', 'shadows'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
+    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature', 'tint', 'highlights', 'shadows'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
     if (it.mask !== undefined) {
       if (!it.mask || !MASK_SHAPES.includes(it.mask.shape)) bad(`${f}.mask.shape`, `one of ${MASK_SHAPES.join(', ')}`);
       num(`${f}.mask.x`, it.mask.x, -1, 2); num(`${f}.mask.y`, it.mask.y, -1, 2); num(`${f}.mask.width`, it.mask.width, 0.01, 3); num(`${f}.mask.height`, it.mask.height, 0.01, 3);
@@ -872,7 +960,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
           if (sc.points[0]![0] !== 0 || sc.points[sc.points.length - 1]![0] !== 1) bad(`${g}.speedCurve.points`, 'must start at x 0 and end at x 1');
         }
         visual(g, c, clipLength(c));
-        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']);
+        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume', ...COLOR_KF_PROPS, ...MASK_KF_PROPS, ...LOOK_KF_PROPS], !!c.mask);
         if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
         if (c.alphaMatte !== undefined) {
           const m = c.alphaMatte as AlphaMatte;
@@ -883,6 +971,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
             if (m.invert !== undefined && typeof m.invert !== 'boolean') bad(`${g}.alphaMatte.invert`, 'true or false');
           }
         }
+        anim(`${g}.animIn`, c.animIn, false); anim(`${g}.animOut`, c.animOut, false);
         if (c.chroma !== undefined) {
           color(`${g}.chroma.color`, c.chroma.color, false);
           num(`${g}.chroma.similarity`, c.chroma.similarity, 0, 1); num(`${g}.chroma.smoothness`, c.chroma.smoothness, 0, 1); num(`${g}.chroma.spill`, c.chroma.spill, 0, 1);
@@ -909,7 +998,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.startSec`, im.startSec, 0, 600, false); num(`${g}.durationSec`, im.durationSec, LIMITS.minItemSec, 600, false);
         visual(g, im, im.durationSec);
         blend(g, im.blend, true);
-        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
+        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity', ...COLOR_KF_PROPS, ...MASK_KF_PROPS, ...LOOK_KF_PROPS], !!im.mask);
         anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false);
       } else if (t.kind === 'text') {
         const tx = it as TextItem;

@@ -1,4 +1,5108 @@
 {
+ "motionKeys": [
+  {
+   "item": {
+    "mask": {
+     "shape": "circle",
+     "x": 0.5,
+     "y": 0.4,
+     "width": 0.6,
+     "height": 0.5,
+     "feather": 0.2
+    },
+    "keyframes": {
+     "maskX": [
+      {
+       "t": 0,
+       "v": 0.2
+      },
+      {
+       "t": 2,
+       "v": 0.8,
+       "ease": "easeInOut"
+      }
+     ],
+     "maskWidth": [
+      {
+       "t": 1,
+       "v": 0.3
+      },
+      {
+       "t": 3,
+       "v": 0.9
+      }
+     ],
+     "maskFeather": [
+      {
+       "t": 0,
+       "v": 0,
+       "ease": "hold"
+      },
+      {
+       "t": 1.5,
+       "v": 0.5
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "mask": {
+      "shape": "circle",
+      "x": 0.2,
+      "y": 0.4,
+      "width": 0.3,
+      "height": 0.5,
+      "feather": 0
+     },
+     "look": null
+    },
+    {
+     "t": 0.5,
+     "mask": {
+      "shape": "circle",
+      "x": 0.35,
+      "y": 0.4,
+      "width": 0.3,
+      "height": 0.5,
+      "feather": 0
+     },
+     "look": null
+    },
+    {
+     "t": 1,
+     "mask": {
+      "shape": "circle",
+      "x": 0.5,
+      "y": 0.4,
+      "width": 0.3,
+      "height": 0.5,
+      "feather": 0
+     },
+     "look": null
+    },
+    {
+     "t": 1.25,
+     "mask": {
+      "shape": "circle",
+      "x": 0.575,
+      "y": 0.4,
+      "width": 0.375,
+      "height": 0.5,
+      "feather": 0
+     },
+     "look": null
+    },
+    {
+     "t": 2,
+     "mask": {
+      "shape": "circle",
+      "x": 0.8,
+      "y": 0.4,
+      "width": 0.6,
+      "height": 0.5,
+      "feather": 0.5
+     },
+     "look": null
+    },
+    {
+     "t": 3,
+     "mask": {
+      "shape": "circle",
+      "x": 0.8,
+      "y": 0.4,
+      "width": 0.9,
+      "height": 0.5,
+      "feather": 0.5
+     },
+     "look": null
+    }
+   ]
+  },
+  {
+   "item": {
+    "mask": {
+     "shape": "rect"
+    },
+    "look": {
+     "vignette": {
+      "amount": 0.2,
+      "size": 0.6
+     },
+     "lift": 0.1
+    },
+    "keyframes": {
+     "maskRotation": [
+      {
+       "t": 0,
+       "v": -45
+      },
+      {
+       "t": 3,
+       "v": 45
+      }
+     ],
+     "vignette": [
+      {
+       "t": 0,
+       "v": 0
+      },
+      {
+       "t": 2,
+       "v": -0.6
+      }
+     ],
+     "grain": [
+      {
+       "t": 0.5,
+       "v": 0.4
+      }
+     ],
+     "leak": [
+      {
+       "t": 1,
+       "v": 0
+      },
+      {
+       "t": 3,
+       "v": 0.8
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "mask": {
+      "shape": "rect",
+      "rotation": -45
+     },
+     "look": {
+      "vignette": {
+       "amount": 0,
+       "size": 0.6
+      },
+      "lift": 0.1,
+      "grain": {
+       "amount": 0.4
+      },
+      "leak": {
+       "kind": "warm",
+       "amount": 0
+      }
+     }
+    },
+    {
+     "t": 0.5,
+     "mask": {
+      "shape": "rect",
+      "rotation": -30
+     },
+     "look": {
+      "vignette": {
+       "amount": -0.15,
+       "size": 0.6
+      },
+      "lift": 0.1,
+      "grain": {
+       "amount": 0.4
+      },
+      "leak": {
+       "kind": "warm",
+       "amount": 0
+      }
+     }
+    },
+    {
+     "t": 1,
+     "mask": {
+      "shape": "rect",
+      "rotation": -15
+     },
+     "look": {
+      "vignette": {
+       "amount": -0.3,
+       "size": 0.6
+      },
+      "lift": 0.1,
+      "grain": {
+       "amount": 0.4
+      },
+      "leak": {
+       "kind": "warm",
+       "amount": 0
+      }
+     }
+    },
+    {
+     "t": 1.25,
+     "mask": {
+      "shape": "rect",
+      "rotation": -7.5
+     },
+     "look": {
+      "vignette": {
+       "amount": -0.375,
+       "size": 0.6
+      },
+      "lift": 0.1,
+      "grain": {
+       "amount": 0.4
+      },
+      "leak": {
+       "kind": "warm",
+       "amount": 0.1
+      }
+     }
+    },
+    {
+     "t": 2,
+     "mask": {
+      "shape": "rect",
+      "rotation": 15
+     },
+     "look": {
+      "vignette": {
+       "amount": -0.6,
+       "size": 0.6
+      },
+      "lift": 0.1,
+      "grain": {
+       "amount": 0.4
+      },
+      "leak": {
+       "kind": "warm",
+       "amount": 0.4
+      }
+     }
+    },
+    {
+     "t": 3,
+     "mask": {
+      "shape": "rect",
+      "rotation": 45
+     },
+     "look": {
+      "vignette": {
+       "amount": -0.6,
+       "size": 0.6
+      },
+      "lift": 0.1,
+      "grain": {
+       "amount": 0.4
+      },
+      "leak": {
+       "kind": "warm",
+       "amount": 0.8
+      }
+     }
+    }
+   ]
+  },
+  {
+   "item": {
+    "look": {
+     "grain": {
+      "amount": 0.3,
+      "size": 2
+     },
+     "leak": {
+      "kind": "teal",
+      "amount": 0.1,
+      "angle": 90
+     }
+    },
+    "keyframes": {
+     "grain": [
+      {
+       "t": 0,
+       "v": 0.1
+      },
+      {
+       "t": 1,
+       "v": 0.9
+      }
+     ],
+     "leak": [
+      {
+       "t": 2,
+       "v": 0.5
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "mask": null,
+     "look": {
+      "grain": {
+       "amount": 0.1,
+       "size": 2
+      },
+      "leak": {
+       "kind": "teal",
+       "amount": 0.5,
+       "angle": 90
+      }
+     }
+    },
+    {
+     "t": 0.5,
+     "mask": null,
+     "look": {
+      "grain": {
+       "amount": 0.5,
+       "size": 2
+      },
+      "leak": {
+       "kind": "teal",
+       "amount": 0.5,
+       "angle": 90
+      }
+     }
+    },
+    {
+     "t": 1,
+     "mask": null,
+     "look": {
+      "grain": {
+       "amount": 0.9,
+       "size": 2
+      },
+      "leak": {
+       "kind": "teal",
+       "amount": 0.5,
+       "angle": 90
+      }
+     }
+    },
+    {
+     "t": 1.25,
+     "mask": null,
+     "look": {
+      "grain": {
+       "amount": 0.9,
+       "size": 2
+      },
+      "leak": {
+       "kind": "teal",
+       "amount": 0.5,
+       "angle": 90
+      }
+     }
+    },
+    {
+     "t": 2,
+     "mask": null,
+     "look": {
+      "grain": {
+       "amount": 0.9,
+       "size": 2
+      },
+      "leak": {
+       "kind": "teal",
+       "amount": 0.5,
+       "angle": 90
+      }
+     }
+    },
+    {
+     "t": 3,
+     "mask": null,
+     "look": {
+      "grain": {
+       "amount": 0.9,
+       "size": 2
+      },
+      "leak": {
+       "kind": "teal",
+       "amount": 0.5,
+       "angle": 90
+      }
+     }
+    }
+   ]
+  },
+  {
+   "item": {
+    "mask": {
+     "shape": "rect",
+     "invert": true,
+     "feather": 0.3,
+     "width": 0.4
+    },
+    "keyframes": {
+     "maskY": [
+      {
+       "t": 0,
+       "v": 0.2
+      },
+      {
+       "t": 3,
+       "v": 0.8
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.2
+     },
+     "look": null
+    },
+    {
+     "t": 0.5,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.3
+     },
+     "look": null
+    },
+    {
+     "t": 1,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.4
+     },
+     "look": null
+    },
+    {
+     "t": 1.25,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.45
+     },
+     "look": null
+    },
+    {
+     "t": 2,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.6
+     },
+     "look": null
+    },
+    {
+     "t": 3,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.8
+     },
+     "look": null
+    }
+   ]
+  }
+ ],
+ "kits": {
+  "kitOf": [
+   {
+    "name": "single clip",
+    "kit": {
+     "version": 1,
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "cut and speeds",
+    "kit": {
+     "version": 1,
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "transitions",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "fade",
+      "durationSec": 0.5
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "captions through cuts",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.12
+      },
+      "preset": "highlight",
+      "highlightColor": "#FFE600",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "captions single",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.065,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "preset": "single",
+      "highlightColor": "#FFFFFF",
+      "y": 0.6,
+      "wordsPerPage": 1,
+      "maxLines": 1
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "captions pop 2",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.05,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "preset": "pop",
+      "highlightColor": "#FFE600",
+      "y": 0.7,
+      "wordsPerPage": 2,
+      "maxLines": 1
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "music ducking",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.1
+      },
+      "preset": "karaoke",
+      "highlightColor": "#22D3EE",
+      "y": 0.72,
+      "wordsPerPage": 4,
+      "maxLines": 2
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "volume keyframes",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "black",
+      "durationSec": 0.6
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "pip text image look",
+    "kit": {
+     "version": 1,
+     "filter": {
+      "id": "film",
+      "amount": 0.7
+     },
+     "adjust": {
+      "exposure": 0.2
+     },
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.06,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      }
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "speed curves, new transitions, attack/release ducking",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "whip",
+      "durationSec": 0.4
+     },
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.08
+      },
+      "preset": "highlighter",
+      "highlightColor": "#22C55E",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "wave 1: hold, mirror, blend, blur fill",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "fade",
+      "durationSec": 0.4
+     },
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.12
+      },
+      "preset": "highlight",
+      "highlightColor": "#FFE600",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.06,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      }
+     },
+     "background": "#000000",
+     "fill": "blur"
+    }
+   }
+  ],
+  "apply": [
+   {
+    "project": 1,
+    "kit": 0,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#202020",
+      "fill": "blur"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 2,
+         "speed": 1,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 2,
+         "outSec": 4,
+         "speed": 0.5,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         },
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 10,
+         "speed": 2,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         },
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 1,
+    "kit": 1,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 2,
+         "speed": 1
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 2,
+         "outSec": 4,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 10,
+         "speed": 2,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.5
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 1,
+    "kit": 2,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 2,
+         "speed": 1,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 2,
+         "outSec": 4,
+         "speed": 0.5,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 10,
+         "speed": 2,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 2,
+    "kit": 0,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#202020",
+      "fill": "blur"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 4,
+         "speed": 1,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 7,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 7,
+         "outSec": 10,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "volume": 0.8,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 2,
+    "kit": 1,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 4,
+         "speed": 1
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 7,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.5
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 7,
+         "outSec": 10,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.5
+         },
+         "volume": 0.8
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 2,
+    "kit": 2,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 4,
+         "speed": 1,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 7,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 0.5
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 7,
+         "outSec": 10,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "slideLeft",
+          "durationSec": 1
+         },
+         "volume": 0.8,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 9,
+    "kit": 0,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#202020",
+      "fill": "blur"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      },
+      {
+       "id": "song",
+       "kind": "audio",
+       "library": "music_upbeat_01",
+       "durationSec": 30
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 3,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "hero",
+          "points": [
+           [
+            0,
+            1
+           ],
+           [
+            0.3,
+            1
+           ],
+           [
+            0.42,
+            6
+           ],
+           [
+            0.58,
+            6
+           ],
+           [
+            0.7,
+            1
+           ],
+           [
+            1,
+            1
+           ]
+          ]
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 3,
+         "outSec": 5.5,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 5.5,
+         "outSec": 8,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c4",
+         "asset": "src",
+         "inSec": 8,
+         "outSec": 10,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "custom",
+          "points": [
+           [
+            0,
+            0.1
+           ],
+           [
+            0.5,
+            2
+           ],
+           [
+            1,
+            10
+           ]
+          ]
+         },
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        }
+       ]
+      },
+      {
+       "id": "cap",
+       "kind": "caption",
+       "items": [],
+       "caption": {
+        "asset": "src",
+        "words": [
+         {
+          "text": "Okay",
+          "startSec": 0.2,
+          "endSec": 0.5
+         },
+         {
+          "text": "so",
+          "startSec": 0.55,
+          "endSec": 0.7
+         },
+         {
+          "text": "um",
+          "startSec": 0.9,
+          "endSec": 1.2
+         },
+         {
+          "text": "this",
+          "startSec": 1.6,
+          "endSec": 1.8
+         },
+         {
+          "text": "serum",
+          "startSec": 1.85,
+          "endSec": 2.3
+         },
+         {
+          "text": "changed",
+          "startSec": 2.35,
+          "endSec": 2.7
+         },
+         {
+          "text": "my",
+          "startSec": 2.75,
+          "endSec": 2.9
+         },
+         {
+          "text": "skin.",
+          "startSec": 2.95,
+          "endSec": 3.4
+         },
+         {
+          "text": "Honestly",
+          "startSec": 4.6,
+          "endSec": 5.1
+         },
+         {
+          "text": "uh",
+          "startSec": 5.2,
+          "endSec": 5.4
+         },
+         {
+          "text": "I",
+          "startSec": 5.6,
+          "endSec": 5.7
+         },
+         {
+          "text": "use",
+          "startSec": 5.75,
+          "endSec": 5.95
+         },
+         {
+          "text": "it",
+          "startSec": 6,
+          "endSec": 6.1
+         },
+         {
+          "text": "every",
+          "startSec": 6.15,
+          "endSec": 6.5
+         },
+         {
+          "text": "single",
+          "startSec": 6.55,
+          "endSec": 6.9
+         },
+         {
+          "text": "day!",
+          "startSec": 6.95,
+          "endSec": 7.4
+         },
+         {
+          "text": "Like",
+          "startSec": 8,
+          "endSec": 8.2
+         },
+         {
+          "text": "seriously",
+          "startSec": 8.25,
+          "endSec": 8.9
+         }
+        ],
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.045,
+         "color": "#FFD1E8",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "uppercase": true,
+         "shadow": {
+          "color": "#FF2D87",
+          "opacity": 0.9,
+          "blurPct": 0.5,
+          "dyPct": 0
+         },
+         "preset": "neon",
+         "highlightColor": "#FF2D87",
+         "y": 0.72,
+         "wordsPerPage": 3,
+         "maxLines": 2
+        }
+       }
+      },
+      {
+       "id": "mus",
+       "kind": "music",
+       "duck": {
+        "level": 0.25,
+        "attackSec": 0.2,
+        "releaseSec": 0.6,
+        "under": [
+         "speech"
+        ]
+       },
+       "items": [
+        {
+         "id": "m1",
+         "asset": "song",
+         "startSec": 0,
+         "inSec": 0,
+         "outSec": 20
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 9,
+    "kit": 1,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      },
+      {
+       "id": "song",
+       "kind": "audio",
+       "library": "music_upbeat_01",
+       "durationSec": 30
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 3,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "hero",
+          "points": [
+           [
+            0,
+            1
+           ],
+           [
+            0.3,
+            1
+           ],
+           [
+            0.42,
+            6
+           ],
+           [
+            0.58,
+            6
+           ],
+           [
+            0.7,
+            1
+           ],
+           [
+            1,
+            1
+           ]
+          ]
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 3,
+         "outSec": 5.5,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.117
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 5.5,
+         "outSec": 8,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.25
+         }
+        },
+        {
+         "id": "c4",
+         "asset": "src",
+         "inSec": 8,
+         "outSec": 10,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "custom",
+          "points": [
+           [
+            0,
+            0.1
+           ],
+           [
+            0.5,
+            2
+           ],
+           [
+            1,
+            10
+           ]
+          ]
+         },
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.25
+         }
+        }
+       ]
+      },
+      {
+       "id": "cap",
+       "kind": "caption",
+       "items": [],
+       "caption": {
+        "asset": "src",
+        "words": [
+         {
+          "text": "Okay",
+          "startSec": 0.2,
+          "endSec": 0.5
+         },
+         {
+          "text": "so",
+          "startSec": 0.55,
+          "endSec": 0.7
+         },
+         {
+          "text": "um",
+          "startSec": 0.9,
+          "endSec": 1.2
+         },
+         {
+          "text": "this",
+          "startSec": 1.6,
+          "endSec": 1.8
+         },
+         {
+          "text": "serum",
+          "startSec": 1.85,
+          "endSec": 2.3
+         },
+         {
+          "text": "changed",
+          "startSec": 2.35,
+          "endSec": 2.7
+         },
+         {
+          "text": "my",
+          "startSec": 2.75,
+          "endSec": 2.9
+         },
+         {
+          "text": "skin.",
+          "startSec": 2.95,
+          "endSec": 3.4
+         },
+         {
+          "text": "Honestly",
+          "startSec": 4.6,
+          "endSec": 5.1
+         },
+         {
+          "text": "uh",
+          "startSec": 5.2,
+          "endSec": 5.4
+         },
+         {
+          "text": "I",
+          "startSec": 5.6,
+          "endSec": 5.7
+         },
+         {
+          "text": "use",
+          "startSec": 5.75,
+          "endSec": 5.95
+         },
+         {
+          "text": "it",
+          "startSec": 6,
+          "endSec": 6.1
+         },
+         {
+          "text": "every",
+          "startSec": 6.15,
+          "endSec": 6.5
+         },
+         {
+          "text": "single",
+          "startSec": 6.55,
+          "endSec": 6.9
+         },
+         {
+          "text": "day!",
+          "startSec": 6.95,
+          "endSec": 7.4
+         },
+         {
+          "text": "Like",
+          "startSec": 8,
+          "endSec": 8.2
+         },
+         {
+          "text": "seriously",
+          "startSec": 8.25,
+          "endSec": 8.9
+         }
+        ],
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.045,
+         "color": "#FFFFFF",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "uppercase": true,
+         "stroke": {
+          "color": "#000000",
+          "widthPct": 0.08
+         },
+         "preset": "highlighter",
+         "highlightColor": "#22C55E",
+         "y": 0.72,
+         "wordsPerPage": 3,
+         "maxLines": 2
+        }
+       }
+      },
+      {
+       "id": "mus",
+       "kind": "music",
+       "duck": {
+        "level": 0.25,
+        "attackSec": 0.2,
+        "releaseSec": 0.6,
+        "under": [
+         "speech"
+        ]
+       },
+       "items": [
+        {
+         "id": "m1",
+         "asset": "song",
+         "startSec": 0,
+         "inSec": 0,
+         "outSec": 20
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 9,
+    "kit": 2,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      },
+      {
+       "id": "song",
+       "kind": "audio",
+       "library": "music_upbeat_01",
+       "durationSec": 30
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 3,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "hero",
+          "points": [
+           [
+            0,
+            1
+           ],
+           [
+            0.3,
+            1
+           ],
+           [
+            0.42,
+            6
+           ],
+           [
+            0.58,
+            6
+           ],
+           [
+            0.7,
+            1
+           ],
+           [
+            1,
+            1
+           ]
+          ]
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 3,
+         "outSec": 5.5,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.4
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 5.5,
+         "outSec": 8,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "spin",
+          "durationSec": 0.5
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c4",
+         "asset": "src",
+         "inSec": 8,
+         "outSec": 10,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "custom",
+          "points": [
+           [
+            0,
+            0.1
+           ],
+           [
+            0.5,
+            2
+           ],
+           [
+            1,
+            10
+           ]
+          ]
+         },
+         "transitionIn": {
+          "kind": "glitch",
+          "durationSec": 0.3
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        }
+       ]
+      },
+      {
+       "id": "cap",
+       "kind": "caption",
+       "items": [],
+       "caption": {
+        "asset": "src",
+        "words": [
+         {
+          "text": "Okay",
+          "startSec": 0.2,
+          "endSec": 0.5
+         },
+         {
+          "text": "so",
+          "startSec": 0.55,
+          "endSec": 0.7
+         },
+         {
+          "text": "um",
+          "startSec": 0.9,
+          "endSec": 1.2
+         },
+         {
+          "text": "this",
+          "startSec": 1.6,
+          "endSec": 1.8
+         },
+         {
+          "text": "serum",
+          "startSec": 1.85,
+          "endSec": 2.3
+         },
+         {
+          "text": "changed",
+          "startSec": 2.35,
+          "endSec": 2.7
+         },
+         {
+          "text": "my",
+          "startSec": 2.75,
+          "endSec": 2.9
+         },
+         {
+          "text": "skin.",
+          "startSec": 2.95,
+          "endSec": 3.4
+         },
+         {
+          "text": "Honestly",
+          "startSec": 4.6,
+          "endSec": 5.1
+         },
+         {
+          "text": "uh",
+          "startSec": 5.2,
+          "endSec": 5.4
+         },
+         {
+          "text": "I",
+          "startSec": 5.6,
+          "endSec": 5.7
+         },
+         {
+          "text": "use",
+          "startSec": 5.75,
+          "endSec": 5.95
+         },
+         {
+          "text": "it",
+          "startSec": 6,
+          "endSec": 6.1
+         },
+         {
+          "text": "every",
+          "startSec": 6.15,
+          "endSec": 6.5
+         },
+         {
+          "text": "single",
+          "startSec": 6.55,
+          "endSec": 6.9
+         },
+         {
+          "text": "day!",
+          "startSec": 6.95,
+          "endSec": 7.4
+         },
+         {
+          "text": "Like",
+          "startSec": 8,
+          "endSec": 8.2
+         },
+         {
+          "text": "seriously",
+          "startSec": 8.25,
+          "endSec": 8.9
+         }
+        ],
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.045,
+         "color": "#FFFFFF",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "uppercase": true,
+         "stroke": {
+          "color": "#000000",
+          "widthPct": 0.08
+         },
+         "preset": "highlighter",
+         "highlightColor": "#22C55E",
+         "y": 0.72,
+         "wordsPerPage": 3,
+         "maxLines": 2
+        }
+       }
+      },
+      {
+       "id": "mus",
+       "kind": "music",
+       "duck": {
+        "level": 0.25,
+        "attackSec": 0.2,
+        "releaseSec": 0.6,
+        "under": [
+         "speech"
+        ]
+       },
+       "items": [
+        {
+         "id": "m1",
+         "asset": "song",
+         "startSec": 0,
+         "inSec": 0,
+         "outSec": 20
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "kits": [
+   {
+    "version": 1,
+    "look": {
+     "lut": "pack:film-gold",
+     "strength": 0.6,
+     "grain": {
+      "amount": 0.2
+     }
+    },
+    "filter": {
+     "id": "warm",
+     "amount": 0.5
+    },
+    "adjust": {
+     "contrast": 0.1,
+     "tint": -0.2
+    },
+    "transition": {
+     "kind": "whip",
+     "durationSec": 0.6
+    },
+    "captionStyle": {
+     "font": "sans",
+     "weight": 900,
+     "sizePct": 0.045,
+     "color": "#FFD1E8",
+     "align": "center",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "uppercase": true,
+     "shadow": {
+      "color": "#FF2D87",
+      "opacity": 0.9,
+      "blurPct": 0.5,
+      "dyPct": 0
+     },
+     "preset": "neon",
+     "highlightColor": "#FF2D87",
+     "y": 0.72,
+     "wordsPerPage": 3,
+     "maxLines": 2
+    },
+    "textStyle": {
+     "font": "mono",
+     "weight": 700,
+     "sizePct": 0.035,
+     "color": "#FFFFFF",
+     "align": "left",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "background": {
+      "color": "#000000",
+      "opacity": 0.6,
+      "paddingPct": 0.3,
+      "radiusPct": 0.1
+     }
+    },
+    "background": "#202020",
+    "fill": "blur"
+   },
+   {
+    "version": 1,
+    "transition": {
+     "kind": "fade",
+     "durationSec": 2
+    }
+   },
+   {
+    "version": 1,
+    "filter": {
+     "id": "film",
+     "amount": 0.7
+    },
+    "adjust": {
+     "exposure": 0.2
+    },
+    "textStyle": {
+     "font": "sans",
+     "weight": 900,
+     "sizePct": 0.06,
+     "color": "#FFFFFF",
+     "align": "center",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "stroke": {
+      "color": "#000000",
+      "widthPct": 0.14
+     }
+    },
+    "background": "#000000"
+   }
+  ],
+  "validate": [
+   {
+    "kit": {
+     "version": 1
+    },
+    "field": null
+   },
+   {
+    "kit": {
+     "version": 1,
+     "look": {
+      "lut": "pack:film-gold",
+      "strength": 0.6,
+      "grain": {
+       "amount": 0.2
+      }
+     },
+     "filter": {
+      "id": "warm",
+      "amount": 0.5
+     },
+     "adjust": {
+      "contrast": 0.1,
+      "tint": -0.2
+     },
+     "transition": {
+      "kind": "whip",
+      "durationSec": 0.6
+     },
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFD1E8",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "shadow": {
+       "color": "#FF2D87",
+       "opacity": 0.9,
+       "blurPct": 0.5,
+       "dyPct": 0
+      },
+      "preset": "neon",
+      "highlightColor": "#FF2D87",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "textStyle": {
+      "font": "mono",
+      "weight": 700,
+      "sizePct": 0.035,
+      "color": "#FFFFFF",
+      "align": "left",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "background": {
+       "color": "#000000",
+       "opacity": 0.6,
+       "paddingPct": 0.3,
+       "radiusPct": 0.1
+      }
+     },
+     "background": "#202020",
+     "fill": "blur"
+    },
+    "field": null
+   },
+   {
+    "kit": {
+     "version": 2
+    },
+    "field": "kit.version"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "mask": {}
+    },
+    "field": "kit.mask"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "adjust": {
+      "tint": 2
+     }
+    },
+    "field": "kit.adjust.tint"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "fade",
+      "durationSec": 5
+     }
+    },
+    "field": "kit.transition.durationSec"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "swirl",
+      "durationSec": 0.5
+     }
+    },
+    "field": "kit.transition.kind"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "look": {
+      "lut": "cube"
+     }
+    },
+    "field": "kit.look.lut"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.05,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "preset": "pop",
+      "highlightColor": "yellow",
+      "y": 0.7,
+      "wordsPerPage": 2,
+      "maxLines": 1
+     }
+    },
+    "field": "kit.captionStyle.highlightColor"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 9,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      }
+     }
+    },
+    "field": "kit.textStyle.sizePct"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "fill": "mirror"
+    },
+    "field": "kit.fill"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "background": "red"
+    },
+    "field": "kit.background"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "filter": {
+      "id": "nope",
+      "amount": 1
+     }
+    },
+    "field": "kit.filter.id"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "look": {
+      "vignette": {
+       "amount": 3
+      }
+     }
+    },
+    "field": "kit.look.vignette.amount"
+   },
+   {
+    "kit": "kit",
+    "field": "kit"
+   }
+  ]
+ },
+ "colorKeys": [
+  {
+   "item": {
+    "adjust": {
+     "exposure": 0.1,
+     "saturation": 0.2
+    },
+    "keyframes": {
+     "exposure": [
+      {
+       "t": 0,
+       "v": -0.5
+      },
+      {
+       "t": 2,
+       "v": 0.5,
+       "ease": "easeInOut"
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "adjust": {
+      "exposure": -0.5,
+      "saturation": 0.2
+     },
+     "matrix": [
+      0.818462,
+      -0.101145,
+      -0.010211,
+      0,
+      -0.030066,
+      0.747384,
+      -0.010211,
+      0,
+      -0.030066,
+      -0.101145,
+      0.838318,
+      0
+     ]
+    },
+    {
+     "t": 0.5,
+     "adjust": {
+      "exposure": -0.25,
+      "saturation": 0.2
+     },
+     "matrix": [
+      0.973321,
+      -0.120282,
+      -0.012143,
+      0,
+      -0.035755,
+      0.888794,
+      -0.012143,
+      0,
+      -0.035755,
+      -0.120282,
+      0.996933,
+      0
+     ]
+    },
+    {
+     "t": 1,
+     "adjust": {
+      "exposure": 0,
+      "saturation": 0.2
+     },
+     "matrix": [
+      1.15748,
+      -0.14304,
+      -0.01444,
+      0,
+      -0.04252,
+      1.05696,
+      -0.01444,
+      0,
+      -0.04252,
+      -0.14304,
+      1.18556,
+      0
+     ]
+    },
+    {
+     "t": 1.25,
+     "adjust": {
+      "exposure": 0.125,
+      "saturation": 0.2
+     },
+     "matrix": [
+      1.262241,
+      -0.155986,
+      -0.015747,
+      0,
+      -0.046368,
+      1.152623,
+      -0.015747,
+      0,
+      -0.046368,
+      -0.155986,
+      1.292862,
+      0
+     ]
+    },
+    {
+     "t": 2,
+     "adjust": {
+      "exposure": 0.5,
+      "saturation": 0.2
+     },
+     "matrix": [
+      1.636924,
+      -0.202289,
+      -0.020421,
+      0,
+      -0.060132,
+      1.494767,
+      -0.020421,
+      0,
+      -0.060132,
+      -0.202289,
+      1.676635,
+      0
+     ]
+    },
+    {
+     "t": 3,
+     "adjust": {
+      "exposure": 0.5,
+      "saturation": 0.2
+     },
+     "matrix": [
+      1.636924,
+      -0.202289,
+      -0.020421,
+      0,
+      -0.060132,
+      1.494767,
+      -0.020421,
+      0,
+      -0.060132,
+      -0.202289,
+      1.676635,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "item": {
+    "adjust": {
+     "tint": 0.3
+    },
+    "filter": {
+     "id": "warm",
+     "amount": 0.5
+    },
+    "keyframes": {
+     "temperature": [
+      {
+       "t": 0.5,
+       "v": -1
+      },
+      {
+       "t": 1.5,
+       "v": 1
+      }
+     ],
+     "tint": [
+      {
+       "t": 1,
+       "v": -0.4
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "adjust": {
+      "tint": -0.4,
+      "temperature": -1
+     },
+     "matrix": [
+      0.947282,
+      -0.03719,
+      -0.003785,
+      0,
+      -0.009688,
+      1.05481,
+      -0.003785,
+      0,
+      -0.009688,
+      -0.03719,
+      1.097245,
+      0
+     ]
+    },
+    {
+     "t": 0.5,
+     "adjust": {
+      "tint": -0.4,
+      "temperature": -1
+     },
+     "matrix": [
+      0.947282,
+      -0.03719,
+      -0.003785,
+      0,
+      -0.009688,
+      1.05481,
+      -0.003785,
+      0,
+      -0.009688,
+      -0.03719,
+      1.097245,
+      0
+     ]
+    },
+    {
+     "t": 1,
+     "adjust": {
+      "tint": -0.4,
+      "temperature": 0
+     },
+     "matrix": [
+      1.04914,
+      -0.03719,
+      -0.003432,
+      0,
+      -0.01073,
+      1.05481,
+      -0.003432,
+      0,
+      -0.01073,
+      -0.03719,
+      0.994698,
+      0
+     ]
+    },
+    {
+     "t": 1.25,
+     "adjust": {
+      "tint": -0.4,
+      "temperature": 0.5
+     },
+     "matrix": [
+      1.100069,
+      -0.03719,
+      -0.003255,
+      0,
+      -0.011251,
+      1.05481,
+      -0.003255,
+      0,
+      -0.011251,
+      -0.03719,
+      0.943425,
+      0
+     ]
+    },
+    {
+     "t": 2,
+     "adjust": {
+      "tint": -0.4,
+      "temperature": 1
+     },
+     "matrix": [
+      1.120441,
+      -0.03719,
+      -0.003184,
+      0,
+      -0.011459,
+      1.05481,
+      -0.003184,
+      0,
+      -0.011459,
+      -0.03719,
+      0.922916,
+      0
+     ]
+    },
+    {
+     "t": 3,
+     "adjust": {
+      "tint": -0.4,
+      "temperature": 1
+     },
+     "matrix": [
+      1.120441,
+      -0.03719,
+      -0.003184,
+      0,
+      -0.011459,
+      1.05481,
+      -0.003184,
+      0,
+      -0.011459,
+      -0.03719,
+      0.922916,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "item": {
+    "adjust": {
+     "saturation": 0.3,
+     "contrast": -0.1
+    },
+    "keyframes": {
+     "exposure": [
+      {
+       "t": 0,
+       "v": 0.4
+      },
+      {
+       "t": 1,
+       "v": 0
+      }
+     ],
+     "contrast": [
+      {
+       "t": 2,
+       "v": 0.25
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "adjust": {
+      "saturation": 0.3,
+      "contrast": 0.25,
+      "exposure": 0.4
+     },
+     "matrix": [
+      2.039003,
+      -0.353892,
+      -0.035726,
+      -0.125,
+      -0.105198,
+      1.790308,
+      -0.035726,
+      -0.125,
+      -0.105198,
+      -0.353892,
+      2.108475,
+      -0.125
+     ]
+    },
+    {
+     "t": 0.5,
+     "adjust": {
+      "saturation": 0.3,
+      "contrast": 0.25,
+      "exposure": 0.2
+     },
+     "matrix": [
+      1.775055,
+      -0.308081,
+      -0.031101,
+      -0.125,
+      -0.09158,
+      1.558554,
+      -0.031101,
+      -0.125,
+      -0.09158,
+      -0.308081,
+      1.835534,
+      -0.125
+     ]
+    },
+    {
+     "t": 1,
+     "adjust": {
+      "saturation": 0.3,
+      "contrast": 0.25,
+      "exposure": 0
+     },
+     "matrix": [
+      1.545275,
+      -0.2682,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      1.3568,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      -0.2682,
+      1.597925,
+      -0.125
+     ]
+    },
+    {
+     "t": 1.25,
+     "adjust": {
+      "saturation": 0.3,
+      "contrast": 0.25,
+      "exposure": 0
+     },
+     "matrix": [
+      1.545275,
+      -0.2682,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      1.3568,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      -0.2682,
+      1.597925,
+      -0.125
+     ]
+    },
+    {
+     "t": 2,
+     "adjust": {
+      "saturation": 0.3,
+      "contrast": 0.25,
+      "exposure": 0
+     },
+     "matrix": [
+      1.545275,
+      -0.2682,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      1.3568,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      -0.2682,
+      1.597925,
+      -0.125
+     ]
+    },
+    {
+     "t": 3,
+     "adjust": {
+      "saturation": 0.3,
+      "contrast": 0.25,
+      "exposure": 0
+     },
+     "matrix": [
+      1.545275,
+      -0.2682,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      1.3568,
+      -0.027075,
+      -0.125,
+      -0.079725,
+      -0.2682,
+      1.597925,
+      -0.125
+     ]
+    }
+   ]
+  },
+  {
+   "item": {
+    "asset": "img",
+    "startSec": 0,
+    "durationSec": 3,
+    "keyframes": {
+     "tint": [
+      {
+       "t": 0,
+       "v": 0.6,
+       "ease": "hold"
+      },
+      {
+       "t": 1.25,
+       "v": -0.6
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "adjust": {
+      "tint": 0.6
+     },
+     "matrix": [
+      1.03,
+      0,
+      0,
+      0,
+      0,
+      0.94,
+      0,
+      0,
+      0,
+      0,
+      1.03,
+      0
+     ]
+    },
+    {
+     "t": 0.5,
+     "adjust": {
+      "tint": 0.6
+     },
+     "matrix": [
+      1.03,
+      0,
+      0,
+      0,
+      0,
+      0.94,
+      0,
+      0,
+      0,
+      0,
+      1.03,
+      0
+     ]
+    },
+    {
+     "t": 1,
+     "adjust": {
+      "tint": 0.6
+     },
+     "matrix": [
+      1.03,
+      0,
+      0,
+      0,
+      0,
+      0.94,
+      0,
+      0,
+      0,
+      0,
+      1.03,
+      0
+     ]
+    },
+    {
+     "t": 1.25,
+     "adjust": {
+      "tint": -0.6
+     },
+     "matrix": [
+      0.97,
+      0,
+      0,
+      0,
+      0,
+      1.06,
+      0,
+      0,
+      0,
+      0,
+      0.97,
+      0
+     ]
+    },
+    {
+     "t": 2,
+     "adjust": {
+      "tint": -0.6
+     },
+     "matrix": [
+      0.97,
+      0,
+      0,
+      0,
+      0,
+      1.06,
+      0,
+      0,
+      0,
+      0,
+      0.97,
+      0
+     ]
+    },
+    {
+     "t": 3,
+     "adjust": {
+      "tint": -0.6
+     },
+     "matrix": [
+      0.97,
+      0,
+      0,
+      0,
+      0,
+      1.06,
+      0,
+      0,
+      0,
+      0,
+      0.97,
+      0
+     ]
+    }
+   ]
+  }
+ ],
+ "autoAdjust": [
+  {
+   "name": "dark warm green",
+   "rgb": [
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192,
+    0.18,
+    0.1725,
+    0.12,
+    0.192,
+    0.184,
+    0.128,
+    0.204,
+    0.1955,
+    0.136,
+    0.216,
+    0.207,
+    0.144,
+    0.228,
+    0.2185,
+    0.152,
+    0.24,
+    0.23,
+    0.16,
+    0.252,
+    0.2415,
+    0.168,
+    0.264,
+    0.253,
+    0.176,
+    0.276,
+    0.2645,
+    0.184,
+    0.288,
+    0.276,
+    0.192
+   ],
+   "out": {
+    "exposure": 0.6,
+    "contrast": 0.4,
+    "saturation": 0.15,
+    "temperature": -1,
+    "tint": 0.45
+   }
+  },
+  {
+   "name": "balanced grey ramp",
+   "rgb": [
+    0.04,
+    0.04,
+    0.04,
+    0.0493,
+    0.0493,
+    0.0493,
+    0.0586,
+    0.0586,
+    0.0586,
+    0.0679,
+    0.0679,
+    0.0679,
+    0.0772,
+    0.0772,
+    0.0772,
+    0.0865,
+    0.0865,
+    0.0865,
+    0.0958,
+    0.0958,
+    0.0958,
+    0.1051,
+    0.1051,
+    0.1051,
+    0.1143,
+    0.1143,
+    0.1143,
+    0.1236,
+    0.1236,
+    0.1236,
+    0.1329,
+    0.1329,
+    0.1329,
+    0.1422,
+    0.1422,
+    0.1422,
+    0.1515,
+    0.1515,
+    0.1515,
+    0.1608,
+    0.1608,
+    0.1608,
+    0.1701,
+    0.1701,
+    0.1701,
+    0.1794,
+    0.1794,
+    0.1794,
+    0.1887,
+    0.1887,
+    0.1887,
+    0.198,
+    0.198,
+    0.198,
+    0.2073,
+    0.2073,
+    0.2073,
+    0.2166,
+    0.2166,
+    0.2166,
+    0.2259,
+    0.2259,
+    0.2259,
+    0.2352,
+    0.2352,
+    0.2352,
+    0.2444,
+    0.2444,
+    0.2444,
+    0.2537,
+    0.2537,
+    0.2537,
+    0.263,
+    0.263,
+    0.263,
+    0.2723,
+    0.2723,
+    0.2723,
+    0.2816,
+    0.2816,
+    0.2816,
+    0.2909,
+    0.2909,
+    0.2909,
+    0.3002,
+    0.3002,
+    0.3002,
+    0.3095,
+    0.3095,
+    0.3095,
+    0.3188,
+    0.3188,
+    0.3188,
+    0.3281,
+    0.3281,
+    0.3281,
+    0.3374,
+    0.3374,
+    0.3374,
+    0.3467,
+    0.3467,
+    0.3467,
+    0.356,
+    0.356,
+    0.356,
+    0.3653,
+    0.3653,
+    0.3653,
+    0.3745,
+    0.3745,
+    0.3745,
+    0.3838,
+    0.3838,
+    0.3838,
+    0.3931,
+    0.3931,
+    0.3931,
+    0.4024,
+    0.4024,
+    0.4024,
+    0.4117,
+    0.4117,
+    0.4117,
+    0.421,
+    0.421,
+    0.421,
+    0.4303,
+    0.4303,
+    0.4303,
+    0.4396,
+    0.4396,
+    0.4396,
+    0.4489,
+    0.4489,
+    0.4489,
+    0.4582,
+    0.4582,
+    0.4582,
+    0.4675,
+    0.4675,
+    0.4675,
+    0.4768,
+    0.4768,
+    0.4768,
+    0.4861,
+    0.4861,
+    0.4861,
+    0.4954,
+    0.4954,
+    0.4954,
+    0.5046,
+    0.5046,
+    0.5046,
+    0.5139,
+    0.5139,
+    0.5139,
+    0.5232,
+    0.5232,
+    0.5232,
+    0.5325,
+    0.5325,
+    0.5325,
+    0.5418,
+    0.5418,
+    0.5418,
+    0.5511,
+    0.5511,
+    0.5511,
+    0.5604,
+    0.5604,
+    0.5604,
+    0.5697,
+    0.5697,
+    0.5697,
+    0.579,
+    0.579,
+    0.579,
+    0.5883,
+    0.5883,
+    0.5883,
+    0.5976,
+    0.5976,
+    0.5976,
+    0.6069,
+    0.6069,
+    0.6069,
+    0.6162,
+    0.6162,
+    0.6162,
+    0.6255,
+    0.6255,
+    0.6255,
+    0.6347,
+    0.6347,
+    0.6347,
+    0.644,
+    0.644,
+    0.644,
+    0.6533,
+    0.6533,
+    0.6533,
+    0.6626,
+    0.6626,
+    0.6626,
+    0.6719,
+    0.6719,
+    0.6719,
+    0.6812,
+    0.6812,
+    0.6812,
+    0.6905,
+    0.6905,
+    0.6905,
+    0.6998,
+    0.6998,
+    0.6998,
+    0.7091,
+    0.7091,
+    0.7091,
+    0.7184,
+    0.7184,
+    0.7184,
+    0.7277,
+    0.7277,
+    0.7277,
+    0.737,
+    0.737,
+    0.737,
+    0.7463,
+    0.7463,
+    0.7463,
+    0.7556,
+    0.7556,
+    0.7556,
+    0.7648,
+    0.7648,
+    0.7648,
+    0.7741,
+    0.7741,
+    0.7741,
+    0.7834,
+    0.7834,
+    0.7834,
+    0.7927,
+    0.7927,
+    0.7927,
+    0.802,
+    0.802,
+    0.802,
+    0.8113,
+    0.8113,
+    0.8113,
+    0.8206,
+    0.8206,
+    0.8206,
+    0.8299,
+    0.8299,
+    0.8299,
+    0.8392,
+    0.8392,
+    0.8392,
+    0.8485,
+    0.8485,
+    0.8485,
+    0.8578,
+    0.8578,
+    0.8578,
+    0.8671,
+    0.8671,
+    0.8671,
+    0.8764,
+    0.8764,
+    0.8764,
+    0.8857,
+    0.8857,
+    0.8857,
+    0.8949,
+    0.8949,
+    0.8949,
+    0.9042,
+    0.9042,
+    0.9042,
+    0.9135,
+    0.9135,
+    0.9135,
+    0.9228,
+    0.9228,
+    0.9228,
+    0.9321,
+    0.9321,
+    0.9321,
+    0.9414,
+    0.9414,
+    0.9414,
+    0.9507,
+    0.9507,
+    0.9507,
+    0.96,
+    0.96,
+    0.96,
+    0.04,
+    0.04,
+    0.04,
+    0.0493,
+    0.0493,
+    0.0493,
+    0.0586,
+    0.0586,
+    0.0586,
+    0.0679,
+    0.0679,
+    0.0679,
+    0.0772,
+    0.0772,
+    0.0772,
+    0.0865,
+    0.0865,
+    0.0865,
+    0.0958,
+    0.0958,
+    0.0958,
+    0.1051,
+    0.1051,
+    0.1051,
+    0.1143,
+    0.1143,
+    0.1143,
+    0.1236,
+    0.1236,
+    0.1236,
+    0.1329,
+    0.1329,
+    0.1329,
+    0.1422,
+    0.1422,
+    0.1422,
+    0.1515,
+    0.1515,
+    0.1515,
+    0.1608,
+    0.1608,
+    0.1608,
+    0.1701,
+    0.1701,
+    0.1701,
+    0.1794,
+    0.1794,
+    0.1794,
+    0.1887,
+    0.1887,
+    0.1887,
+    0.198,
+    0.198,
+    0.198,
+    0.2073,
+    0.2073,
+    0.2073,
+    0.2166,
+    0.2166,
+    0.2166,
+    0.2259,
+    0.2259,
+    0.2259,
+    0.2352,
+    0.2352,
+    0.2352,
+    0.2444,
+    0.2444,
+    0.2444,
+    0.2537,
+    0.2537,
+    0.2537,
+    0.263,
+    0.263,
+    0.263,
+    0.2723,
+    0.2723,
+    0.2723,
+    0.2816,
+    0.2816,
+    0.2816,
+    0.2909,
+    0.2909,
+    0.2909,
+    0.3002,
+    0.3002,
+    0.3002,
+    0.3095,
+    0.3095,
+    0.3095,
+    0.3188,
+    0.3188,
+    0.3188,
+    0.3281,
+    0.3281,
+    0.3281,
+    0.3374,
+    0.3374,
+    0.3374,
+    0.3467,
+    0.3467,
+    0.3467,
+    0.356,
+    0.356,
+    0.356,
+    0.3653,
+    0.3653,
+    0.3653,
+    0.3745,
+    0.3745,
+    0.3745,
+    0.3838,
+    0.3838,
+    0.3838,
+    0.3931,
+    0.3931,
+    0.3931,
+    0.4024,
+    0.4024,
+    0.4024,
+    0.4117,
+    0.4117,
+    0.4117,
+    0.421,
+    0.421,
+    0.421,
+    0.4303,
+    0.4303,
+    0.4303,
+    0.4396,
+    0.4396,
+    0.4396,
+    0.4489,
+    0.4489,
+    0.4489,
+    0.4582,
+    0.4582,
+    0.4582,
+    0.4675,
+    0.4675,
+    0.4675,
+    0.4768,
+    0.4768,
+    0.4768,
+    0.4861,
+    0.4861,
+    0.4861,
+    0.4954,
+    0.4954,
+    0.4954,
+    0.5046,
+    0.5046,
+    0.5046,
+    0.5139,
+    0.5139,
+    0.5139,
+    0.5232,
+    0.5232,
+    0.5232,
+    0.5325,
+    0.5325,
+    0.5325,
+    0.5418,
+    0.5418,
+    0.5418,
+    0.5511,
+    0.5511,
+    0.5511,
+    0.5604,
+    0.5604,
+    0.5604,
+    0.5697,
+    0.5697,
+    0.5697,
+    0.579,
+    0.579,
+    0.579,
+    0.5883,
+    0.5883,
+    0.5883,
+    0.5976,
+    0.5976,
+    0.5976,
+    0.6069,
+    0.6069,
+    0.6069,
+    0.6162,
+    0.6162,
+    0.6162,
+    0.6255,
+    0.6255,
+    0.6255,
+    0.6347,
+    0.6347,
+    0.6347,
+    0.644,
+    0.644,
+    0.644,
+    0.6533,
+    0.6533,
+    0.6533,
+    0.6626,
+    0.6626,
+    0.6626,
+    0.6719,
+    0.6719,
+    0.6719,
+    0.6812,
+    0.6812,
+    0.6812,
+    0.6905,
+    0.6905,
+    0.6905,
+    0.6998,
+    0.6998,
+    0.6998,
+    0.7091,
+    0.7091,
+    0.7091,
+    0.7184,
+    0.7184,
+    0.7184,
+    0.7277,
+    0.7277,
+    0.7277,
+    0.737,
+    0.737,
+    0.737,
+    0.7463,
+    0.7463,
+    0.7463,
+    0.7556,
+    0.7556,
+    0.7556,
+    0.7648,
+    0.7648,
+    0.7648,
+    0.7741,
+    0.7741,
+    0.7741,
+    0.7834,
+    0.7834,
+    0.7834,
+    0.7927,
+    0.7927,
+    0.7927,
+    0.802,
+    0.802,
+    0.802,
+    0.8113,
+    0.8113,
+    0.8113,
+    0.8206,
+    0.8206,
+    0.8206,
+    0.8299,
+    0.8299,
+    0.8299,
+    0.8392,
+    0.8392,
+    0.8392,
+    0.8485,
+    0.8485,
+    0.8485,
+    0.8578,
+    0.8578,
+    0.8578,
+    0.8671,
+    0.8671,
+    0.8671,
+    0.8764,
+    0.8764,
+    0.8764,
+    0.8857,
+    0.8857,
+    0.8857,
+    0.8949,
+    0.8949,
+    0.8949,
+    0.9042,
+    0.9042,
+    0.9042,
+    0.9135,
+    0.9135,
+    0.9135,
+    0.9228,
+    0.9228,
+    0.9228,
+    0.9321,
+    0.9321,
+    0.9321,
+    0.9414,
+    0.9414,
+    0.9414,
+    0.9507,
+    0.9507,
+    0.9507,
+    0.96,
+    0.96,
+    0.96
+   ],
+   "base": {
+    "highlights": 0.2,
+    "tint": 0.5
+   },
+   "out": {
+    "highlights": 0.2,
+    "exposure": -0.15,
+    "contrast": -0.05,
+    "saturation": 0.15
+   }
+  },
+  {
+   "name": "bright saturated blue",
+   "rgb": [
+    0.1,
+    0.4,
+    0.95,
+    0.102,
+    0.4,
+    0.95,
+    0.104,
+    0.4,
+    0.95,
+    0.106,
+    0.4,
+    0.95,
+    0.108,
+    0.4,
+    0.95,
+    0.11,
+    0.4,
+    0.95,
+    0.112,
+    0.4,
+    0.95,
+    0.114,
+    0.4,
+    0.95,
+    0.116,
+    0.4,
+    0.95,
+    0.118,
+    0.4,
+    0.95,
+    0.12,
+    0.4,
+    0.95,
+    0.122,
+    0.4,
+    0.95,
+    0.124,
+    0.4,
+    0.95,
+    0.126,
+    0.4,
+    0.95,
+    0.128,
+    0.4,
+    0.95,
+    0.13,
+    0.4,
+    0.95,
+    0.132,
+    0.4,
+    0.95,
+    0.134,
+    0.4,
+    0.95,
+    0.136,
+    0.4,
+    0.95,
+    0.138,
+    0.4,
+    0.95,
+    0.14,
+    0.4,
+    0.95,
+    0.142,
+    0.4,
+    0.95,
+    0.144,
+    0.4,
+    0.95,
+    0.146,
+    0.4,
+    0.95,
+    0.148,
+    0.4,
+    0.95,
+    0.15,
+    0.4,
+    0.95,
+    0.152,
+    0.4,
+    0.95,
+    0.154,
+    0.4,
+    0.95,
+    0.156,
+    0.4,
+    0.95,
+    0.158,
+    0.4,
+    0.95,
+    0.16,
+    0.4,
+    0.95,
+    0.162,
+    0.4,
+    0.95,
+    0.164,
+    0.4,
+    0.95,
+    0.166,
+    0.4,
+    0.95,
+    0.168,
+    0.4,
+    0.95,
+    0.17,
+    0.4,
+    0.95,
+    0.172,
+    0.4,
+    0.95,
+    0.174,
+    0.4,
+    0.95,
+    0.176,
+    0.4,
+    0.95,
+    0.178,
+    0.4,
+    0.95,
+    0.18,
+    0.4,
+    0.95,
+    0.182,
+    0.4,
+    0.95,
+    0.184,
+    0.4,
+    0.95,
+    0.186,
+    0.4,
+    0.95,
+    0.188,
+    0.4,
+    0.95,
+    0.19,
+    0.4,
+    0.95,
+    0.192,
+    0.4,
+    0.95,
+    0.194,
+    0.4,
+    0.95,
+    0.196,
+    0.4,
+    0.95,
+    0.198,
+    0.4,
+    0.95,
+    0.2,
+    0.4,
+    0.95,
+    0.202,
+    0.4,
+    0.95,
+    0.204,
+    0.4,
+    0.95,
+    0.206,
+    0.4,
+    0.95,
+    0.208,
+    0.4,
+    0.95,
+    0.21,
+    0.4,
+    0.95,
+    0.212,
+    0.4,
+    0.95,
+    0.214,
+    0.4,
+    0.95,
+    0.216,
+    0.4,
+    0.95,
+    0.218,
+    0.4,
+    0.95,
+    0.22,
+    0.4,
+    0.95,
+    0.222,
+    0.4,
+    0.95,
+    0.224,
+    0.4,
+    0.95,
+    0.226,
+    0.4,
+    0.95,
+    0.228,
+    0.4,
+    0.95,
+    0.23,
+    0.4,
+    0.95,
+    0.232,
+    0.4,
+    0.95,
+    0.234,
+    0.4,
+    0.95,
+    0.236,
+    0.4,
+    0.95,
+    0.238,
+    0.4,
+    0.95,
+    0.24,
+    0.4,
+    0.95,
+    0.242,
+    0.4,
+    0.95,
+    0.244,
+    0.4,
+    0.95,
+    0.246,
+    0.4,
+    0.95,
+    0.248,
+    0.4,
+    0.95,
+    0.25,
+    0.4,
+    0.95,
+    0.252,
+    0.4,
+    0.95,
+    0.254,
+    0.4,
+    0.95,
+    0.256,
+    0.4,
+    0.95,
+    0.258,
+    0.4,
+    0.95,
+    0.26,
+    0.4,
+    0.95,
+    0.262,
+    0.4,
+    0.95,
+    0.264,
+    0.4,
+    0.95,
+    0.266,
+    0.4,
+    0.95,
+    0.268,
+    0.4,
+    0.95,
+    0.27,
+    0.4,
+    0.95,
+    0.272,
+    0.4,
+    0.95,
+    0.274,
+    0.4,
+    0.95,
+    0.276,
+    0.4,
+    0.95,
+    0.278,
+    0.4,
+    0.95,
+    0.28,
+    0.4,
+    0.95,
+    0.282,
+    0.4,
+    0.95,
+    0.284,
+    0.4,
+    0.95,
+    0.286,
+    0.4,
+    0.95,
+    0.288,
+    0.4,
+    0.95,
+    0.29,
+    0.4,
+    0.95,
+    0.292,
+    0.4,
+    0.95,
+    0.294,
+    0.4,
+    0.95,
+    0.296,
+    0.4,
+    0.95,
+    0.298,
+    0.4,
+    0.95,
+    0.3,
+    0.4,
+    0.95,
+    0.302,
+    0.4,
+    0.95,
+    0.304,
+    0.4,
+    0.95,
+    0.306,
+    0.4,
+    0.95,
+    0.308,
+    0.4,
+    0.95,
+    0.31,
+    0.4,
+    0.95,
+    0.312,
+    0.4,
+    0.95,
+    0.314,
+    0.4,
+    0.95,
+    0.316,
+    0.4,
+    0.95,
+    0.318,
+    0.4,
+    0.95,
+    0.32,
+    0.4,
+    0.95,
+    0.322,
+    0.4,
+    0.95,
+    0.324,
+    0.4,
+    0.95,
+    0.326,
+    0.4,
+    0.95,
+    0.328,
+    0.4,
+    0.95,
+    0.33,
+    0.4,
+    0.95,
+    0.332,
+    0.4,
+    0.95,
+    0.334,
+    0.4,
+    0.95,
+    0.336,
+    0.4,
+    0.95,
+    0.338,
+    0.4,
+    0.95,
+    0.34,
+    0.4,
+    0.95,
+    0.342,
+    0.4,
+    0.95,
+    0.344,
+    0.4,
+    0.95,
+    0.346,
+    0.4,
+    0.95,
+    0.348,
+    0.4,
+    0.95,
+    0.35,
+    0.4,
+    0.95,
+    0.352,
+    0.4,
+    0.95,
+    0.354,
+    0.4,
+    0.95,
+    0.356,
+    0.4,
+    0.95,
+    0.358,
+    0.4,
+    0.95,
+    0.36,
+    0.4,
+    0.95,
+    0.362,
+    0.4,
+    0.95,
+    0.364,
+    0.4,
+    0.95,
+    0.366,
+    0.4,
+    0.95,
+    0.368,
+    0.4,
+    0.95,
+    0.37,
+    0.4,
+    0.95,
+    0.372,
+    0.4,
+    0.95,
+    0.374,
+    0.4,
+    0.95,
+    0.376,
+    0.4,
+    0.95,
+    0.378,
+    0.4,
+    0.95,
+    0.38,
+    0.4,
+    0.95,
+    0.382,
+    0.4,
+    0.95,
+    0.384,
+    0.4,
+    0.95,
+    0.386,
+    0.4,
+    0.95,
+    0.388,
+    0.4,
+    0.95,
+    0.39,
+    0.4,
+    0.95,
+    0.392,
+    0.4,
+    0.95,
+    0.394,
+    0.4,
+    0.95,
+    0.396,
+    0.4,
+    0.95,
+    0.398,
+    0.4,
+    0.95
+   ],
+   "out": {
+    "exposure": 0.14,
+    "contrast": 0.4,
+    "saturation": -0.1,
+    "temperature": 1,
+    "tint": -1
+   }
+  },
+  {
+   "name": "black",
+   "rgb": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "out": {
+    "exposure": 0.6,
+    "saturation": 0.15
+   }
+  }
+ ],
  "keyframes": [
   {
    "keys": [
@@ -2990,6 +8094,72 @@
     -0.170144,
     1.410209,
     -0.12
+   ]
+  },
+  {
+   "adjust": {
+    "tint": 1
+   },
+   "filter": null,
+   "matrix": [
+    1.05,
+    0,
+    0,
+    0,
+    0,
+    0.9,
+    0,
+    0,
+    0,
+    0,
+    1.05,
+    0
+   ]
+  },
+  {
+   "adjust": {
+    "tint": -0.6,
+    "temperature": 0.5,
+    "contrast": 0.2
+   },
+   "filter": null,
+   "matrix": [
+    1.2222,
+    0,
+    0,
+    -0.1,
+    0,
+    1.272,
+    0,
+    -0.1,
+    0,
+    0,
+    1.1058,
+    -0.1
+   ]
+  },
+  {
+   "adjust": {
+    "tint": 0.4,
+    "saturation": -0.3
+   },
+   "filter": {
+    "id": "film",
+    "amount": 1
+   },
+   "matrix": [
+    0.679816,
+    0.312674,
+    0.032867,
+    0.029922,
+    0.100729,
+    0.84701,
+    0.032867,
+    0.01549,
+    0.100729,
+    0.312674,
+    0.589244,
+    -0.001765
    ]
   }
  ],

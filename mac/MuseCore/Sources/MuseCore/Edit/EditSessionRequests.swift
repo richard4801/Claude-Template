@@ -14,6 +14,7 @@ extension EditSuite.ExportSettings {
             switch r.lowercased() {
             case "720p", "720": s.resolution = .p720
             case "1080p", "1080": s.resolution = .p1080
+            case "2k", "1440p", "1440": s.resolution = .k2
             case "4k", "2160p", "2160": s.resolution = .k4
             default: break
             }

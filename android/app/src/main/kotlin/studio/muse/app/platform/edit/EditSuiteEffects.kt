@@ -23,9 +23,11 @@ import java.nio.ByteBuffer
 
 /** A shape mask (studio.muse.core.edit.maskAlpha, same formula) multiplied into the frame's alpha. */
 @OptIn(UnstableApi::class)
-class MaskEffect(private val mask: Mask) : GlEffect {
+class MaskEffect(private val mask0: Mask, private val at: ((Long) -> Mask?)? = null) : GlEffect {
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
-        SinglePassProgram(useHdr, EditSuiteShaders.MASK) { p, _, _, _ ->
+        SinglePassProgram(useHdr, EditSuiteShaders.MASK) { p, _, _, timeUs ->
+            // Mask keyframes: this frame's mask.
+            val mask = at?.invoke(timeUs) ?: mask0
             p.setIntUniform("uShape", MaskShape.entries.indexOf(mask.shape))
             p.setFloatsUniform("uCenter", floatArrayOf((mask.x ?: 0.5).toFloat(), (mask.y ?: 0.5).toFloat()))
             p.setFloatsUniform("uSize", floatArrayOf(maxOf(0.01, mask.width ?: 0.5).toFloat(), maxOf(0.01, mask.height ?: 0.5).toFloat()))

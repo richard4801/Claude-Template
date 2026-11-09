@@ -9,6 +9,8 @@ public enum EditSuite {
     /// The canvas shapes of the top bar and the export sheet.
     public enum Ratio: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         case portrait = "9:16", square = "1:1", vertical = "4:5", landscape = "16:9"
+        /// Parity (as Android): 4:3 and 2.35:1 (47:20 inside).
+        case fourThree = "4:3", cinema = "2.35:1"
         public var id: String { rawValue }
         public var label: String { rawValue }
         /// Width : height.
@@ -18,14 +20,22 @@ public enum EditSuite {
             case .square: return (1, 1)
             case .vertical: return (4, 5)
             case .landscape: return (16, 9)
+            case .fourThree: return (4, 3)
+            case .cinema: return (47, 20)
             }
         }
         /// The canvas at `shortSide` px on the short side (even sizes, as encoders want).
         public func canvas(shortSide: Int) -> (width: Int, height: Int) {
             let (a, b) = aspect
             func even(_ v: Double) -> Int { max(16, Int((v / 2).rounded()) * 2) }
-            if a <= b { return (even(Double(shortSide)), even(Double(shortSide) * Double(b) / Double(a))) }
-            return (even(Double(shortSide) * Double(a) / Double(b)), even(Double(shortSide)))
+            // The long side is capped at 4096 (2.35:1 at 4K = 4096 × 1744), the short side shrinking with it.
+            let long = Double(shortSide) * Double(max(a, b)) / Double(min(a, b))
+            let k = min(1, 4096 / long)
+            let lg = long * k
+            // Capped: the short side rounds up to even (4096 × 1744, as Android).
+            let sh = k < 1 ? Double(max(16, Int((Double(shortSide) * k / 2).rounded(.up)) * 2)) : Double(even(Double(shortSide)))
+            if a <= b { return (Int(sh), even(lg)) }
+            return (even(lg), Int(sh))
         }
         /// The shape closest to a canvas.
         public static func nearest(width: Int, height: Int) -> Ratio {
@@ -35,12 +45,13 @@ public enum EditSuite {
     }
 
     public enum Resolution: Int, CaseIterable, Codable, Hashable, Sendable, Identifiable {
-        case p720 = 720, p1080 = 1080, k4 = 2160
+        case p720 = 720, p1080 = 1080, k2 = 1440, k4 = 2160
         public var id: Int { rawValue }
         public var label: String {
             switch self {
             case .p720: return "720p"
             case .p1080: return "1080p"
+            case .k2: return "2K"
             case .k4: return "4K"
             }
         }
@@ -50,6 +61,41 @@ public enum EditSuite {
         case h264, hevc
         public var id: String { rawValue }
         public var label: String { self == .h264 ? "MP4 · H.264" : "HEVC" }
+    }
+
+    /// The export sheet's first choice (parity, as Android): a video, the mix alone as .m4a, or a looping GIF.
+    public enum ExportFormat: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+        case video, sound, gif
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .video: return "Video"
+            case .sound: return "Sound only"
+            case .gif: return "GIF"
+            }
+        }
+        public static let gifMaxSec = 30.0, gifFps = 15.0, gifShortSide = 480
+        public static let soundBitrate = 192_000
+    }
+
+    /// Video bitrate against the size estimate's rate (parity, as Android).
+    public enum Bitrate: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+        case smaller, recommended, higher
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .smaller: return "Smaller file"
+            case .recommended: return "Recommended"
+            case .higher: return "Higher quality"
+            }
+        }
+        public var factor: Double {
+            switch self {
+            case .smaller: return 0.6
+            case .recommended: return 1
+            case .higher: return 1.6
+            }
+        }
     }
 
     public enum CaptionsOut: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
@@ -141,6 +187,9 @@ public enum EditSuite {
         public var captions: CaptionsOut = .burnIn
         public var labelAI = false
         public var c2pa = false
+        /// Parity (as Android): what the export makes, and the video bitrate.
+        public var format: ExportFormat = .video
+        public var bitrate: Bitrate = .recommended
         public init() {}
         public static let frameRates = [24, 30, 60]
 
@@ -152,17 +201,24 @@ public enum EditSuite {
             switch resolution {
             case .p720: base = 8e6
             case .p1080: base = 16e6
+            case .k2: base = 28e6
             case .k4: base = 45e6
             }
             // Relative to a 9:16 / 16:9 frame of the same short side (a square has fewer pixels).
             let s = Double(resolution.rawValue)
             let px = Double(size.width * size.height) / (s * s * 16 / 9)
             let f = fps >= 60 ? 1.4 : fps <= 24 ? 0.9 : 1
-            return base * px * f * (codec == .hevc ? 0.6 : 1)
+            return base * px * f * (codec == .hevc ? 0.6 : 1) * bitrate.factor
         }
 
         /// Roughly how big the file will be (bytes): video at `videoBitrate` + 128 kbps AAC.
-        public func estimatedBytes(durationSec d: Double) -> Double { max(0, d) * (videoBitrate + 128_000) / 8 }
+        public func estimatedBytes(durationSec d: Double) -> Double {
+            switch format {
+            case .video: return max(0, d) * (videoBitrate + 128_000) / 8
+            case .sound: return max(0, d) * 192_000 / 8
+            case .gif: return max(0, min(d, ExportFormat.gifMaxSec)) * ExportFormat.gifFps * 480 * 853 * 0.35
+            }
+        }
         /// "≈ 38 MB"
         public func sizeLabel(durationSec d: Double) -> String {
             let mb = estimatedBytes(durationSec: d) / 1_000_000
@@ -322,6 +378,8 @@ public struct EditSuiteState: Sendable {
     /// Why the last change was refused (it would have broken a rule the server checks, e.g. text running into the next
     /// item); nil after a change that went through. The app shows it.
     public private(set) var lastRefusal: E.EditProblem?
+    /// Records why an action couldn't be done, in words for the person (field "user"; the app shows the message as it is).
+    public mutating func refuse(_ message: String) { lastRefusal = E.EditProblem("user", message) }
     /// The project when the current drag began: trims and moves are measured from it, so a drag's target is absolute
     /// (owner audit 2026-11-08: the start handle of a main clip measured from the already-trimmed clip and ran away).
     public private(set) var gestureBase: E.Project?
@@ -1044,15 +1102,19 @@ public struct EditSuiteState: Sendable {
 
     /// Adds an audio clip (music / voice-over / sound effect) at `at` (default: music at 0, others at the playhead).
     @discardableResult
-    public mutating func addAudio(_ asset: E.Asset, kind: E.TrackKind, at: Double? = nil) -> Bool {
-        guard kind.isAudio, asset.kind == .audio || asset.kind == .video, let d = asset.durationSec, d >= E.minClipSourceSec else { return false }
+    /// `trimStart` drops the file's first seconds (a voice-over recorded over playback: the output's delay).
+    public mutating func addAudio(_ asset: E.Asset, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) -> Bool {
+        guard kind.isAudio, asset.kind == .audio || asset.kind == .video, let full = asset.durationSec else { return false }
+        let skip = E.r6(max(0, min(trimStart, full - E.minClipSourceSec)))
+        let d = full - skip
+        guard d >= E.minClipSourceSec else { return false }
         let start = at ?? (kind == .music ? 0 : playhead)
         var newId: String?
         let ok = apply { p in
             var q = p.addingAsset(asset)
             let id = q.newId(kind == .music ? "m" : kind == .voice ? "vo" : "fx")
             let len = min(d, max(E.minClipSourceSec, E.durationSec(q) - start))
-            let clip = E.AudioClip(id: id, asset: asset.id, startSec: E.r6(start), inSec: 0, outSec: E.r6(len),
+            let clip = E.AudioClip(id: id, asset: asset.id, startSec: E.r6(start), inSec: skip, outSec: E.r6(skip + len),
                                    fadeOutSec: kind == .music ? min(1, len / 4) : nil)
             for t in q.tracks where t.kind == kind {
                 if let r = q.adding(.audio(clip), toTrack: t.id) { newId = id; return r }

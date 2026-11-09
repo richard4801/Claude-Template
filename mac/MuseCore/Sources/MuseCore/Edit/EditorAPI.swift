@@ -61,7 +61,24 @@ public struct EditorJobRequest: Codable, Hashable, Sendable {
     public var kind: EditorJobKind
     public var source: EditorSource
     public var options: EditorJobOptions?
-    public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil) { self.kind = kind; self.source = source; self.options = options }
+    /// Owner only (WS13): the helper's model, checked by the server against its candidates; nil = the studio's default.
+    public var engineModel: String?
+    public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, engineModel: String? = nil) {
+        self.kind = kind; self.source = source; self.options = options; self.engineModel = engineModel
+    }
+}
+
+extension EditorJobKind {
+    /// The model purpose behind a helper (server editor/service.ts): captions and cuts transcribe, matte cuts out (track
+    /// when it follows picked points), denoise separates; beats run no model.
+    public func enginePurpose(_ options: EditorJobOptions?) -> EnginePurpose? {
+        switch self {
+        case .captions, .cuts: return .captions
+        case .matte: return options?.points != nil ? .track : .matte
+        case .denoise: return .denoise
+        case .beats: return nil
+        }
+    }
 }
 
 /// GET /v1/editor/features: what the server can do now (paid helpers switched off by the owner, background removal not
@@ -262,4 +279,25 @@ public struct TakeVersionV2Request: Codable, Sendable, Equatable {
         let d = EditV2.durationSec(project)
         return abs(durationSec - d) <= max(0.5, 0.05 * d)
     }
+}
+
+/// A saved style kit (GET/POST/PATCH /v1/editor/kits, plans/api.md "Edit style kits"): members see their own, the owner
+/// the studio's.
+public struct EditKit: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var kit: EditV2.StyleKit
+    public var createdBy: String?
+    public var createdAt: String?
+    public var updatedAt: String?
+    public init(id: String, name: String, kit: EditV2.StyleKit, createdBy: String? = nil, createdAt: String? = nil, updatedAt: String? = nil) {
+        self.id = id; self.name = name; self.kit = kit; self.createdBy = createdBy; self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+}
+
+public struct EditKitList: Codable, Hashable, Sendable { public var kits: [EditKit] }
+public struct EditKitBody: Codable, Hashable, Sendable {
+    public var name: String?
+    public var kit: EditV2.StyleKit?
+    public init(name: String? = nil, kit: EditV2.StyleKit? = nil) { self.name = name; self.kit = kit }
 }

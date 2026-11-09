@@ -30,9 +30,18 @@ struct EditSuiteBin: View {
                         .padding(.bottom, Space.s4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s2) { importButton; linkButton; recordButton }
-                    VStack(alignment: .leading, spacing: Space.s2) { importButton; linkButton; recordButton }
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Space.s2) { importButton; linkButton; recordButton }
+                        VStack(alignment: .leading, spacing: Space.s2) { importButton; linkButton; recordButton }
+                    }
+                    // Design pass (owner-approved): hear the edit while recording a voice-over; off on the speakers by default.
+                    Toggle("Play the video while recording", isOn: $session.voPlayback)
+                        .toggleStyle(.checkbox)
+                        .font(t.scale.caption.font)
+                        .foregroundStyle(t.roles.ink2)
+                        .disabled(session.isRecordingVO)
+                        .help("Use headphones so the microphone doesn't pick up the video's sound")
                 }
                 .padding(Space.s4)
             }
@@ -160,6 +169,8 @@ struct EditSuiteBin: View {
                     .contextMenu {
                         Button("Add to the end") { session.addTake(tk) }
                         Button("Add as overlay at the playhead") { session.addTake(tk, overlay: true) }
+                        Button("Add its sound at the playhead") { session.addTakeSound(tk) }
+                        Button("Replace the clip with this take") { session.replaceClip(with: tk) }
                     }
                     .help("Double-click to add to the end, right-click for an overlay")
                     .accessibilityElement(children: .ignore)

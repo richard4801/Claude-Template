@@ -49,6 +49,42 @@ fun propAt(keyframes: Keyframes?, prop: KfProp, fallback: Double, t: Double): Do
     return if (!k.isNullOrEmpty()) keyframeValue(k, t) else fallback
 }
 
+private fun keyed(k: Keyframes?, p: KfProp) = !k?.get(p).isNullOrEmpty()
+private fun at(k: Keyframes?, p: KfProp, static: Double, t: Double) = Math.round(propAt(k, p, static, t) * 1e6) / 1e6
+
+/** The mask at item-local [t]: each keyed mask field ([KfProp.MASK]) at its keyframes' value there (model.ts `maskAt`). */
+fun maskAt(mask: Mask?, keyframes: Keyframes?, t: Double): Mask? {
+    if (mask == null || KfProp.MASK.none { keyed(keyframes, it) }) return mask
+    fun v(p: KfProp, static: Double?, d: Double) = if (keyed(keyframes, p)) at(keyframes, p, static ?: d, t) else static
+    return mask.copy(x = v(KfProp.MASK_X, mask.x, 0.5), y = v(KfProp.MASK_Y, mask.y, 0.5), width = v(KfProp.MASK_WIDTH, mask.width, 0.5),
+        height = v(KfProp.MASK_HEIGHT, mask.height, 0.5), rotation = v(KfProp.MASK_ROTATION, mask.rotation, 0.0), feather = v(KfProp.MASK_FEATHER, mask.feather, 0.1))
+}
+
+/**
+ * The look at item-local [t]: each keyed finishing amount ([KfProp.LOOK]) at its keyframes' value there; a keyed effect
+ * the look lacks is added with only its amount (a leak as warm). model.ts `lookAt`.
+ */
+fun lookAt(look: Look?, keyframes: Keyframes?, t: Double): Look? {
+    if (KfProp.LOOK.none { keyed(keyframes, it) }) return look
+    var l = look ?: Look()
+    if (keyed(keyframes, KfProp.VIGNETTE)) l = l.copy(vignette = (l.vignette ?: Vignette(0.0)).let { it.copy(amount = at(keyframes, KfProp.VIGNETTE, it.amount, t)) })
+    if (keyed(keyframes, KfProp.GRAIN)) l = l.copy(grain = (l.grain ?: Grain(0.0)).let { it.copy(amount = at(keyframes, KfProp.GRAIN, it.amount, t)) })
+    if (keyed(keyframes, KfProp.LEAK)) l = l.copy(leak = (l.leak ?: Leak(LeakKind.WARM, 0.0)).let { it.copy(amount = at(keyframes, KfProp.LEAK, it.amount, t)) })
+    return l
+}
+
+/** Whether [keyframes] key any colour property ([KfProp.COLOR]). */
+fun hasColorKeys(keyframes: Keyframes?): Boolean = KfProp.COLOR.any { !keyframes?.get(it).isNullOrEmpty() }
+
+/** The adjust at item-local [t]: each keyed colour property at its keyframes' value there (model.ts `adjustAt`). */
+fun adjustAt(adjust: Adjust?, keyframes: Keyframes?, t: Double): Adjust? {
+    if (!hasColorKeys(keyframes)) return adjust
+    val a = adjust ?: Adjust()
+    fun v(p: KfProp, static: Double?) = if (keyframes?.get(p).isNullOrEmpty()) static else Math.round(propAt(keyframes, p, static ?: 0.0, t) * 1e6) / 1e6
+    return a.copy(exposure = v(KfProp.EXPOSURE, a.exposure), contrast = v(KfProp.CONTRAST, a.contrast), saturation = v(KfProp.SATURATION, a.saturation),
+        temperature = v(KfProp.TEMPERATURE, a.temperature), tint = v(KfProp.TINT, a.tint))
+}
+
 // ------------------------------------------------------------------ timeline
 /** Speed at [x] (0–1) of a curve: smoothstep between points in log speed. */
 fun curveSpeed(c: SpeedCurve, x: Double): Double {
@@ -421,7 +457,8 @@ fun effectiveAdjust(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPre
 }
 
 /**
- * One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint), row-major
+ * One 3×4 affine RGB matrix for the item's look (exposure → temperature → green/magenta tint → contrast → saturation →
+ * preset tint), row-major
  * `[r0 r1 r2 r3, g0.., b0..]`, out = M · (r, g, b, 1) on 0–1 values.
  */
 fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset> = Presets.FILTERS): List<Double> {
@@ -432,6 +469,8 @@ fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset>
     m = mul(doubleArrayOf(ex, 0.0, 0.0, 0.0, 0.0, ex, 0.0, 0.0, 0.0, 0.0, ex, 0.0), m)
     val k = a.temperature!!
     m = mul(doubleArrayOf(1 + 0.1 * k, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1 - 0.1 * k, 0.0), m)
+    val g = clamp(adjust?.tint ?: 0.0, -1.0, 1.0)
+    if (g != 0.0) m = mul(doubleArrayOf(1 + 0.05 * g, 0.0, 0.0, 0.0, 0.0, 1 - 0.1 * g, 0.0, 0.0, 0.0, 0.0, 1 + 0.05 * g, 0.0), m)
     val c = 1 + a.contrast!!; val off = 0.5 * (1 - c)
     m = mul(doubleArrayOf(c, 0.0, 0.0, off, 0.0, c, 0.0, off, 0.0, 0.0, c, off), m)
     val s = 1 + a.saturation!!

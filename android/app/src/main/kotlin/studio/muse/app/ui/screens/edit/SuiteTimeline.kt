@@ -177,7 +177,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
 }
 
 /** A gesture's mode once it has moved past the touch slop. */
-private enum class Mode { NONE, SCRUB, VSCROLL, PINCH, TRIM_LEFT, TRIM_RIGHT, MOVE }
+private enum class Mode { NONE, SCRUB, VSCROLL, PINCH, TRIM_LEFT, TRIM_RIGHT, MOVE, KEY }
 
 @Composable
 private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, waves: Map<String, Peaks>, act: (EditAction) -> Unit, lanes: List<Lane>, modifier: Modifier, plus: Boolean) {
@@ -243,6 +243,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val hit = hitAt(down.position, w, density, proj, lanesNow, view.doubleValue, pps.floatValue, vScroll.floatValue)
                             // The selected item's edges are trim handles (20 dp either side), on its own lane.
                             var pendingTrim = Mode.NONE
+                            var pendingKey: Double? = null
                             val selId = s.selectedId
                             if (selId != null && hit.lane != null && hit.lane.kind == LaneKind.TRACK && hit.lane.track?.items?.any { it.id == selId } == true) {
                                 val tr = hit.lane.track
@@ -250,6 +251,14 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                 val l = TimelineMath.xOf(sp.startSec, view.doubleValue, w, ppsPx); val r = TimelineMath.xOf(sp.endSec, view.doubleValue, w, ppsPx)
                                 val reach = 20 * density
                                 pendingTrim = when { abs(down.position.x - r) <= reach -> Mode.TRIM_RIGHT; abs(down.position.x - l) <= reach -> Mode.TRIM_LEFT; else -> Mode.NONE }
+                                // A keyframe ◆ (the lane's lower band) drags the keyframe instead.
+                                val laneBottom = (hit.lane.top + hit.lane.height) * density - vScroll.floatValue * density
+                                if (down.position.y >= laneBottom - 18 * density) {
+                                    pendingKey = SuiteOps.keyTimes(tr.items.first { it.id == selId })
+                                        .minByOrNull { abs(TimelineMath.xOf(sp.startSec + it, view.doubleValue, w, ppsPx) - down.position.x) }
+                                        ?.takeIf { abs(TimelineMath.xOf(sp.startSec + it, view.doubleValue, w, ppsPx) - down.position.x) <= 14 * density }
+                                    if (pendingKey != null) pendingTrim = Mode.NONE
+                                }
                             }
                             val tracker = VelocityTracker()
                             tracker.addPosition(down.uptimeMillis, down.position)
@@ -258,7 +267,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             var last = down.position
                             busy.value = true
                             // Long-press on an item (finger still): move it (main clips reorder).
-                            if (hit.item != null && pendingTrim == Mode.NONE) {
+                            if (hit.item != null && pendingTrim == Mode.NONE && pendingKey == null) {
                                 var lifted = false
                                 val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                                     while (true) {
@@ -296,6 +305,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                 val totalX = ch.position.x - down.position.x; val totalY = ch.position.y - down.position.y
                                 if (mode == Mode.NONE && (abs(totalX) > slop || abs(totalY) > slop)) {
                                     mode = when {
+                                        pendingKey != null && abs(totalX) >= abs(totalY) -> Mode.KEY
                                         pendingTrim != Mode.NONE && abs(totalX) >= abs(totalY) -> pendingTrim
                                         abs(totalY) > abs(totalX) * 1.2f && contentH * density > visibleH -> Mode.VSCROLL
                                         else -> Mode.SCRUB
@@ -305,7 +315,8 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                 when (mode) {
                                     Mode.SCRUB -> { send(TimelineMath.dragged(view.doubleValue, d.x, px, dur), false); ch.consume() }
                                     Mode.VSCROLL -> { vScroll.floatValue = (vScroll.floatValue - d.y / density).coerceIn(0f, max(0f, contentH - visibleH / density)); ch.consume() }
-                                    Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = false)); ch.consume() }
+                                    Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = false, snapSec = 10.0 / pps.floatValue)); ch.consume() }
+                                    Mode.KEY -> { actNow(EditAction.MoveKey(selId!!, pendingKey!!, totalX / px.toDouble(), done = false)); ch.consume() }
                                     Mode.MOVE -> {
                                         val item = hit.item!!
                                         if (hit.lane?.track?.kind == TrackKind.MAIN) {
@@ -323,7 +334,8 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val totalX = last.x - down.position.x
                             when (mode) {
                                 Mode.PINCH -> { actNow(EditAction.Zoom(pps.floatValue)); send(view.doubleValue, true); busy.value = false }
-                                Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = true)); busy.value = false }
+                                Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = true, snapSec = 10.0 / pps.floatValue)); busy.value = false }
+                                Mode.KEY -> { actNow(EditAction.MoveKey(selId!!, pendingKey!!, totalX / px.toDouble(), done = true)); busy.value = false }
                                 Mode.MOVE -> {
                                     val item = hit.item!!
                                     if (hit.lane?.track?.kind == TrackKind.MAIN) { if (lastIndex >= 0) actNow(EditAction.Reorder(item.id, lastIndex, done = true)) }
@@ -442,6 +454,23 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                         for (x in listOf(l, r - 8 * dp)) {
                             drawRoundRect(m.t.accent, Offset(x, top), Size(8 * dp, h), CornerRadius(3 * dp))
                             drawRect(Color.White, Offset(x + 3 * dp, top + h / 2 - 5 * dp), Size(2 * dp, 10 * dp))
+                        }
+                    }
+                }
+                // The selected item's keyframes: ◆ along its lane's lower edge (drag one to move it).
+                ui.selectedId?.let { sid ->
+                    for (lane in lanes) {
+                        val t = lane.track ?: continue
+                        if (lane.kind != LaneKind.TRACK) continue
+                        val item = t.items.firstOrNull { it.id == sid } ?: continue
+                        val sp = itemSpan(p, t, item)
+                        val cy = (lane.top + lane.height) * dp - vs - 8 * dp
+                        for (k in SuiteOps.keyTimes(item)) {
+                            val x = xOf(sp.startSec + k)
+                            if (x < -10 * dp || x > w + 10 * dp) continue
+                            val r = 5 * dp
+                            val path = Path().apply { moveTo(x, cy - r); lineTo(x + r, cy); lineTo(x, cy + r); lineTo(x - r, cy); close() }
+                            drawPath(path, Color.White); drawPath(path, m.t.accent, style = Stroke(1.5f * dp))
                         }
                     }
                 }

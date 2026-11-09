@@ -118,6 +118,7 @@ object EditJson {
         alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
         holdSec = o.numOrNull("holdSec"), blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
+        animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
     )
 
     private fun imageItem(o: Obj) = ImageItem(
@@ -152,7 +153,7 @@ object EditJson {
         },
     )
 
-    private fun mask(o: Obj) = o.objOrNull("mask")?.let { m ->
+    internal fun mask(o: Obj) = o.objOrNull("mask")?.let { m ->
         Mask(
             m.enum("shape", "one of ${MaskShape.entries.joinToString(", ") { it.wire }}"), m.numOrNull("x"), m.numOrNull("y"), m.numOrNull("width"), m.numOrNull("height"),
             m.numOrNull("rotation"), m.numOrNull("feather"), m.boolOrNull("invert"),
@@ -163,7 +164,7 @@ object EditJson {
     private fun crop(o: Obj) = o.objOrNull("crop")?.let { Crop(it.numOrNull("left"), it.numOrNull("top"), it.numOrNull("right"), it.numOrNull("bottom")) }
     private fun adjust(o: Obj) = o.objOrNull("adjust")?.let(::adjustOf)
     private fun adjustOf(a: Obj) = Adjust(
-        a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"), a.numOrNull("highlights"), a.numOrNull("shadows"),
+        a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"), a.numOrNull("highlights"), a.numOrNull("shadows"), a.numOrNull("tint"),
     )
     private fun filter(o: Obj) = o.objOrNull("filter")?.let { FilterRef(it.str("id"), it.num("amount")) }
     private fun look(o: Obj) = o.objOrNull("look")?.let(::lookOf)
@@ -201,7 +202,7 @@ object EditJson {
 
     private fun anim(o: Obj, key: String) = o.objOrNull(key)?.let { Anim(it.enum("kind", "unknown animation"), it.num("durationSec")) }
 
-    private fun keyframes(o: Obj): Keyframes? = o.objOrNull("keyframes")?.let { k ->
+    internal fun keyframes(o: Obj): Keyframes? = o.objOrNull("keyframes")?.let { k ->
         k.o.entries.associate { (name, list) ->
             val prop = wireOf<KfProp>(name) ?: k.bad(name, "is not a keyframe property here")
             prop to Obj.list(list, "${k.path}.$name").map { (e, f) ->
@@ -209,6 +210,14 @@ object EditJson {
             }
         }
     }
+
+    /** A style kit's parts (Kit.kt parseKit checks the keys, version and rules). */
+    internal fun kitOf(o: Obj) = StyleKit(
+        look = o.objOrNull("look")?.let(::lookOf), filter = filter(o), adjust = adjust(o),
+        transition = o.objOrNull("transition")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
+        captionStyle = o.objOrNull("captionStyle")?.let(::captionStyle), textStyle = o.objOrNull("textStyle")?.let(::textStyle),
+        background = o.strOrNull("background"), fill = o.enumOrNull("fill", "must be color or blur"),
+    )
 
     internal fun textStyle(s: Obj) = TextStyle(
         font = s.enum("font", "unknown font"), weight = s.int("weight"), sizePct = s.num("sizePct"), color = s.str("color"),
@@ -259,7 +268,7 @@ object EditJson {
             it.chroma?.let { c -> put("chroma", buildJsonObject { put("color", c.color); num("similarity", c.similarity); num("smoothness", c.smoothness); num("spill", c.spill) }) }
             it.alphaMatte?.let { m -> put("alphaMatte", buildJsonObject { put("asset", m.asset); bool("invert", m.invert) }) }
             it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
-            num("holdSec", it.holdSec); str("blend", it.blend?.wire)
+            num("holdSec", it.holdSec); str("blend", it.blend?.wire); anim("animIn", it.animIn); anim("animOut", it.animOut)
         }
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
@@ -287,12 +296,12 @@ object EditJson {
         v.filter?.let { f -> put("filter", buildJsonObject { put("id", f.id); num("amount", f.amount) }) }
         v.adjust?.let { put("adjust", encodeAdjust(it)) }
         v.look?.let { put("look", encodeLook(it)) }
-        v.mask?.let { m ->
-            put("mask", buildJsonObject {
-                put("shape", m.shape.wire); num("x", m.x); num("y", m.y); num("width", m.width); num("height", m.height)
-                num("rotation", m.rotation); num("feather", m.feather); bool("invert", m.invert)
-            })
-        }
+        v.mask?.let { put("mask", encodeMask(it)) }
+    }
+
+    fun encodeMask(m: Mask) = buildJsonObject {
+        put("shape", m.shape.wire); num("x", m.x); num("y", m.y); num("width", m.width); num("height", m.height)
+        num("rotation", m.rotation); num("feather", m.feather); bool("invert", m.invert)
     }
 
     fun encodeSpeedCurve(c: SpeedCurve) = buildJsonObject {
@@ -316,7 +325,7 @@ object EditJson {
 
     fun encodeAdjust(a: Adjust) = buildJsonObject {
         num("exposure", a.exposure); num("contrast", a.contrast); num("saturation", a.saturation); num("temperature", a.temperature)
-        num("highlights", a.highlights); num("shadows", a.shadows)
+        num("highlights", a.highlights); num("shadows", a.shadows); num("tint", a.tint)
     }
 
 

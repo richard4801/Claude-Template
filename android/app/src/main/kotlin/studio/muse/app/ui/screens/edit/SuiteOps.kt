@@ -142,6 +142,33 @@ object SuiteOps {
     fun easeAt(p: EditProject, id: String, t: Double, ease: studio.muse.core.edit.Ease): EditProject? =
         editKeys(p, id) { k -> k.mapValues { (_, l) -> l.map { if (abs(it.t - t) <= 0.05) it.copy(ease = ease) else it } } }
 
+    /** The item's keyframe times (item-local seconds, every property, sorted, ±0.05 s merged). */
+    fun keyTimes(item: studio.muse.core.edit.Item?): List<Double> {
+        val ks = when (item) { is VideoClip -> item.keyframes; is ImageItem -> item.keyframes; is TextItem -> item.keyframes; is AudioClip -> item.keyframes; else -> null }
+        val out = ArrayList<Double>()
+        for (t in ks.orEmpty().values.flatten().map { it.t }.sorted()) if (out.isEmpty() || t - out.last() > 0.05) out += t
+        return out
+    }
+
+    /**
+     * The keyframes at item-local [fromT] (±0.05 s, every property) moved by [deltaSec], kept inside the item and in
+     * order; null when that would land on (or pass) another keyframe of the same property.
+     */
+    fun moveKeysAt(p: EditProject, id: String, fromT: Double, deltaSec: Double): EditProject? {
+        val (tr, i) = p.locate(id) ?: return null
+        val sp = itemSpan(p, tr, tr.items[i])
+        val to = (Math.round((fromT + deltaSec).coerceIn(0.0, sp.endSec - sp.startSec) * 1000) / 1000.0)
+        if (abs(to - fromT) < 1e-9) return null
+        var ok = true
+        val q = editKeys(p, id) { k -> k.mapValues { (_, l) ->
+            val moved = l.map { if (abs(it.t - fromT) <= 0.05) it.copy(t = to) else it }
+            val others = l.filter { abs(it.t - fromT) > 0.05 }.map { it.t }
+            if (l.size != others.size && others.any { o -> (o - fromT) * (o - to) <= 0 || abs(o - to) <= 0.05 }) ok = false
+            moved.sortedBy { it.t }
+        } }
+        return q.takeIf { ok }
+    }
+
     /** Removes the keyframes at item-local [t] (±0.05 s), of [prop] or of every property. */
     fun removeKeysAt(p: EditProject, id: String, t: Double, prop: KfProp? = null): EditProject? =
         editKeys(p, id) { k -> k.mapValues { (pr, l) -> if (prop == null || pr == prop) l.filter { abs(it.t - t) > 0.05 } else l } }

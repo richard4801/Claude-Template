@@ -49,6 +49,7 @@ struct EditSuiteCaptionsMode: View {
                     HStack {
                         SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Auto-captions", icon: "captions.bubble", accent: session.helperAvailable(.captions),
                                         disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
+                        HelperModelPill(session: session, purpose: .captions, kind: .captions)
                         if session.isRunning(.captions) {
                             ProgressView().controlSize(.small)
                             Text(session.jobs[.captions]?.phase ?? "").font(t.scale.caption.font).foregroundStyle(t.muted)

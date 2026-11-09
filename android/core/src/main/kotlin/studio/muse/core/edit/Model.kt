@@ -17,7 +17,21 @@ inline fun <reified E> wireOf(s: String): E? where E : Enum<E>, E : Wire = enumV
 enum class Ease(override val wire: String) : Wire { LINEAR("linear"), EASE_IN("easeIn"), EASE_OUT("easeOut"), EASE_IN_OUT("easeInOut"), HOLD("hold") }
 
 /** Keyframeable properties. Volume only on clips with sound; the rest on visual items. */
-enum class KfProp(override val wire: String) : Wire { X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume") }
+enum class KfProp(override val wire: String) : Wire {
+    X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume"),
+    /** Colour keyframes (M): replace the adjust field's static value over time ([adjustAt]); video clips and images. */
+    EXPOSURE("exposure"), CONTRAST("contrast"), SATURATION("saturation"), TEMPERATURE("temperature"), TINT("tint"),
+    /** Mask keyframes (M): the mask's fields over time ([maskAt]); only on items with a mask. */
+    MASK_X("maskX"), MASK_Y("maskY"), MASK_WIDTH("maskWidth"), MASK_HEIGHT("maskHeight"), MASK_ROTATION("maskRotation"), MASK_FEATHER("maskFeather"),
+    /** Look keyframes (M): the finishing effects' amounts over time ([lookAt]). */
+    VIGNETTE("vignette"), GRAIN("grain"), LEAK("leak");
+
+    companion object {
+        val COLOR = listOf(EXPOSURE, CONTRAST, SATURATION, TEMPERATURE, TINT)
+        val MASK = listOf(MASK_X, MASK_Y, MASK_WIDTH, MASK_HEIGHT, MASK_ROTATION, MASK_FEATHER)
+        val LOOK = listOf(VIGNETTE, GRAIN, LEAK)
+    }
+}
 
 enum class TransitionKind(override val wire: String) : Wire {
     FADE("fade"), BLACK("black"), WHITE("white"), SLIDE_LEFT("slideLeft"), SLIDE_RIGHT("slideRight"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom"),
@@ -95,6 +109,8 @@ data class Adjust(
     val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null,
     /** Edit suite: tone, applied after the colour matrix ([toneAdjust]). */
     val highlights: Double? = null, val shadows: Double? = null,
+    /** Green (−1) ↔ magenta (+1), right after temperature in [colorMatrix]. */
+    val tint: Double? = null,
 )
 data class FilterRef(val id: String, val amount: Double)
 data class Chroma(val color: String, val similarity: Double? = null, val smoothness: Double? = null, val spill: Double? = null)
@@ -187,6 +203,9 @@ data class VideoClip(
     val holdSec: Double? = null,
     /** Wave 1: overlay (video) tracks only. */
     val blend: BlendMode? = null,
+    /** In / out animation (as images; no typewriter), main or overlay: [animState] over [clipLength]. */
+    val animIn: Anim? = null,
+    val animOut: Anim? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }

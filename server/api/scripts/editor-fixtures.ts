@@ -10,6 +10,7 @@ import { runChain, voiceChain } from '../src/editor/audio.js';
 import { applyPatch, diff } from '../src/editor/jsonpatch.js';
 import { applyOps, OP_NAMES } from '../src/editor/ops.js';
 import * as K from '../src/editor/look.js';
+import { applyKit, kitOf, validateKit } from '../src/editor/kit.js';
 import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -161,6 +162,22 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'text flip ok', project: mut(p => { p.tracks[3].items[0].transform = { ...(p.tracks[3].items[0].transform ?? {}), flipY: true }; }), ok: true },
   { name: 'fill blur ok', project: mut(p => { p.canvas.fill = 'blur'; }), ok: true },
   { name: 'fill unknown', project: mut(p => { p.canvas.fill = 'mirror'; }), ok: false, field: 'edits.canvas.fill' },
+  { name: 'tint ok', project: mut(p => { p.tracks[0].items[0].adjust = { temperature: 0.3, tint: -0.4 }; }), ok: true },
+  { name: 'tint too big', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 1.5 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
+  { name: 'tint not a number', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 'pink' }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
+  { name: 'video anim ok', project: mut(p => { p.tracks[0].items[0].animIn = { kind: 'fade', durationSec: 0.5 }; p.tracks[1].items[0].animOut = { kind: 'zoom', durationSec: 0.4 }; }), ok: true },
+  { name: 'video typewriter', project: mut(p => { p.tracks[1].items[0].animIn = { kind: 'typewriter', durationSec: 1 }; }), ok: false, field: 'edits.tracks.1.items.0.animIn.kind' },
+  { name: 'video anim too long', project: mut(p => { p.tracks[0].items[0].animOut = { kind: 'slideUp', durationSec: 3 }; }), ok: false, field: 'edits.tracks.0.items.0.animOut.durationSec' },
+  { name: 'colour keys ok', project: mut(p => { p.tracks[0].items[0].keyframes = { exposure: [{ t: 0, v: -0.3 }, { t: 1, v: 0.3 }] }; p.tracks[1].items[0].keyframes = { tint: [{ t: 0.5, v: 0.5 }] }; }), ok: true },
+  { name: 'colour key on text', project: mut(p => { p.tracks[3].items[0].keyframes = { exposure: [{ t: 0, v: 0.2 }] }; }), ok: false, field: 'edits.tracks.3.items.0.keyframes.exposure' },
+  { name: 'colour key too big', project: mut(p => { p.tracks[0].items[0].keyframes = { exposure: [{ t: 0, v: 1.5 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.exposure.0.v' },
+  { name: 'colour key on audio', project: mut(p => { p.tracks.push({ id: 'mus', kind: 'music', items: [{ id: 'a9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 1, keyframes: { exposure: [{ t: 0, v: 0.1 }] } }] }); }), ok: false, field: 'edits.tracks.4.items.0.keyframes.exposure' },
+  { name: 'colour keys on an image ok', project: mut(p => { p.tracks[2].items[0].keyframes = { tint: [{ t: 0, v: -0.2 }, { t: 1, v: 0.4 }], saturation: [{ t: 0.5, v: 1 }] }; }), ok: true },
+  { name: 'mask keys ok', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'circle' }; p.tracks[1].items[0].keyframes = { maskX: [{ t: 0, v: 0.3 }, { t: 1, v: 0.7 }], maskFeather: [{ t: 0.5, v: 0.4 }] }; p.tracks[2].items[0].keyframes = { vignette: [{ t: 0, v: -0.5 }], grain: [{ t: 0, v: 0.2 }], leak: [{ t: 0, v: 0.6 }] }; }), ok: true },
+  { name: 'mask key without a mask', project: mut(p => { delete p.tracks[0].items[0].mask; p.tracks[0].items[0].keyframes = { maskX: [{ t: 0, v: 0.3 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.maskX' },
+  { name: 'mask key out of range', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'rect' }; p.tracks[1].items[0].keyframes = { maskWidth: [{ t: 0, v: 5 }] }; }), ok: false, field: 'edits.tracks.1.items.0.keyframes.maskWidth.0.v' },
+  { name: 'look key on text', project: mut(p => { p.tracks[3].items[0].keyframes = { vignette: [{ t: 0, v: 0.2 }] }; }), ok: false, field: 'edits.tracks.3.items.0.keyframes.vignette' },
+  { name: 'grain key negative', project: mut(p => { p.tracks[0].items[0].keyframes = { grain: [{ t: 0, v: -0.1 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.grain.0.v' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
@@ -186,6 +203,9 @@ const anims = animItems.map(item => ({ item, samples: Array.from({ length: 16 },
 const colors = [
   { adjust: {}, filter: null }, { adjust: { exposure: 1 }, filter: null }, { adjust: { contrast: 0.5, saturation: -0.5 }, filter: null },
   { adjust: { temperature: -1 }, filter: null }, ...FILTERS.map(f => ({ adjust: { exposure: -0.1 }, filter: { id: f.id, amount: 0.8 } })),
+  // Green ↔ magenta tint, alone and with the other steps and a preset tint.
+  { adjust: { tint: 1 }, filter: null }, { adjust: { tint: -0.6, temperature: 0.5, contrast: 0.2 }, filter: null },
+  { adjust: { tint: 0.4, saturation: -0.3 }, filter: { id: 'film', amount: 1 } },
 ].map(c => ({ ...c, matrix: M.colorMatrix(c.adjust, c.filter ?? undefined, FILTERS) }));
 const cutsCases = [
   { project: projects[0]!.project, asset: 'src', cuts: [{ startSec: 0.7, endSec: 1.55 }, { startSec: 3.4, endSec: 4.6 }, { startSec: 9.75, endSec: 12 }] },
@@ -351,6 +371,54 @@ const cornerCases = [
   { canvas: { width: 1920, height: 1080 }, w: 1080, h: 1920, fit: 'cover' as M.Fit, t: { flipX: true, flipY: true, rotation: -90 } },
 ].map(c => ({ ...c, corners: M.itemCorners(c.canvas, c.w, c.h, c.fit, c.t) }));
 const tiny = Array.from({ length: 4 * 3 * 3 }, (_, i) => Math.round(((i * 37) % 100) / 100 * 1000) / 1000);
+// Colour keyframes (M): adjustAt and the colour matrix it gives, over time.
+const colorKeyItems = [
+  { adjust: { exposure: 0.1, saturation: 0.2 }, keyframes: { exposure: [{ t: 0, v: -0.5 }, { t: 2, v: 0.5, ease: 'easeInOut' }] } },
+  { adjust: { tint: 0.3 }, filter: { id: 'warm', amount: 0.5 }, keyframes: { temperature: [{ t: 0.5, v: -1 }, { t: 1.5, v: 1 }], tint: [{ t: 1, v: -0.4 }] } },
+  // A static field next to keyed ones stays; a key that comes out 0 is written as 0.
+  { adjust: { saturation: 0.3, contrast: -0.1 }, keyframes: { exposure: [{ t: 0, v: 0.4 }, { t: 1, v: 0 }], contrast: [{ t: 2, v: 0.25 }] } },
+  // An image item's tint keys (adjustAt reads only adjust and keyframes).
+  { asset: 'img', startSec: 0, durationSec: 3, adjust: undefined, keyframes: { tint: [{ t: 0, v: 0.6, ease: 'hold' }, { t: 1.25, v: -0.6 }] } },
+] as unknown as { adjust?: M.Adjust; filter?: M.FilterRef; keyframes: M.Keyframes }[];
+// Auto adjust: synthetic frames (deterministic) → the suggestion.
+const frame = (n: number, f: (k: number) => [number, number, number]) => Array.from({ length: n }, (_, k) => f(k)).flat().map(v => Math.round(v * 1e4) / 1e4);
+const autoAdjustCases = [
+  { name: 'dark warm green', rgb: frame(300, k => { const v = 0.15 + 0.1 * (k % 10) / 10; return [v * 1.2, v * 1.15, v * 0.8]; }) },
+  { name: 'balanced grey ramp', rgb: frame(200, k => { const v = (k % 100) / 99 * 0.92 + 0.04; return [v, v, v]; }), base: { highlights: 0.2, tint: 0.5 } },
+  { name: 'bright saturated blue', rgb: frame(150, k => [0.1 + 0.002 * k, 0.4, 0.95]) },
+  { name: 'black', rgb: frame(16, () => [0, 0, 0]) },
+].map(c => ({ ...c, out: M.autoAdjust(c.rgb, c.base as M.Adjust | undefined) }));
+const colorKeys = colorKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => { const adjust = M.adjustAt(item, t); return { t, adjust: adjust ?? null, matrix: M.colorMatrix(adjust, item.filter, FILTERS) }; }) }));
+// Style kits (M): kitOf every fixture project; applyKit of three kits onto three projects; validateKit cases.
+const kitList = [
+  { version: 1, look: { lut: 'pack:film-gold', strength: 0.6, grain: { amount: 0.2 } }, filter: { id: 'warm', amount: 0.5 }, adjust: { contrast: 0.1, tint: -0.2 },
+    transition: { kind: 'whip', durationSec: 0.6 }, captionStyle: CAPTION_STYLES.neon, textStyle: HOOKS[3]!.style, background: '#202020', fill: 'blur' },
+  { version: 1, transition: { kind: 'fade', durationSec: 2 } },
+  kitOf(projects[8]!.project),
+] as unknown[];
+const kitProblem = (k: unknown) => { try { validateKit(k, FILTERS, LOOK_IDS, new Set()); return null; } catch (e) { return (e as M.EditProblem).field; } };
+const kits = {
+  kitOf: projects.map(x => ({ name: x.name, kit: kitOf(x.project) })),
+  apply: [1, 2, 9].flatMap(pi => kitList.map((kit, ki) => ({ project: pi, kit: ki, result: applyKit(projects[pi]!.project, kit as never) }))),
+  kits: kitList,
+  validate: [
+    { version: 1 }, kitList[0], { version: 2 }, { version: 1, mask: {} }, { version: 1, adjust: { tint: 2 } }, { version: 1, transition: { kind: 'fade', durationSec: 5 } },
+    { version: 1, transition: { kind: 'swirl', durationSec: 0.5 } }, { version: 1, look: { lut: 'cube' } }, { version: 1, captionStyle: { ...CAPTION_STYLES.pop, highlightColor: 'yellow' } },
+    { version: 1, textStyle: { ...HOOKS[0]!.style, sizePct: 9 } }, { version: 1, fill: 'mirror' }, { version: 1, background: 'red' }, { version: 1, filter: { id: 'nope', amount: 1 } },
+    { version: 1, look: { vignette: { amount: 3 } } }, 'kit',
+  ].map(kit => ({ kit, field: kitProblem(kit) })),
+};
+// Mask and look keyframes (M): maskAt and lookAt over time.
+const motionKeyItems = [
+  { mask: { shape: 'circle', x: 0.5, y: 0.4, width: 0.6, height: 0.5, feather: 0.2 },
+    keyframes: { maskX: [{ t: 0, v: 0.2 }, { t: 2, v: 0.8, ease: 'easeInOut' }], maskWidth: [{ t: 1, v: 0.3 }, { t: 3, v: 0.9 }], maskFeather: [{ t: 0, v: 0, ease: 'hold' }, { t: 1.5, v: 0.5 }] } },
+  { mask: { shape: 'rect' }, look: { vignette: { amount: 0.2, size: 0.6 }, lift: 0.1 },
+    keyframes: { maskRotation: [{ t: 0, v: -45 }, { t: 3, v: 45 }], vignette: [{ t: 0, v: 0 }, { t: 2, v: -0.6 }], grain: [{ t: 0.5, v: 0.4 }], leak: [{ t: 1, v: 0 }, { t: 3, v: 0.8 }] } },
+  { look: { grain: { amount: 0.3, size: 2 }, leak: { kind: 'teal', amount: 0.1, angle: 90 } }, keyframes: { grain: [{ t: 0, v: 0.1 }, { t: 1, v: 0.9 }], leak: [{ t: 2, v: 0.5 }] } },
+  // An inverted mask keeps invert (and its other fields) through maskAt.
+  { mask: { shape: 'rect', invert: true, feather: 0.3, width: 0.4 }, keyframes: { maskY: [{ t: 0, v: 0.2 }, { t: 3, v: 0.8 }] } },
+] as unknown as { mask?: M.Mask; look?: K.Look; keyframes: M.Keyframes }[];
+const motionKeys = motionKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => ({ t, mask: M.maskAt(item, t) ?? null, look: M.lookAt(item, t) ?? null })) }));
 const wave1 = projects[projects.length - 1]!.project;
 const holdClip = (wave1.tracks[0]!.items[1]) as M.VideoClip;
 const holdFns = { clip: holdClip, length: M.clipLength(holdClip), sourceAt: [0, 0.7, 1.5].map(t => ({ t, src: M.clipSourceAt(holdClip, t) })), timeAt: M.clipTimeAt(holdClip, 4.05),
@@ -369,7 +437,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

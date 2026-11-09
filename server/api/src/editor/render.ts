@@ -167,6 +167,8 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     const moving = !!(kf.scale?.length || kf.x?.length || kf.y?.length);
     if (tr.rotation || kf.rotation?.length) unsupported.add('rotation');
     if ((c.opacity ?? 1) !== 1 || kf.opacity?.length) unsupported.add('opacity');
+    if (c.animIn && c.animIn.kind !== 'none' || c.animOut && c.animOut.kind !== 'none') unsupported.add('clip animation');
+    if (M.COLOR_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('colour keyframes');
     for (const [k2, name] of [['crop', 'crop'], ['adjust', 'colour adjustments'], ['filter', 'filters'], ['mask', 'masks'], ['chroma', 'chroma key'], ['alphaMatte', 'background removal']] as const)
       if ((c as Record<string, unknown>)[k2] !== undefined) unsupported.add(name);
     const sw = `trunc(${n4(size.width * base)}*(${S})/2)*2`, sh = `trunc(${n4(size.height * base)}*(${S})/2)*2`;

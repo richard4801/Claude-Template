@@ -570,3 +570,57 @@ extension EditSuiteControlsTests {
         XCTAssertNil(EditV2.problem(s.project))
     }
 }
+
+// MARK: Parity (as Android's app-only rows): shapes, export format and bitrate, overlay ⇄ main
+
+extension EditSuiteControlsTests {
+    func testNewShapesAndTheLongSideCap() {
+        XCTAssertTrue(EditSuite.Ratio.fourThree.canvas(shortSide: 1080) == (1440, 1080))
+        XCTAssertTrue(EditSuite.Ratio.cinema.canvas(shortSide: 1080) == (2538, 1080))
+        XCTAssertTrue(EditSuite.Ratio.cinema.canvas(shortSide: 2160) == (4096, 1744), "\(EditSuite.Ratio.cinema.canvas(shortSide: 2160))")
+        XCTAssertTrue(EditSuite.Ratio.portrait.canvas(shortSide: 2160) == (2160, 3840))
+        var s = EditSuiteState(EditV2.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), EditV2.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        XCTAssertTrue(s.setRatio(.cinema))
+        XCTAssertEqual(s.project.canvas.width, 2538)
+        XCTAssertNil(EditV2.problem(s.project))
+    }
+
+    func testExportFormatAndBitrate() {
+        var e = EditSuite.ExportSettings()
+        let base = e.videoBitrate
+        e.bitrate = .smaller
+        XCTAssertEqual(e.videoBitrate, base * 0.6, accuracy: 1)
+        e.bitrate = .higher
+        XCTAssertEqual(e.videoBitrate, base * 1.6, accuracy: 1)
+        e.format = .sound
+        XCTAssertEqual(e.estimatedBytes(durationSec: 10), 240_000, accuracy: 1)
+        XCTAssertEqual(EditSuite.ExportFormat.allCases.map(\.label), ["Video", "Sound only", "GIF"])
+        XCTAssertEqual(EditSuite.Bitrate.allCases.map(\.label), ["Smaller file", "Recommended", "Higher quality"])
+    }
+
+    func testOverlayToMainAndBack() throws {
+        var s = EditSuiteState(EditV2.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), EditV2.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        s.playhead = 4
+        XCTAssertTrue(s.split())
+        s.playhead = 3.9
+        XCTAssertTrue(s.addVideo(EditV2.Asset(id: "o", kind: .video, take: "t2", durationSec: 2, width: 1080, height: 1920, hasAudio: true), overlay: true))
+        let ov = try XCTUnwrap(s.selection)
+        XCTAssertTrue(s.setBlend(.screen))
+        XCTAssertEqual(s.selectedTrackSwap?.toMain, true)
+        XCTAssertTrue(s.moveToMain())
+        XCTAssertEqual(s.project.mainClips.map(\.id).firstIndex(of: ov), 1, "at the boundary nearest 3.9 s (4 s)")
+        XCTAssertNil(s.selectedVideo?.blend)
+        XCTAssertNil(s.selectedVideo?.transform)
+        XCTAssertFalse(s.project.tracks.contains { $0.kind == .video }, "the empty overlay track goes")
+        XCTAssertEqual(s.duration, 12, accuracy: 1e-6)
+        XCTAssertNil(EditV2.problem(s.project))
+        XCTAssertTrue(s.moveToOverlay())
+        XCTAssertEqual(s.selectedVideo?.startSec ?? -1, 4, accuracy: 1e-6, "plays when it played")
+        XCTAssertEqual(s.project.tracks.first { $0.kind == .video }?.name, "Overlay")
+        XCTAssertEqual(s.duration, 10, accuracy: 1e-6)
+        // The last main clip stays.
+        var one = EditSuiteState(EditV2.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), EditV2.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        XCTAssertFalse(one.moveToOverlay())
+        XCTAssertEqual(one.lastRefusal?.message, "The main track needs at least one clip")
+    }
+}

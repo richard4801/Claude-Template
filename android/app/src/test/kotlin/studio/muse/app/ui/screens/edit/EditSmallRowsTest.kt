@@ -195,4 +195,182 @@ class EditSmallRowsTest {
         assertEquals(studio.muse.core.edit.Transform(.25, .5, 1.0), m2.transform)
         valid(c.p())
     }
+
+    @Test fun tintSlider() = runTest {
+        val c = controller()
+        c.act(EditAction.AdjustField("tint", .5))
+        assertEquals(.5, c.p().mainClips[0].adjust!!.tint!!, 1e-9)
+        val m = studio.muse.core.edit.colorMatrix(c.p().mainClips[0].adjust, null)
+        assertEquals(1.025, m[0], 1e-6); assertEquals(.95, m[5], 1e-6) // magenta: less green
+        valid(c.p())
+        c.act(EditAction.AdjustField("tint", 0.0)); assertNull(c.p().mainClips[0].adjust)
+    }
+
+    @Test fun keyframesListMoveAndJump() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        for (t in listOf(1.0, 4.0, 8.0)) { c.act(EditAction.Scrub(t, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.SCALE)) }
+        assertEquals(listOf(1.0, 4.0, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        // Drag the 4 s key to 5.5 s (a live drag, then the drop: one undo step).
+        c.act(EditAction.MoveKey(id, 4.0, 0.7, done = false)); c.act(EditAction.MoveKey(id, 4.0, 1.5, done = true))
+        assertEquals(listOf(1.0, 5.5, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        // It can't pass a neighbour.
+        c.act(EditAction.MoveKey(id, 5.5, 3.0)); assertEquals(listOf(1.0, 5.5, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        c.act(EditAction.Undo); assertEquals(listOf(1.0, 4.0, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        // Previous / next.
+        c.act(EditAction.Scrub(5.0, end = true))
+        c.act(EditAction.KeyNav(next = true)); assertEquals(8.0, c.ui.value.playheadSec, 1e-6)
+        c.act(EditAction.KeyNav(next = false)); assertEquals(4.0, c.ui.value.playheadSec, 1e-6)
+        c.act(EditAction.KeyNav(next = false)); c.act(EditAction.KeyNav(next = false)); assertEquals("No keyframe before the playhead", c.ui.value.message)
+        valid(c.p())
+    }
+
+    @Test fun curvesAndAutoAdjust() = runTest {
+        val c = controller()
+        fun cp(x: Double, y: Double) = studio.muse.core.edit.CurvePoint(x, y)
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, listOf(cp(0.0, 0.05), cp(0.5, 0.6), cp(1.0, 0.95)), done = false))
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, listOf(cp(0.0, 0.05), cp(0.5, 0.62), cp(1.0, 0.95)), done = true))
+        assertEquals(.62, c.p().mainClips[0].look!!.curves!![studio.muse.core.edit.CurveChannel.RGB]!![1].y, 1e-9)
+        valid(c.p())
+        // Points out of order are sorted; two at the same x are refused by validation.
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.B, listOf(cp(1.0, 1.0), cp(0.0, 0.1))))
+        assertEquals(0.0, c.p().mainClips[0].look!!.curves!![studio.muse.core.edit.CurveChannel.B]!![0].x, 0.0)
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.G, listOf(cp(0.0, 0.0), cp(0.5, 0.4), cp(0.5, 0.6), cp(1.0, 1.0))))
+        assertNull(c.p().mainClips[0].look!!.curves!![studio.muse.core.edit.CurveChannel.G])
+        // The straight line (or null) removes a channel; no curves and nothing else: no look.
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.B, listOf(cp(0.0, 0.0), cp(1.0, 1.0))))
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, null))
+        assertNull(c.p().mainClips[0].look)
+        // Auto adjust from a dark frame: brighter, highlights kept.
+        c.act(EditAction.AdjustField("highlights", .3))
+        c.act(EditAction.AutoAdjust(DoubleArray(300) { 0.1 + (it % 30) / 300.0 }))
+        val a = c.p().mainClips[0].adjust!!
+        assertTrue(a.exposure!! > 0); assertEquals(.3, a.highlights!!, 1e-9)
+        valid(c.p())
+    }
+
+    @Test fun videoClipAnimations() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.FADE, 0.5), studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.ZOOM, 0.4)))
+        val clip = c.p().mainClips[0]
+        assertEquals(studio.muse.core.edit.AnimKind.FADE, clip.animIn!!.kind)
+        valid(c.p())
+        // The plan fades it in from nothing and zooms it out.
+        val plan = planRender(c.p(), infos)
+        val main = plan.layers.first { it.role == studio.muse.core.edit.LayerRole.MAIN }.index
+        assertEquals(0.0, plan.placement(main, 0.0).alpha, 1e-9)
+        assertEquals(1.0, plan.placement(main, 5.0).alpha, 1e-9)
+        assertTrue(plan.placement(main, 14.9).scale > 1.0)
+        // Round trip through the contract's JSON.
+        assertEquals(c.p(), studio.muse.core.edit.EditJson.parse(studio.muse.core.edit.EditJson.encode(c.p())))
+        // A typewriter isn't a video animation.
+        c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.TYPEWRITER, 1.0), null))
+        assertEquals(studio.muse.core.edit.AnimKind.FADE, c.p().mainClips[0].animIn!!.kind)
+    }
+
+    @Test fun colourKeyframes() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.EXPOSURE))
+        c.act(EditAction.Scrub(5.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.EXPOSURE))
+        // A keyed slider sets the key at the playhead.
+        c.act(EditAction.AdjustField("exposure", .6))
+        val keys = c.p().mainClips[0].keyframes!![studio.muse.core.edit.KfProp.EXPOSURE]!!
+        assertEquals(listOf(1.0 to 0.0, 5.0 to 0.6), keys.map { it.t to it.v })
+        assertNull(c.p().mainClips[0].adjust) // the static value stays as it was
+        valid(c.p())
+        // The plan: a per-frame matrix that brightens over time.
+        val plan = planRender(c.p(), infos)
+        val look = plan.layers.flatMap { it.clips }.first { it.itemId == id }.look!!
+        val keysOf = look.colorKeys!!
+        assertEquals(1.0, keysOf.matrixAt(1.0)[0], 1e-9)
+        assertEquals(Math.pow(2.0, .6), keysOf.matrixAt(5.0)[0], 1e-6)
+        // Unkeyed fields still take the static value.
+        c.act(EditAction.AdjustField("contrast", .2)); assertEquals(.2, c.p().mainClips[0].adjust!!.contrast!!, 1e-9)
+    }
+
+    @Test fun styleKitsApplyToTheWholeEdit() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.Split)
+        val kit = studio.muse.core.edit.StyleKit(adjust = studio.muse.core.edit.Adjust(contrast = .2), transition = studio.muse.core.edit.Transition(studio.muse.core.edit.TransitionKind.FADE, .5),
+            background = "#202020", fill = studio.muse.core.edit.CanvasFill.BLUR)
+        c.act(EditAction.ApplyKit(KitChoice("k1", "Warm", kit)))
+        val p = c.p()
+        assertTrue(p.mainClips.all { it.adjust?.contrast == .2 })
+        assertEquals(.5, p.mainClips[1].transitionIn!!.durationSec, 1e-9)
+        assertEquals("#202020", p.canvas.background)
+        assertEquals("Applied “Warm”", c.ui.value.message)
+        valid(p)
+        // The same again changes nothing; undo puts the edit back in one step.
+        c.act(EditAction.ApplyKit(KitChoice("k1", "Warm", kit))); assertEquals("This edit already has that style", c.ui.value.message)
+        c.act(EditAction.Undo); assertNull(c.p().mainClips[0].adjust)
+        assertEquals("Colour, transition, background", KitChoice("k1", "Warm", kit).parts)
+    }
+
+    @Test fun captionLanguageAndTrimSnapping() = runTest {
+        val sent = ArrayList<JsonObject?>()
+        val c = EditSuiteController(this, object : EditBackend {
+            override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?) = EditorEstimate(kind, 0.02) to null
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
+                if (kind == "captions") sent += options
+                return FakeEditorResults.result(kind, source.durationSec ?: 15.0, "j", options) to null
+            }
+        }).also { it.load(EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true)), "T", "take_1", null, false) }
+        c.act(EditAction.CaptionLanguage("es")); c.act(EditAction.AutoCaptions); advanceUntilIdle()
+        assertEquals("\"es\"", sent.single()!!["language"].toString())
+        c.act(EditAction.CaptionLanguage(null)); c.act(EditAction.AutoCaptions); advanceUntilIdle()
+        assertNull(sent.last())
+        // Trimming snaps the dragged edge to the playhead within the snap distance.
+        c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.Split)
+        c.act(EditAction.Scrub(3.0, end = true))
+        val first = c.p().mainClips[0].id
+        c.act(EditAction.TrimBy(first, left = false, deltaSec = -2.9, snapSec = 0.2))
+        assertEquals(3.0, studio.muse.core.edit.timeline(c.p())[0].endSec, 1e-6)
+        valid(c.p())
+    }
+
+    @Test fun maskAndLookKeyframes() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.MASK_X)); assertEquals("Add a mask first", c.ui.value.message)
+        c.act(EditAction.SetMask(Mask(MaskShape.CIRCLE)))
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.MASK_X))
+        c.act(EditAction.Scrub(4.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.MASK_X))
+        // At 4 s the keyed x moves its key; the unkeyed feather changes the mask itself.
+        c.act(EditAction.SetMask(Mask(MaskShape.CIRCLE, x = .8, feather = .3)))
+        val clip = c.p().mainClips[0]
+        assertEquals(listOf(1.0 to .5, 4.0 to .8), clip.keyframes!![studio.muse.core.edit.KfProp.MASK_X]!!.map { it.t to it.v })
+        assertEquals(.3, clip.mask!!.feather!!, 1e-9); assertNull(clip.mask!!.x)
+        // Look keys: vignette from nothing; the slider at the playhead sets the key.
+        c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.VIGNETTE))
+        c.act(EditAction.AdjustField("vignette", -.5))
+        assertEquals(-.5, c.p().mainClips[0].keyframes!![studio.muse.core.edit.KfProp.VIGNETTE]!!.single().v, 1e-9)
+        valid(c.p())
+        val look = planRender(c.p(), infos).layers.flatMap { it.clips }.first { it.itemId == id }.look!!
+        val mk = look.motionKeys!!
+        assertTrue(mk.masked && mk.looked)
+        assertEquals(.65, mk.maskAt(2.5)!!.x!!, .1)
+        assertEquals(-.5, mk.lookAt(4.0).vignette!!.amount, 1e-9)
+    }
+
+    @Test fun chromaEyedropper() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id)); c.act(EditAction.Scrub(2.0, end = true))
+        c.act(EditAction.PickColor(true))
+        assertEquals(id, c.ui.value.pick!!.clipId); assertTrue(!c.ui.value.playing)
+        // A 4 × 4 frame: the left half green screen, the right half grey.
+        c.act(EditAction.PickFrame(4, 4, IntArray(16) { i -> if (i % 4 < 2) 0xFF2BD15F.toInt() else 0xFF808080.toInt() }))
+        c.act(EditAction.PickAt(.75, .5, done = false)); assertEquals("#808080", c.ui.value.pick!!.hex)
+        c.act(EditAction.PickAt(.2, .5, done = true))
+        assertNull(c.ui.value.pick)
+        assertEquals("#2BD15F", c.p().mainClips[0].chroma!!.color)
+        valid(c.p())
+        // Cancel leaves the key as it was.
+        c.act(EditAction.PickColor(true)); c.act(EditAction.PickColor(false)); assertNull(c.ui.value.pick)
+    }
 }

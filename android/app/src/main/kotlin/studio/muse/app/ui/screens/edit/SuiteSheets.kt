@@ -3,6 +3,7 @@ package studio.muse.app.ui.screens.edit
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -121,6 +122,11 @@ data class SuiteHost(
     val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
+    /** Style kits: save this edit's style under a name; delete a saved one. */
+    val saveKit: (String) -> Unit = {},
+    val deleteKit: (String) -> Unit = {},
+    /** Auto adjust from the frame under the playhead (the view model reads the frame). */
+    val autoAdjust: () -> Unit = {},
     /** "Add a video from a link" (WS7's import, then added at the end); null where imports aren't offered. */
     val importLink: (() -> Unit)? = null,
 )
@@ -160,6 +166,10 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
 private val BLENDS = listOf(studio.muse.core.edit.BlendMode.NORMAL to "Normal", studio.muse.core.edit.BlendMode.MULTIPLY to "Multiply", studio.muse.core.edit.BlendMode.SCREEN to "Screen",
     studio.muse.core.edit.BlendMode.OVERLAY to "Overlay", studio.muse.core.edit.BlendMode.SOFT_LIGHT to "Soft light", studio.muse.core.edit.BlendMode.DARKEN to "Darken",
     studio.muse.core.edit.BlendMode.LIGHTEN to "Lighten", studio.muse.core.edit.BlendMode.ADD to "Add")
+
+/** Auto-captions' language choices (ISO 639-1; "auto" lets the transcriber detect it). */
+private val CAPTION_LANGUAGES = listOf("auto" to "Detect", "en" to "English", "es" to "Spanish", "pt" to "Portuguese", "fr" to "French", "de" to "German",
+    "it" to "Italian", "ru" to "Russian", "uk" to "Ukrainian", "tr" to "Turkish", "ar" to "Arabic", "hi" to "Hindi", "ja" to "Japanese", "ko" to "Korean", "zh" to "Chinese")
 
 private const val GREEN_KEY = "#2BD15F"
 private const val BLUE_KEY = "#2B5BD1"
@@ -220,6 +230,44 @@ private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
     }
     OptRow("Snap cuts to beats", if (ui.project?.let { SuiteOps.beatTimes(it, false).isNotEmpty() } == true) "Split lands on the nearest beat" else "Detect beats in Audio first", ui.snapToBeats,
         { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
+    KitsSection(ui, host, act)
+}
+
+/**
+ * Style kits (plans/edit-parity.md, M): save this edit's look, colour, transition, caption and text styles and
+ * background under a name; apply a saved kit to the whole edit (undo puts it back); delete one with a second tap.
+ */
+@Composable
+internal fun KitsSection(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
+    val m = muse
+    SuiteLabel("Style kits")
+    T("Save this edit's look, colour, transition, captions and text, then use them on another edit.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    var name by remember { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.weight(1f).height(44.dp).background(m.t.surface).border(1.dp, m.t.line).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+            BasicTextField(name, { name = it.take(60) }, Modifier.fillMaxWidth().semantics { contentDescription = "Style kit name" }, singleLine = true,
+                textStyle = m.type.body.copy(color = m.t.ink, fontSize = 14.sp), cursorBrush = SolidColor(m.t.accent),
+                decorationBox = { inner -> Box { if (name.isEmpty()) T("${ui.title.ifEmpty { "This edit" }.take(30)} style", m.type.body.copy(fontSize = 14.sp), m.t.muted, maxLines = 1); inner() } })
+        }
+        SuiteButton("Save style", { host.saveKit(name); name = "" }, height = 44.dp, enabled = ui.project != null)
+    }
+    ui.kitsNote?.let { T(it, m.type.tiny.copy(fontSize = 12.sp), m.t.muted) }
+    var confirm by remember { mutableStateOf<String?>(null) }
+    ui.kits.forEach { k ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                T(k.name, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
+                T(k.parts, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+            }
+            if (confirm == k.id) {
+                SuiteButton("Keep", { confirm = null }, height = 34.dp)
+                SuiteButton("Delete kit", { confirm = null; host.deleteKit(k.id) }, height = 34.dp)
+            } else {
+                SuiteButton("Apply", { act(EditAction.ApplyKit(k)) }, height = 34.dp, enabled = ui.project != null)
+                Box(Modifier.size(40.dp).press { confirm = k.id }.semantics { contentDescription = "Delete ${k.name}" }, contentAlignment = Alignment.Center) { EIc("trash", 18.dp, m.t.muted) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -374,13 +422,25 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         SuiteChip("Flip horizontally", tr.flipX == true, { act(EditAction.Mirror(x = tr.flipX != true)) })
         SuiteChip("Flip vertically", tr.flipY == true, { act(EditAction.Mirror(y = tr.flipY != true)) })
     }
+    // In / out animations of a picture (text has its own in the Text panel).
+    when (item) {
+        is VideoClip -> AnimPicker(item.id, item.animIn, item.animOut, clipLength(item), text = false, act = act)
+        is studio.muse.core.edit.ImageItem -> AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act)
+        else -> {}
+    }
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     if (!keys.isNullOrEmpty()) {
         SuiteLabel("Easing")
         SuiteChips(listOf(Ease.LINEAR to "Linear", Ease.EASE_IN to "Ease in", Ease.EASE_OUT to "Ease out", Ease.EASE_IN_OUT to "Smooth", Ease.HOLD to "Hold").map { it.first.wire to it.second },
             ui.keyEase.wire, { w -> act(EditAction.KeyEase(Ease.entries.first { it.wire == w })) })
         val here = keys.values.flatten().any { kotlin.math.abs(it.t - local) <= .05 }
-        if (here) SuiteLink("Remove keyframes here") { act(EditAction.RemoveKeyframes()) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SuiteButton("Previous", { act(EditAction.KeyNav(next = false)) }, height = 34.dp, icon = "back")
+            SuiteButton("Next", { act(EditAction.KeyNav(next = true)) }, height = 34.dp, icon = "chev-r")
+            Spacer(Modifier.weight(1f))
+            if (here) SuiteLink("Remove keyframes here") { act(EditAction.RemoveKeyframes()) }
+        }
+        T("Drag a ◆ on the timeline to move it.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     }
     // Crop (pictures only): how much is cut from each side, 0–45 %.
     if (item is Visual) {
@@ -588,7 +648,15 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
     val ct = ui.captionTrack?.caption
     if (ct == null) {
         T("Word-timed captions from the speech, in the style you pick.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted)
-        if (ui.helpersOff["captions"] == null) host.modelRow?.invoke("captions")
+        if (ui.helpersOff["captions"] == null) {
+            host.modelRow?.invoke("captions")
+            SuiteLabel("Spoken language")
+            // One scrolling row (15 languages as wrapped chips took four rows).
+            val cur = ui.captionLanguage ?: "auto"
+            Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CAPTION_LANGUAGES.forEach { (code, label) -> SuiteChip(label, code == cur, { act(EditAction.CaptionLanguage(code.takeIf { it != "auto" })) }) }
+            }
+        }
         ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return
@@ -721,32 +789,53 @@ private fun MaskBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
     val v = p.tracks.flatMap { it.items }.firstOrNull { it.id == id } as? Visual ?: return
     // Tap to keep is on: only its controls, so they sit right under the picture being tapped.
     ui.keep?.let { k -> if (v is VideoClip) { SuiteLabel("Tap what to keep"); KeepPanel(ui, k, host, act); return } }
-    val mask = v.mask
+    // Mask keyframes: the mask at the playhead; ◆ keys a field there.
+    val local = (v as? studio.muse.core.edit.Item)?.id?.let { iid -> p.locate(iid)?.let { (t, i) -> itemSpan(p, t, t.items[i]) } }
+        ?.let { sp -> (ui.playheadSec - sp.startSec).takeIf { it >= -1e-6 && ui.playheadSec <= sp.endSec + 1e-6 } }
+    val mask = if (local != null) studio.muse.core.edit.maskAt(v.mask, v.keyframes, local) else v.mask
+    @Composable
+    fun keyed(label: String, vararg props: KfProp, slider: @Composable (Modifier) -> Unit) = Row(verticalAlignment = Alignment.CenterVertically) {
+        slider(Modifier.weight(1f))
+        Spacer(Modifier.width(10.dp))
+        val on = props.any { !v.keyframes?.get(it).isNullOrEmpty() }
+        Box(Modifier.size(48.dp).press(enabled = local != null) { props.forEach { act(EditAction.AddKeyframe(it)) } }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+            EIc(if (on) "diamond" else "keyframe", 14.dp, if (on) m.t.accent else m.t.muted)
+        }
+    }
     SuiteLabel("Mask")
     SuiteChips(listOf("none" to "None") + MaskShape.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, mask?.shape?.wire ?: "none", { w ->
         act(EditAction.SetMask(MaskShape.entries.firstOrNull { it.wire == w }?.let { s -> (mask ?: Mask(s)).copy(shape = s) }))
     })
     if (mask != null) {
         val f = mask.feather ?: .1
-        SuiteSlider(f.toFloat(), { x, done -> act(EditAction.SetMask(mask.copy(feather = r2(x.toDouble())), done)) }, label = "Feather", valueText = "${(f * 100).roundToInt()}")
+        keyed("Feather", KfProp.MASK_FEATHER) { md -> SuiteSlider(f.toFloat(), { x, done -> act(EditAction.SetMask(mask.copy(feather = r2(x.toDouble())), done)) }, md, label = "Feather", valueText = "${(f * 100).roundToInt()}") }
         val sz = mask.width ?: .5
-        SuiteSlider(((sz - .1) / 1.4).toFloat(), { x, done -> val s = r2(.1 + x * 1.4); act(EditAction.SetMask(mask.copy(width = s, height = s * ((mask.height ?: .5) / (mask.width ?: .5))), done)) }, label = "Size", valueText = "${(sz * 100).roundToInt()}%")
+        keyed("Size", KfProp.MASK_WIDTH, KfProp.MASK_HEIGHT) { md -> SuiteSlider(((sz - .1) / 1.4).toFloat(), { x, done -> val s = r2(.1 + x * 1.4); act(EditAction.SetMask(mask.copy(width = s, height = s * ((mask.height ?: .5) / (mask.width ?: .5))), done)) }, md, label = "Size", valueText = "${(sz * 100).roundToInt()}%") }
         val mx = mask.x ?: .5; val my = mask.y ?: .5; val mr = mask.rotation ?: 0.0
-        SuiteSlider(((mx + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(x = r2(f * 3.0 - 1)), done)) }, label = "Position x", valueText = "${((mx - .5) * 200).roundToInt()}")
-        SuiteSlider(((my + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(y = r2(f * 3.0 - 1)), done)) }, label = "Position y", valueText = "${((my - .5) * 200).roundToInt()}")
-        SuiteSlider(((mr + 180) / 360).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()), done)) }, label = "Rotation", valueText = "${mr.roundToInt()}°")
+        keyed("Position x", KfProp.MASK_X) { md -> SuiteSlider(((mx + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(x = r2(f * 3.0 - 1)), done)) }, md, label = "Position x", valueText = "${((mx - .5) * 200).roundToInt()}") }
+        keyed("Position y", KfProp.MASK_Y) { md -> SuiteSlider(((my + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(y = r2(f * 3.0 - 1)), done)) }, md, label = "Position y", valueText = "${((my - .5) * 200).roundToInt()}") }
+        keyed("Rotation", KfProp.MASK_ROTATION) { md -> SuiteSlider(((mr + 180) / 360).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()), done)) }, md, label = "Rotation", valueText = "${mr.roundToInt()}°") }
         OptRow("Invert", "Show outside the shape", mask.invert == true, { act(EditAction.SetMask(mask.copy(invert = if (mask.invert == true) null else true))) })
     }
     val clip = v as? VideoClip
     if (clip != null) {
         // Chroma key (green or blue screen): on/off, the key colour, how much around it goes, the edge and the spill.
         val ck = clip.chroma
-        OptRow("Chroma key", if (ck == null) "Removes a green or blue screen" else "Removing ${if (ck.color.equals(BLUE_KEY, true)) "blue" else "green"}", ck != null, {
+        OptRow("Chroma key", if (ck == null) "Removes a green or blue screen" else "Removing ${if (ck.color.equals(BLUE_KEY, true)) "blue" else if (ck.color.equals(GREEN_KEY, true)) "green" else "a picked colour"}", ck != null, {
             act(EditAction.SetChroma(if (ck == null) studio.muse.core.edit.Chroma(GREEN_KEY, .4, .08, .5) else null))
         })
         if (ck != null) {
-            SuiteSeg(listOf(GREEN_KEY to "Green screen", BLUE_KEY to "Blue screen"), if (ck.color.equals(BLUE_KEY, true)) BLUE_KEY else GREEN_KEY,
+            SuiteSeg(listOf(GREEN_KEY to "Green screen", BLUE_KEY to "Blue screen"), if (ck.color.equals(BLUE_KEY, true)) BLUE_KEY else if (ck.color.equals(GREEN_KEY, true)) GREEN_KEY else null,
                 { act(EditAction.SetChroma(ck.copy(color = it))) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+            // The eyedropper (owner-approved 2026-11-09): touch the colour to remove on the paused picture.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val sw = runCatching { Color(android.graphics.Color.parseColor(ck.color)) }.getOrDefault(Color.Transparent)
+                Box(Modifier.size(28.dp).background(sw).border(1.dp, m.t.line).semantics { contentDescription = "Key colour ${ck.color}" })
+                T(ck.color.uppercase(), m.type.mono.copy(fontSize = 12.5.sp), m.t.ink, Modifier.weight(1f))
+                val picking = ui.pick != null
+                SuiteButton(if (picking) "Cancel" else "Pick from video", { act(EditAction.PickColor(!picking)) }, height = 34.dp, icon = if (picking) null else "drop", primary = picking)
+            }
+            if (ui.pick != null) T("Touch the colour to remove on the picture, then lift your finger.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
             val sim = ck.similarity ?: .4; val sm = ck.smoothness ?: .08; val sp = ck.spill ?: .5
             SuiteSlider(sim.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(similarity = f.toDouble()), done)) }, label = "Strength", valueText = "${(sim * 100).roundToInt()}")
             SuiteSlider(sm.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(smoothness = f.toDouble()), done)) }, label = "Edge softness", valueText = "${(sm * 100).roundToInt()}")
@@ -798,7 +887,12 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual } ?: ui.activeClip)?.id
     val v = id?.let { i -> p.tracks.flatMap { it.items }.firstOrNull { it.id == i } } as? Visual
-    if (ui.filtersTab == "Adjust") return AdjustBody(v, act)
+    if (ui.filtersTab == "Adjust") {
+        // Item-local playhead, for colour keyframes.
+        val local = ui.project?.let { p -> (v as? studio.muse.core.edit.Item)?.id?.let { id -> p.locate(id)?.let { (t, i) -> itemSpan(p, t, t.items[i]) } } }
+            ?.let { sp -> (ui.playheadSec - sp.startSec).takeIf { it >= -1e-6 && ui.playheadSec <= sp.endSec + 1e-6 } }
+        return AdjustBody(v, host, act, local)
+    }
     val look = v?.look
     val current = look?.lut?.removePrefix("pack:")
     androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -854,24 +948,52 @@ private fun lookSwatch(l: LookChoice): List<Color> = when (l.category) {
 }
 
 @Composable
-private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
+private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit, local: Double? = null) {
+    val m = muse
     val a = v?.adjust
+    SuiteButton("Auto adjust", host.autoAdjust, Modifier.fillMaxWidth(), icon = "sliders", enabled = v != null)
     @Composable
-    fun row(label: String, field: String, value: Double) {
+    fun row(label: String, field: String, static: Double) {
+        // A colour field with keyframes shows (and sets) its value at the playhead; ◆ adds a key there.
+        val kp = (KfProp.COLOR + KfProp.LOOK).firstOrNull { it.wire == field }
+        val keys = kp?.let { v?.keyframes?.get(it) }
+        val value = if (!keys.isNullOrEmpty() && local != null) studio.muse.core.edit.keyframeValue(keys, local) else static
         val n = (value * 100).roundToInt()
-        SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.AdjustField(field, f * 2.0 - 1, done)) }, label = label, valueText = signed(n), enabled = v != null)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.AdjustField(field, f * 2.0 - 1, done)) }, Modifier.weight(1f), label = label, valueText = signed(n), enabled = v != null)
+            if (kp != null) {
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(48.dp).press(enabled = v != null && local != null) { act(EditAction.AddKeyframe(kp)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+                    EIc(if (keys.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys.isNullOrEmpty()) m.t.muted else m.t.accent)
+                }
+            }
+        }
     }
     row("Exposure", "exposure", a?.exposure ?: 0.0)
     row("Contrast", "contrast", a?.contrast ?: 0.0)
     row("Saturation", "saturation", a?.saturation ?: 0.0)
     row("Temperature", "temperature", a?.temperature ?: 0.0)
+    row("Tint", "tint", a?.tint ?: 0.0)
     row("Highlights", "highlights", a?.highlights ?: 0.0)
     row("Shadows", "shadows", a?.shadows ?: 0.0)
     // The look's effects (0 = off).
     val lk = v?.look
     @Composable
-    fun eff(label: String, field: String, value: Double) =
-        SuiteSlider(value.toFloat(), { f, done -> act(EditAction.AdjustField(field, f.toDouble(), done)) }, label = label, valueText = "${(value * 100).roundToInt()}", enabled = v != null)
+    fun eff(label: String, field: String, static: Double) {
+        // Grain and light leak take keyframes (their amount over time), like the colour rows.
+        val kp = KfProp.LOOK.firstOrNull { it.wire == field }
+        val keys = kp?.let { v?.keyframes?.get(it) }
+        val value = if (!keys.isNullOrEmpty() && local != null) studio.muse.core.edit.keyframeValue(keys, local) else static
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SuiteSlider(value.toFloat(), { f, done -> act(EditAction.AdjustField(field, f.toDouble(), done)) }, Modifier.weight(1f), label = label, valueText = "${(value * 100).roundToInt()}", enabled = v != null)
+            if (kp != null) {
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(48.dp).press(enabled = v != null && local != null) { act(EditAction.AddKeyframe(kp)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+                    EIc(if (keys.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys.isNullOrEmpty()) m.t.muted else m.t.accent)
+                }
+            }
+        }
+    }
     eff("Grain", "grain", lk?.grain?.amount ?: 0.0)
     row("Vignette", "vignette", lk?.vignette?.amount ?: 0.0)
     eff("Sharpen", "sharpen", lk?.sharpen ?: 0.0)
@@ -879,6 +1001,7 @@ private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
     eff("Glow", "halation", lk?.halation?.amount ?: 0.0)
     eff("Light leak", "leak", lk?.leak?.amount ?: 0.0)
     eff("Colour fringe", "chromatic", lk?.chromatic ?: 0.0)
+    CurvesEditor(lk?.curves, v != null, act)
 }
 
 // ======================================================================= Overlay (PiP) and clips
@@ -1059,7 +1182,7 @@ private fun KeepPanel(ui: EditSuiteUi, k: KeepUi, host: SuiteHost, act: (EditAct
 
 /** A quiet text action (sentence case, the link colour), 48 dp tall. */
 @Composable
-private fun SuiteLink(text: String, onClick: () -> Unit) {
+internal fun SuiteLink(text: String, onClick: () -> Unit) {
     val m = muse
     Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick).semantics { role = androidx.compose.ui.semantics.Role.Button }, contentAlignment = Alignment.CenterStart) {
         T(text, m.scale.label, m.roles.link, maxLines = 1)

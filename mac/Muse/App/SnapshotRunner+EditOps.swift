@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import ImageIO
 import MuseCore
 
 /// Edit operations check (Mac CI, Mac Edit audit 2026-11-08, plans/mac-edit-audit.md). The click-through proves no control
@@ -42,6 +43,7 @@ extension SnapshotRunner {
         guard s.isReady else { note("FAIL the edit didn't open (\(s.phase))"); s.close(); note("ALL DONE"); return }
         await operations(s, blue: made[1], log: log)
         await exportCheck(s, media: media, log: log)
+        await formatsCheck(s, media: media, log: log)
         s.close()
         note("ALL DONE")
     }
@@ -253,6 +255,28 @@ extension SnapshotRunner {
         check("project: two volume keys", s.project.mainClips.first?.keyframes?.volume?.count == 2)
         s.undo(); s.undo()
 
+        step("Overlay ⇄ main track")
+        s.seek(0)
+        s.addTake(blue)
+        if let bid = s.project.mainClips.last?.id {
+            s.view { $0.selection = bid }
+            s.edit { $0.moveToOverlay() }
+            check("project: blue on an overlay track, main back to 4 s", s.project.tracks.contains { $0.kind == .video && $0.items.contains { $0.id == bid } } && abs(s.duration - 4) < 0.05,
+                  "\(s.duration)")
+            s.edit { $0.moveToMain() }
+            check("project: back on the main track", s.project.mainClips.contains { $0.id == bid } && !s.project.tracks.contains { $0.kind == .video })
+            let qm2 = await previewPixel(s, at: 5)
+            check("preview: blue after the take", isBlue(qm2), describe(qm2))
+            s.undo(); s.undo()
+        }
+        s.undo()
+
+        step("Ratio 4:3")
+        await s.setRatio(.fourThree)
+        let sz43 = await previewSize(s)
+        check("preview 4:3", sz43.map { abs($0.width / $0.height - 4.0 / 3.0) < 0.01 } ?? false, "\(String(describing: sz43))")
+        s.undo()
+
         // Parity wave 1 (contract): mirror, freeze frame, blend, blur fill.
         step("Mirror")
         s.view { $0.selection = s.project.mainClips.first?.id }
@@ -305,6 +329,95 @@ extension SnapshotRunner {
         let qcol = await previewPixel(s, at: 1, 0.05, 0.05)
         check("preview: background colour", isBlue(qcol), describe(qcol))
         for _ in 0..<3 { s.undo() }
+
+        // Parity M rows (as Android c8875ec): keyframes on the timeline, curves, auto adjust.
+        step("Drag a keyframe on the timeline")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        let kid = s.project.mainClips.first?.id ?? ""
+        s.seek(0.5); s.edit { $0.addKeyframe(.opacity, value: 1) }
+        s.seek(1.5); s.edit { $0.addKeyframe(.opacity, value: 0.4) }
+        s.beginGesture()
+        for d in [0.2, 0.4, 0.5] { s.updateGesture { $0.movingKeys(kid, from: 0.5, by: d) } }
+        s.endGesture()
+        check("project: the 0.5 s key moved to 1 s", s.state.keyTimes(kid) == [1, 1.5], "\(s.state.keyTimes(kid))")
+        s.updateGesture { $0.movingKeys(kid, from: 1, by: 2) }
+        check("a key can't pass its neighbour", s.state.keyTimes(kid) == [1, 1.5], "\(s.state.keyTimes(kid))")
+        for _ in 0..<3 { s.undo() }
+
+        step("Curves")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.setCurve(.rgb, [[0, 0], [1, 0.3]]) }
+        check("project: an All curve", s.project.mainClips.first?.look?.curves?.rgb?.count == 2)
+        let qk = await previewPixel(s, at: 1)
+        check("preview: darker red under the curve", qk.map { $0.r > 30 && $0.r < 120 && $0.g < 40 } ?? false, describe(qk))
+        s.undo()
+
+        step("Auto adjust")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1)
+        await s.autoAdjust()
+        let aa = s.project.mainClips.first?.adjust
+        check("project: a red frame gets cooler", (aa?.temperature ?? 0) < 0, "\(String(describing: aa)) · \(s.notice ?? s.lastError ?? "")")
+        if aa != nil { s.undo() }
+
+        step("Colour keyframes (exposure dark → normal)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(0.5); s.edit { $0.addKeyframe(.exposure, value: -1) }
+        s.seek(2.5); s.edit { $0.addKeyframe(.exposure, value: 0) }
+        check("project: exposure keys", s.project.mainClips.first?.keyframes?.exposure?.count == 2 && E.problem(s.project) == nil)
+        let qd = await previewPixel(s, at: 0.5), ql = await previewPixel(s, at: 2.5)
+        check("preview: darker at the first key", (qd?.r ?? 255) + 40 < (ql?.r ?? 0) && isRed(ql), "\(describe(qd)) then \(describe(ql))")
+        for _ in 0..<2 { s.undo() }
+
+        step("Style kit: save, apply, delete")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.changeVisual { $0.adjust = E.Adjust(contrast: 0.3) } }
+        let savedKit = await s.saveKit(name: "CI style")
+        check("kit saved", savedKit && s.kits?.first?.name == "CI style", s.lastError ?? "")
+        check("kit carries the colour", s.kits?.first?.kit.adjust?.contrast == 0.3, "\(String(describing: s.kits?.first?.kit))")
+        s.undo()
+        if let k = s.kits?.first {
+            s.applyKit(k)
+            check("project: every main clip takes the kit's colour", s.project.mainClips.allSatisfy { $0.adjust?.contrast == 0.3 })
+            s.undo()
+            await s.deleteKit(k)
+            check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
+        }
+
+        step("Look keyframes (vignette 0 → 1)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(0.5); s.edit { $0.addKeyframe(.vignette, value: 0) }
+        s.seek(2.5); s.edit { $0.addKeyframe(.vignette, value: 1) }
+        check("project: vignette keys", s.project.mainClips.first?.keyframes?.vignette?.count == 2 && E.problem(s.project) == nil)
+        let v0 = await previewPixel(s, at: 0.5, 0.03, 0.03), v1 = await previewPixel(s, at: 2.5, 0.03, 0.03)
+        check("preview: the corner darker at the second key", (v1?.r ?? 255) + 40 < (v0?.r ?? 0), "\(describe(v0)) then \(describe(v1))")
+        for _ in 0..<2 { s.undo() }
+
+        step("Key colour from the picture (eyedropper)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1)
+        s.edit { $0.changeVisual { $0.chroma = E.Chroma(color: "#2BD15F", similarity: 0.4, smoothness: 0.08, spill: 0.5) } }
+        await s.toggleKeyPick()
+        check("picking", s.pickingKeyColour, s.lastError ?? "")
+        let cw = Double(s.project.canvas.width), chh = Double(s.project.canvas.height)
+        s.pickKeyColour(canvasX: cw / 2, canvasY: chh / 2)
+        let picked = s.project.mainClips.first?.chroma?.color ?? ""
+        let pr = Int(picked.dropFirst().prefix(2), radix: 16) ?? 0, pg = Int(picked.dropFirst(3).prefix(2), radix: 16) ?? 255
+        check("project: the key colour is the take's red", !s.pickingKeyColour && pr > 150 && pg < 90, picked)
+        for _ in 0..<2 { s.undo() }
+
+        step("A large picture goes up at 2048 px")
+        let big = FileManager.default.temporaryDirectory.appendingPathComponent("big-\(UUID().uuidString).png")
+        if let ctx = CGContext(data: nil, width: 3000, height: 1000, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 0.5)); ctx.fill(CGRect(x: 0, y: 0, width: 3000, height: 1000))
+            if let img = ctx.makeImage(), let d = CGImageDestinationCreateWithURL(big as CFURL, "public.png" as CFString, 1, nil) {
+                CGImageDestinationAddImage(d, img, nil); _ = CGImageDestinationFinalize(d)
+            }
+        }
+        let resized = try? EditSuiteSession.pictureForUpload(big, ext: "png")
+        check("2048 × 683, still a PNG", resized.map { $0.2 == 2048 && abs($0.3 - 683) <= 1 && $0.1 == "image/png" } ?? false,
+              resized.map { "\($0.2) × \($0.3) \($0.1)" } ?? "failed")
 
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
@@ -376,6 +489,65 @@ extension SnapshotRunner {
         if let silent = await exportFile(s, media: media, name: "muted", labelAI: false, note: note) {
             let rms = await audioRMS(silent.url, from: 0.2, to: 2.8)
             check("export: muted is silent", rms < 0.005, String(format: "RMS %.4f", rms))
+        }
+    }
+
+    /// Parity formats: a video at a chosen bitrate (the reader → writer path), Sound only (.m4a) and GIF.
+    @MainActor
+    static func formatsCheck(_ s: EditSuiteSession, media: URL, log: OpsLog) async {
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check(name, ok, detail) }
+        log.note("STEP export formats: bitrate, Sound only, GIF")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.changeSound { $0.muted = nil; $0.volume = nil } }
+        // A video at "Higher quality" goes through the writer (AVAssetExportSession has no bitrate).
+        var hi = s.state.export
+        hi.ratio = .portrait; hi.resolution = .p720; hi.fps = 30; hi.codec = .h264; hi.bitrate = .higher
+        let hiURL = media.appendingPathComponent("export-hi.mp4")
+        try? FileManager.default.removeItem(at: hiURL)
+        var savedHi = false
+        s.export(hi, saveFileTo: hiURL) { _ in savedHi = true }
+        for _ in 0..<600 where !savedHi && !(s.exportPhase == .idle && s.lastError != nil) { try? await Task.sleep(for: .milliseconds(100)) }
+        if savedHi {
+            let a = AVURLAsset(url: hiURL)
+            let d = (try? await a.load(.duration).seconds) ?? 0
+            let vt = try? await a.loadTracks(withMediaType: .video).first
+            let size = (try? await vt?.load(.naturalSize)) ?? .zero
+            check("bitrate export: 3 s, 720 × 1280", abs(d - 3) < 0.15 && Int(size.width) == 720 && Int(size.height) == 1280, "\(d) s, \(size)")
+            let gen = AVAssetImageGenerator(asset: a)
+            gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
+            let px = (try? await gen.image(at: CMTime(seconds: 1.5, preferredTimescale: 600)).image).flatMap { pixel($0, 0.5, 0.5) }
+            check("bitrate export: the picture", isRed(px), describe(px))
+            let rms = await audioRMS(hiURL, from: 1, to: 2)
+            check("bitrate export: the sound", rms > 0.09 && rms < 0.2, String(format: "RMS %.3f", rms))
+        } else { check("bitrate export finished", false, s.lastError ?? "timed out") }
+
+        // Sound only and GIF save a file on this Mac (no version).
+        func other(_ format: EditSuite.ExportFormat, _ name: String) async -> URL? {
+            var e = s.state.export
+            e.format = format
+            let url = media.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: url)
+            s.export(e, saveFileTo: url) { _ in }
+            try? await Task.sleep(for: .milliseconds(300))
+            for _ in 0..<600 where s.exportPhase != .idle { try? await Task.sleep(for: .milliseconds(100)) }
+            guard FileManager.default.fileExists(atPath: url.path) else { check("\(format.label) export finished", false, s.lastError ?? "no file"); return nil }
+            return url
+        }
+        if let m4a = await other(.sound, "export-sound.m4a") {
+            let a = AVURLAsset(url: m4a)
+            let d = (try? await a.load(.duration).seconds) ?? 0
+            let vids = (try? await a.loadTracks(withMediaType: .video).count) ?? -1
+            let rms = await audioRMS(m4a, from: 1, to: 2)
+            check("Sound only: 3 s of the mix, no picture", abs(d - 3) < 0.15 && vids == 0 && rms > 0.09 && rms < 0.2, String(format: "%.2f s, %d video tracks, RMS %.3f", d, vids, rms))
+        }
+        if let gif = await other(.gif, "export.gif") {
+            let src = CGImageSourceCreateWithURL(gif as CFURL, nil)
+            let n = src.map { CGImageSourceGetCount($0) } ?? 0
+            let first = src.flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+            let short = first.map { min($0.width, $0.height) } ?? 0
+            let px = first.flatMap { pixel($0, 0.5, 0.5) }
+            let want = min(480, min(s.project.canvas.width, s.project.canvas.height))   // never upscaled
+            check("GIF: 15 frames a second, 480 px at most, the picture", abs(n - 45) <= 2 && short == want && isRed(px), "\(n) frames, short side \(short) (want \(want)), \(describe(px))")
         }
     }
 

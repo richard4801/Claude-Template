@@ -359,9 +359,10 @@ struct AnimPanel: View {
         switch item {
         case .text(let x): panels(animIn: x.animIn, animOut: x.animOut, text: true)
         case .image(let x): panels(animIn: x.animIn, animOut: x.animOut, text: false)
+        case .video(let x): panels(animIn: x.animIn, animOut: x.animOut, text: false)   // video clips too (contract, as Android)
         default:
             VStack(alignment: .leading, spacing: 0) {
-                InspectorEmpty(text: "In and out animations are for text, hooks and stickers. Clips change with transitions (Video tab) and keyframes.")
+                InspectorEmpty(text: "Select a clip, text, hook or sticker to animate it in and out.")
             }
         }
     }
@@ -372,6 +373,7 @@ struct AnimPanel: View {
                 switch it {
                 case .text(var x): if isIn { x.animIn = a } else { x.animOut = a }; it = .text(x)
                 case .image(var x): if isIn { x.animIn = a } else { x.animOut = a }; it = .image(x)
+                case .video(var x): if isIn { x.animIn = a } else { x.animOut = a }; it = .video(x)
                 default: break
                 }
             }

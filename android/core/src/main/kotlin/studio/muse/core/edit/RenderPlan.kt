@@ -59,7 +59,28 @@ data class VideoLook(
     val alphaMatte: AlphaMatte? = null,
     /** Wave 1, blur fill: box-blur radius in canvas pixels (then × BLUR_FILL_DARKEN), null when this isn't the fill layer. */
     val fillBlur: Int? = null,
+    /**
+     * Colour keyframes (M): the item's colour changes over time, so its matrix is per frame ([ColorKeys.matrixAt],
+     * item-local seconds) instead of [colorMatrix] (which then holds the matrix at its start, for stills).
+     */
+    val colorKeys: ColorKeys? = null,
+    /** Mask and look keyframes (M): the mask and the finishing look per frame ([MotionKeys]), null when none are keyed. */
+    val motionKeys: MotionKeys? = null,
 )
+
+/** An item's mask and look when their keyframes move them ([maskAt] / [lookAt] at item-local seconds). */
+data class MotionKeys(val mask: Mask?, val look: Look?, val keyframes: Keyframes) {
+    val masked: Boolean get() = mask != null && KfProp.MASK.any { !keyframes[it].isNullOrEmpty() }
+    val looked: Boolean get() = KfProp.LOOK.any { !keyframes[it].isNullOrEmpty() }
+    fun maskAt(t: Double): Mask? = maskAt(mask, keyframes, t)
+    fun lookAt(t: Double): Look = lookAt(look, keyframes, t) ?: Look()
+}
+
+/** What an item's colour matrix is made of when it has colour keyframes. */
+data class ColorKeys(val adjust: Adjust?, val keyframes: Keyframes, val filter: FilterRef?, val presets: List<FilterPreset>) {
+    /** The 3×4 row-major matrix at item-local [t] ([adjustAt] then [colorMatrix]). */
+    fun matrixAt(t: Double): List<Double> = colorMatrix(adjustAt(adjust, keyframes, t), filter, presets)
+}
 
 /** A clip or image in a layer or lane, placed on the timeline. */
 data class PlannedClip(
@@ -206,6 +227,13 @@ data class RenderPlan(
         )
     }
 
+    /** A video clip's in / out animation ([animState] over its length) on its placement. */
+    private fun animated(b: Placement, c: VideoClip, local: Double): Placement {
+        if (c.animIn == null && c.animOut == null) return b
+        val a = animState(clipLength(c), c.animIn, c.animOut, null, local)
+        return b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy)
+    }
+
     private fun itemPlacement(item: Item, track: Track, t: Double): Placement {
         val span = itemSpan(project, track, item)
         val local = t - span.startSec
@@ -215,7 +243,7 @@ data class RenderPlan(
                 val a = animState(item, local)
                 b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy, blend = item.blend)
             }
-            is VideoClip -> basePlacement(item, local).copy(blend = item.blend)
+            is VideoClip -> basePlacement(item, local).let { b -> animated(b, item, local).copy(blend = item.blend) }
             else -> Placement.HIDDEN
         }
     }
@@ -223,7 +251,7 @@ data class RenderPlan(
     private fun mainPlacement(c: VideoClip, t: Double): Placement {
         val i = mainIndex[c.id] ?: return Placement.HIDDEN
         val me = spans[i]
-        val base = basePlacement(c, t - me.startSec)
+        val base = animated(basePlacement(c, t - me.startSec), c, t - me.startSec)
         val next = spans.getOrNull(i + 1)
         // Incoming: inside my own transition. Outgoing: inside the next clip's.
         val (kind, p, incoming) = when {
@@ -356,8 +384,13 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
             tw = max(2, (fw * q).roundToInt()); th = max(2, (fh * q).roundToInt()); base = 1 / q
         }
         val crop = if (l > 1e-9 || r > 1e-9 || t > 1e-9 || b > 1e-9) CropNdc(-1 + 2 * l, 1 - 2 * r, -1 + 2 * b, 1 - 2 * t) else null
-        val m = colorMatrix(v.adjust, v.filter, presets).takeUnless(::isIdentityMatrix)
-        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte)
+        val keys = v.keyframes?.filterKeys { it in KfProp.COLOR }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
+        val colorKeys = keys?.let { ColorKeys(v.adjust, it, v.filter, presets) }
+        val m = (colorKeys?.matrixAt(0.0) ?: colorMatrix(v.adjust, v.filter, presets)).takeUnless { colorKeys == null && isIdentityMatrix(it) }
+        val motion = v.keyframes?.filterKeys { it in KfProp.MASK || it in KfProp.LOOK }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
+            ?.let { MotionKeys(v.mask, v.look, it) }?.takeIf { it.masked || it.looked }
+        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte,
+            colorKeys = colorKeys, motionKeys = motion)
     }
 
     /** A clip limited to the project's end; null when it starts after it. */
