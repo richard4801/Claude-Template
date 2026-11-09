@@ -178,7 +178,7 @@ class OwnerViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-private fun ownerVm(): OwnerViewModel {
+internal fun ownerVm(): OwnerViewModel {
     val c = LocalContainer.current
     return viewModel { OwnerViewModel(c) }
 }
@@ -251,6 +251,7 @@ fun MembersScreen() {
         Column(Modifier.fillMaxSize()) {
             CalmTopBar("Members", onBack = { nav.back() }, right = { BarButton("plus", "Invite someone", { nav.go(Routes.INVITE) }) })
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
+                Caption(SettingsSection.MEMBERS.line) // Settings → Members (the section's own line)
                 studio.wallet?.takeIf { it.owner }?.let { OwnerBalanceCard(it) }
                 val people = s.members.filterNot { it.owner }
                 if (people.isEmpty()) EmptyState("No members yet", "Invite someone, then send them credit to render with.", "Invite someone", { nav.go(Routes.INVITE) }, primary = false)
@@ -409,11 +410,19 @@ fun StudioSettingsScreen() {
 
 @Composable
 private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
+    CapsForm(vm, st, s)
+    LinkRulesRow()
+    if (!st.features.replaceAudio) Caption("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = muse.roles.ink2)
+}
+
+/** The owner's spend caps (Settings → AI & spending → Spend caps). */
+@Composable
+internal fun CapsForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
     var perJob by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerJob, 2)) }
     var perDay by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerDay, 2)) }
     var perUser by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerUserDay, 2)) }
     val m = muse
-    Labeled("Spending caps ($)") {
+    Labeled("In US dollars") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CapInput("Per job", perJob, { perJob = it }, Modifier.weight(1f))
             CapInput("Studio / day", perDay, { perDay = it }, Modifier.weight(1f))
@@ -424,58 +433,81 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
         vm.saveStudio(StudioSettingsPatch(capPerJob = perJob.toDoubleOrNull(), capPerDay = perDay.toDoubleOrNull(), capPerUserDay = perUser.toDoubleOrNull()))
     }, Modifier.fillMaxWidth(), busy = s.busy)
     s.note?.takeIf { it.first == "studio" }?.let { InlineNote(it.second, it.third) }
-    LinkRulesRow()
-    if (!st.features.replaceAudio) Caption("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = m.roles.ink2)
 }
 
 /**
- * Owner Settings → Engines: each engine's status and whether its key is set, the add-on GPU limits, who pays start-up,
- * Keep add-on engine ready, and the image engine. The only screen that names providers.
+ * The old Studio settings page, kept for its route: the same pieces the redesigned Settings places in AI & spending
+ * (model status, Our own GPUs) and Advanced (the photo service).
  */
 @Composable
 private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
-    val m = muse
-    val c = LocalContainer.current
-    val studio by c.repo.state.collectAsState()
-    var gpus by remember(st) { mutableStateOf(st.maxGpus) }
-    var payer by remember(st) { mutableStateOf(st.overheadPayer) }
     Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
-        Heading("Engines")
-        Caption("Members only ever see results, time and price. Engines, keys and GPUs live here.")
+        Heading("Models")
+        Caption("Members only ever see results, time and price. Models, keys and GPUs live here.")
     }
+    ModelStatusList(st)
+    val navX = LocalNav.current
+    Column {
+        RowItem("Photo models by step", "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
+        RowItem("Archived models", "Hidden models you can restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Chevron() }
+    }
+    Heading("Our own GPUs")
+    OwnGpusForm(vm, st, s)
+    Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Heading("Photo service")
+        Caption("Makes character-sheet angles, outfit sets and photos. Members pay exactly what each photo costs.")
+    }
+    PhotoServiceForm(vm, s)
+}
+
+/** Each model service's status and whether its key is set (owner; the only list that names providers). */
+@Composable
+internal fun ModelStatusList(st: StudioSettings) {
+    val m = muse
     val list = st.engines?.list.orEmpty()
-    if (list.isEmpty()) Caption("This server doesn't report engine status.")
+    if (list.isEmpty()) Caption("This server doesn't report model status.")
     else Column {
         list.forEach { e ->
             RowItem(e.name.ifBlank { e.id }, listOfNotNull(e.usedFor.ifBlank { null }, if (e.keySet) "key set" else "no key",
-                e.balanceUsd?.let { "balance ${Pricing.money(it)}" }).joinToString(" · ") + (e.message?.let { ". $it" } ?: "")) {
+                e.balanceUsd?.let { "balance ${Pricing.money(it)}" }).joinToString(", ") + (e.message?.let { ". $it" } ?: "")) {
                 RowValue(engineStatusLabel(e.status), if (e.status == "ready") m.roles.positive else if (e.status == "simulated") m.roles.ink2 else m.roles.caution)
             }
         }
     }
-    val navX = LocalNav.current
-    Column {
-        RowItem("Image models", "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
-        RowItem("Archived models", "Hidden models you can restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Chevron() }
-    }
-    Heading("Add-on engine (Edit, Fast · beta, Upscale)")
+}
+
+/** "All running", or how many need attention (AI & spending's Default models hint). */
+fun modelStatusLine(st: StudioSettings?): String? {
+    val list = st?.engines?.list.orEmpty().ifEmpty { return null }
+    val off = list.count { it.status != "ready" && it.status != "simulated" }
+    return if (off == 0) "All running" else "$off need attention"
+}
+
+/** Our own GPUs (Edit, Fast · beta, Upscale): keep ready, GPUs at once, who pays start-up. */
+@Composable
+internal fun OwnGpusForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
+    val c = LocalContainer.current
+    val studio by c.repo.state.collectAsState()
+    var gpus by remember(st) { mutableStateOf(st.maxGpus) }
+    var payer by remember(st) { mutableStateOf(st.overheadPayer) }
     WarmSwitchRow(c, studio.warm)
     Caption("Turns off after ${st.engines?.keepReady?.idleMinutes ?: st.warmIdleMinutes} min without renders, and after ${(st.engines?.keepReady?.maxMinutes ?: st.warmMaxMinutes) / 60.0} h at most (Keep ready extends it once).".replace(".0 h", " h"))
-    Labeled("Add-on GPUs at once · $gpus") {
+    Labeled("GPUs at once: $gpus") {
         MuseSlider(gpus, 0, 8, { gpus = it }, calm = true)
         Caption(if (gpus == 0) "0 pauses Edit and Fast · beta." else "Each member's Edit renders run on their own H100 while it's free.")
     }
     Labeled("Who pays start-up") {
         Segmented(listOf("user" to "The member", "owner" to "The studio (me)"), payer, { payer = it })
-        Caption("Starting an add-on GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It's charged with the render, never shown to members as its own line.")
+        Caption("Starting a GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It's charged with the render, never shown to members as its own line.")
     }
-    SecondaryButton(if (s.busy) "Saving…" else "Save engine settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
-    Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
-        Heading("Image engine")
-        Caption("Makes character-sheet angles, outfit sets and photos. Members pay exactly what each photo costs.")
-    }
+    SecondaryButton(if (s.busy) "Saving…" else "Save GPU settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
+}
+
+/** The photo service (simulated, fal or a custom https service) that makes sheet angles, outfit sets and photos. */
+@Composable
+internal fun PhotoServiceForm(vm: OwnerViewModel, s: OwnerState) {
     val en = s.engine
-    if (en != null) EngineForm(vm, en, s)
+    if (en != null) EngineForm(vm, en, s) else SkeletonLines(2)
 }
 
 fun engineStatusLabel(status: String) = when (status) {
@@ -487,7 +519,7 @@ fun engineStatusLabel(status: String) = when (status) {
  * background removal, noise reduction) and their daily limit, with today's spend. Members never see this.
  */
 @Composable
-private fun EditorHelpersSection() {
+internal fun EditorHelpersSection() {
     val c = LocalContainer.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var es by remember { mutableStateOf<studio.muse.app.data.EditorSettings?>(null) }
@@ -520,7 +552,7 @@ private fun EditorHelpersSection() {
  * and a TikTok whose creator turned downloads off is refused; off, any public web link. Hidden on a server without it.
  */
 @Composable
-private fun LinkRulesRow() {
+internal fun LinkRulesRow() {
     val c = LocalContainer.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var rules by remember { mutableStateOf<studio.muse.app.data.RecreateLinkSettings?>(null) }

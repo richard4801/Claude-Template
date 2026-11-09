@@ -23,7 +23,7 @@ class WarmUiTest {
     }
 
     @Test fun costLineAndLiveIndicator() {
-        assertEquals("Keeps the add-on engine ready so Edit renders start right away. About \$4/hour from the studio balance while it's on, and it turns off by itself after 20 min without renders.", warmCostLine(off))
+        assertEquals("Keeps a GPU ready so Edit renders start right away. About \$4/hour from the studio balance while it's on, and it turns off by itself after 20 min without renders.", warmCostLine(off))
         val t0 = 1_000_000_000L
         val w = WarmGpu("warm", startedAt = t0, minutes = 41, costUsd = 41 * 3.99 / 60)
         val (min, cost) = warmLive(w, t0 + 42 * 60_000L + 5_000)

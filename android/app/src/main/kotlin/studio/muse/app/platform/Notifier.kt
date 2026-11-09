@@ -138,7 +138,7 @@ class Notifier(private val context: Context) {
      */
     fun warmOngoing(w: studio.muse.app.data.WarmGpu) {
         if (!canPost()) return
-        val title = if (w.starting) "Add-on engine getting ready… (3–6 min)" else "Add-on engine ready"
+        val title = if (w.starting) "GPU getting ready… (3–6 min)" else "GPU ready"
         val text = "${Pricing.money(w.costUsd)} so far · about ${Pricing.money(w.ratePerHour)}/hour · turns off after ${w.idleMinutes} min without renders"
         val n = NotificationCompat.Builder(context, CHANNEL_WARM)
             .setSmallIcon(R.drawable.ic_stat_muse)
@@ -169,7 +169,7 @@ class Notifier(private val context: Context) {
         if (!canPost()) return
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_muse)
-            .setContentTitle(w.message.ifBlank { "Add-on engine turns off in 5 min" }.replace("Warm GPU", "Add-on engine"))
+            .setContentTitle(w.message.ifBlank { "The GPU turns off in 5 min" }.replace("Warm GPU", "The GPU").replace("Add-on engine", "The GPU"))
             .setContentText(if (w.reason == "cap") "It reaches its time limit. Keep ready extends it once." else "No renders on it. Keep ready keeps it on.")
             .setAutoCancel(true)
             .setTimeoutAfter((w.autoOffAt - System.currentTimeMillis()).coerceIn(10_000, 6 * 60_000L))

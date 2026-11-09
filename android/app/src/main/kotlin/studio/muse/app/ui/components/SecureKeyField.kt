@@ -38,22 +38,26 @@ fun SecureKeyField(
     keysReady: Boolean,
     onSave: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** The line under the field (the Mac's: "Saved encrypted on the MUSE server, checked with fal first. …"). */
+    note: String = "Saved encrypted on the MUSE server. Afterwards you only see its last 4 characters.",
+    onCancel: (() -> Unit)? = null,
 ) {
     val m = muse
     var editing by remember(keyLast4) { mutableStateOf(keyLast4 == null) }
     var typed by remember { mutableStateOf("") }
     Column(modifier.fillMaxWidth().testTag("secure_key"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when {
-            !keysReady -> Caption("Provider keys aren't set up on the server yet")
+            !keysReady -> Caption("Provider keys aren't set up on the server yet. Adding a key works once they are.")
             !editing && keyLast4 != null -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 T("Key ending $keyLast4", m.scale.body, m.roles.ink, Modifier.weight(1f).semantics { contentDescription = "API key ending $keyLast4" }, maxLines = 1)
                 SecondaryButton("Replace key", { editing = true })
             }
             else -> {
-                Input(typed, { typed = it.trim() }, password = true, calm = true, placeholder = hint)
-                error?.let { T(it, m.scale.caption, m.roles.danger) } ?: Caption("Stored encrypted on the studio server. MUSE shows only its last 4 characters after this.")
+                Input(typed, { typed = it.trim() }, password = true, calm = true, placeholder = hint.ifBlank { "Paste the key" })
+                error?.let { T(it, m.scale.caption, m.roles.danger) } ?: Caption(note)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (keyLast4 != null) SecondaryButton("Keep the old key", { typed = ""; editing = false })
+                    if (keyLast4 != null) SecondaryButton("Keep the old key", { typed = ""; editing = false; onCancel?.invoke() })
+                    else if (onCancel != null) SecondaryButton("Cancel", { typed = ""; onCancel() })
                     PrimaryButton(if (busy) "Checking the key…" else if (keyLast4 == null) "Save key" else "Replace key", {
                         if (typed.isNotBlank() && !busy) { onSave(typed); typed = "" }
                     }, Modifier.weight(1f), busy = busy)

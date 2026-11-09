@@ -267,7 +267,7 @@ private fun ColumnScope.EraSlider(cam: CameraCatalog, current: String?, wide: Bo
             T(label, m.type.h2.copy(fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f), maxLines = 1)
             T(if (o == null) "AUTO" else "ERA", m.type.mono.copy(fontSize = 12.sp, letterSpacing = .14.em), m.t.muted, maxLines = 1)
         }
-        T(o?.description?.ifBlank { null } ?: if (o == null) "The engine picks the period from your prompt" else "", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 2)
+        T(o?.description?.ifBlank { null } ?: if (o == null) "The model picks the period from your prompt" else "", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 2)
         if (n > 1) {
             // Each stop sits over the middle of its tick's cell: the track is inset by half a cell on each side.
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {

@@ -64,7 +64,7 @@ import kotlin.math.roundToInt
 /** "About $4/hour from the studio balance while it's on, and it turns off by itself after 20 min without renders." */
 fun warmCostLine(w: WarmGpu?): String {
     val rate = (w?.ratePerHour ?: 3.99).roundToInt().coerceAtLeast(1)
-    return "Keeps the add-on engine ready so Edit renders start right away. About $$rate/hour from the studio balance while it's on, and it turns off by itself after ${w?.idleMinutes ?: 20} min without renders."
+    return "Keeps a GPU ready so Edit renders start right away. About $$rate/hour from the studio balance while it's on, and it turns off by itself after ${w?.idleMinutes ?: 20} min without renders."
 }
 
 /** Minutes since the start and the cost so far, computed live between the server's per-minute ticks. */
@@ -83,7 +83,7 @@ fun WarmBar(w: WarmGpu, onTurnOff: () -> Unit, modifier: Modifier = Modifier, st
     val bg = if (m.isD) m.t.yellow else m.t.ink
     val fg = if (m.isD) Ink else m.t.bg
     val dot = if (w.starting) m.t.warn else m.link
-    val label = (if (w.starting) "Getting ready…" else if (w.state == "stopping") "Turning off…" else "Add-on engine ready") + " · $minutes min · ${Pricing.money(cost)}"
+    val label = (if (w.starting) "Getting ready…" else if (w.state == "stopping") "Turning off…" else "GPU ready") + " · $minutes min · ${Pricing.money(cost)}"
     Row(
         modifier.fillMaxWidth().background(bg).let { if (statusPad) it.statusBarsPadding() else it }.padding(horizontal = 16.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
@@ -109,7 +109,7 @@ fun WarmWarningBanner(w: WarmWarning, onKeepWarm: () -> Unit, onDismiss: () -> U
     Row(mod.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Ic("light", 18.dp, m.t.ink)
         Column(Modifier.weight(1f)) {
-            T(w.message.ifBlank { "Add-on engine turns off in 5 min" }.replace("Warm GPU", "Add-on engine"), m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 2)
+            T(w.message.ifBlank { "The GPU turns off in 5 min" }.replace("Warm GPU", "The GPU").replace("Add-on engine", "The GPU"), m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 2)
             Tiny(if (w.reason == "cap") "Keep ready extends its time limit once." else "No renders on it lately.")
         }
         Cta2("Keep ready", onKeepWarm, height = 40.dp)
@@ -144,7 +144,7 @@ fun BoxScope.WarmPrompt(kind: String, w: WarmGpu?, onYes: () -> Unit, onNo: () -
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Ic("light", 22.dp, m.link)
-                H3("Keep add-on engine ready?")
+                H3("Keep a GPU ready?")
             }
             T(warmCostLine(w), m.type.body, m.t.ink)
             Tiny("It bills from the moment it starts getting ready (3–6 min). Renders on it aren't charged again.")
@@ -175,7 +175,7 @@ fun WarmSwitchRow(container: AppContainer, w: WarmGpu?, modifier: Modifier = Mod
     ) {
         Ic("light", 20.dp, if (w.on) (m.link) else m.t.muted)
         Column(Modifier.weight(1f)) {
-            T("Keep add-on engine ready", m.type.body.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+            T("Keep a GPU ready", m.type.body.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
             T(sub, m.type.tiny, m.t.muted, maxLines = 1)
         }
         Toggle(w.on, {
