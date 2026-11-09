@@ -89,7 +89,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Import own fonts | Missing | Missing | M | |
 | Text templates / hooks | Has | Has | — | 10 hooks; more is **Content** |
 | In/out text animations | Has | Has | S | The model has 7 kinds; there is no picker. Mac: Animate panel. Android: In / out picker with lengths (wave 1). |
-| Loop animations | Missing | Missing | M | |
+| Loop animations | Has | Missing | M | Android: Loop under Animation in / out (Text panel; Transform for overlays and photos): pulse, sway, float, spin, blink, with speed and amount (`animLoop`, `loopState`). Not on main clips. |
 | Keyframed text | Has | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet. Android: The Transform panel acts on the selected text (wave 1 fixed it moving the clip). |
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |

@@ -392,4 +392,22 @@ class EditSmallRowsTest {
         assertEquals(2, c.p().tracks.count { it.kind == TrackKind.IMAGE })
         valid(c.p())
     }
+
+    @Test fun loopAnimations() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddText)
+        val tid = c.ui.value.selectedId!!
+        c.act(EditAction.SetLoop(tid, studio.muse.core.edit.AnimLoop(studio.muse.core.edit.LoopKind.PULSE, 0.123, 1.7)))
+        val l = (c.p().tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).animLoop!!
+        assertEquals(.2, l.periodSec, 1e-9); assertEquals(1.0, l.amount!!, 1e-9) // clamped
+        valid(c.p())
+        // A text frame pulses: bigger half a period in.
+        val plan = planRender(c.p(), infos)
+        val piece = plan.overlays.filterIsInstance<studio.muse.core.edit.TextPiece>().first()
+        assertTrue(plan.textFrame(piece, 2.1)!!.scale > plan.textFrame(piece, 2.0)!!.scale)
+        // Main clips can't loop.
+        c.act(EditAction.SetLoop(c.p().mainClips[0].id, studio.muse.core.edit.AnimLoop(studio.muse.core.edit.LoopKind.SWAY, 1.0)))
+        assertNull(c.p().mainClips[0].animLoop); assertEquals("Loop animations are for overlays, photos and text", c.ui.value.message)
+        c.act(EditAction.SetLoop(tid, null)); assertNull((c.p().tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).animLoop)
+    }
 }

@@ -253,6 +253,8 @@ sealed interface EditAction {
     data object CutToBeats : EditAction
     /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
     data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
+    /** Item [id]'s loop animation (null: none). */
+    data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
     /** A photo from the phone (an editor upload, [width] × [height]) placed over the edit at the playhead. */
@@ -397,7 +399,7 @@ class EditSuiteController(
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
         EditAction.DetectBeats -> "Beats"; is EditAction.AddAudio -> if (a.voiceOver) "Voice-over" else "Music"
-        is EditAction.AddHook -> "Hook"; is EditAction.EditText, EditAction.AddText, is EditAction.SetTextStyle -> "Text"; is EditAction.SetAnim -> "Animation"; EditAction.AutoCaptions -> "Captions"
+        is EditAction.AddHook -> "Hook"; is EditAction.EditText, EditAction.AddText, is EditAction.SetTextStyle -> "Text"; is EditAction.SetAnim, is EditAction.SetLoop -> "Animation"; EditAction.AutoCaptions -> "Captions"
         is EditAction.CaptionStyleOf, is EditAction.CaptionFont, is EditAction.CaptionColors, is EditAction.CaptionY,
         is EditAction.CaptionWordsPerPage, is EditAction.WordHighlight -> "Caption style"
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
@@ -845,6 +847,10 @@ class EditSuiteController(
                 var n = 0
                 if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
                     say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
+            }
+            is EditAction.SetLoop -> change(a.done, "Loop animations are for overlays, photos and text") { p ->
+                val l = a.loop?.let { it.copy(periodSec = r2(it.periodSec.coerceIn(.2, 5.0)), amount = it.amount?.let { x -> r2(x.coerceIn(0.0, 1.0)) }) }
+                p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animLoop = l); is ImageItem -> it.copy(animLoop = l); is VideoClip -> it.copy(animLoop = l); else -> it } }
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
             is EditAction.AddImage -> {

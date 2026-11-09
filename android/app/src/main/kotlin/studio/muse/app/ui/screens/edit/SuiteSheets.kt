@@ -428,8 +428,11 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     }
     // In / out animations of a picture (text has its own in the Text panel).
     when (item) {
-        is VideoClip -> AnimPicker(item.id, item.animIn, item.animOut, clipLength(item), text = false, act = act)
-        is studio.muse.core.edit.ImageItem -> AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act)
+        is VideoClip -> {
+            AnimPicker(item.id, item.animIn, item.animOut, clipLength(item), text = false, act = act)
+            if (overlayTrack) LoopPicker(item.id, item.animLoop, act)
+        }
+        is studio.muse.core.edit.ImageItem -> { AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act); LoopPicker(item.id, item.animLoop, act) }
         else -> {}
     }
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
@@ -566,6 +569,7 @@ private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         )
         TextStyleEditor(sel, act)
         AnimPicker(sel.id, sel.animIn, sel.animOut, sel.durationSec, text = true, act = act)
+        LoopPicker(sel.id, sel.animLoop, act)
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         SuiteLabel("Hook templates", Modifier.weight(1f))
@@ -646,6 +650,26 @@ fun AnimPicker(id: String, animIn: studio.muse.core.edit.Anim?, animOut: studio.
     }
     side("Animation in", animIn) { a, done -> act(EditAction.SetAnim(id, a, animOut, done)) }
     side("Animation out", animOut) { a, done -> act(EditAction.SetAnim(id, animIn, a, done)) }
+}
+
+/** Loop animations (M): a repeating move while the item is on screen; with its speed (period) and amount. */
+@Composable
+fun LoopPicker(id: String, loop: studio.muse.core.edit.AnimLoop?, act: (EditAction) -> Unit) {
+    SuiteLabel("Loop")
+    val kinds = listOf("none" to "None", "pulse" to "Pulse", "sway" to "Sway", "float" to "Float", "spin" to "Spin", "blink" to "Blink")
+    SuiteChips(kinds, loop?.kind?.wire ?: "none", { w ->
+        val k = studio.muse.core.edit.LoopKind.entries.firstOrNull { it.wire == w }
+        act(EditAction.SetLoop(id, k?.let { studio.muse.core.edit.AnimLoop(it, loop?.periodSec ?: 1.0, loop?.amount) }))
+    })
+    if (loop != null) {
+        // Speed: a 0.2–5 s period, faster to the right.
+        SuiteSlider((1 - (loop.periodSec - .2) / 4.8).toFloat(), { f, done -> act(EditAction.SetLoop(id, loop.copy(periodSec = .2 + (1 - f) * 4.8), done)) },
+            label = "Loop speed", valueText = "${fmt1(loop.periodSec)} s")
+        if (loop.kind != studio.muse.core.edit.LoopKind.SPIN) {
+            val a = loop.amount ?: .5
+            SuiteSlider(a.toFloat(), { f, done -> act(EditAction.SetLoop(id, loop.copy(amount = f.toDouble()), done)) }, label = "Loop amount", valueText = "${(a * 100).roundToInt()}")
+        }
+    }
 }
 
 // ======================================================================= Captions (EM2, E3)
