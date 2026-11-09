@@ -18,8 +18,6 @@ extension SnapshotRunner {
             state.chatComposerText = nil
             state.chatAttach = false
             state.overlay = nil
-            // Let the overlay go before the screen changes: both in one tick can leave the old screen drawn.
-            try? await Task.sleep(for: .seconds(0.8))
         }
         guard let w = mainWindow else {
             lines.append("CUT chat not drawn (no window)")
@@ -85,6 +83,8 @@ extension SnapshotRunner {
             state.chatComposerText = nil
             state.chatAttach = false
             state.overlay = nil
+            // Let the overlay go before the screen changes: both in one tick can leave the old screen drawn.
+            try? await Task.sleep(for: .seconds(0.8))
 
             NSLog("[snapshot] chat recreate %@", theme.rawValue)
             // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does). The screen change
