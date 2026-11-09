@@ -424,6 +424,96 @@
      }
     }
    ]
+  },
+  {
+   "item": {
+    "mask": {
+     "shape": "rect",
+     "invert": true,
+     "feather": 0.3,
+     "width": 0.4
+    },
+    "keyframes": {
+     "maskY": [
+      {
+       "t": 0,
+       "v": 0.2
+      },
+      {
+       "t": 3,
+       "v": 0.8
+      }
+     ]
+    }
+   },
+   "samples": [
+    {
+     "t": 0,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.2
+     },
+     "look": null
+    },
+    {
+     "t": 0.5,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.3
+     },
+     "look": null
+    },
+    {
+     "t": 1,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.4
+     },
+     "look": null
+    },
+    {
+     "t": 1.25,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.45
+     },
+     "look": null
+    },
+    {
+     "t": 2,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.6
+     },
+     "look": null
+    },
+    {
+     "t": 3,
+     "mask": {
+      "shape": "rect",
+      "invert": true,
+      "feather": 0.3,
+      "width": 0.4,
+      "y": 0.8
+     },
+     "look": null
+    }
+   ]
   }
  ],
  "kits": {

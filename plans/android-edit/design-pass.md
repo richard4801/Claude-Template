@@ -1,5 +1,7 @@
 # Android Edit · design-pass proposals (WS8, 2026-11-09)
 
+**Owner approved 2026-11-09:** all three, as written. The Mac matches: a file picker for photos, and output-device latency for recording.
+
 Three parity rows change what a screen looks like, so they wait for the owner. Each proposal reuses the existing Edit
 design language: suite buttons and chips, the preview, and the bottom sheet. None adds a new screen.
 

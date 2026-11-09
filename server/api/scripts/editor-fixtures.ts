@@ -415,6 +415,8 @@ const motionKeyItems = [
   { mask: { shape: 'rect' }, look: { vignette: { amount: 0.2, size: 0.6 }, lift: 0.1 },
     keyframes: { maskRotation: [{ t: 0, v: -45 }, { t: 3, v: 45 }], vignette: [{ t: 0, v: 0 }, { t: 2, v: -0.6 }], grain: [{ t: 0.5, v: 0.4 }], leak: [{ t: 1, v: 0 }, { t: 3, v: 0.8 }] } },
   { look: { grain: { amount: 0.3, size: 2 }, leak: { kind: 'teal', amount: 0.1, angle: 90 } }, keyframes: { grain: [{ t: 0, v: 0.1 }, { t: 1, v: 0.9 }], leak: [{ t: 2, v: 0.5 }] } },
+  // An inverted mask keeps invert (and its other fields) through maskAt.
+  { mask: { shape: 'rect', invert: true, feather: 0.3, width: 0.4 }, keyframes: { maskY: [{ t: 0, v: 0.2 }, { t: 3, v: 0.8 }] } },
 ] as unknown as { mask?: M.Mask; look?: K.Look; keyframes: M.Keyframes }[];
 const motionKeys = motionKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => ({ t, mask: M.maskAt(item, t) ?? null, look: M.lookAt(item, t) ?? null })) }));
 const wave1 = projects[projects.length - 1]!.project;
