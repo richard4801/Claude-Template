@@ -84,16 +84,6 @@ extension SnapshotRunner {
             state.chatAttach = false
             state.overlay = nil
 
-            NSLog("[snapshot] chat suite %@", theme.rawValue)
-            // The AI Suite: Claude's panel in the picture's place (demo mode: the stand-in chat, same rows and composer).
-            store.openTool(.shot)
-            fillDemoDraft(store)
-            store.showSuiteClaudeForReview()
-            try? await Task.sleep(for: .seconds(2.5))
-            lines.append(drawnLine("claude_suite", theme, needsReply: true))
-            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_suite.png"))
-            store.suite.claude.open = false
-
             NSLog("[snapshot] chat recreate %@", theme.rawValue)
             // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does).
             store.openEdit(takeId: nil)
@@ -127,6 +117,19 @@ extension SnapshotRunner {
             } else {
                 lines.append("CUT claude_edit 1280x800 \(theme.rawValue) no test video")
             }
+
+            NSLog("[snapshot] chat suite %@", theme.rawValue)
+            // The AI Suite: Claude's panel in the picture's place (demo mode: the stand-in chat, same rows and composer).
+            store.openTool(.shot)
+            fillDemoDraft(store)
+            store.showSuiteClaudeForReview()
+            try? await Task.sleep(for: .seconds(2.5))
+            lines.append(drawnLine("claude_suite", theme, needsReply: true))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_suite.png"))
+            // The demo reply finishes on its own (the first time slowly): wait for it, so it can't pull the next shots
+            // back to the Suite.
+            for _ in 0..<40 where store.suite.claude.demoBusy { try? await Task.sleep(for: .seconds(0.25)) }
+            store.suite.claude.open = false
         }
 
         // Fit: the composer grows with the text, stops at 8 lines, and stays on screen with long messages above it.
