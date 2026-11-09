@@ -96,9 +96,9 @@ jobs:
           pid=$!
           for i in $(seq 1 1500); do kill -0 $pid 2>/dev/null || break; sleep 1; done
           if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1500 s: stopping it"; kill $pid 2>/dev/null || true; fi
-          wait $pid; echo "review mode exit status: $? (128+n = killed by signal n)"
+          status=0; wait $pid || status=$?; echo "review mode exit status: $status (128+n = killed by signal n)"
           ls -la snapshots | head -100
-          tail -n 40 snapshots.log || true
+          tail -n 60 snapshots.log || true
 
       # Generate must be fully on screen, with its price, and every bar pill whole in the composer from 1440 × 900 down to 960 × 640 (owner fix A2, coordination item 8). Fails on any CUT line.
       - name: Composer fit check

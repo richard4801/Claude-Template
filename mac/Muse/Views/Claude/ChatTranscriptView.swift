@@ -154,7 +154,8 @@ struct ChatTranscriptView: View {
         if moved {
             let p = distance < 48
             if p != pinned { pinned = p }
-        } else if grew, pinned {
+        } else if grew, pinned, distance > 1 {
+            // Only when the new text pushed the end out of view, so a scroll can't feed itself.
             DispatchQueue.main.async { proxy.scrollTo(Self.endId, anchor: .bottom) }
         }
         let j = !pinned && distance > 120
@@ -208,7 +209,7 @@ struct ChatTranscriptView: View {
     @ViewBuilder private var footer: some View {
         if state.busy, !lastIsStreamingText {
             HStack(spacing: Space.s2) {
-                ProgressView().controlSize(.small)
+                ChatRunningDot()
                 Text("Claude is working…").scaled(t.scale.caption, t.roles.ink2)
             }
             .accessibilityElement(children: .combine)
@@ -378,7 +379,7 @@ struct ChatToolRow: View {
                 HStack(spacing: Space.s2) {
                     Group {
                         switch line.status {
-                        case .running: ProgressView().controlSize(.mini)
+                        case .running: ChatRunningDot()
                         case .done: Ph("check", 12).foregroundStyle(t.roles.ink2)
                         case .error: Ph("warning", 12).foregroundStyle(t.roles.danger)
                         }
@@ -425,5 +426,26 @@ struct ChatFrame: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("A frame Claude looked at")
+    }
+}
+
+/// A step that's still running: a small dot that breathes (still with Reduce Motion). Drawn in SwiftUI, so it never
+/// holds up a window snapshot the way a native spinner can.
+struct ChatRunningDot: View {
+    @Environment(\.theme) private var t
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        Circle()
+            .fill(t.roles.ink2)
+            .frame(width: 7, height: 7)
+            .opacity(dim ? 0.3 : 1)
+            .frame(width: 16, height: 16)
+            .onAppear {
+                guard !reduceMotion, !SnapshotRunner.probing else { return }
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dim = true }
+            }
+            .accessibilityLabel("Running")
     }
 }

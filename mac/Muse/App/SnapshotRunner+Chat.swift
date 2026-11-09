@@ -60,6 +60,7 @@ extension SnapshotRunner {
             reset()
             store.openEdit(takeId: nil)
 
+            NSLog("[snapshot] chat camera %@", theme.rawValue)
             // Camera: Direct with Claude, beside the stage (the chat panel as it sits in Camera).
             store.go(.home)
             state.overlay = "chat"
@@ -67,10 +68,13 @@ extension SnapshotRunner {
             lines.append(drawnLine("claude_camera", theme, needsReply: true))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_camera.png"))
             // …mid-reply: a tool step running, bold text still arriving, Stop in place of Send.
+            NSLog("[snapshot] chat camera streaming %@", theme.rawValue)
             state.chatStreaming = true
             try? await Task.sleep(for: .seconds(1.5))
+            NSLog("[snapshot] chat camera streaming capture %@", theme.rawValue)
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_camera_streaming.png"))
             // …a long message typed (the field at its 8-line height, then scrolling) and two images waiting to go.
+            NSLog("[snapshot] chat camera composer %@", theme.rawValue)
             state.chatStreaming = false
             state.chatComposerText = longDraft
             state.chatAttach = true
@@ -80,6 +84,7 @@ extension SnapshotRunner {
             state.chatAttach = false
             state.overlay = nil
 
+            NSLog("[snapshot] chat suite %@", theme.rawValue)
             // The AI Suite: Claude's panel in the picture's place (demo mode: the stand-in chat, same rows and composer).
             store.openTool(.shot)
             fillDemoDraft(store)
@@ -89,6 +94,7 @@ extension SnapshotRunner {
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_suite.png"))
             store.suite.claude.open = false
 
+            NSLog("[snapshot] chat recreate %@", theme.rawValue)
             // Recreate: Claude beside the Recipe.
             store.openRecreate()
             try? await Task.sleep(for: .seconds(1))
@@ -106,6 +112,7 @@ extension SnapshotRunner {
             }
             store.closeRecreate()
 
+            NSLog("[snapshot] chat edit %@", theme.rawValue)
             // Edit: the editor's Claude panel on its Chat tab.
             if let take {
                 state.claudeTab = 0
@@ -131,6 +138,7 @@ extension SnapshotRunner {
             size(width, height)
             var heights: [Int: CGFloat] = [:]
             for n in [1, 4, 12] {
+                NSLog("[snapshot] chat composer %dx%d %d lines", width, height, n)
                 state.chatComposerText = (1...n).map { "Line \($0) of the shot notes" }.joined(separator: "\n")
                 try? await Task.sleep(for: .seconds(1.2))
                 state.probeTick += 1
