@@ -168,6 +168,19 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun loopAnimations() {
+        for ((i, c) in fn["loops"]!!.arr.withIndex()) {
+            val lo = c.obj["loop"]!!.obj
+            val loop = AnimLoop(LoopKind.entries.first { it.wire == lo["kind"]!!.str }, lo["periodSec"]!!.num, lo["amount"]?.num)
+            for (sm in c.obj["samples"]!!.arr) {
+                val t = sm.obj["t"]!!.num; val want = sm.obj["state"]!!.obj
+                val got = loopState(loop, t)
+                for ((k, v) in listOf("scale" to got.scale, "rotation" to got.rotation, "dy" to got.dy, "opacity" to got.opacity))
+                    assertEquals("loop $i $k t=$t", want[k]!!.num, v, 1e-6)
+            }
+        }
+    }
+
     @Test fun maskAndLookKeyframes() {
         for ((i, c) in fn["motionKeys"]!!.arr.withIndex()) {
             val o = Obj.of(c.obj["item"]!!, "item")

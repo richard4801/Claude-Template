@@ -490,7 +490,7 @@ extension EditSuiteState {
             let bounds = [0.0] + E.timeline(p).map(\.endSec)
             let at = bounds.indices.min { abs(bounds[$0] - start) < abs(bounds[$1] - start) } ?? bounds.count - 1
             c.startSec = nil; c.fit = nil; c.transform = nil; c.keyframes = nil; c.opacity = nil; c.blend = nil
-            c.mask = nil; c.chroma = nil; c.alphaMatte = nil
+            c.mask = nil; c.chroma = nil; c.alphaMatte = nil; c.animLoop = nil   // loop animations are for overlays
             guard var q = p.removing(id) else { return nil }
             if q.track(tid)?.items.isEmpty == true { q = q.removingTrack(tid) ?? q }
             return q.adding(.video(c), toTrack: main.id, index: at)

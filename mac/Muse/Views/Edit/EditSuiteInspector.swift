@@ -398,6 +398,30 @@ struct AnimPanel: View {
                 }
             }
         }
+        // Loop animations (contract, WS8 57fe40c): overlays, pictures and text; not the main track.
+        if session.state.canLoop {
+            let l = session.state.selectedLoop
+            EditPanel(title: "Loop") {
+                FlowLayout(spacing: 6) {
+                    Chip("None", on: l == nil) { session.edit { $0.setLoop(nil) } }
+                    ForEach(EditV2.LoopKind.all, id: \.self) { k in
+                        Chip(k.label, on: l?.kind == k) {
+                            session.edit { $0.setLoop(EditV2.AnimLoop(kind: k, periodSec: l?.periodSec ?? (k == .spin ? 4 : 1.5), amount: l?.amount)) }
+                        }
+                    }
+                }
+                if let l {
+                    SuiteSlider("Speed", value: l.periodSec, range: 0.2...5, format: { String(format: "%.1f s a cycle", $0) }) { v in
+                        session.edit { $0.setLoop(EditV2.AnimLoop(kind: l.kind, periodSec: (v * 10).rounded() / 10, amount: l.amount)) }
+                    }
+                    if l.kind != .spin {
+                        SuiteSlider("Amount", value: l.amount ?? 0.5, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                            session.edit { $0.setLoop(EditV2.AnimLoop(kind: l.kind, periodSec: l.periodSec, amount: (v * 100).rounded() / 100)) }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func label(_ k: EditV2.AnimKind) -> String {

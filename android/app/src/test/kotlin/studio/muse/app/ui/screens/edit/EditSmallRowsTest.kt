@@ -373,4 +373,41 @@ class EditSmallRowsTest {
         // Cancel leaves the key as it was.
         c.act(EditAction.PickColor(true)); c.act(EditAction.PickColor(false)); assertNull(c.ui.value.pick)
     }
+
+    @Test fun addAPhoto() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(4.0, end = true)); c.act(EditAction.AddImage("up_photo", 1600, 1200))
+        val p = c.p()
+        val t = p.tracks.first { it.kind == TrackKind.IMAGE }
+        val im = t.items.single() as studio.muse.core.edit.ImageItem
+        assertEquals(4.0, im.startSec, 1e-9); assertEquals(3.0, im.durationSec, 1e-9)
+        assertEquals(studio.muse.core.edit.Fit.CONTAIN, im.fit); assertEquals(.4, im.transform!!.scale!!, 1e-9)
+        assertEquals("up_photo", p.asset(im.asset)!!.upload); assertEquals(1600, p.asset(im.asset)!!.width)
+        assertEquals(im.id, c.ui.value.selectedId); assertEquals(Panel.TRANSFORM, c.ui.value.panel)
+        valid(p)
+        // Near the end it's shorter; a second photo at the same time goes on its own track.
+        c.act(EditAction.Scrub(13.5, end = true)); c.act(EditAction.AddImage("up_2", 800, 800))
+        assertEquals(1.5, (c.p().tracks.last { it.kind == TrackKind.IMAGE }.items.last() as studio.muse.core.edit.ImageItem).durationSec, 1e-9)
+        c.act(EditAction.Scrub(4.5, end = true)); c.act(EditAction.AddImage("up_3", 800, 800))
+        assertEquals(2, c.p().tracks.count { it.kind == TrackKind.IMAGE })
+        valid(c.p())
+    }
+
+    @Test fun loopAnimations() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddText)
+        val tid = c.ui.value.selectedId!!
+        c.act(EditAction.SetLoop(tid, studio.muse.core.edit.AnimLoop(studio.muse.core.edit.LoopKind.PULSE, 0.123, 1.7)))
+        val l = (c.p().tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).animLoop!!
+        assertEquals(.2, l.periodSec, 1e-9); assertEquals(1.0, l.amount!!, 1e-9) // clamped
+        valid(c.p())
+        // A text frame pulses: bigger half a period in.
+        val plan = planRender(c.p(), infos)
+        val piece = plan.overlays.filterIsInstance<studio.muse.core.edit.TextPiece>().first()
+        assertTrue(plan.textFrame(piece, 2.1)!!.scale > plan.textFrame(piece, 2.0)!!.scale)
+        // Main clips can't loop.
+        c.act(EditAction.SetLoop(c.p().mainClips[0].id, studio.muse.core.edit.AnimLoop(studio.muse.core.edit.LoopKind.SWAY, 1.0)))
+        assertNull(c.p().mainClips[0].animLoop); assertEquals("Loop animations are for overlays, photos and text", c.ui.value.message)
+        c.act(EditAction.SetLoop(tid, null)); assertNull((c.p().tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).animLoop)
+    }
 }

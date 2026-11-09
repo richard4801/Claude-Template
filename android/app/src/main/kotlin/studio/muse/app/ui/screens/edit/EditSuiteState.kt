@@ -133,6 +133,8 @@ data class EditSuiteUi(
     val scrubbing: Boolean = false,
     /** A voice-over is being recorded (since this time on the playhead): Record VO reads "Stop recording". */
     val recordingAt: Double? = null,
+    /** "Play the video while recording": null until the user chooses (then on with headphones, off on the speaker). */
+    val voPlayback: Boolean? = null,
     /** Easing given to keyframes added from now on (and chosen for the ones at the playhead). */
     val keyEase: studio.muse.core.edit.Ease = studio.muse.core.edit.Ease.EASE_IN_OUT,
     /** The owner's model per helper purpose (WS13; absent / null = the studio's default). */

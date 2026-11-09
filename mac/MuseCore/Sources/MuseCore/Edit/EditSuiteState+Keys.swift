@@ -203,4 +203,45 @@ extension EditSuiteState {
         guard selectedVideo?.chroma != nil else { return false }
         return changeChroma { $0.color = hex.uppercased() }
     }
+
+    // MARK: Loop animations (contract, WS8 57fe40c)
+
+    /// The selected item's loop (overlay clips, pictures and text), or nil.
+    public var selectedLoop: E.AnimLoop? {
+        switch selectedItem {
+        case .video(let c): return c.animLoop
+        case .image(let c): return c.animLoop
+        case .text(let c): return c.animLoop
+        default: return nil
+        }
+    }
+
+    /// Whether the selected item can loop (an overlay clip, a picture or text; not a main clip or a sound).
+    public var canLoop: Bool {
+        switch selectedItem {
+        case .video: return !selectedIsMain
+        case .image, .text: return true
+        default: return false
+        }
+    }
+
+    /// Sets the selected item's loop (nil removes it): period 0.2–5 s, amount 0–1 (left out at the default 0.5).
+    @discardableResult
+    public mutating func setLoop(_ loop: E.AnimLoop?) -> Bool {
+        guard canLoop else { return false }
+        var l = loop
+        if var x = l {
+            x.periodSec = E.r3(min(5, max(0.2, x.periodSec)))
+            x.amount = x.amount.map { E.r3(min(1, max(0, $0))) }.flatMap { abs($0 - 0.5) < 1e-9 ? nil : $0 }
+            l = x
+        }
+        return changeSelected { it in
+            switch it {
+            case .video(var c): c.animLoop = l; it = .video(c)
+            case .image(var c): c.animLoop = l; it = .image(c)
+            case .text(var c): c.animLoop = l; it = .text(c)
+            case .audio: break
+            }
+        }
+    }
 }

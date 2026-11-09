@@ -118,20 +118,20 @@ object EditJson {
         alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
         holdSec = o.numOrNull("holdSec"), blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
-        animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
+        animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), animLoop = loop(o),
     )
 
     private fun imageItem(o: Obj) = ImageItem(
         id = o.str("id"), asset = o.str("asset"), startSec = o.num("startSec"), durationSec = o.num("durationSec"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), animLoop = loop(o),
         blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
     )
 
     private fun textItem(o: Obj) = TextItem(
         id = o.str("id"), startSec = o.num("startSec"), durationSec = o.num("durationSec"), text = o.str("text"), style = textStyle(o.obj("style")),
         transform = transform(o), opacity = o.numOrNull("opacity"), keyframes = keyframes(o),
-        animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), template = o.strOrNull("template"),
+        animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), template = o.strOrNull("template"), animLoop = loop(o),
     )
 
     private fun audioClip(o: Obj) = AudioClip(
@@ -200,6 +200,7 @@ object EditJson {
     /** Parses a look on its own (e.g. a pack entry); [path] names it in problems. */
     fun parseLook(el: JsonElement, path: String = "look"): Look = lookOf(Obj.of(el, path))
 
+    private fun loop(o: Obj) = o.objOrNull("animLoop")?.let { AnimLoop(it.enum("kind", "unknown loop animation"), it.num("periodSec"), it.numOrNull("amount")) }
     private fun anim(o: Obj, key: String) = o.objOrNull(key)?.let { Anim(it.enum("kind", "unknown animation"), it.num("durationSec")) }
 
     internal fun keyframes(o: Obj): Keyframes? = o.objOrNull("keyframes")?.let { k ->
@@ -268,15 +269,15 @@ object EditJson {
             it.chroma?.let { c -> put("chroma", buildJsonObject { put("color", c.color); num("similarity", c.similarity); num("smoothness", c.smoothness); num("spill", c.spill) }) }
             it.alphaMatte?.let { m -> put("alphaMatte", buildJsonObject { put("asset", m.asset); bool("invert", m.invert) }) }
             it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
-            num("holdSec", it.holdSec); str("blend", it.blend?.wire); anim("animIn", it.animIn); anim("animOut", it.animOut)
+            num("holdSec", it.holdSec); str("blend", it.blend?.wire); anim("animIn", it.animIn); anim("animOut", it.animOut); loop(it.animLoop)
         }
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
-            anim("animIn", it.animIn); anim("animOut", it.animOut); str("blend", it.blend?.wire)
+            anim("animIn", it.animIn); anim("animOut", it.animOut); str("blend", it.blend?.wire); loop(it.animLoop)
         }
         is TextItem -> buildJsonObject {
             put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec); put("text", it.text); put("style", encodeTextStyle(it.style))
-            transform(it.transform); num("opacity", it.opacity); keyframes(it.keyframes); anim("animIn", it.animIn); anim("animOut", it.animOut); str("template", it.template)
+            transform(it.transform); num("opacity", it.opacity); keyframes(it.keyframes); anim("animIn", it.animIn); anim("animOut", it.animOut); str("template", it.template); loop(it.animLoop)
         }
         is AudioClip -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("inSec", it.inSec); num("outSec", it.outSec); num("speed", it.speed)
@@ -340,6 +341,10 @@ object EditJson {
         put("keyframes", buildJsonObject {
             for ((prop, list) in k) put(prop.wire, JsonArray(list.map { kf -> buildJsonObject { num("t", kf.t); num("v", kf.v); kf.ease?.let { put("ease", it.wire) } } }))
         })
+    }
+
+    private fun JsonObjectBuilder.loop(l: AnimLoop?) {
+        if (l != null) put("animLoop", buildJsonObject { put("kind", l.kind.wire); num("periodSec", l.periodSec); num("amount", l.amount) })
     }
 
     private fun JsonObjectBuilder.anim(key: String, a: Anim?) {

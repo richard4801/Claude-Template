@@ -290,6 +290,27 @@ extension EditV2 {
         public init(kind: AnimKind, durationSec: Double) { self.kind = kind; self.durationSec = durationSec }
     }
 
+    /// Loop animation kinds; kept as a string so an unknown kind reaches validation ("unknown loop animation").
+    public struct LoopKind: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+        public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+        public var description: String { rawValue }
+        public static let pulse = LoopKind(rawValue: "pulse"), sway = LoopKind(rawValue: "sway"), float = LoopKind(rawValue: "float")
+        public static let spin = LoopKind(rawValue: "spin"), blink = LoopKind(rawValue: "blink")
+        public static let all: [LoopKind] = [.pulse, .sway, .float, .spin, .blink]
+        public var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    }
+
+    /// A repeating move: period 0.2–5 s, amount 0–1 (default 0.5; spin ignores it).
+    public struct AnimLoop: Codable, Hashable, Sendable {
+        public var kind: LoopKind
+        public var periodSec: Double
+        public var amount: Double?
+        public init(kind: LoopKind, periodSec: Double, amount: Double? = nil) { self.kind = kind; self.periodSec = periodSec; self.amount = amount }
+    }
+
     public enum Fit: String, Codable, Hashable, Sendable { case cover, contain }
 
     /// `lut` = an imported .cube (Looks); it must be an `upload`.
@@ -353,6 +374,8 @@ extension EditV2 {
         /// In / out animation (as pictures: fade, pop, slideUp, slideDown, zoom), main or overlay; animState over clipLength.
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,
@@ -382,6 +405,8 @@ extension EditV2 {
         public var look: Look?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         /// Edit suite.
         public var mask: Mask?
         /// Wave 1.
@@ -462,6 +487,8 @@ extension EditV2 {
         public var keyframes: Keyframes?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         /// The hook template it was made from.
         public var template: String?
         public init(id: String, startSec: Double, durationSec: Double, text: String, style: TextStyle, transform: Transform? = nil,

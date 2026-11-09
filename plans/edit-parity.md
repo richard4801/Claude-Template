@@ -89,7 +89,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Import own fonts | Missing | Missing | M | |
 | Text templates / hooks | Has | Has | — | 10 hooks; more is **Content** |
 | In/out text animations | Has | Has | S | The model has 7 kinds; there is no picker. Mac: Animate panel. Android: In / out picker with lengths (wave 1). |
-| Loop animations | Missing | Missing | M | |
+| Loop animations | Has | Has | M | Android: Loop under Animation in / out (Text panel; Transform for overlays and photos): pulse, sway, float, spin, blink, with speed and amount (`animLoop`, `loopState`). Not on main clips. Mac: Animate → Loop (None, Pulse, Sway, Float, Spin, Blink) with Speed and Amount, on overlays, pictures and text; moving a clip to the main track drops it (shared fixtures). |
 | Keyframed text | Has | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet. Android: The Transform panel acts on the selected text (wave 1 fixed it moving the clip). |
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |
@@ -116,7 +116,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Vocal / instrumental separation | Missing | Missing | L | Server model |
 | Volume normalisation | Has | Has | M | Android: Audio → Even out volume: spoken clips (main and voice) brought to their median level from the decoded sound levels, 0.25×–2×, no clipping; music left to ducking. Mac: Audio → Even out volume, from the measured clip levels (same rules). |
 | Record voice-over | Has | Has | — | In-app recorder (WS8). Mac: Mac microphone |
-| Recording over playback (hear the video while recording) | Missing | Has | S | Needs headphones handling Mac: Record VO with "Play the video while recording" (on by default for headphones, Bluetooth or USB); the take lands where recording started, shifted by the output delay; a red bar grows on the voice row (design pass, owner-approved). |
+| Recording over playback (hear the video while recording) | Has | Has | S | Needs headphones handling. Android: Audio → Play the video while recording (on with headphones, off on the speaker); the take is moved earlier by the route's typical latency (Bluetooth 200 ms, wired 20 ms); a red bar on the ruler while recording. Mac: Record VO with "Play the video while recording" (on by default for headphones, Bluetooth or USB); the take lands where recording started, shifted by the output delay; a red bar grows on the voice row (design pass, owner-approved). |
 | **Music library** | Missing | Missing | M (function) | **Content.** Licensing is the real cost. `add_music` refuses `library` today. |
 | **Sound effects library** | Missing | Missing | M (function) | **Content** |
 | AI music / generative SFX | Missing | Missing | XL | Model and vendor decision |
@@ -159,7 +159,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Mask position / rotation on the picture (drag) | Has | Partial | S | Model yes; sliders only for size and feather. Mac: Sliders for position (WS9), size, rotation; no drag on the picture. Android: Mask position x/y and rotation sliders. |
 | Custom / pen mask | Missing | Missing | L | |
 | Chroma key (green / blue, strength, edge, spill) | Has | Has | — | Controls added in WS8. Mac: Softness and spill added in WS9 |
-| Chroma colour picker (eyedropper) | Missing | Has | S | Mac: Mask → Chroma key → Pick from video: a crosshair and the colour under it with its hex on the preview; a click keys out that colour from the clip's own frame (before its look), Esc cancels (design pass, owner-approved). |
+| Chroma colour picker (eyedropper) | Has | Has | S | Android: Effects → Mask & key → Pick from video: a loupe of the source pixels under the finger; lifting sets the key colour (owner-approved design pass). Mac: Mask → Chroma key → Pick from video: a crosshair and the colour under it with its hex on the preview; a click keys out that colour from the clip's own frame (before its look), Esc cancels (design pass, owner-approved). |
 | Background removal, tap what to keep | Has | Has | — | Server helper |
 | Refine the cut-out with a brush | Missing | Missing | L | |
 | Generative background replacement | Missing | Missing | XL | |
@@ -169,7 +169,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Overlay video / PiP; add another take to the end | Has | Has | — | Fixed in WS8 |
-| Overlay photos / images | Partial | Has | S | The model has image items; the phone can't pick a photo yet. Mac: Import picture (WS9); photos over 2048 px go up at 2048 px (PNGs keep transparency) and land selected with the Video tab open (design pass). |
+| Overlay photos / images | Has | Has | S | Android: Overlay → Add a photo: the system photo picker, ≤ 2048 px, PNG transparency kept; placed at the playhead, 3 s, 40 %, Transform open. Mac: Import picture (WS9); photos over 2048 px go up at 2048 px (PNGs keep transparency) and land selected with the Video tab open (design pass). |
 | Opacity | Has | Has | S | Model yes; no slider. Android: Transform → Opacity with ◆ (wave 1). |
 | **Blend modes** (multiply, screen, overlay, soft light, …) | Has | Has | M | New compositor mode (GL / Core Image) and a contract field. Android: Transform → Blend on overlays, drawn by MUSE's own compositor program in preview and export (wave 1). Mac: Video → Blend on overlays, a Core Image kernel with the reference formulas (wave 1). |
 | Move an overlay to the main track and back | Has | Has | S | Android: Edit → Move to main track / Move to an overlay track (app op; no contract change). On the main track the clip fills the frame (overlay placing, opacity, blend, mask and key dropped); off it, it plays at the same time, full frame. Mac: Transform → Move to main track / Move to an overlay track (same rules). |
