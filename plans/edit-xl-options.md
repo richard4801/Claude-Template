@@ -188,7 +188,10 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
   (e.g. SynthID) are not touched. Posts stay labelled by default.
 
 ## Owner bugs to fix FIRST after the token reset (2026-11-09, Mac Edit)
-1. Mac preview + export draw a large black soft oval over the CENTRE of the picture, in black and white, on a take whose
+1. UPDATE from the owner: the oval is the BACKGROUND colour showing through: the clip arrives with its subject made
+   see-through (inverted matte/mask/cut-out applied automatically). Find what adds it on open (alphaMatte, mask invert,
+   chroma, Recreate swap or cutout op) and fix. Original report: Mac preview + export draw a large black soft oval over
+   the CENTRE of the picture, in black and white, on a take whose
    Look is Classic B&W. The timeline thumbnails show the clip normally, and deleting clips doesn't remove it. Likely the
    Look's vignette drawn inverted (the centre darkened) in the Mac compositor (WS9's cached vignette map / maskAt/lookAt).
    The owner can't select or remove it. Reproduce with a B&W-look take, fix, add a pixel probe (centre bright, corners
