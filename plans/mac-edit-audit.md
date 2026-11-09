@@ -83,7 +83,7 @@ paid model or a vendor), taken out until it is built (owner, 2026-11-08).
 | Control | Status | Notes |
 |---|---|---|
 | Make captions | working | |
-| 8 style tiles | working | Neon's glow now follows the highlight colour. |
+| 8 style tiles | working | Neon's glow uses the style's own shadow colour; pop is the active word at 1.15×; single pops in 0.6 → 1 over 0.15 s (coordinator 2026-11-09: the server, Android and the Mac draw them alike). |
 | Font, Text / Highlight / Outline colour, Size, Position, Word-by-word, Upper case | working | Test: every one reaches the caption track. |
 | Edit the words | working | Opens Captions & hooks. |
 
