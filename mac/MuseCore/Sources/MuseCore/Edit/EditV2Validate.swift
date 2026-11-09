@@ -232,7 +232,7 @@ private struct Validator {
                         if sc.points[0][0] != 0 || sc.points[sc.points.count - 1][0] != 1 { throw bad("\(g).speedCurve.points", "must start at x 0 and end at x 1") }
                     }
                     let len = E.clipLength(c)
-                    try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look, mask: c.mask)
+                    try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look, mask: c.mask, effect: c.effect)
                     try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: c.mask != nil)
                     if let aa = c.audioAsset {
                         if let a = assets[aa], a.kind == .video || a.kind == .audio {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
@@ -261,7 +261,6 @@ private struct Validator {
                             }
                         }
                     } else {
-                        if c.transitionIn != nil { throw bad("\(g).transitionIn", "transitions are on the main track only") }
                         try num("\(g).startSec", c.startSec, 0, 600, optional: false)
                     }
                 case (.image, .image(let im)):
@@ -270,7 +269,7 @@ private struct Validator {
                     try num("\(g).startSec", im.startSec, 0, 600, optional: false)
                     try num("\(g).durationSec", im.durationSec, E.minItemSec, 600, optional: false)
                     try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter, look: im.look,
-                               mask: im.mask)
+                               mask: im.mask, effect: im.effect)
                     try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: im.mask != nil)
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
@@ -309,7 +308,18 @@ private struct Validator {
                     break
                 }
                 if t.kind != .main {
-                    if it.startSec < prevEnd - E.overlapSlackSec { throw bad("\(g).startSec", "items on a track must be in order and not overlap") }
+                    // Cross-dissolve between overlays (WS8 3d62419): the one allowed overlap, by exactly the transition's length.
+                    let tr: E.Transition? = t.kind == .video ? it.videoClip?.transitionIn : t.kind == .image ? { if case .image(let im) = it { return im.transitionIn }; return nil }() : nil
+                    if let tr {
+                        if ii == 0 { throw bad("\(g).transitionIn", "the first item has no transition") }
+                        if tr.kind != .fade { throw bad("\(g).transitionIn.kind", "only a cross-dissolve on overlay tracks") }
+                        try num("\(g).transitionIn.durationSec", tr.durationSec, E.minTransitionSec, E.maxTransitionSec, optional: false)
+                        let ps = E.itemSpan(p, t, t.items[ii - 1]), me = E.itemSpan(p, t, it)
+                        if abs(it.startSec - (ps.endSec - tr.durationSec)) > 0.01 { throw bad("\(g).transitionIn.durationSec", "must overlap the previous item by its length") }
+                        if tr.durationSec > (me.endSec - me.startSec) / 2 + 1e-9 || tr.durationSec > (ps.endSec - ps.startSec) / 2 + 1e-9 {
+                            throw bad("\(g).transitionIn.durationSec", "at most half of each item")
+                        }
+                    } else if it.startSec < prevEnd - E.overlapSlackSec { throw bad("\(g).startSec", "items on a track must be in order and not overlap") }
                     prevEnd = E.itemSpan(p, t, it).endSec
                 }
             }
@@ -335,7 +345,17 @@ private struct Validator {
     }
 
     func visual(_ f: String, fit: EditV2.Fit?, transform: EditV2.Transform?, crop: EditV2.Crop?, opacity: Double?, adjust: EditV2.Adjust?, filter: EditV2.FilterRef?,
-                look: EditV2.Look?, mask: EditV2.Mask? = nil) throws {
+                look: EditV2.Look?, mask: EditV2.Mask? = nil, effect: EditV2.Effect? = nil) throws {
+        if let e = effect {
+            if !E.effectIds.contains(e.id) { throw bad("\(f).effect.id", "unknown effect") }
+            try num("\(f).effect.amount", e.amount, 0, 1, optional: false)
+            try num("\(f).effect.speed", e.speed, 0.1, 4)
+            if let cs = e.colors {
+                if e.id != "duotone" { throw bad("\(f).effect.colors", "only for duotone") }
+                if cs.count != 2 { throw bad("\(f).effect.colors", "must be two colours") }
+                for (i, c) in cs.enumerated() { try color("\(f).effect.colors.\(i)", c, optional: false) }
+            }
+        }
         if let t = transform {
             try num("\(f).transform.x", t.x, -2, 3)
             try num("\(f).transform.y", t.y, -2, 3)

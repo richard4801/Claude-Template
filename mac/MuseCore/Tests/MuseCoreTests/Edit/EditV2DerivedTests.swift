@@ -177,3 +177,47 @@ extension EditV2DerivedTests {
         let d2 = jsonDiff(try JV.of(E.captionPages(p)), f["pages"]); XCTAssert(d2.isEmpty, "pages: " + d2.prefix(4).joined(separator: "; "))
     }
 }
+
+extension EditV2DerivedTests {
+    /// Overlay cross-dissolves (functions.json → overlayFades, WS8 3d62419): every item's alpha at each sample time.
+    func testOverlayFades() throws {
+        let f = try editorFixture("functions")["overlayFades"]
+        let p = try f["project"].decode(E.Project.self)
+        XCTAssertNil(E.problem(p))
+        for s in f["samples"].array {
+            let t = try XCTUnwrap(s["t"].double)
+            for tr in p.tracks where tr.kind == .video || tr.kind == .image {
+                for it in tr.items {
+                    XCTAssertEqual(E.overlayFade(p, tr, it, t), try XCTUnwrap(s["alpha"][it.id].double), accuracy: 1e-6, "\(it.id) at \(t)")
+                }
+            }
+        }
+    }
+
+    /// Split voice and music (functions.json → separation, WS8 b5cb9248).
+    func testSeparation() throws {
+        let f = try editorFixture("functions")["separation"]
+        let p = try f["project"].decode(E.Project.self)
+        for c in f["cases"].array {
+            let keep = try XCTUnwrap(c["keep"].string.flatMap(E.SeparationKeep.init(rawValue:)))
+            let got = E.applySeparation(p, clipId: try XCTUnwrap(c["clip"].string), vocals: "voc", instrumental: "ins", keep: keep)
+            let name = "\(c["clip"].string ?? "") \(keep)"
+            if c["result"].isNull { XCTAssertNil(got, name); continue }
+            let r = try XCTUnwrap(got, name)
+            XCTAssertEqual(r.ids, c["result"]["ids"].array.compactMap(\.string), name)
+            let d = jsonDiff(try JV.of(r.project), c["result"]["project"]); XCTAssert(d.isEmpty, "\(name): " + d.prefix(4).joined(separator: "; "))
+        }
+    }
+
+    /// Cut out a picture (functions.json → cutouts, WS8 b5cb9248).
+    func testCutouts() throws {
+        for c in try editorFixture("functions")["cutouts"].array {
+            let name = c["name"].string ?? "?"
+            let p = try c["project"].decode(E.Project.self)
+            let box = try c["box"].decode(E.CutoutBox.self)
+            let got = E.applyCutout(p, itemId: "i1", assetId: "cut", box: box, sourceWidth: c["sourceWidth"].double!, sourceHeight: c["sourceHeight"].double!)
+            if c["result"].isNull { XCTAssertNil(got, name); continue }
+            let d = jsonDiff(try JV.of(try XCTUnwrap(got, name)), c["result"]); XCTAssert(d.isEmpty, "\(name): " + d.prefix(4).joined(separator: "; "))
+        }
+    }
+}

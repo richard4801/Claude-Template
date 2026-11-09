@@ -345,6 +345,20 @@ extension EditV2 {
         }
     }
 
+    /// The effects library (WS8 f7226f2, effects.ts): one in-house picture effect. `id` stays a string so validation can
+    /// name an unknown one; amount 0–1 (0 is the identity), speed 0.1–4 for the moving ones, two colours for duotone.
+    public struct Effect: Codable, Hashable, Sendable {
+        public var id: String
+        public var amount: Double
+        public var speed: Double?
+        public var colors: [String]?
+        public init(id: String, amount: Double, speed: Double? = nil, colors: [String]? = nil) { self.id = id; self.amount = amount; self.speed = speed; self.colors = colors }
+    }
+    public static let effectIds = ["glitch", "vhs", "film", "blur", "zoomBlur", "mirror", "pixelate", "posterize", "duotone", "shake", "flash", "rain"]
+    /// Effects whose look moves over time (they take a speed).
+    public static let effectSpeedIds = ["glitch", "vhs", "film", "shake", "flash", "rain"]
+    public static let duotoneDefault = ["#1B1464", "#FF6B6B"]
+
     public enum DerivedOp: String, Codable, Hashable, Sendable, CaseIterable { case stabilize, slowmo }
     /// How a helper copy was made. `op` stays a string so validation can name an unknown one; the range fields belong to
     /// slowmo only (validation refuses them on a steadied copy).
@@ -384,6 +398,8 @@ extension EditV2 {
         /// The filter stack (EditV2Looks.swift).
         public var look: Look?
         public var chroma: Chroma?
+        /// The effects library (WS8 f7226f2): one picture effect, after the look, before the mask and transform.
+        public var effect: Effect?
         public var transitionIn: Transition?
         /// Edit suite: a speed curve (replaces `speed` for timing), a mask, voice processing.
         public var speedCurve: SpeedCurve?
@@ -431,6 +447,10 @@ extension EditV2 {
         public var animIn: Anim?
         public var animOut: Anim?
         /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        /// The effects library (WS8 f7226f2).
+        public var effect: Effect?
+        /// A cross-dissolve from the previous image on its track (kind fade; it overlaps that one by durationSec, WS8 3d62419).
+        public var transitionIn: Transition?
         public var animLoop: AnimLoop?
         /// Edit suite.
         public var mask: Mask?
