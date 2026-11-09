@@ -79,7 +79,7 @@ fun EditSuiteContent(
             val wide = maxWidth >= 720.dp // tablets in portrait too (800 dp) get the approved layout
             val editor = @Composable { mod: Modifier ->
                 Column(mod) {
-                    TopRow(ui, act, onClose)
+                    TopRow(ui, act, onClose, host.post)
                     SuitePreview(ui, act, Modifier.fillMaxWidth().weight(1f), drawText, picture)
                     Transport(ui, act)
                     if (!ui.fullscreen) {
@@ -141,14 +141,18 @@ private fun Status(text: String, progress: Float?) {
 }
 
 @Composable
-private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Unit) {
+private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Unit, post: ((String) -> Unit)? = null) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(48.dp).press(onClick = onClose).semantics { contentDescription = "Close" }, contentAlignment = Alignment.CenterStart) { EIc("x", 22.dp, m.t.ink) }
         // The title over its status line (plans/edit-layout.md), on the type scale.
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.scale.heading, m.t.ink)
-            T(if (ui.reopened) "Edited version" else "Not exported yet", m.scale.caption, m.t.muted, maxLines = 1)
+            // Once exported, the status line offers Post for the saved version (MUSE Socials: caption, platforms, schedule).
+            val saved = ui.savedTakeId
+            if (saved != null && post != null) T("Saved · Post it", m.scale.caption, m.t.accent, maxLines = 1,
+                modifier = Modifier.press { post(saved) }.semantics { contentDescription = "Post the saved video" })
+            else T(if (ui.reopened) "Edited version" else "Not exported yet", m.scale.caption, m.t.muted, maxLines = 1)
         }
         if (ui.session != null) Box(Modifier.size(44.dp, 48.dp).press { act(EditAction.Open(if (ui.panel == Panel.HISTORY) null else Panel.HISTORY)) }.semantics { contentDescription = "History" }, contentAlignment = Alignment.Center) {
             EIc("clock", 20.dp, if (ui.panel == Panel.HISTORY) m.t.accent else m.t.ink)

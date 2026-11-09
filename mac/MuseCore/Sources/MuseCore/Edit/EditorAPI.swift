@@ -10,6 +10,14 @@ public enum EditorJobKind: String, Codable, Hashable, Sendable, CaseIterable {
     case reverse
     /// Stabilise (XL, WS16 d206d37): a steadied copy of the whole source (≤ 3 min), the same length and timing; free.
     case stabilize
+    /// Smooth slow motion (XL, WS16 402c87d5): a source range with frames interpolated, factor× as long, silent; paid.
+    case slowmo
+    /// Translated captions (XL, WS16 8e126801 / e1e3dd4f): the caption lines in another language, timed per line; paid.
+    case translate
+    /// Split voice and music (WS16 d180db0e): vocals and instrumental as two audio uploads; paid.
+    case separate
+    /// Cut out a picture (WS16 b1fa8715): the person, or what the taps pick, as a trimmed PNG; paid.
+    case cutout
 }
 
 /// The media a job works on: a video take of the studio, or an upload of the studio (+ its length).
@@ -52,12 +60,33 @@ public struct EditorJobOptions: Codable, Hashable, Sendable {
     public var analyzeOnly: Bool?
     /// matte: tap to keep.
     public var points: [KeepPoint]?
+    /// slowmo: 2 or 4, and the source range (0.3–10 s).
+    public var factor: Double?
+    public var startSec: Double?
+    public var endSec: Double?
+    /// translate: the target (and source) language codes, "standard" | "best", and the caption lines as shown.
+    public var targetLanguage: String?
+    public var sourceLanguage: String?
+    public var quality: String?
+    public var lines: [TranslateLine]?
     public init(language: String? = nil, minSilenceSec: Double? = nil, keepPadSec: Double? = nil, fillers: Bool? = nil, repeats: Bool? = nil,
                 extraFillers: [String]? = nil, fromJobId: String? = nil, silenceOnly: Bool? = nil, noiseDb: Double? = nil, analyzeOnly: Bool? = nil,
                 points: [KeepPoint]? = nil) {
         self.points = points
         self.language = language; self.minSilenceSec = minSilenceSec; self.keepPadSec = keepPadSec; self.fillers = fillers; self.repeats = repeats
         self.extraFillers = extraFillers; self.fromJobId = fromJobId; self.silenceOnly = silenceOnly; self.noiseDb = noiseDb; self.analyzeOnly = analyzeOnly
+    }
+}
+
+/// A caption line sent to translate (as shown, edits included) or returned translated.
+public struct TranslateLine: Codable, Hashable, Sendable {
+    public var id: String?
+    public var text: String
+    public var startSec: Double
+    public var endSec: Double
+    public var translated: String?
+    public init(id: String? = nil, text: String, startSec: Double, endSec: Double, translated: String? = nil) {
+        self.id = id; self.text = text; self.startSec = startSec; self.endSec = endSec; self.translated = translated
     }
 }
 
@@ -80,7 +109,7 @@ extension EditorJobKind {
         case .captions, .cuts: return .captions
         case .matte: return options?.points != nil ? .track : .matte
         case .denoise: return .denoise
-        case .beats, .reverse, .stabilize: return nil
+        case .beats, .reverse, .stabilize, .slowmo, .translate, .separate, .cutout: return nil
         }
     }
 }
@@ -103,8 +132,34 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
     public var denoise: Helper?
     /// Stabilise (free, up to `maxSec`).
     public var stabilize: Helper?
-    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil, stabilize: Helper? = nil) {
-        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise; self.stabilize = stabilize
+    /// Smooth slow motion (paid; `factors`, `maxRangeSec`).
+    public var slowmo: Slowmo?
+    /// Translated captions (paid): the languages offered (code → name), the qualities, the most words.
+    public var translate: Translate?
+    /// Split voice and music, and cut out a picture (paid).
+    public var separate: Helper?
+    public var cutout: Helper?
+    public struct Translate: Codable, Hashable, Sendable {
+        public var available: Bool?
+        public var reason: String?
+        public var languages: [String: String]?
+        public var qualities: [String]?
+        public var maxWords: Double?
+        public init(available: Bool? = nil, reason: String? = nil, languages: [String: String]? = nil, qualities: [String]? = nil, maxWords: Double? = nil) {
+            self.available = available; self.reason = reason; self.languages = languages; self.qualities = qualities; self.maxWords = maxWords
+        }
+    }
+    public struct Slowmo: Codable, Hashable, Sendable {
+        public var available: Bool?
+        public var reason: String?
+        public var factors: [Double]?
+        public var maxRangeSec: Double?
+        public init(available: Bool? = nil, reason: String? = nil, factors: [Double]? = nil, maxRangeSec: Double? = nil) {
+            self.available = available; self.reason = reason; self.factors = factors; self.maxRangeSec = maxRangeSec
+        }
+    }
+    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil, stabilize: Helper? = nil, slowmo: Slowmo? = nil) {
+        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise; self.stabilize = stabilize; self.slowmo = slowmo
     }
     /// Background removal (and tap to keep) can run.
     public var matteAvailable: Bool { isAvailable(.matte) }
@@ -115,6 +170,10 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
         case .matte: return matte
         case .denoise: return denoise
         case .stabilize: return stabilize
+        case .separate: return separate
+        case .cutout: return cutout
+        case .translate: return translate.map { Helper(available: $0.available, reason: $0.reason) }
+        case .slowmo: return slowmo.map { Helper(available: $0.available, reason: $0.reason, maxSec: $0.maxRangeSec) }
         case .cuts, .beats, .reverse: return nil   // the free passes are always offered
         }
     }
@@ -158,8 +217,11 @@ public struct EditorResultAsset: Codable, Hashable, Sendable {
     public var take: String?
     public var url: String?
     public var durationSec: Double?
-    public init(kind: String, upload: String? = nil, take: String? = nil, url: String? = nil, durationSec: Double? = nil) {
-        self.kind = kind; self.upload = upload; self.take = take; self.url = url; self.durationSec = durationSec
+    /// cutout: the PNG's size.
+    public var width: Int?
+    public var height: Int?
+    public init(kind: String, upload: String? = nil, take: String? = nil, url: String? = nil, durationSec: Double? = nil, width: Int? = nil, height: Int? = nil) {
+        self.kind = kind; self.upload = upload; self.take = take; self.url = url; self.durationSec = durationSec; self.width = width; self.height = height
     }
 }
 
@@ -187,8 +249,27 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var alpha: Bool?
     /// "person" | "tracked" (tap to keep)
     public var mode: String?
+    /// separate: the two parts.
+    public var vocals: EditorResultAsset?
+    public var instrumental: EditorResultAsset?
+    /// cutout: where the cut-out sits in the source picture (pixels), and the source's size.
+    public var box: EditV2.CutoutBox?
+    public var sourceWidth: Double?
+    public var sourceHeight: Double?
     public var points: [KeepPoint]?
     public var suggestion: DenoiseSuggestion?
+    // translate: the source language, the lines as translated, how many stayed as they were, the quality used
+    public var sourceLanguage: String?
+    public var lines: [TranslateLine]?
+    public var untranslatedLines: Int?
+    /// captions / translate: a note about the export (a script the server's export can't draw yet), shown with the captions.
+    public var exportNotice: String?
+    public var quality: String?
+    // slowmo: the factor and source range the copy was made from, and its frame rate
+    public var factor: Double?
+    public var startSec: Double?
+    public var endSec: Double?
+    public var fps: Double?
     // reverse: the reversed copy's picture size and sound
     public var width: Int?
     public var height: Int?

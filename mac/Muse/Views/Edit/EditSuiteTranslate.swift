@@ -15,6 +15,8 @@ struct EditSuiteTranslateSheet: View {
     @State private var running = false
     @State private var failure: String?
     @State private var request: AnyHashable?
+    /// "device": Apple's translation on this Mac (free); "standard" / "best": the server's paid job (XL, WS16).
+    @State private var how = EditSuiteTranslateSheet.available ? "device" : "standard"
 
     static let languages: [(String, String)] = [
         ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"), ("it", "Italian"), ("pt", "Portuguese"),
@@ -29,20 +31,31 @@ struct EditSuiteTranslateSheet: View {
                 Spacer()
                 SuiteIconButton(systemName: "xmark", label: "Close") { dismiss() }.keyboardShortcut(.cancelAction)
             }
-            Text("Each sentence is translated on this Mac and keeps its timing. Undo brings the original words back.")
+            let ways: [(String, String)] = (Self.available ? [("device", "On this Mac · free")] : []) + [("standard", "Standard"), ("best", "Best quality")]
+            EditSeg(options: ways,
+                    selection: how, small: true) { how = $0 }
+            Text(how == "device"
+                 ? "Each sentence is translated on this Mac and keeps its timing. The original words are kept; switch back any time."
+                 : "Translated on the server, line by line with its timing. The price shows before it runs. The original words are kept.")
                 .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             Picker("Into", selection: $target) {
-                ForEach(Self.languages, id: \.0) { Text($0.1).tag($0.0) }
+                ForEach(how == "device" ? Self.languages : session.translateLanguages.map { ($0.code, $0.name) }, id: \.0) { Text($0.1).tag($0.0) }
             }
             .frame(maxWidth: 280)
             if let failure { Note(warn: true, failure) }
             HStack {
                 Spacer()
                 if running { ProgressView().controlSize(.small) }
-                SuiteToolButton(title: running ? "Translating…" : "Translate", icon: "chat-circle-text", accent: true, disabled: running || !Self.available) { start() }
+                SuiteToolButton(title: running || session.isRunning(.translate) ? "Translating…" : "Translate", icon: "chat-circle-text", accent: true,
+                                disabled: running || session.isRunning(.translate) || (how != "device" && session.features?.isAvailable(.translate) == false)) { start() }
             }
-            if !Self.available {
-                Text("Translation needs macOS 15 or later.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+            // On this Mac any script draws; the server's export only the languages it lists (WS16 0cfa277e).
+            if how == "device", let server = session.features?.translate?.languages, server[target] == nil {
+                Text("Exports made on this Mac show it; the server's export can't draw this script yet.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            if how != "device", let note = session.features?.note(.translate) {
+                Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             }
         }
         .padding(Space.s5)
@@ -53,8 +66,8 @@ struct EditSuiteTranslateSheet: View {
             request = nil
             switch result {
             case .success(let out):
-                if session.edit({ $0.translateCaptions(out) }) {
-                    session.notice = "Captions translated · undo brings the original back"
+                if session.edit({ $0.translateCaptions(out, language: target) }) {
+                    session.notice = "Captions translated · Show original switches back"
                     dismiss()
                 } else { failure = "The translation didn't fit the captions · try again" }
             case .failure(let e):
@@ -72,6 +85,14 @@ struct EditSuiteTranslateSheet: View {
 
     private func start() {
         failure = nil
+        if how != "device" {
+            // The server's job: the price is asked first (the session's paid helper flow), then the timed words land.
+            session.translateTarget = target
+            session.translateQuality = how
+            dismiss()
+            Task { await session.translateCaptions() }
+            return
+        }
         running = true
         request = AnyHashable(UUID())
     }

@@ -345,6 +345,20 @@ extension EditV2 {
         }
     }
 
+    /// The effects library (WS8 f7226f2, effects.ts): one in-house picture effect. `id` stays a string so validation can
+    /// name an unknown one; amount 0–1 (0 is the identity), speed 0.1–4 for the moving ones, two colours for duotone.
+    public struct Effect: Codable, Hashable, Sendable {
+        public var id: String
+        public var amount: Double
+        public var speed: Double?
+        public var colors: [String]?
+        public init(id: String, amount: Double, speed: Double? = nil, colors: [String]? = nil) { self.id = id; self.amount = amount; self.speed = speed; self.colors = colors }
+    }
+    public static let effectIds = ["glitch", "vhs", "film", "blur", "zoomBlur", "mirror", "pixelate", "posterize", "duotone", "shake", "flash", "rain"]
+    /// Effects whose look moves over time (they take a speed).
+    public static let effectSpeedIds = ["glitch", "vhs", "film", "shake", "flash", "rain"]
+    public static let duotoneDefault = ["#1B1464", "#FF6B6B"]
+
     public enum DerivedOp: String, Codable, Hashable, Sendable, CaseIterable { case stabilize, slowmo }
     /// How a helper copy was made. `op` stays a string so validation can name an unknown one; the range fields belong to
     /// slowmo only (validation refuses them on a steadied copy).
@@ -384,6 +398,8 @@ extension EditV2 {
         /// The filter stack (EditV2Looks.swift).
         public var look: Look?
         public var chroma: Chroma?
+        /// The effects library (WS8 f7226f2): one picture effect, after the look, before the mask and transform.
+        public var effect: Effect?
         public var transitionIn: Transition?
         /// Edit suite: a speed curve (replaces `speed` for timing), a mask, voice processing.
         public var speedCurve: SpeedCurve?
@@ -431,6 +447,10 @@ extension EditV2 {
         public var animIn: Anim?
         public var animOut: Anim?
         /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        /// The effects library (WS8 f7226f2).
+        public var effect: Effect?
+        /// A cross-dissolve from the previous image on its track (kind fade; it overlaps that one by durationSec, WS8 3d62419).
+        public var transitionIn: Transition?
         public var animLoop: AnimLoop?
         /// Edit suite.
         public var mask: Mask?
@@ -635,7 +655,42 @@ extension EditV2 {
         public var asset: String
         public var words: [CaptionWord]
         public var style: CaptionStyle
-        public init(asset: String, words: [CaptionWord], style: CaptionStyle) { self.asset = asset; self.words = words; self.style = style }
+        /// Translated captions (WS8 cac2bb0): the words' language (e.g. "es"), and the words they were translated from.
+        public var language: String?
+        public var original: CaptionOriginal?
+        public init(asset: String, words: [CaptionWord], style: CaptionStyle, language: String? = nil, original: CaptionOriginal? = nil) {
+            self.asset = asset; self.words = words; self.style = style; self.language = language; self.original = original
+        }
+    }
+
+    public struct CaptionOriginal: Codable, Hashable, Sendable {
+        public var language: String?
+        public var words: [CaptionWord]
+        public init(language: String? = nil, words: [CaptionWord]) { self.language = language; self.words = words }
+    }
+
+    public static let languageCodePattern = #"^[a-z]{2,3}(-[A-Z]{2})?$"#
+    public static func isLanguageCode(_ s: String) -> Bool { s.range(of: languageCodePattern, options: .regularExpression) != nil }
+
+    /// The caption track shown in its original words (and back): words and language swap with `original`'s; unchanged
+    /// without one.
+    public static func swapCaptionOriginal(_ ct: CaptionTrack) -> CaptionTrack {
+        guard let o = ct.original else { return ct }
+        var out = ct
+        out.words = o.words
+        out.language = o.language
+        out.original = CaptionOriginal(language: ct.language, words: ct.words)
+        return out
+    }
+
+    /// The caption track with translated `words` in `language`; the first original is kept (translating again replaces
+    /// only the translation).
+    public static func translateCaptions(_ ct: CaptionTrack, language: String, words: [CaptionWord], sourceLanguage: String? = nil) -> CaptionTrack {
+        var out = ct
+        out.original = ct.original ?? CaptionOriginal(language: ct.language ?? sourceLanguage, words: ct.words)
+        out.words = words
+        out.language = language
+        return out
     }
 
     public enum DuckSource: String, Codable, Hashable, Sendable { case voice, speech }

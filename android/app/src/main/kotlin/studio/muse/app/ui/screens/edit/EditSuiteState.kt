@@ -202,6 +202,10 @@ data class EditSuiteUi(
     val matteOff: String? = null,
     /** Paid helpers that can't run now (captions, matte, denoise), each with its plain line (WS1 guardrails). */
     val helpersOff: Map<String, String> = emptyMap(),
+    /** Translated captions: the languages offered (the server's list: only what the export draws), code → name. */
+    val translateLanguages: List<Pair<String, String>> = emptyList(),
+    /** The server's note when the captions' script can't be drawn in exports yet (captions/translate `exportNotice`). */
+    val captionNotice: String? = null,
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
 ) {
@@ -227,6 +231,10 @@ data class EditSuiteUi(
 
     val captionTrack: Track? get() = project?.tracks?.firstOrNull { it.kind == TrackKind.CAPTION && it.caption != null }
     val captionPreset: CaptionPreset? get() = captionTrack?.caption?.style?.preset
+    /** Lyric captions can run: the music track's song is one of the member's files (an upload or a take). */
+    val songCaptionable: Boolean get() = project?.let { p ->
+        p.tracks.firstOrNull { it.kind == TrackKind.MUSIC }?.items?.firstOrNull()?.let { (it as? studio.muse.core.edit.AudioClip)?.asset }?.let { p.asset(it) }?.let { it.upload != null || it.take != null }
+    } == true
 }
 
 /** One tap on the paused picture: where (0–1 of the frame), when (source seconds of the clip) and whether to keep it. */

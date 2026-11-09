@@ -70,13 +70,15 @@ class FrameStill(@Suppress("unused") private val context: Context, private val l
                 val small = LookThumbnails.downscale(cropped, texH)
                 LookThumbnails.toBitmap(renderLook(small, vl.look ?: Look(), vl.colorMatrix, looks.lutFor(vl.look, files), fps = plan.fps))
             } else cropped
+            // The effects library on a still: the reference maths on the CPU (at most 480 px a side; it's a preview).
+            val effected = vl?.effect?.let { e -> effectStill(looked, e, t - clip.startUs / 1e6) } ?: looked
             val scale = (vl?.baseScale ?: 1.0) * pl.scale
             val dw = (texW * scale).toFloat(); val dh = (texH * scale).toFloat()
             canvas.save()
             canvas.translate((pl.centerX * w).toFloat(), (pl.centerY * h).toFloat())
             canvas.rotate(pl.rotationCw.toFloat())
             val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG).apply { alpha = (pl.alpha.coerceIn(0.0, 1.0) * 255).roundToInt() }
-            canvas.drawBitmap(looked, Rect(0, 0, looked.width, looked.height), RectF(-dw / 2, -dh / 2, dw / 2, dh / 2), paint)
+            canvas.drawBitmap(effected, Rect(0, 0, effected.width, effected.height), RectF(-dw / 2, -dh / 2, dw / 2, dh / 2), paint)
             canvas.restore()
         }
         // Text, hooks, captions and flashes: the engine's overlay on its own transparent layer.
@@ -113,5 +115,22 @@ class FrameStill(@Suppress("unused") private val context: Context, private val l
             }
             return c.pieces.lastOrNull()?.clipEndUs ?: c.clipEndUs
         }
+    }
+
+    /** [studio.muse.core.edit.Effects.pixel] over a bitmap (downscaled to 480 px a side at most), alpha kept. */
+    private fun effectStill(src: Bitmap, e: studio.muse.core.edit.Effect, t: Double): Bitmap {
+        val q = minOf(1.0, 480.0 / maxOf(src.width, src.height))
+        val b = if (q < 1) Bitmap.createScaledBitmap(src, (src.width * q).roundToInt().coerceAtLeast(1), (src.height * q).roundToInt().coerceAtLeast(1), true) else src
+        val w = b.width; val h = b.height
+        val px = IntArray(w * h); b.getPixels(px, 0, w, 0, 0, w, h)
+        val rgb = px.map { c -> doubleArrayOf(((c shr 16) and 255) / 255.0, ((c shr 8) and 255) / 255.0, (c and 255) / 255.0) }
+        val sample = studio.muse.core.edit.Effects.sampler(w, h, rgb)
+        val out = IntArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            val c = studio.muse.core.edit.Effects.pixel(e, maxOf(0.0, t), w, h, (x + 0.5) / w, (y + 0.5) / h, sample)
+            fun ch(v: Double) = (v.coerceIn(0.0, 1.0) * 255).roundToInt()
+            out[y * w + x] = (px[y * w + x] and 0xFF000000.toInt()) or (ch(c[0]) shl 16) or (ch(c[1]) shl 8) or ch(c[2])
+        }
+        return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
     }
 }

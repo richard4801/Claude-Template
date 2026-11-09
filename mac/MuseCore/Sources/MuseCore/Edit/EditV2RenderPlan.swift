@@ -155,23 +155,26 @@ extension EditV2 {
                                  voice: VoiceSettings(effect: c.voiceEffect, enhance: c.enhance))
                 }
             case .video:
+                // Cross-dissolves between overlays (WS8 3d62419): items overlap, so a track with any alternates two lanes.
                 let vLane = videoLane, aLane = audioLane
-                var usedV = false, usedA = false
-                for c in t.items.compactMap(\.videoClip) {
+                let lanes = t.items.contains { $0.videoClip?.transitionIn != nil } ? 2 : 1
+                var usedV = false, usedA = false, usedV2 = false, usedA2 = false
+                for (k, c) in t.items.compactMap(\.videoClip).enumerated() {
+                    let second = lanes == 2 && k % 2 == 1
                     let start = r6(c.startSec ?? 0), end = min(r6(start + clipLength(c)), d)
                     guard end - start > 1e-3 else { continue }
                     let all = renderPieces(c, fps: p.canvas.fps)
                     if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
-                        video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: vLane, mainIndex: nil, layer: ti,
+                        video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: vLane + (second ? 1 : 0), mainIndex: nil, layer: ti,
                                                   timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,
                                                   pieces: pcs))
-                        usedV = true
+                        if second { usedV2 = true } else { usedV = true }
                     }
-                    if addAudio(t, c.id, asset: c.audioAsset ?? c.asset, pieces: all, start: start, end: end, lane: aLane,
-                                voice: VoiceSettings(effect: c.voiceEffect, enhance: c.enhance)) { usedA = true }
+                    if addAudio(t, c.id, asset: c.audioAsset ?? c.asset, pieces: all, start: start, end: end, lane: aLane + (second ? 1 : 0),
+                                voice: VoiceSettings(effect: c.voiceEffect, enhance: c.enhance)) { if second { usedA2 = true } else { usedA = true } }
                 }
-                if usedV { videoLane += 1 }
-                if usedA { audioLane += 1 }
+                if usedV || usedV2 { videoLane += lanes }
+                if usedA || usedA2 { audioLane += lanes }
             case .music, .voice, .sfx:
                 let aLane = audioLane
                 var used = false

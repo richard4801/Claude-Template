@@ -106,6 +106,7 @@ import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import studio.muse.core.edit.EffectId
 
 /** Things a sheet asks the platform for (files, the recorder, rendering). Screenshots pass the defaults. */
 data class SuiteHost(
@@ -116,6 +117,11 @@ data class SuiteHost(
     val export: (toPhone: Boolean) -> Unit = {},
     val cancelExport: () -> Unit = {},
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** After an export: opens Post for the saved version (its take id). */
+    val post: ((String) -> Unit)? = null,
+    /** The effects library's tiles: each effect on the frame under the playhead (id or "none" → picture). */
+    val effectThumbs: Map<String, ImageBitmap> = emptyMap(),
+    val renderEffectThumbs: (() -> Unit)? = null,
     /** Decoded sound levels per asset id, for the timeline's sound lanes. */
     val waves: Map<String, Peaks> = emptyMap(),
     /**
@@ -516,6 +522,9 @@ private fun TransformBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) ->
         is studio.muse.core.edit.ImageItem -> { AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act); LoopPicker(item.id, item.animLoop, act) }
         else -> {}
     }
+    // Cross-dissolve from the previous item on this overlay track (it must touch it, or already dissolve from it).
+    if (item is VideoClip && overlayTrack || item is studio.muse.core.edit.ImageItem) ui.project?.let { p -> DissolveRow(p, item, act) }
+    if (item is studio.muse.core.edit.ImageItem) CutoutRow(ui, item, act)
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     if (!keys.isNullOrEmpty()) {
         SuiteLabel("Easing")
@@ -605,6 +614,8 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
         when { denoise?.running == true -> "Cleaning the voice · ${denoise.progress} %"; cleaned -> "Background noise removed"; else -> "Removes background noise · ${denoise?.price ?: "AI"}" },
         cleaned, { act(EditAction.NoiseReduction(!cleaned)) },
     )
+    // Split voice and music (paid): the clip's sound apart, the kept part(s) on their own tracks.
+    if (clip is VideoClip) SeparateRow(ui, clip, act)
     val enh = (clip as? VideoClip)?.enhance ?: (clip as? studio.muse.core.edit.AudioClip)?.enhance ?: false
     OptRow("Voice enhance", "Clearer speech", enh == true, { act(EditAction.Enhance(enh != true)) })
     SuiteLabel("Voice effect")
@@ -787,11 +798,13 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
             }
         }
         ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
+        // Lyric captions: from the song on the music track (one of the member's files), timed with the music.
+        if (ui.helpersOff["captions"] == null && ui.songCaptionable) AiButton("Captions from the song", ui.ai["captions"], { act(EditAction.LyricCaptions) }, icon = "music")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        listOf("Style", "Font", "Animation", "Words").forEach { tab ->
+        listOf("Style", "Font", "Animation", "Words", "Language").forEach { tab ->
             val on = ui.captionTab == tab
             Column(Modifier.press { act(EditAction.CaptionTab(tab)) }) {
                 T(tab, m.type.body.copy(fontSize = 13.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal), if (on) m.t.ink else m.t.muted)
@@ -800,6 +813,10 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
             }
         }
     }
+    // Captions the export can't draw yet (the server's note, or a language it doesn't list): said before exporting.
+    val lang = ct.language
+    (ui.captionNotice ?: if (lang != null && ui.translateLanguages.isNotEmpty() && ui.translateLanguages.none { it.first == lang || it.first == lang.substringBefore('-') })
+        "Captions in ${languageName(lang)} show in the app, but exports can't draw them yet" else null)?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.accent) }
     when (ui.captionTab) {
         "Font" -> {
             SuiteLabel("Font")
@@ -822,6 +839,7 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
             T("Pages break at pauses and sentence ends too.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
         }
         "Words" -> WordsBody(ui, p, act)
+        "Language" -> LanguageBody(ui, ct, act)
         else -> {
             // The content library's caption templates (styles in its fonts), above the presets.
             ui.content?.pack("captions")?.flatMap { it.items }?.takeIf { it.isNotEmpty() }?.let { tpl ->
@@ -863,6 +881,93 @@ private fun Swatch(hex: String, on: Boolean, onClick: () -> Unit) {
 }
 
 /** Edit by text: the transcript, word-timed; tapping a word cuts it out of the video (fillers in red, cut words struck). */
+private fun languageName(code: String?, extra: List<Pair<String, String>> = emptyList()) = code?.let { c ->
+    (extra + CAPTION_LANGUAGES).firstOrNull { it.first == c }?.second ?: (extra + CAPTION_LANGUAGES).firstOrNull { it.first == c.substringBefore('-') }?.second ?: c } ?: "Original"
+
+/**
+ * Translated captions (paid): pick a language and a quality, the price on the button; the words come back timed, and
+ * the track keeps the words they came from, so either language can be shown.
+ */
+@Composable
+private fun LanguageBody(ui: EditSuiteUi, ct: studio.muse.core.edit.CaptionTrack, act: (EditAction) -> Unit) {
+    val m = muse
+    ct.original?.let { o ->
+        SuiteLabel("Showing")
+        SuiteSeg(listOf("cur" to languageName(ct.language, ui.translateLanguages), "other" to languageName(o.language, ui.translateLanguages)), "cur", { if (it == "other") act(EditAction.CaptionOriginal(o.language)) },
+            Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    }
+    ui.helpersOff["translate"]?.let { return ComingSoon("Translate captions", it) }
+    // Not the language shown, nor the kept one (the switch above shows that).
+    val have = setOfNotNull(ct.language, ct.original?.language).map { it.substringBefore('-') }
+    // The server's list: only languages the export draws correctly.
+    val choices = ui.translateLanguages.filter { it.first.substringBefore('-') !in have }
+    if (choices.isEmpty()) return ComingSoon("Translate captions", "No other languages can be translated to yet")
+    var target by rememberSaveable { mutableStateOf(choices.firstOrNull()?.first ?: "es") }
+    var best by rememberSaveable { mutableStateOf(false) }
+    val job = ui.ai["translate"]
+    LaunchedEffect(target, best) { act(EditAction.TranslatePrice(target, best)) }
+    SuiteLabel("Translate into")
+    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        choices.forEach { (code, label) -> SuiteChip(label, code == target, { target = code }, enabled = job?.running != true) }
+    }
+    SuiteSeg(listOf("standard" to "Standard", "best" to "Best quality"), if (best) "best" else "standard", { best = it == "best" }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    T("Translates the captions as shown, word fixes included. Timing follows the speech; your style stays.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Translating" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Translate · $it" } ?: "Translate", { act(EditAction.Translate(target, best)) }, Modifier.fillMaxWidth(), enabled = job?.price != null, primary = true)
+        }
+    }
+}
+
+/** Split voice and music: keep the voice, the music or both (each on its own track); the price is on the button. */
+@Composable
+private fun SeparateRow(ui: EditSuiteUi, clip: VideoClip, act: (EditAction) -> Unit) {
+    val m = muse
+    ui.helpersOff["separate"]?.let { return ComingSoon("Split voice and music", it) }
+    val job = ui.ai["separate"]
+    var keep by rememberSaveable(clip.id) { mutableStateOf(studio.muse.core.edit.SeparationKeep.BOTH) }
+    LaunchedEffect(clip.id) { act(EditAction.SeparatePrice) }
+    SuiteLabel("Split voice and music")
+    SuiteChips(listOf("BOTH" to "Both, on two tracks", "VOCALS" to "Voice only", "INSTRUMENTAL" to "Music only"), keep.name, { keep = studio.muse.core.edit.SeparationKeep.valueOf(it) }, enabled = job?.running != true)
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Splitting" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Split · $it" } ?: "Split", { act(EditAction.Separate(keep)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+        }
+    }
+}
+
+/** Cut out a picture: the photo becomes its subject (trimmed, with transparency), where it sat; the price is on the button. */
+@Composable
+private fun CutoutRow(ui: EditSuiteUi, im: studio.muse.core.edit.ImageItem, act: (EditAction) -> Unit) {
+    val m = muse
+    ui.helpersOff["cutout"]?.let { return ComingSoon("Cut out the subject", it) }
+    val job = ui.ai["cutout"]
+    LaunchedEffect(im.id) { act(EditAction.CutoutPrice) }
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Cutting out" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Cut out the subject · $it" } ?: "Cut out the subject", { act(EditAction.Cutout) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+        }
+    }
+}
+
+/** "Dissolve from previous": on, the item moves earlier by the length and fades in over the item before it. */
+@Composable
+private fun DissolveRow(p: EditProject, item: studio.muse.core.edit.Item, act: (EditAction) -> Unit) {
+    val m = muse
+    val tr = when (item) { is VideoClip -> item.transitionIn; is studio.muse.core.edit.ImageItem -> item.transitionIn; else -> null }
+    if (tr == null && SuiteOps.dissolvePrevious(p, item.id) == null) return
+    OptRow("Dissolve from previous", if (tr != null) "Fades in over the clip before it" else "Fades in over the clip before it, which it touches", tr != null,
+        { act(EditAction.OverlayDissolve(item.id, if (tr != null) null else .5)) })
+    if (tr != null) SuiteSlider(((tr.durationSec - .1) / 1.9).toFloat(), { f, done -> act(EditAction.OverlayDissolve(item.id, Math.round((.1 + f * 1.9) * 10) / 10.0, done)) },
+        label = "Dissolve length", valueText = "${fmt1(tr.durationSec)} s")
+}
+
 @Composable
 private fun WordsBody(ui: EditSuiteUi, p: EditProject, act: (EditAction) -> Unit) {
     val m = muse
@@ -893,11 +998,67 @@ private fun WordsBody(ui: EditSuiteUi, p: EditProject, act: (EditAction) -> Unit
 }
 
 // ======================================================================= Effects: transitions, mask & green screen (E2)
+/** The picture the look / effect tools act on: the selected video or photo, else the active main clip. */
+private fun currentVisualOf(ui: EditSuiteUi): studio.muse.core.edit.Visual? =
+    (ui.selection?.second?.takeIf { it is VideoClip || it is studio.muse.core.edit.ImageItem } ?: ui.activeClip) as? studio.muse.core.edit.Visual
+
+private val EFFECT_LABELS = listOf(EffectId.GLITCH to "Glitch", EffectId.VHS to "VHS", EffectId.FILM to "Retro film", EffectId.BLUR to "Blur",
+    EffectId.ZOOM_BLUR to "Zoom blur", EffectId.MIRROR to "Mirror", EffectId.PIXELATE to "Pixelate", EffectId.POSTERIZE to "Posterise", EffectId.DUOTONE to "Duotone",
+    EffectId.SHAKE to "Shake", EffectId.FLASH to "Flash", EffectId.RAIN to "Rain on glass")
+
+/**
+ * The effects library on the selected clip or photo: tiles with live thumbnails (the frame under the playhead), then
+ * Amount, Speed for the moving ones, and the two colours for duotone. One effect per picture.
+ */
+@Composable
+private fun PictureEffectsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
+    val m = muse
+    val item = currentVisualOf(ui) ?: return T("Pick a clip or a photo", m.type.body, m.t.muted)
+    val cur = item.effect
+    LaunchedEffect(Unit) { host.renderEffectThumbs?.invoke() }
+    (listOf<Pair<EffectId?, String>>(null to "None") + EFFECT_LABELS).chunked(3).forEach { row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            row.forEach { (id, label) ->
+                val on = cur?.id == id
+                Column(Modifier.weight(1f).press { act(EditAction.SetEffect(id?.let { e -> studio.muse.core.edit.Effect(e, cur?.amount ?: .6, cur?.speed?.takeIf { e.timed }) })) }
+                    .semantics { contentDescription = "Effect $label" }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1.5f).background(m.t.surface2).border(if (on) 2.dp else 0.dp, if (on) m.t.ink else Color.Transparent)) {
+                        val bmp = host.effectThumbs[id?.wire ?: "none"]
+                        if (bmp != null) Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                    T(label, m.type.tiny.copy(fontSize = 11.5.sp), if (on) m.t.ink else m.t.muted, maxLines = 1)
+                }
+            }
+            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+    if (cur == null) return
+    SuiteSlider(cur.amount.toFloat(), { f, done -> act(EditAction.SetEffect(cur.copy(amount = Math.round(f * 100) / 100.0), done)) }, label = "Amount", valueText = "${(cur.amount * 100).roundToInt()}")
+    if (cur.id.timed) {
+        val sp = cur.speed ?: 1.0
+        SuiteSlider(((sp - .1) / 3.9).toFloat(), { f, done -> act(EditAction.SetEffect(cur.copy(speed = Math.round((.1 + f * 3.9) * 10) / 10.0), done)) }, label = "Speed", valueText = "${fmt1(sp)}×")
+    }
+    if (cur.id == EffectId.DUOTONE) {
+        val cs = cur.colors ?: studio.muse.core.edit.Effects.DUOTONE_DEFAULT
+        val pairs = listOf(listOf("#1B1464", "#FF6B6B"), listOf("#003344", "#FFE600"), listOf("#2B0A3D", "#3EE6C1"), listOf("#111111", "#F2E8D5"))
+        SuiteLabel("Colours")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            pairs.forEach { pr ->
+                val sel = pr.map { it.uppercase() } == cs.map { it.uppercase() }
+                Box(Modifier.size(40.dp).border(if (sel) 2.dp else 1.dp, if (sel) m.t.ink else m.t.line).padding(3.dp).background(Brush.linearGradient(pr.map { colorOf(it) }))
+                    .press { act(EditAction.SetEffect(cur.copy(colors = pr.takeUnless { it == studio.muse.core.edit.Effects.DUOTONE_DEFAULT }))) }.semantics { contentDescription = "Duotone ${pr[0]} and ${pr[1]}" })
+            }
+        }
+    }
+    T("Effects sit on top of the look, and under the mask", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+}
+
 @Composable
 private fun EffectsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
-    SuiteSeg(listOf("Transitions" to "Transitions", "Mask" to "Mask & key"), ui.effectsTab, { act(EditAction.EffectsTab(it)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    SuiteSeg(listOf("Transitions" to "Transitions", "Effects" to "Effects", "Mask" to "Mask & key"), ui.effectsTab, { act(EditAction.EffectsTab(it)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
     if (ui.effectsTab == "Mask") return MaskBody(ui, host, act)
+    if (ui.effectsTab == "Effects") return PictureEffectsBody(ui, host, act)
     val c = ui.activeClip
     val idx = ui.project?.mainClips?.indexOfFirst { it.id == c?.id } ?: -1
     val cur = c?.transitionIn

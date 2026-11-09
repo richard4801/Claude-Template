@@ -526,7 +526,7 @@ public struct EditSuiteState: Sendable {
         case .caption:
             return E.captionPages(project).enumerated().map { i, pg in
                 EditSuite.Block(id: "\(trackId)#\(i)", itemId: nil, startSec: pg.startSec, endSec: pg.endSec,
-                                label: pg.words.map(\.text).joined(separator: " "), transition: nil)
+                                label: E.captionText(pg.words.map(\.text), project.captionTrack?.language), transition: nil)
             }
         case .main:
             let spans = E.timeline(project)

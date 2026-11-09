@@ -170,7 +170,8 @@ final class EditV2Scene: @unchecked Sendable {
             let pl = E.placement(c, local: t - layer.segment.timelineStart)
             image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: E.adjustAt(c.adjust, c.keyframes, t - layer.segment.timelineStart),
                          colorKeyed: E.hasColorKeys(c.keyframes), filter: c.filter, look: E.lookAt(c.look, c.keyframes, t - layer.segment.timelineStart),
-                         chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: E.maskAt(c.mask, c.keyframes, t - layer.segment.timelineStart), frame: frameNo, fps: fps, flip: c.transform, over: image)
+                         chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: E.maskAt(c.mask, c.keyframes, t - layer.segment.timelineStart), frame: frameNo, fps: fps, flip: c.transform,
+                         effect: c.effect, effectTime: t - layer.segment.timelineStart, over: image)
         }
 
         // Other tracks, bottom to top: pictures first (video and image tracks), then the adjustment layers' colour over the
@@ -179,21 +180,24 @@ final class EditV2Scene: @unchecked Sendable {
             switch track.kind {
             case .video:
                 for seg in plan.video where seg.layer == ti && seg.contains(t) {
-                    guard let c = track.item(seg.itemId)?.videoClip, let frame = sourceImage(request, seg) else { continue }
-                    let pl = E.placement(c, local: t - seg.timelineStart)
+                    guard let item = track.item(seg.itemId), let c = item.videoClip, let frame = sourceImage(request, seg) else { continue }
+                    var pl = E.placement(c, local: t - seg.timelineStart)
+                    pl.opacity *= E.overlayFade(project, track, item, t)   // cross-dissolve between overlays (WS8 3d62419)
                     image = draw(frame, crop: c.crop, fit: c.fit ?? .contain, placement: pl, state: E.LayerState(), adjust: E.adjustAt(c.adjust, c.keyframes, t - seg.timelineStart),
                                  colorKeyed: E.hasColorKeys(c.keyframes), filter: c.filter,
                                  look: E.lookAt(c.look, c.keyframes, t - seg.timelineStart), chroma: c.chroma, matte: matteImage(request, seg, c),
                                  mask: E.maskAt(c.mask, c.keyframes, t - seg.timelineStart), frame: frameNo, fps: fps,
-                                 flip: c.transform, blend: c.blend, over: image)
+                                 flip: c.transform, blend: c.blend, effect: c.effect, effectTime: t - seg.timelineStart, over: image)
                 }
             case .image:
-                for case .image(let im) in track.items where t >= im.startSec && t < im.startSec + im.durationSec {
-                    guard let pic = sources.images[im.asset] else { continue }
-                    image = draw(pic, crop: im.crop, fit: im.fit ?? .contain, placement: E.placement(im, local: t - im.startSec), state: E.LayerState(),
+                for item in track.items {
+                    guard case .image(let im) = item, t >= im.startSec, t < im.startSec + im.durationSec, let pic = sources.images[im.asset] else { continue }
+                    var pl = E.placement(im, local: t - im.startSec)
+                    pl.opacity *= E.overlayFade(project, track, item, t)
+                    image = draw(pic, crop: im.crop, fit: im.fit ?? .contain, placement: pl, state: E.LayerState(),
                                  adjust: E.adjustAt(im.adjust, im.keyframes, t - im.startSec), colorKeyed: E.hasColorKeys(im.keyframes), filter: im.filter, look: E.lookAt(im.look, im.keyframes, t - im.startSec), chroma: nil,
                                  mask: E.maskAt(im.mask, im.keyframes, t - im.startSec), frame: frameNo, fps: fps,
-                                 flip: im.transform, blend: im.blend, over: image)
+                                 flip: im.transform, blend: im.blend, effect: im.effect, effectTime: t - im.startSec, over: image)
                 }
             default:
                 break
@@ -244,7 +248,7 @@ final class EditV2Scene: @unchecked Sendable {
     /// halation, leak, vignette, grain; just the colour matrix without a look) → fit → scale/rotate/move → opacity, over `base`.
     private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, colorKeyed: Bool = false, filter: E.FilterRef?,
                       look: E.Look?, chroma: E.Chroma?, matte: CIImage? = nil, mask: E.Mask? = nil, frame: Int, fps: Double,
-                      flip: E.Transform? = nil, blend: E.BlendMode? = nil, over base: CIImage) -> CIImage {
+                      flip: E.Transform? = nil, blend: E.BlendMode? = nil, effect: E.Effect? = nil, effectTime: Double = 0, over base: CIImage) -> CIImage {
         let opacity = pl.opacity * state.opacity
         guard opacity > 0.001 else { return base }
         var img = src
@@ -278,6 +282,8 @@ final class EditV2Scene: @unchecked Sendable {
             ]).cropped(to: img.extent)
         }
         img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), tone: E.Tone(adjust), keyed: colorKeyed, to: img, frame: frame, fps: fps)
+        // The effects library (WS8 f7226f2): after the look, before the mask and transform, in the picture's own frame.
+        if let effect, effect.amount > 0 { img = EditV2EffectRenderer.apply(effect, to: img, t: effectTime) }
         // Edit suite: the mask multiplies the alpha (after the chroma key).
         if let mask { img = looks.applyMask(mask, to: img) }
         let (fw, _) = E.fittedSize(width: Double(w), height: Double(h), crop: nil, fit: fit, canvasWidth: Double(size.width), canvasHeight: Double(size.height))
@@ -472,7 +478,10 @@ final class EditV2Scene: @unchecked Sendable {
         let wrap = CGFloat(st.maxWidthPct ?? 0.85) * size.width
         // Neon draws its glow with the style's own shadow colour (coordinator, 2026-11-09: server, Android and Mac match).
         let textStyle = st.textStyle
-        guard let img = cachedText(key, { EditV2TextRenderer.render(runs, style: textStyle, fontSize: fontSize, wrapWidth: wrap) }) else { return base }
+        let joiner = E.captionJoiner(ct.language), rtl = E.isRtlLanguage(ct.language)
+        guard let img = cachedText(key + "|\(ct.language ?? "")", {
+            EditV2TextRenderer.render(runs, style: textStyle, fontSize: fontSize, wrapWidth: wrap, joiner: joiner, rtl: rtl)
+        }) else { return base }
         // As Android's core RenderPlan: `pop` is the active word at 1.15× (above); `single` (one word a page) pops in,
         // 0.6 → 1 over 0.15 s, easing out, at full opacity. No other preset scales the page.
         var scale = 1.0

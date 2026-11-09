@@ -107,7 +107,8 @@ enum EditV2TextRenderer {
     private static let paragraphKey = NSAttributedString.Key(kCTParagraphStyleAttributeName as String)
 
     /// The runs joined by spaces, drawn with `style` at `fontSize` px, wrapped at `wrapWidth` px. Transparent around the text.
-    static func render(_ runs: [Run], style: EditV2.TextStyle, fontSize: CGFloat, wrapWidth: CGFloat) -> CGImage? {
+    /// `joiner` goes between runs ("" for unspaced scripts, WS8 d0c1a6e); `rtl` lays the lines out right to left.
+    static func render(_ runs: [Run], style: EditV2.TextStyle, fontSize: CGFloat, wrapWidth: CGFloat, joiner: String = " ", rtl: Bool = false) -> CGImage? {
         guard fontSize > 0, wrapWidth > 0, !runs.isEmpty else { return nil }
         let para = NSMutableParagraphStyle()
         para.alignment = style.align == .left ? .left : style.align == .right ? .right : .center
@@ -115,6 +116,7 @@ enum EditV2TextRenderer {
         para.minimumLineHeight = lineHeight
         para.maximumLineHeight = lineHeight
         para.lineBreakMode = .byWordWrapping
+        if rtl { para.baseWritingDirection = .rightToLeft }
         func attrs(_ scale: Double, _ color: String) -> [NSAttributedString.Key: Any] {
             let size = fontSize * CGFloat(scale)
             return [fontKey: font(style, size: size), colorKey: cgColor(color),
@@ -123,7 +125,7 @@ enum EditV2TextRenderer {
         let fill = NSMutableAttributedString()
         var boxes: [(NSRange, String, Bool)] = []
         for (i, r) in runs.enumerated() {
-            if i > 0 { fill.append(NSAttributedString(string: " ", attributes: attrs(1, style.color))) }
+            if i > 0, !joiner.isEmpty { fill.append(NSAttributedString(string: joiner, attributes: attrs(1, style.color))) }
             let text = style.uppercase == true ? r.text.uppercased() : r.text
             let start = fill.length
             fill.append(NSAttributedString(string: text, attributes: attrs(r.scale, r.color)))

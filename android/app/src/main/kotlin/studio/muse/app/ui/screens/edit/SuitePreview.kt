@@ -165,7 +165,7 @@ private fun Overlays(p: EditProject, t: Double, w: Dp, h: Dp) {
                     CaptionPreset.SINGLE -> (0.6 + 0.4 * ease(Ease.EASE_OUT, (t - page.startSec) / 0.15)).toFloat()
                     else -> 1f
                 }
-                Placed(.5, c.style.y ?: .72, w, h, scale, 0f) { CaptionLine(page.words.map { it.text }, at.word, c.style, h, w * .85f) }
+                Placed(.5, c.style.y ?: .72, w, h, scale, 0f) { CaptionLine(page.words.map { it.text }, at.word, c.style, h, w * .85f, c.language) }
             }
             else -> {}
         }
@@ -224,13 +224,23 @@ fun StyledText(text: String, s: EditTextStyle, h: Dp, alpha: Float = 1f, maxW: D
  * highlight colour, karaoke = every word up to it, box = a box behind it, highlighter = a marker stripe behind it.
  */
 @Composable
-fun CaptionLine(words: List<String>, active: Int, style: CaptionStyle, h: Dp, maxW: Dp) {
+fun CaptionLine(words: List<String>, active: Int, style: CaptionStyle, h: Dp, maxW: Dp, language: String? = null) {
+    // Right-to-left languages read from the right (words keep their order); unspaced ones sit without gaps.
+    if (studio.muse.core.edit.isRtlLanguage(language)) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
+            CaptionWords(words, active, style, h, maxW, unspaced = false)
+        }
+    } else CaptionWords(words, active, style, h, maxW, unspaced = studio.muse.core.edit.captionJoiner(language).isEmpty())
+}
+
+@Composable
+private fun CaptionWords(words: List<String>, active: Int, style: CaptionStyle, h: Dp, maxW: Dp, unspaced: Boolean) {
     val s = style.text
     val size: TextUnit = (h.value * s.sizePct).sp
     val up = s.uppercase == true
     val hl = colorOf(style.highlightColor)
     val glow = style.preset == CaptionPreset.NEON
-    FlowRow(Modifier.requiredWidthIn(max = maxW), hGap = (size.value * .28f).dp, vGap = 0.dp) {
+    FlowRow(Modifier.requiredWidthIn(max = maxW), hGap = if (unspaced) 0.dp else (size.value * .28f).dp, vGap = 0.dp) {
         words.forEachIndexed { k, w0 ->
             val w = if (up) w0.uppercase() else w0
             val on = when (style.preset) {

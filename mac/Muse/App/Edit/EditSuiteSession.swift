@@ -766,6 +766,10 @@ final class EditSuiteSession {
         case .beats: return "Detect beats"
         case .reverse: return "Reverse"
         case .stabilize: return "Stabilise"
+        case .slowmo: return "Smooth slow motion"
+        case .translate: return "Translate captions"
+        case .separate: return "Split voice and music"
+        case .cutout: return "Cut out"
         }
     }
 
@@ -822,6 +826,7 @@ final class EditSuiteSession {
             }
             if job.isDone, let r = job.result {
                 if k == .captions { transcriptJobId = job.id }
+                if k == .captions || k == .translate { captionExportNotice = r.exportNotice }
                 apply(r)
             } else if job.state == "failed" {
                 lastError = job.error ?? "That didn't work · try again"
@@ -848,6 +853,25 @@ final class EditSuiteSession {
             guard let self, let words = r.words, !words.isEmpty else { self?.lastError = "No speech found"; return }
             self.edit { $0.setCaptions(words: words, assetId: a.id) }
             self.notice = "Captions added · \(words.count) words"
+        }
+    }
+
+    /// Lyric captions (WS8 54f4b17): the song on the music track (an upload), as captions that follow its clips.
+    var songAsset: E.Asset? {
+        for t in project.tracks where t.kind == .music {
+            for case .audio(let c) in t.items {
+                if let a = project.asset(c.asset), a.upload != nil { return a }
+            }
+        }
+        return nil
+    }
+
+    func captionsFromSong() async {
+        guard let a = songAsset, let src = EditorSource(a) else { lastError = "Add a song from this Mac to the music row first"; return }
+        await run(.captions, source: src, options: EditorJobOptions(language: "auto")) { [weak self] r in
+            guard let self, let words = r.words, !words.isEmpty else { self?.lastError = "No words found in the song"; return }
+            self.edit { $0.setCaptions(words: words, assetId: a.id) }
+            self.notice = "Lyrics added · \(words.count) words, following the song's clips"
         }
     }
 
@@ -961,6 +985,200 @@ final class EditSuiteSession {
         guard let dropped else { return }
         let on = target.derivedFrom?.kind == .stabilize
         notice = (on ? "Steadied" : "Stabilise off") + (dropped.isEmpty ? "" : " · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)")
+    }
+
+    // MARK: Translated captions (XL): the caption lines as shown, in another language, timed by the server (paid)
+
+    var translateTarget = "es"
+    var translateQuality = "standard"
+    /// The server's note about exporting these captions (WS16: a script its export can't draw yet), shown with them.
+    var captionExportNotice: String?
+
+    /// The languages to offer (the server's, by name), or a short list when it doesn't say.
+    var translateLanguages: [(code: String, name: String)] {
+        // The server's list (only scripts its export draws, WS16 0cfa277e); a short safe list when it doesn't say.
+        let l = features?.translate?.languages ?? ["es": "Spanish", "fr": "French", "de": "German", "pt-BR": "Portuguese (Brazil)", "it": "Italian",
+                                                   "ru": "Russian", "en": "English"]
+        return l.map { ($0.key, $0.value) }.sorted { $0.name < $1.name }
+    }
+
+    func translateCaptions() async {
+        guard let ct = project.captionTrack else { lastError = "Make captions first"; return }
+        guard let a = project.asset(ct.asset), let src = EditorSource(a) else { lastError = "Translate needs captions from a take or an upload"; return }
+        let lines = state.captionLinesToTranslate
+        guard !lines.isEmpty else { lastError = "There are no caption words to translate"; return }
+        let target = translateTarget
+        var o = EditorJobOptions()
+        o.targetLanguage = target
+        o.sourceLanguage = ct.original?.language ?? ct.language
+        o.quality = translateQuality
+        o.lines = lines
+        await run(.translate, source: src, options: o) { [weak self] r in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let words = r.words, !words.isEmpty else { self.lastError = "The translation came back empty · try again"; return }
+                if self.edit({ $0.setCaptionTranslation(language: r.language ?? target, words: words, sourceLanguage: r.sourceLanguage) }) {
+                    let name = self.translateLanguages.first { $0.code == (r.language ?? target) }?.name ?? (r.language ?? target)
+                    let kept = (r.untranslatedLines ?? 0) > 0 ? " · \(r.untranslatedLines!) lines kept as they were" : ""
+                    self.notice = "Captions in \(name)\(kept)"
+                }
+            }
+        }
+    }
+
+    // MARK: Smooth slow motion (XL): a range of the clip, 2× or 4× slower with new frames in between
+
+    /// 2 or 4, and the length of the range from the playhead (seconds of source).
+    var slowmoFactor: Double = 4
+    var slowmoLength: Double = 2
+    /// 0…1 while this Mac makes the slowed copy itself; nil otherwise.
+    var slowmoLocalProgress: Double?
+    /// Whether this Mac makes the copy itself (free) rather than the paid server job.
+    var slowmoOnDevice: Bool { EditV2SlowmoLocal.available }
+
+    /// The selected main clip from the playhead, `slowmoLength` long, slowed `slowmoFactor`×: the copy is made once (the
+    /// paid server job, its price confirmed first) and reused; the clip is split around it with the shared applySlowmo,
+    /// the slowed piece muted and selected.
+    func smoothSlowmo() async {
+        guard let c = state.selectedVideo else { lastError = "Select a clip to slow down"; return }
+        guard let r = state.slowmoRange(lengthSec: slowmoLength) else {
+            lastError = "Smooth slow motion works on a main clip at one speed, at least 0.3 s long"; return
+        }
+        let factor = slowmoFactor
+        if let copy = state.slowmoCopy(of: c.asset, startSec: r.startSec, endSec: r.endSec, factor: factor) { applySlowmo(copy); return }
+        guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Smooth slow motion needs a take or an upload"; return }
+        // On this Mac first (macOS 15.4+, free): Apple's frame interpolation, uploaded so the render and other devices have it.
+        if EditV2SlowmoLocal.available, #available(macOS 15.4, *), let file = files[a.id], slowmoLocalProgress == nil {
+            slowmoLocalProgress = 0
+            defer { slowmoLocalProgress = nil }
+            do {
+                let made = try await EditV2SlowmoLocal.make(file, startSec: r.startSec, endSec: r.endSec, factor: Int(factor)) { [weak self] v in
+                    self?.slowmoLocalProgress = v
+                }
+                notice = "Uploading the slowed clip…"
+                let up = try await api.uploadEditorFile(made.file, contentType: "video/mp4", purpose: nil, progress: nil)
+                notice = nil
+                let id = project.newId("v")
+                var copy = E.Asset(id: id, kind: .video, upload: up, durationSec: made.durationSec, width: made.width, height: made.height, hasAudio: false)
+                copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .slowmo, startSec: r.startSec, endSec: r.endSec, factor: factor)
+                files[id] = made.file
+                state.assetNames[id] = "Smooth \(Int(factor))×"
+                applySlowmo(copy)
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                notice = nil   // falls through to the server job
+            }
+        }
+        var o = EditorJobOptions()
+        o.factor = factor; o.startSec = r.startSec; o.endSec = r.endSec
+        await run(.slowmo, source: src, options: o) { [weak self] res in
+            Task { @MainActor in await self?.addSlowmo(res, of: a, startSec: r.startSec, endSec: r.endSec, factor: factor) }
+        }
+    }
+
+    private func addSlowmo(_ r: EditorJobResult, of a: E.Asset, startSec: Double, endSec: Double, factor: Double) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't slow this clip down"; return }
+        let id = project.newId("v")
+        let len = ra.durationSec ?? r.durationSec ?? ((endSec - startSec) * factor * 1e6).rounded() / 1e6
+        var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: len,
+                           width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: false, url: ra.url)
+        copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .slowmo, startSec: r.startSec ?? startSec, endSec: r.endSec ?? endSec, factor: r.factor ?? factor)
+        let link = ra.url ?? ra.take.flatMap { lookupTake($0)?.videoUrl }
+        if let link, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? ra.take ?? id) { files[id] = local }
+        else if ra.upload == a.upload, ra.take == a.take { files[id] = files[a.id] }   // the fake hands back the source itself
+        state.assetNames[id] = "Smooth \(Int(factor))×"
+        applySlowmo(copy)
+    }
+
+    private func applySlowmo(_ copy: E.Asset) {
+        if edit({ $0.applySlowmoSelected(copy) }) {
+            notice = "\(E.derivedLabel(project, copy.id)) · the slowed part is selected and muted"
+        }
+    }
+
+    // MARK: Split voice and music, cut out a picture (XL helpers, WS16 jobs, WS8 shared ops)
+
+    /// The selected clip's sound split by the server (paid, the price first); the clip is muted and the kept part(s)
+    /// land on a voice and / or music track in sync with it.
+    func separateSelected(keep: E.SeparationKeep) async {
+        guard let c = state.selectedVideo, let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Select a video clip with sound"; return }
+        guard a.hasAudio != false else { lastError = "This clip has no sound to split"; return }
+        await run(.separate, source: src) { [weak self] r in
+            Task { @MainActor in await self?.addSeparation(r, clipId: c.id, keep: keep) }
+        }
+    }
+
+    private func addSeparation(_ r: EditorJobResult, clipId: String, keep: E.SeparationKeep) async {
+        guard let v = r.vocals, let i = r.instrumental, v.upload != nil || v.take != nil, i.upload != nil || i.take != nil else {
+            lastError = "Couldn't split this clip's sound"; return
+        }
+        let vid = project.newId("a")
+        let iid = vid + "i"
+        let vocals = E.Asset(id: vid, kind: .audio, take: v.upload == nil ? v.take : nil, upload: v.upload, durationSec: v.durationSec ?? r.durationSec, hasAudio: true, url: v.url, name: "Voice")
+        let instrumental = E.Asset(id: iid, kind: .audio, take: i.upload == nil ? i.take : nil, upload: i.upload, durationSec: i.durationSec ?? r.durationSec, hasAudio: true, url: i.url, name: "Music")
+        for (id, part) in [(vid, v), (iid, i)] {
+            if let link = part.url ?? part.take.flatMap({ lookupTake($0)?.videoUrl }), let u = URL(string: link),
+               let local = try? await EditSuiteMedia.localCopy(u, key: part.upload ?? part.take ?? id) { files[id] = local }
+        }
+        state.assetNames[vid] = "Voice"; state.assetNames[iid] = "Music"
+        view { $0.selection = clipId }
+        if edit({ $0.applySeparationSelected(vocals: vocals, instrumental: instrumental, keep: keep) }) {
+            notice = keep == .both ? "Voice and music on their own rows · the clip is muted" : keep == .vocals ? "Voice only · the clip is muted" : "Music only · the clip is muted"
+        }
+    }
+
+    /// The selected picture cut out by the server (paid): the person, or what `points` keep; it stays where the subject sat.
+    func cutoutSelected(points: [KeepPoint]? = nil) async {
+        guard case .image(let im)? = state.selectedItem, let a = project.asset(im.asset), let src = EditorSource(a) else { lastError = "Select a picture to cut out"; return }
+        await run(.cutout, source: src, options: points.map { EditorJobOptions(points: $0) }) { [weak self] r in
+            Task { @MainActor in await self?.addCutout(r, itemId: im.id) }
+        }
+    }
+
+    private func addCutout(_ r: EditorJobResult, itemId: String?) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't cut that out"; return }
+        let id = project.newId("p")
+        let asset = E.Asset(id: id, kind: .image, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, width: ra.width, height: ra.height, url: ra.url)
+        if let link = ra.url, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? id) { files[id] = local }
+        state.assetNames[id] = "Cut-out"
+        if let itemId, let box = r.box, let sw = r.sourceWidth, let sh = r.sourceHeight {
+            view { $0.selection = itemId }
+            if edit({ $0.applyCutoutSelected(asset, box: box, sourceWidth: sw, sourceHeight: sh) }) { notice = "Cut out · it stays where it was" }
+        } else if edit({ $0.addImage(asset) }) {
+            notice = "Cut-out added at the playhead"
+        }
+    }
+
+    /// "Cut out a picture…" (Stickers): a picture from this Mac, uploaded (JPEG or PNG), cut out, and added at the playhead.
+    func cutoutPicture(_ url: URL) async {
+        do {
+            let ext = url.pathExtension.lowercased()
+            var (file, type, _, _) = try Self.pictureForUpload(url, ext: ext)
+            if type == "image/heic" || type == "image/webp" { (file, type) = try Self.jpegCopy(file) }   // the cut-out takes JPEG or PNG
+            notice = "Uploading \(url.lastPathComponent)…"
+            let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+            notice = nil
+            await run(.cutout, source: EditorSource(uploadId: up)) { [weak self] r in
+                Task { @MainActor in await self?.addCutout(r, itemId: nil) }
+            }
+        } catch {
+            notice = nil
+            lastError = (error as? ApiError)?.message ?? "Couldn't cut out that picture"
+        }
+    }
+
+    /// A JPEG copy of a picture (for helpers that don't take HEIC or WebP).
+    static func jpegCopy(_ url: URL) throws -> (URL, String) {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+            throw ApiError("bad_media", "That picture can't be opened")
+        }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("pic-\(UUID().uuidString).jpg")
+        guard let dest = CGImageDestinationCreateWithURL(out as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { throw ApiError("bad_media", "That picture can't be converted") }
+        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ApiError("bad_media", "That picture can't be converted") }
+        return (out, "image/jpeg")
     }
 
     func setRemoveBackground(_ on: Bool) async {

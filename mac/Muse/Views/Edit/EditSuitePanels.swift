@@ -39,7 +39,13 @@ struct VideoPanels: View {
                 AdjustPanel(session: session, visual: v)
                 MaskPanel(session: session, visual: v)
             }
+            // The effects library (WS8 f7226f2) on clips and pictures.
+            if session.state.canHaveEffect { EffectsPanel(session: session) }
             if session.state.selectedIsMain { TransitionsPanel(session: session) }
+            // Cross-dissolve between overlays (WS8 3d62419).
+            if session.state.canDissolve { OverlayDissolvePanel(session: session) }
+            // Cut out a picture (XL helper).
+            if case .image? = session.state.selectedItem { EditPanel(title: "Cut out") { CutoutRow(session: session) } }
         } else {
             InspectorEmpty(text: "Select a clip, an overlay or a sticker on the timeline.")
         }
@@ -868,6 +874,8 @@ struct AudioPanels: View {
         if let snd = session.state.selectedSound { clipPanel(snd) } else {
             InspectorEmpty(text: "Select a clip, voice-over or song for its sound.")
         }
+        // Split voice and music (XL helper) on a video clip with sound.
+        if session.state.selectedVideo != nil { EditPanel(title: "Voice and music") { SeparateRow(session: session) } }
         mixPanel
     }
 
@@ -1063,6 +1071,29 @@ struct SpeedPanel: View {
                     Task { await session.toggleStabilize() }
                 }
                 .disabled(session.features?.isAvailable(.stabilize) == false && !steps.contains("stabilize"))
+                // Smooth slow motion (XL): from the playhead, 2× or 4× with new frames in between (paid; the price is shown first).
+                if session.state.selectedIsMain {
+                    SuiteRule()
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Smooth slow motion").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                        HStack(spacing: Space.s2) {
+                            EditSeg(options: [(2.0, "2×"), (4.0, "4×")], selection: session.slowmoFactor, small: true) { session.slowmoFactor = $0 }
+                            EditSeg(options: [(1.0, "1 s"), (2.0, "2 s"), (4.0, "4 s")], selection: session.slowmoLength, small: true) { session.slowmoLength = $0 }
+                        }
+                        HStack(spacing: Space.s2) {
+                            let busy = session.isRunning(.slowmo) || session.slowmoLocalProgress != nil
+                            SuiteToolButton(title: busy ? "Slowing down…" : "Slow down from the playhead", icon: "gauge",
+                                            disabled: busy || (!session.slowmoOnDevice && session.features?.isAvailable(.slowmo) == false)) {
+                                Task { await session.smoothSlowmo() }
+                            }
+                            if let p = session.slowmoLocalProgress { ProgressView(value: p).frame(maxWidth: 100) }
+                            else if session.isRunning(.slowmo) { ProgressView().controlSize(.small) }
+                        }
+                        Text(session.slowmoOnDevice ? "Made on this Mac, free. New frames in between, so it stays smooth. The slowed part is muted."
+                             : session.features?.note(.slowmo) ?? "New frames in between, so it stays smooth. The slowed part is muted.")
+                            .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         } else {
             InspectorEmpty(text: "Select a video clip to change its speed.")

@@ -164,6 +164,11 @@ struct CaptionsPanel: View {
                         SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
                                         disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
                         if session.isRunning(.captions) { ProgressView().controlSize(.small) }
+                        // Lyric captions: from the song on the music row (the same captions job, on the song).
+                        if session.songAsset != nil {
+                            SuiteToolButton(title: "Captions from the song",
+                                            disabled: session.isRunning(.captions) || !session.helperAvailable(.captions), plain: true) { Task { await session.captionsFromSong() } }
+                        }
                         Spacer(minLength: 0)
                         Text(session.estimateLabel(.captions) ?? "").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     }
@@ -174,6 +179,7 @@ struct CaptionsPanel: View {
                 SuiteLabel("Style", trailing: style == nil ? nil : "Word-by-word")
                 CaptionStyleGrid(session: session)
                 ContentCaptionChips(session: session)
+                if style != nil { TranslateCaptionsRow(session: session) }
             }
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
@@ -459,5 +465,41 @@ struct AnimPanel: View {
         case .zoom: return "Zoom"
         case .typewriter: return "Typewriter"
         }
+    }
+}
+
+
+/// Translated captions (XL, owner-approved): the captions' language, "Translate…" (the sheet: on this Mac free, or the
+/// server's Standard / Best quality with the price shown first), and "Show <language>" once translated.
+struct TranslateCaptionsRow: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    @State private var showSheet = false
+
+    var body: some View {
+        let s = session.state
+        let name = { (code: String?) -> String? in code.map { c in session.translateLanguages.first { $0.code == c }?.name
+            ?? EditSuiteTranslateSheet.languages.first { $0.0 == c }?.1 ?? c } }
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SuiteLabel("Language", trailing: name(s.captionLanguage))
+            HStack(spacing: Space.s2) {
+                SuiteToolButton(title: session.isRunning(.translate) ? "Translating…" : "Translate…", icon: "chat-circle-text",
+                                disabled: session.isRunning(.translate)) { showSheet = true }
+                if session.isRunning(.translate) { ProgressView().controlSize(.small) }
+                if s.captionsTranslated {
+                    // The other set of words (the original, or the translation once switched back).
+                    SuiteToolButton(title: "Show \(name(s.captionOriginalLanguage) ?? "original")", plain: true) { session.edit { $0.swapCaptionOriginal() } }
+                        .help("Switches the captions between the two languages")
+                }
+                Spacer(minLength: 0)
+            }
+            // The server's note, or (as Android) the same kind of line when the captions' language isn't one its export draws.
+            if let n = session.captionExportNotice ?? s.captionLanguage.flatMap({ code in
+                session.features?.translate?.languages.flatMap { $0[code] == nil ? "The server's export can't draw this script yet · exports made on this Mac show it." : nil }
+            }) {
+                Text(n).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .sheet(isPresented: $showSheet) { EditSuiteTranslateSheet(session: session) }
     }
 }

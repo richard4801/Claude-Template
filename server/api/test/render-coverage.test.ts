@@ -116,6 +116,7 @@ const nested: Entry = meta('probed field by field');
 const clipKeys: Table<M.VideoClip> = {
   id: meta('an id'), asset: set('asset', 'mt'), inSec: set('inSec', 0.5), outSec: set('outSec', 1.2), speed: set('speed', 2), speedCurve: nested, startSec: set('startSec', 0.2),
   volume: set('volume', 0.5), muted: set('muted', true), fadeInSec: set('fadeInSec', 0.3), fadeOutSec: set('fadeOutSec', 0.6), audioAsset: set('audioAsset', 'm'),
+  effect: meta('effects library (2026-11-09): reference in effects.ts; the render follows (WS16)'),
   chroma: nested, transitionIn: nested, alphaMatte: nested, holdSec: { mut: o => { o.holdSec = 1; o.speed = 1; } }, blend: set('blend', 'screen'),
   animIn: nested, animOut: nested, animLoop: nested, voiceEffect: set('voiceEffect', 'radio'), enhance: set('enhance', true),
   fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
@@ -128,7 +129,9 @@ const clipFields = (main: boolean) => ({
     : { ...nest('animLoop', loopFields) }),
 });
 const imageKeys: Table<M.ImageItem> = { id: meta('an id'), asset: set('asset', 'im'), startSec: set('startSec', 0.4), durationSec: set('durationSec', 0.5), blend: set('blend', 'multiply'),
-  animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested };
+  animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
+  transitionIn: meta('overlay cross-dissolve (2026-11-09): needs a previous item it overlaps; the render follows (WS16)'),
+  effect: meta('effects library (2026-11-09): reference in effects.ts; the render follows (WS16)') };
 const imageFields = { startSec: imageKeys.startSec, durationSec: imageKeys.durationSec, blend: imageKeys.blend,
   ...visualFields(['x', 'y', 'scale', 'rotation', 'opacity', ...M.COLOR_KF_PROPS, ...M.MASK_KF_PROPS, ...M.LOOK_KF_PROPS], 'cover'),
   ...nest('animIn', animFields('animIn')), ...nest('animOut', animFields('animOut')), ...nest('animLoop', loopFields) };
@@ -164,7 +167,8 @@ const captionStyleKeys: Table<Omit<M.CaptionStyle, keyof M.TextStyle>> = { prese
   highlightColor: { prep: o => { (o.style as Obj).preset = 'karaoke'; }, mut: o => { (o.style as Obj).highlightColor = '#00FF00'; } },
   y: { mut: o => { (o.style as Obj).y = 0.3; } }, wordsPerPage: { mut: o => { (o.style as Obj).wordsPerPage = 1; } },
   maxLines: { prep: o => { (o.style as Obj).maxWidthPct = 0.1; }, mut: o => { (o.style as Obj).maxLines = 1; } } };
-const captionKeys: Table<M.CaptionTrack> = { asset: set('asset', 'b'), words: set('words', [{ text: 'hey', startSec: 0.2, endSec: 0.9 }]), style: nested };
+const captionKeys: Table<M.CaptionTrack> = { asset: set('asset', 'b'), words: set('words', [{ text: 'hey', startSec: 0.2, endSec: 0.9 }]), style: nested,
+  language: meta('which language the words are in (the words are what is drawn)'), original: meta('the untranslated words, kept to switch back; not drawn') };
 const wordKeys: Table<M.CaptionWord> = { text: { mut: o => { (o.words as Obj[])[0]!.text = 'uno'; } }, startSec: { mut: o => { (o.words as Obj[])[0]!.startSec = 0.2; } },
   endSec: { mut: o => { (o.words as Obj[])[2]!.endSec = 1.5; } } }; // the page's tail
 const captionFields = { asset: captionKeys.asset, words: captionKeys.words, ...nest('word', wordKeys),

@@ -46,7 +46,7 @@ extension FakeMuseAPI {
     /// A run that would cost money on the server (not the free passes).
     private func isPaid(_ req: EditorJobRequest) -> Bool {
         switch req.kind {
-        case .captions, .matte: return true
+        case .captions, .matte, .slowmo, .translate, .separate, .cutout: return true
         case .denoise: return req.options?.analyzeOnly != true
         case .cuts, .beats, .reverse, .stabilize: return false
         }
@@ -98,16 +98,23 @@ extension FakeMuseAPI {
     }
 
     public func editorEstimate(_ req: EditorJobRequest) throws -> EditorEstimate {
-        let d = try editorSourceDuration(req.source)
+        let d = req.kind == .cutout ? ((try? editorSourceDuration(req.source)) ?? 1) : try editorSourceDuration(req.source)   // a photo has no length
         try checkGuardrails(req)
         let usd = isPaid(req) ? editorPriceUsd : 0
         return EditorEstimate(kind: req.kind, usd: usd, tokens: usd > 0 ? usd * 100 : 0, free: usd <= 0, reusesTranscript: false, durationSec: d)
     }
 
     public func startEditorJob(_ req: EditorJobRequest) throws -> EditorJob {
-        let d = try editorSourceDuration(req.source)
+        let d = req.kind == .cutout ? ((try? editorSourceDuration(req.source)) ?? 1) : try editorSourceDuration(req.source)   // a photo has no length
         try checkGuardrails(req)
         if req.kind == .reverse && d > 60 { throw ApiError("bad_request", "Reverse works on videos up to 60 s") }
+        if req.kind == .slowmo {
+            let o = req.options
+            guard let f = o?.factor, EditV2.slowmoFactors.contains(f), let a = o?.startSec, let b = o?.endSec, b - a >= EditV2.slowmoMinRangeSec - 1e-9,
+                  b - a <= EditV2.slowmoMaxRangeSec + 1e-9, a >= 0, b <= d + 0.01 else {
+                throw ApiError("bad_request", "Smooth slow motion takes 2× or 4× on 0.3–10 s inside the video")
+            }
+        }
         if req.kind == .stabilize && d > 180 { throw ApiError("bad_request", "Stabilise works on videos up to 3 minutes") }
         if req.kind == .matte && d > 120 { throw ApiError("bad_request", "Background removal works on videos up to 2 minutes") }
         // Tap to keep: the points are checked before anything starts (as the server does before it holds).
@@ -124,6 +131,10 @@ extension FakeMuseAPI {
         case .beats: phase = "Finding the beat"
         case .reverse: phase = "Reversing"
         case .stabilize: phase = "Steadying"
+        case .slowmo: phase = "Slowing down"
+        case .translate: phase = "Translating"
+        case .separate: phase = "Separating"
+        case .cutout: phase = "Cutting out"
         }
         let job = EditorJob(id: id, kind: req.kind, state: "running", progress: 5, phase: phase, estimateUsd: 0, costUsd: 0)
         editorJobs[id] = job
@@ -171,6 +182,38 @@ extension FakeMuseAPI {
             // The fake hands back the source itself as the "reversed" or "steadied" copy.
             r.asset = EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
             r.width = 1080; r.height = 1920; r.hasAudio = true
+        case .separate:
+            // The demo hands back the source's sound as both parts.
+            r.vocals = EditorResultAsset(kind: "audio", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
+            r.instrumental = EditorResultAsset(kind: "audio", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
+        case .cutout:
+            // The demo hands back the picture itself, its whole frame as the box.
+            r.asset = EditorResultAsset(kind: "image", upload: req.source.uploadId, take: req.source.takeId, width: 1000, height: 1000)
+            r.box = EditV2.CutoutBox(x: 0, y: 0, w: 1000, h: 1000)
+            r.sourceWidth = 1000; r.sourceHeight = 1000
+            r.mode = req.options?.points?.isEmpty == false ? "tracked" : "person"
+        case .translate:
+            // The demo "translates" each line by tagging it with the language, timed as the line.
+            let lang = req.options?.targetLanguage ?? "es"
+            let lines = req.options?.lines ?? [TranslateLine(id: "0", text: "Hello world", startSec: 0, endSec: min(d, 2))]
+            r.language = lang
+            r.sourceLanguage = req.options?.sourceLanguage ?? "en"
+            r.quality = req.options?.quality ?? "standard"
+            r.lines = lines.map { var l = $0; l.translated = "[\(lang)] " + l.text; return l }
+            r.untranslatedLines = 0
+            r.words = lines.flatMap { l -> [EditV2.Word] in
+                let texts = ["[\(lang)]"] + l.text.split(separator: " ").map(String.init)
+                let step = (l.endSec - l.startSec) / Double(max(1, texts.count))
+                return texts.enumerated().map { i, t in EditV2.Word(text: String(t.prefix(60)), startSec: EditV2.r3(l.startSec + Double(i) * step),
+                                                                    endSec: EditV2.r3(l.startSec + Double(i + 1) * step)) }
+            }
+        case .slowmo:
+            // The fake hands back the source itself, at the length the copy would have.
+            let o = req.options!
+            let len = EditV2.r6((o.endSec! - o.startSec!) * o.factor!)
+            r.asset = EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: len)
+            r.factor = o.factor; r.startSec = o.startSec; r.endSec = o.endSec; r.fps = 30
+            r.width = 1080; r.height = 1920; r.hasAudio = false; r.durationSec = len
         case .denoise:
             r.suggestion = DenoiseSuggestion(level: "light", reason: "Some background hum", confidence: 0.7)
             if req.options?.analyzeOnly != true {

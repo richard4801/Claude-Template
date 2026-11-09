@@ -273,16 +273,18 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
             look.crop?.let { add(Crop(it.left.toFloat(), it.right.toFloat(), it.bottom.toFloat(), it.top.toFloat())) }
             add(Presentation.createForWidthAndHeight(look.textureWidth, look.textureHeight, Presentation.LAYOUT_STRETCH_TO_FIT))
             look.chroma?.let { add(ChromaKeyEffect(it)) }
-            // Edit suite: the mask multiplies the alpha after the chroma key.
             val motion = look.motionKeys
             val localSec = { us: Long -> ((us - c.startUs) / 1e6).coerceAtLeast(0.0) }
-            look.mask?.let { add(MaskEffect(it, motion?.takeIf { m -> m.masked }?.let { m -> { us: Long -> m.maskAt(localSec(us)) } })) }
             // Keyed first (on the source colours), then the look in the contract's order; the colour matrix is baked
             // into the look's LUT when it has one.
             val keys = look.colorKeys
             addAll(LookEffects.effects(LookEffects.stages(look.colorMatrix, look.look, looks.lutFor(look.look, files), fps, look.tone,
                 timed = keys?.let { k -> { us: Long -> k.matrixAt(localSec(us)) } },
                 finishAt = motion?.takeIf { it.looked }?.let { m -> { us: Long -> m.lookAt(localSec(us)) } })))
+            // The effects library: after the look, before the mask (contract order; the look leaves alpha alone).
+            look.effect?.let { add(PictureEffect(it, c.startUs)) }
+            // Edit suite: the mask multiplies the alpha last (after the chroma key, the look and the effect).
+            look.mask?.let { add(MaskEffect(it, motion?.takeIf { m -> m.masked }?.let { m -> { us: Long -> m.maskAt(localSec(us)) } })) }
             // Wave 1, blur fill: blurred (a Gaussian with the box's variance, σ = r / √3) and darkened ×0.85.
             look.fillBlur?.let { r ->
                 add(androidx.media3.effect.GaussianBlur((r / kotlin.math.sqrt(3.0)).toFloat().coerceAtLeast(1f)))

@@ -504,6 +504,74 @@ extension SnapshotRunner {
         check("stabilise: undone", s.project.mainClips == unsteady.mainClips)
         s.lastError = nil
 
+        step("Split voice and music (the demo job): the clip muted, both parts on their rows")
+        do {
+            s.view { $0.selection = s.project.mainClips.first?.id }
+            s.lastError = nil
+            let unsplit = s.project
+            await s.separateSelected(keep: .both)
+            s.confirmPaid()
+            for _ in 0..<200 where s.isRunning(.separate) || (s.project == unsplit && s.lastError == nil) { try? await Task.sleep(for: .milliseconds(100)) }
+            let voice = s.project.tracks.contains { $0.kind == .voice && !$0.items.isEmpty }, music = s.project.tracks.contains { $0.kind == .music && !$0.items.isEmpty }
+            check("separate: muted, voice and music rows, valid", s.project.mainClips.first?.muted == true && voice && music && E.problem(s.project) == nil,
+                  s.lastError ?? "voice \(voice) music \(music)")
+            s.undo()
+            check("separate: undone", s.project == unsplit)
+            s.lastError = nil
+        }
+
+        step("Effects: duotone on the clip changes the preview; off again")
+        do {
+            s.view { $0.selection = s.project.mainClips.first?.id }
+            let plain = await previewPixel(s, at: 1)
+            s.edit { $0.setEffect(E.Effect(id: "duotone", amount: 1, colors: ["#000000", "#00FF00"])) }
+            let toned = await previewPixel(s, at: 1)
+            // Red (luma ≈ 0.21) between black and green: green rises, red falls.
+            check("effects: duotone maps the red picture into black → green", toned.map { $0.g > $0.r && $0.g > 20 } ?? false, "\(describe(plain)) → \(describe(toned))")
+            s.undo()
+        }
+
+        step("Effects library: the Core Image kernel against the reference maths (WS8 f7226f2)")
+        effectsKernelCheck(check)
+
+        step("Smooth slow motion: 1 s from 1 s, 4× (the demo job), split around it")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1)
+        s.lastError = nil
+        let unslowed = s.project
+        s.slowmoFactor = 4; s.slowmoLength = 1
+        await s.smoothSlowmo()
+        s.confirmPaid()
+        for _ in 0..<200 where s.isRunning(.slowmo) || (s.state.selectedVideo?.asset == unslowed.mainClips.first?.asset && s.lastError == nil) {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        let slowed = s.state.selectedVideo
+        check("slowmo: the slowed piece plays the copy, muted", slowed.map { E.derivedLabel(s.project, $0.asset) == "Smooth 4×" && $0.muted == true } ?? false,
+              s.lastError ?? "\(String(describing: slowed?.asset))")
+        check("slowmo: the clip is split around it and valid", s.project.mainClips.count == unslowed.mainClips.count + 2 && E.problem(s.project) == nil,
+              "\(s.project.mainClips.count) clips")
+        s.undo()
+        check("slowmo: undone", s.project.mainClips == unslowed.mainClips)
+        s.lastError = nil
+
+        step("Translated captions: the demo job, then Show original")
+        let uncaptioned = s.project
+        if let asset = s.project.mainClips.first?.asset {
+            s.edit { $0.setCaptions(words: [E.Word(text: "Hello", startSec: 0.2, endSec: 0.6), E.Word(text: "world", startSec: 0.6, endSec: 1.1)], assetId: asset) }
+            s.lastError = nil
+            s.translateTarget = "fr"
+            await s.translateCaptions()
+            s.confirmPaid()
+            for _ in 0..<200 where s.isRunning(.translate) || (s.state.captionLanguage == nil && s.lastError == nil) { try? await Task.sleep(for: .milliseconds(100)) }
+            check("translate: captions in French, the English kept", s.state.captionLanguage == "fr" && s.state.captionsTranslated && E.problem(s.project) == nil,
+                  s.lastError ?? "\(String(describing: s.state.captionLanguage))")
+            s.edit { $0.swapCaptionOriginal() }
+            check("translate: Show original", s.project.captionTrack?.words.first?.text == "Hello")
+            for _ in 0..<3 { s.undo() }
+            check("translate: undone", s.project == uncaptioned)
+            s.lastError = nil
+        }
+
         step("Auto reframe: Vision runs over the clip (no face in the test take)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.lastError = nil
@@ -786,5 +854,69 @@ extension SnapshotRunner {
         ex.outputFileType = .mp4
         await ex.export()
         if ex.status != .completed { throw ex.error ?? ApiError("edit_ops", "Couldn't mux the test video") }
+    }
+
+    /// Each effect drawn by the kernel on a 32×32 pattern against EditV2.effectPixel: at least 95 % of the pixels within
+    /// 3/255 (a noise threshold can flip on a float edge), and the kernel must exist.
+    @MainActor
+    static func effectsKernelCheck(_ check: (String, Bool, String) -> Void) {
+        check("effects: the kernel compiles", EditV2EffectRenderer.kernel != nil, "CIKernel(source:) returned nil")
+        guard EditV2EffectRenderer.kernel != nil else { return }
+        let W = 32, H = 32
+        var px: [EditV2.RGB] = []
+        var floats: [Float] = []
+        for y in 0..<H {
+            for x in 0..<W {
+                let c = EditV2.RGB(Double(x) / 31, Double(y) / 31, (x + y) % 2 == 0 ? 0.25 : 0.75)
+                px.append(c)
+                floats += [Float(c.x), Float(c.y), Float(c.z), 1]
+            }
+        }
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+        // Bitmap data's first row is the image's top (as the pattern's row 0, v pointing down); render(toBitmap:) writes
+        // the top row first too, so neither is flipped.
+        let img = CIImage(bitmapData: floats.withUnsafeBufferPointer { Data(buffer: $0) }, bytesPerRow: W * 16, size: CGSize(width: W, height: H), format: .RGBAf, colorSpace: srgb)
+        let ctx = CIContext(options: [.workingColorSpace: srgb, .outputColorSpace: srgb])
+        let sampler = EditV2.imageSampler(width: W, height: H, px)
+        for id in EditV2.effectIds {
+            let e = EditV2.Effect(id: id, amount: 0.8, speed: 1.3)
+            let out = EditV2EffectRenderer.apply(e, to: img, t: 0.37)
+            var buf = [Float](repeating: 0, count: W * H * 4)
+            buf.withUnsafeMutableBytes { ctx.render(out, toBitmap: $0.baseAddress!, rowBytes: W * 16, bounds: CGRect(x: 0, y: 0, width: W, height: H), format: .RGBAf, colorSpace: srgb) }
+            var good = 0, worst = 0.0
+            var firstBad: [String] = []
+            for y in 0..<H {
+                for x in 0..<W {
+                    let ref = EditV2.effectPixel(e, t: 0.37, width: Double(W), height: Double(H), u: (Double(x) + 0.5) / Double(W), v: (Double(y) + 0.5) / Double(H), sample: sampler)
+                    let o = y * W * 4 + x * 4
+                    let d = max(abs(Double(buf[o]) - ref.x), abs(Double(buf[o + 1]) - ref.y), abs(Double(buf[o + 2]) - ref.z))
+                    worst = max(worst, d)
+                    if d <= 3.0 / 255 { good += 1 } else if firstBad.count < 3 {
+                        firstBad.append(String(format: "(%d,%d) got %.3f %.3f %.3f want %.3f %.3f %.3f", x, y, buf[o], buf[o + 1], buf[o + 2], ref.x, ref.y, ref.z))
+                    }
+                }
+            }
+            check("effects: \(id) matches the reference", Double(good) / Double(W * H) >= 0.95,
+                  String(format: "%d/%d within 3/255, worst %.3f; ", good, W * H, worst) + firstBad.joined(separator: "; "))
+        }
+        // Diagnostic: the permutation as the kernel reads it (nearest, 256×1, no colour management).
+        let readK = CIKernel(source: """
+            kernel vec4 musePermRead(sampler perm) {
+                vec2 d = destCoord();
+                float v = sample(perm, samplerTransform(perm, vec2(floor(d.x) + 0.5, 0.5))).r;
+                return vec4(v, v, v, 1.0);
+            }
+            """)
+        if let readK, let out = readK.apply(extent: CGRect(x: 0, y: 0, width: 256, height: 1), roiCallback: { _, _ in CGRect(x: 0, y: 0, width: 256, height: 1) },
+                                           arguments: [EditV2EffectRenderer.perm]) {
+            var pb = [Float](repeating: 0, count: 256 * 4)
+            pb.withUnsafeMutableBytes { ctx.render(out, toBitmap: $0.baseAddress!, rowBytes: 256 * 16, bounds: CGRect(x: 0, y: 0, width: 256, height: 1), format: .RGBAf, colorSpace: nil) }
+            let got = (0..<256).map { Int((pb[$0 * 4] * 255).rounded()) }
+            let bad = (0..<256).filter { got[$0] != EditV2.effectPerm[$0] }
+            check("effects: the kernel reads Perlin's permutation exactly", bad.isEmpty,
+                  "\(bad.count) wrong; first: " + bad.prefix(6).map { "[\($0)] got \(got[$0]) want \(EditV2.effectPerm[$0])" }.joined(separator: ", "))
+        } else {
+            check("effects: the permutation readback kernel compiles", false, "nil")
+        }
     }
 }

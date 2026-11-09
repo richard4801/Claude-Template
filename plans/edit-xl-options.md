@@ -164,7 +164,7 @@ This attaches a signed "made with MUSE, AI used here" record to exported files.
 2. **Translated captions:** server job (WS16) with Claude Haiku by default and a Sonnet "best quality" option; Android UI (WS8).
 3. **Auto reframe that follows faces:** Android on the device with ML Kit (WS8).
 4. **Smooth slow motion on Android:** hosted fal.ai RIFE as a server job (WS16), priced and confirmed per job like the other paid helpers; Android UI (WS8).
-5. **AI music (ElevenLabs):** server (WS16), only after WS16 reports on ElevenLabs' licence terms; Android UI (WS8).
+5. ~~**AI music (ElevenLabs):**~~ **AI music: dropped by the owner 2026-11-09.** Nothing to build on any platform.
 
 **Not now:** HDR export on Android (only if members ask) and C2PA content credentials.
 

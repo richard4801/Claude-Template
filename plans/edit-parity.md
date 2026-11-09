@@ -65,7 +65,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Constant speed 0.1–10×, pitch kept | Has | Has | — | |
 | Speed curves (presets + custom graph) | Has | Has | — | |
-| **Smooth slow-mo (frame interpolation)** | Has | Missing | XL | Owner-approved 2026-11-09. Server job `slowmo` (paid, price on the button), 2× or 4×, 0.3–10 s from the playhead; `Asset.derivedFrom {op:"slowmo"}` plus `applySlowmo` split the clip (shared fixture). Android: Speed sheet, "Smooth slow motion" (x_slowmo). Mac: on-device on macOS 15.4+, the job otherwise (WS9). |
+| **Smooth slow-mo (frame interpolation)** | Has | Has | XL | Owner-approved 2026-11-09. Server job `slowmo` (paid, price on the button), 2× or 4×, 0.3–10 s from the playhead; `Asset.derivedFrom {op:"slowmo"}` plus `applySlowmo` split the clip (shared fixture). Android: Speed sheet, "Smooth slow motion" (x_slowmo). Mac: Speed panel → "Smooth slow motion" (2× / 4×, 1 / 2 / 4 s from the playhead) over the same job, the price confirmed first; the copy is reused, the slowed piece muted and selected (WS9). On macOS 15.4+ the Mac makes the copy itself with Apple's frame interpolation (free), uploads it and falls back to the job if that fails. |
 | Speed on audio-only clips | Has | Has | M | Android: Speed panel on a selected music, voice or effect clip: 0.5–2×, pitch kept (contract: audio speed 0.5–2; beats map through clipTimeAt; server render uses atempo). Mac: Speed on a selected music, voice or effect clip: 0.5–2× (slider and 0.5× / 1× / 1.5× / 2×), pitch kept (spectral); beats, loops and beat marks go through clipTimeAt / clipSourceAt. |
 | Set the duration (speed computed) | Has | Has | S | Android: Speed → Length slider. Mac: Speed → Length slider. |
 
@@ -75,8 +75,8 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Transitions (cut, fade, dip to black/white, slide, push, zoom, whip, spin, glitch) | Has | Has | — | 9 types, own design. Android: 7 more kinds (zoom out, whip right, cover left/right/up/down, split fade), contract 2026-11-09, as presets in Effects → More transitions. |
 | Duration, apply to all | Has | Has | — | |
-| More transition types | Partial | Has | M each | Functional, but the value is in a curated set: **Content** Mac: seven more kinds (zoom out, whip right, cover ×4, split fade) and 12 in-house presets as chips (content library, WS9). |
-| Transitions on overlay tracks | Partial | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut` (no cross-dissolve between overlays). |
+| More transition types | Has | Has | M each | Functional, but the value is in a curated set: **Content** Android: the seven kinds and 12 in-house presets under More transitions (content library, WS8). Mac: seven more kinds (zoom out, whip right, cover ×4, split fade) and 12 in-house presets as chips (content library, WS9). |
+| Transitions on overlay tracks | Has | Has | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut`, and (2026-11-09) a cross-dissolve from the previous item on the track: `transitionIn` fade on overlay clips and images, the item overlapping the previous one by its length (`overlayFade`, shared fixture `overlayFades`); a dissolving track plays on two layers. Transform → "Dissolve from previous". Server render: WS16. Mac: WS9 Mac: Video → Transition → "Dissolve from previous" with a length on an overlay clip or picture that touches the one before (moves it earlier, or back); overlayFade in the compositor, a second lane for overlapping overlay video (WS9). |
 | Clip in/out animations (video) | Has | Has | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). Mac: Animate panel on any video clip, main or overlay (`animIn`/`animOut`), preview and export. |
 
 ## 4. Text, captions and animation
@@ -94,11 +94,11 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |
 | Caption language choice | Has | Missing | S | Server parameter. Android: Captions → Spoken language (Detect or one of 14), sent as the job's `options.language`. |
-| Translated / bilingual captions | Missing | Partial | M | Server job (LLM). Mac: Translate on the Mac (macOS 15, on-device, WS9); not bilingual |
+| Translated / bilingual captions | Has | Has | M | Owner-approved 2026-11-09. Server job `translate` (paid, Standard / Best quality, price on the button), words come back timed; `CaptionTrack.language` + `original` keep both languages, switchable (shared fixture `captionTranslate`). Android: Captions → Language (x_translate); the languages offered come from `features.translate.languages` (only what the export draws). Captions in other scripts (2026-11-09): ja/zh/th (and lo/km/my) pages join words without spaces and ar/he/fa/ur read right to left (`captionJoiner`, `isRtlLanguage`, shared fixture `captionScripts`); Android draws zh, ja, ko, ar, hi, th, ru correctly in the export and the preview (scripts_engine, scripts_preview). Not shown two at once. Mac: Captions → Translate…: on this Mac (Apple translation, free, macOS 15) or the server job (Standard / Best quality, the price first, the lines as shown); both keep the original, "Show <language>" switches back (WS9). |
 | Edit caption text (fix a word) | Has | Has | S | You can cut words but not retype them. Mac: Double-click a word. Android: Captions → Words → Tap to fix text. |
 | Filler and silence removal, edit by transcript | Has | Has | — | |
 | Text-to-speech voice-over | Missing | Missing | L | Needs a TTS vendor decision. Voices are **Content**. |
-| Lyric captions | Missing | Missing | L | |
+| Lyric captions | Has | Has | L | 2026-11-09: captions of a song on the music track (one of the member's files): `captionWords` maps a caption asset's words through audio clips too (shared fixture `lyricCaptions`). Android: Captions → "Captions from the song" (karaoke style; the captions job). Mac: Captions → "Captions from the song" when the music row has a song from this Mac (the captions job on the song); the words follow its clips (WS9). |
 
 ## 5. Audio
 
@@ -113,13 +113,13 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Manual beat marks (tap) | Has | Has | S | Android: Audio → Mark a beat here, Clear beat marks. Mac: Audio → Mark a beat here, Clear beat marks. |
 | Voice effects (warm, radio, phone, deep) | Has | Has | — | 4 effects. More character voices: M. |
 | Noise reduction, voice enhance | Has | Has | — | |
-| Vocal / instrumental separation | Missing | Missing | L | Server model |
+| Vocal / instrumental separation | Has | Has | L | 2026-11-09: server job `separate` (paid, price on the button); `applySeparation` mutes the clip and puts the voice and/or the music on their own tracks in sync (shared fixture `separation`). Android: Audio → Split voice and music (Both / Voice only / Music only). Mac: WS9 Mac: Audio → Voice and music: Keep both / Voice only / Music only over the same job, the shared applySeparation (WS9). |
 | Volume normalisation | Has | Has | M | Android: Audio → Even out volume: spoken clips (main and voice) brought to their median level from the decoded sound levels, 0.25×–2×, no clipping; music left to ducking. Mac: Audio → Even out volume, from the measured clip levels (same rules). |
 | Record voice-over | Has | Has | — | In-app recorder (WS8). Mac: Mac microphone |
 | Recording over playback (hear the video while recording) | Has | Has | S | Needs headphones handling. Android: Audio → Play the video while recording (on with headphones, off on the speaker); the take is moved earlier by the route's typical latency (Bluetooth 200 ms, wired 20 ms); a red bar on the ruler while recording. Mac: Record VO with "Play the video while recording" (on by default for headphones, Bluetooth or USB); the take lands where recording started, shifted by the output delay; a red bar grows on the voice row (design pass, owner-approved). |
 | **Music library** | Missing | Missing | M (function) | **Content.** Licensing is the real cost. `add_music` refuses `library` today. |
 | **Sound effects library** | Has | Has | M (function) | **Content**, built: 197 CC0 sounds (UI SFX in 5 styles, Kenney game sounds) from the content library (plans/edit-content-licences.md). Android: Audio → Sound effects: search, style chips, play preview, Add at the playhead on a sound-effects track (`content:<pack>/<item>` audio assets). Real-world recordings (applause, laughter) left out for now (coordinator). Screenshot: android-edit/c_sfx.png. Mac: Bin → Music → Sound effects, searchable by category, with a play preview; added at the playhead on the sound effects row (WS9). |
-| AI music / generative SFX | Missing | Missing | XL | Model and vendor decision |
+| ~~AI music~~ / generative SFX | Dropped | Dropped | XL | **AI music: dropped by the owner 2026-11-09** (no music job, no music UI on any platform). Generative SFX: not planned. |
 | Audio loop | Has | Has | S | Android: Audio → Loop to the end. Mac: Audio → Loop to the end. |
 
 ## 6. Effects, filters and adjustments
@@ -134,7 +134,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Curves | Has | Has | M | Engine has curves; no editor. Android: Filters → Adjust → Curves: All / Red / Green / Blue; drag to move, touch the line to add, tap a point to remove (`look.curves`). Mac: Adjust → Curves: All / Red / Green / Blue; drag to move, click the line to add, click a point to remove (`look.curves`). |
 | HSL (per-hue) | Has | Has | L | Android: Filters → Adjust → HSL: 8 colour dots (red…magenta), then hue, saturation and luminance for the picked band, and Reset HSL. Contract: `look.hsl` (look step 4b, after the curves and before the LUT; `hslFn`, `hueWeights`), baked into the look's one LUT; kits carry it with the look. Server render: curves + HSL + LUT baked into one .cube (curves are drawn there now too). Screenshot: android-edit/m7_hsl.png. Mac: Adjust → HSL: eight colour dots pick the band; Hue, Saturation, Luminance; Reset HSL; baked into the look's colour cube after the curves (preview and export). |
 | Auto adjust | Has | Has | M | Android: Filters → Adjust → Auto adjust: the frame under the playhead → exposure, contrast, saturation, temperature and tint (core `autoAdjust`). Mac: Adjust → Auto adjust from the clip's source frame under the playhead (same numbers as Android's `autoAdjust`). |
-| Video effects library (glitch, blur, retro, …) | Missing | Missing | L | **Content** plus GL effects |
+| Video effects library (glitch, blur, retro, …) | Has | Has | L | Owner-approved 2026-11-09: 12 in-house effects (glitch, VHS, retro film, blur, zoom blur, mirror, pixelate, posterise, duotone, shake, flash, rain on glass) as `Visual.effect`; reference maths in effects.ts / core Effects with pixel fixtures (`effects`). Android: GL shader, Effects → Effects tab with live tiles (x_effects). Server render: WS16. Mac: Video → Effects: the twelve as one Core Image kernel, checked in CI against the reference; Amount, Speed, duotone colours. |
 | Body and face effects | Missing | Missing | XL | Segmentation and tracking; mostly **Content** |
 | Adjustment keyframes | Has | Has | M | Android: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint in Filters → Adjust (KfProp exposure…tint, `adjustAt`; the colour matrix runs per frame). Highlights, shadows and look effects are not keyframable yet. Mac: ◆ beside Exposure, Contrast, Saturation, Temperature and Tint; a keyed slider sets its key at the playhead (shared fixtures). |
 | AI restyle (generative) | Missing | Missing | XL | MUSE's Suite does generation. Re-styling an edit is a model question. |
@@ -146,7 +146,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Position, scale, rotation | Has | Has | — | Mac: Sliders set the key at the playhead once keyed (fixed in WS9) |
 | Opacity | Has | Has | S | Engine yes; no button. Android: Transform → Opacity with ◆ (wave 1). |
-| Volume | Partial | Has | S | See Audio. Mac: See Audio (wave 1) |
+| Volume | Has | Has | S | See Audio. Android: volume keyframes with easing (wave 1). Mac: See Audio (wave 1) |
 | Look / adjust / mask / crop keyframes | Partial | Partial | M each | Android: adjust (colour keys), mask (x, y, size, rotation, feather; Effects → Mask ◆) and the finishing look (vignette, grain, light leak; Filters → Adjust ◆) keyframe; `maskAt` / `lookAt`. Crop keyframes deferred: Media3 crops are static per clip (scale / x / y keys cover push-ins). Mac: adjust (colour ◆ in Adjust), mask (◆ beside Feather, Size, Rotation, Position X and Y) and the finishing look (◆ beside Vignette, Grain, Light leak), the same `maskAt` / `lookAt` (shared fixtures); crop deferred as on Android. |
 | Easing choice | Has | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold. Android: Linear, ease in, ease out, smooth, hold (wave 1). |
 | Keyframe list / move / delete on the timeline | Has | Has | M | Engine has `remove_keyframe`. Android: the selected item's ◆ on its timeline lane, dragged to move; Transform → Previous / Next keyframe, Remove keyframes here. Mac: the selected item's ◆ on its timeline block, dragged to move every property's key at that time; previous / next key, delete at the playhead. |
@@ -185,15 +185,15 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Background colour | Has | Has | S | `canvas.background` exists; no picker. Mac: Video → Background colour on main clips (wave 1). Android: Ratio → Background (wave 1). |
 | Background blur fill | Has | Has | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). Mac: Video → Background: Blur (wave 1). |
 | Fit / fill per clip | Has | Has | S | Model `fit`; no toggle. Mac: Transform → Frame: Fill / Fit (wave 1). Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
-| Auto reframe (faces) | Partial | Has | M | Re-centring on ratio change exists; face-aware reframe is in the spec but not on Android. Mac: Vision faces on a ratio change; and Transform → "Follow faces": Vision finds the main face 5×/s on this Mac and the clip gets x keyframes that keep it centred without showing an edge, with the same smoothing, dead zone and thinning as Android (Reframe.kt) (WS9, XL owner-approved). |
+| Auto reframe (faces) | Has | Has | M | Owner-approved 2026-11-09. Android: Follow faces (ML Kit on the phone, 5 samples a second → smoothed x keyframes, `Reframe` in core; x_reframe). Mac: Vision faces on a ratio change; and Transform → "Follow faces": Vision finds the main face 5×/s on this Mac and the clip gets x keyframes that keep it centred without showing an edge, with the same smoothing, dead zone and thinning as Android (Reframe.kt) (WS9, XL owner-approved). |
 
 ## 11. Stickers
 
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Sticker / GIF / emoji library | Has | Has | M (function) | **Content**, built: 1,899 Twemoji stickers (CC BY 4.0, attributed) as 160 px PNG. Android: Overlay → Stickers: search (names and CLDR words), category chips, a tap places it at the playhead (3 s, 30 %) like a photo, so it keyframes, animates and blends. No GIFs. Screenshot: android-edit/c_stickers.png. Mac: Bin → Stickers, the Twemoji set (CC BY 4.0), searchable by category; a click places one at the playhead. Licences in Settings → About (WS9). |
-| Own image or cut-out as a sticker | Missing | Partial | M | Uses the image items and the matte. Mac: Own pictures (WS9); a cut-out isn't a sticker yet |
-| Sticker animation and keyframes | Partial | Has | — | Comes with image items |
+| Own image or cut-out as a sticker | Has | Has | M | Android: own pictures through Overlay → Add a photo, and (2026-11-09) Transform → "Cut out the subject" on a photo (server job `cutout`, paid): `applyCutout` switches the item to the trimmed subject where it sat (shared fixture `cutouts`). Mac: WS9 Mac: Video → Cut out → "Cut out the person" on a picture (applyCutout, it stays where it was), and Stickers → "Cut out a picture…" (a photo from this Mac, added at the playhead) (WS9). |
+| Sticker animation and keyframes | Has | Has | — | Comes with image items. Android: animation in / out / loop and transform keyframes on image items (wave 1, M) |
 
 ## 12. Templates
 
@@ -215,7 +215,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Enhance / upscale | Partial | Partial | — | The Suite has upscale for takes; not in Edit |
 | Relight, retouch / beauty | Missing | Missing | XL | |
 | Text-to-speech | Missing | Missing | L | See Text |
-| Frame interpolation | Has | Missing | XL | See Speed (smooth slow motion) |
+| Frame interpolation | Has | Has | XL | See Speed (smooth slow motion) |
 
 ## 14. Export
 

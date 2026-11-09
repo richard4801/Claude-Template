@@ -100,7 +100,9 @@ object EditJson {
                 }
             },
             caption = o.objOrNull("caption")?.let { c ->
-                CaptionTrack(c.str("asset"), c.arr("words").map { (e, f) -> Obj.of(e, f).let { w -> CaptionWord(w.str("text"), w.num("startSec"), w.num("endSec")) } }, captionStyle(c.obj("style")))
+                fun words(ws: List<Pair<JsonElement, String>>) = ws.map { (e, f) -> Obj.of(e, f).let { w -> CaptionWord(w.str("text"), w.num("startSec"), w.num("endSec")) } }
+                CaptionTrack(c.str("asset"), words(c.arr("words")), captionStyle(c.obj("style")), c.strOrNull("language"),
+                    c.objOrNull("original")?.let { o -> CaptionOriginal(o.strOrNull("language"), words(o.arr("words"))) })
             },
             duck = o.objOrNull("duck")?.let { d ->
                 Duck(d.numOrNull("level"), d.numOrNull("fadeSec"), d.arr("under").map { (e, f) -> Obj.wire<DuckUnder>(e, f, "must list voice and/or speech") },
@@ -114,7 +116,7 @@ object EditJson {
         speedCurve = o.objOrNull("speedCurve")?.let(::speedCurveOf), startSec = o.numOrNull("startSec"), volume = o.numOrNull("volume"), muted = o.boolOrNull("muted"),
         fadeInSec = o.numOrNull("fadeInSec"), fadeOutSec = o.numOrNull("fadeOutSec"), audioAsset = o.strOrNull("audioAsset"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), effect = effect(o),
         voiceEffect = o.enumOrNull("voiceEffect", "one of ${VoiceEffect.entries.joinToString(", ") { it.wire }}"), enhance = o.boolOrNull("enhance"),
         chroma = o.objOrNull("chroma")?.let { Chroma(it.str("color"), it.numOrNull("similarity"), it.numOrNull("smoothness"), it.numOrNull("spill")) },
         alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
@@ -128,7 +130,13 @@ object EditJson {
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
         keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), animLoop = loop(o),
         blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
+        transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
+        effect = effect(o),
     )
+
+    private fun effect(o: Obj) = o.objOrNull("effect")?.let { e ->
+        Effect(e.enum("id", "unknown effect"), e.num("amount"), e.numOrNull("speed"), e.arrOrNull("colors")?.map { (el, _) -> (el as kotlinx.serialization.json.JsonPrimitive).content })
+    }
 
     private fun textItem(o: Obj) = TextItem(
         id = o.str("id"), startSec = o.num("startSec"), durationSec = o.num("durationSec"), text = o.str("text"), style = textStyle(o.obj("style")),
@@ -269,6 +277,11 @@ object EditJson {
                 put("asset", c.asset)
                 put("words", JsonArray(c.words.map { w -> buildJsonObject { put("text", w.text); num("startSec", w.startSec); num("endSec", w.endSec) } }))
                 put("style", encodeCaptionStyle(c.style))
+                str("language", c.language)
+                c.original?.let { o -> put("original", buildJsonObject {
+                    str("language", o.language)
+                    put("words", JsonArray(o.words.map { w -> buildJsonObject { put("text", w.text); num("startSec", w.startSec); num("endSec", w.endSec) } }))
+                }) }
             })
         }
         t.duck?.let { d ->
@@ -300,6 +313,7 @@ object EditJson {
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
             anim("animIn", it.animIn); anim("animOut", it.animOut); str("blend", it.blend?.wire); loop(it.animLoop)
+            it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
         }
         is TextItem -> buildJsonObject {
             put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec); put("text", it.text); put("style", encodeTextStyle(it.style))
@@ -315,6 +329,7 @@ object EditJson {
     }
 
     private fun JsonObjectBuilder.visual(v: Visual) {
+        v.effect?.let { e -> put("effect", buildJsonObject { put("id", e.id.wire); num("amount", e.amount); num("speed", e.speed); e.colors?.let { cs -> put("colors", JsonArray(cs.map { kotlinx.serialization.json.JsonPrimitive(it) })) } }) }
         v.fit?.let { put("fit", it.wire) }
         transform(v.transform)
         v.crop?.let { c -> put("crop", buildJsonObject { num("left", c.left); num("top", c.top); num("right", c.right); num("bottom", c.bottom) }) }

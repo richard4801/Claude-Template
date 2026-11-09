@@ -374,6 +374,19 @@ extension EditV2 {
                 out.append(TimedWord(text: w.text, startSec: r6(s.startSec + clipTimeAt(c, a)), endSec: r6(s.startSec + clipTimeAt(c, b)), index: idx))
             }
         }
+        // Lyric captions (WS8 54f4b17): the same through the audio clips (music, voice, sound effects) of the caption asset.
+        for t in p.tracks where t.kind == .music || t.kind == .voice || t.kind == .sfx {
+            for case .audio(let c) in t.items where c.asset == ct.asset {
+                let speed = c.speed ?? 1
+                let at = { (sec: Double) in max(0, min(sec, c.outSec) - c.inSec) / speed }
+                for (idx, w) in ct.words.enumerated() {
+                    let mid = (w.startSec + w.endSec) / 2
+                    if mid < c.inSec || mid >= c.outSec { continue }
+                    let a = max(w.startSec, c.inSec), b = min(w.endSec, c.outSec)
+                    out.append(TimedWord(text: w.text, startSec: r6(c.startSec + at(a)), endSec: r6(c.startSec + at(b)), index: idx))
+                }
+            }
+        }
         return stableSorted(out) { $0.startSec < $1.startSec || ($0.startSec == $1.startSec && $0.index < $1.index) }
     }
 

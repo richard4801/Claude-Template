@@ -66,6 +66,8 @@ data class VideoLook(
     val colorKeys: ColorKeys? = null,
     /** Mask and look keyframes (M): the mask and the finishing look per frame ([MotionKeys]), null when none are keyed. */
     val motionKeys: MotionKeys? = null,
+    /** The effects library: the item's picture effect (after the look, before the mask), null when none or amount 0. */
+    val effect: Effect? = null,
 )
 
 /** An item's mask and look when their keyframes move them ([maskAt] / [lookAt] at item-local seconds). */
@@ -151,7 +153,8 @@ data class Flash(val startSec: Double, val endSec: Double, val kind: TransitionK
 /** A composition-level overlay, drawn in list order (later on top). */
 sealed interface OverlayPiece
 data class TextPiece(val trackId: String, val item: TextItem, val startSec: Double, val endSec: Double) : OverlayPiece
-data class CaptionPiece(val trackId: String, val style: CaptionStyle, val pages: List<CaptionPage>) : OverlayPiece
+/** [language]: the words' language (unspaced scripts join without spaces; right-to-left ones read from the right). */
+data class CaptionPiece(val trackId: String, val style: CaptionStyle, val pages: List<CaptionPage>, val language: String? = null) : OverlayPiece
 data class FlashPiece(val flash: Flash) : OverlayPiece
 
 /** Where a layer's picture goes at one moment: centre in canvas fractions, scale, clockwise degrees, alpha. */
@@ -195,6 +198,7 @@ data class RenderPlan(
     private val spans = timeline(project)
     private val mainIndex = project.mainClips.withIndex().associate { (i, c) -> c.id to i }
     private val layerOfMain = layers.filter { it.role == LayerRole.MAIN }.flatMap { l -> l.clips.map { it.itemId to l.index } }.toMap()
+    private val layerOfOverlay = layers.filter { it.role == LayerRole.OVERLAY }.flatMap { l -> l.clips.map { it.itemId to l.index } }.toMap()
 
     /** The clip or image layer [layerIndex] shows at [tSec], or null (a gap, the clock, the background). */
     fun clipAt(layerIndex: Int, tSec: Double): PlannedClip? {
@@ -211,7 +215,30 @@ data class RenderPlan(
         val clip = clipAt(layerIndex, tSec) ?: return Placement.HIDDEN
         val track = project.track(clip.trackId) ?: return Placement.HIDDEN
         val item = track.items.firstOrNull { it.id == clip.itemId } ?: return Placement.HIDDEN
-        return if (layer.role == LayerRole.MAIN) mainPlacement(item as VideoClip, tSec) else itemPlacement(item, track, tSec)
+        return if (layer.role == LayerRole.MAIN) mainPlacement(item as VideoClip, tSec) else dissolved(item, track, tSec)
+    }
+
+    /**
+     * An overlay item with the cross-dissolve ([overlayFade]) applied: the incoming item is meant on top of the outgoing
+     * one. When its layer is behind, the two alphas are remapped as on main (A' = a(1−b), B' = b / (1 − A')).
+     */
+    private fun dissolved(item: Item, track: Track, t: Double): Placement {
+        val b = itemPlacement(item, track, t)
+        val f = overlayFade(project, track, item, t)
+        if (f >= 1.0) return b
+        val i = track.items.indexOfFirst { it.id == item.id }
+        val tin = when (item) { is VideoClip -> item.transitionIn; is ImageItem -> item.transitionIn; else -> null }
+        val incoming = tin != null && i > 0 && t < itemSpan(project, track, item).startSec + tin.durationSec
+        val other = track.items.getOrNull(if (incoming) i - 1 else i + 1) ?: return b.copy(alpha = b.alpha * f)
+        val inItem = if (incoming) item else other; val outItem = if (incoming) other else item
+        val aIn = itemPlacement(inItem, track, t).alpha * overlayFade(project, track, inItem, t)
+        val aOut = itemPlacement(outItem, track, t).alpha * overlayFade(project, track, outItem, t)
+        val inOnTop = (layerOfOverlay[inItem.id] ?: 0) < (layerOfOverlay[outItem.id] ?: 0)
+        val alpha = if (inOnTop) (if (incoming) aIn else aOut) else {
+            val a2 = aOut * (1 - aIn)
+            if (incoming) (if (a2 < 1 - 1e-9) clamp(aIn / (1 - a2), 0.0, 1.0) else aIn) else a2
+        }
+        return b.copy(alpha = alpha)
     }
 
     private fun basePlacement(item: Visual, local: Double): Placement {
@@ -376,7 +403,8 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         val sw = max(1, inf.width).toDouble(); val sh = max(1, inf.height).toDouble()
         var cw = sw * (1 - l - r); var ch = sh * (1 - t - b)
         val fit = v.fit ?: defaultFit
-        val geometryStatic = v.keyframes.orEmpty().keys.none { it == KfProp.X || it == KfProp.Y || it == KfProp.SCALE || it == KfProp.ROTATION } &&
+        // An effect works on the clip's whole (cropped) frame, so cover-fit isn't pre-cropped to the canvas then.
+        val geometryStatic = (v.effect?.takeIf { it.amount > 0 } == null) && v.keyframes.orEmpty().keys.none { it == KfProp.X || it == KfProp.Y || it == KfProp.SCALE || it == KfProp.ROTATION } &&
             (v.transform == null || (v.transform!!.x ?: 0.5) == 0.5 && (v.transform!!.y ?: 0.5) == 0.5 && (v.transform!!.scale ?: 1.0) == 1.0 && (v.transform!!.rotation ?: 0.0) == 0.0)
         val tw: Int; val th: Int; var base = 1.0
         if (fit == Fit.COVER && geometryStatic) {
@@ -398,7 +426,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         val motion = v.keyframes?.filterKeys { it in KfProp.MASK || it in KfProp.LOOK }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
             ?.let { MotionKeys(v.mask, v.look, it) }?.takeIf { it.masked || it.looked }
         return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte,
-            colorKeys = colorKeys, motionKeys = motion)
+            colorKeys = colorKeys, motionKeys = motion, effect = v.effect?.takeIf { it.amount > 0 })
     }
 
     /** A clip limited to the project's end; null when it starts after it. */
@@ -512,7 +540,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
             }
             TrackKind.CAPTION -> if (t.hidden != true && t.caption != null) {
                 val pages = captionPages(p)
-                if (pages.isNotEmpty()) overlays += CaptionPiece(t.id, t.caption.style, pages)
+                if (pages.isNotEmpty()) overlays += CaptionPiece(t.id, t.caption.style, pages, t.caption.language)
             }
             TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX -> {
                 val clips = t.items.mapNotNull { it ->
@@ -535,7 +563,16 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
     val layers = ArrayList<VideoLayer>()
     fun addLayer(role: LayerRole, trackId: String?, entries: List<LaneEntry>, withAudio: Boolean) { layers += VideoLayer(layers.size, role, trackId, entries, withAudio) }
     addLayer(LayerRole.CLOCK, null, listOf(StillEntry(0, totalUs, 0)), false)
-    for ((t, clips) in overlayLayers.asReversed()) addLayer(LayerRole.OVERLAY, t.id, lane(clips), clips.any { it.withAudio })
+    for ((t, clips) in overlayLayers.asReversed()) {
+        // A track with cross-dissolves plays on two alternating layers (items overlap there), like main A/B.
+        val fades = t.items.any { (it as? VideoClip)?.transitionIn != null || (it as? ImageItem)?.transitionIn != null }
+        if (!fades) { addLayer(LayerRole.OVERLAY, t.id, lane(clips), clips.any { it.withAudio }); continue }
+        val idx = t.items.withIndex().associate { (i, it) -> it.id to i }
+        for (k in 0..1) {
+            val cs = clips.filter { (idx[it.itemId] ?: 0) % 2 == k }
+            if (cs.isNotEmpty()) addLayer(LayerRole.OVERLAY, t.id, lane(cs), cs.any { it.withAudio })
+        }
+    }
     for (k in 0..1) {
         val clips = mainLayers[k]
         if (clips.isEmpty()) continue

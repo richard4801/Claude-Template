@@ -317,6 +317,8 @@ extension SnapshotRunner {
                                  "Full screen preview (Esc to leave)", "Save this frame as a picture",
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
                                  "Remove background", "Run the cut-out",
+                                 // XL helpers: cut out the person, split voice and music (paid); "Cut out a picture…" opens a file panel.
+                                 "Cut out the person", "Cutting out…", "Keep both", "Voice only", "Music only", "Cut out a picture…",
                                  // The shared link import sheet (WS6) has its own walk (SnapshotRunner+Walk.swift).
                                  "Import a video from a link",
                                  // Asks first (its own Keep / Delete kit dialog).

@@ -199,6 +199,8 @@ sealed interface Visual : Item {
     val look: Look?
     /** Edit suite: a shape mask multiplied into the item's alpha (after chroma key). */
     val mask: Mask?
+    /** The effects library (2026-11-09): one picture effect, after the look, before the mask and transform ([Effects]). */
+    val effect: Effect? get() = null
 }
 
 /** Items with source in/out times and a sound (video clips and audio clips). */
@@ -260,6 +262,7 @@ data class VideoClip(
     val animOut: Anim? = null,
     /** A repeating animation (overlay clips only): [loopState]. */
     val animLoop: AnimLoop? = null,
+    override val effect: Effect? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -283,6 +286,9 @@ data class ImageItem(
     /** Wave 1: overlay blend mode. */
     val blend: BlendMode? = null,
     val animLoop: AnimLoop? = null,
+    /** A cross-dissolve from the previous item on its track (kind fade; the item overlaps it by its length); see [overlayFade]. */
+    val transitionIn: Transition? = null,
+    override val effect: Effect? = null,
 ) : Visual
 
 data class Stroke(val color: String, val widthPct: Double)
@@ -354,7 +360,34 @@ data class CaptionStyle(
 )
 
 data class CaptionWord(val text: String, val startSec: Double, val endSec: Double)
-data class CaptionTrack(val asset: String, val words: List<CaptionWord>, val style: CaptionStyle)
+/**
+ * Captions on the timeline. Translated captions (owner-approved 2026-11-09): [language] is the words' language code;
+ * [original] keeps the words they were translated from, so the apps can switch back ([swapCaptionOriginal]).
+ */
+data class CaptionTrack(val asset: String, val words: List<CaptionWord>, val style: CaptionStyle, val language: String? = null, val original: CaptionOriginal? = null)
+data class CaptionOriginal(val language: String? = null, val words: List<CaptionWord>)
+
+val LANGUAGE_CODE = Regex("^[a-z]{2,3}(-[A-Z]{2})?$")
+
+/** Languages written without spaces between words: their caption pages join words with nothing between. */
+val UNSPACED_LANGUAGES = setOf("ja", "zh", "th", "lo", "km", "my")
+/** Languages written right to left (a caption page reads from the right; the words keep their order). */
+val RTL_LANGUAGES = setOf("ar", "he", "fa", "ur")
+/** What goes between a caption page's words: nothing for unspaced languages, else a space. */
+fun captionJoiner(language: String?): String = if (language?.substringBefore('-') in UNSPACED_LANGUAGES) "" else " "
+fun isRtlLanguage(language: String?): Boolean = language?.substringBefore('-') in RTL_LANGUAGES
+/** A caption page's text in [language] (words joined by [captionJoiner]). */
+fun captionText(words: List<String>, language: String?): String = words.joinToString(captionJoiner(language))
+
+/** The caption track shown in its original words (and back): words and language swap with [CaptionTrack.original]'s. */
+fun swapCaptionOriginal(ct: CaptionTrack): CaptionTrack {
+    val o = ct.original ?: return ct
+    return ct.copy(words = o.words, language = o.language, original = CaptionOriginal(ct.language, ct.words))
+}
+
+/** The caption track with translated [words] in [language]; the first original is kept (translating again replaces the translation). */
+fun translateCaptions(ct: CaptionTrack, language: String, words: List<CaptionWord>, sourceLanguage: String? = null): CaptionTrack =
+    ct.copy(words = words, language = language, original = ct.original ?: CaptionOriginal(ct.language ?: sourceLanguage, ct.words))
 data class Duck(
     val level: Double? = null, val fadeSec: Double? = null, val under: List<DuckUnder>,
     /** Edit suite: ramp down before speech / back up after it (else [fadeSec] for both). */

@@ -227,6 +227,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     val soundPlaying by vm.soundPlaying.collectAsState()
     val frames by vm.frames.collectAsState()
     val thumbs by vm.lookThumbs.collectAsState()
+    val fxThumbs by vm.effectThumbs.collectAsState()
+    val nav = studio.muse.app.ui.LocalNav.current
     val player by vm.player.collectAsState()
     val waves by vm.waves.collectAsState()
     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); vm.controller.act(EditAction.ClearMessage) } }
@@ -263,9 +265,12 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         export = vm::export,
         cancelExport = vm::cancelExport,
         lookThumbs = thumbs,
+        effectThumbs = fxThumbs,
+        renderEffectThumbs = vm::renderEffectThumbs,
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        post = { id -> nav.go(studio.muse.app.ui.Routes.post(id)) },
         headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         reframe = vm::reframe,
@@ -315,14 +320,25 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
      * WS1 guardrails (`GET /v1/editor/features`): paid helpers switched off by the owner read "Turned off by the studio
      * owner" (or the server's reason); a helper the server can't run yet (the cut-out on the mock) reads "Coming soon".
      */
+    private var features: kotlinx.serialization.json.JsonObject? = null
+    private suspend fun features() = features ?: c.repo.api.editorFeatures()?.also { features = it }
+
+    override suspend fun translateLanguages(): List<Pair<String, String>> {
+        val t = features()?.get("translate") as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+        if ((t["available"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "false") return emptyList()
+        val langs = t["languages"] as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+        return langs.mapNotNull { (code, name) -> (name as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { code to it } }
+            .filter { studio.muse.core.edit.LANGUAGE_CODE.matches(it.first) }
+    }
+
     override suspend fun helpersOff(): Map<String, String> {
-        val f = c.repo.api.editorFeatures() ?: return emptyMap()
+        val f = features() ?: return emptyMap()
         fun obj(k: String) = f[k] as? kotlinx.serialization.json.JsonObject
         fun off(o: kotlinx.serialization.json.JsonObject?) = (o?.get("available") as? kotlinx.serialization.json.JsonPrimitive)?.content == "false"
         fun note(o: kotlinx.serialization.json.JsonObject?, k: String) = (o?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
         val paid = obj("paid")
         val paidOff = if (off(paid)) note(paid, "reason") ?: "Turned off by the studio owner" else null
-        return listOf("captions", "matte", "denoise").mapNotNull { k ->
+        return listOf("captions", "matte", "denoise", "translate", "slowmo", "separate", "cutout").mapNotNull { k ->
             val o = obj(k)
             (paidOff ?: if (off(o)) (note(o, "note") ?: "Coming soon") else null)?.let { k to it }
         }.toMap()
@@ -919,6 +935,22 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                     controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
                 }
             }
+        }
+    }
+
+    private val _fxThumbs = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+    val effectThumbs: StateFlow<Map<String, ImageBitmap>> = _fxThumbs.asStateFlow()
+
+    /** Effect tiles: each effect (at 80 %) on a small frame under the playhead, on the CPU reference (once per editor). */
+    fun renderEffectThumbs() {
+        if (_fxThumbs.value.isNotEmpty()) return
+        val f = sourceFile ?: return
+        viewModelScope.launch {
+            val frame = runCatching { engine.frames(f, listOf(controller.ui.value.playheadSec.coerceAtLeast(0.1)), 120).firstOrNull() }.getOrNull() ?: return@launch
+            val map = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching { studio.muse.app.platform.edit.EffectThumbnails.render(frame, controller.ui.value.playheadSec) }.getOrNull()
+            } ?: return@launch
+            _fxThumbs.value = map.mapValues { it.value.asImageBitmap() }
         }
     }
 

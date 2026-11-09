@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as M from '../src/editor/model.js';
+import * as FX from '../src/editor/effects.js';
 import { CAPTION_STYLES, CAPTION_STYLE_LABELS, FILTERS, HOOKS, TRANSITION_LABELS } from '../src/editor/presets.js';
 import { suggestCuts } from '../src/editor/cuts.js';
 import { runChain, voiceChain } from '../src/editor/audio.js';
@@ -204,6 +205,20 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'reversed image', project: mut(p => { p.assets.push({ id: 'img_rev', kind: 'image', upload: 'up_imgrev', reverseOf: 'src' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
   { name: 'reversed asset chain', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'src' }, { id: 'src_rev2', kind: 'video', upload: 'up_rev2', reverseOf: 'src_rev' }); }), ok: false, field: 'edits.assets.4.reverseOf' },
   { name: 'reversed asset missing', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'nope' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
+  // Cross-dissolve between overlays (2026-11-09): imgs i1 is 0–2; i2 overlaps it by its transition's length.
+  { name: 'overlay dissolve ok', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.5 } }); }), ok: true },
+  { name: 'overlay dissolve wrong overlap', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.8, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.5 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.durationSec' },
+  { name: 'overlay dissolve not a fade', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2, transitionIn: { kind: 'whip', durationSec: 0.5 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.kind' },
+  { name: 'overlay dissolve too long', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 0.8, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 1.2 } }); }), ok: false, field: 'edits.tracks.2.items.1.transitionIn.durationSec' },
+  { name: 'overlay dissolve on the first item', project: mut(p => { p.tracks[2].items[0].transitionIn = { kind: 'fade', durationSec: 0.5 }; }), ok: false, field: 'edits.tracks.2.items.0.transitionIn' },
+  { name: 'overlay overlap without a dissolve', project: mut(p => { p.tracks[2].items.push({ id: 'i2', asset: 'logo', startSec: 1.5, durationSec: 2 }); }), ok: false, field: 'edits.tracks.2.items.1.startSec' },
+  // The effects library (2026-11-09).
+  { name: 'effect ok', project: mut(p => { p.tracks[0].items[0].effect = { id: 'vhs', amount: 0.6, speed: 2 }; }), ok: true },
+  { name: 'effect duotone colours ok', project: mut(p => { p.tracks[2].items[0].effect = { id: 'duotone', amount: 1, colors: ['#000000', '#FFFFFF'] }; }), ok: true },
+  { name: 'effect unknown', project: mut(p => { p.tracks[0].items[0].effect = { id: 'sparkle', amount: 0.5 }; }), ok: false, field: 'edits.tracks.0.items.0.effect.id' },
+  { name: 'effect amount', project: mut(p => { p.tracks[0].items[0].effect = { id: 'blur', amount: 1.5 }; }), ok: false, field: 'edits.tracks.0.items.0.effect.amount' },
+  { name: 'effect speed', project: mut(p => { p.tracks[0].items[0].effect = { id: 'shake', amount: 0.5, speed: 9 }; }), ok: false, field: 'edits.tracks.0.items.0.effect.speed' },
+  { name: 'effect colours not duotone', project: mut(p => { p.tracks[0].items[0].effect = { id: 'blur', amount: 0.5, colors: ['#000000', '#FFFFFF'] }; }), ok: false, field: 'edits.tracks.0.items.0.effect.colors' },
   // Derived copies (stabilize/slowmo, 2026-11-09).
   { name: 'stabilized asset ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', durationSec: 10, derivedFrom: { asset: 'src', op: 'stabilize' } }); }), ok: true },
   { name: 'stabilized then reversed ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'src', op: 'stabilize' } }, { id: 'src_st_rev', kind: 'video', upload: 'up_strev', reverseOf: 'src_st' }); }), ok: true },
@@ -226,6 +241,13 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'font asset with a size', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', width: 10 }); }), ok: false, field: 'edits.assets.3.width' },
   { name: 'font asset name empty', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: ' ' }); }), ok: false, field: 'edits.assets.3.name' },
   { name: 'font asset name too long', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'x'.repeat(81) }); }), ok: false, field: 'edits.assets.3.name' },
+  // Translated captions (2026-11-09).
+  { name: 'translated captions ok', project: mut(p => { const c = captionTrack(); c.caption!.language = 'es'; c.caption!.original = { language: 'en', words: [{ text: 'hello', startSec: 0.1, endSec: 0.5 }] }; p.tracks.push(c); }), ok: true },
+  { name: 'caption language region ok', project: mut(p => { const c = captionTrack(); c.caption!.language = 'pt-BR'; p.tracks.push(c); }), ok: true },
+  { name: 'caption language bad', project: mut(p => { const c = captionTrack(); c.caption!.language = 'Spanish'; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.language' },
+  { name: 'caption original language bad', project: mut(p => { const c = captionTrack(); c.caption!.original = { language: 'EN', words: [] }; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.original.language' },
+  { name: 'caption original word empty', project: mut(p => { const c = captionTrack(); c.caption!.original = { words: [{ text: '', startSec: 0, endSec: 1 }] }; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.original.words.0.text' },
+  { name: 'caption original word backwards', project: mut(p => { const c = captionTrack(); c.caption!.original = { words: [{ text: 'a', startSec: 2, endSec: 1 }] }; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.original.words.0.endSec' },
   { name: 'own font on captions', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font' }); const c = captionTrack(); (c.caption!.style as M.TextStyle).fontAsset = 'fnt'; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.style.fontAsset' },
   { name: 'adjust item on a video track', project: mut(p => { p.tracks.push({ id: 'ovx', kind: 'video', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
   { name: 'video clip on an adjust track', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'v9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 2 }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
@@ -535,6 +557,80 @@ const derived = {
   clip: derivedClip,
   swaps: (['stabilize', null] as ('stabilize' | null)[]).map(op => ({ op, copy: op ? 'src_st' : 'src', clip: M.deriveClip(derivedClip, op ? 'src_st' : 'src', op) })),
 };
+// Translated captions (M): translateCaptions, then again into another language, then swapCaptionOriginal there and back.
+const capBase: M.CaptionTrack = { asset: 'src', words: [{ text: 'Hello', startSec: 0.2, endSec: 0.6 }, { text: 'world', startSec: 0.6, endSec: 1.1 }], style: CAPTION_STYLES.highlight! };
+const capEs = M.translateCaptions(capBase, 'es', [{ text: 'Hola', startSec: 0.2, endSec: 0.6 }, { text: 'mundo', startSec: 0.6, endSec: 1.1 }], 'en');
+const capFr = M.translateCaptions(capEs, 'fr', [{ text: 'Bonjour', startSec: 0.2, endSec: 0.7 }, { text: 'le', startSec: 0.7, endSec: 0.8 }, { text: 'monde', startSec: 0.8, endSec: 1.1 }], 'en');
+const captionTranslate = { base: capBase, es: capEs, fr: capFr, frOriginal: M.swapCaptionOriginal(capFr), frBack: M.swapCaptionOriginal(M.swapCaptionOriginal(capFr)), baseSwap: M.swapCaptionOriginal(capBase),
+  noSource: M.translateCaptions(capBase, 'de', [{ text: 'Hallo', startSec: 0.2, endSec: 1.1 }]) };
+// Captions in other scripts (M): the joiner and RTL per language, a page's text, and the .srt of a Japanese track.
+const joinWords = [{ text: '今日は' }, { text: 'いい' }, { text: '天気' }];
+const jaProject = (() => { const q = JSON.parse(JSON.stringify(projects.find(x => x.project.tracks.some(t => t.kind === 'caption'))!.project)) as M.EditProject; const t = q.tracks.find(x => x.kind === 'caption')!; t.caption!.language = 'ja';
+  t.caption!.words = t.caption!.words.map((w, i) => ({ ...w, text: ['今日は', 'いい', '天気', 'ですね', '本当に', 'そう', 'です', 'よ'][i % 8]! })); return q; })();
+const captionScripts = {
+  languages: ['en', 'ja', 'zh', 'zh-TW', 'th', 'ko', 'ar', 'he', 'hi', 'ru', 'pt-BR', null].map(l => ({ language: l, joiner: M.captionJoiner(l ?? undefined), rtl: M.isRtlLanguage(l ?? undefined), text: M.captionText(joinWords, l ?? undefined) })),
+  srtJa: { project: jaProject, srt: M.toSrt(jaProject) },
+};
+// Lyric captions (M): captions of an uploaded song on the music track, mapped through its two clips (one at 1.5×).
+const songUp: M.Asset = { id: 'tune', kind: 'audio', upload: 'up_tune', durationSec: 12 };
+const lyricProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
+  { id: 'mus', kind: 'music', items: [{ id: 'm1', asset: 'tune', startSec: 0, inSec: 0, outSec: 4 }, { id: 'm2', asset: 'tune', startSec: 4, inSec: 5, outSec: 11, speed: 1.5 }] } as M.Track,
+  // The same song again on a voice track, overlapping the first clip: both copies are kept (no de-duplication).
+  { id: 'vox', kind: 'voice', items: [{ id: 'v1', asset: 'tune', startSec: 1.5, inSec: 0.4, outSec: 1.4 }] } as M.Track,
+  { id: 'cap', kind: 'caption', items: [], caption: { asset: 'tune', words: [W('Hold', 0.5, 0.9), W('on', 1.0, 1.3), W('to', 3.7, 3.95), W('me', 4.2, 4.6), W('stay', 5.5, 6.0), W('close', 6.1, 6.8), W('tonight', 10.6, 11.4)], style: CAPTION_STYLES.karaoke! } } as M.Track],
+  [src, songUp]);
+M.validate(lyricProject, FILTERS);
+const lyricCaptions = { project: lyricProject, words: M.captionWords(lyricProject), pages: M.captionPages(lyricProject) };
+// Cross-dissolve between overlays (M): overlayFade on a 3-clip video track (p2 dissolves in from p1; p3 just follows)
+// and a 2-image track, sampled through the overlaps.
+const fadeProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
+  { id: 'pipt', kind: 'video', items: [
+    { id: 'p1', asset: 'pip', startSec: 0, inSec: 0, outSec: 3, speed: 1, animOut: { kind: 'fade', durationSec: 0.4 } },
+    { id: 'p2', asset: 'pip', startSec: 2.5, inSec: 1, outSec: 4, speed: 1, transitionIn: { kind: 'fade', durationSec: 0.5 } },
+    { id: 'p3', asset: 'pip', startSec: 5.5, inSec: 0, outSec: 2, speed: 2 } ] } as M.Track,
+  { id: 'imgs', kind: 'image', items: [{ id: 'i1', asset: 'logo', startSec: 1, durationSec: 2 }, { id: 'i2', asset: 'logo', startSec: 2.6, durationSec: 2, transitionIn: { kind: 'fade', durationSec: 0.4 }, opacity: 0.8 }] } as M.Track,
+], [src, pip, img]);
+M.validate(fadeProject, FILTERS);
+const overlayFades = { project: fadeProject, samples: [0, 2.4, 2.5, 2.6, 2.75, 2.8, 2.9, 2.99, 3.0, 5.4, 5.5, 6].map(t => ({ t,
+  alpha: Object.fromEntries(fadeProject.tracks.filter(tr => tr.kind === 'video' || tr.kind === 'image').flatMap(tr => tr.items.map(it => [it.id, M.overlayFade(fadeProject, tr, it, t)]))),
+  // The whole alpha of p1 (it has its own fade-out animation during the overlap): opacity × animation × overlayFade.
+  p1Composed: (() => { const tr = fadeProject.tracks[1]!; const c = tr.items[0] as M.VideoClip; const local = t - M.itemSpan(fadeProject, tr, c).startSec;
+    return Math.round((c.opacity ?? 1) * M.animState({ durationSec: M.clipLength(c), animIn: c.animIn, animOut: c.animOut }, local).opacity * M.overlayFade(fadeProject, tr, c, t) * 1e6) / 1e6; })() })) };
+// Split voice and music (M): applySeparation on main and overlay clips; the music track is busy, so the instrumental
+// gets a new one where it overlaps; refusals for a freeze frame, a speed curve and 3x.
+const sepAssets: M.Asset[] = [src, pip, music, { id: 'voc', kind: 'audio', upload: 'up_voc', durationSec: 10 }, { id: 'ins', kind: 'audio', upload: 'up_ins', durationSec: 10 }];
+const sepProject: M.EditProject = proj([main([clip('c1', 0, 3), clip('c2', 3, 9, { speed: 1.5, transitionIn: { kind: 'fade', durationSec: 0.5 } }), clip('c3', 1, 1.1, { holdSec: 1 }), clip('c4', 0, 4, { speedCurve: { preset: 'custom', points: [[0, 1], [1, 2]] } })]),
+  { id: 'pipt', kind: 'video', items: [{ id: 'p1', asset: 'pip', startSec: 6, inSec: 0, outSec: 3, speed: 1 }] } as M.Track,
+  { id: 'mus', kind: 'music', items: [{ id: 'm1', asset: 'song', startSec: 4, inSec: 0, outSec: 4 }] } as M.Track], sepAssets);
+M.validate(sepProject, FILTERS);
+const separation = [
+  { clip: 'c1', keep: 'both' as const }, { clip: 'c2', keep: 'both' as const }, { clip: 'c2', keep: 'vocals' as const }, { clip: 'p1', keep: 'instrumental' as const },
+  { clip: 'c3', keep: 'both' as const }, { clip: 'c4', keep: 'both' as const },
+].map(c => { const r = M.applySeparation(sepProject, c.clip, 'voc', 'ins', c.keep); if (r) M.validate(r.project, FILTERS); return { ...c, result: r }; });
+// Cut out a picture (M): applyCutout keeps the subject where it sat: contain, rotated and flipped, cover, with keyframes.
+const cutBase = (im: Partial<M.ImageItem>): M.EditProject => proj([main([clip('c1', 0, 10)]), { id: 'imgs', kind: 'image', items: [{ id: 'i1', asset: 'logo', startSec: 0, durationSec: 3, ...im } as M.ImageItem] } as M.Track],
+  [src, { ...img, width: 1200, height: 800 }, { id: 'cut', kind: 'image', upload: 'up_cut', width: 300, height: 500 }]);
+const cutouts = [
+  { name: 'contain', project: cutBase({ transform: { x: 0.5, y: 0.4, scale: 0.8 }, crop: { left: 0.1, right: 0.1, top: 0, bottom: 0 } }) },
+  { name: 'rotated and flipped', project: cutBase({ transform: { x: 0.3, y: 0.6, scale: 1.2, rotation: 30, flipX: true } }) },
+  { name: 'cover', project: cutBase({ fit: 'cover', transform: { x: 0.5, y: 0.5, scale: 1 } }) },
+  { name: 'keyframes', project: cutBase({ transform: { x: 0.5, y: 0.5, scale: 0.6 }, keyframes: { scale: [{ t: 0, v: 0.6 }, { t: 2, v: 0.9, ease: 'easeOut' }], x: [{ t: 0, v: 0.4 }, { t: 2, v: 0.6 }], opacity: [{ t: 0, v: 1 }] } }) },
+].map(c => { const r = M.applyCutout(c.project, 'i1', 'cut', { x: 700, y: 150, w: 300, h: 500 }, 1200, 800); if (r) M.validate(r, FILTERS); return { ...c, box: { x: 700, y: 150, w: 300, h: 500 }, sourceWidth: 1200, sourceHeight: 800, result: r }; });
+// The effects library (M): each effect on a 16×16 test pattern (a gradient plus a checker), sample pixels at two
+// amounts and two times. Bilinear, clamp-to-edge sampling like a GPU texture.
+const FXW = 16, FXH = 16;
+const fxPattern: FX.RGB[] = Array.from({ length: FXW * FXH }, (_, i) => { const x = i % FXW, y = Math.floor(i / FXW); const chk = (x + y) % 2 === 0 ? 0.15 : 0;
+  return [Math.round((x / 15 * 0.8 + chk) * 1000) / 1000, Math.round((y / 15 * 0.7 + 0.1) * 1000) / 1000, Math.round(((x + y) / 30 * 0.6 + 0.2 - chk) * 1000) / 1000] as FX.RGB; });
+const fxPoints: [number, number][] = [[0.03, 0.03], [0.5, 0.5], [0.97, 0.03], [0.03, 0.97], [0.97, 0.97], [0.25, 0.6], [0.7, 0.3], [0.41, 0.13], [0.59, 0.84], [0.12, 0.45], [0.88, 0.55], [0.33, 0.33]];
+const fxSampler = FX.imageSampler(FXW, FXH, fxPattern);
+// A non-square frame too (16×9: blur's H/W factor and pixelate's cell height show only when W ≠ H). The pattern image
+// is 16×16 either way; the frame size is what the effect is told (W, H). u, v are the exact sample points (the image is
+// sampled bilinearly between pixel centres, (x + 0.5) / W).
+const effects = { pattern: { width: FXW, height: FXH, pixels: fxPattern }, perm: FX.PERM, uv: 'exact points; the image is bilinear between pixel centres (x + 0.5)/W, clamped',
+  cases: ([[16, 16], [16, 9]] as [number, number][]).flatMap(([W, H]) => FX.EFFECT_IDS.flatMap(id => [0.4, 1].flatMap(amount => [0.37, 1.2].map(t => {
+  const e: FX.Effect = { id, amount, ...(id === 'flash' || id === 'rain' ? { speed: 1.5 } : {}), ...(id === 'duotone' && amount === 1 ? { colors: ['#003344', '#FFE600'] as [string, string] } : {}) };
+  return { width: W, height: H, effect: e, t, samples: fxPoints.map(([u, v]) => ({ u, v, rgb: FX.effectPixel(e, t, W, H, u, v, fxSampler).map(x => Math.round(x * 1e6) / 1e6) })) };
+})))) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -579,7 +675,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, derived, slowmo, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { effects, reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, separation: { project: sepProject, cases: separation }, cutouts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

@@ -43,6 +43,7 @@ import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.Transition
 import studio.muse.core.edit.TransitionKind
 import studio.muse.core.edit.VideoClip
+import studio.muse.core.edit.updateItem
 import studio.muse.core.edit.problemOf
 
 /**
@@ -74,7 +75,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo", "x_translate", "x_effects").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -152,6 +153,15 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
             "speed" -> {
                 p = SuiteOps.setCurve(p, "c2", SpeedCurve(SpeedPreset.HERO, SPEED_PRESETS.getValue(SpeedPreset.HERO)))!!
                 ui = ui.copy(project = p, panel = Panel.SPEED, selectedId = "c2", speedCurveTab = true)
+            }
+            "x_effects" -> {
+                // The effects library: VHS on the clip, the tiles rendered on a small gradient frame (CPU reference).
+                p = p.updateItem("c2") { (it as VideoClip).copy(effect = studio.muse.core.edit.Effect(studio.muse.core.edit.EffectId.VHS, .7, 1.5)) }!!
+                ui = ui.copy(project = p, panel = Panel.EFFECTS, effectsTab = "Effects", selectedId = "c2")
+                val fw = 72; val fh = 48
+                val frame = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
+                for (y in 0 until fh) for (x in 0 until fw) frame.setPixel(x, y, android.graphics.Color.rgb(60 + 150 * x / fw, 70 + 90 * y / fh, 120 + 100 * (fw - x) / fw))
+                host = host.copy(effectThumbs = studio.muse.app.platform.edit.EffectThumbnails.render(frame, 0.4).mapValues { it.value.asImageBitmap() })
             }
             "looks" -> {
                 p = SuiteOps.setLook(p, listOf("c2"), lib.pack.packLook("cine-teal-orange")!!.copy(strength = .7))!!
@@ -252,6 +262,21 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 }, ui.copy(project = one, playheadSec = 2.0, selectedId = null))
                 c.act(EditAction.Select(one.mainClips[0].id)); c.act(EditAction.Stabilize(true))
                 c.act(EditAction.Open(Panel.SPEED)); c.act(EditAction.SlowmoPrice(2, 2.0))
+                kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(200) }
+                ui = c.ui.value.copy(message = null)
+            }
+            "x_translate" -> {
+                // Captions translated into Spanish (the English kept), on the Language tab with a price for French.
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val words = listOf("Morning", "light", "over", "the", "river").mapIndexed { i, w -> studio.muse.core.edit.CaptionWord(w, .4 + i * .45, .8 + i * .45) }
+                val es = listOf("Luz", "de", "la", "mañana", "sobre", "el", "río").mapIndexed { i, w -> studio.muse.core.edit.CaptionWord(w, .4 + i * .32, .7 + i * .32) }
+                val withCaps = SuiteOps.withCaptions(one, one.assets.first().id, words).let { p -> p.copy(tracks = p.tracks.map { t -> if (t.kind == TrackKind.CAPTION) t.copy(caption = studio.muse.core.edit.translateCaptions(t.caption!!.copy(language = "en"), "es", es)) else t }) }
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) =
+                        studio.muse.app.data.EditorEstimate(kind, 0.01, 1.0) to null
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(translateLanguages = listOf("en" to "English", "es" to "Spanish", "fr" to "French", "de" to "German", "pt" to "Portuguese", "ru" to "Russian"), project = withCaps, playheadSec = 1.0, selectedId = null))
+                c.act(EditAction.Open(Panel.CAPTIONS)); c.act(EditAction.CaptionTab("Language")); c.act(EditAction.TranslatePrice("fr", false))
                 kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(200) }
                 ui = c.ui.value.copy(message = null)
             }
