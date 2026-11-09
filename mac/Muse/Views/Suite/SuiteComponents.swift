@@ -125,6 +125,8 @@ struct SuiteResultPane: View {
     var emptyTitle = "Your shot\nappears here"
     var emptyLine = "Pick a character, describe the moment, press Generate."
     @State private var muted = true
+    /// WS19: the result shown when the job made several (Photo × 4, takes): ← → / the dots move through them.
+    @State private var page = 0
 
     var body: some View {
         let state = SuiteResultState.of(job)
@@ -134,6 +136,7 @@ struct SuiteResultPane: View {
             .clipped()
             .animation(.easeOut(duration: 0.6), value: state)
             .accessibilityElement(children: .contain)
+            .onChange(of: job?.id) { page = 0 }
     }
 
     @ViewBuilder private func content(_ state: SuiteResultState) -> some View {
@@ -161,7 +164,7 @@ struct SuiteResultPane: View {
 
     private func busy(_ state: SuiteResultState, percent: Int?) -> some View {
         let j = job
-        let takeLine = j.map { $0.request.takes > 1 ? "Rendering take \($0.take) of \($0.request.takes)" : "Rendering" } ?? "Rendering"
+        let takeLine = j.map { $0.isPhoto ? Job.memberPhase($0.phase) : $0.request.takes > 1 ? "Rendering take \($0.take) of \($0.request.takes)" : "Rendering" } ?? "Rendering"
         let step: Int = { if case .rendering(_, let s) = state { return s } else { return -1 } }()
         return ZStack {
             MuseImage(ref: art ?? character?.cover)
@@ -179,7 +182,7 @@ struct SuiteResultPane: View {
                         }
                     }
                     .frame(width: 180, height: 3)
-                    VStack(alignment: .leading, spacing: 8) {
+                    if j?.isPhoto != true { VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(SuiteResultState.steps(character: character?.shortName).enumerated()), id: \.offset) { i, s in
                             HStack(spacing: 10) {
                                 Ph(i < step ? "checkmark" : i == step ? "chevron.right" : "clock", 11)
@@ -189,7 +192,7 @@ struct SuiteResultPane: View {
                         }
                     }
                     .padding(12)
-                    .background(t.surface.opacity(0.92))
+                    .background(t.surface.opacity(0.92)) }
                     if let j, j.secondsLeft > 0 {
                         Text("About \(Job.aboutTime(j.secondsLeft)) left · you can leave this screen").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
                     }
@@ -202,19 +205,27 @@ struct SuiteResultPane: View {
             .padding(16)
         }
         .accessibilityLabel(percent.map { "Rendering, \($0) percent" } ?? state.queueLine)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage busy") } }
     }
 
     @ViewBuilder private var ready: some View {
         let list = store.takes(of: job)
-        let take = list.first { $0.id == takeId } ?? list.first
+        let start = list.firstIndex { $0.id == takeId } ?? 0
+        let at = list.isEmpty ? 0 : (start + page) % list.count
+        let take = list.isEmpty ? nil : list[at]
         VStack(spacing: 0) {
             ZStack {
                 if let v = take?.videoUrl, let url = URL(string: v) {
-                    StageVideo(url: url, poster: take?.thumb, muted: muted)
+                    StageVideo(url: url, poster: take?.thumb, muted: muted).id(take?.id)
                 } else {
-                    MuseImage(ref: take?.thumb ?? job?.thumb ?? art)
+                    MuseImage(ref: take?.thumb ?? job?.thumb ?? art).id(take?.id)
                 }
             }
+            .overlay { if list.count > 1 { carousel(count: list.count, at: at, start: start) } }
+            .focusable(list.count > 1)
+            .focusEffectDisabled()
+            .onKeyPress(.leftArrow) { guard list.count > 1 else { return .ignored }; step(-1, count: list.count); return .handled }
+            .onKeyPress(.rightArrow) { guard list.count > 1 else { return .ignored }; step(1, count: list.count); return .handled }
             .overlay(alignment: .topLeading) { SuiteTag(text: "Ready", color: t.goodInk, filled: true).padding(8) }
             .overlay(alignment: .topTrailing) {
                 if take?.videoUrl != nil {
@@ -247,6 +258,47 @@ struct SuiteResultPane: View {
         }
     }
 
+    private func step(_ d: Int, count: Int) { page = ((page + d) % count + count) % count }
+
+    /// Previous / next and one dot per result, over the picture.
+    private func carousel(count: Int, at: Int, start: Int) -> some View {
+        ZStack {
+            HStack {
+                arrow("chevron.left", "Previous") { step(-1, count: count) }
+                Spacer()
+                arrow("chevron.right", "Next") { step(1, count: count) }
+            }
+            .padding(.horizontal, 8)
+            VStack {
+                Spacer()
+                HStack(spacing: 6) {
+                    ForEach(0..<count, id: \.self) { i in
+                        Button { page = ((i - start) % count + count) % count } label: {
+                            Circle().fill(i == at ? Color.white : Color.white.opacity(0.45)).frame(width: 7, height: 7).padding(3).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Result \(i + 1) of \(count)")
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color.black.opacity(0.35)))
+                .padding(.bottom, 10)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Result \(at + 1) of \(count)")
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage carousel \(at + 1)/\(count)") } }
+    }
+
+    private func arrow(_ icon: String, _ label: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            Ph(icon, 13).foregroundStyle(.white).frame(width: 30, height: 30).background(Circle().fill(Color.black.opacity(0.45))).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .help(label)
+    }
+
     private func failed(_ message: String) -> some View {
         let tier = job?.request.quality ?? "draft"
         let lower = SuiteText.tierIds.firstIndex(of: tier).flatMap { $0 > 0 ? SuiteText.tierIds[$0 - 1] : nil }
@@ -260,7 +312,7 @@ struct SuiteResultPane: View {
                         Text("Retry free").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
                     }
                     .buttonStyle(.plain)
-                    if let lower {
+                    if let lower, !j.isPhoto {
                         Button { store.tryCheaper(j) } label: {
                             Text("Try \(SuiteText.tierLabel(lower))").font(t.scale.label.font).foregroundStyle(.white)
                                 .padding(.horizontal, 12).frame(height: 26).overlay(Rectangle().strokeBorder(.white, lineWidth: 1))

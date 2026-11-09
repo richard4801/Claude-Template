@@ -155,6 +155,7 @@ extension AppStore {
             suite.queued.removeAll { $0.id == r.queuedId }
             upsert(r.job)
             suite.shotJobIds.append(r.job.id)
+            rememberStage(r.job.id)
             balance = try await api.balance()
             showToast("Rendering \(ask.item.title) · \(Pricing.money(r.job.cost))")
         }

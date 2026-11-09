@@ -176,6 +176,8 @@ final class SuiteState {
     var rig: [RigWarning] = []
     var rigDismissals = RigDismissals()
     var shotJobIds: [String] = []
+    /// WS19: each mode's latest job on the stage (tool → job id), also kept in UserDefaults per server.
+    var stageJobs: [String: String] = [:]
     var generating = false
     /// Extend: the VIDEO slot's upload in flight (0…1), nil when none.
     var extendUpload: Double?
@@ -229,6 +231,7 @@ final class SuiteState {
         rig = []
         rigDismissals = RigDismissals()
         shotJobIds = []
+        stageJobs = [:]
         swapJobIds = []
         swapEstimate = nil
         swapEstimates = [:]
@@ -471,6 +474,7 @@ extension AppStore {
             let j = try await api.suiteCreateShot(req)
             upsert(j)
             suite.shotJobIds.append(j.id)
+            rememberStage(j.id)
             balance = try await api.balance()
             showToast("Rendering \(j.engineLabel) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in self?.go(.queue) }
         }
@@ -479,7 +483,44 @@ extension AppStore {
 
     /// The composer's newest job.
     var shotJob: Job? { suite.shotJobIds.last.flatMap { id in jobs.first { $0.id == id } } }
-    func takes(of job: Job?) -> [Take] { job.map { j in takes.filter { $0.jobId == j.id }.sorted { $0.index < $1.index } } ?? [] }
+    /// A job's takes; a Photo job's stills are jobless takes it lists (WS19).
+    func takes(of job: Job?) -> [Take] {
+        guard let j = job else { return [] }
+        if let ids = j.takeIds, !ids.isEmpty { return ids.compactMap { id in takes.first { $0.id == id } } }
+        return takes.filter { $0.jobId == j.id }.sorted { $0.index < $1.index }
+    }
+
+    // MARK: The stage (WS19)
+
+    private var stageMemoryKey: String { "suite.stage.\(serverKey)" }
+
+    /// A new generation in a mode replaces that mode's stage; remembered across leaving the page and restarts.
+    /// `tool`: the mode; nil = the job's own (its draft's), else the composer's.
+    func rememberStage(_ jobId: String, tool: ComposerTool? = nil) {
+        let own: ComposerTool? = jobs.first(where: { $0.id == jobId }).flatMap { $0.suiteTool }.flatMap { ComposerTool(rawValue: $0) }
+        let t = tool ?? own ?? suite.composer.tool
+        var m = suite.stageJobs.isEmpty ? (UserDefaults.standard.dictionary(forKey: stageMemoryKey) as? [String: String] ?? [:]) : suite.stageJobs
+        m[t.rawValue] = jobId
+        suite.stageJobs = m
+        UserDefaults.standard.set(m, forKey: stageMemoryKey)
+    }
+
+    /// The stage's job for a mode: the newest of the one remembered for it, the newest of my jobs made with it, and this
+    /// session's. Running or finished, it comes back when the mode opens again.
+    func stageJob(_ tool: ComposerTool) -> Job? {
+        let remembered = suite.stageJobs[tool.rawValue] ?? (UserDefaults.standard.dictionary(forKey: stageMemoryKey) as? [String: String])?[tool.rawValue]
+        let me = user?.id
+        var picks: [Job] = jobs.filter { j in
+            j.suiteTool == tool.rawValue && (me == nil || j.userId == nil || j.userId == me)
+        }.max { $0.createdAt < $1.createdAt }.map { [$0] } ?? []
+        if let id = remembered, let j = jobs.first(where: { $0.id == id }) { picks.append(j) }
+        switch tool {
+        case .swap, .recast: if let j = swapJob { picks.append(j) }
+        case .photo: break
+        default: if let j = shotJob, j.suiteTool == nil || j.suiteTool == tool.rawValue { picks.append(j) }
+        }
+        return picks.max { $0.createdAt < $1.createdAt }
+    }
 
     /// The Recent takes row: the suite's newest jobs (any job before the first suite one).
     var suiteRecentJobs: [Job] {
@@ -633,6 +674,7 @@ extension AppStore {
             let j = try await api.suiteCreateShot(req)
             upsert(j)
             suite.swapJobIds.append(j.id)
+            rememberStage(j.id)
             suite.swapUsesStage = false
             balance = try await api.balance()
             showToast("Rendering \(j.engineLabel) · \(Pricing.money(j.cost))", action: "Open queue") { [weak self] in self?.go(.queue) }
@@ -843,6 +885,7 @@ extension AppStore {
 
     /// Retake: the same request again (a failed one was refunded in full).
     func retakeShot(_ job: Job) {
+        if job.isPhoto { return generatePhoto() } // WS19: the Photo composer's run again
         if suite.shotJobIds.contains(job.id) { generateShot() } else if suite.swapJobIds.contains(job.id) { generateSwap() } else { runAgain(job) }
     }
 

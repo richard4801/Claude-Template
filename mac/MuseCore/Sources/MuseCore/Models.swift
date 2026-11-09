@@ -523,6 +523,8 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
     public var billedSeconds: Double?
     /// AI suite (workstream 1): the composer's draft it was made from ("Reuse settings"). nil for jobs made without one.
     public var draft: SuiteDraft?
+    /// A Photo run's stills (WS19: `request.engine == "photo"`; they are takes without a job id).
+    public var takeIds: [String]?
 
     public init(id: String, title: String, modelId: String, modelName: String, outfitId: String, request: JobRequest, state: String, progress: Double = 0,
                 take: Int = 1, step: Int = 0, totalSteps: Int = 10, phase: String = "", secondsLeft: Double = 0, totalSeconds: Double = 0, cost: Double = 0,
@@ -556,6 +558,7 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
              createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId, warm, errorCode, billedSeconds
         case engineText = "engineLabel"
         case draft // AI suite (workstream 1)
+        case takeIds // WS19
     }
 
     public init(from d: Decoder) throws {
@@ -592,6 +595,21 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         errorCode = c.o(.errorCode)
         billedSeconds = c.o(.billedSeconds)
         draft = c.o(.draft) // AI suite (workstream 1)
+        takeIds = c.o(.takeIds)
+    }
+
+    /// A Photo run shown as a job (WS19): its stills are `takeIds`.
+    public var isPhoto: Bool { request.engine == "photo" }
+
+    /// The Suite tool it was made with: the draft's (every Suite job carries one), else from the request.
+    public var suiteTool: String? {
+        if let t = draft?.tool, !t.isEmpty { return t }
+        switch request.engine {
+        case "photo": return "photo"
+        case "upscale": return "extend"
+        case "suite": return "shot"
+        default: return nil
+        }
     }
 
     /// Waiting in line before it starts (real API): `queuePosition` is set and nothing has rendered yet.

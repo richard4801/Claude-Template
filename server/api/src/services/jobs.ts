@@ -65,6 +65,8 @@ type QueueInfo = { queuePosition: number; etaSeconds: number; startsInSeconds: n
 const isRep = (j: { request: Record<string, any> }) => j.request?.engine === 'replicate';
 // AI suite (workstream 1): suite shots run on their own line (suite/runner.ts), never on a pod.
 const isSuite = (j: { request: Record<string, any> }) => j.request?.engine === 'suite';
+// WS19: a Photo run (POST /v1/suite/photos) shown as a job; it runs in the request, never on a line or a pod.
+const isPhoto = (j: { request: Record<string, any> }) => j.request?.engine === 'photo';
 const isHosted = (j: { request: Record<string, any> }) => isRep(j) || isSuite(j);
 
 export class JobService {
@@ -88,9 +90,10 @@ export class JobService {
       totalSeconds: j.totalSeconds, cost: j.cost, refunded: j.refunded, error: j.error, createdAt: j.createdAt, finishedAt: j.finishedAt,
       prompt: j.prompt, seed: j.seed, thumb: j.thumb ?? undefined, queuePosition: q?.queuePosition, etaSeconds: q?.etaSeconds,
       blocked: j.blocked, userId: j.userId, warmupCost: j.warmupCost || undefined, warm: j.warmSessionId ? true : undefined,
-      engineLabel: j.kind === 'render' ? (isSuite(j) ? j.request.engineLabel : P.engineLabel(j.request)) : undefined, errorCode: (j.stats as any)?.errorCode,
+      engineLabel: j.kind === 'render' ? (isSuite(j) || isPhoto(j) ? j.request.engineLabel : P.engineLabel(j.request)) : undefined, errorCode: (j.stats as any)?.errorCode,
       billedSeconds: j.state === 'done' ? (j.stats as any)?.replicate?.billedSeconds ?? (j.stats as any)?.suite?.billedSeconds : undefined,
       draft: j.draft ?? undefined, // AI suite (workstream 1): the composer draft, for "Reuse settings"
+      takeIds: isPhoto(j) ? (j.stats as any)?.photo?.takeIds : undefined, // WS19: a photo job's stills (jobless takes)
     });
   }
   emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
@@ -249,7 +252,7 @@ export class JobService {
     const [u] = await this.ctx.db.update(jobs).set({ state: 'failed', gpuState: 'cancelled', error: why, refunded: j.cost, finishedAt: Date.now(), phase: why })
       .where(and(eq(jobs.id, j.id), eq(jobs.state, 'running'))).returning();
     if (!u) return;
-    if (isRep(j)) this.ctx.replicateVideo.cancel(j.id); else if (isSuite(j)) this.ctx.suite.runner.cancel(j.id); else await this.ctx.gpu.cancel(j.id);
+    if (isRep(j)) this.ctx.replicateVideo.cancel(j.id); else if (isSuite(j)) this.ctx.suite.runner.cancel(j.id); else if (!isPhoto(j)) await this.ctx.gpu.cancel(j.id);
     if (u.userId) await this.ctx.money.release(u.studioId, u.userId, u.id, u.holdTokens, why);
     this.queueInfo.delete(j.id); this.lineInfo.delete(j.id);
   }

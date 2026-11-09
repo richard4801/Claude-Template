@@ -43,7 +43,7 @@ struct QueueView: View {
                         Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: Space.s3)
-                    RButton("Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", small: true) { store.retry(f) }
+                    RButton(f.isPhoto ? "Make again" : "Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", small: true) { store.retry(f) }
                     RButton("Dismiss", kind: .plain, small: true) { store.dismissFailure(f) }
                 }
                 .padding(.horizontal, Space.s4)
@@ -107,10 +107,12 @@ struct JobRow: View {
         let j = job
         HStack(spacing: Space.s3) {
             MediaFrame(ref: j.thumb, ratio: 44.0 / 58.0).frame(width: 44)
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "queue row \(j.id)") } }
             VStack(alignment: .leading, spacing: 2) {
                 Text(TakeText.displayTitle(j.title)).scaled(t.scale.label, t.roles.ink).lineLimit(1)
                 Text(ScreenCopy.meta([j.modelName.split(separator: " ").first.map(String.init) ?? j.modelName, j.engineLabel,
-                                      "\(Pricing.trimNum(j.lengthSec)) s" + (j.request.takes > 1 ? ", \(j.request.takes) takes" : "")]))
+                                      j.isPhoto ? PhotoEstimate.photos(max(1, j.request.takes)) // WS19: a Photo run
+                                        : "\(Pricing.trimNum(j.lengthSec)) s" + (j.request.takes > 1 ? ", \(j.request.takes) takes" : "")]))
                     .scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

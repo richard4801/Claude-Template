@@ -125,7 +125,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
         preset = c.o(.preset)
     }
 
-    static func photos(_ n: Int) -> String { "\(n) photo\(n == 1 ? "" : "s")" }
+    public static func photos(_ n: Int) -> String { "\(n) photo\(n == 1 ? "" : "s")" }
     /// The server's `photoButton`: "Generate · 4 photos · $0.24".
     public static func buttonLabel(_ estimate: Double, count: Int) -> String { "Generate · \(photos(count)) · \(Pricing.money(estimate))" }
     /// "about $0.24 · 4 photos".
@@ -144,16 +144,20 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
 public struct PhotoResult: Codable, Hashable, Sendable {
     public var tool: String
     public var takes: [Take]
-    public init(takes: [Take]) {
+    /// The run as a job (WS19): running when started with `async`, done otherwise.
+    public var job: Job?
+    public init(takes: [Take], job: Job? = nil) {
         self.tool = "photo"
         self.takes = takes
+        self.job = job
     }
 
-    enum CodingKeys: String, CodingKey { case tool, takes }
+    enum CodingKeys: String, CodingKey { case tool, takes, job }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         tool = c.v(.tool, "photo")
         takes = c.v(.takes, [])
+        job = c.o(.job)
     }
 }
 

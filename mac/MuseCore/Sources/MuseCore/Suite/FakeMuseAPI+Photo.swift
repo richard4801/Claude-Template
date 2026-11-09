@@ -62,6 +62,52 @@ extension FakeMuseAPI {
         for i in takes.indices where ids.contains(takes[i].id) { takes[i] = titled(takes[i]) }
         return shots.map(titled)
     }
+
+    /// WS19: the run as a job, like the server's `async: true`: the job comes back running once the price would be held,
+    /// `job` events follow, and the last one carries the stills.
+    public func suiteStartPhotos(_ req: PhotoRequest) async throws -> Job {
+        try suiteCheckDraft(req.draft)
+        let shoot = try photoShoot(req)
+        let cost = try shootPreviewNow(shoot).estimate
+        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
+        let m = try activeModel(req.modelId)
+        let count = max(1, min(PhotoRequest.maxCount, req.count))
+        var jr = JobRequest(title: "", modelId: m.id, outfitId: req.outfitId ?? "", clipId: "", engine: "photo", takes: count)
+        jr.title = "Photo · \(PhotoEstimate.photos(count))"
+        var j = Job(id: "jp_" + shortId(), title: jr.title, modelId: m.id, modelName: m.name, outfitId: jr.outfitId, request: jr, state: "running", progress: 2,
+                    totalSteps: count, phase: count > 1 ? "Making photo 1 of \(count)" : "Making your photo", cost: cost, createdAt: nowMs(),
+                    prompt: req.prompt, thumb: m.cover)
+        j.engineText = "Photo"
+        j.draft = req.draft
+        jobs.append(j)
+        hub.emit(ApiEvent(type: "job", job: j))
+        let id = j.id
+        Task { await self.finishPhotos(id, req) }
+        return j
+    }
+
+    private func finishPhotos(_ id: String, _ req: PhotoRequest) async {
+        do {
+            let shots = try await suiteCreatePhotos(req)
+            guard let i = jobs.firstIndex(where: { $0.id == id }), jobs[i].isActive else { return }
+            jobs[i].state = "done"
+            jobs[i].progress = 100
+            jobs[i].step = shots.count
+            jobs[i].phase = "Done"
+            jobs[i].finishedAt = nowMs()
+            jobs[i].thumb = shots.first?.thumb ?? jobs[i].thumb
+            jobs[i].takeIds = shots.map(\.id)
+            hub.emit(ApiEvent(type: "job", job: jobs[i], takes: shots))
+        } catch {
+            guard let i = jobs.firstIndex(where: { $0.id == id }) else { return }
+            jobs[i].state = "failed"
+            jobs[i].phase = "Failed"
+            jobs[i].error = (error as? ApiError)?.friendlyMessage ?? MemberText.wentWrong
+            jobs[i].refunded = jobs[i].cost
+            jobs[i].finishedAt = nowMs()
+            hub.emit(ApiEvent(type: "job", job: jobs[i]))
+        }
+    }
 }
 
 private extension ShotRequest {

@@ -251,13 +251,8 @@ struct ComposerMediaPane: View {
 
     private var tool: ComposerTool { store.suite.composer.tool }
 
-    private var job: Job? {
-        switch tool {
-        case .swap, .recast: return store.swapJob
-        case .photo: return nil // Photo's stills open in the take view (AppStore+Photo)
-        default: return store.shotJob
-        }
-    }
+    /// This mode's latest generation, running or finished (WS19: kept per mode, back after leaving the page).
+    private var job: Job? { store.stageJob(tool) }
 
     /// The picture under the result pane's blur: the start frame, the clip or the video being extended.
     private var art: ImageRef? {
@@ -285,7 +280,9 @@ struct ComposerMediaPane: View {
             return false
         }()
         Group {
-            if idle, let media = ownMedia {
+            if store.suite.generating {
+                starting // Generate pressed, the job not back yet: the new one replaces the stage straight away
+            } else if idle, let media = ownMedia {
                 ZStack(alignment: .bottomLeading) {
                     shape.fill(t.roles.field)
                     Color.clear.overlay(MuseImage(ref: media)).clipped().accessibilityHidden(true)
@@ -308,6 +305,23 @@ struct ComposerMediaPane: View {
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .clipped()
         .accessibilityElement(children: .contain)
+    }
+
+    /// Generate pressed: the price is being held and the job made.
+    private var starting: some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.container)
+        return ZStack {
+            shape.fill(t.roles.field)
+            if let a = art { Color.clear.overlay(MuseImage(ref: a)).clipped().blur(radius: 22, opaque: true).opacity(0.6).accessibilityHidden(true) }
+            VStack(spacing: Space.s2) {
+                ProgressView().controlSize(.small)
+                Text("Starting…").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+            }
+        }
+        .clipShape(shape)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Starting")
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage busy") } }
     }
 
     /// No take yet: the shape's outline, centred, with the hint inside and the shape and length under it.

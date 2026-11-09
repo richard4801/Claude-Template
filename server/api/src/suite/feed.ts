@@ -46,6 +46,7 @@ const after = (col: { createdAt: any; id: any }, c: [number, string] | null): SQ
 /** The tool a job was made with: the draft's, else from its request (suite mode, upscale, or the video studio's swap). */
 const jobTool = sql`coalesce(${jobs.draft}->>'tool', case
   when ${jobs.request}->>'engine' = 'upscale' then 'upscale'
+  when ${jobs.request}->>'engine' = 'photo' then 'photo'
   when ${jobs.request}->>'engine' = 'suite' then (case ${jobs.request}->>'mode' when 'extend' then 'extend' when 'recast' then 'recast' else 'shot' end)
   else 'swap' end)`;
 /** A take's tool: its own draft's (photos), a still is a photo, else its job's. */
@@ -94,7 +95,7 @@ export async function feed(ctx: Ctx, u: AuthUser, query: unknown) {
   return { ...(queued ? { queued } : {}), items: page, nextCursor: more && last ? encodeCursor(last.createdAt, last.id) : null };
 }
 
-const toolOfJob = (j: typeof jobs.$inferSelect): Tool => (j.draft?.tool ?? (j.request.engine === 'upscale' ? 'upscale'
+const toolOfJob = (j: typeof jobs.$inferSelect): Tool => (j.draft?.tool ?? (j.request.engine === 'upscale' ? 'upscale' : j.request.engine === 'photo' ? 'photo'
   : j.request.engine === 'suite' ? (j.request.mode === 'extend' ? 'extend' : j.request.mode === 'recast' ? 'recast' : 'shot') : 'swap')) as Tool;
 
 function jobItem(j: typeof jobs.$inferSelect): FeedItem {

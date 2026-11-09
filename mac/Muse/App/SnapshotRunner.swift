@@ -174,6 +174,7 @@ enum SnapshotRunner {
             await settingsShots(store, dir: dir)   // Settings (owner-approved redesign 2026-11-09): every section, four themes
             await outfitShots(store, dir: dir)   // Outfits: the new outfit's angles full size (owner 2026-11-08)
             await linkImportShots(store, dir: dir)   // Import a video from a link (owner 2026-11-08)   // Settings redesign (owner 2026-11-08): before and the proposed mock
+            await suiteStageCheck(store, dir: dir)   // WS19: generating → result on the stage, Photo × 4 carousel, back after leaving, in the Queue
             await claudeChatCheck(store, dir: dir)   // WS18: one bubble per message, chat sessions, Claude's draft in the composer
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)

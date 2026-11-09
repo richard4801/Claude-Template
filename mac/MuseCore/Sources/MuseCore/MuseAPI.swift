@@ -276,6 +276,9 @@ public protocol MuseAPI: AnyObject, Sendable {
     func suitePhotoEstimate(_ req: PhotoRequest) async throws -> PhotoEstimate
     /// POST /v1/suite/photos → the stills as takes ("Photo · …"); holds count × per photo, settles to the exact cost.
     func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take]
+    /// POST /v1/suite/photos with `async: true` (WS19) → the running Photo job, once the price is held; its progress
+    /// arrives as `job` events and the last one carries the stills (`takes`, and the job's `takeIds`).
+    func suiteStartPhotos(_ req: PhotoRequest) async throws -> Job
     /// POST /v1/suite/shots → a render job (`request.engine: "suite"`); progress arrives as `job` events.
     func suiteCreateShot(_ req: ShotRequest) async throws -> Job
     /// GET /v1/suite/shots/{id}

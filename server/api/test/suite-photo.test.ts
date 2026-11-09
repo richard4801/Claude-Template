@@ -100,6 +100,26 @@ describe('Photo tool · routes (fake image engine)', () => {
     expect(old[0].title).toMatch(/^Photo · /);
   });
 
+  it('every photo run is a job (WS19): the Queue lists it, async answers with the running job, done lists its stills', async () => {
+    const r = (await member.req('POST', '/v1/suite/photos', { modelId: model.id, prompt: 'A rooftop at dusk.', count: 4, async: true })).body;
+    expect(r).toMatchObject({ tool: 'photo', takes: [], job: { state: 'running', engineLabel: 'Photo', request: { engine: 'photo', takes: 4 } } });
+    expect(r.job.phase).toMatch(/^Making photo 1 of 4|^Making/);
+    let j: any;
+    for (let i = 0; i < 200; i++) {
+      j = ((await member.req('GET', '/v1/jobs')).body as any[]).find(x => x.id === r.job.id);
+      if (j?.state !== 'running') break;
+      await new Promise(ok => setTimeout(ok, 20));
+    }
+    expect(j).toMatchObject({ state: 'done', progress: 100 });
+    expect(j.takeIds).toHaveLength(4);
+    const feed = (await member.req('GET', '/v1/suite/feed?tool=photo')).body;
+    expect(feed.items.filter((x: any) => j.takeIds.includes(x.takeId))).toHaveLength(4);
+    // Without async the call waits, as before, and the job comes back done.
+    const w = (await member.req('POST', '/v1/suite/photos', { modelId: model.id, count: 1 })).body;
+    expect(w.takes).toHaveLength(1);
+    expect(w.job).toMatchObject({ state: 'done', takeIds: [w.takes[0].id] });
+  });
+
   it('a Photo preset is a photo template: its own camera and light, the template pipeline', async () => {
     const t = (await owner.req('POST', '/v1/templates', { name: 'Laundrette', layers: { scene: 'a laundrette at night', camera: 'medium shot, 35mm' } })).body;
     const e = (await owner.req('POST', '/v1/suite/photos/estimate', { modelId: model.id, presetId: t.id, count: 1, camera: { rig: { focalMm: 24 } } })).body;

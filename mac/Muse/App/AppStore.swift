@@ -771,7 +771,8 @@ final class AppStore {
             self.openTake(ids.first ?? self.takes.first { $0.jobId == j.id }?.id ?? "")
         }
         if notifyDone {
-            Notifier.shared.post(title: "\(j.title) is ready", body: "\(j.engineLabel) · \(Pricing.money(j.cost)) · \(max(1, j.request.takes)) take\(j.request.takes > 1 ? "s" : "") to review.")
+            let n = max(1, j.request.takes), what = j.isPhoto ? PhotoEstimate.photos(n) : "\(n) take\(n > 1 ? "s" : "")"
+            Notifier.shared.post(title: "\(j.title) is ready", body: "\(j.engineLabel) · \(Pricing.money(j.cost)) · \(what) to review.")
         }
     }
 
