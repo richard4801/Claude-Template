@@ -40,10 +40,10 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | **Reorder clips (long-press and drag)** | Has | Has | S | Engine `moveMainClip` exists; there is no gesture. Mac: Drag a main clip (WS9). Android: Long-press a main clip and drag (wave 1). |
 | **Move items in time** (text, music, overlays) | Has | Has | S | Engine `moveItem` exists; there is no gesture. Important for serious editing. Mac: Drag on its row; not between rows. Android: Long-press and drag; snaps to the playhead, edges and beats (wave 1). |
 | Duplicate | Has | Missing | — | |
-| Replace clip (keep edits) | Has | Missing | S |. Android: Overlay → Replace on the selected clip; its edits stay. |
+| Replace clip (keep edits) | Has | Has | S | Android: Overlay → Replace on the selected clip; its edits stay. Mac: Bin → take's menu → Replace the selected clip; its edits stay. |
 | **Freeze frame** | Has | Has | M | A still item from the current frame. Android: `holdSec` hold clip; Edit → Freeze frame, length by slider or edges (wave 1). Mac: Timeline → Freeze frame at the playhead; length in Speed, or drag its edges (wave 1). |
 | **Reverse** | Missing | Missing | L | Needs a reversed proxy render on the device |
-| Slip edit | Has | Missing | S | `trimClip` both ends at once. Android: Edit → Slip slider. |
+| Slip edit | Has | Has | S | `trimClip` both ends at once. Android: Edit → Slip slider. Mac: Slip panel (the source moves, the length stays). |
 | Snapping (to the playhead, edges, beats) | Partial | Partial | S | Beats only. Mac: Beats only |
 | Timeline zoom (pinch) | Has | Has | — | 8–480 dp/s. Mac: Slider and ± buttons, 12–400 pt/s |
 | Frame-by-frame stepping buttons | Has | Has | S | Scrub is frame-exact; ±1 frame buttons would help. Mac: ← / → keys and ‹ › in the transport (wave 1). Android: ◀ ▶ in the transport (wave 1). |
@@ -67,7 +67,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Speed curves (presets + custom graph) | Has | Has | — | |
 | **Smooth slow-mo (frame interpolation)** | Missing | Missing | XL | Needs a model choice (server job like denoise, or on-device). The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
 | Speed on audio-only clips | Missing | Missing | M | The contract says audio plays at 1×; needs a contract change. |
-| Set the duration (speed computed) | Has | Missing | S |. Android: Speed → Length slider. |
+| Set the duration (speed computed) | Has | Has | S | Android: Speed → Length slider. Mac: Speed → Length slider. |
 
 ## 3. Transitions
 
@@ -77,7 +77,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Duration, apply to all | Has | Has | — | |
 | More transition types | Partial | Partial | M each | Functional, but the value is in a curated set: **Content** |
 | Transitions on overlay tracks | Partial | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut` (no cross-dissolve between overlays). |
-| Clip in/out animations (video) | Has | Missing | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). |
+| Clip in/out animations (video) | Has | Has | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). Mac: Animate panel on any video clip, main or overlay (`animIn`/`animOut`), preview and export. |
 
 ## 4. Text, captions and animation
 
@@ -105,22 +105,22 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Clip sound lane, detach / extract audio | Has | Partial | — | WS8. Mac: Sound lane with waveform and mute; no detach |
-| Extract audio from another video | Has | Missing | S | Add another take's sound only. Android: Overlay → Sound: another take's sound at the playhead. |
+| Extract audio from another video | Has | Has | S | Add another take's sound only. Android: Overlay → Sound: another take's sound at the playhead. Mac: Bin → take's menu → Add its sound at the playhead (sound effects row). |
 | Volume, mute, fade in/out | Has | Has | — | Mac: Up to +6 dB (fixed in WS9) |
 | Volume keyframes | Has | Has | S | Engine has `volume` keys; no UI. Mac: ◆ next to Volume; the slider sets the key at the playhead (wave 1). Android: ◆ next to Volume; the slider sets the key at the playhead (wave 1). |
 | Auto-ducking under voice and speech | Has | Has | — | The research found no confirmed ducking in the other apps; MUSE leads here |
 | Beat detection, beat marks, snap to beats | Has | Has | — | |
-| Manual beat marks (tap) | Has | Missing | S |. Android: Audio → Mark a beat here, Clear beat marks. |
+| Manual beat marks (tap) | Has | Has | S | Android: Audio → Mark a beat here, Clear beat marks. Mac: Audio → Mark a beat here, Clear beat marks. |
 | Voice effects (warm, radio, phone, deep) | Has | Has | — | 4 effects. More character voices: M. |
 | Noise reduction, voice enhance | Has | Has | — | |
 | Vocal / instrumental separation | Missing | Missing | L | Server model |
-| Volume normalisation | Has | Missing | M | Android: Audio → Even out volume: spoken clips (main and voice) brought to their median level from the decoded sound levels, 0.25×–2×, no clipping; music left to ducking. |
+| Volume normalisation | Has | Has | M | Android: Audio → Even out volume: spoken clips (main and voice) brought to their median level from the decoded sound levels, 0.25×–2×, no clipping; music left to ducking. Mac: Audio → Even out volume, from the measured clip levels (same rules). |
 | Record voice-over | Has | Has | — | In-app recorder (WS8). Mac: Mac microphone |
 | Recording over playback (hear the video while recording) | Missing | Missing | S | Needs headphones handling |
 | **Music library** | Missing | Missing | M (function) | **Content.** Licensing is the real cost. `add_music` refuses `library` today. |
 | **Sound effects library** | Missing | Missing | M (function) | **Content** |
 | AI music / generative SFX | Missing | Missing | XL | Model and vendor decision |
-| Audio loop | Has | Missing | S |. Android: Audio → Loop to the end. |
+| Audio loop | Has | Has | S | Android: Audio → Loop to the end. Mac: Audio → Loop to the end. |
 
 ## 6. Effects, filters and adjustments
 
@@ -129,8 +129,8 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Looks / filters with intensity | Has | Has | — | 32 original looks. More is **Content**, which MUSE can make itself (`lookpack.ts`). |
 | .cube LUT import | Has | Has | — | |
 | Exposure, contrast, saturation, temperature, highlights, shadows, grain | Has | Has | — | |
-| Tint | Has | Missing | S | Android: Filters → Adjust → Tint (`adjust.tint`, green ↔ magenta, after temperature in the colour matrix). |
-| Vignette, sharpen, halation, light leak, chromatic aberration | Has | Partial | S | Engine `look` has them; there are no sliders. Mac: Engine only. Android: Filters → Adjust: vignette, sharpen, fade, glow, light leak, colour fringe, grain. |
+| Tint | Has | Has | S | Android: Filters → Adjust → Tint (`adjust.tint`, green ↔ magenta, after temperature in the colour matrix). Mac: Adjust → Tint under Temperature (`adjust.tint`; fixtures pass on the Mac). |
+| Vignette, sharpen, halation, light leak, chromatic aberration | Has | Has | S | Engine `look` has them; there are no sliders. Android: Filters → Adjust: vignette, sharpen, fade, glow, light leak, colour fringe, grain. Mac: Look sliders: vignette, sharpen, fade, colour fringe, glow, light leak. |
 | Curves | Has | Partial | M | Engine has curves; no editor. Mac: Engine only. Android: Filters → Adjust → Curves: All / Red / Green / Blue; drag to move, touch the line to add, tap a point to remove (`look.curves`). |
 | HSL (per-hue) | Missing | Missing | L | New engine stage (all three platforms) |
 | Auto adjust | Has | Missing | M | Android: Filters → Adjust → Auto adjust: the frame under the playhead → exposure, contrast, saturation, temperature and tint (core `autoAdjust`). |
@@ -172,8 +172,8 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Overlay photos / images | Partial | Has | S | The model has image items; the phone can't pick a photo yet. Mac: Import picture (WS9) |
 | Opacity | Has | Has | S | Model yes; no slider. Android: Transform → Opacity with ◆ (wave 1). |
 | **Blend modes** (multiply, screen, overlay, soft light, …) | Has | Has | M | New compositor mode (GL / Core Image) and a contract field. Android: Transform → Blend on overlays, drawn by MUSE's own compositor program in preview and export (wave 1). Mac: Video → Blend on overlays, a Core Image kernel with the reference formulas (wave 1). |
-| Move an overlay to the main track and back | Has | Missing | S | Android: Edit → Move to main track / Move to an overlay track (app op; no contract change). On the main track the clip fills the frame (overlay placing, opacity, blend, mask and key dropped); off it, it plays at the same time, full frame. |
-| Split-screen layouts | Has | Missing | M | Android: Overlay → Split screen: side by side, top and bottom, three rows, grid of four; the clips on screen at the playhead get crop, fit and transform (no contract change). |
+| Move an overlay to the main track and back | Has | Has | S | Android: Edit → Move to main track / Move to an overlay track (app op; no contract change). On the main track the clip fills the frame (overlay placing, opacity, blend, mask and key dropped); off it, it plays at the same time, full frame. Mac: Transform → Move to main track / Move to an overlay track (same rules). |
+| Split-screen layouts | Has | Has | M | Android: Overlay → Split screen: side by side, top and bottom, three rows, grid of four; the clips on screen at the playhead get crop, fit and transform (no contract change). Mac: Split screen panel: side by side, top and bottom, three rows, grid of four. |
 | Motion tracking (text or sticker follows an object) | Missing | Missing | XL | Tracker model |
 
 ## 10. Canvas and ratio
@@ -181,7 +181,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | 9:16, 1:1, 4:5, 16:9 | Has | Has | — | |
-| More ratios (4:3, 2.35:1) | Has | Missing | S | Android: Ratio and Export shapes; the canvas is free-size in the contract. 2.35:1 at 4K is capped at 4096 px wide. |
+| More ratios (4:3, 2.35:1) | Has | Has | S | Android: Ratio and Export shapes; the canvas is free-size in the contract. 2.35:1 at 4K is capped at 4096 px wide. Mac: Ratio and Export shapes; 2.35:1 is 4096 × 1744 at 4K. |
 | Background colour | Has | Has | S | `canvas.background` exists; no picker. Mac: Video → Background colour on main clips (wave 1). Android: Ratio → Background (wave 1). |
 | Background blur fill | Has | Has | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). Mac: Video → Background: Blur (wave 1). |
 | Fit / fill per clip | Has | Has | S | Model `fit`; no toggle. Mac: Transform → Frame: Fill / Fit (wave 1). Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
@@ -200,7 +200,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Template library (swap in your media) | Partial | Partial | L | "Recreate an edit" (recipes) is the MUSE take on this. A browsable library is **Content**. Mac: Recreate an edit |
-| Beat-synced auto-cut to a song | Has | Missing | M | Beats engine exists. Android: Audio → Cut clips to the beat: each main clip ends on the beat nearest to its end (the latest its source can reach). |
+| Beat-synced auto-cut to a song | Has | Has | M | Beats engine exists. Android: Audio → Cut clips to the beat: each main clip ends on the beat nearest to its end (the latest its source can reach). Mac: Audio → Cut clips to the beat (same rule). |
 | Save your own edit as a template / style kit | Missing | Missing | M | |
 
 ## 13. AI features
@@ -226,10 +226,10 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Captions burnt in or .SRT | Has | Has | — | Mac: Save to Library always burns them in (WS9) |
 | Label as AI-generated | Has | Has | — | Sent with the version (fixed in WS8). Mac: Sent with the version (WS9) |
 | Content Credentials (C2PA) | Missing | Missing | L | Signing needs a certificate decision. The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
-| 2K, bitrate choice | Has | Missing | S | Android: 2K, and Smaller file / Recommended / Higher quality bitrate (0.6× / 1× / 1.6× of ~0.12 bit per pixel per frame). |
+| 2K, bitrate choice | Has | Has | S | Android: 2K, and Smaller file / Recommended / Higher quality bitrate (0.6× / 1× / 1.6× of ~0.12 bit per pixel per frame). Mac: 2K, and Smaller file / Recommended / Higher quality (reader → writer export at the bitrate). |
 | HDR export | Missing | Missing | L | |
 | Share straight to TikTok / IG / Shorts | Partial | Partial | — | MUSE Socials (posting) |
-| GIF / audio-only export | Has | Missing | S each | No competitor confirmed either. Android: Export → Sound only (.m4a, AAC 192 kbit/s, into Music/MUSE) and GIF (loops, 15 fps, 480 px short side, up to 30 s, into Pictures/MUSE); both saved to the phone only, not as versions. |
+| GIF / audio-only export | Has | Has | S each | No competitor confirmed either. Android: Export → Sound only (.m4a, AAC 192 kbit/s, into Music/MUSE) and GIF (loops, 15 fps, 480 px short side, up to 30 s, into Pictures/MUSE); both saved to the phone only, not as versions. Mac: Export → Format: Sound only (.m4a, AAC 192 kbit/s) and GIF (loops, 15 fps, 480 px, up to 30 s), saved to a file you pick. |
 | Watermark | n/a | n/a | — | MUSE adds none |
 
 ## 15. Desktop only (Mac)

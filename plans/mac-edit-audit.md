@@ -174,6 +174,21 @@ Green in Mac CI run 42541190202 (MuseCore tests, build, click-through, Edit oper
 
 The contract (server `model.ts`, ops, fixtures) is WS8's 60bff55; the Mac port is byte-identical on the fixtures.
 
+## Parity wave 2 (as Android 214d602-era app rows, 22a950d, f90b4f3, and the tint and video animation contracts)
+
+Mac CI: pending on 04047be (run 42550126329); this section is marked green once that run passes.
+
+| Feature | Where on the Mac | Proven by |
+|---|---|---|
+| 4:3 and 2.35:1 (4096 × 1744 at 4K) | Ratio; Export shapes | EditSuiteControlsTests; ops check (4:3) |
+| Sound only (.m4a, AAC 192 kbit/s), GIF (15 fps, 480 px, up to 30 s), bitrate (0.6 / 1 / 1.6×), 2K | Export → Format, Bitrate | Ops check (length, size, pixel, sound of each file) |
+| Overlay ⇄ main track | Transform → Move to main / an overlay track | EditSuiteControlsTests; ops check |
+| Slip, Length, Replace clip, another take's sound, Loop to the end | Slip panel; Speed → Length; Bin take menu; Audio | EditSuiteParityTests |
+| Beat marks, cut clips to the beat, even out volume (measured levels) | Audio | EditSuiteParityTests |
+| Look sliders (vignette, sharpen, fade, colour fringe, glow, light leak), split screen | Look; Split screen panel | EditSuiteParityTests |
+| Tint (`adjust.tint`) | Adjust → Tint | Shared fixtures (colors) |
+| Video clip in/out animations (`animIn` / `animOut`) | Animate panel on video clips | Shared fixtures; EditSuiteParityTests |
+
 ## Left for the owner
 
 1. **Smooth slow-mo**: pick a frame-interpolation model (paid) or accept a free non-AI "frame blending" mode instead (switch removed until then).
