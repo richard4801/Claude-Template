@@ -204,6 +204,8 @@ data class EditSuiteUi(
     val helpersOff: Map<String, String> = emptyMap(),
     /** Translated captions: the languages offered (the server's list: only what the export draws), code → name. */
     val translateLanguages: List<Pair<String, String>> = emptyList(),
+    /** The server's note when the captions' script can't be drawn in exports yet (captions/translate `exportNotice`). */
+    val captionNotice: String? = null,
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
 ) {

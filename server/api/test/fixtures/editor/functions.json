@@ -1838,6 +1838,19 @@
      ]
     },
     {
+     "id": "vox",
+     "kind": "voice",
+     "items": [
+      {
+       "id": "v1",
+       "asset": "tune",
+       "startSec": 1.5,
+       "inSec": 0.4,
+       "outSec": 1.4
+      }
+     ]
+    },
+    {
      "id": "cap",
      "kind": "caption",
      "items": [],
@@ -1916,6 +1929,18 @@
     "index": 1
    },
    {
+    "text": "Hold",
+    "startSec": 1.6,
+    "endSec": 2,
+    "index": 0
+   },
+   {
+    "text": "on",
+    "startSec": 2.1,
+    "endSec": 2.4,
+    "index": 1
+   },
+   {
     "text": "to",
     "startSec": 3.7,
     "endSec": 3.95,
@@ -1937,7 +1962,7 @@
   "pages": [
    {
     "startSec": 0.5,
-    "endSec": 1.7,
+    "endSec": 2.8,
     "words": [
      {
       "text": "Hold",
@@ -1949,6 +1974,18 @@
       "text": "on",
       "startSec": 1,
       "endSec": 1.3,
+      "index": 1
+     },
+     {
+      "text": "Hold",
+      "startSec": 1.6,
+      "endSec": 2,
+      "index": 0
+     },
+     {
+      "text": "on",
+      "startSec": 2.1,
+      "endSec": 2.4,
       "index": 1
      }
     ]

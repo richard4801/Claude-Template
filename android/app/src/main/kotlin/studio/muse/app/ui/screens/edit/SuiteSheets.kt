@@ -802,6 +802,10 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
             }
         }
     }
+    // Captions the export can't draw yet (the server's note, or a language it doesn't list): said before exporting.
+    val lang = ct.language
+    (ui.captionNotice ?: if (lang != null && ui.translateLanguages.isNotEmpty() && ui.translateLanguages.none { it.first == lang || it.first == lang.substringBefore('-') })
+        "Captions in ${languageName(lang)} show in the app, but exports can't draw them yet" else null)?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.accent) }
     when (ui.captionTab) {
         "Font" -> {
             SuiteLabel("Font")
