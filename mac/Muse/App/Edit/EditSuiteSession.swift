@@ -1111,6 +1111,32 @@ final class EditSuiteSession {
         keyPickFrame = nil
     }
 
+    // MARK: Own fonts (contract, WS8 6ccd9aa)
+
+    /// A .ttf / .otf for the selected text: checked here (sfnt, 10 MB), uploaded, checked by the server (it names it from the
+    /// file), added as a font asset and set on the text. The preview draws it at once.
+    func importFont(_ url: URL) async {
+        guard state.selectedItem?.textItem != nil else { lastError = "Select a text first"; return }
+        let ext = url.pathExtension.lowercased()
+        guard ext == "ttf" || ext == "otf" else { lastError = "Fonts are .ttf or .otf files"; return }
+        guard let data = try? Data(contentsOf: url), data.count <= E.fontMaxBytes else { lastError = "That font is over 10 MB"; return }
+        guard E.fontName(data) != nil else { lastError = "That isn't a TrueType or OpenType font (WOFF and .ttc aren't supported)"; return }
+        do {
+            notice = "Uploading \(url.lastPathComponent)…"
+            let up = try await api.uploadEditorFile(url, contentType: ext == "otf" ? "font/otf" : "font/ttf", purpose: "font", progress: nil)
+            let check = try await api.checkFont(uploadId: up)
+            let id = project.newId("fnt")
+            files[id] = url
+            EditV2TextRenderer.registerOwnFont(id, file: url)
+            notice = nil
+            let a = E.Asset(id: id, kind: .font, upload: up, name: check.name)
+            if edit({ $0.setTextFont(a) }) { notice = "Using \(check.name)" }
+        } catch {
+            notice = nil
+            lastError = (error as? ApiError)?.message ?? "Couldn't add that font"
+        }
+    }
+
     // MARK: Style kits (parity, shared kit engine)
 
     /// The studio's saved style kits (members: their own), newest first; nil until loaded.

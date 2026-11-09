@@ -89,6 +89,14 @@ private struct Validator {
             try id("\(f).id", a.id)
             if assets[a.id] != nil { throw bad("\(f).id", "is used twice") }
             if a.kind == .lut && a.upload == nil { throw bad(f, "a lut asset must be an upload") }
+            if a.kind == .font {
+                if a.upload == nil { throw bad(f, "a font asset must be an upload") }
+                if a.durationSec != nil { throw bad("\(f).durationSec", "is not part of a font asset") }
+                if a.width != nil { throw bad("\(f).width", "is not part of a font asset") }
+                if a.height != nil { throw bad("\(f).height", "is not part of a font asset") }
+                if a.hasAudio != nil { throw bad("\(f).hasAudio", "is not part of a font asset") }
+            }
+            if let n = a.name, n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || n.utf16.count > 80 { throw bad("\(f).name", "must be 1–80 characters") }
             let refs = [a.take, a.upload, a.library].compactMap { $0 }
             if refs.count != 1 || refs.contains(where: { $0.isEmpty || $0.utf16.count > 100 }) { throw bad(f, "needs exactly one of take, upload or library") }
             try num("\(f).durationSec", a.durationSec, 0.01, 36_000)
@@ -125,7 +133,7 @@ private struct Validator {
                     try num("\(f).caption.words.\(j).startSec", w.startSec, 0, 36_000, optional: false)
                     try num("\(f).caption.words.\(j).endSec", w.endSec, w.startSec, 36_000, optional: false)
                 }
-                try textStyle("\(f).caption.style", c.style.textStyle)
+                try textStyle("\(f).caption.style", c.style.textStyle, ownFont: false)
                 try color("\(f).caption.style.highlightColor", c.style.highlightColor, optional: false)
                 try num("\(f).caption.style.y", c.style.y, 0, 1)
                 try num("\(f).caption.style.wordsPerPage", c.style.wordsPerPage, 1, 8)
@@ -216,7 +224,7 @@ private struct Validator {
                     if n < 1 || n > E.maxText { throw bad("\(g).text", "must be 1–\(E.maxText) characters") }
                     try num("\(g).startSec", tx.startSec, 0, 600, optional: false)
                     try num("\(g).durationSec", tx.durationSec, E.minItemSec, 600, optional: false)
-                    try textStyle("\(g).style", tx.style)
+                    try textStyle("\(g).style", tx.style, ownFont: true)
                     if tx.transform != nil { try visual(g, fit: nil, transform: tx.transform, crop: nil, opacity: nil, adjust: nil, filter: nil, look: nil) }
                     try num("\(g).opacity", tx.opacity, 0, 1)
                     try kfs("\(g).keyframes", tx.keyframes, tx.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
@@ -356,7 +364,11 @@ private struct Validator {
         try num("\(f).durationSec", a.durationSec, 0.1, 2, optional: false)
     }
 
-    func textStyle(_ f: String, _ s: EditV2.TextStyle) throws {
+    func textStyle(_ f: String, _ s: EditV2.TextStyle, ownFont: Bool) throws {
+        if let fa = s.fontAsset {
+            if !ownFont { throw bad("\(f).fontAsset", "captions use the built-in fonts") }
+            if assets[fa]?.kind != .font { throw bad("\(f).fontAsset", "must be a font asset") }
+        }
         if ![400, 700, 900].contains(s.weight) { throw bad("\(f).weight", "must be 400, 700 or 900") }
         try num("\(f).sizePct", s.sizePct, 0.015, 0.25, optional: false)
         try color("\(f).color", s.color, optional: false)

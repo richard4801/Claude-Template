@@ -156,6 +156,41 @@ final class EditV2ColorKeysTests: XCTestCase {
         XCTAssertNil(E.problem(s.project))
     }
 
+    /// Own fonts: the name table (full name, else family + style; Windows over Mac), and refusing what isn't sfnt.
+    func testFontName() {
+        func sfnt(_ names: [(platform: Int, id: Int, text: String)]) -> Data {
+            var strings = [UInt8](), records = [UInt8]()
+            func be16(_ v: Int) -> [UInt8] { [UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
+            func be32(_ v: Int) -> [UInt8] { [UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
+            for n in names {
+                let bytes: [UInt8] = n.platform == 3 ? n.text.utf16.flatMap { be16(Int($0)) } : Array(n.text.utf8)
+                records += be16(n.platform) + be16(n.platform == 3 ? 1 : 0) + be16(n.platform == 3 ? 0x409 : 0) + be16(n.id) + be16(bytes.count) + be16(strings.count)
+                strings += bytes
+            }
+            let table = be16(0) + be16(names.count) + be16(6 + records.count) + records + strings
+            let header = be32(0x0001_0000) + be16(1) + be16(16) + be16(0) + be16(0)
+            let dir = Array("name".utf8) + be32(0) + be32(12 + 16) + be32(table.count)
+            return Data(header + dir + table)
+        }
+        XCTAssertEqual(E.fontName(sfnt([(3, 1, "Figtree"), (3, 2, "Bold")])), "Figtree Bold")
+        XCTAssertEqual(E.fontName(sfnt([(1, 4, "Mac Full"), (3, 4, "Win Full")])), "Win Full")
+        XCTAssertEqual(E.fontName(sfnt([])), "Font")
+        XCTAssertNil(E.fontName(Data("wOFF0000000000000".utf8)), "WOFF is refused")
+        XCTAssertNil(E.fontName(Data([0, 1])))
+    }
+
+    func testOwnFontOnText() throws {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 6), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        XCTAssertTrue(s.addText("Hello"))
+        let font = E.Asset(id: "fnt1", kind: .font, upload: "up1", name: "Figtree Bold")
+        XCTAssertTrue(s.setTextFont(font))
+        XCTAssertEqual(s.selectedItem?.textItem?.style.fontAsset, "fnt1")
+        XCTAssertEqual(s.ownFonts.map(\.id), ["fnt1"])
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertTrue(s.setTextFont(nil))
+        XCTAssertNil(s.selectedItem?.textItem?.style.fontAsset)
+    }
+
     /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
     func testAutoAdjustFixtures() throws {
         let cases = try editorFixture("functions")["autoAdjust"].array

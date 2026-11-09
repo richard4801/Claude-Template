@@ -304,4 +304,28 @@ extension EditSuiteState {
             it = .adjust(c)
         }
     }
+
+    // MARK: Own fonts (contract, WS8 6ccd9aa)
+
+    /// The project's own fonts (font assets), in the order they were added.
+    public var ownFonts: [E.Asset] { project.assets.filter { $0.kind == .font } }
+
+    /// Adds a checked font upload as a font asset (if new) and sets it on the selected text; nil `asset` puts the built-in
+    /// family back.
+    @discardableResult
+    public mutating func setTextFont(_ asset: E.Asset?) -> Bool {
+        guard selectedItem?.textItem != nil else { return false }
+        if let a = asset, a.kind != .font { return false }
+        let sel = selection
+        return apply { p in
+            var q = asset.map { p.addingAsset($0) } ?? p
+            guard let id = sel, let r = q.updating(id, { it in
+                guard case .text(var tx) = it else { return }
+                tx.style.fontAsset = asset?.id
+                it = .text(tx)
+            }) else { return nil }
+            q = r
+            return q
+        }
+    }
 }

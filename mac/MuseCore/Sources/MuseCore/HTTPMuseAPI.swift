@@ -362,6 +362,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     }
     public func deleteEditKit(id: String) async throws { _ = try await send(request("DELETE", "v1/editor/kits/\(Self.pathKey(id))")) }
     public func validateLut(uploadId: String) async throws -> LutValidation { try await call("POST", "v1/editor/luts/validate", LutValidateBody(uploadId: uploadId)) }
+    public func checkFont(uploadId: String) async throws -> FontCheck { try await call("POST", "v1/editor/uploads/font-check", LutValidateBody(uploadId: uploadId)) }
 
     public func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String {
         let body = UploadBody.file(file)

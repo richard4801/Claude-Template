@@ -35,6 +35,31 @@ enum EditV2TextRenderer {
         }
     }
 
+    // MARK: Own fonts (WS8 6ccd9aa): font assets loaded from their files, by asset id
+
+    private static let ownLock = NSLock()
+    nonisolated(unsafe) private static var own: [String: CGFont] = [:]
+
+    /// Loads a font asset's .ttf / .otf (once per asset id); false when the file isn't a font Core Text can draw.
+    @discardableResult
+    static func registerOwnFont(_ assetId: String, file: URL) -> Bool {
+        ownLock.lock(); let known = own[assetId] != nil; ownLock.unlock()
+        if known { return true }
+        guard let data = try? Data(contentsOf: file), let provider = CGDataProvider(data: data as CFData), let cg = CGFont(provider) else { return false }
+        ownLock.lock(); own[assetId] = cg; ownLock.unlock()
+        return true
+    }
+
+    /// The style's font: its own font file when it names one that's loaded (drawn as is: no synthesised weight), else
+    /// the built-in family.
+    static func font(_ style: EditV2.TextStyle, size: CGFloat) -> NSFont {
+        if let id = style.fontAsset {
+            ownLock.lock(); let cg = own[id]; ownLock.unlock()
+            if let cg { return CTFontCreateWithGraphicsFont(cg, size, nil, nil) as NSFont }
+        }
+        return font(style.font, weight: style.weight, size: size)
+    }
+
     static func font(_ f: EditV2.Font, weight: Int, size: CGFloat) -> NSFont {
         let w: NSFont.Weight = weight >= 900 ? .black : weight >= 700 ? .bold : .regular
         if let family = family(f) {
@@ -70,7 +95,7 @@ enum EditV2TextRenderer {
         para.lineBreakMode = .byWordWrapping
         func attrs(_ scale: Double, _ color: String) -> [NSAttributedString.Key: Any] {
             let size = fontSize * CGFloat(scale)
-            return [fontKey: font(style.font, weight: style.weight, size: size), colorKey: cgColor(color),
+            return [fontKey: font(style, size: size), colorKey: cgColor(color),
                     kernKey: NSNumber(value: Double(size) * (style.letterSpacing ?? 0)), paragraphKey: para]
         }
         let fill = NSMutableAttributedString()

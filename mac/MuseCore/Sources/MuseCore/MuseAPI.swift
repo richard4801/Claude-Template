@@ -226,6 +226,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String
     /// POST /v1/editor/luts/validate {uploadId}
     func validateLut(uploadId: String) async throws -> LutValidation
+    /// POST /v1/editor/uploads/font-check (own fonts): bad_request "not a TrueType or OpenType font" otherwise
+    func checkFont(uploadId: String) async throws -> FontCheck
     /// POST /v1/takes/{id}/versions with `edits: EditProject` (v2).
     func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) async throws -> Take
 

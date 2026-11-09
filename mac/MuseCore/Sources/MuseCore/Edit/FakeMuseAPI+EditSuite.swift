@@ -194,6 +194,14 @@ extension FakeMuseAPI {
         return id
     }
 
+    public func checkFont(uploadId: String) throws -> FontCheck {
+        guard let f = editorFiles[uploadId] else { throw ApiError("not_found", "The upload hasn't arrived") }
+        guard let data = try? Data(contentsOf: f) else { throw ApiError("bad_request", "not a TrueType or OpenType font") }
+        guard data.count <= EditV2.fontMaxBytes else { throw ApiError("bad_request", "the font is over 10 MB") }
+        guard let name = EditV2.fontName(data) else { throw ApiError("bad_request", "not a TrueType or OpenType font") }
+        return FontCheck(uploadId: uploadId, name: name)
+    }
+
     public func validateLut(uploadId: String) throws -> LutValidation {
         guard let f = editorFiles[uploadId] else { throw ApiError("not_found", "The upload hasn't arrived") }
         guard let data = try? Data(contentsOf: f) else { throw ApiError("bad_request", ".cube: couldn't read the file") }
