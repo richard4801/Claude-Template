@@ -242,9 +242,10 @@ const Env = z.object({
   // ---- Workstream 2: camera sessions, "Direct with Claude" chat, MUSE MCP server (plans/mcp-bridge.md)
   /** Claude API key for the in-app Direct with Claude chat. Unset: the chat answers director_unavailable. */
   ANTHROPIC_API_KEY: str(),
-  // AssemblyAI (owner's account): captions and cuts transcription. Unset = the Replicate transcriber only.
+  // AssemblyAI (owner's account): captions and cuts transcription. Unset = the Replicate transcriber only. The EU host
+  // by default (owner's choice 2026-11-09: same price; per AssemblyAI's docs, EU files are never used for training).
   ASSEMBLYAI_API_KEY: str(),
-  ASSEMBLYAI_API_URL: z.string().default('https://api.assemblyai.com'),
+  ASSEMBLYAI_API_URL: z.string().default('https://api.eu.assemblyai.com'),
   DIRECTOR_MODEL: z.string().default('claude-opus-5-5'),
   /** workstream 1 (G8): the model that writes Recreate shot briefs on the server (opt-in, priced, in the editor's daily cap). */
   RECREATE_BRIEF_MODEL: z.string().default('claude-sonnet-5-5'),

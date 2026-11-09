@@ -87,6 +87,17 @@ inside a line are spread evenly.
 - **Build size:** S. A server route, one prompt, a language picker and a "translated" caption track.
 - **Recommendation:** Claude Haiku, practically free at our volume, with Sonnet as an optional "best quality" setting.
 
+**Owner's decisions, 2026-11-09 (built by WS16):**
+- **Translation stays on our direct Claude path** (Haiku 5.5 standard, Sonnet 5.5 best). AssemblyAI's built-in translation
+  returns text with no word timing, and its LLM Gateway charges about 10× our direct Claude rate, so no gateway route.
+- **The minimum charge stays $0.01** per translation.
+- **Captions (transcription) go through AssemblyAI** when `ASSEMBLYAI_API_KEY` is set. It's a model the owner can pick in
+  Default models (purpose captions; cuts use it too), and the default once the key is set. Universal-3.5 Pro covers its
+  18 languages at $0.21/hr, and Universal-2 the rest at $0.15/hr. The job settles on the audio length × the model used.
+- **EU host by default** (`ASSEMBLYAI_API_URL` = https://api.eu.assemblyai.com): the same price, and per AssemblyAI's
+  docs EU files are never used for model training. Each transcript is deleted at AssemblyAI as soon as its words are stored.
+- **No live test from the server side:** the owner's first real Captions run in the app is the check.
+
 ## 5. AI music: Dropped by the owner 2026-11-09
 
 **Not being built.** Nothing was built on the server: no job, no stubs, no key. The research below is kept for the

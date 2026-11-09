@@ -1,5 +1,5 @@
 // AssemblyAI transcription (captions and cuts): the owner's account, key ASSEMBLYAI_API_KEY (server env; sent only in
-// the authorization header, never logged). Async pre-recorded API: POST /v2/transcript {audio_url} → poll
+// the authorization header, never logged), on the EU host by default (ASSEMBLYAI_API_URL). Async pre-recorded API: POST /v2/transcript {audio_url} → poll
 // GET /v2/transcript/{id} (queued | processing | completed | error) → words in ms. The transcript is deleted at
 // AssemblyAI as soon as we have the words (DELETE also removes the audio it fetched), finished or not.
 // Price (assemblyai.com/pricing, 2026-10-27): per hour of audio, Universal-3.5 Pro $0.21, Universal-2 $0.15; with the
