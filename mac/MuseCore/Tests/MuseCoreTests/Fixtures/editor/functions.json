@@ -258,6 +258,20 @@
      "t": 4,
      "src": 8
     }
+   ],
+   "tappedMarks": [
+    {
+     "timelineT": 1.6,
+     "src": 2.9
+    },
+    {
+     "timelineT": 4.25,
+     "src": 6.875
+    },
+    {
+     "timelineT": 7,
+     "src": 11
+    }
    ]
   },
   {
@@ -291,6 +305,20 @@
     },
     {
      "t": 4,
+     "src": 3
+    }
+   ],
+   "tappedMarks": [
+    {
+     "timelineT": 1.6,
+     "src": 0.825
+    },
+    {
+     "timelineT": 4.25,
+     "src": 2.813
+    },
+    {
+     "timelineT": 7,
      "src": 3
     }
    ]

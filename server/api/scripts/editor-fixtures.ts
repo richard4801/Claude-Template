@@ -446,7 +446,9 @@ const audioSpeedClips = [
   { id: 'v', asset: 'vo', startSec: 0.5, inSec: 0, outSec: 3, speed: 0.75, fadeInSec: 0.2 },
 ] as M.AudioClip[];
 const audioSpeed = audioSpeedClips.map(c => ({ clip: c, length: M.clipLength(c), beatsOnTimeline: (c.beats ?? []).map(b => Math.round((c.startSec + M.clipTimeAt(c, b)) * 1e6) / 1e6),
-  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })) }));
+  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })),
+  // A beat mark tapped at timeline time T is stored as its source time (rounded to 1 ms).
+  tappedMarks: [1.6, 4.25, 7].map(T => ({ timelineT: T, src: Math.round(M.clipSourceAt(c, T - c.startSec) * 1000) / 1000 })) }));
 // Adjustment layers (M): adjustLayerMatrix over time on a project with two adjust tracks.
 const adjustProject = (() => {
   const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;
