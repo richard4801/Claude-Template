@@ -21,10 +21,11 @@ import { detectSilences, silenceCuts } from './silence.js';
 import { decodeMono, detectBeats } from './audio.js';
 import { REVERSE_LIMITS, reverseVideo } from './reverse.js';
 import { STABILIZE_LIMITS, stabilizeVideo, vidstabAvailable } from './stabilize.js';
+import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError, captionLines, expectedTokens, translateClient, translateUsd, translateWords, type Quality, type TranslateClient } from './translate.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
@@ -33,13 +34,13 @@ export const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', briefs: 'Writing the briefs' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', briefs: 'Writing the briefs' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
 export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
 export const MAX_KEEP_POINTS = 10;
-export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
+export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; quality?: Quality; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -69,6 +70,11 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
       return { x: n('x', 0, 1), y: n('y', 0, 1), t: n('t', 0, EDITOR_LIMITS.maxMatteSec, 0), keep: q.keep !== false };
     });
     if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
+  }
+  if (kind === 'translate') {
+    if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage]) throw badRequest(`options.targetLanguage: one of ${Object.keys(TRANSLATE_LANGUAGES).join(', ')}`);
+    out.targetLanguage = o.targetLanguage;
+    if (o.quality !== undefined) { if (o.quality !== 'standard' && o.quality !== 'best') throw badRequest('options.quality: "standard" or "best"'); out.quality = o.quality; }
   }
   if (kind === 'denoise' && o.analyzeOnly !== undefined) { if (typeof o.analyzeOnly !== 'boolean') throw badRequest('options.analyzeOnly: true or false'); out.analyzeOnly = o.analyzeOnly; }
   return out;
@@ -191,7 +197,14 @@ export class EditorAiService {
     if (kind === 'stabilize' && !(await this.stabilizeAvailable())) throw badRequest('kind: stabilise is not available on this server');
     const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats' || kind === 'reverse' || kind === 'stabilize';
     if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest(kind === 'beats' ? 'kind: beat detection is not available on this server' : kind === 'reverse' ? 'kind: reverse is not available on this server' : 'options.silenceOnly: not available on this server');
-    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, opts) : null;
+    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || kind === 'translate' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, kind === 'translate' ? { fromJobId: opts.fromJobId } : opts) : null;
+    if (kind === 'translate') {
+      if (!this.translator()) throw badRequest('kind: translating captions is not available on this server');
+      if (!reuse) throw badRequest('options: make captions for this video first');
+      if (reuse.words.length > TRANSLATE_LIMITS.maxWords) throw badRequest(`source: at most ${TRANSLATE_LIMITS.maxWords} words`);
+      if (reuse.language === opts.targetLanguage) throw badRequest('options.targetLanguage: the captions are already in that language');
+      return { kind, opts, src, reuse, usd: translateUsd(opts.quality ?? 'standard', expectedTokens(captionLines(reuse.words)), this.markup) };
+    }
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
     let usd = 0;
@@ -212,7 +225,7 @@ export class EditorAiService {
     const e = await this.estimate(u, body);
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
+    const models = e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     try {
@@ -243,6 +256,12 @@ export class EditorAiService {
     await new Promise<void>(r => this.localWaiting.push(r));
   }
   private localFree() { const next = this.localWaiting.shift(); if (next) next(); else this.localBusy = false; }
+  private translateFake: TranslateClient | null = null;
+  private translateReal: TranslateClient | null = null;
+  /** Tests: a fake Claude client for translations. */
+  setTranslateClient(c: TranslateClient | null) { this.translateFake = c; }
+  /** The client translations use (the server's Anthropic key), or null when the server has none. */
+  translator(): TranslateClient | null { return this.translateFake ?? (this.translateReal ??= translateClient(this.ctx.config.ANTHROPIC_API_KEY)); }
   private vidstab: Promise<boolean> | null = null;
   /** Whether this server's ffmpeg can stabilise (checked once). */
   stabilizeAvailable() { return (this.vidstab ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH).then(ok => ok && vidstabAvailable(this.ctx.config.FFMPEG_PATH))); }
@@ -261,7 +280,7 @@ export class EditorAiService {
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
       await this.patch(id, { phase: PHASE[row.kind], progress: 5 });
       const url = await this.ctx.storage.presignGet(src.key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
-      let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0;
+      let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0, spentUsd: number | null = null;
       const transcript = async () => {
         if (reuse) return reuse;
         const t = await p.transcribe(url, d, o.language ?? null, hooks);
@@ -296,6 +315,11 @@ export class EditorAiService {
             result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d };
           } finally { this.localFree(); }
         }
+      } else if (row.kind === 'translate') {
+        const q = o.quality ?? 'standard';
+        const t = await translateWords(this.translator()!, reuse!.words, o.targetLanguage!, q, f => this.patch(id, { progress: 5 + f * 90 }).then(() => undefined));
+        spentUsd = translateUsd(q, t.usage, this.markup);
+        result = { language: o.targetLanguage, sourceLanguage: reuse!.language, words: t.words, lines: t.lines, untranslatedLines: t.missing, quality: q, durationSec: d };
       } else if (row.kind === 'cuts' && o.silenceOnly) {
         const minSilenceSec = o.minSilenceSec ?? CUT_DEFAULTS.minSilenceSec, keepPadSec = o.keepPadSec ?? CUT_DEFAULTS.keepPadSec;
         const sil = await this.withLocalInput(src.key, input => detectSilences(this.ctx.config.FFMPEG_PATH, input, d, { minSilenceSec, noiseDb: o.noiseDb }));
@@ -319,7 +343,7 @@ export class EditorAiService {
         result = { suggestion: noiseSuggestion(reuse?.words ?? []) };
       }
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
-      const actual = !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
+      const actual = spentUsd != null ? spentUsd : !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
       if (row.holdTokens || actual > 0) await this.ctx.money.settle(u.studioId, u.id, id, row.holdTokens, actual, `Editor ${row.kind}`);
       await this.patch(id, { state: 'done', progress: 100, phase: 'Done', result, cost: actual, finishedAt: Date.now() });
     } catch (e) {
@@ -328,6 +352,7 @@ export class EditorAiService {
       if (!cancelled) this.ctx.log.warn({ err: (e as Error).message, job: id, kind: row.kind }, 'editor job failed');
       const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
         : e instanceof ReplicateError && e.kind === 'out_of_credit' ? 'The studio is out of AI credit · ask the owner'
+        : e instanceof TranslateError ? (e.kind === 'refused' ? 'These captions couldn’t be translated · you weren’t charged' : 'Couldn’t translate these captions this time · you weren’t charged')
         : e instanceof ReplicateError && (row.kind === 'reverse' || row.kind === 'stabilize') && /^(Reverse|Stabilise) works/.test(e.message) ? e.message : 'Something went wrong · try again';
       await this.patch(id, { state: cancelled ? 'cancelled' : 'failed', phase: msg, error: msg, finishedAt: Date.now() }).catch(() => {});
     } finally {
@@ -466,6 +491,7 @@ export class EditorAiService {
       denoise: { available: paid },
       beats: { available: true, free: true },
       stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
+      translate: { available: paid && !!this.translator(), languages: Object.keys(TRANSLATE_LANGUAGES), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }

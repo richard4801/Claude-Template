@@ -4,7 +4,7 @@ import { bigint, doublePrecision, index, integer, jsonb, pgTable, serial, text }
 const ms = (name: string) => bigint(name, { mode: 'number' });
 
 /** 'briefs' (workstream 1, G8): Recreate shot briefs written on the server; counted in the day's spend, not listed. */
-export type EditorJobKind = 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats' | 'reverse' | 'stabilize' | 'briefs';
+export type EditorJobKind = 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats' | 'reverse' | 'stabilize' | 'translate' | 'briefs';
 export type EditorJobState = 'running' | 'done' | 'failed' | 'cancelled';
 /** What the job works on: a take of the studio, or an upload of the studio (with the duration the app measured). */
 export type EditorSource = { takeId?: string; uploadId?: string; durationSec: number };
