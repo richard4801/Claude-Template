@@ -11,6 +11,7 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 
     private val kindList = listOf(
         ProviderKind("replicate", "Replicate", "Starts with r8_", "https://replicate.com/account/api-tokens"),
         ProviderKind("fal", "fal", "A key id and secret, joined with a colon", "https://fal.ai/dashboard/keys"),
+        ProviderKind("muapi", "Muapi", "Your Muapi API key", "https://muapi.ai/dashboard"),
     )
     private val list = mutableListOf(
         Provider("p_demo", "replicate", "Studio Replicate", "7Q2k", "ok", 1_762_600_000_000, 1_762_000_000_000),
@@ -46,7 +47,7 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 
     private fun view(p: Provider) = p.copy(models = counts(p.id))
     private fun provider(id: String) = list.firstOrNull { it.id == id } ?: throw ApiException("not_found", "That provider isn't connected any more")
     private fun check(kind: String, key: String) {
-        val ok = when (kind) { "replicate" -> key.startsWith("r8_") && key.length >= 12; "fal" -> ':' in key && key.length >= 12; else -> false }
+        val ok = when (kind) { "replicate" -> key.startsWith("r8_") && key.length >= 12; "fal" -> ':' in key && key.length >= 12; "muapi" -> key.length >= 12; else -> false }
         if (!ok) throw ApiException("invalid_key", "That key didn't work with ${kindList.firstOrNull { it.kind == kind }?.label ?: kind}. Nothing was saved.")
     }
 

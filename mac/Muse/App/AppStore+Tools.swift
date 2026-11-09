@@ -461,7 +461,7 @@ extension AppStore {
             let a = try await api.archiveModel(id: m.id)
             dropArchived(a)
             if screen == .profile { go(.models) }
-            showToast("\(m.name) archived", action: "Archived") { [weak self] in self?.openSettings(.archived) }
+            showToast("\(m.name) archived", action: "Archived") { [weak self] in self?.openSettings(.studio) }
         }
     }
 

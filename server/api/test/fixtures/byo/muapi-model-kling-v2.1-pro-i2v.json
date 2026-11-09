@@ -1,0 +1,206 @@
+{
+ "name": "kling-v2.1-pro-i2v",
+ "description": "Kling 2.1 Pro is the high-end version of Kuaishou’s video generation model, offering enhanced realism, longer motion sequences, and cinematic quality. In I2V mode, it animates static images with fluid environmental effects.",
+ "category": "Image to Video",
+ "family": "kling-v2.1",
+ "group_of": "video",
+ "domain": "ai",
+ "cost": 0.4,
+ "cost_currency": "USD",
+ "cost_strategy": "kling-v2.1-pro-video",
+ "dynamic_pricing": true,
+ "endpoint": "/api/v1/kling-v2.1-pro-i2v",
+ "endpoint_url": "kling-v2.1-pro-i2v",
+ "is_enabled": 1,
+ "is_coming_soon": false,
+ "input_fields": [
+  "prompt",
+  "image_url",
+  "last_image",
+  "aspect_ratio",
+  "duration"
+ ],
+ "required_fields": [
+  "prompt",
+  "image_url"
+ ],
+ "estimate_endpoint": "/api/v1/models/kling-v2.1-pro-i2v/estimate-cost",
+ "input_schema": {
+  "schemas": {
+   "input_data": {
+    "x-order-properties": [
+     "prompt",
+     "image_url",
+     "last_image",
+     "aspect_ratio",
+     "duration"
+    ],
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "examples": [
+       "A cyberpunk woman with neon tattoos stands in a rainy alley as glowing signs reflect vividly in puddles around her. Her coat flutters slightly in the breeze, and she makes subtle head movements, capturing the moody, futuristic atmosphere without any scene changes."
+      ],
+      "description": "Text prompt describing the video.",
+      "type": "string",
+      "title": "Prompt",
+      "name": "prompt"
+     },
+     "image_url": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/ai-images/186/250681938484/aae57ec8-a4ea-4122-9b4c-42113fa6b1c7.jpg"
+      ],
+      "description": "URL of the input image used to generate video.",
+      "field": "image",
+      "type": "string",
+      "title": "Image URL",
+      "name": "image_url"
+     },
+     "last_image": {
+      "examples": [
+       null
+      ],
+      "description": "URL of the input last image.",
+      "field": "image",
+      "type": "string",
+      "title": "Last Image",
+      "name": "last_image"
+     },
+     "aspect_ratio": {
+      "enum": [
+       "16:9",
+       "9:16",
+       "1:1"
+      ],
+      "title": "Aspect Ratio",
+      "name": "aspect_ratio",
+      "type": "string",
+      "description": "Aspect ratio of the output video.",
+      "default": "16:9"
+     },
+     "duration": {
+      "title": "Duration",
+      "name": "duration",
+      "type": "int",
+      "description": "The duration of the generated video in seconds",
+      "default": 5,
+      "minValue": 5,
+      "maxValue": 10,
+      "step": 5
+     }
+    },
+    "title": "BaseInput",
+    "required": [
+     "prompt",
+     "image_url"
+    ],
+    "endpoint_url": "kling-v2.1-pro-i2v"
+   },
+   "output_data": {
+    "x-fal-order-properties": [
+     "video"
+    ],
+    "type": "object",
+    "properties": {
+     "video": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/videos/186/870174106372/73e33cd5-af1a-452b-9865-45bd0322b7ff.mp4"
+      ],
+      "description": "The generated video",
+      "title": "Video",
+      "comparison": false
+     }
+    },
+    "title": "Kling2.1ProVideo",
+    "required": [
+     "video"
+    ]
+   }
+  }
+ },
+ "output_schema": {
+  "schemas": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "title": "request_id",
+     "type": "string",
+     "description": "prediction request_id"
+    },
+    "status": {
+     "title": "status",
+     "type": "string",
+     "description": "prediction status"
+    },
+    "output": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "title": "id",
+       "type": "string",
+       "description": "prediction request_id"
+      },
+      "urls": {
+       "title": "urls",
+       "type": "object",
+       "get": {
+        "title": "get",
+        "type": "string",
+        "format": "uri",
+        "description": "URL to retrieve the prediction result"
+       }
+      },
+      "error": {
+       "title": "error",
+       "type": "string",
+       "description": "Error message if the prediction failed"
+      },
+      "status": {
+       "title": "status",
+       "type": "string",
+       "description": "Status of the prediction (e.g., completed, failed)"
+      },
+      "outputs": {
+       "title": "outputs",
+       "type": "array",
+       "description": "List of output URLs",
+       "items": {
+        "title": "items",
+        "type": "string",
+        "format": "uri"
+       }
+      },
+      "timings": {
+       "title": "timings",
+       "type": "object",
+       "inference": {
+        "title": "inference",
+        "type": "number",
+        "description": "Inference time in seconds"
+       }
+      },
+      "created_at": {
+       "title": "created_at",
+       "type": "string",
+       "format": "date-time",
+       "description": "Timestamp when the prediction was created"
+      },
+      "has_nsfw_contents": {
+       "title": "has_nsfw_contents",
+       "type": "array",
+       "description": "List indicating NSFW content presence per output",
+       "items": {
+        "title": "items",
+        "type": "boolean"
+       }
+      }
+     },
+     "title": "output",
+     "required": [
+      "prompt"
+     ]
+    }
+   }
+  }
+ }
+}

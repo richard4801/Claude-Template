@@ -16,7 +16,8 @@ describe('render helpers (unit)', () => {
     expect(kfExpr(undefined, 1)).toBe('1');
     expect(kfExpr([{ t: 0, v: 1 }], 2)).toBe('1');
     const e = kfExpr([{ t: 0, v: 1 }, { t: 2, v: 1.5 }], 1);
-    expect(e).toBe('if(lt(t,0),1,if(lt(t,2),1+(0.5)*(t-0)/2,1.5))');
+    expect(e).toBe('if(lt(t,0),1,if(lt(t,2),1+(0.5)*((t-0)/2),1.5))');
+    expect(kfExpr([{ t: 0, v: 0, ease: 'easeIn' }, { t: 1, v: 1 }], 0, 'T')).toBe('if(lt(T,0),0,if(lt(T,1),0+(1)*pow(((T-0)/1),2),1))');
     expect(atempo(1)).toEqual([]);
     expect(atempo(4)).toEqual(['atempo=2', 'atempo=2']);
     expect(atempo(0.25)).toEqual(['atempo=0.5', 'atempo=0.5']);
@@ -179,11 +180,10 @@ describe.skipIf(!hasFfmpeg)('render an edit project (ffmpeg)', () => {
 
   it('a guide track replaces the project\'s sound, padded to a set length; what can\'t be drawn is listed', async () => {
     const p = project();
-    (p.tracks[0]!.items[0] as M.VideoClip).mask = { shape: 'circle' };
-    p.tracks.push({ id: 'ov', kind: 'video', items: [{ id: 'v1', asset: 'a', inSec: 0, outSec: 1, speed: 1, startSec: 0 } as M.VideoClip] });
+    (p.tracks[0]!.items[0] as M.VideoClip).look = { lut: 'pack:not-on-this-server' };
     const out = path.join(dir, 'guide.mp4');
     const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, files, out, { maxSide: 320, audio: { file: files.m! }, durationSec: 5 });
-    expect(r.unsupported.sort()).toEqual(['masks', 'overlays']);
+    expect(r.unsupported).toEqual(['a look that is not on the server']);
     const info = await probe('ffprobe', out);
     expect(Math.abs(info.duration - 5)).toBeLessThan(0.1);
     expect(info.audioCodec).toBeTruthy();

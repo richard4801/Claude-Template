@@ -1,23 +1,25 @@
 // Bring your own provider · one adapter per provider kind. Each validates a key with a free read-only call, searches the
 // provider's models, reads one model's schema (and price, when the provider publishes it), and runs a prediction with
-// the owner's key. Everything happens server-side; keys go only into the Authorization header of calls to the
-// provider's own host and never into an error message or a log line. To add a provider (e.g. an OpenAI-compatible image
-// endpoint), implement ProviderAdapter and add it to ADAPTERS.
+// the owner's key. Everything happens server-side; keys go only into the auth header (Authorization, or Muapi's x-api-key)
+// of calls to the provider's own host and never into an error message or a log line. To add a provider (e.g. an
+// OpenAI-compatible image endpoint), implement ProviderAdapter and add it to KINDS and adapters().
 import { CREDIT_RE, errorText, ReplicateError, SAFETY_RE } from '../replicate/client.js';
 import { analyse, type Analysis, type Kind } from './classify.js';
 
-export type ProviderKind = 'replicate' | 'fal';
+export type ProviderKind = 'replicate' | 'fal' | 'muapi';
 export type Price = { basis: 'per_run' | 'per_second'; costUsd: number; source: 'provider' | 'owner' };
 export type RawModel = { ref: string; version: string | null; name: string; description: string | null; analysis: Analysis; price: Price | null };
 export type Page = { models: RawModel[]; nextCursor: string | null };
 export type RunStatus = { status: 'running' | 'succeeded' | 'failed' | 'canceled'; url?: string; error?: ReplicateError };
-export type Urls = { replicate: string; falPlatform: string; falQueue: string };
+export type Urls = { replicate: string; falPlatform: string; falQueue: string; muapi: string };
 
 export interface ProviderAdapter {
   kind: ProviderKind;
   label: string;
   keyHint: string;
   keyUrl: string;
+  /** Whether `ref` has this provider's model-id shape (checked before any call; refuses path tricks). */
+  validRef(ref: string): boolean;
   /** A free read-only call: 'ok', or 'invalid' for a refused key. Throws provider_unreachable otherwise. */
   validate(key: string): Promise<'ok' | 'invalid'>;
   search(key: string, o: { q?: string; kind?: Kind; cursor?: string | null; limit: number }): Promise<Page>;
@@ -32,7 +34,11 @@ export class ProviderUnreachable extends Error { constructor(readonly kind: Prov
 type Fetch = typeof fetch;
 const trim = (u: string) => u.replace(/\/$/, '');
 const REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+/** An `owner/name[/…]` model id (Replicate, fal). */
 export const validRef = (ref: string) => REF_RE.test(ref) && ref.length <= 200 && !ref.includes('..');
+const SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** A single path segment (Muapi model names and endpoints): no slash, no `..`. */
+export const validSegment = (ref: string) => SEGMENT_RE.test(ref) && ref.length <= 100 && !ref.includes('..');
 
 /** The first URL in a prediction output: a string, a list, or {video|image|images|url}. */
 export function firstUrl(o: unknown): string | undefined {
@@ -67,6 +73,7 @@ export class ReplicateAdapter implements ProviderAdapter {
   label = 'Replicate';
   keyHint = 'An API token from replicate.com → Account → API tokens (starts with r8_)';
   keyUrl = 'https://replicate.com/account/api-tokens';
+  validRef(ref: string) { return validRef(ref) && ref.split('/').length === 2; }
   constructor(private base: () => string, private f: Fetch = fetch) {}
   private h(key: string) { return { authorization: `Bearer ${key}`, 'content-type': 'application/json', accept: 'application/json' }; }
 
@@ -166,6 +173,7 @@ export class FalAdapter implements ProviderAdapter {
   label = 'fal.ai';
   keyHint = 'An API key from fal.ai → Dashboard → API keys';
   keyUrl = 'https://fal.ai/dashboard/keys';
+  validRef(ref: string) { return validRef(ref); }
   constructor(private urls: () => Pick<Urls, 'falPlatform' | 'falQueue'>, private f: Fetch = fetch) {}
   private h(key: string) { return { authorization: `Key ${key}`, 'content-type': 'application/json', accept: 'application/json' }; }
 
@@ -268,7 +276,224 @@ export class FalAdapter implements ProviderAdapter {
   }
 }
 
-export const KINDS: ProviderKind[] = ['replicate', 'fal'];
+// ---------------------------------------------------------------------------------------------------------------- Muapi
+// https://muapi.ai/llms.txt · https://api.muapi.ai/openapi.json · auth header `x-api-key: <key>`. The model list
+// (GET /models), one model's schema (GET /models/{name}) and price quotes (POST /models/{name}/estimate-cost) are public,
+// so they're called WITHOUT the key; the key goes only on the balance check, submits, polls and cancels, all on Muapi's
+// own host. A model's ref is its catalog name (one path segment, e.g. "seedance-2-t2v"); a run POSTs to its
+// `endpoint_url` (e.g. "seedance-v2.0-t2v"), kept as the model's version. Results: GET /predictions/{id}/result.
+const MUAPI_CATEGORIES: Record<string, Kind> = { 'text to video': 'video', 'image to video': 'video', 'text to image': 'image', 'image to image': 'image' };
+const MUAPI_TYPES: Record<string, string> = { int: 'integer', integer: 'integer', float: 'number', double: 'number', number: 'number', bool: 'boolean', boolean: 'boolean', str: 'string', string: 'string', list: 'array', array: 'array' };
+const MUAPI_SINGLE_URL = /(_url|_uri)$|^(image|start_image|end_image|first_image|last_image|first_frame|last_frame|start_frame|end_frame)$/;
+/** Muapi fields that are always lists: a single URL MUSE sends there goes in as a one-item list. */
+const MUAPI_LIST = /(_list|_urls)$|^(reference_images|images)$/;
+/** Muapi's own words for an account that can't pay (its docs don't publish them; CREDIT_RE covers the usual ones). */
+const MUAPI_CREDIT_RE = /\b(insufficient|not enough (credits?|balance|funds)|low balance|top[ -]?up|out of credits?)\b|INSUFFICIENT_[A-Z_]+/i;
+const MUAPI_KEY_RE = /not authori[sz]ed|invalid (api[ _-]?)?key|missing or invalid credentials|unauthori[sz]ed/i;
+const MUAPI_TTL = 10 * 60_000;
+
+/**
+ * One Muapi input schema in JSON Schema terms, so classify.ts reads it like Replicate's and fal's: its `int`/`float`/`bool`
+ * types, `minValue`/`maxValue` (and `step`, as an enum when short), URL fields (they carry no `format`) marked as URIs,
+ * and, on a video model, a list that takes exactly one image read as the start frame.
+ */
+export function muapiSchema(raw: any, kind: Kind | null): { type: 'object'; properties: Record<string, any>; required: string[] } {
+  const props: Record<string, any> = {};
+  for (const [n, v0] of Object.entries((raw?.properties ?? {}) as Record<string, any>)) {
+    if (!v0 || typeof v0 !== 'object') continue;
+    const v: Record<string, any> = { ...v0 };
+    if (typeof v.type === 'string') v.type = MUAPI_TYPES[v.type.toLowerCase()] ?? v.type;
+    if (v.minimum === undefined && Number.isFinite(Number(v.minValue))) v.minimum = Number(v.minValue);
+    if (v.maximum === undefined && Number.isFinite(Number(v.maxValue))) v.maximum = Number(v.maxValue);
+    const step = Number(v.step);
+    if (!Array.isArray(v.enum) && (v.type === 'integer' || v.type === 'number') && step > 0 && Number.isFinite(v.minimum) && Number.isFinite(v.maximum)
+      && v.maximum >= v.minimum && (v.maximum - v.minimum) / step <= 30) {
+      v.enum = Array.from({ length: Math.floor((v.maximum - v.minimum) / step + 1e-9) + 1 }, (_, i) => Math.round((v.minimum + i * step) * 1000) / 1000);
+    }
+    if (v.type === 'string' && !Array.isArray(v.enum) && !v.format && MUAPI_SINGLE_URL.test(n)) v.format = 'uri';
+    if (v.type === 'array' && /image/.test(n)) v.items = { ...(v.items ?? {}), type: 'string', format: 'uri' };
+    if (kind === 'video' && v.type === 'array' && /image/.test(n) && Number(v.maxItems) === 1 && MUAPI_LIST.test(n))
+      Object.assign(v, { type: 'string', format: 'uri', items: undefined, maxItems: undefined });
+    props[n] = v;
+  }
+  return { type: 'object', properties: props, required: Array.isArray(raw?.required) ? raw.required.filter((x: unknown) => typeof x === 'string') : [] };
+}
+
+/** At most `n` at a time. */
+async function pool<T, R>(items: T[], n: number, f: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await f(items[k]!); } }));
+  return out;
+}
+
+export class MuapiAdapter implements ProviderAdapter {
+  kind = 'muapi' as const;
+  label = 'Muapi';
+  keyHint = 'An API key from muapi.ai → Access keys';
+  keyUrl = 'https://muapi.ai/access-keys';
+  private list: { at: number; models: any[] } | null = null;
+  private details = new Map<string, { at: number; value: RawModel | null }>();
+  constructor(private base: () => string, private f: Fetch = fetch) {}
+  validRef(ref: string) { return validSegment(ref); }
+  /** The key goes only here (x-api-key), on calls to Muapi's own host. */
+  private h(key: string) { return { 'x-api-key': key, 'content-type': 'application/json', accept: 'application/json' }; }
+  private get pub() { return { 'content-type': 'application/json', accept: 'application/json' }; }
+
+  /** GET /account/balance: free and read-only. Muapi answers 403 (sometimes 401) to a missing or refused key. */
+  async validate(key: string) {
+    const r = await call(this.f, 'muapi', `${trim(this.base())}/account/balance`, { headers: this.h(key) });
+    if (r.status === 401 || r.status === 403) return 'invalid' as const;
+    if (!r.ok) throw new ProviderUnreachable('muapi', String(r.status));
+    return 'ok' as const;
+  }
+
+  /** The public catalog, image and video generators only (cached 10 min: it's one ~600 KB list). */
+  private async catalog(): Promise<any[]> {
+    if (this.list && Date.now() - this.list.at < MUAPI_TTL) return this.list.models;
+    const r = await call(this.f, 'muapi', `${trim(this.base())}/models`, { headers: this.pub });
+    if (!r.ok) throw new ProviderUnreachable('muapi', String(r.status));
+    const b = (await r.json().catch(() => ({}))) as { models?: any[] };
+    const models = (Array.isArray(b) ? b : b.models ?? []).filter((m: any) => typeof m?.name === 'string' && validSegment(m.name)
+      && MUAPI_CATEGORIES[String(m.category ?? '').toLowerCase()] && (m.domain ?? 'ai') === 'ai' && m.is_enabled !== 0 && m.is_enabled !== false && !m.is_coming_soon);
+    this.list = { at: Date.now(), models };
+    return models;
+  }
+
+  /** One price quote at Muapi's own list price (no key, so no account discount: never below what the owner pays). */
+  private async quote(name: string, body: Record<string, unknown>): Promise<number | null> {
+    const r = await call(this.f, 'muapi', `${trim(this.base())}/models/${encodeURIComponent(name)}/estimate-cost`, { method: 'POST', headers: this.pub, body: JSON.stringify(body) }).catch(() => null);
+    if (!r?.ok) return null;
+    const b = (await r.json().catch(() => ({}))) as { cost?: unknown; currency?: string };
+    const c = Number(b.cost);
+    return (b.currency && b.currency.toUpperCase() !== 'USD') || !Number.isFinite(c) || c < 0 ? null : c;
+  }
+
+  /**
+   * Muapi publishes a USD price per model. A fixed price is used as is (per run). A dynamic one (it depends on duration,
+   * resolution…) is quoted at the shortest and longest durations at every resolution, and the dearest rate is kept so a
+   * run never costs the studio more than it charges: per second when the cost grows with the duration, per run when it
+   * doesn't. No quote, no price: the owner sets one (Price corrections).
+   */
+  private async price(m: any, a: Analysis): Promise<Price | null> {
+    if (m.cost_currency && String(m.cost_currency).toUpperCase() !== 'USD') return null;
+    const base = Number(m.cost);
+    if (m.dynamic_pricing === false || m.cost_strategy === 'fixed_cost') return Number.isFinite(base) && base >= 0 ? { basis: 'per_run', costUsd: base, source: 'provider' } : null;
+    const d = a.kind === 'video' && a.map.duration ? a.inputs.duration : null;
+    const durs = d ? [...new Set(d.allowed?.length ? [d.allowed[0]!, d.allowed.at(-1)!] : [d.min, d.max])] : [null];
+    const res = a.map.resolution && a.inputs.resolutions.length ? a.inputs.resolutions.slice(0, 4) : [null];
+    const shape = (v: number) => a.shapes.duration === 'string' ? String(v) : a.shapes.duration === 'integer' ? Math.round(v) : v;
+    const cases = durs.flatMap(s => res.map(r => ({ s, r })));
+    const quotes = await pool(cases, 4, async c => {
+      const body: Record<string, unknown> = { prompt: 'x' };
+      if (c.s != null) body[a.map.duration!] = shape(c.s);
+      if (c.r != null) body[a.map.resolution!] = c.r;
+      return { ...c, cost: await this.quote(m.name, body) };
+    });
+    if (quotes.some(q => q.cost == null)) return null;
+    const round = (x: number) => Math.round(x * 1e6) / 1e6;
+    const most = Math.max(...quotes.map(q => q.cost!));
+    if (!d || durs.length < 2) return { basis: 'per_run', costUsd: round(most), source: 'provider' };
+    const flat = res.every(r => { const [lo, hi] = durs.map(s => quotes.find(q => q.s === s && q.r === r)!.cost!); return Math.abs(hi! - lo!) <= 0.01 * Math.max(hi!, 1e-9); });
+    if (flat) return { basis: 'per_run', costUsd: round(most), source: 'provider' };
+    return { basis: 'per_second', costUsd: round(Math.max(...quotes.map(q => q.cost! / q.s!))), source: 'provider' };
+  }
+
+  /** One model with its schema and price (cached 10 min). */
+  private async detail(name: string): Promise<RawModel | null> {
+    const hit = this.details.get(name);
+    if (hit && Date.now() - hit.at < MUAPI_TTL) return hit.value;
+    const r = await call(this.f, 'muapi', `${trim(this.base())}/models/${encodeURIComponent(name)}`, { headers: this.pub });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new ProviderUnreachable('muapi', String(r.status));
+    const m = (await r.json().catch(() => null)) as any;
+    if (!m || m.name !== name || m.is_coming_soon === true || m.is_enabled === 0 || m.is_enabled === false) return null; // can't run yet
+    const endpoint = typeof m.endpoint_url === 'string' ? m.endpoint_url.replace(/^\/?(api\/v1\/)?/, '') : name;
+    if (!validSegment(endpoint)) return null;
+    const kind = MUAPI_CATEGORIES[String(m.category ?? '').toLowerCase()] ?? null;
+    const input = muapiSchema(m.input_schema?.schemas?.input_data ?? m.input_schema ?? {}, kind);
+    const analysis = analyse({}, input, { category: kind ? `x-to-${kind}` : String(m.category ?? '').toLowerCase().replace(/\s+/g, '-'), text: `${m.name} ${m.description ?? ''}` });
+    const value: RawModel = { ref: name, version: endpoint, name, description: m.description ?? null, analysis, price: await this.price(m, analysis) };
+    // A missing price may be a quote that failed for now: kept 30 s, not 10 min.
+    this.details.set(name, { at: value.price ? Date.now() : Date.now() - MUAPI_TTL + 30_000, value });
+    if (this.details.size > 500) this.details.delete(this.details.keys().next().value!);
+    return value;
+  }
+
+  async model(_key: string, ref: string) {
+    if (!validSegment(ref)) return null;
+    return this.detail(ref);
+  }
+
+  /** Muapi has no text search: the catalog is filtered here (every word, in the name, description, family or category). */
+  async search(_key: string, o: { q?: string; kind?: Kind; cursor?: string | null; limit: number }) {
+    const off = Math.max(0, Number(o.cursor) || 0);
+    const words = (o.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const all = (await this.catalog()).filter(m => (!o.kind || MUAPI_CATEGORIES[String(m.category).toLowerCase()] === o.kind)
+      && words.every(w => `${m.name} ${m.description ?? ''} ${m.family ?? ''} ${m.category ?? ''}`.toLowerCase().includes(w)));
+    const page = all.slice(off, off + o.limit);
+    const out = await pool(page, 6, m => this.detail(m.name).catch(() => null));
+    const models = out.filter((x): x is RawModel => !!x).filter(x => !o.kind || x.analysis.kind === o.kind || x.analysis.kind === null);
+    return { models, nextCursor: off + o.limit < all.length ? String(off + o.limit) : null };
+  }
+
+  /** Our input URLs are public https (presigned), which Muapi takes as is: nothing is uploaded to /upload_file. */
+  async start(key: string, m: { ref: string; version: string | null }, input: Record<string, unknown>) {
+    const endpoint = m.version ?? m.ref;
+    if (!validSegment(endpoint)) throw new ReplicateError('not a Muapi model', 'failed');
+    const body = Object.fromEntries(Object.entries(input).map(([k, v]) => [k, typeof v === 'string' && MUAPI_LIST.test(k) ? [v] : v]));
+    const r = await call(this.f, 'muapi', `${trim(this.base())}/${endpoint}`, { method: 'POST', headers: this.h(key), body: JSON.stringify(body) }, 60_000)
+      .catch(e => { throw e instanceof ProviderUnreachable ? new ReplicateError(e.message, 'unavailable') : e; });
+    const text = await r.text().catch(() => '');
+    if (!r.ok) throw muapiError(r.status, text);
+    let id: unknown;
+    try { id = (JSON.parse(text) as { request_id?: unknown; id?: unknown }).request_id ?? (JSON.parse(text) as { id?: unknown }).id; } catch { id = null; }
+    if (typeof id !== 'string' || !id) throw new ReplicateError('Muapi gave no request id', 'failed');
+    return JSON.stringify({ id });
+  }
+  async get(key: string, handle: string): Promise<RunStatus> {
+    const { id } = JSON.parse(handle) as { id: string };
+    const r = await this.f(`${trim(this.base())}/predictions/${encodeURIComponent(id)}/result`, { headers: this.h(key), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    if (r && (r.status === 401 || r.status === 403)) return { status: 'failed', error: new ReplicateError("Muapi refused the studio's key", 'unavailable', r.status) };
+    if (!r || !r.ok) return { status: 'running' };
+    const p = (await r.json().catch(() => ({}))) as { status?: string; outputs?: unknown[]; error?: unknown; has_nsfw_contents?: unknown[] };
+    const st = String(p.status ?? '').toLowerCase();
+    if (st === 'completed' || st === 'succeeded') {
+      const outs = Array.isArray(p.outputs) ? p.outputs : [];
+      const flags = Array.isArray(p.has_nsfw_contents) ? p.has_nsfw_contents : [];
+      // Muapi flags outputs it thinks are NSFW: those aren't used; all flagged is a refusal.
+      const url = firstUrl(outs.filter((_, i) => flags[i] !== true));
+      if (url) return { status: 'succeeded', url };
+      if (flags.some(x => x === true)) return { status: 'failed', error: new ReplicateError('Muapi flagged the result as NSFW', 'refused') };
+      return { status: 'failed', error: new ReplicateError('no output came back', 'failed') };
+    }
+    if (st === 'failed' || st === 'error') {
+      const t = errorText(p.error ?? 'failed');
+      return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : CREDIT_RE.test(t) || MUAPI_CREDIT_RE.test(t) ? 'out_of_credit' : 'failed') };
+    }
+    if (st === 'cancelled' || st === 'canceled') return { status: 'canceled' };
+    return { status: 'running' }; // queued, pending, processing
+  }
+  /** Best effort: Muapi documents no cancel in its public API; its dashboard's POST /app/cancel_prediction/{id} is tried. */
+  async cancel(key: string, handle: string) {
+    const { id } = JSON.parse(handle) as { id: string };
+    const root = trim(this.base()).replace(/\/api\/v1$/, '');
+    await this.f(`${root}/app/cancel_prediction/${encodeURIComponent(id)}`, { method: 'POST', headers: this.h(key), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+  }
+}
+
+/** A Muapi refusal at submit as the suite's error kinds. Muapi answers 403 (not 401) to a refused key. */
+export function muapiError(status: number, text: string) {
+  const t = text.slice(0, 500);
+  if (status === 402 || CREDIT_RE.test(t) || MUAPI_CREDIT_RE.test(t)) return new ReplicateError('Muapi is out of credit', 'out_of_credit', status);
+  if (SAFETY_RE.test(t)) return new ReplicateError(`Muapi refused the request (${t.slice(0, 200)})`, 'refused', status);
+  if (status === 401 || (status === 403 && (MUAPI_KEY_RE.test(t) || !t.trim()))) return new ReplicateError("Muapi refused the studio's key", 'unavailable', status);
+  if (status === 429) return new ReplicateError('Muapi is busy', 'rate_limited', status);
+  if (status >= 500) return new ReplicateError(`Muapi is having trouble (${status})`, 'unavailable', status);
+  return new ReplicateError(`Muapi rejected the request (${status}: ${t.slice(0, 200)})`, 'failed', status);
+}
+
+export const KINDS = ['replicate', 'fal', 'muapi'] as const satisfies readonly ProviderKind[];
 export function adapters(urls: () => Urls, f: Fetch = fetch): Record<ProviderKind, ProviderAdapter> {
-  return { replicate: new ReplicateAdapter(() => urls().replicate, f), fal: new FalAdapter(() => urls(), f) };
+  return { replicate: new ReplicateAdapter(() => urls().replicate, f), fal: new FalAdapter(() => urls(), f), muapi: new MuapiAdapter(() => urls().muapi, f) };
 }

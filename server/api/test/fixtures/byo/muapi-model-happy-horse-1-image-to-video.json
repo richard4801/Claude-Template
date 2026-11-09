@@ -1,0 +1,152 @@
+{
+ "name": "happy-horse-1-image-to-video",
+ "description": "Happy Horse 1.0 Image to Video — bring still images to life with fluid, expressive animation. Selectable output resolution (720p/1080p) — price scales with the resolution chosen.",
+ "category": "Image to Video",
+ "family": "happy-horse-1",
+ "group_of": "video",
+ "domain": "ai",
+ "cost": 0.9,
+ "cost_currency": "USD",
+ "cost_strategy": "happy-horse-1-i2v-res-cost",
+ "dynamic_pricing": true,
+ "endpoint": "/api/v1/happy-horse-1-image-to-video",
+ "endpoint_url": "happy-horse-1-image-to-video",
+ "is_enabled": 1,
+ "is_coming_soon": false,
+ "input_fields": [
+  "prompt",
+  "resolution",
+  "images_list",
+  "aspect_ratio",
+  "duration"
+ ],
+ "required_fields": [
+  "prompt",
+  "images_list"
+ ],
+ "estimate_endpoint": "/api/v1/models/happy-horse-1-image-to-video/estimate-cost",
+ "input_schema": {
+  "schemas": {
+   "input_data": {
+    "x-order-properties": [
+     "prompt",
+     "resolution",
+     "images_list",
+     "aspect_ratio",
+     "duration"
+    ],
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "type": "string",
+      "title": "Prompt",
+      "name": "prompt",
+      "description": "Optional text description guiding the motion.",
+      "examples": [
+       "The motorcycle suddenly accelerates uncontrollably through traffic while the horse struggles to stay balanced. Cars swerve out of the way, sparks scrape across the road during sharp turns, and the camera tracks inches away from the speeding bike."
+      ]
+     },
+     "resolution": {
+      "enum": [
+       "720p",
+       "1080p"
+      ],
+      "type": "string",
+      "title": "Resolution",
+      "name": "resolution",
+      "description": "Output resolution. Price scales with resolution: 720p is cheaper, 1080p is more expensive.",
+      "default": "720p"
+     },
+     "images_list": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/happy-horse-1-image-to-video-720p.jpg"
+      ],
+      "description": "Upload or provide the image to animate.",
+      "field": "images_list",
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "title": "Image",
+      "name": "images_list",
+      "maxItems": 1
+     },
+     "aspect_ratio": {
+      "enum": [
+       "16:9",
+       "9:16",
+       "1:1",
+       "4:3",
+       "3:4"
+      ],
+      "type": "string",
+      "title": "Aspect Ratio",
+      "name": "aspect_ratio",
+      "description": "Output video aspect ratio.",
+      "default": "16:9"
+     },
+     "duration": {
+      "type": "int",
+      "title": "Duration (seconds)",
+      "name": "duration",
+      "description": "Video duration in seconds.",
+      "default": 5,
+      "minValue": 3,
+      "maxValue": 15,
+      "step": 1
+     }
+    },
+    "title": "BaseInput",
+    "required": [
+     "prompt",
+     "images_list"
+    ],
+    "endpoint_url": "happy-horse-1-image-to-video"
+   },
+   "output_data": {
+    "type": "object",
+    "properties": {
+     "video": {
+      "type": "string",
+      "title": "Video",
+      "description": "Generated video URL",
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/happy-horse-1-image-to-video-720p.mp4"
+      ]
+     }
+    },
+    "title": "HappyHorse1I2VOutput",
+    "required": [
+     "video"
+    ]
+   }
+  }
+ },
+ "output_schema": {
+  "schemas": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "title": "request_id",
+     "type": "string",
+     "description": "prediction request_id"
+    },
+    "status": {
+     "title": "status",
+     "type": "string",
+     "description": "prediction status"
+    },
+    "output": {
+     "type": "object",
+     "properties": {
+      "video": {
+       "type": "string",
+       "format": "uri",
+       "description": "Video URL"
+      }
+     }
+    }
+   }
+  }
+ }
+}
