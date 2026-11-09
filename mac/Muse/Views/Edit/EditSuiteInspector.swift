@@ -493,7 +493,10 @@ struct TranslateCaptionsRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            if let n = session.captionExportNotice {
+            // The server's note, or (as Android) the same kind of line when the captions' language isn't one its export draws.
+            if let n = session.captionExportNotice ?? s.captionLanguage.flatMap({ code in
+                session.features?.translate?.languages.flatMap { $0[code] == nil ? "The server's export can't draw this script yet · exports made on this Mac show it." : nil }
+            }) {
                 Text(n).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }
         }
