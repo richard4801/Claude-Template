@@ -23,7 +23,9 @@ export const TRANSLATE_LANGUAGES: Record<string, string> = {
 };
 /** Languages written without spaces: their caption "words" are short runs of characters. */
 const UNSPACED = new Set(['ja', 'zh', 'th']);
-export const TRANSLATE_LIMITS = { maxWords: 3000, linesPerCall: 120, maxWordsPerLine: 12, gapSec: 0.6, minChargeUsd: 0.01 } as const;
+export const TRANSLATE_LIMITS = { maxWords: 3000, maxLines: 2000, maxLineChars: 300, linesPerCall: 120, maxWordsPerLine: 12, gapSec: 0.6, minChargeUsd: 0.01 } as const;
+/** A caption line the app sends (its pages as shown, edits included): its id comes back with the translation. */
+export type AppLine = { id: string; text: string; startSec: number; endSec: number };
 
 /** Caption lines: a new line after a pause, after a sentence's end, or after maxWordsPerLine words. */
 export function captionLines(words: Word[]): Line[] {
@@ -78,7 +80,7 @@ export type TranslateReply = { content: { type: string; text?: string }[]; usage
 export type TranslateClient = { messages: { create(p: Record<string, unknown>): Promise<TranslateReply> } };
 
 /** Tokens a translation is expected to take (prompt, lines as JSON, the answer; generous for long scripts). */
-export function expectedTokens(lines: Line[]): { input: number; output: number } {
+export function expectedTokens(lines: { text: string }[]): { input: number; output: number } {
   const chars = lines.reduce((s, l) => s + l.text.length + 14, 0), calls = Math.max(1, Math.ceil(lines.length / TRANSLATE_LIMITS.linesPerCall));
   return { input: calls * 320 + Math.ceil(chars / 3), output: calls * 40 + Math.ceil((chars * 1.6) / 3) };
 }
@@ -88,13 +90,18 @@ export function translateUsd(q: Quality, tokens: { input: number; output: number
   return Math.max(TRANSLATE_LIMITS.minChargeUsd, Math.round(usd * 10000) / 10000);
 }
 
+/** A line in, as the translator takes it: its time, its text, and the words to keep if the answer misses it. */
+type InLine = { startSec: number; endSec: number; text: string; keep: TimedWord[] };
+/** A line out: its translation timed word by word, or the original kept (translated false). */
+export type OutLine = { text: string; startSec: number; endSec: number; translated: boolean; words: TimedWord[] };
+
 /**
- * Translates [words] into [language] (a TRANSLATE_LANGUAGES code), batch by batch: → the timed words and the tokens
- * used. A batch whose answer misses lines keeps those lines' words untranslated rather than inventing timing.
+ * Translates [lines] into [language] (a TRANSLATE_LANGUAGES code), batch by batch: → each line timed and the tokens used.
+ * A batch whose answer misses lines keeps those lines as they were rather than inventing timing.
  */
-export async function translateWords(client: TranslateClient, words: Word[], language: string, q: Quality, onProgress?: (f: number) => Promise<void> | void) {
-  const lines = captionLines(words), name = TRANSLATE_LANGUAGES[language] ?? language, m = TRANSLATE_MODELS[q];
-  const out: TimedWord[] = [];
+export async function translateLines(client: TranslateClient, lines: InLine[], language: string, q: Quality, onProgress?: (f: number) => Promise<void> | void) {
+  const name = TRANSLATE_LANGUAGES[language] ?? language, m = TRANSLATE_MODELS[q];
+  const out: OutLine[] = [];
   const usage = { input: 0, output: 0 };
   let missing = 0;
   for (let b = 0; b < lines.length; b += TRANSLATE_LIMITS.linesPerCall) {
@@ -110,13 +117,26 @@ export async function translateWords(client: TranslateClient, words: Word[], lan
     try { got = JSON.parse(reply.content.filter(c => c.type === 'text').map(c => c.text ?? '').join('')); } catch { throw new TranslateError('unreadable'); }
     const byI = new Map((got.lines ?? []).filter(x => Number.isInteger(x.i) && typeof x.text === 'string').map(x => [x.i, x.text]));
     batch.forEach((l, k) => {
-      const t = byI.get(k);
-      if (t && t.trim()) out.push(...timeLine(l, t, language));
-      else { missing++; out.push(...words.slice(l.from, l.to + 1).map(w => ({ text: w.text, startSec: w.startSec, endSec: w.endSec }))); }
+      const t = byI.get(k)?.replace(/\s+/g, ' ').trim();
+      if (t) out.push({ text: t, startSec: l.startSec, endSec: l.endSec, translated: true, words: timeLine(l, t, language) });
+      else { missing++; out.push({ text: l.text, startSec: l.startSec, endSec: l.endSec, translated: false, words: l.keep }); }
     });
     await onProgress?.(Math.min(1, (b + batch.length) / lines.length));
   }
-  return { words: out, lines: lines.length, missing, usage, model: m.model };
+  return { lines: out, missing, usage, model: m.model };
+}
+
+/** A transcript's words, grouped into caption lines and translated (the untranslated keep their own timing). */
+export async function translateWords(client: TranslateClient, words: Word[], language: string, q: Quality, onProgress?: (f: number) => Promise<void> | void) {
+  const lines = captionLines(words).map(l => ({ ...l, keep: words.slice(l.from, l.to + 1).map(w => ({ text: w.text, startSec: w.startSec, endSec: w.endSec })) }));
+  const r = await translateLines(client, lines, language, q, onProgress);
+  return { ...r, words: r.lines.flatMap(l => l.words) };
+}
+
+/** The app's own caption lines translated (ids kept); a missed line keeps its text, timed like a translation. */
+export async function translateAppLines(client: TranslateClient, lines: AppLine[], sourceLanguage: string | null, language: string, q: Quality, onProgress?: (f: number) => Promise<void> | void) {
+  const r = await translateLines(client, lines.map(l => ({ startSec: l.startSec, endSec: l.endSec, text: l.text, keep: timeLine(l, l.text, sourceLanguage ?? '') })), language, q, onProgress);
+  return { ...r, lines: r.lines.map((l, i) => ({ id: lines[i]!.id, ...l })), words: r.lines.flatMap(l => l.words) };
 }
 export class TranslateError extends Error { constructor(public kind: 'refused' | 'too long' | 'unreadable') { super(`translation ${kind}`); } }
 

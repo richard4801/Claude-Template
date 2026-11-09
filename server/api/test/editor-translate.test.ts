@@ -69,7 +69,8 @@ describe('translate job (fake Claude)', () => {
     expect(r.result).toMatchObject({ language: 'es', sourceLanguage: 'en', quality: 'standard', untranslatedLines: 0 });
     expect(r.result.words[0].text).toBe('ES');
     const lines = captionLines(cap.result.words);
-    expect(r.result.lines).toBe(lines.length);
+    expect(r.result.lines).toHaveLength(lines.length);
+    expect(r.result.lines[0]).toMatchObject({ text: `ES ${lines[0]!.text}`, startSec: lines[0]!.startSec, endSec: lines[0]!.endSec, translated: true });
     // Every translated word sits inside its line's time, in order.
     for (let i = 1; i < r.result.words.length; i++) expect(r.result.words[i].startSec).toBeGreaterThanOrEqual(r.result.words[i - 1].startSec - 1e-9);
     expect(r.result.words[0].startSec).toBeCloseTo(lines[0]!.startSec, 3); expect(r.result.words.at(-1).endSec).toBeCloseTo(lines.at(-1)!.endSec, 3);
@@ -93,6 +94,22 @@ describe('translate job (fake Claude)', () => {
     expect(mr.result.words[0].text).toBe(cap.result.words[0].text);
     expect(calls.at(-1)).toMatchObject({ model: TRANSLATE_MODELS.best.model });
     expect(JSON.stringify(mr)).not.toMatch(/claude|haiku|sonnet|anthropic/i);
+
+    // The app's own lines (edited captions): ids come back, no transcript needed, a missed line keeps its text, timed.
+    const appLines = [{ id: 'p1', text: 'Hello everyone', startSec: 0, endSec: 1.2 }, { id: 'p2', text: 'Edited by hand', startSec: 1.5, endSec: 3 }];
+    const bad = async (options: unknown) => (await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options })).body.error;
+    expect(await bad({ targetLanguage: 'es', lines: [] })).toMatch(/1 to 2000 lines/);
+    expect(await bad({ targetLanguage: 'es', lines: [appLines[0], appLines[0]] })).toMatch(/unique id/);
+    expect(await bad({ targetLanguage: 'es', lines: [{ ...appLines[0], endSec: -1 }] })).toMatch(/seconds from 0/);
+    expect(await bad({ targetLanguage: 'es', sourceLanguage: 'es', lines: appLines })).toMatch(/already in that language/);
+    const fresh = await take(); // no captions job: lines alone are enough
+    drop = true;
+    const al = await done(owner, (await owner.req('POST', '/v1/editor/jobs', { kind: 'translate', source: { takeId: fresh }, options: { targetLanguage: 'de', sourceLanguage: 'en', lines: appLines } })).body.id);
+    drop = false;
+    expect(al.state, JSON.stringify(al)).toBe('done');
+    expect(al.result).toMatchObject({ language: 'de', sourceLanguage: 'en', untranslatedLines: 1, lines: [{ id: 'p1', text: 'Hello everyone', translated: false }, { id: 'p2', text: 'ES Edited by hand', translated: true, startSec: 1.5, endSec: 3 }] });
+    expect(al.result.words.map((w: any) => w.text)).toEqual(['Hello', 'everyone', 'ES', 'Edited', 'by', 'hand']);
+    expect(al.result.words[0].startSec).toBe(0); expect(al.result.words[1].endSec).toBe(1.2); expect(al.result.words[2].startSec).toBe(1.5);
 
     // The owner's switch stops it.
     await owner.req('PATCH', '/v1/editor/settings', { paidHelpers: 'off' });

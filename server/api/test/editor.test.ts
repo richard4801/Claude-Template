@@ -587,9 +587,17 @@ describe('stabilise (local ffmpeg vid.stab)', () => {
       expect(r.state, JSON.stringify(r)).toBe('done');
       expect(r.costUsd).toBe(0);
       expect(r.result).toMatchObject({ width: 180, height: 320, hasAudio: true, asset: { kind: 'video' } });
+      const done2 = (c: typeof owner, id: string) => until(async () => { const x = (await c.req('GET', `/v1/editor/jobs/${id}`)).body; return x.state !== 'running' ? x : null; });
       const j2 = (await owner.req('POST', '/v1/editor/jobs', { kind: 'stabilize', source })).body;
       const r2 = await until(async () => { const x = (await owner.req('GET', `/v1/editor/jobs/${j2.id}`)).body; return x.state !== 'running' ? x : null; });
       expect(r2.result).toMatchObject({ reused: true, asset: { upload: r.result.asset.upload } });
+      // Options: strength 0–1 and zoom auto/none; the default strength (0.5) reuses, another strength or no zoom runs anew.
+      expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'stabilize', source, options: { strength: 2 } })).body.error).toMatch(/strength: from 0 to 1/);
+      expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'stabilize', source, options: { zoom: 'max' } })).body.error).toMatch(/"auto" or "none"/);
+      expect((await done2(owner, (await owner.req('POST', '/v1/editor/jobs', { kind: 'stabilize', source, options: { strength: 0.5, zoom: 'auto' } })).body.id)).result.reused).toBe(true);
+      const r3 = await done2(owner, (await owner.req('POST', '/v1/editor/jobs', { kind: 'stabilize', source, options: { strength: 1, zoom: 'none' } })).body.id);
+      expect(r3.state, JSON.stringify(r3)).toBe('done');
+      expect(r3.result.reused).toBe(false); expect(r3.result.asset.upload).not.toBe(r.result.asset.upload);
       const long = await owner.req('POST', '/v1/editor/estimate', { kind: 'stabilize', source: { uploadId: p.uploadId, durationSec: 181 } });
       expect(long.status).toBe(400); expect(long.body.error).toMatch(/up to 3 minutes/);
     } finally { await a.close(); }

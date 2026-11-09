@@ -20,8 +20,8 @@ import { mediaToolsAvailable, probe } from '../replicate/media.js';
 import { detectSilences, silenceCuts } from './silence.js';
 import { decodeMono, detectBeats } from './audio.js';
 import { REVERSE_LIMITS, reverseVideo } from './reverse.js';
-import { STABILIZE_LIMITS, stabilizeVideo, vidstabAvailable } from './stabilize.js';
-import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError, captionLines, expectedTokens, translateClient, translateUsd, translateWords, type Quality, type TranslateClient } from './translate.js';
+import { STABILIZE_LIMITS, smoothingOf, stabilizeVideo, vidstabAvailable } from './stabilize.js';
+import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError, captionLines, expectedTokens, translateAppLines, translateClient, translateUsd, translateWords, type AppLine, type Quality, type TranslateClient } from './translate.js';
 import { FalProvider } from '../suite/providers.js';
 import { SLOWMO_LIMITS, SLOWMO_MODEL, cutRange, falInterpolate, retime, slowmoComputeSec, slowmoUsd, type SlowmoFactor } from './slowmo.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
@@ -42,7 +42,7 @@ const LANG_RE = /^[a-z]{2}$/;
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
 export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
 export const MAX_KEEP_POINTS = 10;
-export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; quality?: Quality; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
+export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -76,7 +76,27 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   if (kind === 'translate') {
     if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage]) throw badRequest(`options.targetLanguage: one of ${Object.keys(TRANSLATE_LANGUAGES).join(', ')}`);
     out.targetLanguage = o.targetLanguage;
+    if (o.sourceLanguage !== undefined) { if (typeof o.sourceLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.sourceLanguage]) throw badRequest('options.sourceLanguage: a language code'); out.sourceLanguage = o.sourceLanguage; }
+    if (o.lines !== undefined) {
+      // The app's caption lines as shown (edits included), instead of the transcript.
+      const L = TRANSLATE_LIMITS;
+      if (!Array.isArray(o.lines) || !o.lines.length || o.lines.length > L.maxLines) throw badRequest(`options.lines: 1 to ${L.maxLines} lines`);
+      const ids = new Set<string>();
+      out.lines = o.lines.map((l: any, i: number) => {
+        if (!l || typeof l !== 'object' || typeof l.id !== 'string' || !l.id || l.id.length > 100 || ids.has(l.id)) throw badRequest(`options.lines.${i}.id: a unique id`);
+        if (typeof l.text !== 'string' || !l.text.trim() || l.text.length > L.maxLineChars) throw badRequest(`options.lines.${i}.text: 1 to ${L.maxLineChars} characters`);
+        const t = (k: string) => { const v = l[k]; if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) throw badRequest(`options.lines.${i}.${k}: seconds from 0`); return Math.round(v * 1000) / 1000; };
+        const startSec = t('startSec'), endSec = t('endSec');
+        if (endSec < startSec) throw badRequest(`options.lines.${i}.endSec: not before startSec`);
+        ids.add(l.id);
+        return { id: l.id, text: l.text.trim(), startSec, endSec };
+      });
+    }
     if (o.quality !== undefined) { if (o.quality !== 'standard' && o.quality !== 'best') throw badRequest('options.quality: "standard" or "best"'); out.quality = o.quality; }
+  }
+  if (kind === 'stabilize') {
+    if (o.strength !== undefined) { if (typeof o.strength !== 'number' || !Number.isFinite(o.strength) || o.strength < 0 || o.strength > 1) throw badRequest('options.strength: from 0 to 1'); out.strength = Math.round(o.strength * 100) / 100; }
+    if (o.zoom !== undefined) { if (o.zoom !== 'auto' && o.zoom !== 'none') throw badRequest('options.zoom: "auto" or "none"'); out.zoom = o.zoom; }
   }
   if (kind === 'slowmo') {
     if (o.factor !== 2 && o.factor !== 4) throw badRequest('options.factor: 2 or 4');
@@ -206,9 +226,13 @@ export class EditorAiService {
     if (kind === 'stabilize' && !(await this.stabilizeAvailable())) throw badRequest('kind: stabilise is not available on this server');
     const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats' || kind === 'reverse' || kind === 'stabilize';
     if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest(kind === 'beats' ? 'kind: beat detection is not available on this server' : kind === 'reverse' ? 'kind: reverse is not available on this server' : 'options.silenceOnly: not available on this server');
-    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || kind === 'translate' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, kind === 'translate' ? { fromJobId: opts.fromJobId } : opts) : null;
+    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'translate' && !opts.lines) || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, kind === 'translate' ? { fromJobId: opts.fromJobId } : opts) : null;
     if (kind === 'translate') {
       if (!this.translator()) throw badRequest('kind: translating captions is not available on this server');
+      if (opts.lines) {
+        if (opts.sourceLanguage === opts.targetLanguage) throw badRequest('options.targetLanguage: the captions are already in that language');
+        return { kind, opts, src, reuse, usd: translateUsd(opts.quality ?? 'standard', expectedTokens(opts.lines), this.markup) };
+      }
       if (!reuse) throw badRequest('options: make captions for this video first');
       if (reuse.words.length > TRANSLATE_LIMITS.maxWords) throw badRequest(`source: at most ${TRANSLATE_LIMITS.maxWords} words`);
       if (reuse.language === opts.targetLanguage) throw badRequest('options.targetLanguage: the captions are already in that language');
@@ -325,7 +349,9 @@ export class EditorAiService {
         result = { ...detectBeats(samples), durationSec: d };
       } else if (row.kind === 'reverse' || row.kind === 'stabilize') {
         // The same source reversed / steadied before (by anyone in the studio) is reused.
-        const [prev] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, u.studioId), eq(editorJobs.kind, row.kind), eq(editorJobs.mediaKey, src.key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(1);
+        // Stabilise: only with the same strength and zoom.
+        const same = (r: Row) => row.kind === 'reverse' || (smoothingOf((r.options as JobOptions).strength) === smoothingOf(o.strength) && ((r.options as JobOptions).zoom ?? 'auto') === (o.zoom ?? 'auto'));
+        const prev = (await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, u.studioId), eq(editorJobs.kind, row.kind), eq(editorJobs.mediaKey, src.key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20)).find(same);
         if (prev?.result) result = { ...(prev.result as Record<string, unknown>), reused: true };
         else {
           // One heavy local ffmpeg job at a time (the 512 MB box).
@@ -338,10 +364,10 @@ export class EditorAiService {
             const out = path.join(os.tmpdir(), `${uid(row.kind === 'reverse' ? 'rev' : 'stab')}.mp4`);
             file = out;
             await this.withLocalInput(src.key, input => row.kind === 'reverse' ? reverseVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration)
-              : stabilizeVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration));
+              : stabilizeVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration, smoothingOf(o.strength), o.zoom ?? 'auto'));
             await this.patch(id, { progress: 90 });
             const asset = await this.store(u, src, out, 'video/mp4', 'video', d);
-            result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d };
+            result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d, reused: false };
           } finally { this.localFree(); }
         }
       } else if (row.kind === 'slowmo') {
@@ -354,9 +380,13 @@ export class EditorAiService {
         }
       } else if (row.kind === 'translate') {
         const q = o.quality ?? 'standard';
-        const t = await translateWords(this.translator()!, reuse!.words, o.targetLanguage!, q, f => this.patch(id, { progress: 5 + f * 90 }).then(() => undefined));
+        const progress = (f: number) => this.patch(id, { progress: 5 + f * 90 }).then(() => undefined);
+        const t = o.lines ? await translateAppLines(this.translator()!, o.lines, o.sourceLanguage ?? null, o.targetLanguage!, q, progress)
+          : await translateWords(this.translator()!, reuse!.words, o.targetLanguage!, q, progress);
         spentUsd = translateUsd(q, t.usage, this.markup);
-        result = { language: o.targetLanguage, sourceLanguage: reuse!.language, words: t.words, lines: t.lines, untranslatedLines: t.missing, quality: q, durationSec: d };
+        // lines: each caption line (the app's ids when it sent its own), its text and time, translated or kept as it was.
+        const lines = t.lines.map(l => ({ ...('id' in l ? { id: l.id } : {}), text: l.text, startSec: l.startSec, endSec: l.endSec, translated: l.translated }));
+        result = { language: o.targetLanguage, sourceLanguage: o.lines ? o.sourceLanguage ?? null : reuse!.language, words: t.words, lines, untranslatedLines: t.missing, quality: q, durationSec: d };
       } else if (row.kind === 'cuts' && o.silenceOnly) {
         const minSilenceSec = o.minSilenceSec ?? CUT_DEFAULTS.minSilenceSec, keepPadSec = o.keepPadSec ?? CUT_DEFAULTS.keepPadSec;
         const sil = await this.withLocalInput(src.key, input => detectSilences(this.ctx.config.FFMPEG_PATH, input, d, { minSilenceSec, noiseDb: o.noiseDb }));
@@ -570,7 +600,7 @@ export class EditorAiService {
       beats: { available: true, free: true },
       stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
       slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
-      translate: { available: paid && !!this.translator(), languages: Object.keys(TRANSLATE_LANGUAGES), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords },
+      translate: { available: paid && !!this.translator(), languages: Object.keys(TRANSLATE_LANGUAGES), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }
