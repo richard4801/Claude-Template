@@ -7,7 +7,13 @@ import { hash01, lookProblem, type Look } from './look.js';
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
 export type Keyframe = { t: number; v: number; ease?: Ease };
-export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume' | ColorKfProp;
+export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume' | ColorKfProp | MaskKfProp | LookKfProp;
+/** Mask keyframes (M): replace the mask's field over time (`maskAt`); only on items with a mask. */
+export type MaskKfProp = 'maskX' | 'maskY' | 'maskWidth' | 'maskHeight' | 'maskRotation' | 'maskFeather';
+export const MASK_KF_PROPS: MaskKfProp[] = ['maskX', 'maskY', 'maskWidth', 'maskHeight', 'maskRotation', 'maskFeather'];
+/** Look keyframes (M): the finishing effects' amounts over time (`lookAt`); keying one the look lacks adds it. */
+export type LookKfProp = 'vignette' | 'grain' | 'leak';
+export const LOOK_KF_PROPS: LookKfProp[] = ['vignette', 'grain', 'leak'];
 /** Colour keyframes (M): replace the adjust field's static value over time (`adjustAt`). Video clips and images. */
 export type ColorKfProp = 'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint';
 export const COLOR_KF_PROPS: ColorKfProp[] = ['exposure', 'contrast', 'saturation', 'temperature', 'tint'];
@@ -183,6 +189,32 @@ export function autoAdjust(rgb: number[], base?: Adjust): Adjust {
   const out: Adjust = { ...(base ?? {}) };
   const set = (k: 'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint', v: number) => { const x = r2(v); if (x !== 0) out[k] = x; else delete out[k]; };
   set('exposure', e); set('contrast', c); set('saturation', s); set('temperature', t); set('tint', tn);
+  return out;
+}
+
+const keyed = (item: { keyframes?: Keyframes }, p: KfProp) => !!item.keyframes?.[p]?.length;
+
+/** The item's mask at item-local t: each keyed mask field ([MASK_KF_PROPS]) at its keyframes' value there. */
+export function maskAt(item: { mask?: Mask; keyframes?: Keyframes }, t: number): Mask | undefined {
+  const m = item.mask;
+  if (!m || !MASK_KF_PROPS.some(p => keyed(item, p))) return m;
+  const out: Mask = { ...m };
+  const f: [MaskKfProp, 'x' | 'y' | 'width' | 'height' | 'rotation' | 'feather', number][] = [
+    ['maskX', 'x', 0.5], ['maskY', 'y', 0.5], ['maskWidth', 'width', 0.5], ['maskHeight', 'height', 0.5], ['maskRotation', 'rotation', 0], ['maskFeather', 'feather', 0.1]];
+  for (const [p, k, d] of f) if (keyed(item, p)) out[k] = r6(propAt(item, p, m[k] ?? d, t));
+  return out;
+}
+
+/**
+ * The item's look at item-local t: each keyed finishing amount ([LOOK_KF_PROPS]) at its keyframes' value there. A keyed
+ * effect the look lacks is added with only its amount (a leak as kind 'warm'), so the renderer's defaults apply.
+ */
+export function lookAt(item: { look?: Look; keyframes?: Keyframes }, t: number): Look | undefined {
+  if (!LOOK_KF_PROPS.some(p => keyed(item, p))) return item.look;
+  const out: Look = { ...(item.look ?? {}) };
+  if (keyed(item, 'vignette')) out.vignette = { ...(out.vignette ?? {}), amount: r6(propAt(item, 'vignette', out.vignette?.amount ?? 0, t)) };
+  if (keyed(item, 'grain')) out.grain = { ...(out.grain ?? {}), amount: r6(propAt(item, 'grain', out.grain?.amount ?? 0, t)) };
+  if (keyed(item, 'leak')) out.leak = { kind: 'warm', ...(out.leak ?? {}), amount: r6(propAt(item, 'leak', out.leak?.amount ?? 0, t)) };
   return out;
 }
 
@@ -795,11 +827,12 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   let total = 0;
   const filterIds = new Set(presets.map(x => x.id));
 
-  const kfs = (f: string, k: Keyframes | undefined, len: number, allowed: KfProp[]) => {
+  const kfs = (f: string, k: Keyframes | undefined, len: number, allowed: KfProp[], hasMask = false) => {
     if (k === undefined) return;
     if (typeof k !== 'object' || k === null) bad(f, 'must be an object');
     for (const [prop, list] of Object.entries(k)) {
       if (!allowed.includes(prop as KfProp)) bad(`${f}.${prop}`, 'is not a keyframe property here');
+      if ((MASK_KF_PROPS as string[]).includes(prop) && !hasMask) bad(`${f}.${prop}`, 'needs a mask');
       if (!Array.isArray(list) || list.length > LIMITS.maxKeyframes) bad(`${f}.${prop}`, `at most ${LIMITS.maxKeyframes} keyframes`);
       let prev = -Infinity;
       (list as Keyframe[]).forEach((kf, j) => {
@@ -808,7 +841,9 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         if (kf.t < prev) bad(`${g}.t`, 'keyframes must be in time order');
         prev = kf.t;
         const range: Record<KfProp, [number, number]> = { x: [-2, 3], y: [-2, 3], scale: [0.05, 10], rotation: [-3600, 3600], opacity: [0, 1], volume: [0, 2],
-          exposure: [-1, 1], contrast: [-1, 1], saturation: [-1, 1], temperature: [-1, 1], tint: [-1, 1] };
+          exposure: [-1, 1], contrast: [-1, 1], saturation: [-1, 1], temperature: [-1, 1], tint: [-1, 1],
+          maskX: [-1, 2], maskY: [-1, 2], maskWidth: [0.01, 3], maskHeight: [0.01, 3], maskRotation: [-360, 360], maskFeather: [0, 1],
+          vignette: [-1, 1], grain: [0, 1], leak: [0, 1] };
         num(`${g}.v`, kf.v, range[prop as KfProp][0], range[prop as KfProp][1], false);
         if (kf.ease !== undefined && !['linear', 'easeIn', 'easeOut', 'easeInOut', 'hold'].includes(kf.ease)) bad(`${g}.ease`, 'unknown ease');
       });
@@ -925,7 +960,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
           if (sc.points[0]![0] !== 0 || sc.points[sc.points.length - 1]![0] !== 1) bad(`${g}.speedCurve.points`, 'must start at x 0 and end at x 1');
         }
         visual(g, c, clipLength(c));
-        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume', ...COLOR_KF_PROPS]);
+        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume', ...COLOR_KF_PROPS, ...MASK_KF_PROPS, ...LOOK_KF_PROPS], !!c.mask);
         if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
         if (c.alphaMatte !== undefined) {
           const m = c.alphaMatte as AlphaMatte;
@@ -963,7 +998,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.startSec`, im.startSec, 0, 600, false); num(`${g}.durationSec`, im.durationSec, LIMITS.minItemSec, 600, false);
         visual(g, im, im.durationSec);
         blend(g, im.blend, true);
-        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity', ...COLOR_KF_PROPS]);
+        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity', ...COLOR_KF_PROPS, ...MASK_KF_PROPS, ...LOOK_KF_PROPS], !!im.mask);
         anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false);
       } else if (t.kind === 'text') {
         const tx = it as TextItem;

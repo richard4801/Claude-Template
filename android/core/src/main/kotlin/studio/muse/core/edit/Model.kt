@@ -20,9 +20,17 @@ enum class Ease(override val wire: String) : Wire { LINEAR("linear"), EASE_IN("e
 enum class KfProp(override val wire: String) : Wire {
     X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume"),
     /** Colour keyframes (M): replace the adjust field's static value over time ([adjustAt]); video clips and images. */
-    EXPOSURE("exposure"), CONTRAST("contrast"), SATURATION("saturation"), TEMPERATURE("temperature"), TINT("tint");
+    EXPOSURE("exposure"), CONTRAST("contrast"), SATURATION("saturation"), TEMPERATURE("temperature"), TINT("tint"),
+    /** Mask keyframes (M): the mask's fields over time ([maskAt]); only on items with a mask. */
+    MASK_X("maskX"), MASK_Y("maskY"), MASK_WIDTH("maskWidth"), MASK_HEIGHT("maskHeight"), MASK_ROTATION("maskRotation"), MASK_FEATHER("maskFeather"),
+    /** Look keyframes (M): the finishing effects' amounts over time ([lookAt]). */
+    VIGNETTE("vignette"), GRAIN("grain"), LEAK("leak");
 
-    companion object { val COLOR = listOf(EXPOSURE, CONTRAST, SATURATION, TEMPERATURE, TINT) }
+    companion object {
+        val COLOR = listOf(EXPOSURE, CONTRAST, SATURATION, TEMPERATURE, TINT)
+        val MASK = listOf(MASK_X, MASK_Y, MASK_WIDTH, MASK_HEIGHT, MASK_ROTATION, MASK_FEATHER)
+        val LOOK = listOf(VIGNETTE, GRAIN, LEAK)
+    }
 }
 
 enum class TransitionKind(override val wire: String) : Wire {

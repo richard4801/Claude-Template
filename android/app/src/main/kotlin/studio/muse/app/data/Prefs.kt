@@ -44,6 +44,10 @@ data class AppPrefs(
      * out when the process ends) and the email isn't saved.
      */
     val rememberMe: Boolean = true,
+    /** Settings redesign (owner, 2026-11-09): Advanced (server, testing) shows only once turned on under Account. */
+    val showAdvanced: Boolean = false,
+    /** Settings → Studio → Start at: the quality new shots start on (draft | standard | hd | cinema). */
+    val startAt: String = "draft",
 ) {
     val owner get() = role == "owner"
 }
@@ -97,6 +101,8 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
         val useFake = booleanPreferencesKey("use_fake")
         val serverUrl = stringPreferencesKey("server_url")
         val fastBeta = booleanPreferencesKey("fast_beta")
+        val showAdvanced = booleanPreferencesKey("show_advanced")
+        val startAt = stringPreferencesKey("start_at")
         /** Old plaintext token (before 2026-11-04): moved to [tokenEnc] and removed. */
         val legacyToken = stringPreferencesKey("token")
         val tokenEnc = stringPreferencesKey("token_enc")
@@ -130,6 +136,8 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
             useFake = if (v2) p[K.useFake] ?: d.useFake else d.useFake,
             serverUrl = if (v2) p[K.serverUrl] ?: d.serverUrl else d.serverUrl,
             fastBeta = p[K.fastBeta] ?: d.fastBeta,
+            showAdvanced = p[K.showAdvanced] ?: d.showAdvanced,
+            startAt = p[K.startAt] ?: d.startAt,
             token = if (v2) tokenOf(p) else null,
             studioName = p[K.studio] ?: "", email = p[K.email]?.ifBlank { null } ?: memoryEmail ?: "", notifAsked = p[K.notifAsked] ?: false,
             role = p[K.role] ?: d.role, userId = p[K.userId] ?: "", rememberMe = p[K.rememberMe] ?: d.rememberMe,
@@ -146,7 +154,7 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
             p.remove(K.legacyToken)
             p[K.version] = 2
             p[K.theme] = n.theme; p[K.useFake] = n.useFake; p[K.serverUrl] = n.serverUrl
-            p[K.fastBeta] = n.fastBeta; p[K.studio] = n.studioName; p[K.notifAsked] = n.notifAsked
+            p[K.fastBeta] = n.fastBeta; p[K.studio] = n.studioName; p[K.notifAsked] = n.notifAsked; p[K.showAdvanced] = n.showAdvanced; p[K.startAt] = n.startAt
             p[K.role] = n.role; p[K.userId] = n.userId; p[K.rememberMe] = n.rememberMe
             val token = n.token
             if (!n.rememberMe) {

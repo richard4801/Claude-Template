@@ -44,7 +44,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | **Freeze frame** | Has | Has | M | A still item from the current frame. Android: `holdSec` hold clip; Edit → Freeze frame, length by slider or edges (wave 1). Mac: Timeline → Freeze frame at the playhead; length in Speed, or drag its edges (wave 1). |
 | **Reverse** | Missing | Missing | L | Needs a reversed proxy render on the device |
 | Slip edit | Has | Has | S | `trimClip` both ends at once. Android: Edit → Slip slider. Mac: Slip panel (the source moves, the length stays). |
-| Snapping (to the playhead, edges, beats) | Partial | Partial | S | Beats only. Mac: Beats only |
+| Snapping (to the playhead, edges, beats) | Has | Partial | S | Beats only. Mac: Beats only. Android: moving and trimming snap to the playhead, other items' edges and beats (within 10 dp). |
 | Timeline zoom (pinch) | Has | Has | — | 8–480 dp/s. Mac: Slider and ± buttons, 12–400 pt/s |
 | Frame-by-frame stepping buttons | Has | Has | S | Scrub is frame-exact; ±1 frame buttons would help. Mac: ← / → keys and ‹ › in the transport (wave 1). Android: ◀ ▶ in the transport (wave 1). |
 | Crop / rotate | Has | Has | — | Crop added in WS8. Mac: Crop section added in WS9 |
@@ -93,7 +93,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Keyframed text | Has | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet. Android: The Transform panel acts on the selected text (wave 1 fixed it moving the clip). |
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |
-| Caption language choice | Missing | Missing | S | Server parameter |
+| Caption language choice | Has | Missing | S | Server parameter. Android: Captions → Spoken language (Detect or one of 14), sent as the job's `options.language`. |
 | Translated / bilingual captions | Missing | Partial | M | Server job (LLM). Mac: Translate on the Mac (macOS 15, on-device, WS9); not bilingual |
 | Edit caption text (fix a word) | Has | Has | S | You can cut words but not retype them. Mac: Double-click a word. Android: Captions → Words → Tap to fix text. |
 | Filler and silence removal, edit by transcript | Has | Has | — | |
@@ -147,7 +147,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Position, scale, rotation | Has | Has | — | Mac: Sliders set the key at the playhead once keyed (fixed in WS9) |
 | Opacity | Has | Has | S | Engine yes; no button. Android: Transform → Opacity with ◆ (wave 1). |
 | Volume | Partial | Has | S | See Audio. Mac: See Audio (wave 1) |
-| Look / adjust / mask / crop keyframes | Missing | Missing | M each | |
+| Look / adjust / mask / crop keyframes | Partial | Missing | M each | Android: adjust (colour keys), mask (x, y, size, rotation, feather; Effects → Mask ◆) and the finishing look (vignette, grain, light leak; Filters → Adjust ◆) keyframe; `maskAt` / `lookAt`. Crop keyframes deferred: Media3 crops are static per clip (scale / x / y keys cover push-ins). |
 | Easing choice | Has | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold. Android: Linear, ease in, ease out, smooth, hold (wave 1). |
 | Keyframe list / move / delete on the timeline | Has | Has | M | Engine has `remove_keyframe`. Android: the selected item's ◆ on its timeline lane, dragged to move; Transform → Previous / Next keyframe, Remove keyframes here. Mac: the selected item's ◆ on its timeline block, dragged to move every property's key at that time; previous / next key, delete at the playhead. |
 

@@ -382,6 +382,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             }
         }
         viewModelScope.launch { controller.ui.map { it.playing }.distinctUntilChanged().collect { on -> _player.value?.let { if (on) it.play() else it.pause() } } }
+        // The chroma eyedropper: its frame once it opens (the source picture at the playhead, 720 px).
+        viewModelScope.launch {
+            controller.ui.map { it.pick?.takeIf { pk -> pk.argb == null }?.clipId }.distinctUntilChanged().collect { id ->
+                if (id == null) return@collect
+                val fr = sourceFrame(id, 720)
+                if (fr == null) { controller.act(EditAction.PickColor(false)); c.repo.toast("This clip's file isn't on the phone yet") }
+                else controller.act(EditAction.PickFrame(fr.first, fr.second, fr.third))
+            }
+        }
         viewModelScope.launch {
             // Scrubbing: the preview follows the playhead frame by frame. Seeks are conflated (only the latest position
             // waits while one is being decoded), so a fast drag never queues up stale frames; when the finger stops,
@@ -582,28 +591,36 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      * (96 px) from its file, then the controller's [EditAction.AutoAdjust].
      */
     fun autoAdjust() {
-        val p = controller.project ?: return
         val u = controller.ui.value
         val clip = (u.selection?.second as? VideoClip) ?: u.activeClip ?: return c.repo.toast("Select a clip to adjust")
-        val f = files[clip.asset] ?: return c.repo.toast("This clip's file isn't on the phone yet")
-        val (tr, i) = p.locate(clip.id) ?: return
-        val local = (u.playheadSec - itemSpan(p, tr, tr.items[i]).startSec).coerceAtLeast(0.0)
-        val src = studio.muse.core.edit.clipSourceAt(clip, local)
         viewModelScope.launch {
-            val rgb = withContext(Dispatchers.IO) {
-                runCatching {
-                    val r = MediaMetadataRetriever()
-                    try {
-                        r.setDataSource(f.absolutePath)
-                        val bmp = r.getFrameAtTime((src * 1_000_000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return@runCatching null
-                        val k = 96f / maxOf(bmp.width, bmp.height)
-                        val small = android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).roundToInt()), maxOf(1, (bmp.height * k).roundToInt()), true)
-                        val px = IntArray(small.width * small.height).also { small.getPixels(it, 0, small.width, 0, 0, small.width, small.height) }
-                        DoubleArray(px.size * 3) { j -> val c2 = px[j / 3]; ((c2 shr (16 - 8 * (j % 3))) and 0xFF) / 255.0 }
-                    } finally { r.release() }
-                }.getOrNull()
-            } ?: return@launch c.repo.toast("Couldn't read this frame · try another spot")
-            controller.act(EditAction.AutoAdjust(rgb))
+            val (_, _, px) = sourceFrame(clip.id, 96) ?: return@launch c.repo.toast("Couldn't read this frame · try another spot")
+            controller.act(EditAction.AutoAdjust(DoubleArray(px.size * 3) { j -> ((px[j / 3] shr (16 - 8 * (j % 3))) and 0xFF) / 255.0 }))
+        }
+    }
+
+    /**
+     * Clip [clipId]'s source frame at the playhead (before its look), at most [maxSide] px on the long side, as ARGB: for
+     * Auto adjust and the chroma eyedropper. Null when the clip's file isn't on the phone or the frame can't be read.
+     */
+    private suspend fun sourceFrame(clipId: String, maxSide: Int): Triple<Int, Int, IntArray>? {
+        val p = controller.project ?: return null
+        val (tr, i) = p.locate(clipId) ?: return null
+        val clip = tr.items[i] as? VideoClip ?: return null
+        val f = files[clip.asset] ?: return null
+        val local = (controller.ui.value.playheadSec - itemSpan(p, tr, clip).startSec).coerceAtLeast(0.0)
+        val src = studio.muse.core.edit.clipSourceAt(clip, local)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(f.absolutePath)
+                    val bmp = r.getFrameAtTime((src * 1_000_000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST) ?: return@runCatching null
+                    val k = minOf(1f, maxSide.toFloat() / maxOf(bmp.width, bmp.height))
+                    val small = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).roundToInt()), maxOf(1, (bmp.height * k).roundToInt()), true) else bmp
+                    Triple(small.width, small.height, IntArray(small.width * small.height).also { small.getPixels(it, 0, small.width, 0, 0, small.width, small.height) })
+                } finally { r.release() }
+            }.getOrNull()
         }
     }
 

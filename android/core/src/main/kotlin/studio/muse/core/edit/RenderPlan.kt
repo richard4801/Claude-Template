@@ -64,7 +64,17 @@ data class VideoLook(
      * item-local seconds) instead of [colorMatrix] (which then holds the matrix at its start, for stills).
      */
     val colorKeys: ColorKeys? = null,
+    /** Mask and look keyframes (M): the mask and the finishing look per frame ([MotionKeys]), null when none are keyed. */
+    val motionKeys: MotionKeys? = null,
 )
+
+/** An item's mask and look when their keyframes move them ([maskAt] / [lookAt] at item-local seconds). */
+data class MotionKeys(val mask: Mask?, val look: Look?, val keyframes: Keyframes) {
+    val masked: Boolean get() = mask != null && KfProp.MASK.any { !keyframes[it].isNullOrEmpty() }
+    val looked: Boolean get() = KfProp.LOOK.any { !keyframes[it].isNullOrEmpty() }
+    fun maskAt(t: Double): Mask? = maskAt(mask, keyframes, t)
+    fun lookAt(t: Double): Look = lookAt(look, keyframes, t) ?: Look()
+}
 
 /** What an item's colour matrix is made of when it has colour keyframes. */
 data class ColorKeys(val adjust: Adjust?, val keyframes: Keyframes, val filter: FilterRef?, val presets: List<FilterPreset>) {
@@ -377,7 +387,10 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         val keys = v.keyframes?.filterKeys { it in KfProp.COLOR }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
         val colorKeys = keys?.let { ColorKeys(v.adjust, it, v.filter, presets) }
         val m = (colorKeys?.matrixAt(0.0) ?: colorMatrix(v.adjust, v.filter, presets)).takeUnless { colorKeys == null && isIdentityMatrix(it) }
-        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte, colorKeys = colorKeys)
+        val motion = v.keyframes?.filterKeys { it in KfProp.MASK || it in KfProp.LOOK }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
+            ?.let { MotionKeys(v.mask, v.look, it) }?.takeIf { it.masked || it.looked }
+        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte,
+            colorKeys = colorKeys, motionKeys = motion)
     }
 
     /** A clip limited to the project's end; null when it starts after it. */

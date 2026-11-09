@@ -104,7 +104,7 @@ fun SuiteResultScreen(jobId: String) {
                     take?.let { MenuItem("stack", "Add to collection") { collecting = true } },
                     MenuItem("refresh", "Retake now", onClick = retake),
                     MenuItem("grid", "Library") { nav.tab(Routes.GALLERY) },
-                    if (store.owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
+                    if (store.owner) MenuItem("quality", "Models and prices (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                 ))
             }
             // Bottom: room for the action row (92 dp up, ~68 dp tall) so the takes strip is never under it.

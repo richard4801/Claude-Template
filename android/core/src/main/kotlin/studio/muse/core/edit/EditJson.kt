@@ -153,7 +153,7 @@ object EditJson {
         },
     )
 
-    private fun mask(o: Obj) = o.objOrNull("mask")?.let { m ->
+    internal fun mask(o: Obj) = o.objOrNull("mask")?.let { m ->
         Mask(
             m.enum("shape", "one of ${MaskShape.entries.joinToString(", ") { it.wire }}"), m.numOrNull("x"), m.numOrNull("y"), m.numOrNull("width"), m.numOrNull("height"),
             m.numOrNull("rotation"), m.numOrNull("feather"), m.boolOrNull("invert"),
@@ -202,7 +202,7 @@ object EditJson {
 
     private fun anim(o: Obj, key: String) = o.objOrNull(key)?.let { Anim(it.enum("kind", "unknown animation"), it.num("durationSec")) }
 
-    private fun keyframes(o: Obj): Keyframes? = o.objOrNull("keyframes")?.let { k ->
+    internal fun keyframes(o: Obj): Keyframes? = o.objOrNull("keyframes")?.let { k ->
         k.o.entries.associate { (name, list) ->
             val prop = wireOf<KfProp>(name) ?: k.bad(name, "is not a keyframe property here")
             prop to Obj.list(list, "${k.path}.$name").map { (e, f) ->
@@ -296,12 +296,12 @@ object EditJson {
         v.filter?.let { f -> put("filter", buildJsonObject { put("id", f.id); num("amount", f.amount) }) }
         v.adjust?.let { put("adjust", encodeAdjust(it)) }
         v.look?.let { put("look", encodeLook(it)) }
-        v.mask?.let { m ->
-            put("mask", buildJsonObject {
-                put("shape", m.shape.wire); num("x", m.x); num("y", m.y); num("width", m.width); num("height", m.height)
-                num("rotation", m.rotation); num("feather", m.feather); bool("invert", m.invert)
-            })
-        }
+        v.mask?.let { put("mask", encodeMask(it)) }
+    }
+
+    fun encodeMask(m: Mask) = buildJsonObject {
+        put("shape", m.shape.wire); num("x", m.x); num("y", m.y); num("width", m.width); num("height", m.height)
+        num("rotation", m.rotation); num("feather", m.feather); bool("invert", m.invert)
     }
 
     fun encodeSpeedCurve(c: SpeedCurve) = buildJsonObject {

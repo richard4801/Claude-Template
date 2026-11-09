@@ -94,3 +94,22 @@ class AutoAdjustTest {
         assertTrue("${a}", kotlin.math.abs(a.exposure ?: 0.0) <= 0.2 && a.temperature == null && a.tint == null)
     }
 }
+
+/** The eyedropper's canvas → source mapping. */
+class SourcePointTest {
+    @Test fun fullFrameCentreAndCorners() {
+        val sp = { x: Double, y: Double -> sourcePoint(1080, 1920, 1080, 1920, Fit.COVER, Transform(), null, x, y)!! }
+        assertEquals(0.5, sp(.5, .5).first, 1e-9); assertEquals(0.25, sp(.25, .1).first, 1e-9); assertEquals(0.1, sp(.25, .1).second, 1e-9)
+    }
+
+    @Test fun mirroredScaledAndCroppedOverlays() {
+        // An overlay at half size in the top-right quarter, mirrored: the canvas's top-right corner of it is the source's top-left.
+        val t = Transform(0.75, 0.25, 0.5, flipX = true)
+        val p = sourcePoint(1080, 1920, 1080, 1920, Fit.COVER, t, null, 0.999, 0.001)!!
+        assertEquals(0.0, p.first, 0.01); assertEquals(0.0, p.second, 0.01)
+        assertNull(sourcePoint(1080, 1920, 1080, 1920, Fit.COVER, t, null, 0.25, 0.75)) // outside it
+        // A quarter cropped off the left: the picture's left edge is source x 0.25.
+        val c = sourcePoint(1080, 1920, 1080, 1920, Fit.CONTAIN, Transform(), Crop(left = 0.25), 0.1251, 0.5) // 810 px wide, contained: from x 135
+        assertEquals(0.25, c!!.first, 0.01)
+    }
+}

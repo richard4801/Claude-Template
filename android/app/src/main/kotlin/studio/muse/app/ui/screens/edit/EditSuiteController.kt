@@ -37,6 +37,7 @@ import studio.muse.core.edit.Font
 import studio.muse.core.edit.Grain
 import studio.muse.core.edit.ImageItem
 import studio.muse.core.edit.KfProp
+import studio.muse.core.edit.propAt
 import studio.muse.core.edit.Look
 import studio.muse.core.edit.Mask
 import studio.muse.core.edit.MediaClip
@@ -107,7 +108,8 @@ sealed interface EditAction {
     /** Long-press drag of a main clip: it goes to position [toIndex]. */
     data class Reorder(val clipId: String, val toIndex: Int, val done: Boolean = true) : EditAction
     /** Dragging a selected item's [left] or right edge by [deltaSec] from where the drag began. */
-    data class TrimBy(val itemId: String, val left: Boolean, val deltaSec: Double, val done: Boolean = true) : EditAction
+    /** [snapSec] > 0: the moved edge snaps to the playhead, other items' edges and beats within that distance. */
+    data class TrimBy(val itemId: String, val left: Boolean, val deltaSec: Double, val done: Boolean = true, val snapSec: Double = 0.0) : EditAction
     /** Dragging a selected main clip's edge: its new source in/out ([done] when the finger lifts: one undo step). */
     data class Trim(val clipId: String, val inSec: Double, val outSec: Double, val done: Boolean = true) : EditAction
     data class Zoom(val pxPerSec: Float) : EditAction
@@ -251,6 +253,14 @@ sealed interface EditAction {
     data object CutToBeats : EditAction
     /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
     data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
+    /** The chroma eyedropper on (pauses; the view model loads the frame) or off. */
+    data class PickColor(val on: Boolean) : EditAction
+    /** The eyedropper's frame: the clip's source picture at the playhead, [w] × [h] ARGB. */
+    class PickFrame(val w: Int, val h: Int, val argb: IntArray) : EditAction
+    /** The finger at ([x], [y]) (fractions of the canvas); [done] sets the key colour there and closes the eyedropper. */
+    data class PickAt(val x: Double, val y: Double, val done: Boolean) : EditAction
+    /** Auto-captions' language (null: detect it). */
+    data class CaptionLanguage(val code: String?) : EditAction
     /** A saved style kit applied to the whole edit ([studio.muse.core.edit.applyKit]). */
     data class ApplyKit(val kit: KitChoice) : EditAction
     /** The selected clip moved between the main track and an overlay track (plans/edit-parity.md, S). */
@@ -465,7 +475,15 @@ class EditSuiteController(
                 if (next == null) { if (a.done) endDrag() } else change(a.done) { next }
             }
             is EditAction.TrimBy -> {
-                val next = SuiteOps.trimBy(dragBase ?: project ?: return, a.itemId, a.left, a.deltaSec)
+                val base = dragBase ?: project ?: return
+                var delta = a.deltaSec
+                if (a.snapSec > 0) base.locate(a.itemId)?.let { (t, i) ->
+                    val sp = itemSpan(base, t, t.items[i])
+                    val edge = (if (a.left) sp.startSec else sp.endSec) + delta
+                    snapPoints(base, a.itemId, u).minByOrNull { kotlin.math.abs(it - edge) }?.takeIf { kotlin.math.abs(it - edge) <= a.snapSec }
+                        ?.let { s -> delta = s - (if (a.left) sp.startSec else sp.endSec) }
+                }
+                val next = SuiteOps.trimBy(base, a.itemId, a.left, delta)
                 if (next == null) { if (a.done) endDrag() } else change(a.done, "That doesn't fit there") { next }
             }
             is EditAction.Trim -> {
@@ -631,7 +649,32 @@ class EditSuiteController(
             is EditAction.StepFrame -> { val fps = u.project?.canvas?.fps ?: 30.0; act(EditAction.Scrub(TimelineMath.snapFrame(u.playheadSec, fps) + a.frames / fps, end = true)) }
             is EditAction.Background -> change { p -> if (p.canvas.background.equals(a.color, true)) null else p.copy(canvas = p.canvas.copy(background = a.color)) }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
-            is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
+            is EditAction.SetMask -> {
+                val id = visualId(u) ?: return
+                val vis = project?.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual
+                val keys = vis?.keyframes
+                val local = localAt(u, id)
+                val old = vis?.mask; val n = a.mask
+                if (old != null && n != null && n.shape == old.shape && local != null && KfProp.MASK.any { !keys?.get(it).isNullOrEmpty() }) {
+                    // Mask keyframes: a keyed field changed from what shows at the playhead sets its key there; the rest change the mask.
+                    val shown = studio.muse.core.edit.maskAt(old, keys, local)!!
+                    val fields = listOf<Triple<KfProp, (Mask) -> Double?, Double>>(Triple(KfProp.MASK_X, { it.x }, .5), Triple(KfProp.MASK_Y, { it.y }, .5),
+                        Triple(KfProp.MASK_WIDTH, { it.width }, .5), Triple(KfProp.MASK_HEIGHT, { it.height }, .5), Triple(KfProp.MASK_ROTATION, { it.rotation }, 0.0),
+                        Triple(KfProp.MASK_FEATHER, { it.feather }, .1))
+                    fun keyedP(p: KfProp) = !keys?.get(p).isNullOrEmpty()
+                    val static = n.copy(x = if (keyedP(KfProp.MASK_X)) old.x else n.x, y = if (keyedP(KfProp.MASK_Y)) old.y else n.y,
+                        width = if (keyedP(KfProp.MASK_WIDTH)) old.width else n.width, height = if (keyedP(KfProp.MASK_HEIGHT)) old.height else n.height,
+                        rotation = if (keyedP(KfProp.MASK_ROTATION)) old.rotation else n.rotation, feather = if (keyedP(KfProp.MASK_FEATHER)) old.feather else n.feather)
+                    change(a.done) { p ->
+                        var q = p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = static); is ImageItem -> it.copy(mask = static); else -> it } } ?: return@change null
+                        for ((prop, get, d) in fields) if (keyedP(prop)) {
+                            val nv = get(n) ?: d
+                            if (kotlin.math.abs(nv - (get(shown) ?: d)) > 1e-9) q = SuiteOps.keyframe(q, id, prop, local, nv, u.keyEase) ?: q
+                        }
+                        q
+                    }
+                } else change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } }
+            }
             is EditAction.SetCrop -> {
                 val id = visualId(u) ?: return
                 val c = a.crop?.let { k -> studio.muse.core.edit.Crop(k.left?.let { r2(it.coerceIn(0.0, .45)) }, k.top?.let { r2(it.coerceIn(0.0, .45)) }, k.right?.let { r2(it.coerceIn(0.0, .45)) }, k.bottom?.let { r2(it.coerceIn(0.0, .45)) }) }
@@ -799,6 +842,15 @@ class EditSuiteController(
                 if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
                     say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
             }
+            is EditAction.PickColor -> {
+                if (!a.on) return _ui.update { it.copy(pick = null) }
+                val clip = (u.selection?.second as? VideoClip) ?: u.activeClip ?: return say("Select a clip to key")
+                setPlayback(u.playheadSec, false)
+                _ui.update { it.copy(pick = PickUi(clip.id)) }
+            }
+            is EditAction.PickFrame -> _ui.update { s -> s.copy(pick = s.pick?.copy(w = a.w, h = a.h, argb = a.argb)) }
+            is EditAction.PickAt -> pickAt(u, a)
+            is EditAction.CaptionLanguage -> _ui.update { it.copy(captionLanguage = a.code) }
             is EditAction.ApplyKit -> if (change(refused = "That style kit doesn't fit this edit") { p -> studio.muse.core.edit.applyKit(p, a.kit.kit).takeIf { it != p } })
                 say("Applied “${a.kit.name}”") else if (project != null) say("This edit already has that style")
             EditAction.SwapTrack -> {
@@ -932,7 +984,8 @@ class EditSuiteController(
     private fun autoCaptions() {
         val p = project ?: return
         val asset = SuiteOps.sourceAsset(p) ?: return
-        runAi("captions", null, sourceOf(asset)) { r ->
+        val lang = _ui.value.captionLanguage?.let { kotlinx.serialization.json.buildJsonObject { put("language", kotlinx.serialization.json.JsonPrimitive(it)) } }
+        runAi("captions", lang, sourceOf(asset)) { r ->
             val words = (r["words"] as? JsonArray).orEmpty().mapNotNull { w ->
                 val o = w as? JsonObject ?: return@mapNotNull null
                 val text = (o["text"] as? JsonPrimitive)?.content?.trim()?.take(60)?.ifEmpty { null } ?: return@mapNotNull null
@@ -1024,6 +1077,31 @@ class EditSuiteController(
             _ui.update { it.copy(bpm = bpm) }
             say("Beats found · ${bpm?.let { "${it.roundToInt()} BPM" } ?: "${beats.size} marks"}")
         }
+    }
+
+    /** The eyedropper: the source pixel under canvas point (x, y) of the clip being keyed; on [done], its colour becomes the key. */
+    private fun pickAt(u: EditSuiteUi, a: EditAction.PickAt) {
+        val pk = u.pick ?: return
+        val px = pk.argb ?: return
+        val p = project ?: return
+        val (t, i) = p.locate(pk.clipId) ?: return
+        val c = t.items[i] as? VideoClip ?: return
+        val local = (u.playheadSec - itemSpan(p, t, c).startSec).coerceAtLeast(0.0)
+        val k = c.keyframes; val tr = c.transform
+        val place = Transform(propAt(k, KfProp.X, tr?.x ?: .5, local), propAt(k, KfProp.Y, tr?.y ?: .5, local), propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local),
+            propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local), tr?.flipX, tr?.flipY)
+        val asset = p.asset(c.asset)
+        val fit = c.fit ?: if (t.kind == TrackKind.MAIN) studio.muse.core.edit.Fit.COVER else studio.muse.core.edit.Fit.CONTAIN
+        val src = studio.muse.core.edit.sourcePoint(p.canvas.width, p.canvas.height, asset?.width ?: pk.w, asset?.height ?: pk.h, fit, place, c.crop, a.x, a.y)
+        val hex = src?.let { (sx, sy) ->
+            val x = (sx * pk.w).toInt().coerceIn(0, pk.w - 1); val y = (sy * pk.h).toInt().coerceIn(0, pk.h - 1)
+            "#%06X".format(px[y * pk.w + x] and 0xFFFFFF)
+        }
+        if (!a.done) return _ui.update { it.copy(pick = pk.copy(at = a.x to a.y, hex = hex, src = src)) }
+        _ui.update { it.copy(pick = null) }
+        if (hex == null) return say("That's outside the clip · try again on the picture")
+        val ch = c.chroma ?: studio.muse.core.edit.Chroma(hex)
+        if (change { pp -> pp.updateItem(c.id) { (it as? VideoClip)?.copy(chroma = ch.copy(color = hex)) ?: it } }) say("Key colour $hex")
     }
 
     /** Tap to keep: a tap at the playhead's source time of the clip being cut out (1–10 taps). */
@@ -1128,8 +1206,8 @@ class EditSuiteController(
     private fun adjust(u: EditSuiteUi, a: EditAction.AdjustField) {
         val id = visualId(u) ?: return
         val v = r2(a.value)
-        // A keyframed colour field: the slider sets its key at the playhead (like the transform's).
-        val kp = KfProp.COLOR.firstOrNull { it.wire == a.field }
+        // A keyframed colour or look field: the slider sets its key at the playhead (like the transform's).
+        val kp = (KfProp.COLOR + KfProp.LOOK).firstOrNull { it.wire == a.field }
         val vis = project?.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual
         if (kp != null && !vis?.keyframes?.get(kp).isNullOrEmpty()) {
             val local = localAt(u, id) ?: return say("Move the playhead over this clip to set its keyframe")
@@ -1215,6 +1293,23 @@ class EditSuiteController(
 
     private fun addKeyframe(u: EditSuiteUi, prop: KfProp) {
         val p = project ?: return
+        if (prop in KfProp.MASK || prop in KfProp.LOOK) {
+            // Mask and look keyframes: on the picture the Mask / Adjust panels act on, at the value showing now.
+            val id = visualId(u) ?: return
+            val local = localAt(u, id) ?: return say("Move the playhead over this clip to add a keyframe")
+            val vis = p.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual ?: return
+            if (prop in KfProp.MASK && vis.mask == null) return say("Add a mask first")
+            val mk = studio.muse.core.edit.maskAt(vis.mask, vis.keyframes, local)
+            val lk = studio.muse.core.edit.lookAt(vis.look, vis.keyframes, local)
+            val v = when (prop) {
+                KfProp.MASK_X -> mk?.x ?: .5; KfProp.MASK_Y -> mk?.y ?: .5; KfProp.MASK_WIDTH -> mk?.width ?: .5; KfProp.MASK_HEIGHT -> mk?.height ?: .5
+                KfProp.MASK_ROTATION -> mk?.rotation ?: 0.0; KfProp.MASK_FEATHER -> mk?.feather ?: .1
+                KfProp.VIGNETTE -> lk?.vignette?.amount ?: 0.0; KfProp.GRAIN -> lk?.grain?.amount ?: 0.0; KfProp.LEAK -> lk?.leak?.amount ?: 0.0
+                else -> return
+            }
+            if (change { SuiteOps.keyframe(it, id, prop, local, v, u.keyEase) }) say("Keyframe added at ${"%.1f".format(local)} s")
+            return
+        }
         if (prop in KfProp.COLOR) {
             // Colour keyframes: on the picture the Adjust panel acts on, at the value showing now.
             val id = visualId(u) ?: return
