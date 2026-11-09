@@ -394,6 +394,26 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun reverse() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val src = c.p().asset(clip.asset)!!
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.Reverse(true)); advanceUntilIdle()
+        val rev = c.p().assets.single { it.reverseOf == src.id }
+        var now = c.p().mainClips[0]
+        assertEquals(rev.id, now.asset)
+        assertEquals(src.durationSec!! - clip.outSec, now.inSec, 1e-6); assertEquals(src.durationSec!! - clip.inSec, now.outSec, 1e-6)
+        valid(c.p())
+        // Back, then forwards again without a new job (the reversed copy is reused).
+        c.act(EditAction.Reverse(false))
+        now = c.p().mainClips[0]
+        assertEquals(clip.asset, now.asset); assertEquals(clip.inSec, now.inSec, 1e-6); assertEquals(clip.outSec, now.outSec, 1e-6)
+        c.act(EditAction.Reverse(true))
+        assertEquals(rev.id, c.p().mainClips[0].asset)
+        assertEquals(1, c.p().assets.count { it.reverseOf != null })
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

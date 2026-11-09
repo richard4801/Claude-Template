@@ -330,6 +330,16 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             label = "Length", valueText = "${fmt1(clipLength(c))} s")
         T("${fmt1(src)} s of video → ${fmt1(clipLength(c))} s · pitch kept", m.type.body.copy(fontSize = 13.sp), m.t.ink)
     }
+    // Reverse: plays the clip backwards (the first time, the server makes the reversed copy).
+    if (c.holdSec == null) {
+        val reversed = ui.project?.asset(c.asset)?.reverseOf != null
+        val job = ui.ai["reverse"]
+        OptRow("Reverse", when {
+            job?.running == true -> "${job.phase.ifEmpty { "Reversing" }}… ${job.progress}%"
+            job?.error != null && !reversed -> job.error
+            else -> "Plays the clip backwards, sound too"
+        }, reversed, { if (job?.running != true) act(EditAction.Reverse(!reversed)) })
+    }
 }
 
 /** The speed curve editor: log scale 0.1×–10×, points draggable, double-tap adds one, the playhead as a line. */
