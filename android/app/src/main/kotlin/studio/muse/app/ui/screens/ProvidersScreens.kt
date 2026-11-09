@@ -145,15 +145,17 @@ internal fun ProvidersContent(s: ProvidersState, vm: ProvidersViewModel?) {
                 var removing by remember(p.id) { mutableStateOf(false) }
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2), modifier = Modifier.testTag("provider_${p.id}")) {
                     RowItem(p.label.ifBlank { p.kind }, p.line(), onClick = { nav.go(studio.muse.app.ui.Routes.providerModels(p.id)) }) { Chevron() }
-                    if (replacing) SecureKeyField(p.keyLast4, "Paste the new key", s.busy, s.error, s.keysReady, { k -> vm?.replaceKey(p.id, k); replacing = false },
+                    if (replacing) Labeled("Replace the ${p.label.ifBlank { p.kind }} key") { SecureKeyField(p.keyLast4, "Paste the new key", s.busy, s.error, s.keysReady, { k -> vm?.replaceKey(p.id, k); replacing = false },
                         note = "Saved encrypted on the MUSE server, checked with ${p.label.ifBlank { p.kind }} first. Afterwards you only see its last 4 characters.",
-                        onCancel = { replacing = false })
+                        onCancel = { replacing = false }) }
                     else if (removing) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                         // Removing deletes the key and switches its models off everywhere: name it and ask first.
-                        Body("Remove ${p.label.ifBlank { p.kind }}? Its key is deleted and its ${p.models.added} model${if (p.models.added == 1) "" else "s"} leave the model picker.")
+                        val name = p.label.ifBlank { p.kind }
+                        Heading("Remove $name?")
+                        Body("Its key is deleted and its models leave the AI Suite.")
                         Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                             SecondaryButton("Keep", { removing = false }, Modifier.weight(1f))
-                            PrimaryButton("Remove provider", { removing = false; vm?.remove(p.id) }, Modifier.weight(1f))
+                            PrimaryButton("Remove $name", { removing = false; vm?.remove(p.id) }, Modifier.weight(1f))
                         }
                     }
                     else Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
@@ -268,7 +270,7 @@ internal fun ProviderModelsContent(
     val shown = if (s.filter == "on") s.models.filter { it.added?.enabled == true } else s.models
     Column(Modifier.fillMaxSize().padding(horizontal = MuseSpace.gutter), verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
         Segmented(listOf("all" to "All", "video" to "Video", "image" to "Image", "on" to "On"), s.filter, onFilter)
-        Input(s.q, onQuery, placeholder = "Search models", calm = true)
+        Input(s.q, onQuery, placeholder = "Search ${s.provider?.label?.ifBlank { null } ?: "the provider's"} models", calm = true)
         when {
             s.loading -> SkeletonLines(5)
             s.error != null -> ErrorState("Can't load the models", s.error, action = null)

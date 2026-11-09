@@ -146,7 +146,7 @@ fun StudioSectionScreen() {
         SettingsGroup("New videos and photos") {
             Labeled("Start at") {
                 Segmented(listOf("draft" to "Draft", "standard" to "Standard", "hd" to "HD", "cinema" to "Cinema"), s.prefs.startAt, vm::startAt)
-                Caption("The quality new shots use. Change it per shot in the AI Suite.")
+                Caption("The quality new videos use. Change it per shot in the AI Suite.")
             }
             RowItem("Test renders are kept for") { RowValue("30 days") }
         }
@@ -178,10 +178,10 @@ fun AiSpendingScreen() {
         SettingsGroup("Credit") {
             RowItem("Balance", onClick = { nav.go(Routes.CREDITS) }) { RowValue(creditLabel(s.wallet, s.balance)); Chevron() }
             s.wallet?.let { w -> RowItem("This month") { RowValue(studio.muse.core.Pricing.money(w.monthUsd)) } }
-            if (s.prefs.owner) TextAction("Add credit", { nav.go(Routes.CREDITS) }) else TextAction("Ask for credit", { nav.go(Routes.CREDITS) })
+            if (s.prefs.owner) TextAction("Add credit", { nav.go(Routes.CREDITS) }) else TextAction("Open credit", { nav.go(Routes.CREDITS) })
         }
         if (s.prefs.owner) OwnerAiSpending()
-        else Caption("Spend caps are set by the studio owner.")
+        else SettingsGroup("Spend caps", "Set by the studio owner") {}
     }
 }
 
@@ -200,7 +200,7 @@ private fun OwnerAiSpending() {
     SettingsGroup("Default models", "What “Auto” uses for each kind of work. You can still pick another model each time. Only you see models.") {
         RowItem("Default models", "Shots, photos, swaps, upscale and the rest", onClick = { nav.go(Routes.DEFAULT_MODELS) }) { Chevron() }
     }
-    SettingsGroup("More") {
+    SettingsGroup("Models and our own GPUs", "Status, GPU limits, the photo service and price corrections") {
         RowItem("Our own GPUs", st?.let { "${it.maxGpus} at once, off after ${it.engines?.keepReady?.idleMinutes ?: it.warmIdleMinutes} idle minutes" }, onClick = { nav.go(Routes.SETTINGS_GPUS) }) { Chevron() }
         RowItem("Price corrections", "Each model's price and the qualities that use it", onClick = { nav.go(Routes.SUITE_ENGINES) }) { Chevron() }
         RowItem("Photo models by step", "The model behind each photo step: new shots, edits, Enhance and Dress up", onClick = { nav.go(Routes.IMAGE_MODELS) }) { Chevron() }

@@ -88,7 +88,7 @@ class SettingsRedesignScreenshotTest(private val theme: String, private val stat
                 assertTrue(compose.onAllNodesWithText("Members").fetchSemanticsNodes().isEmpty())
             }
             "member_ai" -> {
-                compose.onNodeWithText("Ask for credit").assertIsDisplayed()
+                compose.onNodeWithText("Open credit").assertIsDisplayed()
                 // No model or provider names, no Default models for members.
                 assertTrue(compose.onAllNodesWithText("Default models").fetchSemanticsNodes().isEmpty())
             }
