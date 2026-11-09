@@ -476,7 +476,7 @@ object SuiteOps {
         val start = itemSpan(p, t, c).startSec
         val bounds = listOf(0.0) + timeline(p).map { it.endSec }
         val at = bounds.indices.minBy { abs(bounds[it] - start) }
-        val moved = c.copy(startSec = null, fit = null, transform = null, keyframes = null, opacity = null, blend = null, mask = null, chroma = null, alphaMatte = null)
+        val moved = c.copy(startSec = null, fit = null, transform = null, keyframes = null, opacity = null, blend = null, mask = null, chroma = null, alphaMatte = null, animLoop = null)
         var q = p.removeItem(id) ?: return null
         if (q.track(t.id)?.items?.isEmpty() == true) q = q.removeTrack(t.id) ?: q
         return q.addItem(q.main.id, moved, at)
