@@ -121,6 +121,9 @@ data class SuiteHost(
     val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
+    /** Style kits: save this edit's style under a name; delete a saved one. */
+    val saveKit: (String) -> Unit = {},
+    val deleteKit: (String) -> Unit = {},
     /** Auto adjust from the frame under the playhead (the view model reads the frame). */
     val autoAdjust: () -> Unit = {},
     /** "Add a video from a link" (WS7's import, then added at the end); null where imports aren't offered. */
@@ -222,6 +225,44 @@ private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
     }
     OptRow("Snap cuts to beats", if (ui.project?.let { SuiteOps.beatTimes(it, false).isNotEmpty() } == true) "Split lands on the nearest beat" else "Detect beats in Audio first", ui.snapToBeats,
         { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
+    KitsSection(ui, host, act)
+}
+
+/**
+ * Style kits (plans/edit-parity.md, M): save this edit's look, colour, transition, caption and text styles and
+ * background under a name; apply a saved kit to the whole edit (undo puts it back); delete one with a second tap.
+ */
+@Composable
+internal fun KitsSection(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
+    val m = muse
+    SuiteLabel("Style kits")
+    T("Save this edit's look, colour, transition, captions and text, then use them on another edit.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    var name by remember { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.weight(1f).height(44.dp).background(m.t.surface).border(1.dp, m.t.line).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+            BasicTextField(name, { name = it.take(60) }, Modifier.fillMaxWidth().semantics { contentDescription = "Style kit name" }, singleLine = true,
+                textStyle = m.type.body.copy(color = m.t.ink, fontSize = 14.sp), cursorBrush = SolidColor(m.t.accent),
+                decorationBox = { inner -> Box { if (name.isEmpty()) T("${ui.title.ifEmpty { "This edit" }.take(30)} style", m.type.body.copy(fontSize = 14.sp), m.t.muted, maxLines = 1); inner() } })
+        }
+        SuiteButton("Save style", { host.saveKit(name); name = "" }, height = 44.dp, enabled = ui.project != null)
+    }
+    ui.kitsNote?.let { T(it, m.type.tiny.copy(fontSize = 12.sp), m.t.muted) }
+    var confirm by remember { mutableStateOf<String?>(null) }
+    ui.kits.forEach { k ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                T(k.name, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
+                T(k.parts, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+            }
+            if (confirm == k.id) {
+                SuiteButton("Keep", { confirm = null }, height = 34.dp)
+                SuiteButton("Delete kit", { confirm = null; host.deleteKit(k.id) }, height = 34.dp)
+            } else {
+                SuiteButton("Apply", { act(EditAction.ApplyKit(k)) }, height = 34.dp, enabled = ui.project != null)
+                Box(Modifier.size(40.dp).press { confirm = k.id }.semantics { contentDescription = "Delete ${k.name}" }, contentAlignment = Alignment.Center) { EIc("trash", 18.dp, m.t.muted) }
+            }
+        }
+    }
 }
 
 @Composable

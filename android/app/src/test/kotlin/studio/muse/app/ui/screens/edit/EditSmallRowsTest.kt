@@ -291,4 +291,22 @@ class EditSmallRowsTest {
         // Unkeyed fields still take the static value.
         c.act(EditAction.AdjustField("contrast", .2)); assertEquals(.2, c.p().mainClips[0].adjust!!.contrast!!, 1e-9)
     }
+
+    @Test fun styleKitsApplyToTheWholeEdit() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.Split)
+        val kit = studio.muse.core.edit.StyleKit(adjust = studio.muse.core.edit.Adjust(contrast = .2), transition = studio.muse.core.edit.Transition(studio.muse.core.edit.TransitionKind.FADE, .5),
+            background = "#202020", fill = studio.muse.core.edit.CanvasFill.BLUR)
+        c.act(EditAction.ApplyKit(KitChoice("k1", "Warm", kit)))
+        val p = c.p()
+        assertTrue(p.mainClips.all { it.adjust?.contrast == .2 })
+        assertEquals(.5, p.mainClips[1].transitionIn!!.durationSec, 1e-9)
+        assertEquals("#202020", p.canvas.background)
+        assertEquals("Applied “Warm”", c.ui.value.message)
+        valid(p)
+        // The same again changes nothing; undo puts the edit back in one step.
+        c.act(EditAction.ApplyKit(KitChoice("k1", "Warm", kit))); assertEquals("This edit already has that style", c.ui.value.message)
+        c.act(EditAction.Undo); assertNull(c.p().mainClips[0].adjust)
+        assertEquals("Colour, transition, background", KitChoice("k1", "Warm", kit).parts)
+    }
 }

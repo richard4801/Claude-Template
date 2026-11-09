@@ -201,7 +201,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Template library (swap in your media) | Partial | Partial | L | "Recreate an edit" (recipes) is the MUSE take on this. A browsable library is **Content**. Mac: Recreate an edit |
 | Beat-synced auto-cut to a song | Has | Has | M | Beats engine exists. Android: Audio → Cut clips to the beat: each main clip ends on the beat nearest to its end (the latest its source can reach). Mac: Audio → Cut clips to the beat (same rule). |
-| Save your own edit as a template / style kit | Missing | Missing | M | |
+| Save your own edit as a template / style kit | Partial | Partial | M | Android: style kits (Edit → Style kits: save this edit's look, colour, transition, caption and text styles and background by name; apply to another edit; `/v1/editor/kits`, shared `kit.ts`). A template that swaps in new media is still the recipes / Recreate path. Mac: Video → Style kits: Save style, Apply, delete (asks first); the same kit engine (fixtures match). |
 
 ## 13. AI features
 

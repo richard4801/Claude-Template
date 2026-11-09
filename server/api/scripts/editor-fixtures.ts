@@ -10,6 +10,7 @@ import { runChain, voiceChain } from '../src/editor/audio.js';
 import { applyPatch, diff } from '../src/editor/jsonpatch.js';
 import { applyOps, OP_NAMES } from '../src/editor/ops.js';
 import * as K from '../src/editor/look.js';
+import { applyKit, kitOf, validateKit } from '../src/editor/kit.js';
 import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -383,6 +384,25 @@ const autoAdjustCases = [
   { name: 'black', rgb: frame(16, () => [0, 0, 0]) },
 ].map(c => ({ ...c, out: M.autoAdjust(c.rgb, c.base as M.Adjust | undefined) }));
 const colorKeys = colorKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => { const adjust = M.adjustAt(item, t); return { t, adjust: adjust ?? null, matrix: M.colorMatrix(adjust, item.filter, FILTERS) }; }) }));
+// Style kits (M): kitOf every fixture project; applyKit of three kits onto three projects; validateKit cases.
+const kitList = [
+  { version: 1, look: { lut: 'pack:film-gold', strength: 0.6, grain: { amount: 0.2 } }, filter: { id: 'warm', amount: 0.5 }, adjust: { contrast: 0.1, tint: -0.2 },
+    transition: { kind: 'whip', durationSec: 0.6 }, captionStyle: CAPTION_STYLES.neon, textStyle: HOOKS[3]!.style, background: '#202020', fill: 'blur' },
+  { version: 1, transition: { kind: 'fade', durationSec: 2 } },
+  kitOf(projects[8]!.project),
+] as unknown[];
+const kitProblem = (k: unknown) => { try { validateKit(k, FILTERS, LOOK_IDS, new Set()); return null; } catch (e) { return (e as M.EditProblem).field; } };
+const kits = {
+  kitOf: projects.map(x => ({ name: x.name, kit: kitOf(x.project) })),
+  apply: [1, 2, 9].flatMap(pi => kitList.map((kit, ki) => ({ project: pi, kit: ki, result: applyKit(projects[pi]!.project, kit as never) }))),
+  kits: kitList,
+  validate: [
+    { version: 1 }, kitList[0], { version: 2 }, { version: 1, mask: {} }, { version: 1, adjust: { tint: 2 } }, { version: 1, transition: { kind: 'fade', durationSec: 5 } },
+    { version: 1, transition: { kind: 'swirl', durationSec: 0.5 } }, { version: 1, look: { lut: 'cube' } }, { version: 1, captionStyle: { ...CAPTION_STYLES.pop, highlightColor: 'yellow' } },
+    { version: 1, textStyle: { ...HOOKS[0]!.style, sizePct: 9 } }, { version: 1, fill: 'mirror' }, { version: 1, background: 'red' }, { version: 1, filter: { id: 'nope', amount: 1 } },
+    { version: 1, look: { vignette: { amount: 3 } } }, 'kit',
+  ].map(kit => ({ kit, field: kitProblem(kit) })),
+};
 const wave1 = projects[projects.length - 1]!.project;
 const holdClip = (wave1.tracks[0]!.items[1]) as M.VideoClip;
 const holdFns = { clip: holdClip, length: M.clipLength(holdClip), sourceAt: [0, 0.7, 1.5].map(t => ({ t, src: M.clipSourceAt(holdClip, t) })), timeAt: M.clipTimeAt(holdClip, 4.05),
@@ -401,7 +421,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

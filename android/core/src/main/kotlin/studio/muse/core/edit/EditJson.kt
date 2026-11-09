@@ -211,6 +211,14 @@ object EditJson {
         }
     }
 
+    /** A style kit's parts (Kit.kt parseKit checks the keys, version and rules). */
+    internal fun kitOf(o: Obj) = StyleKit(
+        look = o.objOrNull("look")?.let(::lookOf), filter = filter(o), adjust = adjust(o),
+        transition = o.objOrNull("transition")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
+        captionStyle = o.objOrNull("captionStyle")?.let(::captionStyle), textStyle = o.objOrNull("textStyle")?.let(::textStyle),
+        background = o.strOrNull("background"), fill = o.enumOrNull("fill", "must be color or blur"),
+    )
+
     internal fun textStyle(s: Obj) = TextStyle(
         font = s.enum("font", "unknown font"), weight = s.int("weight"), sizePct = s.num("sizePct"), color = s.str("color"),
         align = s.enum("align", "must be left, center or right"),

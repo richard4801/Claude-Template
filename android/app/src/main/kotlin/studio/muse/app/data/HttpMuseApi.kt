@@ -182,6 +182,9 @@ interface MuseService {
     @DELETE("v1/suite/rigs/{id}") suspend fun deleteSuiteRig(@Path("id") id: String): retrofit2.Response<Unit>
     // The learning editor (workstream 3), owner only.
     @GET("v1/learn/playbook") suspend fun playbook(): List<LearnRule>
+    @GET("v1/editor/kits") suspend fun editKits(): EditKits
+    @POST("v1/editor/kits") suspend fun saveEditKit(@Body r: EditKitRequest): EditKit
+    @DELETE("v1/editor/kits/{id}") suspend fun deleteEditKit(@Path("id") id: String): retrofit2.Response<Unit>
     @POST("v1/learn/playbook") suspend fun addRule(@Body r: LearnRuleRequest): LearnRule
     @PATCH("v1/learn/playbook/{id}") suspend fun patchRule(@Path("id") id: String, @Body r: LearnRuleRequest): LearnRule
     @DELETE("v1/learn/playbook/{id}") suspend fun deleteRule(@Path("id") id: String): retrofit2.Response<Unit>
@@ -508,6 +511,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
 
     // The learning editor (workstream 3)
     override suspend fun playbook() = call { playbook() }
+    override suspend fun editKits() = call { editKits() }.kits
+    override suspend fun saveEditKit(name: String, kit: kotlinx.serialization.json.JsonObject) = call { saveEditKit(EditKitRequest(name, kit)) }
+    override suspend fun deleteEditKit(id: String) { call { deleteEditKit(id) } }
     override suspend fun addRule(req: LearnRuleRequest) = call { addRule(req) }
     override suspend fun patchRule(id: String, req: LearnRuleRequest) = call { patchRule(id, req) }
     override suspend fun deleteRule(id: String) { call { deleteRule(id) } }

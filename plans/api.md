@@ -1397,6 +1397,38 @@ _Terms note:_ Recreate's link fetching was approved as a "personal reference onl
 **Events** (to the importer and the owner): `{type: "clip", clip: Import}` on create, rename and when talking detection finishes; `{type: "clip", op: "delete", id}` on delete.
 **Config:** `IMPORT_MAX_MB` (150). The server fallback shares `RECREATE_LINKS` and `YTDLP_PATH` with Recreate.
 
+## Edit style kits (WS8, 2026-11-09; plans/edit-parity.md M "Save your own edit as a template / style kit")
+
+A style kit is an edit's look, colour, transition, caption and text styles and canvas background, saved by name and
+applied to another edit. The kit is pure data, shared by the server, Android and the Mac (server/api/src/editor/kit.ts:
+`kitOf`, `applyKit`, `validateKit`; checked through functions.json → kits):
+
+```
+StyleKit = { version: 1, look?: Look, filter?: FilterRef, adjust?: Adjust, transition?: Transition,
+             captionStyle?: CaptionStyle, textStyle?: TextStyle, background?: "#RRGGBB", fill?: "color" | "blur" }
+```
+
+- **kitOf(edit):** the first main clip's look, filter and adjust (no keyframes). A look keeps its LUT only when it's a
+  `pack:` or `palette:` look, because an uploaded .cube belongs to its edit. Also the first transition, the caption
+  style, the first text item's style, and the canvas background and fill.
+- **applyKit(edit, kit):** every main clip takes the look, filter and adjust (their keyframes stay). Every cut takes the
+  transition, at most half of each clip beside it; cuts too short for 0.1 s stay as they are. The caption track and every
+  text item take the styles (words and text stay). The canvas takes the background and fill. Parts the kit leaves out
+  stay.
+- **validateKit:** the known keys at version 1; a transition of a known kind at 0.1–2 s; a pack or palette look only.
+  Every other part is checked by the edit's own rules, on a small probe edit. Errors name a `kit.…` field.
+
+Endpoints (signed-in users; members see their own kits, the owner sees the studio's; at most 200 per studio):
+
+| | |
+|---|---|
+| `GET /v1/editor/kits` | `{ kits: [{ id, name, kit, createdBy, createdAt, updatedAt }] }`, newest first |
+| `POST /v1/editor/kits` | `{ name (1–60), kit }` → the kit. 400 with the `kit.…` field when it isn't valid |
+| `PATCH /v1/editor/kits/:id` | `{ name?, kit? }` → the kit. 404 for another member's |
+| `DELETE /v1/editor/kits/:id` | 204. 404 for another member's |
+
+Table `edit_kits` (migration 0027).
+
 ## Learning editor (workstream 3, 2026-11-08; `plans/recreate-edit.md` §5)
 The studio's editing memory, which Claude reads before every edit. The model doesn't change; MUSE's memory does. It is owner only: members get `403 owner_only`. Migration **0017** adds `edit_recipes`, `edit_corrections`, `playbook_rules`, `edit_gaps` and `edit_ops.meta`. Code: `src/editor/learn.ts`, `learnRoutes.ts`, `learnSchema.ts`. Tests: `test/learn.test.ts`.
 
