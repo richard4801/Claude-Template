@@ -63,3 +63,9 @@ Today the apps say "engines", "models" and "image engine" for the same thing. Ev
 1. Members: move it from the sidebar into Settings (⌘8 still opens it), or keep both?
 2. Advanced: hidden behind the Account switch (as drawn), or always the last item for the owner?
 3. Providers: anything else you want on the provider row (spend this month with that key, a test call)?
+
+## Owner's decision (2026-11-09)
+- **Approved as shown** (the Mac mock in run 42545454181). Build it on Mac (WS6) and Android (WS7), same sections, words and member rules.
+- **Members:** inside Settings only; the sidebar item goes, ⌘8 still opens the section.
+- **Advanced:** hidden until switched on in Account.
+- Providers: as drawn (no extra columns for now).
