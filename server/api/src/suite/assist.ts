@@ -46,7 +46,7 @@ export function suiteOptions() {
     style: { genre: pick(GENRES), era: pick(ERAS), tempo: pick(TEMPOS), format: pick(UGC_FORMATS) },
     moves: MOVES.map(m => ({ id: m.id, label: m.label, description: m.description, category: m.category })),
     moveRules: 'At most 2 moves; a second must be a different kind (never with static, time or aerial moves). Intensity 0–1 (default 0.5).',
-    bar: { tool: 'the composer\'s own (the draft keeps it; suite_request_shot only for shot)', quality: [...QUALITIES], aspect: [...ASPECTS], duration: '2–30 s (whole seconds)', takes: '1–4', sound: 'true = native sound where the model makes it' },
+    bar: { tool: 'the composer\'s own (the draft keeps it; suite_request_shot only for shot)', count: 'Photo: 1–4 stills', quality: [...QUALITIES], aspect: [...ASPECTS], duration: '2–30 s (whole seconds)', takes: '1–4', sound: 'true = native sound where the model makes it' },
     notes: 'Leave a row out for Auto. Only these ids are accepted.',
   };
 }
@@ -112,6 +112,8 @@ export const SetBody = z.object({
   moves: z.array(z.object({ id: z.string().max(40), intensity: z.number().min(0).max(1).optional() }).strict()).max(2).optional(),
   quality: z.enum(QUALITIES).optional(), aspect: z.enum(ASPECTS).optional(), duration: z.number().int().min(2).max(30).optional(), takes: z.number().int().min(1).max(4).optional(),
   sound: z.boolean().optional(), speaking: z.boolean().nullable().optional(),
+  /** WS18: Photo's number of stills. */
+  count: z.number().int().min(1).max(4).optional(),
 }).strict();
 export type SetInput = z.infer<typeof SetBody>;
 
@@ -193,7 +195,7 @@ export class SuiteAssist {
       toks = [...toks.filter(x => x.t !== 'move'), ...ms.map(({ o, intensity }) => ({ t: 'move' as const, id: o.id, label: o.label, category: o.category, intensity: Math.round(intensity * 100), key: ++key }))];
     }
     if (b.rig !== undefined) d.rig = { ...checkVisibleRig(RigSchema.parse(b.rig)) };
-    for (const k of ['quality', 'aspect', 'duration', 'takes', 'sound'] as const) if (b[k] !== undefined) (d as Record<string, unknown>)[k] = b[k];
+    for (const k of ['quality', 'aspect', 'duration', 'takes', 'sound', 'count'] as const) if (b[k] !== undefined) (d as Record<string, unknown>)[k] = b[k];
     if (b.speaking !== undefined) { if (b.speaking === null) delete d.speaking; else d.speaking = b.speaking; }
     // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
     // change Claude made outside Shot, because it only lays a draft over the composer of the same tool.

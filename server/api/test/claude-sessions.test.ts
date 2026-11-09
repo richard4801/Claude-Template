@@ -117,7 +117,8 @@ describe('Claude\'s draft changes in every mode', () => {
     const d = await assist('photo');
     const o = suiteOptions();
     const rig = { lens: o.camera.lens[0]!.id, lighting: o.lighting[0]!.id };
-    const v = await tool('suite_set_draft').run(env(), { assistId: d.id, modelId: model.id, prompt: 'At the café window, soft morning light', rig, aspect: '3:4' }) as any;
+    const v = await tool('suite_set_draft').run(env(), { assistId: d.id, modelId: model.id, prompt: 'At the café window, soft morning light', rig, aspect: '3:4', count: 3 }) as any;
+    expect(v.draft.count).toBe(3);
     expect(v.draft.tool).toBe('photo');
     expect(v.revision).toBe(d.revision + 1);
     expect(v.draft.rig).toMatchObject(rig);
