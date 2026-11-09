@@ -46,6 +46,8 @@ final class ClaudeCodeService: ObservableObject {
     /// Phone turns this Mac ran: their `{op: "event"}` echoes from the server are dropped (the local stream showed them).
     private var ranTurns: Set<String> = []
     private static let demoAPI = FakeClaudeAPI()
+    /// Demo mode: seconds between the scripted reply's lines (review mode slows it to close a chat mid-reply).
+    static var demoLineDelay = 0.12
 
     init() {}
 
@@ -247,7 +249,7 @@ final class ClaudeCodeService: ObservableObject {
     private func makeRunner() -> ClaudeTurnRunner? {
         guard let api, info.ready else { return nil }
         if isDemo {
-            return ClaudeTurnRunner(api: api, launcher: ClaudeScriptedLauncher(delay: 0.12), tokens: tokens, executable: "claude",
+            return ClaudeTurnRunner(api: api, launcher: ClaudeScriptedLauncher(delay: Self.demoLineDelay), tokens: tokens, executable: "claude",
                                     root: FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-demo-claude"), environment: [:])
         }
         guard let exe = executable else { return nil }
