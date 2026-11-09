@@ -507,11 +507,11 @@ extension SnapshotRunner {
         step("Auto reframe: Vision runs over the clip (no face in the test take)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.lastError = nil
-        let before = s.project
+        let beforeReframe = s.project
         s.followFaces()
         for _ in 0..<300 where s.reframeProgress != nil { try? await Task.sleep(for: .milliseconds(100)) }
         check("reframe: finished", s.reframeProgress == nil)
-        check("reframe: no face, no change, and says why", s.project == before && (s.lastError ?? "").contains("No face"), s.lastError ?? "no message")
+        check("reframe: no face, no change, and says why", s.project == beforeReframe && (s.lastError ?? "").contains("No face"), s.lastError ?? "no message")
         s.lastError = nil
 
         step("Back to the take")
