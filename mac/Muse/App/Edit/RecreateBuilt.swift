@@ -42,6 +42,15 @@ final class RecreateBuiltPreview {
         player.isMuted = true
     }
 
+    /// True when `url` is a real video (a video track that lasts). A still image or an unreadable file is never drawn as
+    /// "your edit": animating a poster with the clip's camera keys made the edit look like a slideshow (owner bug).
+    static func isPlayableVideo(_ url: URL) async -> Bool {
+        let asset = AVURLAsset(url: url)
+        guard let tracks = try? await asset.loadTracks(withMediaType: .video), !tracks.isEmpty else { return false }
+        let secs = (try? await asset.load(.duration).seconds) ?? 0
+        return secs.isFinite && secs > 0.1
+    }
+
     /// The server's picture leaves something out (rotation, masks, captions…): the player says "Preview of the cut".
     var cutOnly: Bool { serverRender?.isCutOnly ?? false }
     var clipCount: Int { project?.mainClips.count ?? 0 }

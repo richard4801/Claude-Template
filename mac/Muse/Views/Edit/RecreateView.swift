@@ -708,13 +708,27 @@ struct RecreatePlayer: View {
                             .background(SnapshotFrame(key: "yours"))
                     } else if let player, !yours {
                         RecreateVideoSurface(player: player)
+                    } else if yours && !store.isDemo {
+                        // Never stills animated as if they were the edit (owner bug): the real render, or a plain state.
+                        VStack(spacing: Space.s2) {
+                            if rs.loadingBuilt {
+                                ProgressView().controlSize(.small)
+                                Text("Preparing the preview…").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                            } else if let e = rs.builtError {
+                                Text(e).scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                                RButton("Retry", kind: .plain, small: true) { Task { await store.loadRecreateBuilt() } }
+                            } else {
+                                Text("No preview yet").scaled(t.scale.caption, .white.opacity(0.7))
+                            }
+                        }
+                        .padding(Space.s3)
                     } else {
                         frame
                         if !yours || store.isDemo { overlayText }
                         if yours && rs.loadingBuilt {
                             VStack(spacing: Space.s2) {
                                 ProgressView().controlSize(.small)
-                                Text("Getting your edit ready to play").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                                Text("Preparing the preview…").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
                             }
                             .padding(Space.s3)
                         }
