@@ -71,7 +71,8 @@ enum class AnimKind(override val wire: String) : Wire {
 }
 
 enum class Fit(override val wire: String) : Wire { COVER("cover"), CONTAIN("contain") }
-enum class AssetKind(override val wire: String) : Wire { VIDEO("video"), IMAGE("image"), AUDIO("audio"), /** An imported .cube (Looks); always an upload. */ LUT("lut") }
+enum class AssetKind(override val wire: String) : Wire { VIDEO("video"), IMAGE("image"), AUDIO("audio"), /** An imported .cube (Looks); always an upload. */ LUT("lut"),
+    /** The member's own .ttf/.otf for text; always an upload. */ FONT("font") }
 
 enum class TrackKind(override val wire: String) : Wire {
     MAIN("main"), VIDEO("video"), IMAGE("image"), TEXT("text"), CAPTION("caption"), MUSIC("music"), VOICE("voice"), SFX("sfx"),
@@ -131,6 +132,8 @@ data class Asset(
     val hasAudio: Boolean? = null,
     /** A hint, never trusted. */
     val url: String? = null,
+    /** A font asset's family and style, read from the file (display only). */
+    val name: String? = null,
 )
 
 /** Anything on a track. Which class an item is follows from its track's kind. */
@@ -267,6 +270,8 @@ data class TextStyle(
     val stroke: Stroke? = null,
     val shadow: Shadow? = null,
     val background: TextBackground? = null,
+    /** Text items only: a [AssetKind.FONT] asset to draw with (its own face; [weight] is not synthesised). [font] stays the fallback. */
+    val fontAsset: String? = null,
 )
 
 data class TextItem(

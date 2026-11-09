@@ -221,3 +221,18 @@ test('edit and delete a model (with her LoRA and accounts)', async () => {
   assert.equal((await api('DELETE', '/v1/models/m_noor')).status, 404);
   await api('POST', '/v1/dev/reset');
 });
+
+test('editor uploads: a font is presigned, PUT, checked and named; other files are refused', async () => {
+  const fs = await import('node:fs');
+  const figtree = fs.readFileSync(new URL('../api/assets/fonts/figtree_700.ttf', import.meta.url));
+  const p = (await api('POST', '/v1/editor/uploads/presign', { purpose: 'font', contentType: 'font/ttf', bytes: figtree.length })).body;
+  assert.equal((await fetch(p.url, { method: 'PUT', headers: p.headers, body: figtree })).status, 204);
+  assert.deepEqual((await api('POST', '/v1/editor/uploads/font-check', { uploadId: p.uploadId })).body, { uploadId: p.uploadId, name: 'Figtree Bold' });
+  assert.ok((await api('GET', `/v1/editor/uploads/${p.uploadId}`)).body.url.startsWith('/uploads/'));
+  const junk = (await api('POST', '/v1/editor/uploads/presign', { purpose: 'font', contentType: 'application/octet-stream' })).body;
+  await fetch(junk.url, { method: 'PUT', body: 'not a font at all' });
+  const r = await api('POST', '/v1/editor/uploads/font-check', { uploadId: junk.uploadId });
+  assert.equal(r.status, 400); assert.match(r.body.error, /not a TrueType or OpenType font/);
+  assert.equal((await api('POST', '/v1/editor/uploads/presign', { purpose: 'font', contentType: 'font/woff2' })).status, 400);
+  assert.equal((await api('POST', '/v1/editor/uploads/presign', { purpose: 'font', contentType: 'font/ttf', bytes: 11 * 1024 * 1024 })).status, 400);
+});

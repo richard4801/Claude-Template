@@ -47,6 +47,14 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             id("$f.id", a.id)
             if (assets.containsKey(a.id)) bad("$f.id", "is used twice")
             if (a.kind == AssetKind.LUT && a.upload == null) bad(f, "a lut asset must be an upload")
+            if (a.kind == AssetKind.FONT) {
+                if (a.upload == null) bad(f, "a font asset must be an upload")
+                if (a.durationSec != null) bad("$f.durationSec", "is not part of a font asset")
+                if (a.width != null) bad("$f.width", "is not part of a font asset")
+                if (a.height != null) bad("$f.height", "is not part of a font asset")
+                if (a.hasAudio != null) bad("$f.hasAudio", "is not part of a font asset")
+            }
+            a.name?.let { if (it.isBlank() || it.length > 80) bad("$f.name", "must be 1–80 characters") }
             val refs = listOfNotNull(a.take, a.upload, a.library)
             if (refs.size != 1 || refs.any { it.isEmpty() || it.length > 100 }) bad(f, "needs exactly one of take, upload or library")
             num("$f.durationSec", a.durationSec, 0.01, 36_000.0)
@@ -85,7 +93,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
                 num("$f.caption.words.$j.startSec", w.startSec, 0.0, 36_000.0, false)
                 num("$f.caption.words.$j.endSec", w.endSec, w.startSec, 36_000.0, false)
             }
-            textStyle("$f.caption.style", c.style.text)
+            textStyle("$f.caption.style", c.style.text, ownFont = false)
             color("$f.caption.style.highlightColor", c.style.highlightColor, false)
             num("$f.caption.style.y", c.style.y, 0.0, 1.0); num("$f.caption.style.wordsPerPage", c.style.wordsPerPage?.toDouble(), 1.0, 8.0)
             num("$f.caption.style.maxLines", c.style.maxLines?.toDouble(), 1.0, 2.0)
@@ -288,7 +296,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     private fun textItem(g: String, tx: TextItem) {
         if (tx.text.isEmpty() || tx.text.length > EditLimits.MAX_TEXT) bad("$g.text", "must be 1–${EditLimits.MAX_TEXT} characters")
         num("$g.startSec", tx.startSec, 0.0, 600.0, false); num("$g.durationSec", tx.durationSec, EditLimits.MIN_ITEM_SEC, 600.0, false)
-        textStyle("$g.style", tx.style)
+        textStyle("$g.style", tx.style, ownFont = true)
         transform(g, tx.transform)
         num("$g.opacity", tx.opacity, 0.0, 1.0)
         keyframes("$g.keyframes", tx.keyframes, tx.durationSec, VISUAL_PROPS)
@@ -306,7 +314,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
 
     }
 
-    private fun textStyle(f: String, s: TextStyle) {
+    private fun textStyle(f: String, s: TextStyle, ownFont: Boolean) {
+        s.fontAsset?.let {
+            if (!ownFont) bad("$f.fontAsset", "captions use the built-in fonts")
+            if (assets[it]?.kind != AssetKind.FONT) bad("$f.fontAsset", "must be a font asset")
+        }
         if (s.weight !in setOf(400, 700, 900)) bad("$f.weight", "must be 400, 700 or 900")
         num("$f.sizePct", s.sizePct, 0.015, 0.25, false)
         color("$f.color", s.color, false)

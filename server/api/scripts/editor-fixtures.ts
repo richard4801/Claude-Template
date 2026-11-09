@@ -187,6 +187,14 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'adjust layer ok', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 }, opacity: 0.7 }, { id: 'ad2', startSec: 2, durationSec: 1, filter: { id: 'warm', amount: 1 }, keyframes: { opacity: [{ t: 0, v: 1 }], tint: [{ t: 0.5, v: 0.3 }] } }] }); }), ok: true },
   { name: 'adjust layer with a look', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, look: { vignette: { amount: 0.3 } } }] }); }), ok: false, field: 'edits.tracks.4.items.0.look' },
   { name: 'adjust layer overlap', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2 }, { id: 'ad2', startSec: 1.5, durationSec: 1 }] }); }), ok: false, field: 'edits.tracks.4.items.1.startSec' },
+  { name: 'own font ok', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'Figtree Bold' }); (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'fnt'; }), ok: true },
+  { name: 'own font is an image', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'logo'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
+  { name: 'own font missing', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'nope'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
+  { name: 'font asset from a take', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', take: 'take_font' }); }), ok: false, field: 'edits.assets.3' },
+  { name: 'font asset with a size', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', width: 10 }); }), ok: false, field: 'edits.assets.3.width' },
+  { name: 'font asset name empty', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: ' ' }); }), ok: false, field: 'edits.assets.3.name' },
+  { name: 'font asset name too long', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'x'.repeat(81) }); }), ok: false, field: 'edits.assets.3.name' },
+  { name: 'own font on captions', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font' }); const c = captionTrack(); (c.caption!.style as M.TextStyle).fontAsset = 'fnt'; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.style.fontAsset' },
   { name: 'adjust item on a video track', project: mut(p => { p.tracks.push({ id: 'ovx', kind: 'video', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
   { name: 'video clip on an adjust track', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'v9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 2 }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
   { name: 'adjust layer with highlights', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { highlights: 0.3 } }] }); }), ok: false, field: 'edits.tracks.4.items.0.adjust.highlights' },
@@ -414,13 +422,21 @@ const kitList = [
 const kitProblem = (k: unknown) => { try { validateKit(k, FILTERS, LOOK_IDS, new Set()); return null; } catch (e) { return (e as M.EditProblem).field; } };
 const kits = {
   kitOf: projects.map(x => ({ name: x.name, kit: kitOf(x.project) })),
+  // A text item with an own font: the kit keeps the fallback family, not the asset.
+  ownFont: (() => {
+    const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;
+    q.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'Figtree Bold' });
+    q.tracks.push({ id: 'txf', kind: 'text', items: [{ id: 'tf', startSec: 0, durationSec: 2, text: 'Own font', style: { ...HOOKS[0]!.style, fontAsset: 'fnt' } }] });
+    M.validate(q, FILTERS);
+    return { project: q, kit: kitOf(q) };
+  })(),
   apply: [1, 2, 9].flatMap(pi => kitList.map((kit, ki) => ({ project: pi, kit: ki, result: applyKit(projects[pi]!.project, kit as never) }))),
   kits: kitList,
   validate: [
     { version: 1 }, kitList[0], { version: 2 }, { version: 1, mask: {} }, { version: 1, adjust: { tint: 2 } }, { version: 1, transition: { kind: 'fade', durationSec: 5 } },
     { version: 1, transition: { kind: 'swirl', durationSec: 0.5 } }, { version: 1, look: { lut: 'cube' } }, { version: 1, captionStyle: { ...CAPTION_STYLES.pop, highlightColor: 'yellow' } },
     { version: 1, textStyle: { ...HOOKS[0]!.style, sizePct: 9 } }, { version: 1, fill: 'mirror' }, { version: 1, background: 'red' }, { version: 1, filter: { id: 'nope', amount: 1 } },
-    { version: 1, look: { vignette: { amount: 3 } } }, 'kit',
+    { version: 1, look: { vignette: { amount: 3 } } }, { version: 1, textStyle: { ...HOOKS[0]!.style, fontAsset: 'fnt' } }, 'kit',
   ].map(kit => ({ kit, field: kitProblem(kit) })),
 };
 // Mask and look keyframes (M): maskAt and lookAt over time.

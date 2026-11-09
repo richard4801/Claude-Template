@@ -38,7 +38,7 @@ export function kitOf(p: M.EditProject): StyleKit {
   const cap = p.tracks.find(t => t.kind === 'caption' && t.caption)?.caption?.style;
   if (cap) kit.captionStyle = clone(cap);
   const txt = p.tracks.find(t => t.kind === 'text' && t.items.length)?.items[0] as M.TextItem | undefined;
-  if (txt) kit.textStyle = clone(txt.style);
+  if (txt) { kit.textStyle = clone(txt.style); delete kit.textStyle.fontAsset; } // asset ids are per edit
   if (p.canvas.background !== undefined) kit.background = p.canvas.background;
   if (p.canvas.fill !== undefined) kit.fill = p.canvas.fill;
   return kit;
