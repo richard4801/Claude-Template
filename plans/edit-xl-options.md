@@ -198,3 +198,6 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
    darker), and check Android and the server render the same.
 2. Mac Export only saves a version to the Library; it must also save the file to the Mac (Save panel, default
    ~/Downloads or Movies/MUSE) with "Show in Finder".
+3. Direct manipulation (owner 2026-11-09, both apps): on-preview handles for text, captions, stickers and overlays (drag,
+   corner/pinch resize, rotate; snap to centre and the platform safe-area guides), and free timeline dragging on the Mac
+   (move/reorder clips, cross-track drags, snapping to the playhead, edges and beats; Android has move/reorder).
