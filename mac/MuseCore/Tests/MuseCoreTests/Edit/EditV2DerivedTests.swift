@@ -167,3 +167,13 @@ extension EditV2DerivedTests {
         XCTAssertEqual(E.toSrt(p), f["srtJa"]["srt"].string)
     }
 }
+
+extension EditV2DerivedTests {
+    /// Lyric captions (functions.json → lyricCaptions, WS8 54f4b17): the song's words mapped through its music clips.
+    func testLyricCaptions() throws {
+        let f = try editorFixture("functions")["lyricCaptions"]
+        let p = try f["project"].decode(E.Project.self)
+        let d1 = jsonDiff(try JV.of(E.captionWords(p)), f["words"]); XCTAssert(d1.isEmpty, "words: " + d1.prefix(4).joined(separator: "; "))
+        let d2 = jsonDiff(try JV.of(E.captionPages(p)), f["pages"]); XCTAssert(d2.isEmpty, "pages: " + d2.prefix(4).joined(separator: "; "))
+    }
+}

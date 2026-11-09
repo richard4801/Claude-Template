@@ -854,6 +854,25 @@ final class EditSuiteSession {
         }
     }
 
+    /// Lyric captions (WS8 54f4b17): the song on the music track (an upload), as captions that follow its clips.
+    var songAsset: E.Asset? {
+        for t in project.tracks where t.kind == .music {
+            for case .audio(let c) in t.items {
+                if let a = project.asset(c.asset), a.upload != nil { return a }
+            }
+        }
+        return nil
+    }
+
+    func captionsFromSong() async {
+        guard let a = songAsset, let src = EditorSource(a) else { lastError = "Add a song from this Mac to the music row first"; return }
+        await run(.captions, source: src, options: EditorJobOptions(language: "auto")) { [weak self] r in
+            guard let self, let words = r.words, !words.isEmpty else { self?.lastError = "No words found in the song"; return }
+            self.edit { $0.setCaptions(words: words, assetId: a.id) }
+            self.notice = "Lyrics added · \(words.count) words, following the song's clips"
+        }
+    }
+
     /// Cut silences: the free silence-only pass first (no transcript needed); filler words come from the transcript.
     func cutSilences() async {
         if project.captionTrack != nil {

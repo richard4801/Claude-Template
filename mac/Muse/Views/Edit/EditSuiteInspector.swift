@@ -164,6 +164,11 @@ struct CaptionsPanel: View {
                         SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
                                         disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
                         if session.isRunning(.captions) { ProgressView().controlSize(.small) }
+                        // Lyric captions: from the song on the music row (the same captions job, on the song).
+                        if session.songAsset != nil {
+                            SuiteToolButton(title: "Captions from the song", plain: true,
+                                            disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.captionsFromSong() } }
+                        }
                         Spacer(minLength: 0)
                         Text(session.estimateLabel(.captions) ?? "").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     }
