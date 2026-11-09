@@ -5607,5 +5607,809 @@
    },
    "srt": "1\n00:00:00,200 --> 00:00:01,134\nOKAY SO UM\n\n2\n00:00:01,134 --> 00:00:01,834\nTHIS SERUM CHANGED\n\n3\n00:00:01,834 --> 00:00:01,984\nSKIN.\n\n4\n00:00:01,984 --> 00:00:02,534\nMY\n\n5\n00:00:05,034 --> 00:00:06,584\nHONESTLY UH I\n\n6\n00:00:06,584 --> 00:00:07,384\nUSE IT EVERY\n\n7\n00:00:07,384 --> 00:00:08,534\nSINGLE DAY!\n\n8\n00:00:08,534 --> 00:00:12,517\nLIKE SERIOUSLY\n"
   }
+ },
+ {
+  "name": "wave 1: hold, mirror, blend, blur fill",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000",
+    "fill": "blur"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "logo",
+     "kind": "image",
+     "upload": "up_logo",
+     "width": 512,
+     "height": 512
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 4,
+       "speed": 1
+      },
+      {
+       "id": "c2",
+       "asset": "src",
+       "inSec": 4,
+       "outSec": 4.1,
+       "speed": 1,
+       "holdSec": 1.5,
+       "transitionIn": {
+        "kind": "fade",
+        "durationSec": 0.4
+       }
+      },
+      {
+       "id": "c3",
+       "asset": "src",
+       "inSec": 4,
+       "outSec": 10,
+       "speed": 1,
+       "fadeInSec": 0.5,
+       "fit": "contain"
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.12
+       },
+       "preset": "highlight",
+       "highlightColor": "#FFE600",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      }
+     }
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 1,
+       "inSec": 0,
+       "outSec": 4,
+       "speed": 1,
+       "fit": "contain",
+       "blend": "screen",
+       "transform": {
+        "x": 0.7,
+        "y": 0.3,
+        "scale": 0.5,
+        "rotation": 15,
+        "flipX": true
+       }
+      }
+     ]
+    },
+    {
+     "id": "imgs",
+     "kind": "image",
+     "items": [
+      {
+       "id": "i1",
+       "asset": "logo",
+       "startSec": 0,
+       "durationSec": 3,
+       "blend": "multiply",
+       "transform": {
+        "scale": 0.3,
+        "flipY": true
+       }
+      }
+     ]
+    },
+    {
+     "id": "txt",
+     "kind": "text",
+     "items": [
+      {
+       "id": "t1",
+       "startSec": 0,
+       "durationSec": 2,
+       "text": "Mirror",
+       "style": {
+        "font": "sans",
+        "weight": 900,
+        "sizePct": 0.06,
+        "color": "#FFFFFF",
+        "align": "center",
+        "maxWidthPct": 0.85,
+        "lineHeight": 1.15,
+        "stroke": {
+         "color": "#000000",
+         "widthPct": 0.14
+        }
+       },
+       "transform": {
+        "flipX": true
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "durationSec": 11.1,
+   "timeline": [
+    {
+     "id": "c1",
+     "index": 0,
+     "startSec": 0,
+     "endSec": 4,
+     "transitionSec": 0
+    },
+    {
+     "id": "c2",
+     "index": 1,
+     "startSec": 3.6,
+     "endSec": 5.1,
+     "transitionSec": 0.4
+    },
+    {
+     "id": "c3",
+     "index": 2,
+     "startSec": 5.1,
+     "endSec": 11.1,
+     "transitionSec": 0
+    }
+   ],
+   "captionWords": [
+    {
+     "text": "Okay",
+     "startSec": 0.2,
+     "endSec": 0.5,
+     "index": 0
+    },
+    {
+     "text": "so",
+     "startSec": 0.55,
+     "endSec": 0.7,
+     "index": 1
+    },
+    {
+     "text": "um",
+     "startSec": 0.9,
+     "endSec": 1.2,
+     "index": 2
+    },
+    {
+     "text": "this",
+     "startSec": 1.6,
+     "endSec": 1.8,
+     "index": 3
+    },
+    {
+     "text": "serum",
+     "startSec": 1.85,
+     "endSec": 2.3,
+     "index": 4
+    },
+    {
+     "text": "changed",
+     "startSec": 2.35,
+     "endSec": 2.7,
+     "index": 5
+    },
+    {
+     "text": "my",
+     "startSec": 2.75,
+     "endSec": 2.9,
+     "index": 6
+    },
+    {
+     "text": "skin.",
+     "startSec": 2.95,
+     "endSec": 3.4,
+     "index": 7
+    },
+    {
+     "text": "Honestly",
+     "startSec": 5.7,
+     "endSec": 6.2,
+     "index": 8
+    },
+    {
+     "text": "uh",
+     "startSec": 6.3,
+     "endSec": 6.5,
+     "index": 9
+    },
+    {
+     "text": "I",
+     "startSec": 6.7,
+     "endSec": 6.8,
+     "index": 10
+    },
+    {
+     "text": "use",
+     "startSec": 6.85,
+     "endSec": 7.05,
+     "index": 11
+    },
+    {
+     "text": "it",
+     "startSec": 7.1,
+     "endSec": 7.2,
+     "index": 12
+    },
+    {
+     "text": "every",
+     "startSec": 7.25,
+     "endSec": 7.6,
+     "index": 13
+    },
+    {
+     "text": "single",
+     "startSec": 7.65,
+     "endSec": 8,
+     "index": 14
+    },
+    {
+     "text": "day!",
+     "startSec": 8.05,
+     "endSec": 8.5,
+     "index": 15
+    },
+    {
+     "text": "Like",
+     "startSec": 9.1,
+     "endSec": 9.3,
+     "index": 16
+    },
+    {
+     "text": "seriously",
+     "startSec": 9.35,
+     "endSec": 10,
+     "index": 17
+    }
+   ],
+   "captionPages": [
+    {
+     "startSec": 0.2,
+     "endSec": 1.6,
+     "words": [
+      0,
+      1,
+      2
+     ]
+    },
+    {
+     "startSec": 1.6,
+     "endSec": 2.75,
+     "words": [
+      3,
+      4,
+      5
+     ]
+    },
+    {
+     "startSec": 2.75,
+     "endSec": 3.8,
+     "words": [
+      6,
+      7
+     ]
+    },
+    {
+     "startSec": 5.7,
+     "endSec": 6.85,
+     "words": [
+      8,
+      9,
+      10
+     ]
+    },
+    {
+     "startSec": 6.85,
+     "endSec": 7.65,
+     "words": [
+      11,
+      12,
+      13
+     ]
+    },
+    {
+     "startSec": 7.65,
+     "endSec": 8.9,
+     "words": [
+      14,
+      15
+     ]
+    },
+    {
+     "startSec": 9.1,
+     "endSec": 10.4,
+     "words": [
+      16,
+      17
+     ]
+    }
+   ],
+   "captionAt": [
+    {
+     "t": 0,
+     "at": null
+    },
+    {
+     "t": 0.25,
+     "at": {
+      "page": 0,
+      "word": 0
+     }
+    },
+    {
+     "t": 0.5,
+     "at": {
+      "page": 0,
+      "word": 0
+     }
+    },
+    {
+     "t": 0.75,
+     "at": {
+      "page": 0,
+      "word": 1
+     }
+    },
+    {
+     "t": 1,
+     "at": {
+      "page": 0,
+      "word": 2
+     }
+    },
+    {
+     "t": 1.25,
+     "at": {
+      "page": 0,
+      "word": 2
+     }
+    },
+    {
+     "t": 1.5,
+     "at": {
+      "page": 0,
+      "word": 2
+     }
+    },
+    {
+     "t": 1.75,
+     "at": {
+      "page": 1,
+      "word": 0
+     }
+    },
+    {
+     "t": 2,
+     "at": {
+      "page": 1,
+      "word": 1
+     }
+    },
+    {
+     "t": 2.25,
+     "at": {
+      "page": 1,
+      "word": 1
+     }
+    },
+    {
+     "t": 2.5,
+     "at": {
+      "page": 1,
+      "word": 2
+     }
+    },
+    {
+     "t": 2.75,
+     "at": {
+      "page": 2,
+      "word": 0
+     }
+    },
+    {
+     "t": 3,
+     "at": {
+      "page": 2,
+      "word": 1
+     }
+    },
+    {
+     "t": 3.25,
+     "at": {
+      "page": 2,
+      "word": 1
+     }
+    },
+    {
+     "t": 3.5,
+     "at": {
+      "page": 2,
+      "word": 1
+     }
+    },
+    {
+     "t": 3.75,
+     "at": {
+      "page": 2,
+      "word": 1
+     }
+    },
+    {
+     "t": 4,
+     "at": null
+    },
+    {
+     "t": 4.25,
+     "at": null
+    },
+    {
+     "t": 4.5,
+     "at": null
+    },
+    {
+     "t": 4.75,
+     "at": null
+    },
+    {
+     "t": 5,
+     "at": null
+    },
+    {
+     "t": 5.25,
+     "at": null
+    },
+    {
+     "t": 5.5,
+     "at": null
+    },
+    {
+     "t": 5.75,
+     "at": {
+      "page": 3,
+      "word": 0
+     }
+    },
+    {
+     "t": 6,
+     "at": {
+      "page": 3,
+      "word": 0
+     }
+    },
+    {
+     "t": 6.25,
+     "at": {
+      "page": 3,
+      "word": 0
+     }
+    },
+    {
+     "t": 6.5,
+     "at": {
+      "page": 3,
+      "word": 1
+     }
+    },
+    {
+     "t": 6.75,
+     "at": {
+      "page": 3,
+      "word": 2
+     }
+    },
+    {
+     "t": 7,
+     "at": {
+      "page": 4,
+      "word": 0
+     }
+    },
+    {
+     "t": 7.25,
+     "at": {
+      "page": 4,
+      "word": 2
+     }
+    },
+    {
+     "t": 7.5,
+     "at": {
+      "page": 4,
+      "word": 2
+     }
+    },
+    {
+     "t": 7.75,
+     "at": {
+      "page": 5,
+      "word": 0
+     }
+    },
+    {
+     "t": 8,
+     "at": {
+      "page": 5,
+      "word": 0
+     }
+    },
+    {
+     "t": 8.25,
+     "at": {
+      "page": 5,
+      "word": 1
+     }
+    },
+    {
+     "t": 8.5,
+     "at": {
+      "page": 5,
+      "word": 1
+     }
+    },
+    {
+     "t": 8.75,
+     "at": {
+      "page": 5,
+      "word": 1
+     }
+    },
+    {
+     "t": 9,
+     "at": null
+    },
+    {
+     "t": 9.25,
+     "at": {
+      "page": 6,
+      "word": 0
+     }
+    },
+    {
+     "t": 9.5,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 9.75,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 10,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 10.25,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 10.5,
+     "at": null
+    },
+    {
+     "t": 10.75,
+     "at": null
+    },
+    {
+     "t": 11,
+     "at": null
+    },
+    {
+     "t": 11.25,
+     "at": null
+    }
+   ],
+   "envelopes": {
+    "main/c1": [
+     {
+      "t": 0,
+      "gain": 1
+     },
+     {
+      "t": 3.6,
+      "gain": 1
+     },
+     {
+      "t": 4,
+      "gain": 0
+     }
+    ],
+    "main/c2": [
+     {
+      "t": 3.6,
+      "gain": 0
+     },
+     {
+      "t": 4,
+      "gain": 0
+     },
+     {
+      "t": 5.1,
+      "gain": 0
+     }
+    ],
+    "main/c3": [
+     {
+      "t": 5.1,
+      "gain": 0
+     },
+     {
+      "t": 5.6,
+      "gain": 1
+     },
+     {
+      "t": 11.1,
+      "gain": 1
+     }
+    ],
+    "pipt/p1": [
+     {
+      "t": 1,
+      "gain": 1
+     },
+     {
+      "t": 5,
+      "gain": 1
+     }
+    ]
+   },
+   "colorMatrices": {},
+   "toV1": null,
+   "pieces": {},
+   "srt": "1\n00:00:00,200 --> 00:00:01,600\nOkay so um\n\n2\n00:00:01,600 --> 00:00:02,750\nthis serum changed\n\n3\n00:00:02,750 --> 00:00:03,800\nmy skin.\n\n4\n00:00:05,700 --> 00:00:06,850\nHonestly uh I\n\n5\n00:00:06,850 --> 00:00:07,650\nuse it every\n\n6\n00:00:07,650 --> 00:00:08,900\nsingle day!\n\n7\n00:00:09,100 --> 00:00:10,400\nLike seriously\n"
+  }
  }
 ]

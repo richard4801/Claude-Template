@@ -5,6 +5,8 @@ import Foundation
 
 extension EditV2 {
     public static let maxJsonBytes = 256 * 1024
+    /// Wave 1: a freeze frame lasts 0.1–30 s.
+    public static let holdMinSec = 0.1, holdMaxSec = 30.0
     public static let maxTracks = 16, maxItemsPerTrack = 300, maxItems = 600, maxAssets = 60, maxWords = 3000, maxKeyframes = 100
     public static let minClipSourceSec = 0.1, minItemSec = 0.05, minOutputSec = 0.5, maxOutputSec = 600.0
     public static let minSpeed = 0.1, maxSpeed = 10.0, endSlackSec = 0.05, minTransitionSec = 0.1, maxTransitionSec = 2.0
@@ -76,6 +78,50 @@ extension EditV2 {
     }
 
     /// A property at item-local t: its keyframes when it has any, else the static value.
+    /// The item's adjust at item-local `t`: each keyed colour property at its keyframes' value there (model.ts adjustAt).
+    /// Unchanged when no colour property is keyed; a keyed property without a static value appears with the curve's value.
+    public static func adjustAt(_ adjust: Adjust?, _ keyframes: Keyframes?, _ t: Double) -> Adjust? {
+        let keyed = KfProp.color.filter { !(keyframes?[$0] ?? []).isEmpty }
+        guard !keyed.isEmpty else { return adjust }
+        var out = adjust ?? Adjust()
+        for p in keyed { out[p] = r6(propAt(keyframes, p, fallback: adjust?[p] ?? 0, t)) }
+        return out
+    }
+
+    /// The item's mask at item-local `t`: each keyed mask field at its keyframes' value there (model.ts maskAt).
+    public static func maskAt(_ mask: Mask?, _ keyframes: Keyframes?, _ t: Double) -> Mask? {
+        guard let m = mask, KfProp.mask.contains(where: { !(keyframes?[$0] ?? []).isEmpty }) else { return mask }
+        func at(_ p: KfProp, _ cur: Double?, _ d: Double) -> Double? {
+            (keyframes?[p] ?? []).isEmpty ? cur : r6(propAt(keyframes, p, fallback: cur ?? d, t))
+        }
+        var out = m
+        out.x = at(.maskX, m.x, 0.5); out.y = at(.maskY, m.y, 0.5)
+        out.width = at(.maskWidth, m.width, 0.5); out.height = at(.maskHeight, m.height, 0.5)
+        out.rotation = at(.maskRotation, m.rotation, 0); out.feather = at(.maskFeather, m.feather, 0.1)
+        return out
+    }
+
+    /// The item's look at item-local `t`: each keyed finishing amount at its keyframes' value there; a keyed effect the
+    /// look lacks is added with only its amount (a leak as kind warm), so the renderer's defaults apply (model.ts lookAt).
+    public static func lookAt(_ look: Look?, _ keyframes: Keyframes?, _ t: Double) -> Look? {
+        func keyed(_ p: KfProp) -> Bool { !(keyframes?[p] ?? []).isEmpty }
+        guard KfProp.look.contains(where: keyed) else { return look }
+        var out = look ?? Look()
+        if keyed(.vignette) {
+            let v = r6(propAt(keyframes, .vignette, fallback: out.vignette?.amount ?? 0, t))
+            out.vignette = Vignette(amount: v, size: out.vignette?.size, softness: out.vignette?.softness)
+        }
+        if keyed(.grain) { out.grain = Grain(amount: r6(propAt(keyframes, .grain, fallback: out.grain?.amount ?? 0, t)), size: out.grain?.size) }
+        if keyed(.leak) {
+            let v = r6(propAt(keyframes, .leak, fallback: out.leak?.amount ?? 0, t))
+            out.leak = Leak(kind: out.leak?.kind ?? .warm, amount: v, angle: out.leak?.angle)
+        }
+        return out
+    }
+
+    /// Whether any colour property is keyed (the matrix then changes over time).
+    public static func hasColorKeys(_ keyframes: Keyframes?) -> Bool { KfProp.color.contains { !(keyframes?[$0] ?? []).isEmpty } }
+
     public static func propAt(_ keyframes: Keyframes?, _ prop: KfProp, fallback: Double, _ t: Double) -> Double {
         if let k = keyframes?[prop], !k.isEmpty { return keyframeValue(k, t) }
         return fallback
@@ -84,6 +130,7 @@ extension EditV2 {
     // MARK: Timeline
 
     public static func clipLength(_ c: VideoClip) -> Double {
+        if let h = c.holdSec { return h }   // wave 1: a freeze frame lasts holdSec whatever its source range
         if c.speedCurve != nil { return speedPieces(c).reduce(0) { $0 + ($1.outSec - $1.inSec) / $1.speed } }
         return (c.outSec - c.inSec) / c.speed
     }
@@ -129,10 +176,14 @@ extension EditV2 {
         }
         return out
     }
-    public static func speedPieces(_ c: VideoClip) -> [Piece] { speedPieces(inSec: c.inSec, outSec: c.outSec, speed: c.speed, curve: c.speedCurve) }
+    public static func speedPieces(_ c: VideoClip) -> [Piece] {
+        if c.holdSec != nil { return [Piece(inSec: c.inSec, outSec: c.inSec, speed: 1)] }   // wave 1: a hold is one frame
+        return speedPieces(inSec: c.inSec, outSec: c.outSec, speed: c.speed, curve: c.speedCurve)
+    }
 
     /// Seconds from the clip's start on the timeline at source time `sec` (clamped to the clip).
     public static func clipTimeAt(_ c: VideoClip, _ sec: Double) -> Double {
+        if c.holdSec != nil { return 0 }
         var acc = 0.0
         for p in speedPieces(c) {
             if sec <= p.outSec { return acc + max(0, sec - p.inSec) / p.speed }
@@ -143,6 +194,7 @@ extension EditV2 {
 
     /// The source time at `local` seconds from the clip's start on the timeline (the inverse of clipTimeAt).
     public static func clipSourceAt(_ c: VideoClip, _ local: Double) -> Double {
+        if c.holdSec != nil { return c.inSec }
         var acc = 0.0
         for p in speedPieces(c) {
             let len = (p.outSec - p.inSec) / p.speed
@@ -253,6 +305,11 @@ extension EditV2 {
         var items: [VideoClip] = []
         for it in p.tracks[mi].items.compactMap(\.videoClip) {
             if it.asset != assetId { items.append(it); continue }
+            // A hold (freeze frame) has no source span: it goes when a cut covers its frame, else it stays as it is.
+            if it.holdSec != nil {
+                if !rs.contains(where: { it.inSec >= $0.startSec && it.inSec < $0.endSec }) { items.append(it) }
+                continue
+            }
             var pieces = [SecRange(startSec: it.inSec, endSec: it.outSec)]
             for r in rs {
                 pieces = pieces.flatMap { pc -> [SecRange] in
@@ -308,7 +365,7 @@ extension EditV2 {
         guard let ct = p.captionTrack else { return [] }
         let spans = timeline(p)
         var out: [TimedWord] = []
-        for (i, c) in p.mainClips.enumerated() where c.asset == ct.asset {
+        for (i, c) in p.mainClips.enumerated() where c.asset == ct.asset && c.holdSec == nil {   // a hold has no speech
             let s = spans[i]
             for (idx, w) in ct.words.enumerated() {
                 let mid = (w.startSec + w.endSec) / 2

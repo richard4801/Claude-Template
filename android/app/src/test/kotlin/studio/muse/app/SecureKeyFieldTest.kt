@@ -51,6 +51,6 @@ class SecureKeyFieldTest {
 
     @Test fun keysNotReady() {
         compose.setContent { MuseTheme(ThemeId.C) { SecureKeyField(null, "", busy = false, error = null, keysReady = false, onSave = {}) } }
-        compose.onNodeWithText("Provider keys aren't set up on the server yet").assertIsDisplayed()
+        compose.onNodeWithText("Provider keys aren't set up on the server yet. Adding a key works once they are.").assertIsDisplayed()
     }
 }

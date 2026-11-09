@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 55
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -84,7 +84,7 @@ jobs:
           ditto -c -k --keepParent "$APP" MUSE-mac.zip
 
       # Review screenshots of the key screens in the four themes (SnapshotRunner, demo mode, no server). Never fails the build.
-      # 1500 s: about 17 min before the Claude chat shots (SnapshotRunner+Chat.swift) added about 2 more.
+      # The app gets up to 1800 s; it prints its own log even when it had to be stopped.
       - name: Review screenshots
         continue-on-error: true
         working-directory: mac
@@ -94,8 +94,8 @@ jobs:
           mkdir -p snapshots
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
-          for i in $(seq 1 1500); do kill -0 $pid 2>/dev/null || break; sleep 1; done
-          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1500 s: stopping it"; kill $pid 2>/dev/null || true; fi
+          for i in $(seq 1 1800); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1800 s: stopping it"; kill $pid 2>/dev/null || true; fi
           status=0; wait $pid || status=$?; echo "review mode exit status: $status (128+n = killed by signal n)"
           ls -la snapshots | head -100
           tail -n 60 snapshots.log || true
@@ -119,6 +119,18 @@ jobs:
           cat "$f"
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+
+      # Every Edit operation must WORK, not just not crash (Mac Edit audit 2026-11-08, plans/mac-edit-audit.md): each runs
+      # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
+      # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
+      - name: Edit operations and export check
+        working-directory: mac
+        run: |
+          f=snapshots/edit-ops-check.txt
+          if [ ! -f "$f" ]; then echo "no edit-ops-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^STEP' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
       # When review mode stops early, the crash report says where (thread, frames, exception).
       - name: Crash report

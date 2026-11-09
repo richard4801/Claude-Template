@@ -292,6 +292,35 @@ struct TextPanel: View {
             }
             EditSeg(options: [(EditV2.Align.left, "Left"), (.center, "Centre"), (.right, "Right")], selection: st.align, mono: false) { a in change { $0.style.align = a } }
             SuiteToggleRow(title: "Outline", isOn: st.stroke != nil) { on in change { $0.style.stroke = on ? EditV2.Stroke(color: "#000000", widthPct: 0.12) : nil } }
+            if let sk = st.stroke {
+                // Parity wave 1: the outline's colour and width.
+                HStack(alignment: .bottom, spacing: Space.s2) {
+                    SuiteSlider("Outline width", value: sk.widthPct, range: 0.02...0.3, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                        change { $0.style.stroke?.widthPct = (v * 100).rounded() / 100 }
+                    }
+                    SuiteSwatch(hex: sk.color, label: "Outline colour") { c in change { $0.style.stroke?.color = c } }
+                }
+            }
+            SuiteToggleRow(title: "Shadow", isOn: st.shadow != nil) { on in
+                change { $0.style.shadow = on ? EditV2.Shadow(color: "#000000", opacity: 0.6, blurPct: 0.15, dyPct: 0.06) : nil }
+            }
+            if let sh = st.shadow {
+                HStack(alignment: .bottom, spacing: Space.s2) {
+                    SuiteSlider("Shadow blur", value: sh.blurPct, range: 0...0.5, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                        change { $0.style.shadow?.blurPct = (v * 100).rounded() / 100 }
+                    }
+                    SuiteSwatch(hex: sh.color, label: "Shadow colour") { c in change { $0.style.shadow?.color = c } }
+                }
+                SuiteSlider("Shadow strength", value: sh.opacity, range: 0...1, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                    change { $0.style.shadow?.opacity = (v * 100).rounded() / 100 }
+                }
+            }
+            SuiteSlider("Letter spacing", value: st.letterSpacing ?? 0, range: -0.1...0.5, format: { String(format: "%.2f em", $0) }) { v in
+                change { $0.style.letterSpacing = abs(v) < 0.005 ? nil : (v * 100).rounded() / 100 }
+            }
+            SuiteSlider("Line height", value: st.lineHeight ?? 1.15, range: 0.8...2, format: { String(format: "%.2f", $0) }) { v in
+                change { $0.style.lineHeight = (v * 100).rounded() / 100 }
+            }
             SuiteToggleRow(title: "Background box", isOn: st.background != nil) { on in
                 change { $0.style.background = on ? EditV2.TextBackground(color: "#FFFFFF", opacity: 1, paddingPct: 0.3, radiusPct: 0.2) : nil }
             }
@@ -330,9 +359,10 @@ struct AnimPanel: View {
         switch item {
         case .text(let x): panels(animIn: x.animIn, animOut: x.animOut, text: true)
         case .image(let x): panels(animIn: x.animIn, animOut: x.animOut, text: false)
+        case .video(let x): panels(animIn: x.animIn, animOut: x.animOut, text: false)   // video clips too (contract, as Android)
         default:
             VStack(alignment: .leading, spacing: 0) {
-                InspectorEmpty(text: "In and out animations are for text, hooks and stickers. Clips change with transitions (Video tab) and keyframes.")
+                InspectorEmpty(text: "Select a clip, text, hook or sticker to animate it in and out.")
             }
         }
     }
@@ -343,6 +373,7 @@ struct AnimPanel: View {
                 switch it {
                 case .text(var x): if isIn { x.animIn = a } else { x.animOut = a }; it = .text(x)
                 case .image(var x): if isIn { x.animIn = a } else { x.animOut = a }; it = .image(x)
+                case .video(var x): if isIn { x.animIn = a } else { x.animOut = a }; it = .video(x)
                 default: break
                 }
             }
@@ -363,6 +394,30 @@ struct AnimPanel: View {
                 if let a {
                     SuiteSlider("Duration", value: a.durationSec, range: 0.1...2, format: { String(format: "%.1f s", $0) }) { v in
                         set(isIn, EditV2.Anim(kind: a.kind, durationSec: (v * 10).rounded() / 10))
+                    }
+                }
+            }
+        }
+        // Loop animations (contract, WS8 57fe40c): overlays, pictures and text; not the main track.
+        if session.state.canLoop {
+            let l = session.state.selectedLoop
+            EditPanel(title: "Loop") {
+                FlowLayout(spacing: 6) {
+                    Chip("None", on: l == nil) { session.edit { $0.setLoop(nil) } }
+                    ForEach(EditV2.LoopKind.all, id: \.self) { k in
+                        Chip(k.label, on: l?.kind == k) {
+                            session.edit { $0.setLoop(EditV2.AnimLoop(kind: k, periodSec: l?.periodSec ?? (k == .spin ? 4 : 1.5), amount: l?.amount)) }
+                        }
+                    }
+                }
+                if let l {
+                    SuiteSlider("Speed", value: l.periodSec, range: 0.2...5, format: { String(format: "%.1f s a cycle", $0) }) { v in
+                        session.edit { $0.setLoop(EditV2.AnimLoop(kind: l.kind, periodSec: (v * 10).rounded() / 10, amount: l.amount)) }
+                    }
+                    if l.kind != .spin {
+                        SuiteSlider("Amount", value: l.amount ?? 0.5, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                            session.edit { $0.setLoop(EditV2.AnimLoop(kind: l.kind, periodSec: l.periodSec, amount: (v * 100).rounded() / 100)) }
+                        }
                     }
                 }
             }

@@ -78,8 +78,20 @@ extension FakeMuseAPI {
         c.enabled = true
         c.test = true
         if !suiteIsOwner { c.tiers = c.tiers.map { var t = $0; t.models = nil; return t } }
+        // The owner's model picker (server suite/service.ts ownerEngines): the registry's shot models and two photo models.
+        if suiteIsOwner, let s = SuiteDemoCatalog.settings {
+            c.engines = s.models.compactMap { SuiteModelOption.from($0, ladder: s.ladder) } + Self.demoImageEngines
+        }
         return c
     }
+
+    /// Demo photo models for the owner's Photo Model pill (prices as the server reports one photo with 3 identity images).
+    static let demoImageEngines: [SuiteModelOption] = [
+        SuiteModelOption(model: "black-forest-labs/flux-2-pro", name: "FLUX.2 [pro]", kind: "image", perRun: 0.05, inputs: SuiteInputs(images: 6),
+                    price: SuiteModelOption.Price(basis: "per_run", usd: 0.05)),
+        SuiteModelOption(model: "google/nano-banana-pro", name: "Nano Banana Pro", kind: "image", perRun: 0.15, aspectRatios: ["9:16", "3:4", "1:1", "4:3", "16:9"],
+                    inputs: SuiteInputs(images: 6), price: SuiteModelOption.Price(basis: "per_run", usd: 0.15)),
+    ]
 
     public func suiteCamera() async throws -> CameraCatalog { SuiteDemoCatalog.catalog.camera }
 

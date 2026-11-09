@@ -1,4 +1,6 @@
 import AVFoundation
+import UniformTypeIdentifiers
+import ImageIO
 import AppKit
 import MuseCore
 import Observation
@@ -138,6 +140,8 @@ final class EditSuiteSession {
     }
 
     var project: E.Project { state.project }
+    /// The preview's player item shows the current project (review mode's Edit operations check waits for it).
+    var previewIsCurrent: Bool { builtProject == project && player.currentItem != nil }
     var duration: Double { state.duration }
     var isReady: Bool { phase == .ready }
     var busy: Bool { exportPhase != .idle }
@@ -167,6 +171,7 @@ final class EditSuiteSession {
             }
             project.sourceTakeId = sourceTakeId
             state = EditSuiteState(project)
+            state.paletteIds = EditV2LookLibrary.shared.paletteIds
             state.markSaved()
             for a in project.assets {
                 if a.take == sourceTakeId { files[a.id] = local }
@@ -229,6 +234,8 @@ final class EditSuiteSession {
         let ok = f(&next)
         state = next
         playhead = state.playhead
+        // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
+        if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
         if state.project != before { projectChanged() }
         return ok
     }
@@ -248,6 +255,18 @@ final class EditSuiteSession {
     }
 
     func endGesture() { state.endGesture() }
+
+    /// "That doesn't fit: the text would run into the next one" style message for a refused change.
+    static func refusalText(_ p: E.EditProblem) -> String {
+        let f = p.field
+        if f == "user" { return p.message }
+        if f.hasSuffix("startSec") || f.hasSuffix("durationSec") || p.message.contains("overlap") {
+            return "That doesn't fit there · it would overlap the next item on its row"
+        }
+        if f.contains("transition") { return "That transition doesn't fit · make the clips longer or the transition shorter" }
+        if f.contains("duration") || f.contains("speed") { return "That would make the edit too short or too long (0.5 s to 10 min)" }
+        return "That change isn't possible here (\(p.message))"
+    }
 
     /// View-only changes (selection, zoom, tabs, snapping…).
     func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next }   // a copy, as in edit (exclusivity)
@@ -303,7 +322,7 @@ final class EditSuiteSession {
                 _ = await self.player.seek(to: CMTime(seconds: self.playhead, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 if wasPlaying { self.player.play() }
             } catch {
-                self.lastError = (error as? ApiError)?.message ?? "Couldn't update the preview"
+                self.lastError = (error as? ApiError)?.message ?? "Couldn't update the preview (\(error.localizedDescription))"
             }
         }
     }
@@ -383,6 +402,23 @@ final class EditSuiteSession {
         seek(playhead + Double(dir) / max(1, project.canvas.fps))
     }
 
+    /// Writes the edit's frame at timeline `t` (the preview's render: looks, text, captions) as a PNG. Nil on success, else why.
+    func saveFrame(at t: Double, to url: URL) async -> String? {
+        guard let item = player.currentItem else { return "The preview isn't ready yet" }
+        let gen = AVAssetImageGenerator(asset: item.asset)
+        gen.videoComposition = item.videoComposition
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        do {
+            let cg = try await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)).image
+            guard let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else { return "Couldn't make the picture" }
+            try data.write(to: url)
+            return nil
+        } catch {
+            return "Couldn't save the frame (\(error.localizedDescription))"
+        }
+    }
+
     // MARK: Media (strips, waveforms, Looks thumbnails)
 
     private func refreshMedia() {
@@ -419,7 +455,7 @@ final class EditSuiteSession {
             local = max(0, t - (clip.startSec ?? 0))
         }
         let src = E.clipSourceAt(clip, local)
-        let matrix = E.colorMatrix(clip.adjust, clip.filter)
+        let matrix = E.colorMatrix(E.adjustAt(clip.adjust, clip.keyframes, local), clip.filter)
         thumbTask = Task { [weak self] in
             guard let frame = await EditSuiteMedia.frame(url, at: src, maxSide: 360), !Task.isCancelled else { return }
             let tiles = await EditV2LookThumbnails.render(frame: frame, matrix: E.isIdentity(matrix) ? nil : matrix, shortSide: 96)
@@ -440,8 +476,28 @@ final class EditSuiteSession {
         edit { $0.addVideo(a, overlay: overlay) }
     }
 
+    /// A take as an asset of this edit (named after it).
+    private func takeAsset(_ t: Take) -> E.Asset? {
+        guard let d = t.durationSec, d > 0 else { lastError = "That take has no video yet"; return nil }
+        let id = project.newId("t")
+        state.assetNames[id] = t.title.isEmpty ? "Take" : t.displayTitle
+        return E.Asset(id: id, kind: .video, take: t.id, durationSec: d, width: t.width, height: t.height, hasAudio: true, url: t.videoUrl)
+    }
+
+    /// Parity: another take's sound at the playhead (sound effects row).
+    func addTakeSound(_ t: Take) {
+        guard let a = takeAsset(t) else { return }
+        if edit({ $0.addTakeSound(a) }) { notice = "Sound added · on the sound effects row" }
+    }
+
+    /// Parity: the selected (or current) main clip plays this take instead, keeping its edits.
+    func replaceClip(with t: Take) {
+        guard let a = takeAsset(t) else { return }
+        if edit({ $0.replaceClip(with: a) }) { notice = "Clip replaced · its edits stay" }
+    }
+
     /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row.
-    func importAudio(_ url: URL, kind: E.TrackKind) async {
+    func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
         guard isReady else { return }
         do {
             let asset = AVURLAsset(url: url)
@@ -454,27 +510,109 @@ final class EditSuiteSession {
             files[id] = url
             state.assetNames[id] = url.deletingPathExtension().lastPathComponent
             notice = nil
-            edit { $0.addAudio(a, kind: kind) }
+            edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
         } catch {
             notice = nil
             lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
         }
     }
 
+    /// A video or picture from this Mac (Uploads / Stickers): uploaded as an editor upload, then added like a take (a video at
+    /// the end of the main track, or as an overlay at the playhead) or as a picture at the playhead (Mac Edit audit: the
+    /// Uploads tab could only take sounds, and pictures had no way in).
+    func importMedia(_ url: URL, overlay: Bool = false) async {
+        guard isReady else { return }
+        let ext = url.pathExtension.lowercased()
+        do {
+            if Self.pictureTypes[ext] != nil {
+                guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
+                // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
+                let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: ext)
+                notice = "Uploading \(url.lastPathComponent)…"
+                let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+                let id = project.newId("p")
+                let a = E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
+                files[id] = file
+                state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+                notice = nil
+                // Selected, with the Video tab (Transform, blend, keyframes) open so it can be placed straight away.
+                if edit({ $0.addImage(a) }) { view { $0.tab = .video } }
+                return
+            }
+            let info = try await VideoEditEngine.info(AVURLAsset(url: url))
+            guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
+            notice = "Uploading \(url.lastPathComponent)…"
+            let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
+            let id = project.newId("v")
+            let audioTracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
+            let sound = !audioTracks.isEmpty
+            let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
+                            hasAudio: sound)
+            files[id] = url
+            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+            notice = nil
+            edit { $0.addVideo(a, overlay: overlay) }
+        } catch {
+            notice = nil
+            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
+        }
+    }
+
+    /// Picture types an editor upload takes (server `/v1/editor/uploads/presign`).
+    /// The file to upload for a picture: itself, or a copy at 2048 px on the long side when larger (PNG stays PNG, others
+    /// become JPEG), upright. Returns the file, its content type and its pixel size.
+    static func pictureForUpload(_ url: URL, ext: String) throws -> (URL, String, Int, Int) {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { throw ApiError("bad_media", "That picture can't be opened") }
+        var w = (props[kCGImagePropertyPixelWidth] as? Int) ?? 0, h = (props[kCGImagePropertyPixelHeight] as? Int) ?? 0
+        if let o = props[kCGImagePropertyOrientation] as? Int, o >= 5 { swap(&w, &h) }
+        let maxSide = 2048
+        guard max(w, h) > maxSide else { return (url, pictureTypes[ext] ?? "image/jpeg", max(1, w), max(1, h)) }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                     kCGImageSourceThumbnailMaxPixelSize: maxSide]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { throw ApiError("bad_media", "That picture can't be opened") }
+        let png = ext == "png"
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("pic-\(UUID().uuidString).\(png ? "png" : "jpg")")
+        guard let dest = CGImageDestinationCreateWithURL(out as CFURL, (png ? UTType.png : UTType.jpeg).identifier as CFString, 1, nil) else {
+            throw ApiError("bad_media", "That picture can't be resized")
+        }
+        CGImageDestinationAddImage(dest, cg, png ? nil : [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ApiError("bad_media", "That picture can't be resized") }
+        return (out, png ? "image/png" : "image/jpeg", cg.width, cg.height)
+    }
+
+    static let pictureTypes: [String: String] = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "webp": "image/webp"]
+
+    /// Pictures in this edit (the Stickers tab lists them to add again).
+    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image } }
+
     // MARK: Record VO (Edit suite, workstream 3)
 
     /// True while a voice-over is being recorded from the Mac's microphone.
     var isRecordingVO = false
     @ObservationIgnored private var voRecorder: AVAudioRecorder?
+    /// Where the recording started on the timeline (the take lands there), and the output delay to trim when the video played.
+    @ObservationIgnored private var voStart: Double = 0
+    @ObservationIgnored private var voTrim: Double = 0
+    /// Design pass (owner-approved 2026-11-09): play the video, with the edit's sound, while recording. Remembered once
+    /// chosen; until then on only when the sound goes to headphones, Bluetooth or USB, so the microphone doesn't hear it.
+    var voPlayback: Bool = (UserDefaults.standard.object(forKey: "edit.voPlayback") as? Bool) ?? EditSuiteMedia.outputIsPrivate {
+        didSet { UserDefaults.standard.set(voPlayback, forKey: "edit.voPlayback") }
+    }
+    /// When recording began (the timeline's red bar grows from voStart by the time since).
+    var voStartedAt: Date?
+    var voStartSec: Double { voStart }
 
     /// Starts recording a voice-over (asks for the microphone the first time), or stops and adds it to the voice row.
     @MainActor
     func toggleRecordVO() async {
         if let r = voRecorder {
             r.stop()
+            if playing { pause() }
             voRecorder = nil
             isRecordingVO = false
-            await importAudio(r.url, kind: .voice)
+            voStartedAt = nil
+            await importAudio(r.url, kind: .voice, at: voStart, trimStart: voTrim)
             return
         }
         guard isReady else { return }
@@ -493,9 +631,17 @@ final class EditSuiteSession {
                                        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
         do {
             let r = try AVAudioRecorder(url: url, settings: settings)
+            if playing { pause() }
+            // At the very end there's nothing to play over: start from the top (as Play does).
+            if voPlayback, playhead >= duration - 0.05 { seek(0) }
+            voStart = playhead
+            // Over playback: the voice answers what the user hears, which the output plays this late.
+            voTrim = voPlayback ? EditSuiteMedia.outputLatencySec : 0
             guard r.record() else { throw ApiError("record_failed", "Couldn't start recording") }
+            if voPlayback { play(rate: 1) }
             voRecorder = r
             isRecordingVO = true
+            voStartedAt = Date()
         } catch {
             lastError = (error as? ApiError)?.message ?? "Couldn't start recording"
         }
@@ -584,7 +730,7 @@ final class EditSuiteSession {
 
     func loadEstimate(_ k: EditorJobKind, source: EditorSource? = nil, options: EditorJobOptions? = nil) async {
         guard let src = source ?? mainSourceAsset.flatMap({ EditorSource($0) }) else { return }
-        if let e = try? await api.editorEstimate(EditorJobRequest(kind: k, source: src, options: options)) { estimates[k] = e }
+        if let e = try? await api.editorEstimate(EditorJobRequest(kind: k, source: src, options: options, engineModel: model(k, options))) { estimates[k] = e }
     }
 
     func refreshFeatures() async {
@@ -619,13 +765,19 @@ final class EditSuiteSession {
 
     /// Starts a job, polls it until it ends and hands the result to `apply` (on success). A helper that costs money asks
     /// first (`paidAsk`: its price, Run or Cancel) unless `confirmed` (tap to keep confirms in its own panel).
+    /// The owner's model picks for the Edit helpers (OwnerModelPill beside each; members never set one): purpose → model id.
+    var helperModels: [EnginePurpose: String] = [:]
+
+    /// The model a helper job asks for (nil = the studio's default).
+    private func model(_ k: EditorJobKind, _ options: EditorJobOptions?) -> String? { k.enginePurpose(options).flatMap { helperModels[$0] } }
+
     private func run(_ k: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, confirmed: Bool = false,
                      apply: @escaping (EditorJobResult) -> Void) async {
         guard !isRunning(k) else { return }
         helperNotes[k] = nil
         if !confirmed {
             do {
-                let e = try await api.editorEstimate(EditorJobRequest(kind: k, source: source, options: options))
+                let e = try await api.editorEstimate(EditorJobRequest(kind: k, source: source, options: options, engineModel: model(k, options)))
                 if !e.free && e.usd > 0 {
                     paidAsk = PaidAsk(kind: k, title: Self.helperTitle(k), price: e.label) { [weak self] in
                         await self?.run(k, source: source, options: options, confirmed: true, apply: apply)
@@ -639,7 +791,7 @@ final class EditSuiteSession {
             }
         }
         do {
-            var job = try await api.startEditorJob(EditorJobRequest(kind: k, source: source, options: options))
+            var job = try await api.startEditorJob(EditorJobRequest(kind: k, source: source, options: options, engineModel: model(k, options)))
             jobs[k] = job
             while job.isRunning {
                 try await Task.sleep(nanoseconds: 700_000_000)
@@ -811,7 +963,7 @@ final class EditSuiteSession {
     /// The price of cutting out what was picked (asked with the same points the job will get).
     func loadKeepEstimate() async {
         guard let k = keepPick, k.canRun, let a = project.asset(k.assetId), let src = EditorSource(a) else { keepEstimate = nil; return }
-        let e = try? await api.editorEstimate(EditorJobRequest(kind: .matte, source: src, options: k.options))
+        let e = try? await api.editorEstimate(EditorJobRequest(kind: .matte, source: src, options: k.options, engineModel: model(.matte, k.options)))
         if keepPick?.points == k.points { keepEstimate = e }
     }
 
@@ -878,6 +1030,149 @@ final class EditSuiteSession {
         }
     }
 
+    // MARK: Even out volume (parity)
+
+    /// Measures each main and voice clip's sound over the part that plays (RMS above a −50 dB gate, and the loudest
+    /// sample), then evens them out to the median (EditSuiteState.evenVolume).
+    func evenVolume() async {
+        var levels: [String: (rms: Double, peak: Double)] = [:]
+        for t in project.tracks where t.kind == .main || t.kind == .voice {
+            for it in t.items {
+                let (id, assetId, a, b): (String, String, Double, Double)
+                switch it {
+                case .video(let c): (id, assetId, a, b) = (c.id, c.audioAsset ?? c.asset, c.inSec, c.outSec)
+                case .audio(let c): (id, assetId, a, b) = (c.id, c.asset, c.inSec, c.outSec)
+                default: continue
+                }
+                guard let url = files[assetId], let l = await EditSuiteMedia.level(url, from: a, to: b) else { continue }
+                levels[id] = l
+            }
+        }
+        var changed = 0
+        edit { s in changed = s.evenVolume(levels: levels); return changed > 0 }
+        if changed > 0 { notice = "Evened out \(changed) clip\(changed == 1 ? "" : "s")" }
+    }
+
+    // MARK: Key colour from the picture (design pass, owner-approved 2026-11-09)
+
+    /// The selected clip's source frame under the playhead, before its look (the pixels the key compares), while picking.
+    struct KeyPickFrame { let width: Int; let height: Int; let rgba: [UInt8] }
+    var pickingKeyColour = false
+    @ObservationIgnored private(set) var keyPickFrame: KeyPickFrame?
+
+    /// "Pick from video": pauses, reads the clip's source frame at the playhead, then waits for a click on the preview.
+    /// Picking again (or Esc) cancels.
+    func toggleKeyPick() async {
+        if pickingKeyColour { pickingKeyColour = false; keyPickFrame = nil; return }
+        guard let c = state.selectedVideo, c.chroma != nil, let url = files[c.asset], let loc = project.locate(c.id) else { return }
+        pause()
+        let track = project.tracks[loc.track]
+        let span = E.itemSpan(project, track, track.items[loc.item])
+        let local = min(max(0, playhead - span.startSec), span.endSec - span.startSec)
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 1280, height: 1280)
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        guard let cg = try? await gen.image(at: CMTime(seconds: E.clipSourceAt(c, local), preferredTimescale: 600)).image else {
+            lastError = "Couldn't read this clip's picture"; return
+        }
+        let w = cg.width, h = cg.height
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        keyPickFrame = KeyPickFrame(width: w, height: h, rgba: px)
+        pickingKeyColour = true
+    }
+
+    /// The colour under a canvas point (pixels, top-left origin): a 3 × 3 average of the source frame, as #RRGGBB.
+    func keyColour(canvasX x: Double, canvasY y: Double) -> String? {
+        guard let f = keyPickFrame,
+              let p = state.sourcePoint(canvasX: x, canvasY: y, sourceWidth: Double(f.width), sourceHeight: Double(f.height)) else { return nil }
+        let cx = min(f.width - 1, max(0, Int(p.u * Double(f.width)))), cy = min(f.height - 1, max(0, Int(p.v * Double(f.height))))
+        var sum = [0, 0, 0], n = 0
+        for dy in -1...1 { for dx in -1...1 {
+            let xx = cx + dx, yy = cy + dy
+            guard xx >= 0, yy >= 0, xx < f.width, yy < f.height else { continue }
+            let i = (yy * f.width + xx) * 4
+            sum[0] += Int(f.rgba[i]); sum[1] += Int(f.rgba[i + 1]); sum[2] += Int(f.rgba[i + 2]); n += 1
+        } }
+        guard n > 0 else { return nil }
+        return String(format: "#%02X%02X%02X", sum[0] / n, sum[1] / n, sum[2] / n)
+    }
+
+    /// Sets the key colour from a click on the preview (one undo step) and leaves picking.
+    func pickKeyColour(canvasX x: Double, canvasY y: Double) {
+        guard let hex = keyColour(canvasX: x, canvasY: y) else { notice = "Click on the clip itself"; return }
+        edit { $0.setKeyColour(hex) }
+        pickingKeyColour = false
+        keyPickFrame = nil
+    }
+
+    // MARK: Style kits (parity, shared kit engine)
+
+    /// The studio's saved style kits (members: their own), newest first; nil until loaded.
+    var kits: [EditKit]?
+
+    func loadKits() async {
+        do { kits = try await api.editKits() } catch { if kits == nil { kits = [] } }
+    }
+
+    /// Saves this edit's look, colour, transition, caption and text styles and background as a kit.
+    func saveKit(name: String) async -> Bool {
+        let kit = E.kitOf(project)
+        guard kit != E.StyleKit() else { lastError = "This edit has no style to save yet · add a look, colour, transition or captions"; return false }
+        do {
+            let k = try await api.saveEditKit(name: name, kit: kit)
+            kits = [k] + (kits ?? [])
+            notice = "Saved \u{201C}\(k.name)\u{201D}"
+            return true
+        } catch let e as E.EditProblem {
+            lastError = "This style can't be saved (\(e.message))"
+        } catch {
+            lastError = (error as? ApiError)?.message ?? "Couldn't save the style · try again"
+        }
+        return false
+    }
+
+    /// Applies a kit to this edit (one undo step).
+    func applyKit(_ k: EditKit) {
+        if edit({ $0.apply { E.applyKit($0, k.kit) } }) { notice = "Applied \u{201C}\(k.name)\u{201D}" }
+        else if lastError == nil { notice = "This edit already has that style" }
+    }
+
+    func deleteKit(_ k: EditKit) async {
+        do {
+            try await api.deleteEditKit(id: k.id)
+            kits?.removeAll { $0.id == k.id }
+        } catch {
+            lastError = (error as? ApiError)?.message ?? "Couldn't delete the style kit · try again"
+        }
+    }
+
+    // MARK: Auto adjust (parity)
+
+    /// Auto adjust of the selected clip from its own picture under the playhead (the source frame, before its look), as
+    /// Android: exposure, contrast, saturation, temperature and tint; highlights and shadows kept.
+    func autoAdjust() async {
+        let p = project
+        guard let c = state.selectedVideo ?? p.mainClip(at: playhead).map({ p.mainClips[$0.index] }) else { lastError = "Select a clip to adjust"; return }
+        guard let url = files[c.asset] else { lastError = "This clip's file isn't on this Mac yet"; return }
+        guard let loc = p.locate(c.id) else { return }
+        let track = p.tracks[loc.track]
+        let span = E.itemSpan(p, track, track.items[loc.item])
+        let local = min(max(0, playhead - span.startSec), span.endSec - span.startSec)
+        guard let rgb = await EditSuiteMedia.frameRGB(url, at: E.clipSourceAt(c, local)) else { lastError = "Couldn't read this clip's picture"; return }
+        var changed = false
+        edit { s in
+            if s.selection != c.id { s.selection = c.id }
+            changed = s.autoAdjust(rgb); return changed
+        }
+        notice = changed ? "Adjusted · fine-tune with the sliders" : "This picture already looks balanced"
+    }
+
     // MARK: Export → upload → new version
 
     /// Problems that stop an export (shown on the sheet).
@@ -891,6 +1186,12 @@ final class EditSuiteSession {
     func export(_ settings: EditSuite.ExportSettings, saveFileTo: URL?, request: EditAppRequest? = nil, onSaved: @escaping (Take) -> Void) {
         guard isReady, !busy, exportProblem == nil else {
             if let request { answerRequest(request, .failed(exportProblem ?? "The Mac is busy · try again in a moment")) }
+            return
+        }
+        // Sound only and GIF (parity): a file on this Mac, nothing saved to the Library.
+        if settings.format != .video {
+            guard let dest = saveFileTo else { return }
+            exportOther(settings, to: dest)
             return
         }
         requestInExport = request
@@ -911,9 +1212,18 @@ final class EditSuiteSession {
                 guard let self else { return }
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let sources = try await EditV2Engine.load(p, files: files)
-                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: settings.captions == .burnIn)
-                try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc) { [weak self] v in
+                // Captions go out as an .srt only next to a saved file; the Library's video always carries them burnt in
+                // (Mac Edit audit: "Save to Library" with .SRT lost the captions).
+                let burn = settings.captions == .burnIn || saveFileTo == nil
+                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: burn)
+                let onProgress: @MainActor (Double) -> Void = { [weak self] v in
                     if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
+                }
+                if settings.bitrate == .recommended {
+                    try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc, progress: onProgress)
+                } else {
+                    // A chosen bitrate (parity): reader → writer at the size estimate's rate × the choice.
+                    try await EditV2Engine.write(built, to: file, hevc: settings.codec == .hevc, bitrate: settings.videoBitrate, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)
@@ -933,7 +1243,7 @@ final class EditSuiteSession {
                     }
                 })
                 // Claude's save request may name the version.
-                let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p, name: request?.name))
+                let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p, name: request?.name, aiLabel: settings.labelAI))
                 try? FileManager.default.removeItem(at: file)
                 self.exportPhase = .idle
                 self.savedAt = Date()
@@ -958,12 +1268,59 @@ final class EditSuiteSession {
         }
     }
 
+    /// What the export makes now (the progress card's words).
+    private(set) var exportFormat: EditSuite.ExportFormat = .video
+
+    /// Sound only (.m4a) or GIF to a file on this Mac.
+    private func exportOther(_ settings: EditSuite.ExportSettings, to dest: URL) {
+        pause()
+        var p = project
+        if settings.format == .gif {
+            guard duration <= EditSuite.ExportFormat.gifMaxSec + 0.05 else { lastError = "GIFs are up to 30 s · trim the edit or export a video"; return }
+        } else {
+            let size = settings.size
+            p.canvas.width = size.width
+            p.canvas.height = size.height
+        }
+        let files = self.files
+        lastError = nil
+        exportFormat = settings.format
+        exportPhase = .rendering(0)
+        exportTask = Task { [weak self] in
+            do {
+                let sources = try await EditV2Engine.load(p, files: files)
+                let built = try EditV2Engine.build(p, sources: sources, burnCaptions: true)
+                let onProgress: @MainActor (Double) -> Void = { [weak self] v in
+                    if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
+                }
+                if settings.format == .gif {
+                    try await EditV2Engine.writeGif(built, to: dest, progress: onProgress)
+                } else {
+                    try await EditV2Engine.write(built, to: dest, audioOnly: true, progress: onProgress)
+                }
+                guard let self else { return }
+                self.exportPhase = .idle
+                self.exportFormat = .video
+                self.lastExport = dest
+                self.notice = settings.format == .gif ? "Saved the GIF" : "Saved the sound file"
+            } catch {
+                guard let self else { return }
+                self.exportPhase = .idle
+                self.exportFormat = .video
+                if !(error is CancellationError) && !Task.isCancelled {
+                    self.lastError = (error as? ApiError)?.message ?? "Couldn't export the edit"
+                }
+            }
+        }
+    }
+
     func cancelExport() {
         if let r = requestInExport { answerRequest(r, .failed("The owner cancelled the export")) }
         requestInExport = nil
         exportTask?.cancel()
         exportTask = nil
         exportPhase = .idle
+        exportFormat = .video
     }
 
     /// "v3 · saved just now" / "v3 · unsaved changes".

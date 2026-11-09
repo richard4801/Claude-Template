@@ -1,0 +1,162 @@
+import XCTest
+@testable import MuseCore
+
+/// Colour keyframes (contract, WS8 c10e398): adjustAt and the colour matrix at item-local t give the reference's answers
+/// (functions.json → colorKeys).
+final class EditV2ColorKeysTests: XCTestCase {
+    typealias E = EditV2
+
+    func testAdjustAtAndMatrix() throws {
+        let cases = try editorFixture("functions")["colorKeys"].array
+        XCTAssertEqual(cases.count, 4)
+        for c in cases {
+            let item = c["item"]
+            let adjust = item["adjust"].isNull ? nil : try item["adjust"].decode(E.Adjust.self)
+            let filter = item["filter"].isNull ? nil : try item["filter"].decode(E.FilterRef.self)
+            let keys = try item["keyframes"].decode(E.Keyframes.self)
+            XCTAssertTrue(E.hasColorKeys(keys))
+            for s in c["samples"].array {
+                let t = s["t"].double!
+                let got = E.adjustAt(adjust, keys, t)
+                if s["adjust"].isNull {
+                    XCTAssertNil(got, "t \(t)")
+                } else {
+                    let want = try s["adjust"].decode(E.Adjust.self)
+                    XCTAssertEqual(got, want, "t \(t)")
+                }
+                let m = E.colorMatrix(got, filter)
+                let wm = s["matrix"].array.compactMap(\.double)
+                XCTAssertEqual(m.count, wm.count)
+                for (g, e) in zip(m, wm) { XCTAssertEqual(g, e, accuracy: 1e-5, "matrix at t \(t)") }
+            }
+        }
+    }
+
+    /// Mask and look keyframes (WS8 bfa44a6, 9cf11a4): maskAt and lookAt at item-local t (functions.json → motionKeys).
+    func testMaskAndLookKeys() throws {
+        let cases = try editorFixture("functions")["motionKeys"].array
+        XCTAssertEqual(cases.count, 4)
+        for (i, c) in cases.enumerated() {
+            let item = c["item"]
+            let mask = item["mask"].isNull ? nil : try item["mask"].decode(E.Mask.self)
+            let look = item["look"].isNull ? nil : try item["look"].decode(E.Look.self)
+            let keys = try item["keyframes"].decode(E.Keyframes.self)
+            for s in c["samples"].array {
+                let t = s["t"].double!
+                let gm = try JV.of(E.maskAt(mask, keys, t)), gl = try JV.of(E.lookAt(look, keys, t))
+                let dm = jsonDiff(gm, s["mask"]), dl = jsonDiff(gl, s["look"])
+                XCTAssert(dm.isEmpty, "item \(i) maskAt \(t): " + dm.prefix(4).joined(separator: "; "))
+                XCTAssert(dl.isEmpty, "item \(i) lookAt \(t): " + dl.prefix(4).joined(separator: "; "))
+            }
+        }
+    }
+
+    /// Loop animations (WS8 57fe40c): loopState at item-local t (functions.json → loops).
+    func testLoopStates() throws {
+        let cases = try editorFixture("functions")["loops"].array
+        XCTAssertEqual(cases.count, 6)
+        for c in cases {
+            let loop = try c["loop"].decode(E.AnimLoop.self)
+            for s in c["samples"].array {
+                let t = s["t"].double!, got = E.loopState(loop, t), w = s["state"]
+                XCTAssertEqual(got.scale, w["scale"].double!, accuracy: 1e-6, "\(loop.kind) \(t)")
+                XCTAssertEqual(got.rotation, w["rotation"].double!, accuracy: 1e-6, "\(loop.kind) \(t)")
+                XCTAssertEqual(got.dy, w["dy"].double!, accuracy: 1e-6, "\(loop.kind) \(t)")
+                XCTAssertEqual(got.opacity, w["opacity"].double!, accuracy: 1e-6, "\(loop.kind) \(t)")
+            }
+        }
+    }
+
+    func testLoopOnOverlaysOnly() {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 6), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        s.selection = s.project.mainClips[0].id
+        XCTAssertFalse(s.setLoop(E.AnimLoop(kind: .pulse, periodSec: 1)), "not on a main clip")
+        let take2 = E.Asset(id: "t2", kind: .video, take: "tk2", durationSec: 4, width: 1080, height: 1920, hasAudio: true)
+        s.playhead = 1
+        XCTAssertTrue(s.addVideo(take2, overlay: true))
+        XCTAssertTrue(s.setLoop(E.AnimLoop(kind: .float, periodSec: 9, amount: 0.5)))
+        XCTAssertEqual(s.selectedLoop, E.AnimLoop(kind: .float, periodSec: 5), "period clamped, default amount left out")
+        XCTAssertNil(E.problem(s.project))
+        let p0 = E.placement(s.selectedVideo!, local: 1.25)
+        var still = s.selectedVideo!; still.animLoop = nil
+        XCTAssertEqual(p0.y - E.placement(still, local: 1.25).y, -0.03 * 0.5 * sin(2 * Double.pi * 1.25 / 5), accuracy: 1e-6, "float moves it up")
+        XCTAssertTrue(s.moveToMain())
+        XCTAssertNil(s.project.mainClips.first { $0.asset == "t2" }?.animLoop, "the main track drops the loop")
+        XCTAssertNil(E.problem(s.project))
+    }
+
+    /// Audio speed (WS8 dacb556): length, beats on the timeline and source times (functions.json → audioSpeed).
+    func testAudioSpeedFixtures() throws {
+        let cases = try editorFixture("functions")["audioSpeed"].array
+        XCTAssertEqual(cases.count, 2)
+        for c in cases {
+            let clip = try c["clip"].decode(E.AudioClip.self)
+            XCTAssertEqual(E.clipLength(clip), c["length"].double!, accuracy: 1e-6)
+            let beats = (clip.beats ?? []).map { E.r6(clip.startSec + ($0 - clip.inSec) / (clip.speed ?? 1)) }
+            let want = c["beatsOnTimeline"].array.compactMap(\.double)
+            XCTAssertEqual(beats.count, want.count)
+            for (g, w) in zip(beats, want) { XCTAssertEqual(g, w, accuracy: 1e-6) }
+            for s in c["sourceAt"].array {
+                XCTAssertEqual(clip.inSec + s["t"].double! * (clip.speed ?? 1), s["src"].double!, accuracy: 1e-6, "t \(s["t"])")
+            }
+        }
+    }
+
+    func testAudioSpeedOnASound() {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        let song = E.Asset(id: "a1", kind: .audio, upload: "u1", durationSec: 6, hasAudio: true)
+        XCTAssertTrue(s.addAudio(song, kind: .music))
+        XCTAssertTrue(s.setAudioSpeed(1.5))
+        let c = s.project.tracks.first { $0.kind == .music }!.items[0].audioClip!
+        XCTAssertEqual(c.speed, 1.5)
+        XCTAssertEqual(E.clipLength(c), (c.outSec - c.inSec) / 1.5, accuracy: 1e-9)
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertTrue(s.setAudioSpeed(9))
+        XCTAssertEqual(s.selectedAudioSpeed, 2, "clamped to 2×")
+        XCTAssertTrue(s.setAudioSpeed(1))
+        XCTAssertNil(s.project.tracks.first { $0.kind == .music }!.items[0].audioClip!.speed)
+    }
+
+    /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
+    func testAutoAdjustFixtures() throws {
+        let cases = try editorFixture("functions")["autoAdjust"].array
+        XCTAssertEqual(cases.count, 4)
+        for c in cases {
+            let base = c["base"].isNull ? nil : try c["base"].decode(E.Adjust.self)
+            let got = E.autoAdjust(c["rgb"].array.compactMap(\.double), base: base)
+            XCTAssertEqual(got, try c["out"].decode(E.Adjust.self), c["name"].string ?? "")
+        }
+    }
+
+    func testColorKeysOnTheSelectedClip() {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 6), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        s.selection = s.project.mainClips[0].id
+        XCTAssertTrue(s.setVisualValue(.exposure, 0.4))
+        XCTAssertEqual(s.project.mainClips[0].adjust?.exposure, 0.4, "unkeyed: the static value")
+        s.playhead = 1; XCTAssertTrue(s.addKeyframe(.exposure, value: -0.5))
+        s.playhead = 3; XCTAssertTrue(s.addKeyframe(.exposure, value: 0.5))
+        s.playhead = 2
+        XCTAssertEqual(s.visualValue(.exposure) ?? 9, 0, accuracy: 1e-6, "half-way between the keys")
+        XCTAssertTrue(s.setVisualValue(.exposure, 0.2), "keyed: sets a key at the playhead")
+        XCTAssertEqual(s.project.mainClips[0].keyframes?.exposure?.count, 3)
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertFalse(s.setVisualValue(.volume, 1))
+    }
+}
+
+/// The owner's model pick on Edit helpers (WS13 engineModel): the purpose each helper runs, and the field on the wire.
+final class EditorHelperModelTests: XCTestCase {
+    func testPurposesAndEncoding() throws {
+        XCTAssertEqual(EditorJobKind.captions.enginePurpose(nil), .captions)
+        XCTAssertEqual(EditorJobKind.cuts.enginePurpose(nil), .captions)
+        XCTAssertEqual(EditorJobKind.matte.enginePurpose(nil), .matte)
+        XCTAssertEqual(EditorJobKind.matte.enginePurpose(EditorJobOptions(points: [])), .track)
+        XCTAssertEqual(EditorJobKind.denoise.enginePurpose(nil), .denoise)
+        XCTAssertNil(EditorJobKind.beats.enginePurpose(nil))
+        let src = EditorSource(takeId: "tk", durationSec: 3)
+        let plain = String(decoding: try JSONEncoder().encode(EditorJobRequest(kind: .denoise, source: src)), as: UTF8.self)
+        XCTAssertFalse(plain.contains("engineModel"), "no pick: the studio's default, field left out")
+        let picked = String(decoding: try JSONEncoder().encode(EditorJobRequest(kind: .denoise, source: src, engineModel: "m1")), as: UTF8.self)
+        XCTAssertTrue(picked.contains("\"engineModel\":\"m1\""))
+    }
+}

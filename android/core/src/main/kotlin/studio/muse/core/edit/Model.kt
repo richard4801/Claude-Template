@@ -17,7 +17,21 @@ inline fun <reified E> wireOf(s: String): E? where E : Enum<E>, E : Wire = enumV
 enum class Ease(override val wire: String) : Wire { LINEAR("linear"), EASE_IN("easeIn"), EASE_OUT("easeOut"), EASE_IN_OUT("easeInOut"), HOLD("hold") }
 
 /** Keyframeable properties. Volume only on clips with sound; the rest on visual items. */
-enum class KfProp(override val wire: String) : Wire { X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume") }
+enum class KfProp(override val wire: String) : Wire {
+    X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume"),
+    /** Colour keyframes (M): replace the adjust field's static value over time ([adjustAt]); video clips and images. */
+    EXPOSURE("exposure"), CONTRAST("contrast"), SATURATION("saturation"), TEMPERATURE("temperature"), TINT("tint"),
+    /** Mask keyframes (M): the mask's fields over time ([maskAt]); only on items with a mask. */
+    MASK_X("maskX"), MASK_Y("maskY"), MASK_WIDTH("maskWidth"), MASK_HEIGHT("maskHeight"), MASK_ROTATION("maskRotation"), MASK_FEATHER("maskFeather"),
+    /** Look keyframes (M): the finishing effects' amounts over time ([lookAt]). */
+    VIGNETTE("vignette"), GRAIN("grain"), LEAK("leak");
+
+    companion object {
+        val COLOR = listOf(EXPOSURE, CONTRAST, SATURATION, TEMPERATURE, TINT)
+        val MASK = listOf(MASK_X, MASK_Y, MASK_WIDTH, MASK_HEIGHT, MASK_ROTATION, MASK_FEATHER)
+        val LOOK = listOf(VIGNETTE, GRAIN, LEAK)
+    }
+}
 
 enum class TransitionKind(override val wire: String) : Wire {
     FADE("fade"), BLACK("black"), WHITE("white"), SLIDE_LEFT("slideLeft"), SLIDE_RIGHT("slideRight"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom"),
@@ -83,12 +97,20 @@ data class Keyframe(val t: Double, val v: Double, val ease: Ease? = null)
 /** Per-property keyframe lists, in JSON order. */
 typealias Keyframes = Map<KfProp, List<Keyframe>>
 
-data class Transform(val x: Double? = null, val y: Double? = null, val scale: Double? = null, val rotation: Double? = null)
+/** [flipX] / [flipY] (wave 1, mirror): mirrored about the picture's centre, after the crop and before scale and rotation. */
+data class Transform(val x: Double? = null, val y: Double? = null, val scale: Double? = null, val rotation: Double? = null, val flipX: Boolean? = null, val flipY: Boolean? = null)
+
+/** Wave 1: how an overlay picture combines with the layers below ([blendPixel]). */
+enum class BlendMode(override val wire: String) : Wire {
+    NORMAL("normal"), MULTIPLY("multiply"), SCREEN("screen"), OVERLAY("overlay"), SOFT_LIGHT("softLight"), DARKEN("darken"), LIGHTEN("lighten"), ADD("add")
+}
 data class Crop(val left: Double? = null, val top: Double? = null, val right: Double? = null, val bottom: Double? = null)
 data class Adjust(
     val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null,
     /** Edit suite: tone, applied after the colour matrix ([toneAdjust]). */
     val highlights: Double? = null, val shadows: Double? = null,
+    /** Green (−1) ↔ magenta (+1), right after temperature in [colorMatrix]. */
+    val tint: Double? = null,
 )
 data class FilterRef(val id: String, val amount: Double)
 data class Chroma(val color: String, val similarity: Double? = null, val smoothness: Double? = null, val spill: Double? = null)
@@ -177,6 +199,15 @@ data class VideoClip(
     val transitionIn: Transition? = null,
     val voiceEffect: VoiceEffect? = null,
     val enhance: Boolean? = null,
+    /** Wave 1, freeze frame: shows the single source frame at [inSec] for this many seconds, silent ([clipLength] = holdSec). */
+    val holdSec: Double? = null,
+    /** Wave 1: overlay (video) tracks only. */
+    val blend: BlendMode? = null,
+    /** In / out animation (as images; no typewriter), main or overlay: [animState] over [clipLength]. */
+    val animIn: Anim? = null,
+    val animOut: Anim? = null,
+    /** A repeating animation (overlay clips only): [loopState]. */
+    val animLoop: AnimLoop? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -197,6 +228,9 @@ data class ImageItem(
     override val mask: Mask? = null,
     val animIn: Anim? = null,
     val animOut: Anim? = null,
+    /** Wave 1: overlay blend mode. */
+    val blend: BlendMode? = null,
+    val animLoop: AnimLoop? = null,
 ) : Visual
 
 data class Stroke(val color: String, val widthPct: Double)
@@ -230,6 +264,7 @@ data class TextItem(
     val animIn: Anim? = null,
     val animOut: Anim? = null,
     val template: String? = null,
+    val animLoop: AnimLoop? = null,
 ) : Item
 
 data class AudioClip(
@@ -284,7 +319,14 @@ data class Track(
     val duck: Duck? = null,
 )
 
-data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null)
+/** [fill] (wave 1): what shows where a contain-fitted main clip leaves the frame empty: the background colour, or a blur of the clip. */
+/** Loop animations (M): a repeating move while the item is on screen ([loopState]). */
+enum class LoopKind(override val wire: String) : Wire { PULSE("pulse"), SWAY("sway"), FLOAT("float"), SPIN("spin"), BLINK("blink") }
+data class AnimLoop(val kind: LoopKind, val periodSec: Double, val amount: Double? = null)
+
+enum class CanvasFill(override val wire: String) : Wire { COLOR("color"), BLUR("blur") }
+
+data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null, val fill: CanvasFill? = null)
 
 data class EditProject(
     val version: Int = 2,

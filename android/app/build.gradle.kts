@@ -1,3 +1,13 @@
+import com.android.build.api.instrumentation.AsmClassVisitorFactory
+import com.android.build.api.instrumentation.ClassContext
+import com.android.build.api.instrumentation.ClassData
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationParameters
+import com.android.build.api.instrumentation.InstrumentationScope
+import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.commons.ClassRemapper
+import org.objectweb.asm.commons.SimpleRemapper
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -15,8 +25,8 @@ android {
         applicationId = "studio.muse.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 8
+        versionName = "0.1.7"
         // The live MUSE API (server/api on Railway). Settings → Developer can point the app at another URL
         // (e.g. http://10.0.2.2:8787/ for a local server/api or server/mock from the emulator).
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://angelic-elegance-production-c42b.up.railway.app/\"")
@@ -151,4 +161,25 @@ dependencies {
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit.rule)
+}
+
+// Edit blend modes (WS8, plans/video-editor.md "Wave 1 additions"): Media3 1.11 draws every multi-layer composite with
+// its package-private DefaultCompositorGlProgram and lets no app replace it (Transformer can't even take a custom video
+// graph). The app ships androidx.media3.effect.MuseCompositorGlProgram (app/src/main/java/androidx/media3/effect/), a
+// copy that also blends layers by mode, and this instrumentation rewrites Media3's references to the library class to
+// it (DefaultVideoCompositor, the frame processors), so the preview player and the export both use it.
+abstract class MuseCompositorRemap : AsmClassVisitorFactory<InstrumentationParameters.None> {
+    override fun createClassVisitor(classContext: ClassContext, nextClassVisitor: ClassVisitor): ClassVisitor =
+        ClassRemapper(nextClassVisitor, SimpleRemapper("androidx/media3/effect/DefaultCompositorGlProgram", "androidx/media3/effect/MuseCompositorGlProgram"))
+    // WS4 (0.1.5 release build): the library class itself is left alone. Remapping it renamed it to MuseCompositorGlProgram
+    // too, so R8 found that type twice ("defined multiple times") and the release build failed; debug builds didn't check.
+    override fun isInstrumentable(classData: ClassData): Boolean =
+        classData.className.startsWith("androidx.media3.effect.") && !classData.className.startsWith("androidx.media3.effect.Muse") &&
+            classData.className != "androidx.media3.effect.DefaultCompositorGlProgram" && !classData.className.startsWith("androidx.media3.effect.DefaultCompositorGlProgram$")
+}
+androidComponents {
+    onVariants { variant ->
+        variant.instrumentation.transformClassesWith(MuseCompositorRemap::class.java, InstrumentationScope.ALL) {}
+        variant.instrumentation.setAsmFramesComputationMode(FramesComputationMode.COPY_FRAMES)
+    }
 }

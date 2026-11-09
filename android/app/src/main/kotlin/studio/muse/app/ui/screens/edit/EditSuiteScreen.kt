@@ -89,13 +89,21 @@ import studio.muse.core.edit.CaptionExport
 import studio.muse.core.edit.CubeCheck
 import studio.muse.core.edit.EditJson
 import studio.muse.core.edit.EditProject
+import studio.muse.core.edit.ExportBitrate
 import studio.muse.core.edit.ExportCodec
+import studio.muse.core.edit.ExportFormat
+import studio.muse.core.edit.ExportResolution
+import studio.muse.core.edit.GIF_FPS
+import studio.muse.core.edit.SOUND_BITRATE
+import studio.muse.core.edit.videoBitrate
 import studio.muse.core.edit.ImageItem
 import studio.muse.core.edit.SourceSize
 import studio.muse.core.edit.Track
 import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.VideoClip
 import studio.muse.core.edit.exportProject
+import studio.muse.core.edit.itemSpan
+import studio.muse.core.edit.locate
 import studio.muse.core.edit.fromV1
 import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.toSrt
@@ -227,6 +235,16 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         if (ok) vm.startVoiceOver() else c.repo.toast("Record VO needs the microphone · allow it in the phone's settings")
     }
     val cube = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { vm.importCube(it) } }
+    // "Add a video from a link": WS7's import screen; when the link can't be fetched, the saved video is picked and imported there too.
+    var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var savedVideo by remember { mutableStateOf<Uri?>(null) }
+    val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { savedVideo = uri; importing = true } }
+    // "Add a photo": the system photo picker (images only; no storage permission).
+    val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.addPhoto(it) } }
+    if (importing) studio.muse.app.ui.screens.ImportLinkDialog(studio.muse.app.ui.screens.ImportPurpose.EDIT, file = savedVideo,
+        onClose = { importing = false; savedVideo = null }, onPickFile = { importing = false; video.launch("video/*") }) { v ->
+        importing = false; savedVideo = null; vm.addImported(v)
+    }
     val host = SuiteHost(
         pickAudio = { audio.launch("audio/*") },
         // Record VO: records in the editor from the playhead (the phone's own recorder app isn't there on most phones).
@@ -242,6 +260,18 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         cancelExport = vm::cancelExport,
         lookThumbs = thumbs,
         waves = waves,
+        saveFrame = vm::saveFrame,
+        importLink = { importing = true },
+        headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
+        addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        autoAdjust = vm::autoAdjust,
+        saveKit = vm::saveKit,
+        deleteKit = vm::deleteKit,
+        modelRow = { purpose ->
+            studio.muse.app.data.ModelPurpose.of(purpose)?.let { mp ->
+                studio.muse.app.ui.screens.ModelChoiceRow(mp, studio.muse.app.ui.screens.ModelPick(ui.helperModels[purpose]), onPick = { pick -> vm.controller.act(EditAction.PickModel(purpose, pick.model)) })
+            }
+        },
     )
     EditSuiteContent(ui, frames, host, vm.controller::act, onClose = onBack, drawText = player == null) { mod ->
         val p = player
@@ -288,11 +318,13 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
         }.toMap()
     }
 
-    override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =
-        runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
+    override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> = estimate(kind, source, options, null)
+    override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?, engineModel: String?): Pair<EditorEstimate?, String?> =
+        runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options, engineModel)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
 
-    override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
-        val (started, err) = runCatching { c.repo.attemptInline { startEditorJob(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
+    override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> = run(kind, source, options, null, onProgress)
+    override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, engineModel: String?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
+        val (started, err) = runCatching { c.repo.attemptInline { startEditorJob(EditorJobRequest(kind, source, options, engineModel)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
         var job = started ?: return null to (err ?: "Couldn't start the helper")
         try {
             onProgress(job)
@@ -343,6 +375,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     init {
         load()
+        loadKits()
         viewModelScope.launch {
             controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
                 if (p == null) return@collect
@@ -353,6 +386,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             }
         }
         viewModelScope.launch { controller.ui.map { it.playing }.distinctUntilChanged().collect { on -> _player.value?.let { if (on) it.play() else it.pause() } } }
+        // The chroma eyedropper: its frame once it opens (the source picture at the playhead, 720 px).
+        viewModelScope.launch {
+            controller.ui.map { it.pick?.takeIf { pk -> pk.argb == null }?.clipId }.distinctUntilChanged().collect { id ->
+                if (id == null) return@collect
+                val fr = sourceFrame(id, 720)
+                if (fr == null) { controller.act(EditAction.PickColor(false)); c.repo.toast("This clip's file isn't on the phone yet") }
+                else controller.act(EditAction.PickFrame(fr.first, fr.second, fr.third))
+            }
+        }
         viewModelScope.launch {
             // Scrubbing: the preview follows the playhead frame by frame. Seeks are conflated (only the latest position
             // waits while one is being decoded), so a fast drag never queues up stale frames; when the finger stops,
@@ -501,6 +543,141 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
+    /**
+     * A video imported from a link (WS7's import; or the saved file it falls back to): its file for the preview, then
+     * added after the last clip as an upload asset (the export reads the same upload on the server).
+     */
+    fun addImported(v: studio.muse.app.data.ImportedVideo) {
+        val upload = v.uploadId ?: return c.repo.toast("This video can't be added · import it again")
+        if (v.durationSec < studio.muse.core.edit.EditLimits.MIN_CLIP_SOURCE_SEC) return c.repo.toast("This video is too short to add")
+        viewModelScope.launch {
+            val f = v.videoUrl?.let { url -> runCatching { engine.fetchSource(url) {} }.getOrNull() }
+            controller.act(EditAction.AppendUpload(upload, v.durationSec, v.width.takeIf { it > 0 }, v.height.takeIf { it > 0 }, v.audio?.let { it.kind != "none" } ?: true))
+            val p = controller.project ?: return@launch
+            val a = p.assets.firstOrNull { it.upload == upload && it.kind == AssetKind.VIDEO } ?: return@launch
+            if (f == null) return@launch c.repo.toast("Added · the preview can't show it until it downloads")
+            files[a.id] = f
+            rebuildPreview(p); loadWaves(p)
+        }
+    }
+
+    /**
+     * "Add a photo" (owner-approved design pass): the picked image, scaled to 2048 px on the long side at most (PNG when
+     * it has transparency, else JPEG), uploaded as an editor asset and placed over the edit at the playhead.
+     */
+    fun addPhoto(uri: Uri) {
+        viewModelScope.launch {
+            controller.update { it.copy(message = "Adding the photo…") }
+            val made = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return@runCatching null
+                    val k = minOf(1f, 2048f / maxOf(src.width, src.height))
+                    val bmp = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(src, maxOf(1, (src.width * k).roundToInt()), maxOf(1, (src.height * k).roundToInt()), true) else src
+                    val png = bmp.hasAlpha()
+                    val f = File(app.cacheDir, "edit-suite/photo_${System.currentTimeMillis()}.${if (png) "png" else "jpg"}").apply { parentFile?.mkdirs() }
+                    f.outputStream().use { bmp.compress(if (png) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                    Triple(f, if (png) "image/png" else "image/jpeg", bmp.width to bmp.height)
+                }.getOrNull()
+            } ?: return@launch c.repo.toast("Couldn't read that photo")
+            val (f, mime, size) = made
+            val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, mime) } }.getOrElse { null to "Couldn't upload · try again" }
+            if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
+            controller.act(EditAction.AddImage(id, size.first, size.second))
+            controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
+            controller.project?.let { rebuildPreview(it) }
+        }
+    }
+
+    // ------------------------------------------------------------ style kits
+    private fun kitsOf(list: List<studio.muse.app.data.EditKit>) = list.mapNotNull { k -> runCatching { KitChoice(k.id, k.name, studio.muse.core.edit.parseKit(k.kit)) }.getOrNull() }
+
+    fun loadKits() {
+        viewModelScope.launch {
+            runCatching { c.repo.api.editKits() }
+                .onSuccess { l -> controller.update { it.copy(kits = kitsOf(l), kitsNote = null) } }
+                .onFailure { e -> controller.update { it.copy(kitsNote = (e as? studio.muse.app.data.ApiException)?.message ?: "Couldn't load your style kits") } }
+        }
+    }
+
+    /** Saves the edit's style ([studio.muse.core.edit.kitOf]) as kit [name]. */
+    fun saveKit(name: String) {
+        val p = controller.project ?: return
+        val kit = studio.muse.core.edit.kitOf(p)
+        if (kit.isEmpty) return c.repo.toast("This edit has no style to save yet · add a look, colour, transition or captions")
+        viewModelScope.launch {
+            runCatching { c.repo.api.saveEditKit(name.trim().take(60).ifEmpty { "${controller.ui.value.title} style" }, studio.muse.core.edit.encodeKit(kit)) }
+                .onSuccess { c.repo.toast("Saved “${it.name}”"); loadKits() }
+                .onFailure { e -> c.repo.toast((e as? studio.muse.app.data.ApiException)?.message ?: "Couldn't save the style kit · try again") }
+        }
+    }
+
+    fun deleteKit(id: String) {
+        viewModelScope.launch {
+            runCatching { c.repo.api.deleteEditKit(id) }.onSuccess { loadKits() }.onFailure { c.repo.toast("Couldn't delete that style kit · try again") }
+        }
+    }
+
+    /**
+     * Auto adjust: the selected picture's (or the clip under the playhead's) source frame at the playhead, read small
+     * (96 px) from its file, then the controller's [EditAction.AutoAdjust].
+     */
+    fun autoAdjust() {
+        val u = controller.ui.value
+        val clip = (u.selection?.second as? VideoClip) ?: u.activeClip ?: return c.repo.toast("Select a clip to adjust")
+        viewModelScope.launch {
+            val (_, _, px) = sourceFrame(clip.id, 96) ?: return@launch c.repo.toast("Couldn't read this frame · try another spot")
+            controller.act(EditAction.AutoAdjust(DoubleArray(px.size * 3) { j -> ((px[j / 3] shr (16 - 8 * (j % 3))) and 0xFF) / 255.0 }))
+        }
+    }
+
+    /**
+     * Clip [clipId]'s source frame at the playhead (before its look), at most [maxSide] px on the long side, as ARGB: for
+     * Auto adjust and the chroma eyedropper. Null when the clip's file isn't on the phone or the frame can't be read.
+     */
+    private suspend fun sourceFrame(clipId: String, maxSide: Int): Triple<Int, Int, IntArray>? {
+        val p = controller.project ?: return null
+        val (tr, i) = p.locate(clipId) ?: return null
+        val clip = tr.items[i] as? VideoClip ?: return null
+        val f = files[clip.asset] ?: return null
+        val local = (controller.ui.value.playheadSec - itemSpan(p, tr, clip).startSec).coerceAtLeast(0.0)
+        val src = studio.muse.core.edit.clipSourceAt(clip, local)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val r = MediaMetadataRetriever()
+                try {
+                    r.setDataSource(f.absolutePath)
+                    val bmp = r.getFrameAtTime((src * 1_000_000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST) ?: return@runCatching null
+                    val k = minOf(1f, maxSide.toFloat() / maxOf(bmp.width, bmp.height))
+                    val small = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).roundToInt()), maxOf(1, (bmp.height * k).roundToInt()), true) else bmp
+                    Triple(small.width, small.height, IntArray(small.width * small.height).also { small.getPixels(it, 0, small.width, 0, 0, small.width, small.height) })
+                } finally { r.release() }
+            }.getOrNull()
+        }
+    }
+
+    /** The frame under the playhead, rendered like the export (looks, text, captions), into Pictures/MUSE. */
+    fun saveFrame() {
+        val p = controller.project ?: return
+        if (sourceFile == null) return c.repo.toast("This video has no file to take a frame from")
+        val t = controller.ui.value.playheadSec
+        viewModelScope.launch {
+            val png = runCatching {
+                studio.muse.app.platform.edit.FrameStill(app, looks).png(composer.plan(playable(p), files), files, t, minOf(p.canvas.width, 2160))
+            }.getOrNull() ?: return@launch c.repo.toast("Couldn't take that frame · try again")
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val v = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, "MUSE frame ${System.currentTimeMillis() / 1000}.png"); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MUSE")
+                    }
+                    val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: return@runCatching false
+                    app.contentResolver.openOutputStream(uri)?.use { it.write(png) } != null
+                }.getOrDefault(false)
+            }
+            c.repo.toast(if (ok) "Frame saved to Photos · Pictures/MUSE" else "Couldn't save the frame to this phone")
+        }
+    }
+
     // ------------------------------------------------------------ voice-over
     private var recorder: android.media.MediaRecorder? = null
     private var voFile: File? = null
@@ -521,6 +698,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         } catch (e: Exception) { r.release(); f.delete(); c.repo.toast("Couldn't start the microphone · try again"); return }
         recorder = r; voFile = f
         controller.update { it.copy(recordingAt = it.playheadSec) }
+        // Hearing the video while recording: the preview plays from the playhead with the edit's sound.
+        val route = outputRoute()
+        voLatency = if (controller.ui.value.voPlayback ?: route.headphones) route.latencySec else null
+        if (voLatency != null) controller.setPlayback(controller.ui.value.playheadSec, true)
     }
 
     /** Stops the voice-over and adds it to the Voice-over lane where recording started. */
@@ -529,11 +710,33 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val f = voFile
         val at = controller.ui.value.recordingAt
         recorder = null; voFile = null
+        val lag = voLatency ?: 0.0
+        voLatency = null
+        if (controller.ui.value.playing) pause()
         val ok = runCatching { r.stop() }.isSuccess
         r.release()
         controller.update { it.copy(recordingAt = null) }
         if (!ok || f == null || f.length() == 0L) { f?.delete(); c.repo.toast("That recording was too short · hold on a little longer"); return }
-        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at)
+        // Heard late by the output's latency, the voice is late by it too: the take goes that much earlier.
+        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at?.let { maxOf(0.0, it - lag) })
+    }
+
+    /** While recording with the video playing: the output route's latency (s); null when the video isn't playing. */
+    private var voLatency: Double? = null
+
+    data class OutputRoute(val headphones: Boolean, val latencySec: Double)
+
+    /**
+     * The current audio output: headphones (wired, USB, Bluetooth) or the speaker, and its latency. Android has no
+     * public output-latency API, so the latency is the typical figure for the route (Bluetooth about 200 ms, wired and
+     * USB about 20 ms); measured per route on a device later if the takes drift.
+     */
+    fun outputRoute(): OutputRoute {
+        val am = app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+        val outs = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
+        val bt = outs.any { it == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || (Build.VERSION.SDK_INT >= 31 && it == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET) }
+        val wired = outs.any { it == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET || it == android.media.AudioDeviceInfo.TYPE_USB_HEADSET }
+        return OutputRoute(bt || wired, if (bt) 0.2 else if (wired) 0.02 else 0.0)
     }
 
     fun importCube(uri: Uri) {
@@ -599,7 +802,61 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     fun export(toPhone: Boolean) {
         exporting?.cancel()
-        exporting = viewModelScope.launch { exportAndSave(toPhone) }
+        val format = controller.ui.value.export.format
+        exporting = viewModelScope.launch { if (format == ExportFormat.VIDEO) exportAndSave(toPhone) else exportToPhone(format) }
+    }
+
+    /**
+     * Sound only or a GIF (plans/edit-parity.md, S rows): the edit rendered by the same engine (small for sound; at the
+     * GIF's size and rate for a GIF), then remuxed / turned into GIF frames, into Music/MUSE or Pictures/MUSE. Neither is
+     * saved as a version (versions are videos).
+     */
+    private suspend fun exportToPhone(format: ExportFormat) {
+        val p = controller.project ?: return
+        val u = controller.ui.value
+        if (sourceFile == null) return c.repo.toast("This video has no file to render · open a finished render")
+        u.export.refusal(u.duration, SuiteOps.editHasSound(playable(p)))?.let { return controller.setPhase(SuitePhase.Failed(it)) }
+        withContext(Dispatchers.Main) { pause() }
+        // Sound only: a small, quick picture (it's thrown away); a GIF: its own size and frame rate.
+        val s = if (format == ExportFormat.SOUND) u.export.copy(format = ExportFormat.VIDEO, resolution = ExportResolution.HD, fps = 24, bitrate = ExportBitrate.LOWER) else u.export
+        val renderShare = if (format == ExportFormat.GIF) .6f else 1f
+        controller.setPhase(SuitePhase.Exporting(0f))
+        var made: File? = null
+        val out = File(app.cacheDir, "edit-suite/export_${System.currentTimeMillis()}.${if (format == ExportFormat.GIF) "gif" else "m4a"}").apply { parentFile?.mkdirs() }
+        try {
+            val plan = composer.plan(exportProject(playable(p), s), files)
+            val (w, h) = s.size
+            val video = composer.export(plan, files, androidx.media3.common.MimeTypes.VIDEO_H264, videoBitrate(w, h, s.outFps, s.bitrate), SOUND_BITRATE) { pr -> controller.setPhase(SuitePhase.Exporting(pr * renderShare)) }
+            made = video.file
+            val ok = when (format) {
+                ExportFormat.SOUND -> withContext(Dispatchers.IO) { studio.muse.app.platform.edit.ExportFormats.soundOnly(video.file, out) }
+                else -> studio.muse.app.platform.edit.ExportFormats.gif(video.file, out, GIF_FPS) { pr -> controller.setPhase(SuitePhase.Exporting(renderShare + pr * (1 - renderShare))) } > 0
+            }
+            if (!ok) return controller.setPhase(SuitePhase.Failed(if (format == ExportFormat.SOUND) "This edit has no sound to export" else "Couldn't make the GIF · try again"))
+            controller.setPhase(SuitePhase.Saving(0f))
+            val where = withContext(Dispatchers.IO) { savePhoneFile(out, format, u.title) }
+                ?: return controller.setPhase(SuitePhase.Failed("Couldn't save to this phone"))
+            controller.update { it.copy(phase = SuitePhase.Ready, panel = null, message = "Saved to this phone · $where") }
+        } catch (e: kotlinx.coroutines.CancellationException) { controller.setPhase(SuitePhase.Ready); throw e
+        } catch (e: Exception) {
+            controller.setPhase(SuitePhase.Failed(if (format == ExportFormat.GIF) "This phone couldn't make the GIF · try again" else "This phone couldn't make the sound file · try again"))
+        } finally { made?.delete(); out.delete() }
+    }
+
+    /** An .m4a into Music/MUSE or a .gif into Pictures/MUSE; the folder, or null. */
+    private fun savePhoneFile(f: File, format: ExportFormat, title: String): String? {
+        val name = "MUSE ${title.take(40)} ${System.currentTimeMillis() / 1000}"
+        val r = app.contentResolver
+        val sound = format == ExportFormat.SOUND
+        val folder = if (sound) "Music/MUSE" else "Pictures/MUSE"
+        val v = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "$name.${if (sound) "m4a" else "gif"}")
+            put(MediaStore.MediaColumns.MIME_TYPE, if (sound) "audio/mp4" else "image/gif")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+        }
+        val uri = r.insert(if (sound) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: return null
+        r.openOutputStream(uri)?.use { o -> f.inputStream().use { it.copyTo(o) } } ?: return null
+        return folder
     }
 
     /** Renders and saves a new version (and a copy on the phone); the saved take, or null with [lastExportError]. */
@@ -609,11 +866,13 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val u = controller.ui.value
         if (sourceFile == null) { c.repo.toast("This video has no file to render · open a finished render"); lastExportError = "No video file"; return null }
         withContext(Dispatchers.Main) { pause() }
-        val s = u.export
+        val s = u.export.copy(format = ExportFormat.VIDEO) // versions are videos (Claude's export asks for one too)
         controller.setPhase(SuitePhase.Exporting(0f))
         val made = try {
             val plan = composer.plan(exportProject(playable(p), s), files)
-            composer.export(plan, files, if (s.codec == ExportCodec.HEVC) androidx.media3.common.MimeTypes.VIDEO_H265 else androidx.media3.common.MimeTypes.VIDEO_H264) { pr ->
+            val (w, h) = s.size
+            composer.export(plan, files, if (s.codec == ExportCodec.HEVC) androidx.media3.common.MimeTypes.VIDEO_H265 else androidx.media3.common.MimeTypes.VIDEO_H264,
+                videoBitrate(w, h, s.fps, s.bitrate, s.codec), null) { pr ->
                 controller.setPhase(SuitePhase.Exporting(pr))
             }
         } catch (e: kotlinx.coroutines.CancellationException) { controller.setPhase(SuitePhase.Ready); throw e

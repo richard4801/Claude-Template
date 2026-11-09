@@ -59,6 +59,38 @@ extension FakeMuseAPI {
         if editorCapHit { throw ApiError("editor_daily_cap", "Today’s AI editing limit ($5.00) is reached · try tomorrow, or the owner can raise it") }
     }
 
+    // Style kits: the same rules as server editor/kits.ts (name 1–60, validateKit, at most 200).
+    public func editKits() throws -> [EditKit] { editKitStore }
+
+    public func saveEditKit(name: String, kit: EditV2.StyleKit) throws -> EditKit {
+        let n = try Self.kitName(name)
+        let k = try EditV2.validateKit(try JSONPatch.encode(kit))
+        guard editKitStore.count < 200 else { throw ApiError("bad_request", "At most 200 style kits") }
+        let now = ISO8601DateFormatter().string(from: Date())
+        let saved = EditKit(id: "kit_\(UUID().uuidString.prefix(8).lowercased())", name: n, kit: k, createdBy: "me", createdAt: now, updatedAt: now)
+        editKitStore.insert(saved, at: 0)
+        return saved
+    }
+
+    public func updateEditKit(id: String, name: String?, kit: EditV2.StyleKit?) throws -> EditKit {
+        guard let i = editKitStore.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That style kit is gone") }
+        if let name { editKitStore[i].name = try Self.kitName(name) }
+        if let kit { editKitStore[i].kit = try EditV2.validateKit(try JSONPatch.encode(kit)) }
+        editKitStore[i].updatedAt = ISO8601DateFormatter().string(from: Date())
+        return editKitStore[i]
+    }
+
+    public func deleteEditKit(id: String) throws {
+        guard let i = editKitStore.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That style kit is gone") }
+        editKitStore.remove(at: i)
+    }
+
+    private static func kitName(_ name: String) throws -> String {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...60).contains(n.count) else { throw ApiError("bad_request", "name: 1 to 60 characters") }
+        return n
+    }
+
     public func editorFeatures() throws -> EditorFeatures? {
         guard editorPaidOff else { return nil }
         let off = EditorFeatures.Helper(available: false)
@@ -195,6 +227,7 @@ extension FakeMuseAPI {
         t.parentTakeId = takeId
         t.editsV2 = req.edits
         t.name = TakeVersionV2Request.versionName(req.name)
+        t.aiLabel = req.aiLabel == true ? true : nil
         t.templateId = src.templateId
         t.templateName = src.templateName
         usedUploads.insert(req.uploadId)

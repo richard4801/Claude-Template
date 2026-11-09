@@ -124,8 +124,13 @@ public struct RecreateFillOptions: Hashable, Sendable {
     public var locationId: String?
     /// The fill only: the confirmed price. A swap that would cost more comes back as `409 price_changed`.
     public var maxUsd: Double?
-    public init(method: String? = nil, keepBackground: Bool? = nil, outfitId: String? = nil, locationId: String? = nil, maxUsd: Double? = nil) {
+    /// Owner only (WS13): the slot's video model, and the background plate's image model.
+    public var engineModel: String?
+    public var imageModel: String?
+    public init(method: String? = nil, keepBackground: Bool? = nil, outfitId: String? = nil, locationId: String? = nil, maxUsd: Double? = nil,
+                engineModel: String? = nil, imageModel: String? = nil) {
         self.method = method; self.keepBackground = keepBackground; self.outfitId = outfitId; self.locationId = locationId; self.maxUsd = maxUsd
+        self.engineModel = engineModel; self.imageModel = imageModel
     }
 }
 
@@ -382,7 +387,8 @@ extension HTTPMuseAPI: RecreateAPI {
     private struct CreateBody: Encodable { var uploadId: String; var name: String?; var sourceUrl: String? = nil }
     private struct LinkBody: Encodable { var url: String; var name: String? }
     private struct PatchBody: Encodable { var keep: Bool?; var name: String? }
-    private struct SlotBody: Encodable { var modelId: String; var quality: String?; var method: String?; var keepBackground: Bool?; var outfitId: String?; var locationId: String?; var maxUsd: Double? }
+    private struct SlotBody: Encodable { var modelId: String; var quality: String?; var method: String?; var keepBackground: Bool?; var outfitId: String?; var locationId: String?; var maxUsd: Double?
+        var engineModel: String? = nil; var imageModel: String? = nil }
     private struct MatchBody: Encodable { var modelId: String? }
 
     public func listReferences() async throws -> [RecreateReference] { try await suiteCall("GET", "v1/recreate/references") }
@@ -428,11 +434,11 @@ extension HTTPMuseAPI: RecreateAPI {
     }
     public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotEstimate {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/estimate"
-        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId, locationId: options.locationId, maxUsd: options.maxUsd)))
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId, locationId: options.locationId, maxUsd: options.maxUsd, engineModel: options.engineModel, imageModel: options.imageModel)))
     }
     public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotFillStart {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/fill"
-        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId, locationId: options.locationId, maxUsd: options.maxUsd)))
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId, locationId: options.locationId, maxUsd: options.maxUsd, engineModel: options.engineModel, imageModel: options.imageModel)))
     }
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/apply", body: try JSONEncoder().encode(req))

@@ -1057,6 +1057,14 @@ class ApiException(val code: String, message: String) : Exception(message) {
 // plans/api.md "Prompt scripts (2026-11-05)": inputs → rules → blocks. Owner only (Settings → Prompts → Scripts).
 
 /** A clip's audio as the server classified it on upload. kind: speech | music | silence | none. */
+/** An edit style kit (/v1/editor/kits): [kit] is the contract's StyleKit JSON (core Kit.kt parseKit / encodeKit). */
+@Serializable
+data class EditKit(val id: String, val name: String, val kit: kotlinx.serialization.json.JsonObject, val createdBy: String? = null, val createdAt: Long = 0, val updatedAt: Long = 0)
+@Serializable
+data class EditKits(val kits: List<EditKit> = emptyList())
+@Serializable
+data class EditKitRequest(val name: String? = null, val kit: kotlinx.serialization.json.JsonObject? = null)
+
 @Serializable
 data class ClipAudio(val kind: String = "none", val speaking: Boolean = false, val detected: Boolean = false)
 
@@ -1143,7 +1151,9 @@ data class ScriptPreview(
 data class EditorSourceDto(val takeId: String? = null, val uploadId: String? = null, val durationSec: Double? = null)
 
 @Serializable
-data class EditorJobRequest(val kind: String, val source: EditorSourceDto, val options: JsonObject? = null)
+data class EditorJobRequest(val kind: String, val source: EditorSourceDto, val options: JsonObject? = null,
+    /** WS13 (owner): the model to run this helper on (captions/cuts → captions, matte → matte or track with points, denoise). Null = the studio's default. */
+    val engineModel: String? = null)
 
 /** POST /v1/editor/estimate. [free] = nothing is charged ("Free" in the UI). */
 @Serializable

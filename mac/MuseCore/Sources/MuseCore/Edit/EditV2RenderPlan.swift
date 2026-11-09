@@ -91,6 +91,14 @@ extension EditV2 {
         }
     }
 
+    /// A clip's pieces for the engines. A freeze frame (wave 1) is one source frame stretched over its hold (the reference's
+    /// zero-length piece can't be placed in a composition).
+    static func renderPieces(_ c: VideoClip, fps: Double) -> [Piece] {
+        guard let h = c.holdSec, h > 0 else { return speedPieces(c) }
+        let frame = 1 / max(1, fps.isFinite ? fps : 30)
+        return [Piece(inSec: c.inSec, outSec: c.inSec + frame, speed: frame / h)]
+    }
+
     /// Lays the project out for rendering. Sources missing from `media` (or without video/sound) are left out; overlays and
     /// sounds past the project's end are cut there; hidden tracks don't draw; silent clips get no audio segment.
     public static func renderPlan(_ p: Project, media: [String: MediaInfo]) -> RenderPlan {
@@ -135,7 +143,7 @@ extension EditV2 {
                 for (i, c) in t.items.compactMap(\.videoClip).enumerated() where i < spans.count {
                     let start = spans[i].startSec, end = min(spans[i].endSec, d)
                     guard end - start > 1e-3 else { continue }
-                    let all = speedPieces(c)
+                    let all = renderPieces(c, fps: p.canvas.fps)
                     if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
                         video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: i % 2, mainIndex: i, layer: 0,
                                                   timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,
@@ -150,7 +158,7 @@ extension EditV2 {
                 for c in t.items.compactMap(\.videoClip) {
                     let start = r6(c.startSec ?? 0), end = min(r6(start + clipLength(c)), d)
                     guard end - start > 1e-3 else { continue }
-                    let all = speedPieces(c)
+                    let all = renderPieces(c, fps: p.canvas.fps)
                     if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
                         video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: vLane, mainIndex: nil, layer: ti,
                                                   timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,
@@ -231,7 +239,27 @@ extension EditV2 {
         public var chars: Int?
     }
 
-    public static func placement(transform: Transform?, opacity: Double?, keyframes: Keyframes?, anim: AnimState? = nil, _ t: Double) -> Placement {
+    /// A loop at item-local t (model.ts loopState): scale ×, rotation + (degrees), dy + (canvas heights, negative up),
+    /// opacity ×; at rest at t = 0.
+    public struct LoopState: Hashable, Sendable { public var scale = 1.0, rotation = 0.0, dy = 0.0, opacity = 1.0 }
+
+    public static func loopState(_ loop: AnimLoop?, _ t: Double) -> LoopState {
+        var st = LoopState()
+        guard let l = loop, l.periodSec > 0 else { return st }
+        let a = clamp(l.amount ?? 0.5, 0, 1), ph = 2 * Double.pi * t / l.periodSec, wave = 0.5 - 0.5 * cos(ph)
+        switch l.kind {
+        case .pulse: st.scale = 1 + 0.12 * a * wave
+        case .sway: st.rotation = 8 * a * sin(ph)
+        case .float: st.dy = -0.03 * a * sin(ph)
+        case .spin: st.rotation = (360 * t / l.periodSec).truncatingRemainder(dividingBy: 360)
+        case .blink: st.opacity = 1 - a * wave
+        default: break
+        }
+        return LoopState(scale: r6(st.scale), rotation: r6(st.rotation), dy: r6(st.dy), opacity: r6(st.opacity))
+    }
+
+    public static func placement(transform: Transform?, opacity: Double?, keyframes: Keyframes?, anim: AnimState? = nil, loop: AnimLoop? = nil,
+                                 _ t: Double) -> Placement {
         let tf = transform ?? Transform()
         var pl = Placement(x: propAt(keyframes, .x, fallback: tf.x ?? 0.5, t), y: propAt(keyframes, .y, fallback: tf.y ?? 0.5, t),
                            scale: propAt(keyframes, .scale, fallback: tf.scale ?? 1, t), rotation: propAt(keyframes, .rotation, fallback: tf.rotation ?? 0, t),
@@ -242,17 +270,28 @@ extension EditV2 {
             pl.y += a.dy
             pl.chars = a.chars
         }
+        // Loop animations compose last: after keyframes and the in / out animation.
+        if let loop {
+            let l = loopState(loop, t)
+            pl.scale *= l.scale
+            pl.rotation += l.rotation
+            pl.y += l.dy
+            pl.opacity *= l.opacity
+        }
         return pl
     }
 
     public static func placement(_ c: VideoClip, local t: Double) -> Placement {
-        placement(transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, t)
+        // Video in / out animations: the same animState as pictures, over the clip's length.
+        let a = (c.animIn != nil || c.animOut != nil)
+            ? animState(durationSec: clipLength(c), animIn: c.animIn, animOut: c.animOut, text: nil, t) : nil
+        return placement(transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, anim: a, loop: c.animLoop, t)
     }
     public static func placement(_ im: ImageItem, local t: Double) -> Placement {
-        placement(transform: im.transform, opacity: im.opacity, keyframes: im.keyframes, anim: animState(im, t), t)
+        placement(transform: im.transform, opacity: im.opacity, keyframes: im.keyframes, anim: animState(im, t), loop: im.animLoop, t)
     }
     public static func placement(_ tx: TextItem, local t: Double) -> Placement {
-        placement(transform: tx.transform, opacity: tx.opacity, keyframes: tx.keyframes, anim: animState(tx, t), t)
+        placement(transform: tx.transform, opacity: tx.opacity, keyframes: tx.keyframes, anim: animState(tx, t), loop: tx.animLoop, t)
     }
 
     /// The size (canvas pixels) a picture of `w`×`h` gets at scale 1: after its crop, fitted to the canvas keeping its

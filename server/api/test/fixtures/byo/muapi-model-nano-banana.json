@@ -1,0 +1,175 @@
+{
+ "name": "nano-banana",
+ "description": "Nano Banana is an advanced AI model excelling in natural language-driven image generation and editing. It produces hyper-realistic, physics-aware visuals with seamless style transformations.",
+ "category": "Text to Image",
+ "family": "nano",
+ "group_of": "image",
+ "domain": "ai",
+ "cost": 0.03,
+ "cost_currency": "USD",
+ "cost_strategy": "nano-banana",
+ "dynamic_pricing": true,
+ "endpoint": "/api/v1/nano-banana",
+ "endpoint_url": "nano-banana",
+ "is_enabled": 1,
+ "is_coming_soon": false,
+ "input_fields": [
+  "prompt",
+  "aspect_ratio"
+ ],
+ "required_fields": [
+  "prompt"
+ ],
+ "estimate_endpoint": "/api/v1/models/nano-banana/estimate-cost",
+ "input_schema": {
+  "schemas": {
+   "input_data": {
+    "x-order-properties": [
+     "prompt",
+     "aspect_ratio"
+    ],
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "examples": [
+       "A portrait of me in a modern living room. Change it so I’m dressed in 1950s attire with a polka-dot dress, while maintaining my face and hairstyle."
+      ],
+      "description": "Text prompt describing the image, what you want the final edited image to look like.",
+      "type": "string",
+      "title": "Prompt",
+      "name": "prompt"
+     },
+     "aspect_ratio": {
+      "enum": [
+       "1:1",
+       "3:4",
+       "4:3",
+       "9:16",
+       "16:9",
+       "3:2",
+       "2:3",
+       "5:4",
+       "4:5",
+       "21:9"
+      ],
+      "title": "Aspect Ratio",
+      "name": "aspect_ratio",
+      "type": "string",
+      "description": "Aspect ratio of the output image.",
+      "default": "1:1"
+     }
+    },
+    "title": "BaseInput",
+    "required": [
+     "prompt"
+    ],
+    "endpoint_url": "nano-banana"
+   },
+   "output_data": {
+    "x-fal-order-properties": [
+     "image"
+    ],
+    "type": "object",
+    "properties": {
+     "video": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/google-nano-banana.png"
+      ],
+      "description": "The generated image",
+      "title": "Image",
+      "comparison": false
+     }
+    },
+    "title": "NanoBanana",
+    "required": [
+     "image"
+    ]
+   }
+  }
+ },
+ "output_schema": {
+  "schemas": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "title": "request_id",
+     "type": "string",
+     "description": "prediction request_id"
+    },
+    "status": {
+     "title": "status",
+     "type": "string",
+     "description": "prediction status"
+    },
+    "output": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "title": "id",
+       "type": "string",
+       "description": "prediction request_id"
+      },
+      "urls": {
+       "title": "urls",
+       "type": "object",
+       "get": {
+        "title": "get",
+        "type": "string",
+        "format": "uri",
+        "description": "URL to retrieve the prediction result"
+       }
+      },
+      "error": {
+       "title": "error",
+       "type": "string",
+       "description": "Error message if the prediction failed"
+      },
+      "status": {
+       "title": "status",
+       "type": "string",
+       "description": "Status of the prediction (e.g., completed, failed)"
+      },
+      "outputs": {
+       "title": "outputs",
+       "type": "array",
+       "description": "List of output URLs",
+       "items": {
+        "title": "items",
+        "type": "string",
+        "format": "uri"
+       }
+      },
+      "timings": {
+       "title": "timings",
+       "type": "object",
+       "inference": {
+        "title": "inference",
+        "type": "number",
+        "description": "Inference time in seconds"
+       }
+      },
+      "created_at": {
+       "title": "created_at",
+       "type": "string",
+       "format": "date-time",
+       "description": "Timestamp when the prediction was created"
+      },
+      "has_nsfw_contents": {
+       "title": "has_nsfw_contents",
+       "type": "array",
+       "description": "List indicating NSFW content presence per output",
+       "items": {
+        "title": "items",
+        "type": "boolean"
+       }
+      }
+     },
+     "title": "output",
+     "required": [
+      "image_url"
+     ]
+    }
+   }
+  }
+ }
+}

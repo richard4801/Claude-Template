@@ -16,7 +16,7 @@ import { ReplicateError } from '../replicate/client.js';
 import { aspectFor, ImageEngineError, type EngineImage, type EngineSelection, type ImageEngine, type ImageRequest, type ImageResult } from '../images/engines.js';
 import type { ProviderStatus, StartHooks, VideoProvider } from '../suite/providers.js';
 import { customModelsOf, setCustomModels, inputSlotsOf, type ModelSpec, type Resolution } from '../suite/registry.js';
-import { adapters, KINDS, ProviderUnreachable, validRef, type Price, type ProviderAdapter, type ProviderKind, type RawModel } from './adapters.js';
+import { adapters, KINDS, ProviderUnreachable, type Price, type ProviderAdapter, type ProviderKind, type RawModel } from './adapters.js';
 import type { Analysis, Inputs, Kind } from './classify.js';
 import { keyFromSecret, keysUnavailable, last4, openKey, sealKey } from './crypto.js';
 import { byoModels, byoProviders } from './schema.js';
@@ -28,7 +28,7 @@ const AR_ALL = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'];
 const MAX_PROVIDERS = 10, MAX_MODELS = 100, CACHE_MS = 10 * 60_000, CACHE_MAX = 200, LOAD_MS = 15_000;
 const newId = (p: string) => `${p}_${crypto.randomBytes(9).toString('base64url')}`;
 
-const AddBody = z.object({ kind: z.enum(['replicate', 'fal']), apiKey: z.string().trim().min(8).max(500), label: z.string().trim().min(1).max(60).optional() }).strict();
+const AddBody = z.object({ kind: z.enum(KINDS), apiKey: z.string().trim().min(8).max(500), label: z.string().trim().min(1).max(60).optional() }).strict();
 const PatchBody = z.object({ apiKey: z.string().trim().min(8).max(500).optional(), label: z.string().trim().min(1).max(60).optional() }).strict();
 const AddModelBody = z.object({ ref: z.string().trim().min(3).max(200), displayName: z.string().trim().min(1).max(60).optional() }).strict();
 const PriceBody = z.object({ basis: z.enum(['per_run', 'per_second']), costUsd: z.number().min(0).max(50) }).strict();
@@ -60,7 +60,7 @@ export class ByoService {
   readonly image: ImageEngine;
   constructor(private ctx: Ctx, private fetchFn: typeof fetch = fetch) {
     const c = ctx.config;
-    this.adapters = adapters(() => ({ replicate: c.REPLICATE_API_URL, falPlatform: c.FAL_PLATFORM_URL, falQueue: c.FAL_QUEUE_URL }), fetchFn);
+    this.adapters = adapters(() => ({ replicate: c.REPLICATE_API_URL, falPlatform: c.FAL_PLATFORM_URL, falQueue: c.FAL_QUEUE_URL, muapi: c.MUAPI_API_URL }), fetchFn);
     this.video = this.videoProvider();
     this.image = this.imageEngine();
   }
@@ -188,7 +188,7 @@ export class ByoService {
   async addModel(u: AuthUser, providerId: string, body: unknown) {
     const b = parse(AddModelBody, body);
     const p = await this.providerRow(u, providerId);
-    if (!validRef(b.ref)) throw badRequest('That isn’t a model id on this provider');
+    if (!this.adapters[p.kind as ProviderKind]?.validRef(b.ref)) throw badRequest('That isn’t a model id on this provider');
     const [dup] = await this.ctx.db.select().from(byoModels).where(and(eq(byoModels.providerId, p.id), eq(byoModels.ref, b.ref)));
     if (dup) return this.modelView(dup, p);
     const n = (await this.ctx.db.select({ id: byoModels.id }).from(byoModels).where(eq(byoModels.studioId, u.studioId))).length;

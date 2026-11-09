@@ -1023,7 +1023,7 @@ class FakeMuseApi(
     override suspend fun setWarmGpu(req: WarmRequest): WarmGpu = lock.withLock {
         when {
             req.extend == true -> {
-                if (!warm.on) throw ApiException("not_warm", "The add-on engine is off")
+                if (!warm.on) throw ApiException("not_warm", "The GPU is off")
                 val v = warmView()
                 warm = if (v.autoOffReason == "cap" && warm.canExtend) warm.copy(maxMinutes = warm.maxMinutes * 2, canExtend = false) else warm.copy(readyAt = now().takeIf { warm.state == "warm" } ?: warm.readyAt)
             }
@@ -1153,6 +1153,14 @@ class FakeMuseApi(
     }
     // The learning editor (workstream 3's /v1/learn): demo's playbook, lessons, corrections, library and gaps, in memory.
     private val learnRules = FakeLearn.rules().toMutableList()
+    // Edit style kits (the demo keeps them in memory).
+    private val kits = mutableListOf<EditKit>()
+    override suspend fun editKits(): List<EditKit> = lock.withLock { kits.sortedByDescending { it.updatedAt } }
+    override suspend fun saveEditKit(name: String, kit: kotlinx.serialization.json.JsonObject): EditKit = lock.withLock {
+        val now = System.currentTimeMillis()
+        EditKit("kit_${kits.size + 1}", name.trim().take(60), kit, "u_owner", now, now + kits.size).also { kits += it }
+    }
+    override suspend fun deleteEditKit(id: String) { lock.withLock { kits.removeAll { it.id == id } } }
     private val learnRecipes = FakeLearn.recipes().toMutableList()
     private var learnSeq = 100
     override suspend fun playbook(): List<LearnRule> = lock.withLock { learnRules.sortedWith(compareByDescending<LearnRule> { it.pinned }.thenByDescending { it.evidence.size }.thenByDescending { it.createdAt }) }

@@ -293,8 +293,8 @@ extension AppStore {
         suite.browserOpen = false
         if tool == .swap || tool == .recast {
             suite.swap.kind = tool == .recast ? .recast : .swap
+            suite.swap.addOn = nil // Edit / Fast are swap models in the Model list now (coordinator 2026-11-08)
             if tool == .recast {
-                suite.swap.addOn = nil
                 if suite.swap.cast.isEmpty { addRecastPerson() }
             }
             if clip == nil && isDemo { Task { await useSampleClip(bad: false, quiet: true) } }
@@ -334,7 +334,7 @@ extension AppStore {
             if !SuiteText.tierIds.contains(suite.composer.quality) { suite.composer.quality = c.defaultQuality }
             suite.composer.duration = ComposerBar.clampLength(suite.composer.duration, c.tier(suite.composer.quality))
             if isOwner { suite.settings = try? await api.suiteSettings() }
-            suite.composer = ComposerEngines.validated(suite.composer, c)
+            revalidateModelPins() // the owner's model pins (WS6)
             if let list = try? await api.suiteLocations() { suite.locations = list }
         } catch let e as ApiError {
             suite.catalogError = e.code == "not_found" || e.code == "http_404" ? "This server doesn't have the AI suite yet" : e.friendlyMessage
@@ -351,7 +351,7 @@ extension AppStore {
     // MARK: The composer (Shot)
 
     /// What the chosen quality takes (start / end frames, references, audio); the owner's pinned engine's when one is pinned.
-    var composerInputs: SuiteInputs { suite.composer.inputs(suite.catalog) }
+    var composerInputs: SuiteInputs { ComposerModelPicker.inputs(suite.composer, catalog: suite.catalog, settings: suite.settings) }
 
     var shotRequest: ShotRequest {
         let r = suite.composer.request(suite.composerSlots.slots, composerInputs, locations: suite.locations)
@@ -368,7 +368,7 @@ extension AppStore {
     func setComposerQuality(_ id: String) {
         suite.composer.quality = id
         suite.composer.duration = ComposerBar.clampLength(suite.composer.duration, suite.catalog?.tier(id))
-        suite.composer = ComposerEngines.validated(suite.composer, suite.catalog)
+        suite.composer = ComposerModelPicker.validated(suite.composer, catalog: suite.catalog, settings: suite.settings) // the owner's model pin (WS6)
     }
 
     /// The composer's character (the @mention the CHARACTER slot shows).
@@ -567,6 +567,7 @@ extension AppStore {
             var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
                                 prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
             applyLook(&r)
+            applyEnginePick(&r, .swap) // the owner's model (WS6)
             if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
                 var cam = r.camera ?? CameraSpec(mode: "preset")
                 cam.move = mv
@@ -578,6 +579,7 @@ extension AppStore {
             let cast = RecastFaces.resolveClashes(d.cast, faces: d.people.map(\.face))
             var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
             applyLook(&r)
+            applyEnginePick(&r, .recast) // the owner's model (WS6)
             return r
         }
     }
@@ -790,7 +792,13 @@ extension AppStore {
 
     // MARK: Storyboard
 
-    func boardRequests() -> [ShotRequest] { suite.board.toGenerate.map { suite.board.request(for: $0) } }
+    func boardRequests() -> [ShotRequest] { suite.board.toGenerate.map { boardRequest($0) } }
+    /// A storyboard shot's request with the owner's storyboard model (WS6).
+    func boardRequest(_ s: StoryShot) -> ShotRequest {
+        var r = suite.board.request(for: s)
+        applyEnginePick(&r, .storyboard)
+        return r
+    }
 
     func estimateBoard() async {
         guard suite.enabled, suite.catalog != nil else { return }
@@ -820,7 +828,7 @@ extension AppStore {
         perform { [self] in
             defer { suite.generating = false }
             for s in list {
-                let j = try await api.suiteCreateShot(suite.board.request(for: s))
+                let j = try await api.suiteCreateShot(boardRequest(s))
                 upsert(j)
                 if let i = suite.board.shots.firstIndex(where: { $0.id == s.id }) { suite.board.shots[i].jobId = j.id }
             }

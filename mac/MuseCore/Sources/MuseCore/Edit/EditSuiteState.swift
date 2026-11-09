@@ -9,6 +9,8 @@ public enum EditSuite {
     /// The canvas shapes of the top bar and the export sheet.
     public enum Ratio: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         case portrait = "9:16", square = "1:1", vertical = "4:5", landscape = "16:9"
+        /// Parity (as Android): 4:3 and 2.35:1 (47:20 inside).
+        case fourThree = "4:3", cinema = "2.35:1"
         public var id: String { rawValue }
         public var label: String { rawValue }
         /// Width : height.
@@ -18,14 +20,22 @@ public enum EditSuite {
             case .square: return (1, 1)
             case .vertical: return (4, 5)
             case .landscape: return (16, 9)
+            case .fourThree: return (4, 3)
+            case .cinema: return (47, 20)
             }
         }
         /// The canvas at `shortSide` px on the short side (even sizes, as encoders want).
         public func canvas(shortSide: Int) -> (width: Int, height: Int) {
             let (a, b) = aspect
             func even(_ v: Double) -> Int { max(16, Int((v / 2).rounded()) * 2) }
-            if a <= b { return (even(Double(shortSide)), even(Double(shortSide) * Double(b) / Double(a))) }
-            return (even(Double(shortSide) * Double(a) / Double(b)), even(Double(shortSide)))
+            // The long side is capped at 4096 (2.35:1 at 4K = 4096 × 1744), the short side shrinking with it.
+            let long = Double(shortSide) * Double(max(a, b)) / Double(min(a, b))
+            let k = min(1, 4096 / long)
+            let lg = long * k
+            // Capped: the short side rounds up to even (4096 × 1744, as Android).
+            let sh = k < 1 ? Double(max(16, Int((Double(shortSide) * k / 2).rounded(.up)) * 2)) : Double(even(Double(shortSide)))
+            if a <= b { return (Int(sh), even(lg)) }
+            return (even(lg), Int(sh))
         }
         /// The shape closest to a canvas.
         public static func nearest(width: Int, height: Int) -> Ratio {
@@ -35,12 +45,13 @@ public enum EditSuite {
     }
 
     public enum Resolution: Int, CaseIterable, Codable, Hashable, Sendable, Identifiable {
-        case p720 = 720, p1080 = 1080, k4 = 2160
+        case p720 = 720, p1080 = 1080, k2 = 1440, k4 = 2160
         public var id: Int { rawValue }
         public var label: String {
             switch self {
             case .p720: return "720p"
             case .p1080: return "1080p"
+            case .k2: return "2K"
             case .k4: return "4K"
             }
         }
@@ -50,6 +61,41 @@ public enum EditSuite {
         case h264, hevc
         public var id: String { rawValue }
         public var label: String { self == .h264 ? "MP4 · H.264" : "HEVC" }
+    }
+
+    /// The export sheet's first choice (parity, as Android): a video, the mix alone as .m4a, or a looping GIF.
+    public enum ExportFormat: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+        case video, sound, gif
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .video: return "Video"
+            case .sound: return "Sound only"
+            case .gif: return "GIF"
+            }
+        }
+        public static let gifMaxSec = 30.0, gifFps = 15.0, gifShortSide = 480
+        public static let soundBitrate = 192_000
+    }
+
+    /// Video bitrate against the size estimate's rate (parity, as Android).
+    public enum Bitrate: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+        case smaller, recommended, higher
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .smaller: return "Smaller file"
+            case .recommended: return "Recommended"
+            case .higher: return "Higher quality"
+            }
+        }
+        public var factor: Double {
+            switch self {
+            case .smaller: return 0.6
+            case .recommended: return 1
+            case .higher: return 1.6
+            }
+        }
     }
 
     public enum CaptionsOut: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
@@ -141,6 +187,9 @@ public enum EditSuite {
         public var captions: CaptionsOut = .burnIn
         public var labelAI = false
         public var c2pa = false
+        /// Parity (as Android): what the export makes, and the video bitrate.
+        public var format: ExportFormat = .video
+        public var bitrate: Bitrate = .recommended
         public init() {}
         public static let frameRates = [24, 30, 60]
 
@@ -152,17 +201,24 @@ public enum EditSuite {
             switch resolution {
             case .p720: base = 8e6
             case .p1080: base = 16e6
+            case .k2: base = 28e6
             case .k4: base = 45e6
             }
             // Relative to a 9:16 / 16:9 frame of the same short side (a square has fewer pixels).
             let s = Double(resolution.rawValue)
             let px = Double(size.width * size.height) / (s * s * 16 / 9)
             let f = fps >= 60 ? 1.4 : fps <= 24 ? 0.9 : 1
-            return base * px * f * (codec == .hevc ? 0.6 : 1)
+            return base * px * f * (codec == .hevc ? 0.6 : 1) * bitrate.factor
         }
 
         /// Roughly how big the file will be (bytes): video at `videoBitrate` + 128 kbps AAC.
-        public func estimatedBytes(durationSec d: Double) -> Double { max(0, d) * (videoBitrate + 128_000) / 8 }
+        public func estimatedBytes(durationSec d: Double) -> Double {
+            switch format {
+            case .video: return max(0, d) * (videoBitrate + 128_000) / 8
+            case .sound: return max(0, d) * 192_000 / 8
+            case .gif: return max(0, min(d, ExportFormat.gifMaxSec)) * ExportFormat.gifFps * 480 * 853 * 0.35
+            }
+        }
         /// "≈ 38 MB"
         public func sizeLabel(durationSec d: Double) -> String {
             let mb = estimatedBytes(durationSec: d) / 1_000_000
@@ -317,6 +373,16 @@ public struct EditSuiteState: Sendable {
     public var export = EditSuite.ExportSettings()
     /// The last saved project (for "saved just now" / unsaved changes).
     public private(set) var savedProject: E.Project?
+    /// The suite looks ("palette:<id>") this app ships, so the validity guard accepts them (set by the app).
+    public var paletteIds: Set<String> = []
+    /// Why the last change was refused (it would have broken a rule the server checks, e.g. text running into the next
+    /// item); nil after a change that went through. The app shows it.
+    public private(set) var lastRefusal: E.EditProblem?
+    /// Records why an action couldn't be done, in words for the person (field "user"; the app shows the message as it is).
+    public mutating func refuse(_ message: String) { lastRefusal = E.EditProblem("user", message) }
+    /// The project when the current drag began: trims and moves are measured from it, so a drag's target is absolute
+    /// (owner audit 2026-11-08: the start handle of a main clip measured from the already-trimmed clip and ran away).
+    public private(set) var gestureBase: E.Project?
 
     public init(_ project: E.Project) {
         history = E.History(project)
@@ -337,7 +403,18 @@ public struct EditSuiteState: Sendable {
     /// Applies an operation (nil = nothing to do); keeps the selection and playhead valid. Returns whether it changed.
     @discardableResult
     public mutating func apply(_ op: (E.Project) -> E.Project?) -> Bool {
-        guard history.apply(op) else { return false }
+        // Owner audit 2026-11-08: a change must never leave a project the server refuses (and Export blocks), e.g. a text
+        // lengthened over the next one. A project that is already off (older data) may still change.
+        let before = project
+        var refusal: E.EditProblem?
+        let pal = paletteIds
+        let ok = history.apply { p in
+            guard let next = op(p) else { return nil }
+            if let bad = E.problem(next, paletteIds: pal), E.problem(before, paletteIds: pal) == nil { refusal = bad; return nil }
+            return next
+        }
+        lastRefusal = refusal
+        guard ok else { return false }
         settle()
         return true
     }
@@ -356,13 +433,15 @@ public struct EditSuiteState: Sendable {
     @discardableResult public mutating func redo() -> Bool { guard history.redo() else { return false }; settle(); return true }
 
     /// A drag: one undo step for the whole gesture.
-    public mutating func beginGesture() { history.begin() }
+    public mutating func beginGesture() { history.begin(); gestureBase = project }
     public mutating func updateGesture(_ next: E.Project?) {
         guard let p = next, p != project else { return }
+        // A drag never goes past what the server accepts (it stops at the last valid position).
+        if E.problem(p, paletteIds: paletteIds) != nil, E.problem(project, paletteIds: paletteIds) == nil { return }
         history.update(p)
         settle()
     }
-    public mutating func endGesture() { history.end() }
+    public mutating func endGesture() { history.end(); gestureBase = nil }
 
     private mutating func settle() {
         playhead = min(max(0, playhead), duration)
@@ -573,7 +652,7 @@ public struct EditSuiteState: Sendable {
     /// clips after follow); other items change start/length. Use inside begin/updateGesture/endGesture for drags.
     public func trimming(_ itemId: String, _ edge: Edge, to rawT: Double) -> E.Project? {
         let t = snapped(rawT)
-        let p = project
+        let p = gestureBase ?? project
         guard !isLocked(itemId), let loc = p.locate(itemId) else { return nil }
         let track = p.tracks[loc.track]
         let item = track.items[loc.item]
@@ -581,6 +660,13 @@ public struct EditSuiteState: Sendable {
         let minLen = 0.1
         return p.updating(itemId) { it in
             switch it {
+            case .video(var c) where c.holdSec != nil:
+                // Wave 1: trimming a freeze frame changes how long it holds.
+                let len = edge == .start ? span.endSec - t : t - span.startSec
+                let h = E.r3(min(E.holdMaxSec, max(E.holdMinSec, len)))
+                if edge == .start && track.kind != .main { c.startSec = E.r6(span.endSec - h) }
+                c.holdSec = h
+                it = .video(c)
             case .video(var c):
                 let dur = p.asset(c.asset)?.durationSec ?? .infinity
                 let sp = edge == .start ? (E.speedPieces(c).first?.speed ?? c.speed) : (E.speedPieces(c).last?.speed ?? c.speed)
@@ -624,7 +710,7 @@ public struct EditSuiteState: Sendable {
     public func moving(_ itemId: String, to rawT: Double, track: String? = nil) -> E.Project? {
         guard !isLocked(itemId) else { return nil }
         if let track, locked.contains(track) { return nil }
-        return project.moving(itemId, toStartSec: E.r6(max(0, snapped(rawT))), track: track)
+        return (gestureBase ?? project).moving(itemId, toStartSec: E.r6(max(0, snapped(rawT))), track: track)
     }
 
     /// Moves a main clip to another place in the sequence.
@@ -682,14 +768,16 @@ public struct EditSuiteState: Sendable {
         changeSelected { it in
             switch it {
             case .video(var c):
-                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
                 change(&v)
                 c.adjust = v.adjust; c.look = v.look; c.mask = v.mask; c.chroma = v.chroma; c.transform = v.transform; c.opacity = v.opacity; c.keyframes = v.keyframes
+                c.crop = v.crop
                 it = .video(c)
             case .image(var c):
-                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
                 change(&v)
                 c.adjust = v.adjust; c.look = v.look; c.mask = v.mask; c.transform = v.transform; c.opacity = v.opacity; c.keyframes = v.keyframes
+                c.crop = v.crop
                 it = .image(c)
             case .text(var c):
                 var v = EditSuite.Visual(adjust: nil, look: nil, mask: nil, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
@@ -705,8 +793,8 @@ public struct EditSuiteState: Sendable {
     /// The selected visual's fields (nil for audio).
     public var selectedVisual: EditSuite.Visual? {
         switch selectedItem {
-        case .video(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
-        case .image(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+        case .video(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
+        case .image(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
         case .text(let c): return EditSuite.Visual(adjust: nil, look: nil, mask: nil, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
         default: return nil
         }
@@ -1014,15 +1102,19 @@ public struct EditSuiteState: Sendable {
 
     /// Adds an audio clip (music / voice-over / sound effect) at `at` (default: music at 0, others at the playhead).
     @discardableResult
-    public mutating func addAudio(_ asset: E.Asset, kind: E.TrackKind, at: Double? = nil) -> Bool {
-        guard kind.isAudio, asset.kind == .audio || asset.kind == .video, let d = asset.durationSec, d >= E.minClipSourceSec else { return false }
+    /// `trimStart` drops the file's first seconds (a voice-over recorded over playback: the output's delay).
+    public mutating func addAudio(_ asset: E.Asset, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) -> Bool {
+        guard kind.isAudio, asset.kind == .audio || asset.kind == .video, let full = asset.durationSec else { return false }
+        let skip = E.r6(max(0, min(trimStart, full - E.minClipSourceSec)))
+        let d = full - skip
+        guard d >= E.minClipSourceSec else { return false }
         let start = at ?? (kind == .music ? 0 : playhead)
         var newId: String?
         let ok = apply { p in
             var q = p.addingAsset(asset)
             let id = q.newId(kind == .music ? "m" : kind == .voice ? "vo" : "fx")
             let len = min(d, max(E.minClipSourceSec, E.durationSec(q) - start))
-            let clip = E.AudioClip(id: id, asset: asset.id, startSec: E.r6(start), inSec: 0, outSec: E.r6(len),
+            let clip = E.AudioClip(id: id, asset: asset.id, startSec: E.r6(start), inSec: skip, outSec: E.r6(skip + len),
                                    fadeOutSec: kind == .music ? min(1, len / 4) : nil)
             for t in q.tracks where t.kind == kind {
                 if let r = q.adding(.audio(clip), toTrack: t.id) { newId = id; return r }
@@ -1171,6 +1263,8 @@ extension EditSuite {
         public var transform: EditV2.Transform?
         public var opacity: Double?
         public var keyframes: EditV2.Keyframes?
+        /// Video and picture items (nil on text).
+        public var crop: EditV2.Crop? = nil
     }
 
     /// The sound fields of a clip.

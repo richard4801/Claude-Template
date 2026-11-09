@@ -224,6 +224,10 @@ struct RecreateTopBar: View {
                 Spacer(minLength: Space.s2)
                 if rs.mode == .recipe {
                     claudeButton(iconOnly: true)
+                    // The owner's models for the new shots and their background plates (WS6); Build's estimates use them.
+                    // Left of the cost, so the cost stays right beside Build (fit check).
+                    OwnerModelPill(purpose: .fill, compact: true)
+                    OwnerModelPill(purpose: .plate, compact: true)
                     if let f = rs.fill {
                         VStack(alignment: .trailing, spacing: 0) {
                             Text(RecreateText.makingSummary(f, prices: rs.prices, unavailable: rs.unpriceable, swaps: Set(rs.estimateInfo.filter { $0.value.method == "swap" }.keys))).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
@@ -591,14 +595,26 @@ struct RecreateStill: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            placeholder
-            if let image {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+        // The picture is an overlay, so it fills the frame it's given and never sizes the view: as a ZStack child, a
+        // `.fill` image made the stack as big as the picture's aspect needed, and the lanes' shot tiles drew over the
+        // player and each other (owner test 2026-11-08).
+        placeholder
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if let image {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                }
             }
+            .clipped()
+        .task(id: link) {
+            // Review mode's lanes check draws real portrait stills from local files (SnapshotRunner.recreateLanesShots).
+            if SnapshotRunner.probing, let link, link.hasPrefix("file://"), let u = URL(string: link) {
+                image = NSImage(contentsOf: u)
+                return
+            }
+            image = await RecreateMediaLoader.image(store.recreateMedia(link))
         }
-        .clipped()
-        .task(id: link) { image = await RecreateMediaLoader.image(store.recreateMedia(link)) }
     }
 
     private var placeholder: some View {
@@ -696,13 +712,27 @@ struct RecreatePlayer: View {
                             .background(SnapshotFrame(key: "yours"))
                     } else if let player, !yours {
                         RecreateVideoSurface(player: player)
+                    } else if yours && !store.isDemo {
+                        // Never stills animated as if they were the edit (owner bug): the real render, or a plain state.
+                        VStack(spacing: Space.s2) {
+                            if rs.loadingBuilt {
+                                ProgressView().controlSize(.small)
+                                Text("Preparing the preview…").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                            } else if let e = rs.builtError {
+                                Text(e).scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                                RButton("Retry", kind: .plain, small: true) { Task { await store.loadRecreateBuilt() } }
+                            } else {
+                                Text("No preview yet").scaled(t.scale.caption, .white.opacity(0.7))
+                            }
+                        }
+                        .padding(Space.s3)
                     } else {
                         frame
                         if !yours || store.isDemo { overlayText }
                         if yours && rs.loadingBuilt {
                             VStack(spacing: Space.s2) {
                                 ProgressView().controlSize(.small)
-                                Text("Getting your edit ready to play").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
+                                Text("Preparing the preview…").scaled(t.scale.caption, .white).multilineTextAlignment(.center)
                             }
                             .padding(Space.s3)
                         }

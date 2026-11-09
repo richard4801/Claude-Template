@@ -15,7 +15,7 @@ final class EditV2FixtureTests: XCTestCase {
 
     func testProjectsHaveTheReferenceAnswers() throws {
         let all = try projects()
-        XCTAssertEqual(all.count, 10)
+        XCTAssertEqual(all.count, 11, "ten projects + wave 1")
         for (name, _, p, ex) in all {
             XCTAssertEqual(E.durationSec(p), try XCTUnwrap(ex["durationSec"].double), accuracy: 1e-6, name)
             assertJSON(E.timeline(p), ex["timeline"], "\(name) timeline")
@@ -67,7 +67,11 @@ final class EditV2FixtureTests: XCTestCase {
         XCTAssertGreaterThan(cases.count, 20)
         for c in cases {
             let name = c["name"].string ?? "?"
-            let p = try c["project"].decode(E.Project.self)
+            // A wrong type (an unknown blend mode, a flip that isn't a boolean) already fails decoding here (EditV2Validate.swift).
+            guard let p = try? c["project"].decode(E.Project.self) else {
+                XCTAssertNotEqual(c["ok"], .bool(true), "\(name): a valid project didn't decode")
+                continue
+            }
             let problem = E.problem(p, presets: E.filters)
             if c["ok"] == .bool(true) {
                 XCTAssertNil(problem, "\(name): \(problem?.description ?? "")")
@@ -110,7 +114,7 @@ final class EditV2FixtureTests: XCTestCase {
 
     func testColors() throws {
         let cases = try editorFixture("functions")["colors"].array
-        XCTAssertEqual(cases.count, 4 + E.filters.count)
+        XCTAssertEqual(cases.count, 4 + E.filters.count + 3, "+ 3 tint cases")
         for c in cases {
             let adjust = try c["adjust"].decode(E.Adjust.self)
             let filter = c["filter"].isNull ? nil : try c["filter"].decode(E.FilterRef.self)

@@ -118,10 +118,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         return total
     }
 
-    private fun keyframes(f: String, k: Keyframes?, len: Double, allowed: Set<KfProp>) {
+    private fun keyframes(f: String, k: Keyframes?, len: Double, allowed: Set<KfProp>, hasMask: Boolean = false) {
         k ?: return
         for ((prop, list) in k) {
             if (prop !in allowed) bad("$f.${prop.wire}", "is not a keyframe property here")
+            if (prop in KfProp.MASK && !hasMask) bad("$f.${prop.wire}", "needs a mask")
             if (list.size > EditLimits.MAX_KEYFRAMES) bad("$f.${prop.wire}", "at most ${EditLimits.MAX_KEYFRAMES} keyframes")
             var prev = Double.NEGATIVE_INFINITY
             list.forEachIndexed { j, kf ->
@@ -135,6 +136,13 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
                     KfProp.ROTATION -> -3600.0 to 3600.0
                     KfProp.OPACITY -> 0.0 to 1.0
                     KfProp.VOLUME -> 0.0 to 2.0
+                    KfProp.EXPOSURE, KfProp.CONTRAST, KfProp.SATURATION, KfProp.TEMPERATURE, KfProp.TINT -> -1.0 to 1.0
+                    KfProp.MASK_X, KfProp.MASK_Y -> -1.0 to 2.0
+                    KfProp.MASK_WIDTH, KfProp.MASK_HEIGHT -> 0.01 to 3.0
+                    KfProp.MASK_ROTATION -> -360.0 to 360.0
+                    KfProp.MASK_FEATHER -> 0.0 to 1.0
+                    KfProp.VIGNETTE -> -1.0 to 1.0
+                    KfProp.GRAIN, KfProp.LEAK -> 0.0 to 1.0
                 }
                 num("$g.v", kf.v, lo, hi, false)
             }
@@ -153,7 +161,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         num("$f.opacity", it.opacity, 0.0, 1.0)
         it.adjust?.let { a ->
             num("$f.adjust.exposure", a.exposure, -1.0, 1.0); num("$f.adjust.contrast", a.contrast, -1.0, 1.0)
-            num("$f.adjust.saturation", a.saturation, -1.0, 1.0); num("$f.adjust.temperature", a.temperature, -1.0, 1.0)
+            num("$f.adjust.saturation", a.saturation, -1.0, 1.0); num("$f.adjust.temperature", a.temperature, -1.0, 1.0); num("$f.adjust.tint", a.tint, -1.0, 1.0)
             num("$f.adjust.highlights", a.highlights, -1.0, 1.0); num("$f.adjust.shadows", a.shadows, -1.0, 1.0)
         }
         it.mask?.let { m ->
@@ -191,6 +199,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         l.leak?.let { num("$f.leak.amount", it.amount, 0.0, 1.0, false); num("$f.leak.angle", it.angle, -360.0, 360.0) }
     }
 
+    private fun loop(f: String, l: AnimLoop?) {
+        l ?: return
+        num("$f.periodSec", l.periodSec, 0.2, 5.0, false); num("$f.amount", l.amount, 0.0, 1.0)
+    }
+
     private fun anim(f: String, a: Anim?, text: Boolean) {
         a ?: return
         if (a.kind == AnimKind.TYPEWRITER && !text) bad("$f.kind", "unknown animation")
@@ -209,6 +222,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     private fun videoClip(g: String, t: Track, ii: Int, c: VideoClip) {
         clipBase(g, c, setOf(AssetKind.VIDEO))
         num("$g.speed", c.speed, EditLimits.MIN_SPEED, EditLimits.MAX_SPEED, false)
+        c.holdSec?.let { h ->
+            num("$g.holdSec", h, HOLD_MIN_SEC, HOLD_MAX_SEC, false)
+            if (c.speed != 1.0 || c.speedCurve != null) bad("$g.holdSec", "a freeze frame plays at 1× without a speed curve")
+        }
+        if (c.blend != null && t.kind != TrackKind.VIDEO) bad("$g.blend", "only on overlay tracks (video, image)")
         c.speedCurve?.let { sc ->
             if (sc.points.size < 2 || sc.points.size > 16) bad("$g.speedCurve.points", "2–16 points")
             sc.points.forEachIndexed { j, pt ->
@@ -219,10 +237,13 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             if (sc.points.first().x != 0.0 || sc.points.last().x != 1.0) bad("$g.speedCurve.points", "must start at x 0 and end at x 1")
         }
         visual(g, c)
-        keyframes("$g.keyframes", c.keyframes, clipLength(c), KfProp.entries.toSet())
+        keyframes("$g.keyframes", c.keyframes, clipLength(c), KfProp.entries.toSet(), c.mask != null)
         c.audioAsset?.let { aa -> val a = assets[aa]; if (a == null || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) bad("$g.audioAsset", "must be an audio or video asset") }
         // Background removal's matte (workstream 1): the asset must be a video of the project (the server's message).
         c.alphaMatte?.let { m -> if (assets[m.asset]?.kind != AssetKind.VIDEO) bad("$g.alphaMatte.asset", "must be a video asset") }
+        anim("$g.animIn", c.animIn, false); anim("$g.animOut", c.animOut, false)
+        if (c.animLoop != null && t.kind == TrackKind.MAIN) bad("$g.animLoop", "loop animations are for overlays, images and text")
+        loop("$g.animLoop", c.animLoop)
         c.chroma?.let { ch ->
             color("$g.chroma.color", ch.color, false)
             num("$g.chroma.similarity", ch.similarity, 0.0, 1.0); num("$g.chroma.smoothness", ch.smoothness, 0.0, 1.0); num("$g.chroma.spill", ch.spill, 0.0, 1.0)
@@ -246,8 +267,8 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         if (a.kind != AssetKind.IMAGE) bad("$g.asset", "must be image")
         num("$g.startSec", im.startSec, 0.0, 600.0, false); num("$g.durationSec", im.durationSec, EditLimits.MIN_ITEM_SEC, 600.0, false)
         visual(g, im)
-        keyframes("$g.keyframes", im.keyframes, im.durationSec, VISUAL_PROPS)
-        anim("$g.animIn", im.animIn, false); anim("$g.animOut", im.animOut, false)
+        keyframes("$g.keyframes", im.keyframes, im.durationSec, VISUAL_PROPS + KfProp.COLOR + KfProp.MASK + KfProp.LOOK, im.mask != null)
+        anim("$g.animIn", im.animIn, false); anim("$g.animOut", im.animOut, false); loop("$g.animLoop", im.animLoop)
     }
 
     private fun textItem(g: String, tx: TextItem) {
@@ -257,13 +278,14 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         transform(g, tx.transform)
         num("$g.opacity", tx.opacity, 0.0, 1.0)
         keyframes("$g.keyframes", tx.keyframes, tx.durationSec, VISUAL_PROPS)
-        anim("$g.animIn", tx.animIn, true); anim("$g.animOut", tx.animOut, true)
+        anim("$g.animIn", tx.animIn, true); anim("$g.animOut", tx.animOut, true); loop("$g.animLoop", tx.animLoop)
     }
 
     private fun audioClip(g: String, c: AudioClip) {
         clipBase(g, c, setOf(AssetKind.AUDIO, AssetKind.VIDEO))
         num("$g.startSec", c.startSec, 0.0, 600.0, false)
-        if (c.speed != null && c.speed != 1.0) bad("$g.speed", "audio clips play at 1×")
+        // Audio speed (M): 0.5–2×, pitch kept; timeline length = (outSec − inSec) / speed.
+        num("$g.speed", c.speed, 0.5, 2.0)
         keyframes("$g.keyframes", c.keyframes, clipLength(c), setOf(KfProp.VOLUME))
         c.beats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.beats", "must be up to 2000 times") }
         c.strongBeats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.strongBeats", "must be up to 2000 times") }

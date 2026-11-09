@@ -57,11 +57,13 @@ object LookEffects {
         data class Chromatic(val amount: Double) : Stage
         /** The colour matrix alone (3×4 row-major). */
         data class Matrix(val rowMajor3x4: List<Double>) : Stage
+        /** Colour keyframes: the matrix per frame, from the effect's presentation time (µs). */
+        class TimedMatrix(val at: (Long) -> List<Double>) : Stage
         /** Steps 3–6 baked: [cube] is [size]³ rgb triples in Media3's [R][G][B] order. */
         class BakedLut(val size: Int, val cube: FloatArray) : Stage
         data class Halo(val halation: Halation) : Stage
         /** Leak, vignette and grain in one pass; [fps] turns presentation time into the grain's frame number. */
-        data class Finish(val leak: Leak?, val vignette: Vignette?, val grain: Grain?, val fps: Double) : Stage
+        data class Finish(val leak: Leak?, val vignette: Vignette?, val grain: Grain?, val fps: Double, val at: ((Long) -> Look)? = null) : Stage
     }
 
     const val BAKE_SIZE = 33
@@ -70,19 +72,26 @@ object LookEffects {
      * The stages for an item: [matrix] = its colour matrix (null = identity), [look] its look, [lut] the resolved LUT of
      * `look.lut` (null when it has none or it could not be loaded — the rest of the look still applies).
      */
-    fun stages(matrix: List<Double>?, look: Look?, lut: Lut?, fps: Double, tone: Tone? = null): List<Stage> = buildList {
+    fun stages(matrix: List<Double>?, look: Look?, lut: Lut?, fps: Double, tone: Tone? = null, timed: ((Long) -> List<Double>)? = null,
+               finishAt: ((Long) -> Look)? = null): List<Stage> = buildList {
         val l = look ?: Look()
         (l.sharpen ?: 0.0).coerceIn(0.0, 1.0).takeIf { it > 0 }?.let { add(Stage.Sharpen(it)) }
         (l.chromatic ?: 0.0).coerceIn(0.0, 1.0).takeIf { it > 0 }?.let { add(Stage.Chromatic(it)) }
         // Edit suite: highlights/shadows (tone) sit right after the matrix, so they go into the bake with the rest.
         val colour = ColorStack(null, l, lut, tone)
-        if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, ColorStack(matrix, l, lut, tone).bakeCube(BAKE_SIZE)))
+        if (timed != null) {
+            // A matrix that changes over time can't be baked: it runs on its own, then the rest of the colour as a LUT.
+            add(Stage.TimedMatrix(timed))
+            if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, colour.bakeCube(BAKE_SIZE)))
+        } else if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, ColorStack(matrix, l, lut, tone).bakeCube(BAKE_SIZE)))
         else if (matrix != null) add(Stage.Matrix(matrix))
         l.halation?.takeIf { it.amount > 0 }?.let { add(Stage.Halo(it)) }
         val leak = l.leak?.takeIf { it.amount > 0 }
         val vignette = l.vignette?.takeIf { it.amount != 0.0 }
         val grain = l.grain?.takeIf { it.amount > 0 }
-        if (leak != null || vignette != null || grain != null) add(Stage.Finish(leak, vignette, grain, fps))
+        // Look keyframes: the finishing pass reads its amounts per frame, so it runs even while they're at 0.
+        if (finishAt != null) add(Stage.Finish(leak, vignette, grain, fps, finishAt))
+        else if (leak != null || vignette != null || grain != null) add(Stage.Finish(leak, vignette, grain, fps))
     }
 
     @OptIn(UnstableApi::class)
@@ -91,9 +100,10 @@ object LookEffects {
             is Stage.Sharpen -> SharpenEffect(s.amount)
             is Stage.Chromatic -> ChromaticEffect(s.amount)
             is Stage.Matrix -> ColorMatrixEffect(s.rowMajor3x4)
+            is Stage.TimedMatrix -> TimedColorMatrixEffect(s.at)
             is Stage.BakedLut -> SingleColorLut.createFromCube(argbCube(s.size, s.cube))
             is Stage.Halo -> HalationEffect(s.halation)
-            is Stage.Finish -> LookFinishEffect(s.leak, s.vignette, s.grain, s.fps)
+            is Stage.Finish -> LookFinishEffect(s.leak, s.vignette, s.grain, s.fps, s.at)
         }
     }
 
@@ -139,9 +149,15 @@ class ChromaticEffect(private val amount: Double) : GlEffect {
 
 /** Steps 8–10: light leak (drifts with time), vignette and grain (a new pattern every frame). */
 @OptIn(UnstableApi::class)
-class LookFinishEffect(private val leak: Leak?, private val vignette: Vignette?, private val grain: Grain?, private val fps: Double) : GlEffect {
+class LookFinishEffect(private val leak0: Leak?, private val vignette0: Vignette?, private val grain0: Grain?, private val fps: Double,
+                       private val at: ((Long) -> Look)? = null) : GlEffect {
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
         SinglePassProgram(useHdr, LookShaders.FINISH) { p, w, h, timeUs ->
+            // Look keyframes: this frame's amounts.
+            val now = at?.invoke(timeUs)
+            val leak = if (at != null) now?.leak else leak0
+            val vignette = if (at != null) now?.vignette else vignette0
+            val grain = if (at != null) now?.grain else grain0
             // The contract's frame is the TIMELINE frame (round(timeline s × canvas fps)) and the leak's t = frame / fps.
             // Item effects see the composition (sequence) presentation time, which is the timeline time.
             val frame = LookEffects.frameAt(timeUs, fps)

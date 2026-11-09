@@ -800,7 +800,12 @@ public struct UpscaleSize: Codable, Hashable, Sendable, Identifiable {
 /// POST /v1/takes/{id}/upscale.
 public struct UpscaleRequest: Codable, Sendable {
     public var size: String
-    public init(size: String) { self.size = size }
+    /// Owner only: the upscale model (EngineChoice.swift); nil = the studio's default.
+    public var engineModel: String?
+    public init(size: String, engineModel: String? = nil) {
+        self.size = size
+        self.engineModel = engineModel
+    }
 }
 
 /// PATCH /v1/settings/studio: only the fields set are sent.

@@ -43,6 +43,18 @@ class ColorMatrixEffect(rowMajor3x4: List<Double>) : RgbMatrix {
     override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = m
 }
 
+/**
+ * Colour keyframes: [at] gives the 3×4 row-major matrix for a presentation time (µs), as [ColorMatrixEffect] lays it
+ * out. The presentation time is taken to be the composition's, as the transition and matte effects do.
+ */
+@OptIn(UnstableApi::class)
+class TimedColorMatrixEffect(private val at: (Long) -> List<Double>) : RgbMatrix {
+    override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+        val m = at(presentationTimeUs)
+        return FloatArray(16).also { out -> for (row in 0 until 3) for (col in 0 until 4) out[col * 4 + row] = m[row * 4 + col].toFloat(); out[15] = 1f }
+    }
+}
+
 /** The chroma key (studio.muse.core.edit.ChromaKey, same formula) as a GL shader effect. */
 @OptIn(UnstableApi::class)
 class ChromaKeyEffect(private val key: Chroma) : GlEffect {
@@ -155,11 +167,18 @@ class EnvelopeAudioProcessor(private val startSec: Double, envelope: List<GainPo
  * transition or a keyframed position moves a layer's centre off the canvas, so this implements the interface directly.
  */
 @OptIn(UnstableApi::class)
-class LayerOverlaySettings(private val alpha: Float, private val anchorX: Float, private val anchorY: Float, private val scale: Float, private val rotationCcw: Float) : OverlaySettings {
+class LayerOverlaySettings(
+    private val alpha: Float, private val anchorX: Float, private val anchorY: Float, private val scale: Float, private val rotationCcw: Float,
+    /** Wave 1, mirror: −1 flips that axis (about the picture's centre, before the rotation). */
+    private val signX: Float = 1f, private val signY: Float = 1f,
+    /** Wave 1: the blend mode (BlendMode.ordinal; 0 = normal), read by MuseCompositorGlProgram. */
+    private val blendMode: Int = 0,
+) : OverlaySettings, androidx.media3.effect.MuseBlendOverlay {
+    override fun getBlendMode() = blendMode
     override fun getAlphaScale() = alpha
     override fun getBackgroundFrameAnchor(): Pair<Float, Float> = Pair.create(anchorX, anchorY)
     override fun getOverlayFrameAnchor(): Pair<Float, Float> = Pair.create(0f, 0f)
-    override fun getScale(): Pair<Float, Float> = Pair.create(scale, scale)
+    override fun getScale(): Pair<Float, Float> = Pair.create(scale * signX, scale * signY)
     override fun getRotationDegrees() = rotationCcw
 }
 
@@ -184,6 +203,8 @@ class PlanCompositorSettings(private val plan: RenderPlan) : VideoCompositorSett
         return LayerOverlaySettings(
             alpha = p.alpha.coerceIn(0.0, 1.0).toFloat(), anchorX = (2 * p.centerX - 1).toFloat(), anchorY = (1 - 2 * p.centerY).toFloat(),
             scale = (p.scale * base).toFloat(), rotationCcw = (-p.rotationCw).toFloat(),
+            signX = if (p.flipX) -1f else 1f, signY = if (p.flipY) -1f else 1f,
+            blendMode = p.blend?.ordinal ?: 0,
         )
     }
 

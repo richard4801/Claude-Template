@@ -1,0 +1,166 @@
+{
+ "name": "flux-3-dev",
+ "description": "FLUX 3 Dev is the faster, lower-cost variant of Black Forest Labs' FLUX 3 frontier model, planned for open-weight release. It trades a small amount of peak fidelity for significantly reduced latency and price, making it well suited for rapid iteration, prototyping, and high-volume text-to-image generation.",
+ "category": "Text to Image",
+ "family": "flux-3",
+ "group_of": "image",
+ "domain": "ai",
+ "cost": 0.025,
+ "cost_currency": "USD",
+ "cost_strategy": "flux-3-dev",
+ "dynamic_pricing": false,
+ "endpoint": "/api/v1/flux-3-dev",
+ "endpoint_url": "flux-3-dev",
+ "is_enabled": 1,
+ "is_coming_soon": true,
+ "input_fields": [
+  "prompt",
+  "resolution",
+  "aspect_ratio"
+ ],
+ "required_fields": [
+  "prompt"
+ ],
+ "estimate_endpoint": null,
+ "input_schema": {
+  "schemas": {
+   "input_data": {
+    "type": "object",
+    "title": "BaseInput",
+    "required": [
+     "prompt"
+    ],
+    "properties": {
+     "prompt": {
+      "name": "prompt",
+      "type": "string",
+      "title": "Prompt",
+      "examples": [
+       "A hyperrealistic portrait of an astronaut standing on red Martian dunes at golden hour, dust particles catching the light, ultra-detailed suit reflections, cinematic depth of field."
+      ],
+      "description": "Text prompt describing the image. Supports long, richly detailed descriptions."
+     },
+     "resolution": {
+      "enum": [
+       "1k",
+       "2k",
+       "4k"
+      ],
+      "name": "resolution",
+      "type": "string",
+      "title": "Resolution",
+      "default": "2k",
+      "description": "Target resolution of the generated image."
+     },
+     "aspect_ratio": {
+      "enum": [
+       "16:9",
+       "9:16",
+       "1:1",
+       "4:3",
+       "3:4",
+       "2:3",
+       "3:2",
+       "21:9"
+      ],
+      "name": "aspect_ratio",
+      "type": "string",
+      "title": "Aspect Ratio",
+      "default": "1:1",
+      "description": "Aspect ratio of the output image."
+     }
+    },
+    "endpoint_url": "flux-3-dev",
+    "x-order-properties": [
+     "prompt",
+     "aspect_ratio",
+     "resolution"
+    ]
+   },
+   "output_data": {
+    "type": "object",
+    "title": "Flux3Dev",
+    "required": [
+     "images"
+    ],
+    "properties": {
+     "video": {
+      "title": "Image",
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/flux-2-pro.avif"
+      ],
+      "comparison": false,
+      "description": "The generated image"
+     }
+    },
+    "x-fal-order-properties": [
+     "images"
+    ]
+   }
+  }
+ },
+ "output_schema": {
+  "schemas": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "title": "request_id",
+     "description": "prediction request_id"
+    },
+    "output": {
+     "type": "object",
+     "title": "output",
+     "properties": {
+      "id": {
+       "type": "string",
+       "title": "id",
+       "description": "prediction request_id"
+      },
+      "urls": {
+       "get": {
+        "type": "string",
+        "title": "get",
+        "format": "uri",
+        "description": "URL to retrieve the prediction result"
+       },
+       "type": "object",
+       "title": "urls"
+      },
+      "error": {
+       "type": "string",
+       "title": "error",
+       "description": "Error message if the prediction failed"
+      },
+      "status": {
+       "type": "string",
+       "title": "status",
+       "description": "Status of the prediction (e.g., completed, failed)"
+      },
+      "outputs": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "title": "items",
+        "format": "uri"
+       },
+       "title": "outputs",
+       "description": "List of output URLs"
+      },
+      "created_at": {
+       "type": "string",
+       "title": "created_at",
+       "format": "date-time",
+       "description": "Timestamp when the prediction was created"
+      }
+     }
+    },
+    "status": {
+     "type": "string",
+     "title": "status",
+     "description": "prediction status"
+    }
+   }
+  }
+ }
+}

@@ -35,8 +35,8 @@ describe('model choice · purposes (unit)', () => {
     expect(purposeOfShot({})).toBe('shot');
   });
   it('swap engines: the hosted H3 family (registry prices) and Edit / Fast on our GPU', () => {
-    expect(SWAP_ENGINES.map(e => e.id)).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']);
-    for (const e of SWAP_ENGINES.filter(x => x.runs === 'replicate')) expect(modelById(e.id)?.ref).toBe(e.ref);
+    expect(SWAP_ENGINES.map(e => e.id)).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-hf', 'h3-open', 'viggle']);
+    for (const e of SWAP_ENGINES.filter(x => x.runs !== 'gpu')) { const ref = modelById(e.id)?.ref; expect(typeof ref === 'string' ? ref : (ref as { ref2v?: string })?.ref2v).toBe(e.ref); }
   });
 });
 
@@ -129,6 +129,22 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect(bad.body.valid).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']);
     expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-lite' })).status).toBe(403);
     expect(JSON.stringify((await member.req('POST', '/v1/suite/shots/estimate', body)).body)).not.toMatch(PROVIDER_WORDS);
+    expect(fake.state.creates).toEqual([]);
+  });
+
+  it('Character swap sent as a one-person Recast (the apps) with a swap model picked runs as a swap on that model', async () => {
+    const asRecast = { mode: 'recast', clipId: 'c_swap', quality: 'standard', cast: [{ characterId: char.id }] };
+    for (const m of ['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']) {
+      const e = await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, engineModel: m });
+      expect(e.status, `${m}: ${JSON.stringify(e.body)}`).toBe(200);
+      expect(e.body).toMatchObject({ mode: 'swap', engine: { model: m, source: 'request' } });
+    }
+    expect((await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, engineModel: 'h3-lite' })).body.estimate).toBeCloseTo(0.02 * 8, 2);
+    // A real Recast model stays a Recast; two people stay a Recast (a swap model is refused there).
+    const two = await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, cast: [{ characterId: char.id }, { characterId: char.id }], engineModel: 'h3-lite' });
+    expect(two.body.code).toBe('engine_not_allowed');
+    // Auto (no model) is unchanged.
+    expect((await owner.req('POST', '/v1/suite/shots/estimate', asRecast)).status).toBe(200);
     expect(fake.state.creates).toEqual([]);
   });
 

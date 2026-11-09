@@ -1,5 +1,6 @@
 package studio.muse.app.ui.screens.suite.composer
 
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -265,6 +266,13 @@ fun SuiteComposerScreen(toolId: String? = null) {
             else -> FrameSource(null, null)
         }
     }
+    // The chosen clip's picture for its slot and the empty canvas: its thumb, else the file's first frame.
+    val appCtx = androidx.compose.ui.platform.LocalContext.current
+    val clipFrame by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, frame) {
+        value = frame?.let { f -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            FirstFrame.ofThumb(appCtx, f.thumb) ?: f.video?.let { FirstFrame.ofVideo(appCtx, it) }
+        } }
+    }
     fun tapFace(bmp: android.graphics.Bitmap, fx: Float, fy: Float): Int? {
         val max = catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST
         val id = System.nanoTime()
@@ -285,7 +293,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val ui = ComposerUi(
         d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates, live = live, own = own,
         addons = addonPills, onAddon = ::onAddon, owner = owner, locations = locations, refsUsed = d.referencesUsed(slots, inputs, own),
-        lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
+        lead = st.model(d.characterId), clipFrame = clipFrame, clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
         photo = photo, // Photo tool (workstream 3)
@@ -351,7 +359,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                         if (live && problem == null && photo == null && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS)
                             MenuItem("clock", "Queue this shot") { scope.launch { store.queueShot(req) } } else null,
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
-                        if (owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
+                        if (owner) MenuItem("quality", "Models and prices (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                     ))
                 }
                 if (showFeed) SuiteFeedView(photo = d.tool == ComposerTool.PHOTO, wide = wide, onOpen = { j -> nav.go(Routes.suiteTake(j)) }, modifier = Modifier.weight(1f))
@@ -417,6 +425,8 @@ class ComposerUi(
     val own: studio.muse.app.ui.screens.suite.InputSlots,
     val lead: studio.muse.app.data.Model?,
     val clipName: String?,
+    /** The chosen clip's first frame (its thumb or the file's frame), null while loading or without one. */
+    val clipFrame: android.graphics.Bitmap? = null,
     val models: List<studio.muse.app.data.Model>,
     val outfits: List<studio.muse.app.data.Outfit>,
     val update: ((ComposerDraft) -> ComposerDraft) -> Unit,
@@ -522,6 +532,15 @@ private fun EmptyCanvas(ui: ComposerUi, modifier: Modifier) {
         else -> "Your shot appears here"
     }
     val tag = if (ui.photo != null) null else if (ui.d.tool == ComposerTool.EXTEND) "+${ui.d.duration} s" else "${ui.d.aspect} · ${ui.d.duration} s"
+    val frame = ui.clipFrame.takeIf { ui.recast.clipId != null && (ui.d.tool == ComposerTool.SWAP || ui.d.tool == ComposerTool.RECAST) }
+    if (frame != null) {
+        // The chosen clip, as it will be swapped: its first frame in the shot's shape.
+        Box(modifier, contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Image(frame.asImageBitmap(), ui.clipName ?: "Your clip", Modifier.aspectRatio(ratio).clip(shape).border(1.dp, m.roles.hairline, shape),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        }
+        return
+    }
     Box(modifier, contentAlignment = Alignment.Center) {
         Column(Modifier.aspectRatio(ratio).clip(shape).background(m.roles.raised).border(1.dp, m.roles.hairline, shape).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -542,11 +561,15 @@ private fun SlotThumbs(ui: ComposerUi) {
             Column(Modifier.width(72.dp).alpha(if (enabled) 1f else .45f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val shape = RoundedCornerShape(m.radii.control)
                 Box(Modifier.padding(bottom = 6.dp).size(64.dp).clip(shape).press { ui.onSlot(s) }
-                    .let { if (filled?.first == null) it.dashed(m.t.muted.copy(alpha = .7f), m.radii.control) else it }
+                    .let { if (filled == null) it.dashed(m.t.muted.copy(alpha = .7f), m.radii.control) else it }
                     .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "${s.label}${if (s.optional) ", optional" else ""}${filled?.let { ": " + it.second } ?: ""}" },
                     contentAlignment = Alignment.Center) {
                     val img = filled?.first
-                    if (img != null) RefImage(img, Modifier.matchParentSize(), 20) else SIc("plus", 20.dp, m.t.muted)
+                    val frameBmp = if (s.kind == "clip" && filled != null) ui.clipFrame else null
+                    if (frameBmp != null) androidx.compose.foundation.Image(frameBmp.asImageBitmap(), null, Modifier.matchParentSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    else if (img != null) RefImage(img, Modifier.matchParentSize(), 20)
+                    else if (s.kind == "clip" && filled != null) Box(Modifier.matchParentSize().background(m.t.surface2))
+                    else SIc("plus", 20.dp, m.t.muted)
                     if (filled != null && s.kind in setOf("character", "start", "end", "clip", "audio", "location", "product", "refad", "video"))
                         Box(Modifier.align(Alignment.TopEnd).size(28.dp).press { ui.onClearSlot(s.kind) }.semantics { contentDescription = "Remove ${s.label}"; role = Role.Button }, contentAlignment = Alignment.Center) {
                             Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0x8C0E0C0A)), contentAlignment = Alignment.Center) { SIc("close", 10.dp, Color(0xFFF8F5EF)) }

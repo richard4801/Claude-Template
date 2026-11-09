@@ -10,6 +10,7 @@ import { runChain, voiceChain } from '../src/editor/audio.js';
 import { applyPatch, diff } from '../src/editor/jsonpatch.js';
 import { applyOps, OP_NAMES } from '../src/editor/ops.js';
 import * as K from '../src/editor/look.js';
+import { applyKit, kitOf, validateKit } from '../src/editor/kit.js';
 import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +78,17 @@ const projects: { name: string; project: M.EditProject }[] = [
   },
 ];
 
+// Wave 1 (plans/edit-parity.md): a freeze frame (hold) with a transition into it, mirrored and blended overlays, blur fill.
+projects.push({
+  name: 'wave 1: hold, mirror, blend, blur fill', project: proj([
+    main([clip('c1', 0, 4), clip('c2', 4, 4.1, { holdSec: 1.5, transitionIn: { kind: 'fade', durationSec: 0.4 } }), clip('c3', 4, 10, { fadeInSec: 0.5, fit: 'contain' })]),
+    captionTrack('highlight'),
+    { id: 'pipt', kind: 'video', items: [{ id: 'p1', asset: 'pip', startSec: 1, inSec: 0, outSec: 4, speed: 1, fit: 'contain', blend: 'screen', transform: { x: 0.7, y: 0.3, scale: 0.5, rotation: 15, flipX: true } } as M.VideoClip] },
+    { id: 'imgs', kind: 'image', items: [{ id: 'i1', asset: 'logo', startSec: 0, durationSec: 3, blend: 'multiply', transform: { scale: 0.3, flipY: true } } as M.ImageItem] },
+    { id: 'txt', kind: 'text', items: [{ id: 't1', startSec: 0, durationSec: 2, text: 'Mirror', style: HOOKS[0]!.style, transform: { flipX: true } } as M.TextItem] },
+  ], [src, pip, img], { canvas: { ...canvas, fill: 'blur' } }),
+});
+
 function expectFor(p: M.EditProject) {
   const e: Record<string, unknown> = { durationSec: M.durationSec(p), timeline: M.timeline(p) };
   e.captionWords = M.captionWords(p);
@@ -140,6 +152,38 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'look leak kind', project: mut(p => { p.tracks[0].items[0].look = { leak: { kind: 'green', amount: 0.3 } }; }), ok: false, field: 'edits.tracks.0.items.0.look.leak.kind' },
   { name: 'look unknown key', project: mut(p => { p.tracks[0].items[0].look = { bloom: 1 }; }), ok: false, field: 'edits.tracks.0.items.0.look.bloom' },
   { name: 'lut asset must be an upload', project: mut(p => { p.assets.push({ id: 'cube2', kind: 'lut', library: 'x' }); }), ok: false, field: 'edits.assets.3' },
+  { name: 'hold ok', project: mut(p => { p.tracks[0].items[0].holdSec = 2; }), ok: true },
+  { name: 'hold too long', project: mut(p => { p.tracks[0].items[0].holdSec = 31; }), ok: false, field: 'edits.tracks.0.items.0.holdSec' },
+  { name: 'hold at 2x', project: mut(p => { p.tracks[0].items[0].holdSec = 2; p.tracks[0].items[0].speed = 2; }), ok: false, field: 'edits.tracks.0.items.0.holdSec' },
+  { name: 'blend on overlay ok', project: mut(p => { p.tracks[1].items[0].blend = 'softLight'; p.tracks[2].items[0].blend = 'add'; }), ok: true },
+  { name: 'blend on main', project: mut(p => { p.tracks[0].items[0].blend = 'screen'; }), ok: false, field: 'edits.tracks.0.items.0.blend' },
+  { name: 'blend unknown', project: mut(p => { p.tracks[1].items[0].blend = 'dissolve'; }), ok: false, field: 'edits.tracks.1.items.0.blend' },
+  { name: 'flip not a boolean', project: mut(p => { p.tracks[1].items[0].transform.flipX = 1; }), ok: false, field: 'edits.tracks.1.items.0.transform.flipX' },
+  { name: 'text flip ok', project: mut(p => { p.tracks[3].items[0].transform = { ...(p.tracks[3].items[0].transform ?? {}), flipY: true }; }), ok: true },
+  { name: 'fill blur ok', project: mut(p => { p.canvas.fill = 'blur'; }), ok: true },
+  { name: 'fill unknown', project: mut(p => { p.canvas.fill = 'mirror'; }), ok: false, field: 'edits.canvas.fill' },
+  { name: 'tint ok', project: mut(p => { p.tracks[0].items[0].adjust = { temperature: 0.3, tint: -0.4 }; }), ok: true },
+  { name: 'tint too big', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 1.5 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
+  { name: 'tint not a number', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 'pink' }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
+  { name: 'video anim ok', project: mut(p => { p.tracks[0].items[0].animIn = { kind: 'fade', durationSec: 0.5 }; p.tracks[1].items[0].animOut = { kind: 'zoom', durationSec: 0.4 }; }), ok: true },
+  { name: 'video typewriter', project: mut(p => { p.tracks[1].items[0].animIn = { kind: 'typewriter', durationSec: 1 }; }), ok: false, field: 'edits.tracks.1.items.0.animIn.kind' },
+  { name: 'video anim too long', project: mut(p => { p.tracks[0].items[0].animOut = { kind: 'slideUp', durationSec: 3 }; }), ok: false, field: 'edits.tracks.0.items.0.animOut.durationSec' },
+  { name: 'colour keys ok', project: mut(p => { p.tracks[0].items[0].keyframes = { exposure: [{ t: 0, v: -0.3 }, { t: 1, v: 0.3 }] }; p.tracks[1].items[0].keyframes = { tint: [{ t: 0.5, v: 0.5 }] }; }), ok: true },
+  { name: 'colour key on text', project: mut(p => { p.tracks[3].items[0].keyframes = { exposure: [{ t: 0, v: 0.2 }] }; }), ok: false, field: 'edits.tracks.3.items.0.keyframes.exposure' },
+  { name: 'colour key too big', project: mut(p => { p.tracks[0].items[0].keyframes = { exposure: [{ t: 0, v: 1.5 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.exposure.0.v' },
+  { name: 'colour key on audio', project: mut(p => { p.tracks.push({ id: 'mus', kind: 'music', items: [{ id: 'a9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 1, keyframes: { exposure: [{ t: 0, v: 0.1 }] } }] }); }), ok: false, field: 'edits.tracks.4.items.0.keyframes.exposure' },
+  { name: 'colour keys on an image ok', project: mut(p => { p.tracks[2].items[0].keyframes = { tint: [{ t: 0, v: -0.2 }, { t: 1, v: 0.4 }], saturation: [{ t: 0.5, v: 1 }] }; }), ok: true },
+  { name: 'mask keys ok', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'circle' }; p.tracks[1].items[0].keyframes = { maskX: [{ t: 0, v: 0.3 }, { t: 1, v: 0.7 }], maskFeather: [{ t: 0.5, v: 0.4 }] }; p.tracks[2].items[0].keyframes = { vignette: [{ t: 0, v: -0.5 }], grain: [{ t: 0, v: 0.2 }], leak: [{ t: 0, v: 0.6 }] }; }), ok: true },
+  { name: 'mask key without a mask', project: mut(p => { delete p.tracks[0].items[0].mask; p.tracks[0].items[0].keyframes = { maskX: [{ t: 0, v: 0.3 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.maskX' },
+  { name: 'mask key out of range', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'rect' }; p.tracks[1].items[0].keyframes = { maskWidth: [{ t: 0, v: 5 }] }; }), ok: false, field: 'edits.tracks.1.items.0.keyframes.maskWidth.0.v' },
+  { name: 'look key on text', project: mut(p => { p.tracks[3].items[0].keyframes = { vignette: [{ t: 0, v: 0.2 }] }; }), ok: false, field: 'edits.tracks.3.items.0.keyframes.vignette' },
+  { name: 'grain key negative', project: mut(p => { p.tracks[0].items[0].keyframes = { grain: [{ t: 0, v: -0.1 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.grain.0.v' },
+  { name: 'loop ok', project: mut(p => { p.tracks[3].items[0].animLoop = { kind: 'pulse', periodSec: 1 }; p.tracks[2].items[0].animLoop = { kind: 'sway', periodSec: 2, amount: 0.4 }; p.tracks[1].items[0].animLoop = { kind: 'float', periodSec: 1.5 }; }), ok: true },
+  { name: 'loop on main', project: mut(p => { p.tracks[0].items[0].animLoop = { kind: 'pulse', periodSec: 1 }; }), ok: false, field: 'edits.tracks.0.items.0.animLoop' },
+  { name: 'loop kind unknown', project: mut(p => { p.tracks[3].items[0].animLoop = { kind: 'wobble', periodSec: 1 }; }), ok: false, field: 'edits.tracks.3.items.0.animLoop.kind' },
+  { name: 'loop period too short', project: mut(p => { p.tracks[2].items[0].animLoop = { kind: 'spin', periodSec: 0.1 }; }), ok: false, field: 'edits.tracks.2.items.0.animLoop.periodSec' },
+  { name: 'audio speed ok', project: mut(p => { p.assets.push({ id: 'mus9', kind: 'audio', upload: 'up_m9', durationSec: 20 }); p.tracks.push({ id: 'mu9', kind: 'music', items: [{ id: 'a9', asset: 'mus9', startSec: 0, inSec: 0, outSec: 9, speed: 1.5 }] }); }), ok: true },
+  { name: 'audio speed too fast', project: mut(p => { p.assets.push({ id: 'mus9', kind: 'audio', upload: 'up_m9', durationSec: 20 }); p.tracks.push({ id: 'mu9', kind: 'music', items: [{ id: 'a9', asset: 'mus9', startSec: 0, inSec: 0, outSec: 9, speed: 3 }] }); }), ok: false, field: 'edits.tracks.4.items.0.speed' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
@@ -165,6 +209,9 @@ const anims = animItems.map(item => ({ item, samples: Array.from({ length: 16 },
 const colors = [
   { adjust: {}, filter: null }, { adjust: { exposure: 1 }, filter: null }, { adjust: { contrast: 0.5, saturation: -0.5 }, filter: null },
   { adjust: { temperature: -1 }, filter: null }, ...FILTERS.map(f => ({ adjust: { exposure: -0.1 }, filter: { id: f.id, amount: 0.8 } })),
+  // Green ↔ magenta tint, alone and with the other steps and a preset tint.
+  { adjust: { tint: 1 }, filter: null }, { adjust: { tint: -0.6, temperature: 0.5, contrast: 0.2 }, filter: null },
+  { adjust: { tint: 0.4, saturation: -0.3 }, filter: { id: 'film', amount: 1 } },
 ].map(c => ({ ...c, matrix: M.colorMatrix(c.adjust, c.filter ?? undefined, FILTERS) }));
 const cutsCases = [
   { project: projects[0]!.project, asset: 'src', cuts: [{ startSec: 0.7, endSec: 1.55 }, { startSec: 3.4, endSec: 4.6 }, { startSec: 9.75, endSec: 12 }] },
@@ -303,7 +350,9 @@ const opsFor: Record<string, unknown[]> = {
   volume: [{ op: 'volume', itemId: 'c1', volume: 0.6, fadeInSec: 0.5 }],
   duck: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
   voice: [{ op: 'voice', itemId: 'c1', effect: 'radio', enhance: true }], add_music: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 1 }],
-  ratio: [{ op: 'ratio', ratio: '1:1' }], patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
+  ratio: [{ op: 'ratio', ratio: '1:1' }],
+  flip: [{ op: 'flip', itemId: 'p1', x: true }, { op: 'flip', itemId: 'i1', y: true }], freeze: [{ op: 'freeze', at: 2, durationSec: 1.2 }],
+  blend: [{ op: 'blend', itemId: 'p1', mode: 'overlay' }], fill: [{ op: 'fill', kind: 'blur', color: '#202020' }], patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
 };
 for (const n of OP_NAMES) if (n !== 'caption_style' && !opsFor[n]?.length) throw new Error(`ops fixture: no case for ${n}`);
 const opsFixture = OP_NAMES.map(name => {
@@ -313,6 +362,93 @@ const opsFixture = OP_NAMES.map(name => {
   return { name, ops, project: applyOps(base, ops as never).project };
 });
 
+// Wave 1 reference functions.
+const RGB = (r: number, g: number, b: number) => [r, g, b] as [number, number, number];
+const blendCases = M.BLEND_MODES.flatMap(mode => [
+  { mode, top: RGB(0.2, 0.5, 0.9), below: RGB(0.6, 0.3, 0.1), a: 1 },
+  { mode, top: RGB(0.8, 0.1, 0.45), below: RGB(0.2, 0.7, 0.5), a: 1 },
+  { mode, top: RGB(0.6, 0.6, 0.6), below: RGB(0.1, 0.24, 0.9), a: 0.5 },
+  { mode, top: RGB(1, 0, 0.5), below: RGB(0.5, 0.5, 0.5), a: 0 },
+].map(c => ({ ...c, out: M.blendPixel(c.mode, c.top, c.below, c.a) })));
+const cornerCases = [
+  { canvas: { width: 1080, height: 1920 }, w: 720, h: 1280, fit: 'contain' as M.Fit, t: {} },
+  { canvas: { width: 1080, height: 1920 }, w: 720, h: 1280, fit: 'contain' as M.Fit, t: { flipX: true } },
+  { canvas: { width: 1080, height: 1920 }, w: 512, h: 512, fit: 'contain' as M.Fit, t: { x: 0.7, y: 0.3, scale: 0.5, rotation: 15, flipX: true } },
+  { canvas: { width: 1920, height: 1080 }, w: 1080, h: 1920, fit: 'cover' as M.Fit, t: { flipX: true, flipY: true, rotation: -90 } },
+].map(c => ({ ...c, corners: M.itemCorners(c.canvas, c.w, c.h, c.fit, c.t) }));
+const tiny = Array.from({ length: 4 * 3 * 3 }, (_, i) => Math.round(((i * 37) % 100) / 100 * 1000) / 1000);
+// Colour keyframes (M): adjustAt and the colour matrix it gives, over time.
+const colorKeyItems = [
+  { adjust: { exposure: 0.1, saturation: 0.2 }, keyframes: { exposure: [{ t: 0, v: -0.5 }, { t: 2, v: 0.5, ease: 'easeInOut' }] } },
+  { adjust: { tint: 0.3 }, filter: { id: 'warm', amount: 0.5 }, keyframes: { temperature: [{ t: 0.5, v: -1 }, { t: 1.5, v: 1 }], tint: [{ t: 1, v: -0.4 }] } },
+  // A static field next to keyed ones stays; a key that comes out 0 is written as 0.
+  { adjust: { saturation: 0.3, contrast: -0.1 }, keyframes: { exposure: [{ t: 0, v: 0.4 }, { t: 1, v: 0 }], contrast: [{ t: 2, v: 0.25 }] } },
+  // An image item's tint keys (adjustAt reads only adjust and keyframes).
+  { asset: 'img', startSec: 0, durationSec: 3, adjust: undefined, keyframes: { tint: [{ t: 0, v: 0.6, ease: 'hold' }, { t: 1.25, v: -0.6 }] } },
+] as unknown as { adjust?: M.Adjust; filter?: M.FilterRef; keyframes: M.Keyframes }[];
+// Auto adjust: synthetic frames (deterministic) → the suggestion.
+const frame = (n: number, f: (k: number) => [number, number, number]) => Array.from({ length: n }, (_, k) => f(k)).flat().map(v => Math.round(v * 1e4) / 1e4);
+const autoAdjustCases = [
+  { name: 'dark warm green', rgb: frame(300, k => { const v = 0.15 + 0.1 * (k % 10) / 10; return [v * 1.2, v * 1.15, v * 0.8]; }) },
+  { name: 'balanced grey ramp', rgb: frame(200, k => { const v = (k % 100) / 99 * 0.92 + 0.04; return [v, v, v]; }), base: { highlights: 0.2, tint: 0.5 } },
+  { name: 'bright saturated blue', rgb: frame(150, k => [0.1 + 0.002 * k, 0.4, 0.95]) },
+  { name: 'black', rgb: frame(16, () => [0, 0, 0]) },
+].map(c => ({ ...c, out: M.autoAdjust(c.rgb, c.base as M.Adjust | undefined) }));
+const colorKeys = colorKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => { const adjust = M.adjustAt(item, t); return { t, adjust: adjust ?? null, matrix: M.colorMatrix(adjust, item.filter, FILTERS) }; }) }));
+// Style kits (M): kitOf every fixture project; applyKit of three kits onto three projects; validateKit cases.
+const kitList = [
+  { version: 1, look: { lut: 'pack:film-gold', strength: 0.6, grain: { amount: 0.2 } }, filter: { id: 'warm', amount: 0.5 }, adjust: { contrast: 0.1, tint: -0.2 },
+    transition: { kind: 'whip', durationSec: 0.6 }, captionStyle: CAPTION_STYLES.neon, textStyle: HOOKS[3]!.style, background: '#202020', fill: 'blur' },
+  { version: 1, transition: { kind: 'fade', durationSec: 2 } },
+  kitOf(projects[8]!.project),
+] as unknown[];
+const kitProblem = (k: unknown) => { try { validateKit(k, FILTERS, LOOK_IDS, new Set()); return null; } catch (e) { return (e as M.EditProblem).field; } };
+const kits = {
+  kitOf: projects.map(x => ({ name: x.name, kit: kitOf(x.project) })),
+  apply: [1, 2, 9].flatMap(pi => kitList.map((kit, ki) => ({ project: pi, kit: ki, result: applyKit(projects[pi]!.project, kit as never) }))),
+  kits: kitList,
+  validate: [
+    { version: 1 }, kitList[0], { version: 2 }, { version: 1, mask: {} }, { version: 1, adjust: { tint: 2 } }, { version: 1, transition: { kind: 'fade', durationSec: 5 } },
+    { version: 1, transition: { kind: 'swirl', durationSec: 0.5 } }, { version: 1, look: { lut: 'cube' } }, { version: 1, captionStyle: { ...CAPTION_STYLES.pop, highlightColor: 'yellow' } },
+    { version: 1, textStyle: { ...HOOKS[0]!.style, sizePct: 9 } }, { version: 1, fill: 'mirror' }, { version: 1, background: 'red' }, { version: 1, filter: { id: 'nope', amount: 1 } },
+    { version: 1, look: { vignette: { amount: 3 } } }, 'kit',
+  ].map(kit => ({ kit, field: kitProblem(kit) })),
+};
+// Mask and look keyframes (M): maskAt and lookAt over time.
+const motionKeyItems = [
+  { mask: { shape: 'circle', x: 0.5, y: 0.4, width: 0.6, height: 0.5, feather: 0.2 },
+    keyframes: { maskX: [{ t: 0, v: 0.2 }, { t: 2, v: 0.8, ease: 'easeInOut' }], maskWidth: [{ t: 1, v: 0.3 }, { t: 3, v: 0.9 }], maskFeather: [{ t: 0, v: 0, ease: 'hold' }, { t: 1.5, v: 0.5 }] } },
+  { mask: { shape: 'rect' }, look: { vignette: { amount: 0.2, size: 0.6 }, lift: 0.1 },
+    keyframes: { maskRotation: [{ t: 0, v: -45 }, { t: 3, v: 45 }], vignette: [{ t: 0, v: 0 }, { t: 2, v: -0.6 }], grain: [{ t: 0.5, v: 0.4 }], leak: [{ t: 1, v: 0 }, { t: 3, v: 0.8 }] } },
+  { look: { grain: { amount: 0.3, size: 2 }, leak: { kind: 'teal', amount: 0.1, angle: 90 } }, keyframes: { grain: [{ t: 0, v: 0.1 }, { t: 1, v: 0.9 }], leak: [{ t: 2, v: 0.5 }] } },
+  // An inverted mask keeps invert (and its other fields) through maskAt.
+  { mask: { shape: 'rect', invert: true, feather: 0.3, width: 0.4 }, keyframes: { maskY: [{ t: 0, v: 0.2 }, { t: 3, v: 0.8 }] } },
+] as unknown as { mask?: M.Mask; look?: K.Look; keyframes: M.Keyframes }[];
+const motionKeys = motionKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => ({ t, mask: M.maskAt(item, t) ?? null, look: M.lookAt(item, t) ?? null })) }));
+// Loop animations (M): loopState over time.
+const loopCases = [
+  { kind: 'pulse', periodSec: 1 }, { kind: 'pulse', periodSec: 0.6, amount: 1 }, { kind: 'sway', periodSec: 2, amount: 0.3 }, { kind: 'float', periodSec: 1.5 },
+  { kind: 'spin', periodSec: 4, amount: 0 }, { kind: 'blink', periodSec: 0.8, amount: 0.9 },
+] as M.AnimLoop[];
+const loops = loopCases.map(loop => ({ loop, samples: [0, 0.1, 0.25, 0.5, 0.75, 1, 1.3, 2.2, 5].map(t => ({ t, state: M.loopState(loop, t) })) }));
+// Audio speed (M): timing of music and voice clips at speed ≠ 1 (beats mapped through clipTimeAt).
+const audioSpeedClips = [
+  { id: 'm', asset: 'mus', startSec: 1, inSec: 2, outSec: 14, speed: 1.5, beats: [2, 2.5, 3.1, 6, 13.9] },
+  { id: 'v', asset: 'vo', startSec: 0.5, inSec: 0, outSec: 3, speed: 0.75, fadeInSec: 0.2 },
+] as M.AudioClip[];
+const audioSpeed = audioSpeedClips.map(c => ({ clip: c, length: M.clipLength(c), beatsOnTimeline: (c.beats ?? []).map(b => Math.round((c.startSec + M.clipTimeAt(c, b)) * 1e6) / 1e6),
+  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })) }));
+const wave1 = projects[projects.length - 1]!.project;
+const holdClip = (wave1.tracks[0]!.items[1]) as M.VideoClip;
+const holdFns = { clip: holdClip, length: M.clipLength(holdClip), sourceAt: [0, 0.7, 1.5].map(t => ({ t, src: M.clipSourceAt(holdClip, t) })), timeAt: M.clipTimeAt(holdClip, 4.05),
+  cuts: [{ cuts: [{ startSec: 3.9, endSec: 4.2 }], project: M.applyCuts(wave1, 'src', [{ startSec: 3.9, endSec: 4.2 }]) }, { cuts: [{ startSec: 5, endSec: 6 }], project: M.applyCuts(wave1, 'src', [{ startSec: 5, endSec: 6 }]) }] };
+const wave1Fns = {
+  blend: blendCases, corners: cornerCases, hold: holdFns,
+  blurFill: { w: 4, h: 3, radius: 1, rgb: tiny, out: M.blurFill(tiny, 4, 3, 1), darken: M.BLUR_FILL_DARKEN,
+    radii: [{ width: 1080, height: 1920 }, { width: 720, height: 1280 }, { width: 2160, height: 3840 }, { width: 16, height: 16 }].map(c => ({ ...c, radius: M.blurFillRadius(c) })),
+    clipAt: [0, 3.5, 3.79, 3.8, 3.81, 4.2, 5.3, 5.5, 8].map(t => ({ t, at: M.blurFillClip(wave1, t) })) },
+};
+
 const files: Record<string, unknown> = {
   'jsonpatch.json': jsonpatch,
   'ops.json': opsFixture,
@@ -320,7 +456,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

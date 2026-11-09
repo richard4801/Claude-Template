@@ -25,6 +25,13 @@ struct VideoPanels: View {
     var body: some View {
         if let v = session.state.selectedVisual {
             TransformPanel(session: session, visual: v)
+            if session.state.selectedBlend != nil { BlendPanel(session: session) }
+            if session.state.selectedIsMain, let c = session.state.selectedVideo, c.holdSec == nil,
+               let d = session.project.asset(c.asset)?.durationSec, d - (c.outSec - c.inSec) > 0.05 {
+                SlipPanel(session: session, clip: c, sourceSec: d)
+            }
+            if session.state.clipsHere.count >= 2 { SplitScreenPanel(session: session) }
+            if session.state.selectedIsMain { BackgroundPanel(session: session) }
             if session.state.selectedItem?.textItem == nil {
                 LooksPanel(session: session, visual: v)
                 AdjustPanel(session: session, visual: v)
@@ -34,6 +41,8 @@ struct VideoPanels: View {
         } else {
             InspectorEmpty(text: "Select a clip, an overlay or a sticker on the timeline.")
         }
+        // The whole edit's style (parity): shown whatever is selected.
+        StyleKitsPanel(session: session)
     }
 }
 
@@ -42,42 +51,216 @@ struct TransformPanel: View {
     @Bindable var session: EditSuiteSession
     var visual: EditSuite.Visual
 
-    private func setTransform(_ f: @escaping (inout EditV2.Transform) -> Void) {
-        session.edit { s in s.changeVisual { v in var tf = v.transform ?? EditV2.Transform(); f(&tf); v.transform = tf } }
+    var body: some View {
+        let s = session.state
+        // Values at the playhead: a keyframed property shows (and edits) its key there, not the ignored static value
+        // (Mac Edit audit 2026-11-08).
+        let px = s.visualValue(.x) ?? 0.5, py = s.visualValue(.y) ?? 0.5, sc = s.visualValue(.scale) ?? 1
+        let rot = s.visualValue(.rotation) ?? 0, op = s.visualValue(.opacity) ?? 1
+        let isText = s.selectedItem?.textItem != nil
+        EditPanel(title: "Transform & keyframes") {
+            row("Position X", value: px - 0.5, range: -1...1, prop: .x, fmt: signed100) { x in session.edit { $0.setVisualValue(.x, 0.5 + x) } }
+            row("Position Y", value: py - 0.5, range: -1...1, prop: .y, fmt: signed100) { y in session.edit { $0.setVisualValue(.y, 0.5 + y) } }
+            row("Scale", value: sc, range: 0.1...4, prop: .scale, fmt: { "\(Int(($0 * 100).rounded()))%" }) { n in session.edit { $0.setVisualValue(.scale, n) } }
+            row("Rotation", value: rot, range: -180...180, prop: .rotation, fmt: { "\(Int($0.rounded()))°" }) { n in session.edit { $0.setVisualValue(.rotation, n) } }
+            row("Opacity", value: op, range: 0...1, prop: .opacity, fmt: { "\(Int(($0 * 100).rounded()))%" }) { n in session.edit { $0.setVisualValue(.opacity, n) } }
+            if visual.keyframes.map({ !$0.isEmpty }) == true {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Ease").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                    EditSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
+                             selection: visual.keyframes?.present.first?.1.first?.ease ?? .easeInOut, small: true) { e in session.edit { $0.setKeyframeEase(e) } }
+                }
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: "Previous key", icon: "caret-left", disabled: s.adjacentKeyframe(-1) == nil, plain: true) {
+                        if let k = session.state.adjacentKeyframe(-1) { session.seek(k) }
+                    }
+                    SuiteToolButton(title: "Next key", icon: "caret-right", disabled: s.adjacentKeyframe(1) == nil, plain: true) {
+                        if let k = session.state.adjacentKeyframe(1) { session.seek(k) }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            // Parity wave 1: mirror, and fit / fill for pictures.
+            HStack(spacing: Space.s2) {
+                SuiteToolButton(title: "Mirror", icon: "arrows-left-right", filled: s.selectedFlip.x, plain: !s.selectedFlip.x) {
+                    let on = session.state.selectedFlip.x
+                    session.edit { $0.setFlip(x: !on) }
+                }
+                .accessibilityLabel("Mirror horizontally")
+                .accessibilityValue(s.selectedFlip.x ? "On" : "Off")
+                SuiteToolButton(title: "Flip", icon: "swap", filled: s.selectedFlip.y, plain: !s.selectedFlip.y) {
+                    let on = session.state.selectedFlip.y
+                    session.edit { $0.setFlip(y: !on) }
+                }
+                .accessibilityLabel("Mirror vertically")
+                .accessibilityValue(s.selectedFlip.y ? "On" : "Off")
+                Spacer(minLength: 0)
+            }
+            if let swap = s.selectedTrackSwap {
+                // Parity (as Android): a clip between the main track and an overlay track.
+                SuiteToolButton(title: swap.toMain ? "Move to main track" : "Move to an overlay track", icon: "stack", disabled: !swap.possible, plain: true) {
+                    if swap.toMain { session.edit { $0.moveToMain() } } else { session.edit { $0.moveToOverlay() } }
+                }
+                .help(swap.possible ? "" : "The main track needs at least one clip")
+            }
+            if !isText {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Frame").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                    EditSeg(options: [(EditV2.Fit.cover, "Fill"), (.contain, "Fit")], selection: fitNow, small: true) { f in session.edit { $0.setFit(f) } }
+                        .accessibilityLabel("Fill or fit the frame")
+                }
+            }
+            Text("The diamond adds a keyframe at the playhead, or removes the one there. With keyframes, a slider sets the value at the playhead.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+        }
+        if !isText { CropPanel(session: session, crop: visual.crop) }
+    }
+
+    /// The selected video's or picture's fit (main clips fill by default, overlays fit).
+    private var fitNow: EditV2.Fit {
+        switch session.state.selectedItem {
+        case .video(let c): return c.fit ?? (session.state.selectedIsMain ? .cover : .contain)
+        case .image(let c): return c.fit ?? .contain
+        default: return .cover
+        }
+    }
+
+    private func row(_ label: String, value: Double, range: ClosedRange<Double>, prop: EditV2.KfProp,
+                     fmt: @escaping (Double) -> String, set: @escaping (Double) -> Void) -> some View {
+        let s = session.state
+        let keyed = !(session.state.selectedVisual?.keyframes?[prop]?.isEmpty ?? true)
+        let here = s.hasKeyframe(prop)
+        return HStack(alignment: .bottom, spacing: 8) {
+            SuiteSlider(label, value: min(range.upperBound, max(range.lowerBound, value)), range: range, format: fmt, onCommit: set)
+            SuiteIconButton(systemName: here ? "diamond.fill" : "diamond",
+                            label: here ? "Remove the \(label.lowercased()) keyframe at the playhead" : "Add a \(label.lowercased()) keyframe at the playhead",
+                            on: keyed, size: 28) {
+                let v = prop == .x || prop == .y ? value + 0.5 : value
+                if here { session.edit { $0.removeKeyframe(prop) } } else { session.edit { $0.addKeyframe(prop, value: v) } }
+            }
+        }
+    }
+}
+
+/// Slip (parity): the clip plays another part of its source, keeping its length.
+struct SlipPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    var clip: EditV2.VideoClip
+    var sourceSec: Double
+
+    var body: some View {
+        let len = clip.outSec - clip.inSec
+        EditPanel(title: "Slip") {
+            SuiteSlider("Starts at", value: clip.inSec, range: 0...max(0.01, sourceSec - len), format: { String(format: "%.1f s of the take", $0) }) { v in
+                session.edit { $0.slip(to: v) }
+            }
+            Text("Plays another part of the take; its length stays.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+        }
+    }
+}
+
+/// Split screen (parity): the clips on screen at the playhead, side by side, top and bottom, in three rows or a grid.
+struct SplitScreenPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+
+    var body: some View {
+        EditPanel(title: "Split screen") {
+            FlowLayout(spacing: 6) {
+                ForEach(EditSuite.SplitLayout.allCases) { l in
+                    Chip(l.label, on: false) { session.edit { $0.splitScreen(l) } }
+                        .accessibilityLabel("Split screen \(l.label)")
+                }
+            }
+            Text("Uses the \(session.state.clipsHere.count) clips on screen at the playhead. Each stays editable.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Blend modes for overlays (parity wave 1): how the picture mixes with the layers below.
+struct BlendPanel: View {
+    @Bindable var session: EditSuiteSession
+
+    static func label(_ m: EditV2.BlendMode) -> String {
+        switch m {
+        case .normal: return "Normal"
+        case .multiply: return "Multiply"
+        case .screen: return "Screen"
+        case .overlay: return "Overlay"
+        case .softLight: return "Soft light"
+        case .darken: return "Darken"
+        case .lighten: return "Lighten"
+        case .add: return "Add"
+        }
     }
 
     var body: some View {
-        let tf = visual.transform ?? EditV2.Transform()
-        let k = visual.keyframes
-        EditPanel(title: "Transform & keyframes") {
-            row("Position X", value: (tf.x ?? 0.5) - 0.5, range: -1...1, prop: .x, keys: k?.x, fmt: signed100) { v in setTransform { $0.x = 0.5 + v } }
-            row("Position Y", value: (tf.y ?? 0.5) - 0.5, range: -1...1, prop: .y, keys: k?.y, fmt: signed100) { v in setTransform { $0.y = 0.5 + v } }
-            row("Scale", value: tf.scale ?? 1, range: 0.1...4, prop: .scale, keys: k?.scale, fmt: { "\(Int(($0 * 100).rounded()))%" }) { v in setTransform { $0.scale = v } }
-            row("Rotation", value: tf.rotation ?? 0, range: -180...180, prop: .rotation, keys: k?.rotation, fmt: { "\(Int($0.rounded()))°" }) { v in setTransform { $0.rotation = v } }
-            row("Opacity", value: visual.opacity ?? 1, range: 0...1, prop: .opacity, keys: k?.opacity, fmt: { "\(Int(($0 * 100).rounded()))%" }) { v in
-                session.edit { s in s.changeVisual { $0.opacity = v } }
+        let cur = session.state.selectedBlend ?? .normal
+        EditPanel(title: "Blend") {
+            FlowLayout(spacing: 6) {
+                ForEach(EditV2.BlendMode.allCases, id: \.self) { m in
+                    Chip(Self.label(m), on: cur == m) { session.edit { $0.setBlend(m) } }
+                        .accessibilityLabel("Blend \(Self.label(m))")
+                }
             }
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text("Ease").font(t.scale.label.font).foregroundStyle(t.roles.ink)
-                EditSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
-                         selection: k?.present.first?.1.first?.ease ?? .easeInOut, small: true) { e in session.edit { $0.setKeyframeEase(e) } }
+        }
+    }
+}
+
+/// The background behind the main clips (parity wave 1): a colour, or a blurred copy of the clip. It shows where a clip is
+/// fitted (Frame: Fit) or moved and scaled.
+struct BackgroundPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+
+    var body: some View {
+        let cv = session.project.canvas
+        let blur = cv.fill == .blur
+        EditPanel(title: "Background") {
+            HStack(spacing: Space.s2) {
+                EditSeg(options: [(EditV2.CanvasFill.color, "Colour"), (.blur, "Blur")], selection: blur ? .blur : .color, small: true) { f in
+                    session.edit { $0.setBackground(fill: f) }
+                }
+                .fixedSize()
+                .accessibilityLabel("Background")
+                if !blur {
+                    SuiteSwatch(hex: cv.background ?? "#000000", label: "Background colour") { c in session.edit { $0.setBackground(fill: .color, color: c) } }
+                }
+                Spacer(minLength: 0)
             }
-            HStack(spacing: 6) {
-                Ph("diamond.fill", 9).foregroundStyle(t.roles.ink2)
-                Text("adds a keyframe at the playhead").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+            Text("Shows where a clip doesn't fill the frame (Frame: Fit, or scaled down).")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Crop (Mac Edit audit 2026-11-08: the timeline's Crop button opened the Video tab, which had no crop): each side 0–45 %.
+struct CropPanel: View {
+    @Bindable var session: EditSuiteSession
+    var crop: EditV2.Crop?
+
+    var body: some View {
+        EditPanel(title: "Crop") {
+            ForEach(EditSuiteState.CropSide.allCases, id: \.self) { side in
+                SuiteSlider(side.rawValue.capitalized, value: value(side), range: 0...0.45, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                    session.edit { $0.setCrop(side, (v * 100).rounded() / 100) }
+                }
+            }
+            HStack {
+                SuiteToolButton(title: "Reset crop and transform", icon: "arrow-counter-clockwise", plain: true) { session.edit { $0.resetTransform() } }
+                Spacer(minLength: 0)
             }
         }
     }
 
-    private func row(_ label: String, value: Double, range: ClosedRange<Double>, prop: EditV2.KfProp, keys: [EditV2.Keyframe]?,
-                     fmt: @escaping (Double) -> String, set: @escaping (Double) -> Void) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            SuiteSlider(label, value: min(range.upperBound, max(range.lowerBound, value)), range: range, format: fmt, onCommit: set)
-            SuiteIconButton(systemName: (keys?.isEmpty ?? true) ? "diamond" : "diamond.fill", label: "Add a \(label.lowercased()) keyframe at the playhead",
-                            on: !(keys?.isEmpty ?? true), size: 24) {
-                let v = prop == .x || prop == .y ? value + 0.5 : value
-                session.edit { $0.addKeyframe(prop, value: v) }
-            }
+    private func value(_ side: EditSuiteState.CropSide) -> Double {
+        switch side {
+        case .left: return crop?.left ?? 0
+        case .top: return crop?.top ?? 0
+        case .right: return crop?.right ?? 0
+        case .bottom: return crop?.bottom ?? 0
         }
     }
 }
@@ -178,19 +361,105 @@ struct AdjustPanel: View {
     var body: some View {
         let a = visual.adjust ?? EditV2.Adjust()
         EditPanel(title: "Adjust") {
-            SuiteSlider("Exposure", value: a.exposure ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.exposure = v } }
-            SuiteSlider("Contrast", value: a.contrast ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.contrast = v } }
-            SuiteSlider("Saturation", value: a.saturation ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.saturation = v } }
-            SuiteSlider("Temperature", value: a.temperature ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.temperature = v } }
+            if session.state.selectedVideo != nil {
+                // Parity: the clip's own picture under the playhead → exposure, contrast, saturation, white balance.
+                SuiteToolButton(title: "Auto adjust", icon: "sliders-horizontal", plain: true) { Task { await session.autoAdjust() } }
+                    .help("Balance this clip from its picture at the playhead")
+            }
+            // Colour keyframes (contract, WS8 c10e398): the ◆ keys the value at the playhead; once keyed, the slider sets it there.
+            colorRow("Exposure", .exposure)
+            colorRow("Contrast", .contrast)
+            colorRow("Saturation", .saturation)
+            colorRow("Temperature", .temperature)
+            colorRow("Tint", .tint)
             SuiteSlider("Highlights", value: a.highlights ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.highlights = v } }
             SuiteSlider("Shadows", value: a.shadows ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.shadows = v } }
-            SuiteSlider("Grain", value: visual.look?.grain?.amount ?? 0, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
-                session.edit { s in
-                    s.changeVisual { vv in
-                        var l = vv.look ?? EditV2.Look()
-                        l.grain = v > 0.005 ? EditV2.Grain(amount: (v * 100).rounded() / 100, size: l.grain?.size) : nil
-                        vv.look = l
+            // The look's effects (parity): 0 removes each.
+            ForEach(EditSuite.LookEffect.allCases) { e in
+                // Look keyframes: vignette and light leak take a ◆ (the other effects are baked or multi-pass).
+                if e == .vignette || e == .leak {
+                    KeyedRow(session: session, label: e.label, props: [e == .vignette ? .vignette : .leak], range: e.range,
+                             format: { e == .vignette ? signed100($0) : "\(Int(($0 * 100).rounded()))" }, store: { v, _ in (v * 1000).rounded() / 1000 })
+                } else {
+                    SuiteSlider(e.label, value: session.state.lookEffect(e), range: e.range, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                        session.edit { $0.setLookEffect(e, v) }
                     }
+                }
+            }
+            KeyedRow(session: session, label: "Grain", props: [.grain], range: 0...1, format: { "\(Int(($0 * 100).rounded()))" },
+                     store: { v, _ in (v * 100).rounded() / 100 })
+            if session.state.selectedItem?.textItem == nil {
+                SuiteRule()
+                SuiteLabel("Curves")
+                CurvesEditor(session: session)
+            }
+        }
+    }
+}
+
+extension AdjustPanel {
+    fileprivate func colorRow(_ label: String, _ prop: EditV2.KfProp) -> some View {
+        let s = session.state
+        let value = s.visualValue(prop) ?? 0
+        let keyed = !(visual.keyframes?[prop]?.isEmpty ?? true)
+        let here = s.hasKeyframe(prop)
+        return HStack(alignment: .bottom, spacing: 8) {
+            SuiteSlider(label, value: min(1, max(-1, value)), range: -1...1, format: signed100) { v in
+                session.edit { $0.setVisualValue(prop, (v * 100).rounded() / 100) }
+            }
+            SuiteIconButton(systemName: here ? "diamond.fill" : "diamond",
+                            label: here ? "Remove the \(label.lowercased()) keyframe at the playhead" : "Add a \(label.lowercased()) keyframe at the playhead",
+                            on: keyed, size: 28) {
+                if here { session.edit { $0.removeKeyframe(prop) } } else { session.edit { $0.addKeyframe(prop, value: value) } }
+            }
+        }
+    }
+}
+
+/// The owner's model for an Edit helper (WS6's OwnerModelPill, "model picks everywhere"); members see nothing. A new pick
+/// asks for the helper's price again (`kind`), since models can cost differently.
+struct HelperModelPill: View {
+    @Bindable var session: EditSuiteSession
+    var purpose: EnginePurpose
+    var kind: EditorJobKind?
+
+    var body: some View {
+        OwnerModelPill(purpose: purpose, selection: Binding(get: { session.helperModels[purpose] }, set: { m in
+            session.helperModels[purpose] = m
+            if let kind { Task { await session.loadEstimate(kind) } }
+        }), compact: true)
+    }
+}
+
+/// A slider with a ◆ for keyframe properties beyond the transform (mask, look): the value at the playhead; the ◆ adds keys
+/// of every listed property there (mask size keys width and height together) or removes them; once keyed, the slider sets
+/// the keys at the playhead (EditSuiteState.setVisualValue).
+struct KeyedRow: View {
+    @Bindable var session: EditSuiteSession
+    var label: String
+    var props: [EditV2.KfProp]
+    var range: ClosedRange<Double>
+    var format: (Double) -> String
+    var display: (Double) -> Double = { $0 }
+    var store: (Double, EditV2.KfProp) -> Double = { v, _ in v }
+
+    var body: some View {
+        let s = session.state
+        let value = display(s.visualValue(props[0]) ?? 0)
+        let keyed = props.contains { !(s.selectedVisual?.keyframes?[$0]?.isEmpty ?? true) }
+        let here = props.contains { s.hasKeyframe($0) }
+        HStack(alignment: .bottom, spacing: 8) {
+            SuiteSlider(label, value: min(range.upperBound, max(range.lowerBound, value)), range: range, format: format) { v in
+                session.edit { st in props.reduce(false) { ok, p in st.setVisualValue(p, store(v, p)) || ok } }
+            }
+            SuiteIconButton(systemName: here ? "diamond.fill" : "diamond",
+                            label: here ? "Remove the \(label.lowercased()) keyframe at the playhead" : "Add a \(label.lowercased()) keyframe at the playhead",
+                            on: keyed, size: 28) {
+                if here {
+                    session.edit { st in props.reduce(false) { ok, p in st.removeKeyframe(p) || ok } }
+                } else {
+                    let values = props.map { session.state.visualValue($0) ?? 0 }
+                    session.edit { st in zip(props, values).reduce(false) { ok, pv in st.addKeyframe(pv.0, value: pv.1) || ok } }
                 }
             }
         }
@@ -218,11 +487,17 @@ struct MaskPanel: View {
                 }
             }
             if let m {
-                SuiteSlider("Feather", value: m.feather ?? 0.1, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in setMask { $0?.feather = v } }
-                SuiteSlider("Size", value: m.width ?? 0.5, range: 0.05...1.5, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
-                    setMask { $0?.width = v; $0?.height = v * ((m.height ?? 0.5) / max(0.01, m.width ?? 0.5)) }
-                }
-                SuiteSlider("Rotation", value: m.rotation ?? 0, range: -180...180, format: { "\(Int($0.rounded()))°" }) { v in setMask { $0?.rotation = v } }
+                // Mask keyframes (contract, WS8 bfa44a6): each slider has a ◆; once keyed it sets the key at the playhead.
+                KeyedRow(session: session, label: "Feather", props: [.maskFeather], range: 0...1, format: { "\(Int(($0 * 100).rounded()))" })
+                let ratio = (m.height ?? 0.5) / max(0.01, m.width ?? 0.5)
+                KeyedRow(session: session, label: "Size", props: [.maskWidth, .maskHeight], range: 0.05...1.5, format: { "\(Int(($0 * 100).rounded()))%" },
+                         store: { v, p in p == .maskHeight ? v * ratio : v })
+                KeyedRow(session: session, label: "Rotation", props: [.maskRotation], range: -180...180, format: { "\(Int($0.rounded()))°" })
+                // Where the mask sits on the picture (Mac Edit audit: it could only be centred).
+                KeyedRow(session: session, label: "Position X", props: [.maskX], range: -0.5...0.5, format: signed100,
+                         display: { $0 - 0.5 }, store: { v, _ in 0.5 + (v * 100).rounded() / 100 })
+                KeyedRow(session: session, label: "Position Y", props: [.maskY], range: -0.5...0.5, format: signed100,
+                         display: { $0 - 0.5 }, store: { v, _ in 0.5 + (v * 100).rounded() / 100 })
                 SuiteToggleRow(title: "Invert", isOn: m.invert == true) { on in setMask { $0?.invert = on ? true : nil } }
             }
             if isVideo {
@@ -233,6 +508,11 @@ struct MaskPanel: View {
                     if let ck {
                         SuiteSwatch(hex: ck.color, label: "Key colour") { c in session.edit { s in s.changeVisual { $0.chroma?.color = c } } }
                         Text(ck.color).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                        // Design pass (owner-approved): the key colour from the picture itself.
+                        SuiteToolButton(title: session.pickingKeyColour ? "Cancel picking" : "Pick from video", icon: "drop", plain: true) {
+                            Task { await session.toggleKeyPick() }
+                        }
+                        .help("Click on the preview to key out that colour (Esc cancels)")
                     }
                     MToggle(isOn: Binding(get: { ck != nil }, set: { on in
                         session.edit { s in s.changeVisual { $0.chroma = on ? EditV2.Chroma(color: "#2BD15F", similarity: 0.4, smoothness: 0.08, spill: 0.5) : nil } }
@@ -243,14 +523,23 @@ struct MaskPanel: View {
                     SuiteSlider("Strength", value: ck.similarity ?? 0.4, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
                         session.edit { s in s.changeVisual { $0.chroma?.similarity = v } }
                     }
+                    SuiteSlider("Softness", value: ck.smoothness ?? 0.08, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                        session.edit { $0.changeChroma { $0.smoothness = (v * 100).rounded() / 100 } }
+                    }
+                    SuiteSlider("Spill", value: ck.spill ?? 0.5, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                        session.edit { $0.changeChroma { $0.spill = (v * 100).rounded() / 100 } }
+                    }
                 }
                 if !session.matteAvailable && !session.backgroundRemoved {
                     // Not ready yet ("Coming soon"), or the owner switched paid helpers off: say so instead of offering a no-op.
                     HelperUnavailableRow(title: "Remove background", note: session.helperNote(.matte))
                 } else {
-                    SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
-                                   busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
-                        Task { await session.setRemoveBackground(on) }
+                    HStack(spacing: Space.s2) {
+                        SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
+                                       busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
+                            Task { await session.setRemoveBackground(on) }
+                        }
+                        HelperModelPill(session: session, purpose: .matte, kind: .matte)
                     }
                     .task(id: session.state.selection) { await session.loadEstimate(.matte) }
                     HelperNote(text: session.helperNotes[.matte])
@@ -332,6 +621,7 @@ struct KeepPicker: View {
                             Task { await session.runKeep() }
                         }
                         SuiteToolButton(title: "Not now", plain: true) { session.keepPick?.confirming = false }
+                        HelperModelPill(session: session, purpose: .track, kind: nil)
                     }
                 }
             } else {
@@ -480,9 +770,19 @@ struct AudioPanels: View {
         let audioAsset = snd.audioAsset.flatMap { session.project.asset($0) }
         let denoised = audioAsset?.kind == .audio
         return EditPanel(title: "Audio · clip") {
-            SuiteSlider("Volume", value: EditSuite.db(gain: snd.volume ?? 1), range: -30...6, format: { $0 == 0 ? "0 dB" : String(format: "%+.0f dB", $0) }) { v in
-                let g = v <= -29.5 ? 0 : EditSuite.gain(db: v.rounded())
-                setSound { $0.volume = min(2, g) == 1 ? nil : min(2, g) }
+            // Keyframe aware (parity wave 1): with volume keys the slider sets the key at the playhead.
+            let st = session.state
+            HStack(alignment: .bottom, spacing: 8) {
+                SuiteSlider("Volume", value: EditSuite.db(gain: st.volumeAtPlayhead ?? snd.volume ?? 1), range: -30...6,
+                            format: { $0 == 0 ? "0 dB" : String(format: "%+.0f dB", $0) }) { v in
+                    let g = v <= -29.5 ? 0 : EditSuite.gain(db: v.rounded())
+                    session.edit { $0.setVolumeValue(g) }
+                }
+                SuiteIconButton(systemName: st.hasVolumeKeyHere ? "diamond.fill" : "diamond",
+                                label: st.hasVolumeKeyHere ? "Remove the volume keyframe at the playhead" : "Add a volume keyframe at the playhead",
+                                on: st.hasVolumeKeys, size: 28) {
+                    if session.state.hasVolumeKeyHere { session.edit { $0.removeVolumeKey() } } else { session.edit { $0.addVolumeKey() } }
+                }
             }
             HStack(spacing: 14) {
                 SuiteSlider("Fade in", value: snd.fadeInSec ?? 0, range: 0...5, format: { String(format: "%.1f s", $0) }) { v in
@@ -496,12 +796,19 @@ struct AudioPanels: View {
             if !session.helperAvailable(.denoise) && !denoised {
                 HelperUnavailableRow(title: "Noise reduction", note: session.helperNote(.denoise))
             } else {
-                SuiteToggleRow(title: "Noise reduction", hint: "Removes background noise and music", isOn: denoised,
-                               busy: session.isRunning(.denoise), trailingNote: session.estimateLabel(.denoise)) { on in
-                    Task { await session.setNoiseReduction(on) }
+                HStack(spacing: Space.s2) {
+                    SuiteToggleRow(title: "Noise reduction", hint: "Removes background noise and music", isOn: denoised,
+                                   busy: session.isRunning(.denoise), trailingNote: session.estimateLabel(.denoise)) { on in
+                        Task { await session.setNoiseReduction(on) }
+                    }
+                    HelperModelPill(session: session, purpose: .denoise, kind: .denoise)
                 }
                 .task(id: session.state.selection) { await session.loadEstimate(.denoise) }
                 HelperNote(text: session.helperNotes[.denoise])
+            }
+            if session.state.selectedItem?.audioClip != nil {
+                SuiteToolButton(title: "Loop to the end", icon: "arrows-clockwise", plain: true) { session.edit { $0.loopToEnd() } }
+                    .help("Repeat this sound until the video ends")
             }
             SuiteToggleRow(title: "Voice enhance", hint: "Clearer speech", isOn: snd.enhance == true) { on in setSound { $0.enhance = on ? true : nil } }
             SuiteLabel("Voice effect")
@@ -516,6 +823,8 @@ struct AudioPanels: View {
     @ViewBuilder private var mixPanel: some View {
         let music = session.state.musicTrack
         EditPanel(title: "Audio · mix & beats") {
+            SuiteToolButton(title: "Even out volume", icon: "faders", plain: true) { Task { await session.evenVolume() } }
+                .help("Spoken clips and voice-overs to the same level (music is left to ducking)")
             if music == nil {
                 Text("Add music (Music in the media bin) to duck it under the voice and cut on its beats.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             } else {
@@ -557,6 +866,19 @@ struct AudioPanels: View {
                 SuiteToggleRow(title: "Snap cuts to beats", hint: "Auto-cut on the beat", isOn: session.state.snapToBeats) { on in
                     session.view { $0.snapToBeats = on }
                 }
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: "Mark a beat", icon: "metronome", plain: true) { session.edit { $0.markBeat() } }
+                        .help("A beat mark at the playhead on the music")
+                    SuiteToolButton(title: "Clear beats", icon: "x", disabled: session.state.bpm == nil && session.state.beats.isEmpty, plain: true) {
+                        session.edit { $0.clearBeats() }
+                    }
+                }
+                SuiteToolButton(title: "Cut clips to the beat", icon: "scissors", disabled: session.state.beats.isEmpty) {
+                    var n = 0
+                    session.edit { s in n = s.cutToBeats(); return n > 0 }
+                    if n > 0 { session.notice = "\(n) clip\(n == 1 ? "" : "s") now end on the beat" }
+                }
+                .help("Each clip ends on the beat nearest its end")
             }
         }
     }
@@ -569,7 +891,28 @@ struct SpeedPanel: View {
     @Bindable var session: EditSuiteSession
 
     var body: some View {
-        if let c = session.state.selectedVideo {
+        if let c = session.state.selectedVideo, let hold = c.holdSec {
+            // Parity wave 1: a freeze frame has a length, not a speed.
+            EditPanel(title: "Freeze frame") {
+                SuiteSlider("Length", value: hold, range: EditV2.holdMinSec...10, format: { String(format: "%.1f s", $0) }) { v in
+                    session.edit { $0.setHoldDuration((v * 10).rounded() / 10) }
+                }
+                Text("Holds this frame, silent. Drag its edges on the timeline to change the length.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let sp = session.state.selectedAudioSpeed {
+            // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept; no curves for sound.
+            EditPanel(title: "Speed") {
+                SuiteSlider("Speed", value: sp, range: 0.5...2, format: { String(format: "%.2f×", $0) }) { v in session.edit { $0.setAudioSpeed(v) } }
+                FlowLayout(spacing: 6) {
+                    ForEach([0.5, 1, 1.5, 2], id: \.self) { v in
+                        Chip(v == 1 ? "1×" : String(format: "%g×", v), on: abs(sp - v) < 0.001) { session.edit { $0.setAudioSpeed(v) } }
+                    }
+                }
+                Text("The pitch stays the same. Its length on the timeline follows the speed.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let c = session.state.selectedVideo {
             EditPanel(title: "Speed") {
                 EditSeg(options: [(false, "Constant"), (true, "Curve")], selection: c.speedCurve != nil) { curve in
                     session.edit { $0.setSpeedPreset(curve ? .custom : nil) }
@@ -586,6 +929,10 @@ struct SpeedPanel: View {
                     SuiteSlider("Speed", value: log10(c.speed), range: -1...1, format: { String(format: "%.2g×", pow(10, $0)) }) { v in
                         session.edit { $0.setSpeed(pow(10, v)) }
                     }
+                    let srcLen = c.outSec - c.inSec
+                    SuiteSlider("Length", value: EditV2.clipLength(c), range: max(0.1, srcLen / 10)...max(0.2, srcLen * 10), format: { String(format: "%.1f s", $0) }) { v in
+                        session.edit { $0.setClipLength((v * 10).rounded() / 10) }
+                    }
                     FlowLayout(spacing: 6) {
                         ForEach([0.25, 0.5, 1, 1.5, 2, 4], id: \.self) { sp in
                             Chip(String(format: "%g×", sp), on: abs(c.speed - sp) < 0.001) { session.edit { $0.setSpeed(sp) } }
@@ -596,15 +943,6 @@ struct SpeedPanel: View {
                     Text(session.state.speedSummary ?? "").font(t.scale.caption.font).foregroundStyle(t.roles.ink)
                     Text("Keeps the pitch. Drag points; double-click to add one.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Smooth slow-mo").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
-                        Text("Fills in frames (AI) · Coming soon").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                    }
-                    Spacer()
-                    MToggle(isOn: .constant(false)).disabled(true).opacity(0.5)
-                        .accessibilityLabel("Smooth slow-mo, coming soon")
                 }
             }
         } else {

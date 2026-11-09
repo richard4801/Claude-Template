@@ -30,9 +30,18 @@ struct EditSuiteBin: View {
                         .padding(.bottom, Space.s4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s2) { importButton; recordButton }
-                    VStack(alignment: .leading, spacing: Space.s2) { importButton; recordButton }
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Space.s2) { importButton; linkButton; recordButton }
+                        VStack(alignment: .leading, spacing: Space.s2) { importButton; linkButton; recordButton }
+                    }
+                    // Design pass (owner-approved): hear the edit while recording a voice-over; off on the speakers by default.
+                    Toggle("Play the video while recording", isOn: $session.voPlayback)
+                        .toggleStyle(.checkbox)
+                        .font(t.scale.caption.font)
+                        .foregroundStyle(t.roles.ink2)
+                        .disabled(session.isRecordingVO)
+                        .help("Use headphones so the microphone doesn't pick up the video's sound")
                 }
                 .padding(Space.s4)
             }
@@ -40,8 +49,34 @@ struct EditSuiteBin: View {
         .background(t.roles.canvas)
     }
 
+    /// Import what the tab is for (Mac Edit audit 2026-11-08: it always imported a sound as a voice-over): videos and
+    /// pictures on Takes / Uploads, pictures on Stickers, songs on Music, voice-overs elsewhere.
     private var importButton: some View {
-        SuiteToolButton(title: "Import", icon: "upload-simple") { importAudio(kind: session.binTab == .music ? .music : .voice) }
+        SuiteToolButton(title: "Import", icon: "upload-simple") {
+            switch session.binTab {
+            case .takes, .uploads: importMedia(pictures: true, videos: true)
+            case .stickers: importMedia(pictures: true, videos: false)
+            case .music: importAudio(kind: .music)
+            default: importAudio(kind: .voice)
+            }
+        }
+        .help(importHelp)
+    }
+
+    private var importHelp: String {
+        switch session.binTab {
+        case .takes, .uploads: return "Add a video or picture from this Mac"
+        case .stickers: return "Add a picture from this Mac"
+        case .music: return "Add a song from this Mac"
+        default: return "Add a voice-over from this Mac"
+        }
+    }
+
+    /// Import a video from a link (WS6, owner 2026-11-08): the shared sheet; the clip lands in Uploads.
+    private var linkButton: some View {
+        SuiteToolButton(title: "From a link", icon: "link") { store.openLinkImport(.edit) }
+            .help("Import a video from a link")
+            .accessibilityLabel("Import a video from a link")
     }
 
     private var recordButton: some View {
@@ -90,10 +125,10 @@ struct EditSuiteBin: View {
     @ViewBuilder private var content: some View {
         switch session.binTab {
         case .takes: takes
-        case .uploads, .music: audioList
+        case .uploads: VStack(alignment: .leading, spacing: Space.s3) { mediaList; audioList }
+        case .music: audioList
         case .text: textList
-        case .stickers:
-            Note("Sticker packs are coming soon.")
+        case .stickers: stickers
         case .templates: templates
         }
     }
@@ -134,6 +169,8 @@ struct EditSuiteBin: View {
                     .contextMenu {
                         Button("Add to the end") { session.addTake(tk) }
                         Button("Add as overlay at the playhead") { session.addTake(tk, overlay: true) }
+                        Button("Add its sound at the playhead") { session.addTakeSound(tk) }
+                        Button("Replace the clip with this take") { session.replaceClip(with: tk) }
                     }
                     .help("Double-click to add to the end, right-click for an overlay")
                     .accessibilityElement(children: .ignore)
@@ -142,6 +179,78 @@ struct EditSuiteBin: View {
                 }
             }
         }
+    }
+
+    // MARK: Uploads (videos, pictures) and stickers
+
+    /// Videos and pictures brought in from this Mac, to add again.
+    private var mediaList: some View {
+        let media = session.project.assets.filter { ($0.kind == .video && $0.upload != nil) || $0.kind == .image }
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            if media.isEmpty { Note("Import videos and pictures from this Mac.") }
+            ForEach(media) { a in
+                HStack(spacing: Space.s2) {
+                    Ph(a.kind == .image ? "image" : "film-strip", 15).foregroundStyle(t.roles.ink2)
+                    Text(session.state.assetNames[a.id] ?? a.id).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    Spacer()
+                    if let d = a.durationSec, a.kind == .video { Text(EditSuite.clock(d)).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2) }
+                    if a.kind == .image {
+                        SuiteIconButton(systemName: "plus", label: "Add \(session.state.assetNames[a.id] ?? "picture") at the playhead", size: 28) {
+                            session.edit { $0.addImage(a) }
+                        }
+                    } else {
+                        SuiteIconButton(systemName: "plus", label: "Add \(session.state.assetNames[a.id] ?? "video") to the end", size: 28) {
+                            session.edit { $0.addVideo(a) }
+                        }
+                        SuiteIconButton(systemName: "stack", label: "Add \(session.state.assetNames[a.id] ?? "video") as an overlay", size: 28) {
+                            session.edit { $0.addVideo(a, overlay: true) }
+                        }
+                    }
+                }
+            }
+            SuiteToolButton(title: "Import video or picture", icon: "upload-simple") { importMedia(pictures: true, videos: true) }
+        }
+    }
+
+    /// Pictures (PNG with transparency works as a sticker) from this Mac; a sticker library needs licensed content
+    /// (plans/edit-parity.md, content licensing).
+    private var stickers: some View {
+        let pics = session.pictureAssets
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            Text("Add your own pictures and logos. PNGs keep their transparency. They go on the Stickers row at the playhead.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s2), GridItem(.flexible(), spacing: Space.s2)], spacing: Space.s2) {
+                ForEach(pics) { a in
+                    Button { session.edit { $0.addImage(a) } } label: {
+                        VStack(alignment: .leading, spacing: Space.s1) {
+                            Group {
+                                if let url = session.files[a.id], let img = NSImage(contentsOf: url) {
+                                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                                } else { Ph("image", 20).foregroundStyle(t.roles.ink2) }
+                            }
+                            .frame(height: 72).frame(maxWidth: .infinity)
+                            .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+                            Text(session.state.assetNames[a.id] ?? "Picture").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add sticker \(session.state.assetNames[a.id] ?? "picture")")
+                }
+            }
+            SuiteToolButton(title: "Import picture", icon: "image") { importMedia(pictures: true, videos: false) }
+        }
+    }
+
+    private func importMedia(pictures: Bool, videos: Bool) {
+        let panel = NSOpenPanel()
+        var types: [UTType] = []
+        if videos { types += [.mpeg4Movie, .quickTimeMovie] }
+        if pictures { types += [.png, .jpeg, .heic, .webP] }
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = false
+        panel.message = videos ? "Choose a video or a picture" : "Choose a picture"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await session.importMedia(url) }
     }
 
     // MARK: Uploads / music

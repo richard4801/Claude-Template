@@ -81,7 +81,7 @@ fun CreditsScreen() {
                         OwnerTokens(w, s.balance, live.studioBalance ?: studio)
                         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                             Heading("Add a top-up")
-                            Caption("Record money you loaded into the studio, for example after paying the engines. Every render and photo is spent from it.")
+                            Caption("Record money you loaded into the studio, for example after paying for the models. Every render and photo is spent from it.")
                             Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                                 Labeled("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal, placeholder = "20", calm = true) }
                                 Labeled("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "Card, 4 Nov", calm = true) }

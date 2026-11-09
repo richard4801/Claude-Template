@@ -49,6 +49,42 @@ fun propAt(keyframes: Keyframes?, prop: KfProp, fallback: Double, t: Double): Do
     return if (!k.isNullOrEmpty()) keyframeValue(k, t) else fallback
 }
 
+private fun keyed(k: Keyframes?, p: KfProp) = !k?.get(p).isNullOrEmpty()
+private fun at(k: Keyframes?, p: KfProp, static: Double, t: Double) = Math.round(propAt(k, p, static, t) * 1e6) / 1e6
+
+/** The mask at item-local [t]: each keyed mask field ([KfProp.MASK]) at its keyframes' value there (model.ts `maskAt`). */
+fun maskAt(mask: Mask?, keyframes: Keyframes?, t: Double): Mask? {
+    if (mask == null || KfProp.MASK.none { keyed(keyframes, it) }) return mask
+    fun v(p: KfProp, static: Double?, d: Double) = if (keyed(keyframes, p)) at(keyframes, p, static ?: d, t) else static
+    return mask.copy(x = v(KfProp.MASK_X, mask.x, 0.5), y = v(KfProp.MASK_Y, mask.y, 0.5), width = v(KfProp.MASK_WIDTH, mask.width, 0.5),
+        height = v(KfProp.MASK_HEIGHT, mask.height, 0.5), rotation = v(KfProp.MASK_ROTATION, mask.rotation, 0.0), feather = v(KfProp.MASK_FEATHER, mask.feather, 0.1))
+}
+
+/**
+ * The look at item-local [t]: each keyed finishing amount ([KfProp.LOOK]) at its keyframes' value there; a keyed effect
+ * the look lacks is added with only its amount (a leak as warm). model.ts `lookAt`.
+ */
+fun lookAt(look: Look?, keyframes: Keyframes?, t: Double): Look? {
+    if (KfProp.LOOK.none { keyed(keyframes, it) }) return look
+    var l = look ?: Look()
+    if (keyed(keyframes, KfProp.VIGNETTE)) l = l.copy(vignette = (l.vignette ?: Vignette(0.0)).let { it.copy(amount = at(keyframes, KfProp.VIGNETTE, it.amount, t)) })
+    if (keyed(keyframes, KfProp.GRAIN)) l = l.copy(grain = (l.grain ?: Grain(0.0)).let { it.copy(amount = at(keyframes, KfProp.GRAIN, it.amount, t)) })
+    if (keyed(keyframes, KfProp.LEAK)) l = l.copy(leak = (l.leak ?: Leak(LeakKind.WARM, 0.0)).let { it.copy(amount = at(keyframes, KfProp.LEAK, it.amount, t)) })
+    return l
+}
+
+/** Whether [keyframes] key any colour property ([KfProp.COLOR]). */
+fun hasColorKeys(keyframes: Keyframes?): Boolean = KfProp.COLOR.any { !keyframes?.get(it).isNullOrEmpty() }
+
+/** The adjust at item-local [t]: each keyed colour property at its keyframes' value there (model.ts `adjustAt`). */
+fun adjustAt(adjust: Adjust?, keyframes: Keyframes?, t: Double): Adjust? {
+    if (!hasColorKeys(keyframes)) return adjust
+    val a = adjust ?: Adjust()
+    fun v(p: KfProp, static: Double?) = if (keyframes?.get(p).isNullOrEmpty()) static else Math.round(propAt(keyframes, p, static ?: 0.0, t) * 1e6) / 1e6
+    return a.copy(exposure = v(KfProp.EXPOSURE, a.exposure), contrast = v(KfProp.CONTRAST, a.contrast), saturation = v(KfProp.SATURATION, a.saturation),
+        temperature = v(KfProp.TEMPERATURE, a.temperature), tint = v(KfProp.TINT, a.tint))
+}
+
 // ------------------------------------------------------------------ timeline
 /** Speed at [x] (0–1) of a curve: smoothstep between points in log speed. */
 fun curveSpeed(c: SpeedCurve, x: Double): Double {
@@ -75,14 +111,17 @@ fun speedPieces(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve
     return List(n) { i -> Piece(r6(inSec + i * len), r6(if (i == n - 1) outSec else inSec + (i + 1) * len), r6(curveSpeed(curve, (i + 0.5) / n))) }
 }
 
-fun speedPieces(c: MediaClip): List<Piece> = speedPieces(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
+fun speedPieces(c: MediaClip): List<Piece> = (c as? VideoClip)?.holdSec?.let { listOf(Piece(c.inSec, c.inSec, 1.0)) }
+    ?: speedPieces(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 fun clipLength(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve? = null): Double =
     if (curve != null) speedPieces(inSec, outSec, speed, curve).sumOf { (it.outSec - it.inSec) / it.speed } else (outSec - inSec) / (speed ?: 1.0)
-fun clipLength(c: MediaClip): Double = clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
+/** A hold (freeze frame) lasts holdSec whatever its source range. */
+fun clipLength(c: MediaClip): Double = (c as? VideoClip)?.holdSec ?: clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 /** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */
 fun clipTimeAt(c: MediaClip, sec: Double): Double {
+    if ((c as? VideoClip)?.holdSec != null) return 0.0
     var acc = 0.0
     for (p in speedPieces(c)) {
         if (sec <= p.outSec) return acc + max(0.0, sec - p.inSec) / p.speed
@@ -93,6 +132,7 @@ fun clipTimeAt(c: MediaClip, sec: Double): Double {
 
 /** The source time of the clip at [local] seconds from its start on the timeline (the inverse of [clipTimeAt]). */
 fun clipSourceAt(c: MediaClip, local: Double): Double {
+    if ((c as? VideoClip)?.holdSec != null) return c.inSec
     var acc = 0.0
     for (p in speedPieces(c)) {
         val len = (p.outSec - p.inSec) / p.speed
@@ -213,6 +253,8 @@ fun applyCuts(p: EditProject, assetId: String, cuts: List<Range>): EditProject {
     val items = ArrayList<VideoClip>()
     for (it in p.mainClips) {
         if (it.asset != assetId) { items += it; continue }
+        // A hold (freeze frame) has no source span: it goes when a cut covers its frame, else it stays as it is.
+        if (it.holdSec != null) { if (rs.none { r -> it.inSec >= r.startSec && it.inSec < r.endSec }) items += it; continue }
         var pieces = listOf(Range(it.inSec, it.outSec))
         for (r in rs) {
             pieces = pieces.flatMap { pc ->
@@ -253,7 +295,7 @@ fun captionWords(p: EditProject): List<TimedWord> {
     val spans = timeline(p)
     val out = ArrayList<TimedWord>()
     p.mainClips.forEachIndexed { i, c ->
-        if (c.asset != ct.asset) return@forEachIndexed
+        if (c.asset != ct.asset || c.holdSec != null) return@forEachIndexed // a hold has no speech
         val s = spans[i]
         ct.words.forEachIndexed { idx, w ->
             val mid = (w.startSec + w.endSec) / 2
@@ -365,6 +407,23 @@ fun animState(durationSec: Double, animIn: Anim?, animOut: Anim?, text: String?,
     return AnimState(r6(opacity), r6(scale), r6(dy), chars)
 }
 
+/** A loop at item-local [t] (model.ts `loopState`): scale ×, rotation + (degrees), dy + (canvas heights), opacity ×. */
+data class LoopState(val scale: Double = 1.0, val rotation: Double = 0.0, val dy: Double = 0.0, val opacity: Double = 1.0)
+
+fun loopState(loop: AnimLoop?, t: Double): LoopState {
+    if (loop == null || loop.periodSec <= 0) return LoopState()
+    val a = clamp(loop.amount ?: 0.5, 0.0, 1.0); val ph = 2 * Math.PI * t / loop.periodSec; val wave = 0.5 - 0.5 * kotlin.math.cos(ph)
+    fun r6(v: Double) = Math.round(v * 1e6) / 1e6
+    val s = when (loop.kind) {
+        LoopKind.PULSE -> LoopState(scale = 1 + 0.12 * a * wave)
+        LoopKind.SWAY -> LoopState(rotation = 8 * a * kotlin.math.sin(ph))
+        LoopKind.FLOAT -> LoopState(dy = -0.03 * a * kotlin.math.sin(ph))
+        LoopKind.SPIN -> LoopState(rotation = (360 * t / loop.periodSec) % 360)
+        LoopKind.BLINK -> LoopState(opacity = 1 - a * wave)
+    }
+    return LoopState(r6(s.scale), r6(s.rotation), r6(s.dy), r6(s.opacity))
+}
+
 fun animState(item: ImageItem, t: Double) = animState(item.durationSec, item.animIn, item.animOut, null, t)
 fun animState(item: TextItem, t: Double) = animState(item.durationSec, item.animIn, item.animOut, item.text, t)
 
@@ -415,7 +474,8 @@ fun effectiveAdjust(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPre
 }
 
 /**
- * One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint), row-major
+ * One 3×4 affine RGB matrix for the item's look (exposure → temperature → green/magenta tint → contrast → saturation →
+ * preset tint), row-major
  * `[r0 r1 r2 r3, g0.., b0..]`, out = M · (r, g, b, 1) on 0–1 values.
  */
 fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset> = Presets.FILTERS): List<Double> {
@@ -426,6 +486,8 @@ fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset>
     m = mul(doubleArrayOf(ex, 0.0, 0.0, 0.0, 0.0, ex, 0.0, 0.0, 0.0, 0.0, ex, 0.0), m)
     val k = a.temperature!!
     m = mul(doubleArrayOf(1 + 0.1 * k, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1 - 0.1 * k, 0.0), m)
+    val g = clamp(adjust?.tint ?: 0.0, -1.0, 1.0)
+    if (g != 0.0) m = mul(doubleArrayOf(1 + 0.05 * g, 0.0, 0.0, 0.0, 0.0, 1 - 0.1 * g, 0.0, 0.0, 0.0, 0.0, 1 + 0.05 * g, 0.0), m)
     val c = 1 + a.contrast!!; val off = 0.5 * (1 - c)
     m = mul(doubleArrayOf(c, 0.0, 0.0, off, 0.0, c, 0.0, off, 0.0, 0.0, c, off), m)
     val s = 1 + a.saturation!!
@@ -513,7 +575,7 @@ fun duckRegions(p: EditProject, duck: Duck): List<Range> {
 
 /** Base gain of a clip at timeline t, without ducking (volume, keyframes, fades, transition crossfade). */
 private fun baseGain(p: EditProject, track: Track, item: MediaClip, t: Double, spans: List<MainSpan>): Double {
-    if (p.mute == true || track.muted == true || item.muted == true) return 0.0
+    if (p.mute == true || track.muted == true || item.muted == true || (item as? VideoClip)?.holdSec != null) return 0.0 // a hold is silent
     val span = itemSpan(p, track, item)
     if (t < span.startSec - 1e-9 || t > span.endSec + 1e-9) return 0.0
     val local = t - span.startSec; val len = span.endSec - span.startSec

@@ -138,4 +138,20 @@ class LookEffectsTest {
         val bw = thumbs.getValue("bw-classic").getPixel(85, 48)
         assertEquals(android.graphics.Color.red(bw).toDouble(), android.graphics.Color.blue(bw).toDouble(), 3.0)
     }
+
+    @Test fun colourKeyframesRunTheMatrixPerFrameBeforeTheBakedLook() {
+        val timed = { us: Long -> listOf(1.0 + us / 1e7, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0) }
+        val st = LookEffects.stages(null, Look(lut = "pack:film-gold"), library.packLut("film-gold"), 30.0, timed = timed)
+        assertTrue(st[0] is Stage.TimedMatrix)
+        assertTrue(st[1] is Stage.BakedLut)
+        assertEquals(1.5, (st[0] as Stage.TimedMatrix).at(5_000_000)[0], 1e-9)
+        // No look: the timed matrix alone.
+        assertEquals(1, LookEffects.stages(null, null, null, 30.0, timed = timed).size)
+    }
+
+    @Test fun lookKeyframesKeepTheFinishingPassEvenAtZero() {
+        val at = { _: Long -> Look() }
+        val st = LookEffects.stages(null, null, null, 30.0, finishAt = at)
+        assertEquals(1, st.size); assertTrue(st[0] is Stage.Finish && (st[0] as Stage.Finish).at != null)
+    }
 }

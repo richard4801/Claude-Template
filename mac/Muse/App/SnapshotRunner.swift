@@ -31,6 +31,7 @@ enum SnapshotRunner {
         var recreateFrames: [String: CGRect] = [:]
         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
         var claudeTab: Int?
+<<<<<<< HEAD
         /// Claude chat review (SnapshotRunner+Chat.swift): every chat shows the sample thread (ClaudeChatSample)…
         var chatSample = false
         /// …mid-reply (a tool running, text still arriving)…
@@ -41,6 +42,10 @@ enum SnapshotRunner {
         var chatAttach = false
         /// Bumped to put the caret in the chat's field.
         var chatFocusTick = 0
+=======
+        /// Settings shows the proposed redesign's mock in this state (SnapshotRunner+Settings.swift).
+        var settingsMock: SettingsMockState?
+>>>>>>> origin/claude/ecstatic-rubin-2egjfb
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
@@ -94,6 +99,7 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(4))
             // The composer screens need the suite's catalog (the demo draft picks its camera, light and look from it).
             await store.loadSuite()
+            await store.loadEngines()   // the owner's models per purpose (WS6)
             let shots: [(String, @MainActor () -> Void)] = [
                 ("home", { store.go(.home) }),
                 ("library", { store.go(.gallery) }),
@@ -127,6 +133,15 @@ enum SnapshotRunner {
                     store.suite.composer.tokens = PromptTokens(); store.unselectPresetOnEmptyPrompt() }),
                 ("composer_photo_preset", { store.openPhoto(model: SampleData.demo)
                     if let tpl = store.templates.first { store.choosePhotoPreset(tpl) } }),
+                // The owner's model picker (owner 2026-11-08): a model pinned (its name on the pill, Length and Shape in its
+                // limits) and the pill's list.
+                ("composer_model", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store) }),
+                ("composer_model_list", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store); state.overlay = "model_picker" }),
+                // Swap and Extend: the generic Model pill's list for that purpose (WS6, "pick the model everywhere").
+                ("composer_swap_model_list", { store.openTool(.swap); state.overlay = "engine_list:swap" }),
+                ("composer_extend_model_list", { store.openTool(.extend); state.overlay = "engine_list:extend" }),
+                // Photo: the owner's photo model list.
+                ("composer_photo_model_list", { store.openPhoto(model: SampleData.demo); state.overlay = "model_picker" }),
                 ("composer_photo_preset_cleared", { store.openPhoto(model: SampleData.demo)
                     if let tpl = store.templates.first { store.choosePhotoPreset(tpl) }
                     store.suite.composer.tokens = PromptTokens(); store.unselectPresetOnEmptyPrompt() }),
@@ -157,8 +172,12 @@ enum SnapshotRunner {
             store.suite.picker = nil
             state.overlay = nil
             store.themeID = .a
+            await settingsMockShots(store, dir: dir)
+            await outfitShots(store, dir: dir)   // Outfits: the new outfit's angles full size (owner 2026-11-08)
+            await linkImportShots(store, dir: dir)   // Import a video from a link (owner 2026-11-08)   // Settings redesign (owner 2026-11-08): before and the proposed mock
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+            await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
@@ -179,6 +198,8 @@ enum SnapshotRunner {
             list.first { o in words.allSatisfy { o.label.localizedCaseInsensitiveContains($0) } }?.id
         }
         var d = store.suite.composer
+        d.engineModel = nil   // Auto, unless a shot pins a model after this (pinDemoModel)
+        d.resolution = nil
         d.collapsed = nil
         d.directed = nil
         d.aspect = "16:9"
@@ -197,6 +218,13 @@ enum SnapshotRunner {
         store.setComposerCharacter(store.character(SampleData.demo))
     }
 
+    /// Veo 3.1 Lite at 720p (4, 6 or 8 s; 9:16 and 16:9): the demo draft's 8 s and 16:9 fit it.
+    static func pinDemoModel(_ store: AppStore) {
+        if let m = ComposerModelPicker.engines(store.suite.catalog, store.suite.settings).first(where: { $0.model == "veo-3.1-lite" }) {
+            store.pinComposerModel(m, resolution: "720p")
+        }
+    }
+
     // MARK: Fit check (CI): Generate is fully on screen at the common Mac window sizes (owner fix A2)
 
     /// Writes `fit-check.txt` and `mac_<theme>_<screen>_<w>x<h>.png`: one line per tool and size, `FITS` when Generate
@@ -213,6 +241,8 @@ enum SnapshotRunner {
                 try? await Task.sleep(for: .seconds(0.4))
                 store.openTool(.shot); store.suite.composer.tokens = PromptTokens(); store.suite.composer.collapsed = nil } }),
             ("composer_photo", { store.openPhoto(model: SampleData.demo) }),
+            // The owner's model picker: a pinned model's name on the Model pill stays whole at every size.
+            ("composer_model", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store) }),
             // Regression (the old composer): Photo drawn, then Shot and the Style picker in one tick (PANEL line).
             ("composer_rig_sametick", { store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
         ]
@@ -741,6 +771,9 @@ enum SnapshotRunner {
             store.closeRecreate()
             try? await Task.sleep(for: .seconds(0.5))
         }
+        // The lanes on a 29.7 s reference with 7 uneven shots (owner test 2026-11-08), at 1280 and 1470 wide.
+        let laneLines = await recreateLanesShots(store, dir: dir, window: w)
+        lines.append(contentsOf: laneLines)
         // The swatches (owner note 1): the analysis's palette, then the strip the Recipe shows.
         if let ref = try? await FakeRecreateAPI().listReferences().first, let raw = ref.recipe?.grade?.swatches {
             let soft = RecreateSwatches.soften(raw)

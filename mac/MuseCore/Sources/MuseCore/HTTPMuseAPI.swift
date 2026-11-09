@@ -255,6 +255,11 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func createModel(_ req: CreateModelRequest) async throws -> MuseModel { try await call("POST", "v1/models", req) }
     public func setSlot(modelId: String, slot: String, _ req: SetSlotRequest) async throws -> MuseModel { try await call("PUT", "v1/models/\(modelId)/slots/\(slot)", req) }
     public func fillAngles(modelId: String) async throws -> FillAnglesResponse { try await call("POST", "v1/models/\(modelId)/fill-angles", Empty()) }
+    /// Owner only (WS13): the sheet's missing angles on this image model.
+    public func fillAngles(modelId: String, imageModel: String) async throws -> FillAnglesResponse {
+        struct Body: Encodable { var imageModel: String }
+        return try await call("POST", "v1/models/\(modelId)/fill-angles", Body(imageModel: imageModel))
+    }
     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
     public func saveOutfit(outfitId: String) async throws -> Outfit { try await call("POST", "v1/outfits/\(outfitId)/save", Empty()) }
@@ -278,14 +283,14 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         progress?(0)
         if let file, let clip: Clip = try await presigned(kind: "clip", contentType: HTTPMuseAPI.videoType(file), body: .file(file), meta: meta, progress: progress) {
             progress?(1)
-            return clip
+            return absolutize(clip)
         }
         var form = Multipart()
         form.addField("meta", value: try encoder.encode(meta), mime: "application/json")
         if let file { form.addFile("file", filename: file.lastPathComponent, mime: HTTPMuseAPI.videoType(file), data: try Data(contentsOf: file)) }
         let clip: Clip = try decode(try await send(request("POST", "v1/uploads/clips", body: form.finish(), contentType: form.contentType)))
         progress?(1)
-        return clip
+        return absolutize(clip)
     }
 
     static func videoType(_ file: URL) -> String {
@@ -350,6 +355,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func startEditorJob(_ req: EditorJobRequest) async throws -> EditorJob { try await call("POST", "v1/editor/jobs", req) }
     public func editorJob(id: String) async throws -> EditorJob { try await call("GET", "v1/editor/jobs/\(Self.pathKey(id))") }
     public func cancelEditorJob(id: String) async throws { let _: StateReply = try await call("DELETE", "v1/editor/jobs/\(Self.pathKey(id))") }
+    public func editKits() async throws -> [EditKit] { let r: EditKitList = try await call("GET", "v1/editor/kits"); return r.kits }
+    public func saveEditKit(name: String, kit: EditV2.StyleKit) async throws -> EditKit { try await call("POST", "v1/editor/kits", EditKitBody(name: name, kit: kit)) }
+    public func updateEditKit(id: String, name: String?, kit: EditV2.StyleKit?) async throws -> EditKit {
+        try await call("PATCH", "v1/editor/kits/\(Self.pathKey(id))", EditKitBody(name: name, kit: kit))
+    }
+    public func deleteEditKit(id: String) async throws { _ = try await send(request("DELETE", "v1/editor/kits/\(Self.pathKey(id))")) }
     public func validateLut(uploadId: String) async throws -> LutValidation { try await call("POST", "v1/editor/luts/validate", LutValidateBody(uploadId: uploadId)) }
 
     public func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String {
@@ -655,6 +666,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func listArchivedModels() async throws -> [MuseModel] { (try await call("GET", "v1/models?archived=true") as [MuseModel]).map(absolutize) }
 
     func absolutize(_ r: ImageRef?) -> ImageRef? { r.map(absolutize) }
+    /// A clip's thumb ("/uploads/…" for imports) made absolute, so the Swap slot and canvas can show it.
+    public func absolutize(_ c: Clip) -> Clip {
+        var x = c
+        x.thumb = absolutize(c.thumb)
+        return x
+    }
     func absolutize(_ s: SheetSlot) -> SheetSlot {
         var s = s
         s.image = absolutize(s.image)

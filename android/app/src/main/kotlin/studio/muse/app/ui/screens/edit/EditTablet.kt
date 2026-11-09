@@ -184,11 +184,13 @@ private fun SafeAreaRow(ui: EditSuiteUi, act: (EditAction) -> Unit) {
 private fun TabletTransport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = Pad), verticalAlignment = Alignment.CenterVertically) {
-        T("${suiteTime(ui.playheadSec)} / ${suiteTime(ui.duration)}", m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
+        T("${playheadTime(ui.playheadSec)} / ${playheadTime(ui.duration)}", m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
         Icon48("rewind", "Go to start", enabled = ui.ready) { act(EditAction.Seek(0.0)) }
+        Icon48("caret-left", "Previous frame", enabled = ui.project != null) { act(EditAction.StepFrame(-1)) }
         Box(Modifier.size(48.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play"; role = Role.Button }, contentAlignment = Alignment.Center) {
             Box(Modifier.size(40.dp).clip(CircleShape).background(m.t.ink), contentAlignment = Alignment.Center) { EIc(if (ui.playing) "pause" else "play", 18.dp, m.t.bg) }
         }
+        Icon48("caret-right", "Next frame", enabled = ui.project != null) { act(EditAction.StepFrame(1)) }
         Icon48("fast-forward", "Go to end", enabled = ui.ready) { act(EditAction.Seek(ui.duration)) }
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             if (ui.session != null) Icon48("clock", "History", lit = ui.panel == Panel.HISTORY) {

@@ -82,6 +82,7 @@ private struct Validator {
         try num("edits.canvas.height", cv.height, 16, 4096, optional: false)
         try num("edits.canvas.fps", cv.fps, 1, 120, optional: false)
         try color("edits.canvas.background", cv.background)
+        // Wave 1: canvas.fill is typed (color / blur): anything else fails decoding.
         if p.assets.count > E.maxAssets { throw bad("edits.assets", "must be a list of at most \(E.maxAssets)") }
         for (i, a) in p.assets.enumerated() {
             let f = "edits.assets.\(i)"
@@ -149,6 +150,12 @@ private struct Validator {
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.video],
                                  voice: c.voiceEffect)
                     try num("\(g).speed", c.speed, E.minSpeed, E.maxSpeed, optional: false)
+                    // Wave 1: a freeze frame plays at 1× without a speed curve; blend modes on overlay tracks only.
+                    if let h = c.holdSec {
+                        try num("\(g).holdSec", h, E.holdMinSec, E.holdMaxSec, optional: false)
+                        if c.speed != 1 || c.speedCurve != nil { throw bad("\(g).holdSec", "a freeze frame plays at 1× without a speed curve") }
+                    }
+                    if c.blend != nil, t.kind != .video { throw bad("\(g).blend", "only on overlay tracks (video, image)") }
                     if let sc = c.speedCurve {
                         if !E.SpeedPreset.all.contains(sc.preset) { throw bad("\(g).speedCurve.preset", "unknown preset") }
                         if sc.points.count < 2 || sc.points.count > 16 { throw bad("\(g).speedCurve.points", "2–16 points") }
@@ -162,13 +169,17 @@ private struct Validator {
                     }
                     let len = E.clipLength(c)
                     try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look, mask: c.mask)
-                    try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume])
+                    try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: c.mask != nil)
                     if let aa = c.audioAsset {
                         if let a = assets[aa], a.kind == .video || a.kind == .audio {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
                     }
                     if let m = c.alphaMatte {
                         if let a = assets[m.asset], a.kind == .video {} else { throw bad("\(g).alphaMatte.asset", "must be a video asset") }
                     }
+                    try anim("\(g).animIn", c.animIn, text: false)
+                    try anim("\(g).animOut", c.animOut, text: false)
+                    if c.animLoop != nil && t.kind == .main { throw bad("\(g).animLoop", "loop animations are for overlays, images and text") }
+                    try loop("\(g).animLoop", c.animLoop)
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
                         try num("\(g).chroma.similarity", ck.similarity, 0, 1)
@@ -196,9 +207,10 @@ private struct Validator {
                     try num("\(g).durationSec", im.durationSec, E.minItemSec, 600, optional: false)
                     try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter, look: im.look,
                                mask: im.mask)
-                    try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
+                    try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: im.mask != nil)
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
+                    try loop("\(g).animLoop", im.animLoop)
                 case (.text, .text(let tx)):
                     let n = tx.text.utf16.count
                     if n < 1 || n > E.maxText { throw bad("\(g).text", "must be 1–\(E.maxText) characters") }
@@ -210,11 +222,13 @@ private struct Validator {
                     try kfs("\(g).keyframes", tx.keyframes, tx.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
                     try anim("\(g).animIn", tx.animIn, text: true)
                     try anim("\(g).animOut", tx.animOut, text: true)
+                    try loop("\(g).animLoop", tx.animLoop)
                 case (.music, .audio(let c)), (.voice, .audio(let c)), (.sfx, .audio(let c)):
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video],
                                  voice: c.voiceEffect)
                     try num("\(g).startSec", c.startSec, 0, 600, optional: false)
-                    if let s = c.speed, s != 1 { throw bad("\(g).speed", "audio clips play at 1×") }
+                    // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept.
+                    try num("\(g).speed", c.speed, 0.5, 2)
                     try kfs("\(g).keyframes", c.keyframes, E.clipLength(c), allowed: [.volume])
                     if let b = c.beats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).beats", "must be up to 2000 times") }
                     if let b = c.strongBeats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).strongBeats", "must be up to 2000 times") }
@@ -267,6 +281,7 @@ private struct Validator {
             try num("\(f).adjust.contrast", a.contrast, -1, 1)
             try num("\(f).adjust.saturation", a.saturation, -1, 1)
             try num("\(f).adjust.temperature", a.temperature, -1, 1)
+            try num("\(f).adjust.tint", a.tint, -1, 1)
             try num("\(f).adjust.highlights", a.highlights, -1, 1)
             try num("\(f).adjust.shadows", a.shadows, -1, 1)
         }
@@ -289,10 +304,11 @@ private struct Validator {
         }
     }
 
-    func kfs(_ f: String, _ k: EditV2.Keyframes?, _ len: Double, allowed: [EditV2.KfProp]) throws {
+    func kfs(_ f: String, _ k: EditV2.Keyframes?, _ len: Double, allowed: [EditV2.KfProp], hasMask: Bool = false) throws {
         guard let k else { return }
         for (prop, list) in k.present {
             if !allowed.contains(prop) { throw bad("\(f).\(prop.rawValue)", "is not a keyframe property here") }
+            if prop.isMask && !hasMask { throw bad("\(f).\(prop.rawValue)", "needs a mask") }
             if list.count > E.maxKeyframes { throw bad("\(f).\(prop.rawValue)", "at most \(E.maxKeyframes) keyframes") }
             var prev = -Double.infinity
             let range: (Double, Double)
@@ -302,6 +318,11 @@ private struct Validator {
             case .rotation: range = (-3600, 3600)
             case .opacity: range = (0, 1)
             case .volume: range = (0, 2)
+            case .exposure, .contrast, .saturation, .temperature, .tint, .vignette: range = (-1, 1)
+            case .maskX, .maskY: range = (-1, 2)
+            case .maskWidth, .maskHeight: range = (0.01, 3)
+            case .maskRotation: range = (-360, 360)
+            case .maskFeather, .grain, .leak: range = (0, 1)
             }
             for (j, kf) in list.enumerated() {
                 let g = "\(f).\(prop.rawValue).\(j)"
@@ -311,6 +332,13 @@ private struct Validator {
                 try num("\(g).v", kf.v, range.0, range.1, optional: false)
             }
         }
+    }
+
+    func loop(_ f: String, _ l: EditV2.AnimLoop?) throws {
+        guard let l else { return }
+        if !EditV2.LoopKind.all.contains(l.kind) { throw bad("\(f).kind", "unknown loop animation") }
+        try num("\(f).periodSec", l.periodSec, 0.2, 5, optional: false)
+        if let a = l.amount { try num("\(f).amount", a, 0, 1, optional: false) }
     }
 
     func anim(_ f: String, _ a: EditV2.Anim?, text: Bool) throws {

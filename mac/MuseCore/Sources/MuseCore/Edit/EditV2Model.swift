@@ -18,7 +18,22 @@ extension EditV2 {
         public init(t: Double, v: Double, ease: Ease? = nil) { self.t = t; self.v = v; self.ease = ease }
     }
 
-    public enum KfProp: String, Codable, Hashable, Sendable, CaseIterable { case x, y, scale, rotation, opacity, volume }
+    public enum KfProp: String, Codable, Hashable, Sendable, CaseIterable {
+        case x, y, scale, rotation, opacity, volume
+        /// Colour keyframes (contract, WS8 c10e398): replace the adjust field's static value over time (`adjustAt`).
+        case exposure, contrast, saturation, temperature, tint
+        /// Mask keyframes (contract, WS8 bfa44a6): replace the mask's field over time (`maskAt`); only on items with a mask.
+        case maskX, maskY, maskWidth, maskHeight, maskRotation, maskFeather
+        /// Look keyframes: the finishing effects' amounts over time (`lookAt`).
+        case vignette, grain, leak
+        /// The colour properties, in the contract's order (COLOR_KF_PROPS).
+        public static let color: [KfProp] = [.exposure, .contrast, .saturation, .temperature, .tint]
+        public static let mask: [KfProp] = [.maskX, .maskY, .maskWidth, .maskHeight, .maskRotation, .maskFeather]
+        public static let look: [KfProp] = [.vignette, .grain, .leak]
+        public var isColor: Bool { KfProp.color.contains(self) }
+        public var isMask: Bool { KfProp.mask.contains(self) }
+        public var isLook: Bool { KfProp.look.contains(self) }
+    }
 
     public struct Keyframes: Codable, Hashable, Sendable {
         public var x: [Keyframe]?
@@ -27,6 +42,20 @@ extension EditV2 {
         public var rotation: [Keyframe]?
         public var opacity: [Keyframe]?
         public var volume: [Keyframe]?
+        public var exposure: [Keyframe]?
+        public var contrast: [Keyframe]?
+        public var saturation: [Keyframe]?
+        public var temperature: [Keyframe]?
+        public var tint: [Keyframe]?
+        public var maskX: [Keyframe]?
+        public var maskY: [Keyframe]?
+        public var maskWidth: [Keyframe]?
+        public var maskHeight: [Keyframe]?
+        public var maskRotation: [Keyframe]?
+        public var maskFeather: [Keyframe]?
+        public var vignette: [Keyframe]?
+        public var grain: [Keyframe]?
+        public var leak: [Keyframe]?
         public init(x: [Keyframe]? = nil, y: [Keyframe]? = nil, scale: [Keyframe]? = nil, rotation: [Keyframe]? = nil,
                     opacity: [Keyframe]? = nil, volume: [Keyframe]? = nil) {
             self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.opacity = opacity; self.volume = volume
@@ -40,6 +69,20 @@ extension EditV2 {
                 case .rotation: return rotation
                 case .opacity: return opacity
                 case .volume: return volume
+                case .exposure: return exposure
+                case .contrast: return contrast
+                case .saturation: return saturation
+                case .temperature: return temperature
+                case .tint: return tint
+                case .maskX: return maskX
+                case .maskY: return maskY
+                case .maskWidth: return maskWidth
+                case .maskHeight: return maskHeight
+                case .maskRotation: return maskRotation
+                case .maskFeather: return maskFeather
+                case .vignette: return vignette
+                case .grain: return grain
+                case .leak: return leak
                 }
             }
             set {
@@ -50,6 +93,20 @@ extension EditV2 {
                 case .rotation: rotation = newValue
                 case .opacity: opacity = newValue
                 case .volume: volume = newValue
+                case .exposure: exposure = newValue
+                case .contrast: contrast = newValue
+                case .saturation: saturation = newValue
+                case .temperature: temperature = newValue
+                case .tint: tint = newValue
+                case .maskX: maskX = newValue
+                case .maskY: maskY = newValue
+                case .maskWidth: maskWidth = newValue
+                case .maskHeight: maskHeight = newValue
+                case .maskRotation: maskRotation = newValue
+                case .maskFeather: maskFeather = newValue
+                case .vignette: vignette = newValue
+                case .grain: grain = newValue
+                case .leak: leak = newValue
                 }
             }
         }
@@ -63,10 +120,21 @@ extension EditV2 {
         public var y: Double?
         public var scale: Double?
         public var rotation: Double?
-        public init(x: Double? = nil, y: Double? = nil, scale: Double? = nil, rotation: Double? = nil) {
-            self.x = x; self.y = y; self.scale = scale; self.rotation = rotation
+        /// Wave 1 (mirror): the picture mirrored about its own centre, after the crop and before scale and rotation. Only true is written.
+        public var flipX: Bool?
+        public var flipY: Bool?
+        public init(x: Double? = nil, y: Double? = nil, scale: Double? = nil, rotation: Double? = nil, flipX: Bool? = nil, flipY: Bool? = nil) {
+            self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.flipX = flipX; self.flipY = flipY
         }
     }
+
+    /// Wave 1: how a picture on an overlay track combines with the layers below it (`blendPixel`).
+    public enum BlendMode: String, Codable, Hashable, Sendable, CaseIterable {
+        case normal, multiply, screen, overlay, softLight, darken, lighten, add
+    }
+
+    /// Wave 1: what shows where a contain-fitted main clip leaves the frame empty.
+    public enum CanvasFill: String, Codable, Hashable, Sendable { case color, blur }
 
     public struct Crop: Codable, Hashable, Sendable {
         public var left: Double?
@@ -86,10 +154,35 @@ extension EditV2 {
         /// Edit suite: tone after the colour matrix (`toneAdjust`), −1…1.
         public var highlights: Double?
         public var shadows: Double?
+        /// Parity: green (−1) ↔ magenta (+1), right after temperature in the colour matrix.
+        public var tint: Double?
         public init(exposure: Double? = nil, contrast: Double? = nil, saturation: Double? = nil, temperature: Double? = nil,
-                    highlights: Double? = nil, shadows: Double? = nil) {
+                    highlights: Double? = nil, shadows: Double? = nil, tint: Double? = nil) {
             self.exposure = exposure; self.contrast = contrast; self.saturation = saturation; self.temperature = temperature
-            self.highlights = highlights; self.shadows = shadows
+            self.highlights = highlights; self.shadows = shadows; self.tint = tint
+        }
+        /// A colour keyframe property's field (nil for the other KfProps).
+        public subscript(_ p: KfProp) -> Double? {
+            get {
+                switch p {
+                case .exposure: return exposure
+                case .contrast: return contrast
+                case .saturation: return saturation
+                case .temperature: return temperature
+                case .tint: return tint
+                default: return nil
+                }
+            }
+            set {
+                switch p {
+                case .exposure: exposure = newValue
+                case .contrast: contrast = newValue
+                case .saturation: saturation = newValue
+                case .temperature: temperature = newValue
+                case .tint: tint = newValue
+                default: break
+                }
+            }
         }
     }
 
@@ -197,6 +290,27 @@ extension EditV2 {
         public init(kind: AnimKind, durationSec: Double) { self.kind = kind; self.durationSec = durationSec }
     }
 
+    /// Loop animation kinds; kept as a string so an unknown kind reaches validation ("unknown loop animation").
+    public struct LoopKind: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+        public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+        public var description: String { rawValue }
+        public static let pulse = LoopKind(rawValue: "pulse"), sway = LoopKind(rawValue: "sway"), float = LoopKind(rawValue: "float")
+        public static let spin = LoopKind(rawValue: "spin"), blink = LoopKind(rawValue: "blink")
+        public static let all: [LoopKind] = [.pulse, .sway, .float, .spin, .blink]
+        public var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    }
+
+    /// A repeating move: period 0.2–5 s, amount 0–1 (default 0.5; spin ignores it).
+    public struct AnimLoop: Codable, Hashable, Sendable {
+        public var kind: LoopKind
+        public var periodSec: Double
+        public var amount: Double?
+        public init(kind: LoopKind, periodSec: Double, amount: Double? = nil) { self.kind = kind; self.periodSec = periodSec; self.amount = amount }
+    }
+
     public enum Fit: String, Codable, Hashable, Sendable { case cover, contain }
 
     /// `lut` = an imported .cube (Looks); it must be an `upload`.
@@ -253,6 +367,15 @@ extension EditV2 {
         public var enhance: Bool?
         /// Remove background (workstream 1 contract, 2026-11-08): a grey matte video aligned with `asset`; its luma is the alpha.
         public var alphaMatte: AlphaMatte?
+        /// Wave 1, freeze frame: the clip shows the single source frame at inSec for holdSec seconds, silent (clipLength = holdSec).
+        public var holdSec: Double?
+        /// Wave 1: overlay tracks only.
+        public var blend: BlendMode?
+        /// In / out animation (as pictures: fade, pop, slideUp, slideDown, zoom), main or overlay; animState over clipLength.
+        public var animIn: Anim?
+        public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,
@@ -282,8 +405,12 @@ extension EditV2 {
         public var look: Look?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         /// Edit suite.
         public var mask: Mask?
+        /// Wave 1.
+        public var blend: BlendMode?
         public init(id: String, asset: String, startSec: Double, durationSec: Double, fit: Fit? = nil, transform: Transform? = nil, crop: Crop? = nil,
                     opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil, adjust: Adjust? = nil, look: Look? = nil,
                     animIn: Anim? = nil, animOut: Anim? = nil, mask: Mask? = nil) {
@@ -360,6 +487,8 @@ extension EditV2 {
         public var keyframes: Keyframes?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         /// The hook template it was made from.
         public var template: String?
         public init(id: String, startSec: Double, durationSec: Double, text: String, style: TextStyle, transform: Transform? = nil,
@@ -630,8 +759,10 @@ extension EditV2 {
         public var fps: Double
         /// "#RRGGBB", default black.
         public var background: String?
-        public init(width: Int, height: Int, fps: Double, background: String? = nil) {
-            self.width = width; self.height = height; self.fps = fps; self.background = background
+        /// Wave 1: the background colour (nil / color) or a blurred copy of the main clip (blur) behind contain-fitted clips.
+        public var fill: CanvasFill?
+        public init(width: Int, height: Int, fps: Double, background: String? = nil, fill: CanvasFill? = nil) {
+            self.width = width; self.height = height; self.fps = fps; self.background = background; self.fill = fill
         }
     }
 

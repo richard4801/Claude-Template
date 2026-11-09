@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -120,82 +121,43 @@ class SettingsViewModel(val c: AppContainer) : ViewModel() {
     fun notifStatus() = c.notifier?.canPost() ?: false
     fun openNotificationSettings(from: android.content.Context) = c.notifier?.openSettings(from)
     fun toast(s: String) = c.repo.toast(s)
+    // Settings redesign (2026-11-09)
+    fun showAdvanced(v: Boolean) = upd { it.copy(showAdvanced = v) }
+    fun startAt(q: String) = upd { it.copy(startAt = q) }
+    fun reload() = viewModelScope.launch { c.repo.refresh(); c.repo.toast("Reloaded") }
 }
 
 @Composable
-private fun settingsVm(): SettingsViewModel {
+internal fun settingsVm(): SettingsViewModel {
     val c = LocalContainer.current
     return viewModel { SettingsViewModel(c) }
 }
 
+/**
+ * The Settings tab (redesign, 2026-11-09): who you are, then the sections this person sees, each with its one line.
+ * Members: Account, Studio, AI & spending. The owner also gets Members, Providers, Apps & devices and, once turned on,
+ * Advanced.
+ */
 @Composable
 fun SettingsScreen() {
     val vm = settingsVm()
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
     val m = muse
-    val context = LocalContext.current
-    var notifOn by remember { mutableStateOf(vm.notifStatus()) }
-    var notifAskedHere by remember { mutableStateOf(false) }
-    // Re-read on return from system settings.
-    LifecycleResumeEffect(Unit) { notifOn = vm.notifStatus(); onPauseOrDispose {} }
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifOn = it }
-    val studio by vm.c.repo.state.collectAsState()
-    val preview = remember(studio.models, studio.outfits) { previewProfileState(studio, vm.demo) }
     ScreenBox(bg = m.roles.canvas) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s4, bottom = 120.dp),
-            verticalArrangement = Arrangement.spacedBy(MuseSpace.s6),
+            verticalArrangement = Arrangement.spacedBy(MuseSpace.s5),
         ) {
             DisplayTitle("Settings")
-            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
-                Heading("Theme")
-                ThemeId.entries.chunked(2).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
-                        row.forEach { t -> ThemeCard(t, t.key == s.prefs.theme, Modifier.weight(1f), preview) { vm.theme(t) } }
+            if (s.prefs.email.isNotBlank()) Caption(s.prefs.email + if (s.prefs.owner) ", owner" else ", member of ${s.prefs.studioName.ifBlank { "the studio" }}")
+            Column {
+                SettingsSection.visible(s.prefs.owner, s.prefs.showAdvanced).forEach { sec ->
+                    RowItem(sec.title, sec.line, onClick = { nav.go(sec.route) }, modifier = Modifier.testTag("section_${sec.name.lowercase()}")) {
+                        if (sec == SettingsSection.AI) RowValue(creditLabel(s.wallet, s.balance))
+                        Chevron()
                     }
                 }
-            }
-            Column {
-                RowItem("Notifications", "Sound and alerts follow your phone's notification settings", onClick = {
-                    // Off on Android 13+: ask once from here; after that (or when on) open the system page.
-                    if (!notifOn && Build.VERSION.SDK_INT >= 33 && !notifAskedHere) { notifAskedHere = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
-                    else vm.openNotificationSettings(context)
-                }) { RowValue(if (notifOn) "On" else "Off"); Chevron() }
-                s.modelName?.let { name -> RowItem("$name's accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { RowValue("${s.connected} of 5"); Chevron() } }
-                RowItem("Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { RowValue("${s.scheduled}"); Chevron() }
-                RowItem("Credit", onClick = { nav.go(Routes.CREDITS) }) { RowValue(creditLabel(s.wallet, s.balance)); Chevron() }
-            }
-            if (s.prefs.owner) Column {
-                Heading("Studio")
-                RowItem("Members", "Send credit, set caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Chevron() }
-                RowItem("Invite someone", onClick = { nav.go(Routes.INVITE) }) { Chevron() }
-                RowItem("Studio settings", "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Chevron() }
-                RowItem("Default models", "What Auto uses for shots, photos, swaps and the rest", onClick = { nav.go(Routes.DEFAULT_MODELS) }) { Chevron() } // WS7
-                RowItem("Prompts", "Every prompt the studio sends: edit or reset", onClick = { nav.go(Routes.PROMPTS) }) { Chevron() }
-                RowItem("Connections", "Claude, MCP and the Blender relay", onClick = { nav.go(Routes.CONNECTIONS) }) { Chevron() } // AI suite (workstream 1 → 2)
-            }
-            Column {
-                Heading("Developer")
-                RowItem("Demo mode", "The sample studio, in the app, no server", onClick = { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } }) {
-                    Toggle(s.prefs.useFake, { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } })
-                }
-                if (!s.prefs.useFake) Labeled("Server", Modifier.padding(vertical = MuseSpace.s2)) {
-                    Input(s.prefs.serverUrl, vm::serverUrl, placeholder = BuildConfig.DEFAULT_SERVER_URL, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri, calm = true)
-                    if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) TextAction("Use the MUSE server", { vm.resetServer { nav.reset(Routes.WELCOME) } })
-                }
-                RowItem("Fast · beta", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
-                // A demo-studio test switch: the real server has no such thing.
-                if (vm.demo) RowItem("Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                SecondaryButton("Sign out", { vm.signOut { nav.reset(Routes.WELCOME) } }, Modifier.fillMaxWidth())
-                if (s.prefs.email.isNotBlank()) Caption("Signed in as ${s.prefs.email}")
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
-                // Model names are owner-only (plans/app-cleanup.md); the owner sees the licence attribution.
-                if (s.prefs.owner) Caption("Video model: MiniMax H3. Lip sync: LatentSync.")
-                Caption("MUSE ${BuildConfig.VERSION_NAME}. " + if (s.prefs.owner) "MiniMax H3 licence terms apply." else "Third-party model licence terms apply.")
             }
         }
         TabBar(Routes.SETTINGS)
@@ -204,7 +166,7 @@ fun SettingsScreen() {
 
 /** Live preview: the real profile layout rendered in that theme, scaled down. The chosen one has the selection outline. */
 @Composable
-private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, preview: ProfileState, onClick: () -> Unit) {
+internal fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, preview: ProfileState, onClick: () -> Unit) {
     val m = muse
     val shape = containerShape()
     Column(modifier.press(onClick = onClick).semantics { selected = on; contentDescription = "${t.label} theme" }, verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {

@@ -298,7 +298,7 @@ class MuseRepository(
         val prev = _state.value.warm
         _state.update { it.copy(warm = g) }
         val off = g.lastOff
-        if (prev?.on == true && !g.on && off != null && off.reason != "user") toast("Add-on engine turned off · ${warmOffWhy(off.reason, g.idleMinutes)} · ${Credit.money(off.costUsd)}")
+        if (prev?.on == true && !g.on && off != null && off.reason != "user") toast("The GPU turned off · ${warmOffWhy(off.reason, g.idleMinutes)} · ${Credit.money(off.costUsd)}")
     }
 
     // ---- Keep add-on engine ready (owner only)

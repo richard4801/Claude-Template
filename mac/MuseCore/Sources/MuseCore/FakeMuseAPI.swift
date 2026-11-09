@@ -17,6 +17,8 @@ public actor FakeMuseAPI: MuseAPI {
     /// (0 = free, as before), the owner's switch off, today's cap reached.
     var editorPriceUsd: Double = 0
     var editorPaidOff = false
+    /// Style kits (/v1/editor/kits), newest first.
+    var editKitStore: [EditKit] = []
     var editorCapHit = false
     /// Edit sessions (workstream 3): the live edits shared with Claude, in memory (Edit/FakeMuseAPI+EditSessions.swift).
     var editSessions: [String: FakeEditSessionRecord] = [:]
@@ -70,6 +72,10 @@ public actor FakeMuseAPI: MuseAPI {
     var sheetVersionsByModel: [String: [SheetVersion]] = [:]
     /// AI suite (workstream 1): the demo studio's suite settings (Engines), once changed.
     var suiteSettingsBox: SuiteSettings?
+    /// Settings → Default models (EngineChoice.swift): the studio's pick per purpose.
+    /// Imports in demo mode (LinkImport.swift), newest first.
+    var demoImports: [LinkImportResult] = []
+    var engineDefaultsBox: [String: String?] = [:]
     /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
     var suiteLooks: [String: SuiteLook] = [:]
     /// AI suite (workstream 1): a job's take length when it isn't the request's (Extend: source + extension; Upscale: the take's).

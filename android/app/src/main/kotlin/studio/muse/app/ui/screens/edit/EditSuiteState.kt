@@ -68,6 +68,25 @@ sealed interface SuitePhase {
 enum class BeatMarks { ALL, STRONG }
 
 /** One take the Edit home or the Overlay panel can open / add (a render or an edited version). */
+/**
+ * The chroma eyedropper: the clip it keys, its source frame at the playhead ([w] × [h] ARGB, filled in by the view
+ * model; null while it loads), and where the finger is ([at], fractions of the canvas) with the colour there ([hex]).
+ */
+class PickUi(val clipId: String, val w: Int = 0, val h: Int = 0, val argb: IntArray? = null, val at: Pair<Double, Double>? = null, val hex: String? = null,
+             /** The source point under the finger (fractions of the frame), for the loupe. */ val src: Pair<Double, Double>? = null) {
+    fun copy(w: Int = this.w, h: Int = this.h, argb: IntArray? = this.argb, at: Pair<Double, Double>? = this.at, hex: String? = this.hex, src: Pair<Double, Double>? = this.src) =
+        PickUi(clipId, w, h, argb, at, hex, src)
+}
+
+/** A saved style kit: its id, name and parts ([studio.muse.core.edit.StyleKit]). */
+data class KitChoice(val id: String, val name: String, val kit: studio.muse.core.edit.StyleKit) {
+    /** What it carries, in words ("Look, colour, transition, captions"). */
+    val parts: String get() = listOfNotNull(
+        "look".takeIf { kit.look != null || kit.filter != null }, "colour".takeIf { kit.adjust != null }, "transition".takeIf { kit.transition != null },
+        "captions".takeIf { kit.captionStyle != null }, "text".takeIf { kit.textStyle != null }, "background".takeIf { kit.background != null || kit.fill != null },
+    ).joinToString(", ").replaceFirstChar(Char::uppercase).ifEmpty { "Nothing yet" }
+}
+
 data class TakeChoice(val id: String, val title: String, val label: String, val thumb: ImageRef?, val durationSec: Double?, val edited: Boolean, val hasVideo: Boolean)
 
 /**
@@ -114,6 +133,19 @@ data class EditSuiteUi(
     val scrubbing: Boolean = false,
     /** A voice-over is being recorded (since this time on the playhead): Record VO reads "Stop recording". */
     val recordingAt: Double? = null,
+    /** "Play the video while recording": null until the user chooses (then on with headphones, off on the speaker). */
+    val voPlayback: Boolean? = null,
+    /** Easing given to keyframes added from now on (and chosen for the ones at the playhead). */
+    val keyEase: studio.muse.core.edit.Ease = studio.muse.core.edit.Ease.EASE_IN_OUT,
+    /** The owner's model per helper purpose (WS13; absent / null = the studio's default). */
+    val helperModels: Map<String, String?> = emptyMap(),
+    /** Saved style kits (/v1/editor/kits), newest first; [kitsNote] when the server can't keep them. */
+    val kits: List<KitChoice> = emptyList(),
+    val kitsNote: String? = null,
+    /** Auto-captions' spoken language: a two-letter code, or null for automatic detection. */
+    val captionLanguage: String? = null,
+    /** The chroma eyedropper while it's open ("Pick from video"), else null. */
+    val pick: PickUi? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     /** The item the edit tools act on (a main clip by default: the one under the playhead). */

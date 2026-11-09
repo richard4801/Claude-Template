@@ -51,11 +51,13 @@ struct EditSuiteTimeline: View {
             tool("Split", icon: "scissors", help: "Split at the playhead (S)") { session.edit { $0.split() } }
             tool("Delete", icon: "trash", help: "Delete (⌫)", disabled: s.selection == nil) { session.edit { $0.deleteSelected() } }
             tool("Speed", icon: "gauge", help: "Speed", disabled: s.selectedVideo == nil) { session.view { $0.tab = .speed } }
-            tool("Keyframe", icon: "diamond", help: "Add a keyframe at the playhead", disabled: s.selectedVisual == nil) {
-                let v = s.selectedVisual
-                session.edit { $0.addKeyframe(.scale, value: v?.transform?.scale ?? 1) }
+            tool("Freeze frame", icon: "pause", help: "Freeze frame at the playhead (1 s)", disabled: session.project.mainClips.isEmpty) {
+                session.edit { $0.freezeFrame(durationSec: 1) }
             }
-            tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil) { session.view { $0.tab = .video } }
+            tool("Keyframe", icon: "diamond", help: "Keyframe position, scale, rotation and opacity at the playhead", disabled: s.selectedVisual == nil) {
+                session.edit { $0.addKeyframesAll() }
+            }
+            tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil || s.selectedItem?.textItem != nil) { session.view { $0.tab = .video } }
             divider
             SuiteIconButton(systemName: "arrow-counter-clockwise", label: "Undo (⌘Z)", disabled: !s.canUndo) { session.undo() }
                 .keyboardShortcut("z", modifiers: .command)
@@ -174,6 +176,15 @@ struct TimelineCanvas: View {
     @Bindable var session: EditSuiteSession
     var lanes: [Lane]
     @State private var drag: DragState?
+    /// A main clip being dragged to a new place: how far it has moved (points).
+    @State private var reorderOffset: CGFloat = 0
+    /// A keyframe ◆ being dragged (parity): its item time when the drag started.
+    @State private var keyFrom: Double?
+
+    /// Where a main clip dropped with its centre at timeline `centre` goes: the number of other clips whose centre is before it.
+    static func reorderIndex(blocks: [EditSuite.Block], moving id: String, centre: Double) -> Int {
+        blocks.filter { $0.itemId != id && ($0.startSec + $0.endSec) / 2 < centre }.count
+    }
 
     /// A lane of the timeline: a track, the Captions lane before there are captions, or the video's own sound.
     enum Lane: Identifiable, Hashable {
@@ -359,6 +370,15 @@ struct TimelineCanvas: View {
             ForEach(blocks) { b in
                 block(b, row: row, locked: locked)
             }
+            // Design pass: while a voice-over records, a red bar grows on the first voice row from where it started.
+            if session.isRecordingVO, row.kind == .voice, session.project.tracks.first(where: { $0.kind == .voice })?.id == row.trackId {
+                let from = session.voStartSec
+                Rectangle().fill(t.roles.danger.opacity(0.55))
+                    .frame(width: max(2, CGFloat(max(0, session.playhead - from)) * z), height: Self.rowHeight(row.kind) - 12)
+                    .offset(x: CGFloat(from) * z, y: 6)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Recording")
+            }
         }
         .opacity(session.project.track(row.trackId)?.hidden == true ? 0.4 : 1)
     }
@@ -406,9 +426,14 @@ struct TimelineCanvas: View {
                     trimHandle(b, edge: .end, height: h)
                 }
             }
+            if selected && !locked, let id = b.itemId {
+                // By position, so the ◆ being dragged keeps its identity while its time changes (keys can't pass each other).
+                ForEach(Array(s.keyTimes(id).enumerated()), id: \.offset) { _, kt in keyMark(id, at: kt, height: h) }
+            }
         }
         .frame(width: w, height: h)
-        .offset(x: x, y: 6)
+        .offset(x: x + (row.kind == .main && drag?.itemId == b.itemId && drag?.kind == .move ? reorderOffset : 0), y: 6)
+        .zIndex(drag?.itemId == b.itemId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
             guard let id = b.itemId else {
@@ -506,6 +531,31 @@ struct TimelineCanvas: View {
 
     // MARK: Gestures
 
+    /// A keyframe of the selected item (every property at that time): drag it along the lane to move them all, one undo
+    /// step; it stops before a neighbour (parity, as Android's timeline ◆).
+    private func keyMark(_ id: String, at kt: Double, height: CGFloat) -> some View {
+        Rectangle().fill(t.roles.selection)
+            .frame(width: 8, height: 8)
+            .rotationEffect(.degrees(45))
+            .overlay(Rectangle().stroke(t.roles.canvas, lineWidth: 1).frame(width: 8, height: 8).rotationEffect(.degrees(45)))
+            .frame(width: 16, height: height)
+            .contentShape(Rectangle())
+            .offset(x: CGFloat(kt) * z - 8)
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .highPriorityGesture(DragGesture(minimumDistance: 1)
+                .onChanged { v in
+                    if keyFrom == nil { keyFrom = kt; session.beginGesture() }
+                    guard let from = keyFrom else { return }
+                    session.updateGesture { $0.movingKeys(id, from: from, by: Double(v.translation.width / z)) }
+                }
+                .onEnded { _ in
+                    keyFrom = nil
+                    session.endGesture()
+                })
+            .help("Keyframe at \(EditSuite.clockTenths(kt)) · drag to move")
+            .accessibilityLabel("Keyframe at \(EditSuite.clockTenths(kt))")
+    }
+
     private func trimHandle(_ b: EditSuite.Block, edge: EditSuiteState.Edge, height: CGFloat) -> some View {
         Rectangle().fill(t.roles.selection).frame(width: 6, height: height)
             .contentShape(Rectangle().inset(by: -4))
@@ -531,7 +581,14 @@ struct TimelineCanvas: View {
     private func moveGesture(_ b: EditSuite.Block, row: EditSuite.Row, locked: Bool) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { v in
-                guard !locked, row.kind != .main, row.kind != .caption, let id = b.itemId else { return }
+                guard !locked, row.kind != .caption, let id = b.itemId else { return }
+                if row.kind == .main {
+                    // Main clips reorder (Mac Edit audit 2026-11-08: there was no way to change their order): the block follows
+                    // the pointer and drops into the gap it ends over.
+                    if drag == nil { drag = DragState(itemId: id, kind: .move, start: b.startSec, end: b.endSec); session.view { $0.selection = id } }
+                    reorderOffset = v.translation.width
+                    return
+                }
                 if drag == nil {
                     drag = DragState(itemId: id, kind: .move, start: b.startSec, end: b.endSec)
                     session.view { $0.selection = id }
@@ -541,7 +598,14 @@ struct TimelineCanvas: View {
                 let target = d.start + Double(v.translation.width / z)
                 session.updateGesture { $0.moving(id, to: target) }
             }
-            .onEnded { _ in
+            .onEnded { v in
+                if row.kind == .main {
+                    defer { drag = nil; reorderOffset = 0 }
+                    guard let d = drag, let id = b.itemId else { return }
+                    let to = Self.reorderIndex(blocks: s.blocks(row.trackId), moving: id, centre: (d.start + d.end) / 2 + Double(v.translation.width / z))
+                    if let from = session.project.mainClips.firstIndex(where: { $0.id == id }), to != from { session.edit { $0.moveMainClip(id, to: to) } }
+                    return
+                }
                 if drag != nil { session.endGesture() }
                 drag = nil
             }

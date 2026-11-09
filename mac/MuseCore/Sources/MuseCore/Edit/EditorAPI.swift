@@ -61,7 +61,24 @@ public struct EditorJobRequest: Codable, Hashable, Sendable {
     public var kind: EditorJobKind
     public var source: EditorSource
     public var options: EditorJobOptions?
-    public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil) { self.kind = kind; self.source = source; self.options = options }
+    /// Owner only (WS13): the helper's model, checked by the server against its candidates; nil = the studio's default.
+    public var engineModel: String?
+    public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, engineModel: String? = nil) {
+        self.kind = kind; self.source = source; self.options = options; self.engineModel = engineModel
+    }
+}
+
+extension EditorJobKind {
+    /// The model purpose behind a helper (server editor/service.ts): captions and cuts transcribe, matte cuts out (track
+    /// when it follows picked points), denoise separates; beats run no model.
+    public func enginePurpose(_ options: EditorJobOptions?) -> EnginePurpose? {
+        switch self {
+        case .captions, .cuts: return .captions
+        case .matte: return options?.points != nil ? .track : .matte
+        case .denoise: return .denoise
+        case .beats: return nil
+        }
+    }
 }
 
 /// GET /v1/editor/features: what the server can do now (paid helpers switched off by the owner, background removal not
@@ -236,16 +253,19 @@ public struct TakeVersionV2Request: Codable, Sendable, Equatable {
     public var fps: Double?
     /// The version's name (1–80 characters after trimming; Claude's `save_version` name). Left out when empty.
     public var name: String?
+    /// The export sheet's "Label as AI-generated" (sent only when on; the server stores it on the version).
+    public var aiLabel: Bool?
     public init(uploadId: String, thumbUploadId: String? = nil, thumb: ImageRef? = nil, edits: EditV2.Project, durationSec: Double, width: Int, height: Int,
-                fps: Double? = nil, name: String? = nil) {
+                fps: Double? = nil, name: String? = nil, aiLabel: Bool = false) {
         self.uploadId = uploadId; self.thumbUploadId = thumbUploadId; self.thumb = thumb; self.edits = edits; self.durationSec = durationSec
         self.width = width; self.height = height; self.fps = fps; self.name = TakeVersionV2Request.versionName(name)
+        self.aiLabel = aiLabel ? true : nil
     }
 
-    public static func make(_ upload: EditedUpload, video: EditedVideo, edits: EditV2.Project, name: String? = nil) -> TakeVersionV2Request {
+    public static func make(_ upload: EditedUpload, video: EditedVideo, edits: EditV2.Project, name: String? = nil, aiLabel: Bool = false) -> TakeVersionV2Request {
         TakeVersionV2Request(uploadId: upload.uploadId, thumbUploadId: upload.thumbUploadId, thumb: upload.thumbUploadId == nil ? upload.thumb : nil,
                              edits: edits, durationSec: (video.durationSec * 1000).rounded() / 1000, width: video.width, height: video.height,
-                             fps: video.fps.map { ($0 * 100).rounded() / 100 }, name: name)
+                             fps: video.fps.map { ($0 * 100).rounded() / 100 }, name: name, aiLabel: aiLabel)
     }
 
     /// The server's rule for a version name: trimmed, 1–80 characters (longer is cut at 80), nil when empty.
@@ -259,4 +279,25 @@ public struct TakeVersionV2Request: Codable, Sendable, Equatable {
         let d = EditV2.durationSec(project)
         return abs(durationSec - d) <= max(0.5, 0.05 * d)
     }
+}
+
+/// A saved style kit (GET/POST/PATCH /v1/editor/kits, plans/api.md "Edit style kits"): members see their own, the owner
+/// the studio's.
+public struct EditKit: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var kit: EditV2.StyleKit
+    public var createdBy: String?
+    public var createdAt: String?
+    public var updatedAt: String?
+    public init(id: String, name: String, kit: EditV2.StyleKit, createdBy: String? = nil, createdAt: String? = nil, updatedAt: String? = nil) {
+        self.id = id; self.name = name; self.kit = kit; self.createdBy = createdBy; self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+}
+
+public struct EditKitList: Codable, Hashable, Sendable { public var kits: [EditKit] }
+public struct EditKitBody: Codable, Hashable, Sendable {
+    public var name: String?
+    public var kit: EditV2.StyleKit?
+    public init(name: String? = nil, kit: EditV2.StyleKit? = nil) { self.name = name; self.kit = kit }
 }

@@ -31,7 +31,8 @@ import kotlin.math.roundToLong
 /** What the engine probed about an asset's file (display size: rotation already applied). */
 data class MediaInfo(val durationSec: Double, val width: Int, val height: Int, val fps: Double = 0.0, val hasAudio: Boolean = false)
 
-enum class LayerRole { CLOCK, OVERLAY, MAIN, BACKGROUND }
+/** FILL (wave 1): the blurred copy of the main clip behind contain-fitted main clips (canvas.fill = blur). */
+enum class LayerRole { CLOCK, OVERLAY, MAIN, FILL, BACKGROUND }
 
 /** A source crop in normalised device coordinates (Media3 `Crop(left, right, bottom, top)`), -1…1. */
 data class CropNdc(val left: Double, val right: Double, val bottom: Double, val top: Double)
@@ -56,7 +57,30 @@ data class VideoLook(
     val mask: Mask? = null,
     /** Background removal's matte (the clip's alpha from a video aligned with its source), null when none. */
     val alphaMatte: AlphaMatte? = null,
+    /** Wave 1, blur fill: box-blur radius in canvas pixels (then × BLUR_FILL_DARKEN), null when this isn't the fill layer. */
+    val fillBlur: Int? = null,
+    /**
+     * Colour keyframes (M): the item's colour changes over time, so its matrix is per frame ([ColorKeys.matrixAt],
+     * item-local seconds) instead of [colorMatrix] (which then holds the matrix at its start, for stills).
+     */
+    val colorKeys: ColorKeys? = null,
+    /** Mask and look keyframes (M): the mask and the finishing look per frame ([MotionKeys]), null when none are keyed. */
+    val motionKeys: MotionKeys? = null,
 )
+
+/** An item's mask and look when their keyframes move them ([maskAt] / [lookAt] at item-local seconds). */
+data class MotionKeys(val mask: Mask?, val look: Look?, val keyframes: Keyframes) {
+    val masked: Boolean get() = mask != null && KfProp.MASK.any { !keyframes[it].isNullOrEmpty() }
+    val looked: Boolean get() = KfProp.LOOK.any { !keyframes[it].isNullOrEmpty() }
+    fun maskAt(t: Double): Mask? = maskAt(mask, keyframes, t)
+    fun lookAt(t: Double): Look = lookAt(look, keyframes, t) ?: Look()
+}
+
+/** What an item's colour matrix is made of when it has colour keyframes. */
+data class ColorKeys(val adjust: Adjust?, val keyframes: Keyframes, val filter: FilterRef?, val presets: List<FilterPreset>) {
+    /** The 3×4 row-major matrix at item-local [t] ([adjustAt] then [colorMatrix]). */
+    fun matrixAt(t: Double): List<Double> = colorMatrix(adjustAt(adjust, keyframes, t), filter, presets)
+}
 
 /** A clip or image in a layer or lane, placed on the timeline. */
 data class PlannedClip(
@@ -135,12 +159,16 @@ data class Placement(
     val alpha: Double, val centerX: Double, val centerY: Double, val scale: Double, val rotationCw: Double,
     /** Edit suite transitions: motion blur 0–1 along x (whip) and RGB split 0–1 (glitch). */
     val blur: Double = 0.0, val rgbSplit: Double = 0.0,
+    /** Wave 1, mirror: the picture flipped about its centre (before scale and rotation). */
+    val flipX: Boolean = false, val flipY: Boolean = false,
+    /** Wave 1: an overlay's blend mode over the layers below it (null = normal). */
+    val blend: BlendMode? = null,
 ) {
     companion object { val HIDDEN = Placement(0.0, 0.5, 0.5, 1.0, 0.0) }
 }
 
 /** A text item's state at one moment (the shown text after typewriter and uppercase). */
-data class TextFrame(val text: String, val alpha: Double, val centerX: Double, val centerY: Double, val scale: Double, val rotationCw: Double)
+data class TextFrame(val text: String, val alpha: Double, val centerX: Double, val centerY: Double, val scale: Double, val rotationCw: Double, val flipX: Boolean = false, val flipY: Boolean = false)
 
 /**
  * A caption page at one moment: its words (uppercased when the style says so), the active one, and how to draw each.
@@ -179,6 +207,7 @@ data class RenderPlan(
         val layer = layers.getOrNull(layerIndex) ?: return Placement.HIDDEN
         if (layer.role == LayerRole.CLOCK) return Placement.HIDDEN
         if (layer.role == LayerRole.BACKGROUND) return Placement(1.0, 0.5, 0.5, 1.0, 0.0)
+        if (layer.role == LayerRole.FILL) return if (clipAt(layerIndex, tSec) != null) Placement(1.0, 0.5, 0.5, 1.0, 0.0) else Placement.HIDDEN
         val clip = clipAt(layerIndex, tSec) ?: return Placement.HIDDEN
         val track = project.track(clip.trackId) ?: return Placement.HIDDEN
         val item = track.items.firstOrNull { it.id == clip.itemId } ?: return Placement.HIDDEN
@@ -194,7 +223,22 @@ data class RenderPlan(
             centerY = propAt(k, KfProp.Y, tr?.y ?: 0.5, local),
             scale = propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local),
             rotationCw = propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local),
+            flipX = tr?.flipX == true, flipY = tr?.flipY == true,
         )
+    }
+
+    /** A loop animation on a placement (after keyframes and the in / out animation). */
+    private fun looped(b: Placement, loop: AnimLoop?, local: Double): Placement {
+        if (loop == null) return b
+        val s = loopState(loop, local)
+        return b.copy(alpha = b.alpha * s.opacity, scale = b.scale * s.scale, rotationCw = b.rotationCw + s.rotation, centerY = b.centerY + s.dy)
+    }
+
+    /** A video clip's in / out animation ([animState] over its length) on its placement. */
+    private fun animated(b: Placement, c: VideoClip, local: Double): Placement {
+        if (c.animIn == null && c.animOut == null) return b
+        val a = animState(clipLength(c), c.animIn, c.animOut, null, local)
+        return b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy)
     }
 
     private fun itemPlacement(item: Item, track: Track, t: Double): Placement {
@@ -204,9 +248,9 @@ data class RenderPlan(
             is ImageItem -> {
                 val b = basePlacement(item, local)
                 val a = animState(item, local)
-                b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy)
+                looped(b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy, blend = item.blend), item.animLoop, local)
             }
-            is VideoClip -> basePlacement(item, local)
+            is VideoClip -> basePlacement(item, local).let { b -> looped(animated(b, item, local), item.animLoop, local).copy(blend = item.blend) }
             else -> Placement.HIDDEN
         }
     }
@@ -214,7 +258,7 @@ data class RenderPlan(
     private fun mainPlacement(c: VideoClip, t: Double): Placement {
         val i = mainIndex[c.id] ?: return Placement.HIDDEN
         val me = spans[i]
-        val base = basePlacement(c, t - me.startSec)
+        val base = animated(basePlacement(c, t - me.startSec), c, t - me.startSec)
         val next = spans.getOrNull(i + 1)
         // Incoming: inside my own transition. Outgoing: inside the next clip's.
         val (kind, p, incoming) = when {
@@ -264,14 +308,16 @@ data class RenderPlan(
         val k = it.keyframes; val tr = it.transform
         var text = if (it.style.uppercase == true) it.text.uppercase() else it.text
         a.chars?.let { n -> text = text.substring(0, text.offsetByCodePoints(0, min(n, text.codePointCount(0, text.length)))) }
-        val alpha = propAt(k, KfProp.OPACITY, it.opacity ?: 1.0, local) * a.opacity
+        val lp = loopState(it.animLoop, local)
+        val alpha = propAt(k, KfProp.OPACITY, it.opacity ?: 1.0, local) * a.opacity * lp.opacity
         if (alpha <= 0.0 || text.isEmpty()) return null
         return TextFrame(
             text, alpha,
             centerX = propAt(k, KfProp.X, tr?.x ?: 0.5, local),
-            centerY = propAt(k, KfProp.Y, tr?.y ?: 0.5, local) + a.dy,
-            scale = propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale,
-            rotationCw = propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local),
+            centerY = propAt(k, KfProp.Y, tr?.y ?: 0.5, local) + a.dy + lp.dy,
+            scale = propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale * lp.scale,
+            rotationCw = propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local) + lp.rotation,
+            flipX = tr?.flipX == true, flipY = tr?.flipY == true,
         )
     }
 
@@ -346,14 +392,30 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
             tw = max(2, (fw * q).roundToInt()); th = max(2, (fh * q).roundToInt()); base = 1 / q
         }
         val crop = if (l > 1e-9 || r > 1e-9 || t > 1e-9 || b > 1e-9) CropNdc(-1 + 2 * l, 1 - 2 * r, -1 + 2 * b, 1 - 2 * t) else null
-        val m = colorMatrix(v.adjust, v.filter, presets).takeUnless(::isIdentityMatrix)
-        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte)
+        val keys = v.keyframes?.filterKeys { it in KfProp.COLOR }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
+        val colorKeys = keys?.let { ColorKeys(v.adjust, it, v.filter, presets) }
+        val m = (colorKeys?.matrixAt(0.0) ?: colorMatrix(v.adjust, v.filter, presets)).takeUnless { colorKeys == null && isIdentityMatrix(it) }
+        val motion = v.keyframes?.filterKeys { it in KfProp.MASK || it in KfProp.LOOK }?.filterValues { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
+            ?.let { MotionKeys(v.mask, v.look, it) }?.takeIf { it.masked || it.looked }
+        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte,
+            colorKeys = colorKeys, motionKeys = motion)
     }
 
     /** A clip limited to the project's end; null when it starts after it. */
     fun place(track: Track, item: MediaClip, span: Span, assetId: String, withVideoLook: VideoLook?, removeVideo: Boolean): PlannedClip? {
         val startUs = RenderPlan.us(span.startSec)
         if (startUs >= totalUs) return null
+        (item as? VideoClip)?.holdSec?.let { hold ->
+            // Freeze frame (wave 1): one source frame played slowly enough to last the hold (each frame shows until the
+            // next one, as in slow motion), silent.
+            val inf = info(assetId)
+            val frame = 1.0 / (inf.fps.takeIf { it > 0 } ?: cv.fps)
+            val src0 = if (inf.durationSec > frame) min(item.inSec, inf.durationSec - frame) else item.inSec
+            val inUs = RenderPlan.us(src0); val outUs = RenderPlan.us(src0 + frame)
+            val sp = frame / hold
+            return PlannedClip(track.id, item.id, assetId, startUs, RenderPlan.us(min(span.endSec, total)), inUs, outUs, sp, isImage = false, withAudio = false,
+                removeVideo = removeVideo, envelope = emptyList(), frameDropFps = null, look = withVideoLook, pieces = listOf(PlannedPiece(inUs, outUs, sp)))
+        }
         val endSec = min(span.endSec, total)
         val speed = item.speedOrNull ?: 1.0
         val outSec = min(item.outSec, clipSourceAt(item, endSec - span.startSec))
@@ -383,6 +445,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         return out
     }
 
+    var fillLayer: List<PlannedClip>? = null
     val audioLanes = ArrayList<AudioLane>()
     val extraAudio = ArrayList<PlannedClip>()
 
@@ -477,7 +540,31 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         if (main.hidden == true) { if (clips.any { it.withAudio }) audioLanes += AudioLane("${main.id}#$k", lane(clips.filter { it.withAudio }.map { it.copy(frameDropFps = null) })) }
         else addLayer(LayerRole.MAIN, main.id, lane(clips), clips.any { it.withAudio })
     }
+    // Wave 1, blur fill: each main clip again, cover-fitted, blurred and darkened, behind the main layers. During a
+    // transition the fill switches to the incoming clip half-way through (blurFillClip).
+    if (cv.fill == CanvasFill.BLUR && main.hidden != true) {
+        val spans = timeline(p)
+        val radius = blurFillRadius(cv.width, cv.height)
+        val fill = ArrayList<PlannedClip>()
+        p.mainClips.forEachIndexed { i, c ->
+            val s = spans[i]
+            val from = if (s.transitionSec > 0) s.startSec + s.transitionSec / 2 else s.startSec
+            val next = spans.getOrNull(i + 1)
+            val to = if (next != null && next.transitionSec > 0) next.startSec + next.transitionSec / 2 else s.endSec
+            if (to - from < 1e-3) return@forEachIndexed
+            val a = from - s.startSec; val b = to - s.startSec
+            val piece: VideoClip = if (c.holdSec != null) c.copy(holdSec = b - a) else {
+                val x0 = (clipSourceAt(c, a) - c.inSec) / (c.outSec - c.inSec); val x1 = (clipSourceAt(c, b) - c.inSec) / (c.outSec - c.inSec)
+                c.copy(inSec = clipSourceAt(c, a), outSec = clipSourceAt(c, b), speedCurve = c.speedCurve?.let { subCurve(it, x0, x1) })
+            }
+            val bare = piece.copy(transform = null, crop = null, mask = null, chroma = null, alphaMatte = null, keyframes = null, fit = Fit.COVER)
+            val lk = look(bare, c.asset, Fit.COVER).copy(fillBlur = radius)
+            place(main, bare, Span(from, to), c.asset, lk, removeVideo = false)?.let { fill += it.copy(withAudio = false, envelope = emptyList()) }
+        }
+        if (fill.isNotEmpty()) fillLayer = fill
+    }
     val bg = cv.background ?: "#000000"
+    fillLayer?.let { addLayer(LayerRole.FILL, main.id, lane(it), false) }
     if (!bg.equals("#000000", ignoreCase = true)) addLayer(LayerRole.BACKGROUND, null, listOf(StillEntry(0, totalUs, hexArgb(bg))), false)
 
     val hasAudio = layers.any { it.withAudio } || audioLanes.isNotEmpty()
