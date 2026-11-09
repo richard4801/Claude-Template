@@ -372,28 +372,54 @@ export class ByoService {
         const ad = self.adapters[k.p.kind as ProviderKind];
         const images: EngineImage[] = [];
         const fail = (e: ImageEngineError) => { e.partial = images.slice(); return e; };
+        // Owner 2026-11-09: the largest size the model offers; a size it refuses for this shape (e.g. 2K at 9:16) steps down.
+        const sizes = largestFirst(r.analysis, r.fixedInputs);
         for (let i = 0; i < req.count; i++) {
-          const input = imageInput(r.analysis, r.fixedInputs, req, i);
-          let h: string;
-          try { h = await ad.start(k.key, { ref: r.ref, version: r.version }, input); }
-          catch (e) {
-            const re = e as ReplicateError;
-            if (re.status === 401 || re.status === 403) await self.markInvalid(k.p.id);
-            throw fail(new ImageEngineError(re.message, re.kind === 'refused' ? 'provider_refused' : re.kind === 'rate_limited' ? 'provider_rate_limited' : re.kind === 'unavailable' ? 'engine_unavailable' : undefined));
-          }
-          const t0 = Date.now();
-          for (;;) {
-            const s = await ad.get(k.key, h);
-            if (s.status === 'succeeded') { images.push({ url: s.url }); break; }
-            if (s.status === 'failed' || s.status === 'canceled') throw fail(new ImageEngineError(s.error?.message ?? 'failed', s.error?.kind === 'refused' ? 'provider_refused' : undefined));
-            if (Date.now() - t0 > self.ctx.config.IMAGE_TIMEOUT_SEC * 1000) { await ad.cancel(k.key, h); throw fail(new ImageEngineError('timed out')); }
-            await sleep(Math.min(1500, self.ctx.config.REPLICATE_POLL_MS));
+          for (let si = 0; ; si++) {
+            const input = imageInput(r.analysis, r.fixedInputs, req, i);
+            if (sizes.length && r.analysis.map.resolution) input[r.analysis.map.resolution] = sizes[si];
+            const more = si + 1 < sizes.length;
+            let h: string;
+            try { h = await ad.start(k.key, { ref: r.ref, version: r.version }, input); }
+            catch (e) {
+              const re = e as ReplicateError;
+              if (re.status === 401 || re.status === 403) await self.markInvalid(k.p.id);
+              if (more && re.kind === 'failed' && (re.status ?? 0) >= 400 && (re.status ?? 0) < 500) continue;
+              throw fail(new ImageEngineError(re.message, re.kind === 'refused' ? 'provider_refused' : re.kind === 'rate_limited' ? 'provider_rate_limited' : re.kind === 'unavailable' ? 'engine_unavailable' : undefined));
+            }
+            const t0 = Date.now();
+            let retry = false;
+            for (;;) {
+              const s = await ad.get(k.key, h);
+              if (s.status === 'succeeded') { images.push({ url: s.url }); break; }
+              if (s.status === 'failed' && more && s.error?.kind !== 'refused' && s.error?.kind !== 'out_of_credit') { retry = true; break; }
+              if (s.status === 'failed' || s.status === 'canceled') throw fail(new ImageEngineError(s.error?.message ?? 'failed', s.error?.kind === 'refused' ? 'provider_refused' : undefined));
+              if (Date.now() - t0 > self.ctx.config.IMAGE_TIMEOUT_SEC * 1000) { await ad.cancel(k.key, h); throw fail(new ImageEngineError('timed out')); }
+              await sleep(Math.min(1500, self.ctx.config.REPLICATE_POLL_MS));
+            }
+            if (!retry) break;
           }
         }
         return { images, seed: req.seed, costUsd: perImage * images.length };
       },
     };
   }
+}
+
+/** Pixels a resolution id stands for ("2K", "1080p", "4 MP", "1024x1536"); 0 when unknown. */
+export function resolutionRank(id: string): number {
+  const s = id.trim().toLowerCase();
+  let m = /^(\d+(?:\.\d+)?)\s*k$/.exec(s); if (m) return Number(m[1]) * 1000 * 1000;
+  m = /^(\d+)\s*p$/.exec(s); if (m) return Number(m[1]) * Number(m[1]) * 16 / 9;
+  m = /^(\d+(?:\.\d+)?)\s*mp$/.exec(s); if (m) return Number(m[1]) * 1e6;
+  m = /^(\d+)\s*[x×*]\s*(\d+)$/.exec(s); if (m) return Number(m[1]) * Number(m[2]);
+  return 0;
+}
+/** The model's sizes, largest first (only when it has a size choice and the owner didn't fix one). */
+export function largestFirst(a: Analysis, fixed: Record<string, unknown>): string[] {
+  if (!a.map.resolution || fixed[a.map.resolution] !== undefined) return [];
+  const known = a.inputs.resolutions.filter(x => resolutionRank(x) > 0);
+  return known.sort((x, y) => resolutionRank(y) - resolutionRank(x));
 }
 
 /** One photo's inputs on a custom image model. */

@@ -169,3 +169,8 @@ This attaches a signed "made with MUSE, AI used here" record to exported files.
 **Not now:** HDR export on Android (only if members ask) and C2PA content credentials.
 
 Each job's API is agreed with WS16, and each contract change with WS9, before it's built.
+
+## Photo size (owner 2026-11-09)
+- **Now (server, done):** custom provider image models (Muapi, fal, Replicate keys) run at the largest size the model offers; a size it refuses for the shape (e.g. Seedream 2K at 9:16) steps down to the next. FLUX keeps its current size (priced by megapixels).
+- **4K today:** Enhance → Realism Off, Upscale 4× (Clarity Upscaler) on any finished photo.
+- **Next, when tokens reset (owner asked to save this):** a size picker in the Photo composer (1K / 2K / 4K, only the sizes the picked model offers, price on the button), Mac + Android, plus "7 shapes" relabelled as "7 aspect ratios" in the model picker.

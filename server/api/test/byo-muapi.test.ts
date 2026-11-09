@@ -343,10 +343,11 @@ describe('Bring your own provider · Muapi against a FAKE Muapi (recorded fixtur
       expect(out.images).toHaveLength(2);
       expect(out.costUsd).toBeCloseTo(0.08, 6);
       const posts = calls.filter(c => c.method === 'POST' && c.url === '/mu/api/v1/bytedance-seedream-edit-v4');
-      expect(posts.map(c => c.body)).toEqual([
-        { prompt: 'A portrait', images_list: ['https://x/a.jpg'], aspect_ratio: '3:4' },
-        { prompt: 'A portrait', images_list: ['https://x/a.jpg'], aspect_ratio: '3:4' },
-      ]);
+      // Owner 2026-11-09: sent at the model's largest size when it has a size choice.
+      const base = { prompt: 'A portrait', images_list: ['https://x/a.jpg'], aspect_ratio: '3:4' };
+      expect(posts.map(c => c.body)).toEqual([expect.objectContaining(base), expect.objectContaining(base)]);
+      const sizes = posts.map(c => (c.body as Record<string, unknown>).resolution ?? (c.body as Record<string, unknown>).image_size ?? null);
+      expect(new Set(sizes).size).toBe(1);
       await expect(a.ctx.suite.byo.image.generate({ prompt: 'REFUSE', referenceImages: ['https://x/a.jpg'], width: 768, height: 1024, count: 1 }, { provider: 'byo', model: im.id }))
         .rejects.toMatchObject({ code: 'provider_refused' });
     } finally { await a.close(); }
