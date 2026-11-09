@@ -205,6 +205,41 @@ final class EditV2ColorKeysTests: XCTestCase {
         XCTAssertNil(s.project.mainClips[0].look)
     }
 
+    /// Reverse (WS8 cb5413e): reverseClip and back is the identity; a freeze has nothing to reverse (functions.json → reverse).
+    func testReverseFixtures() throws {
+        let cases = try editorFixture("functions")["reverse"].array
+        XCTAssertEqual(cases.count, 6)
+        for c in cases {
+            let clip = try c["clip"].decode(E.VideoClip.self), d = c["durationSec"].double!
+            if c["reversed"].isNull { XCTAssertNil(E.reverseClip(clip, reversed: "x", durationSec: d), clip.id); continue }
+            let want = try c["reversed"].decode(E.VideoClip.self)
+            let got = try XCTUnwrap(E.reverseClip(clip, reversed: want.asset, durationSec: d))
+            let d1 = jsonDiff(try JV.of(got), c["reversed"]); XCTAssert(d1.isEmpty, "\(clip.id): " + d1.prefix(4).joined(separator: "; "))
+            let back = try XCTUnwrap(E.reverseClip(got, reversed: clip.asset, durationSec: d))
+            let d2 = jsonDiff(try JV.of(back), c["back"]); XCTAssert(d2.isEmpty, "\(clip.id) back: " + d2.prefix(4).joined(separator: "; "))
+        }
+    }
+
+    func testReverseTheSelectedClip() throws {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        let id = s.project.mainClips[0].id
+        s.selection = id
+        s.beginGesture(); s.updateGesture(s.trimming(id, .end, to: 4)); s.endGesture()
+        let orig = s.project.mainClips[0].asset
+        var rev = E.Asset(id: "src_rev", kind: .video, upload: "u_rev", durationSec: 10, width: 1080, height: 1920, hasAudio: true)
+        rev.reverseOf = orig
+        XCTAssertEqual(s.reverseSelected(to: rev), [])
+        XCTAssertEqual(s.project.mainClips[0].asset, "src_rev")
+        XCTAssertEqual(s.project.mainClips[0].inSec, 6, accuracy: 1e-9)
+        XCTAssertEqual(s.reversedFrom, orig)
+        XCTAssertNil(E.problem(s.project))
+        let back = try XCTUnwrap(s.project.asset(orig))
+        XCTAssertEqual(s.reverseSelected(to: back), [])
+        XCTAssertEqual(s.project.mainClips[0].asset, orig)
+        XCTAssertEqual(s.project.mainClips[0].inSec, 0, accuracy: 1e-9)
+        XCTAssertNotNil(s.reversedCopy(of: orig), "the copy stays for next time")
+    }
+
     /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
     func testAutoAdjustFixtures() throws {
         let cases = try editorFixture("functions")["autoAdjust"].array

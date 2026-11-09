@@ -361,4 +361,32 @@ extension EditSuiteState {
             vis.look = l == E.Look() ? nil : l
         }
     }
+
+    // MARK: Reverse (contract, WS8 cb5413e)
+
+    /// The selected clip's original asset when it plays a reversed copy, else nil.
+    public var reversedFrom: String? {
+        guard let c = selectedVideo else { return nil }
+        return project.asset(c.asset)?.reverseOf
+    }
+
+    /// The reversed copy already in the project for an asset, if any.
+    public func reversedCopy(of assetId: String) -> E.Asset? { project.assets.first { $0.reverseOf == assetId } }
+
+    /// Switches the selected clip to `target` (the reversed copy, or the original when it's reversed), adding `target` to
+    /// the assets if new; one undo step. Returns the parts dropped on the way (background removal, separate sound), or nil
+    /// when refused (a freeze frame, nothing selected).
+    @discardableResult
+    public mutating func reverseSelected(to target: E.Asset) -> [String]? {
+        guard let c = selectedVideo else { return nil }
+        guard c.holdSec == nil else { refuse("A freeze frame has nothing to reverse"); return nil }
+        // D is the original source's length, whichever way round.
+        let original = target.reverseOf ?? project.asset(c.asset)?.reverseOf ?? c.asset
+        guard let d = project.asset(original)?.durationSec ?? target.durationSec, let next = E.reverseClip(c, reversed: target.id, durationSec: d) else { return nil }
+        var dropped: [String] = []
+        if c.alphaMatte != nil { dropped.append("background removal") }
+        if c.audioAsset != nil { dropped.append("the separate sound") }
+        let ok = apply { p in p.addingAsset(target).updating(c.id) { $0 = .video(next) } }
+        return ok ? dropped : nil
+    }
 }

@@ -105,6 +105,12 @@ private struct Validator {
             assets[a.id] = a
         }
         assetKinds = assets.mapValues(\.kind)
+        for (i, a) in p.assets.enumerated() where a.reverseOf != nil {
+            let o = assets[a.reverseOf!]
+            if a.kind != .video || o == nil || o!.kind != .video || o!.reverseOf != nil || o!.id == a.id {
+                throw bad("edits.assets.\(i).reverseOf", "must be a video asset")
+            }
+        }
         if p.tracks.isEmpty || p.tracks.count > E.maxTracks { throw bad("edits.tracks", "must have 1–\(E.maxTracks) tracks") }
         if p.tracks[0].kind != .main { throw bad("edits.tracks.0.kind", "the first track must be the main track") }
         if p.tracks.filter({ $0.kind == .main }).count != 1 { throw bad("edits.tracks", "needs exactly one main track") }

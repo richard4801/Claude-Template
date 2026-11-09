@@ -1035,6 +1035,11 @@ struct SpeedPanel: View {
                     Text("Keeps the pitch. Drag points; double-click to add one.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // Reverse (contract, WS8 cb5413e): the clip plays a reversed copy of its source (made once, up to 60 s).
+                SuiteRule()
+                SuiteToggleRow(title: "Reverse", hint: "Plays backwards", isOn: session.state.reversedFrom != nil, busy: session.isRunning(.reverse)) { _ in
+                    Task { await session.toggleReverse() }
+                }
             }
         } else {
             InspectorEmpty(text: "Select a video clip to change its speed.")

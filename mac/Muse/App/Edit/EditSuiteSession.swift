@@ -744,6 +744,7 @@ final class EditSuiteSession {
         case .denoise: return "Noise reduction"
         case .cuts: return "Cut silences"
         case .beats: return "Detect beats"
+        case .reverse: return "Reverse"
         }
     }
 
@@ -866,6 +867,42 @@ final class EditSuiteSession {
 
     /// Remove background on the selected clip: the person, as an alpha matte on the clip (2026-11-08 contract); off takes
     /// it away (and puts an older cut-out's original picture back).
+    /// Reverse (contract, WS8 cb5413e): the selected clip plays a reversed copy of its source, made once by the server
+    /// (free, up to 60 s) and kept in the edit; toggling back switches to the original at once. Background removal and a
+    /// separate sound are aligned to the original's frames, so they're dropped (and the notice says so).
+    func toggleReverse() async {
+        guard let c = state.selectedVideo else { lastError = "Select a clip to reverse"; return }
+        if let orig = state.reversedFrom, let a = project.asset(orig) { switchReverse(to: a); return }
+        if let copy = state.reversedCopy(of: c.asset) { switchReverse(to: copy); return }
+        guard c.holdSec == nil else { lastError = "A freeze frame has nothing to reverse"; return }
+        guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Reverse needs a take or an upload"; return }
+        await run(.reverse, source: src) { [weak self] r in
+            Task { @MainActor in await self?.addReversed(r, of: a) }
+        }
+    }
+
+    private func addReversed(_ r: EditorJobResult, of a: E.Asset) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't reverse this clip"; return }
+        let id = project.newId("v")
+        var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: ra.durationSec ?? r.durationSec ?? a.durationSec,
+                           width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: r.hasAudio ?? a.hasAudio, url: ra.url)
+        copy.reverseOf = a.id
+        let link = ra.url ?? ra.take.flatMap { lookupTake($0)?.videoUrl }
+        if let link, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? ra.take ?? id) { files[id] = local }
+        else if ra.upload == a.upload, ra.take == a.take { files[id] = files[a.id] }   // the fake hands back the source itself
+        state.assetNames[id] = "Reversed"
+        switchReverse(to: copy)
+    }
+
+    private func switchReverse(to target: E.Asset) {
+        var dropped: [String]?
+        edit { s in dropped = s.reverseSelected(to: target); return dropped != nil }
+        guard let dropped else { return }
+        let backwards = target.reverseOf != nil
+        if dropped.isEmpty { notice = backwards ? "Plays backwards" : "Plays forwards again" }
+        else { notice = "\(backwards ? "Plays backwards" : "Plays forwards again") · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)" }
+    }
+
     func setRemoveBackground(_ on: Bool) async {
         guard let c = state.selectedVideo else { return }
         if !on {

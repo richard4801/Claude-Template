@@ -331,6 +331,8 @@ extension EditV2 {
         public var url: String?
         /// A font asset's family and style, read from the file (display only), 1–80 characters.
         public var name: String?
+        /// Reverse (WS8 cb5413e): this video asset is that video asset played backwards.
+        public var reverseOf: String?
         public init(id: String, kind: AssetKind, take: String? = nil, upload: String? = nil, library: String? = nil, durationSec: Double? = nil,
                     width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil, name: String? = nil) {
             self.id = id; self.kind = kind; self.take = take; self.upload = upload; self.library = library; self.durationSec = durationSec
