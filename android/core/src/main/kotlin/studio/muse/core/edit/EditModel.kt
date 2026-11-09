@@ -142,6 +142,22 @@ fun speedPieces(c: MediaClip): List<Piece> = (c as? VideoClip)?.holdSec?.let { l
 fun clipLength(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve? = null): Double =
     if (curve != null) speedPieces(inSec, outSec, speed, curve).sumOf { (it.outSec - it.inSec) / it.speed } else (outSec - inSec) / (speed ?: 1.0)
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
+/**
+ * A clip switched to the reversed copy [reversed] of a source [durationSec] long (or back to the original), model.ts
+ * `reverseClip`: in' = D − out, out' = D − in, a speed curve mirrored in x (custom unless symmetric); alphaMatte and
+ * audioAsset dropped. Null for a freeze.
+ */
+fun reverseClip(c: VideoClip, reversed: String, durationSec: Double): VideoClip? {
+    if (c.holdSec != null) return null
+    val curve = c.speedCurve?.let { sc ->
+        val pts = sc.points.map { SpeedPoint(r6(1 - it.x), it.speed) }.sortedBy { it.x }
+        SpeedCurve(if (pts == sc.points) sc.preset else SpeedPreset.CUSTOM, pts)
+    }
+    // alphaMatte and audioAsset are lined up with the original's frames, so they'd play the wrong way: dropped.
+    return c.copy(asset = reversed, inSec = r6(maxOf(0.0, durationSec - c.outSec)), outSec = r6(minOf(durationSec, durationSec - c.inSec)), speedCurve = curve,
+        alphaMatte = null, audioAsset = null)
+}
+
 fun clipLength(c: MediaClip): Double = (c as? VideoClip)?.holdSec ?: clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 /** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */
@@ -406,6 +422,14 @@ fun transitionState(kind: TransitionKind, p0: Double): TransitionState {
             LayerState(opacity = if (p < 0.5) 1.0 else 0.0, dx = 0.04 * peak * jit(1), rgbSplit = peak),
             LayerState(opacity = if (p < 0.5) 0.0 else 1.0, dx = 0.04 * peak * jit(2), rgbSplit = peak), null,
         )
+        TransitionKind.ZOOM_OUT -> TransitionState(LayerState(scale = 1 - 0.2 * e, opacity = 1 - p), LayerState(scale = 1.2 - 0.2 * e, opacity = p), null)
+        TransitionKind.WHIP_RIGHT -> TransitionState(LayerState(dx = e3, blur = peak), LayerState(dx = -(1 - e3), blur = peak), null)
+        // Cover: the incoming clip slides over the outgoing one, which stays still and fully shown underneath.
+        TransitionKind.COVER_LEFT -> TransitionState(l, LayerState(dx = 1 - e), null)
+        TransitionKind.COVER_RIGHT -> TransitionState(l, LayerState(dx = -(1 - e)), null)
+        TransitionKind.COVER_UP -> TransitionState(l, LayerState(dy = 1 - e), null)
+        TransitionKind.COVER_DOWN -> TransitionState(l, LayerState(dy = -(1 - e)), null)
+        TransitionKind.SPLIT_FADE -> TransitionState(LayerState(rgbSplit = peak), LayerState(opacity = p, rgbSplit = peak), null)
     }
 }
 

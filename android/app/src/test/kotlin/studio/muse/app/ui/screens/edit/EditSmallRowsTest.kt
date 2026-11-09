@@ -394,6 +394,45 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun contentStickersSoundsAndCaptionTemplates() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(2.0, end = true)); c.act(EditAction.AddSticker("content:twemoji/1f600", 160, 160))
+        val st = c.p().assets.single { it.library == "content:twemoji/1f600" }
+        val item = c.p().tracks.first { it.kind == TrackKind.IMAGE }.items.single() as studio.muse.core.edit.ImageItem
+        assertEquals(st.id, item.asset); assertEquals(2.0, item.startSec, 1e-9); assertEquals(.3, item.transform!!.scale!!, 1e-9)
+        // The same sticker again reuses the asset.
+        c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.AddSticker("content:twemoji/1f600", 160, 160))
+        assertEquals(1, c.p().assets.count { it.library == "content:twemoji/1f600" })
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddSoundEffect("content:uisfx/glass-notification", 0.509, "Select"))
+        val fx = c.p().tracks.single { it.kind == TrackKind.SFX }.items.single() as AudioClip
+        assertEquals(1.0, fx.startSec, 1e-9); assertEquals(0.509, fx.outSec, 1e-9)
+        assertEquals("content:uisfx/glass-notification", c.p().asset(fx.asset)!!.library)
+        valid(c.p())
+        // A caption template needs captions; with them, it replaces the style (here in a content font).
+        c.act(EditAction.CaptionTemplate(studio.muse.core.edit.Presets.CAPTION_STYLES.values.first().let { it.copy(text = it.text.copy(font = studio.muse.core.edit.Font.MONTSERRAT, weight = 900)) }, "Bold"))
+        assertTrue(c.p().tracks.none { it.kind == TrackKind.CAPTION && it.caption?.style?.text?.font == studio.muse.core.edit.Font.MONTSERRAT })
+    }
+
+    @Test fun reverse() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val src = c.p().asset(clip.asset)!!
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.Reverse(true)); advanceUntilIdle()
+        val rev = c.p().assets.single { it.reverseOf == src.id }
+        var now = c.p().mainClips[0]
+        assertEquals(rev.id, now.asset)
+        assertEquals(src.durationSec!! - clip.outSec, now.inSec, 1e-6); assertEquals(src.durationSec!! - clip.inSec, now.outSec, 1e-6)
+        valid(c.p())
+        // Back, then forwards again without a new job (the reversed copy is reused).
+        c.act(EditAction.Reverse(false))
+        now = c.p().mainClips[0]
+        assertEquals(clip.asset, now.asset); assertEquals(clip.inSec, now.inSec, 1e-6); assertEquals(clip.outSec, now.outSec, 1e-6)
+        c.act(EditAction.Reverse(true))
+        assertEquals(rev.id, c.p().mainClips[0].asset)
+        assertEquals(1, c.p().assets.count { it.reverseOf != null })
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

@@ -330,3 +330,21 @@ extension EditV2 {
         } ?? p
     }
 }
+
+extension EditV2 {
+    /// A clip switched to the reversed copy `reversed` of a source `durationSec` long (or back to the original): the same
+    /// stretch, mirrored (in' = D − out, out' = D − in); a speed curve mirrored in x (custom unless symmetric). Keyframes,
+    /// look and the rest stay; alphaMatte and audioAsset (aligned to the original's frames) are dropped. Nil for a freeze.
+    public static func reverseClip(_ c: VideoClip, reversed: String, durationSec d: Double) -> VideoClip? {
+        guard c.holdSec == nil else { return nil }
+        var out = c
+        out.asset = reversed
+        out.inSec = r6(max(0, d - c.outSec)); out.outSec = r6(min(d, d - c.inSec))
+        out.alphaMatte = nil; out.audioAsset = nil
+        if let sc = c.speedCurve {
+            let pts = sc.points.map { [r6(1 - $0[0]), $0[1]] }.sorted { $0[0] < $1[0] }
+            out.speedCurve = SpeedCurve(preset: pts == sc.points ? sc.preset : .custom, points: pts)
+        }
+        return out
+    }
+}

@@ -406,7 +406,7 @@ final class EditV2Scene: @unchecked Sendable {
         var text = tx.text
         if let n = pl.chars { text = String(String.UnicodeScalarView(text.unicodeScalars.prefix(n))) }
         guard !text.isEmpty else { return base }
-        let key = "t|\(tx.id)|\(k)|\(text.hashValue)|\(tx.style.hashValue)"
+        let key = "t|\(tx.id)|\(k)|\(text.hashValue)|\(tx.style.hashValue)|\(EditV2TextRenderer.fontGeneration)"
         let fontSize = CGFloat(tx.style.sizePct) * size.height * CGFloat(k)
         let wrap = CGFloat(tx.style.maxWidthPct ?? 0.85) * size.width * CGFloat(k)
         guard let img = cachedText(key, {
@@ -435,23 +435,18 @@ final class EditV2Scene: @unchecked Sendable {
 
             return run
         }
-        let key = "c|\(at.page)|\(at.word)|\(st.hashValue)"
+        let key = "c|\(at.page)|\(at.word)|\(st.hashValue)|\(EditV2TextRenderer.fontGeneration)"
         let fontSize = CGFloat(st.sizePct) * size.height
         let wrap = CGFloat(st.maxWidthPct ?? 0.85) * size.width
-        var textStyle = st.textStyle
-        // Neon: the glow follows the highlight colour when it is changed (Mac Edit audit 2026-11-08).
-        if st.preset == .neon {
-            let g = textStyle.shadow
-            textStyle.shadow = E.Shadow(color: st.highlightColor, opacity: g?.opacity ?? 0.9, blurPct: g?.blurPct ?? 0.5, dyPct: 0)
-        }
+        // Neon draws its glow with the style's own shadow colour (coordinator, 2026-11-09: server, Android and Mac match).
+        let textStyle = st.textStyle
         guard let img = cachedText(key, { EditV2TextRenderer.render(runs, style: textStyle, fontSize: fontSize, wrapWidth: wrap) }) else { return base }
-        // `single` (and `pop` on each new page) pops in.
-        var scale = 1.0, opacity = 1.0
-        if st.preset == .single || st.preset == .pop {
-            let a = E.animState(durationSec: max(0.2, page.endSec - page.startSec), animIn: E.Anim(kind: .pop, durationSec: 0.2), animOut: nil, text: nil, t - page.startSec)
-            scale = a.scale
-            opacity = a.opacity
+        // As Android's core RenderPlan: `pop` is the active word at 1.15× (above); `single` (one word a page) pops in,
+        // 0.6 → 1 over 0.15 s, easing out, at full opacity. No other preset scales the page.
+        var scale = 1.0
+        if st.preset == .single {
+            scale = 0.6 + 0.4 * E.ease(.easeOut, min(1, max(0, (t - page.startSec) / 0.15)))
         }
-        return place(img, x: 0.5, y: st.y ?? 0.72, scale: scale, rotation: 0, opacity: opacity, over: base)
+        return place(img, x: 0.5, y: st.y ?? 0.72, scale: scale, rotation: 0, opacity: 1, over: base)
     }
 }

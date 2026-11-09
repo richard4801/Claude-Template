@@ -153,6 +153,7 @@ interface MuseService {
     @POST("v1/takes/{id}/versions") suspend fun createVersionV2(@Path("id") id: String, @Body r: TakeVersionV2Request): Take
     @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
     @GET("v1/editor/uploads/{id}") suspend fun editorUpload(@Path("id") id: String): EditorUploadDto
+    @GET("v1/editor/content") suspend fun editorContent(): okhttp3.ResponseBody
     // Edit sessions (workstream 3)
     @POST("v1/edit-sessions") suspend fun openEditSession(@Body r: OpenEditSessionRequest): EditSessionDto
     @GET("v1/edit-sessions/{id}") suspend fun editSession(@Path("id") id: String): EditSessionDto
@@ -505,6 +506,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     }
 
     override suspend fun editorUploadUrl(uploadId: String): String? = call { editorUpload(uploadId) }.url
+
+    override suspend fun editorContentCatalog(): String? = call { editorContent() }.string()
+    override fun editorContentUrl(path: String): String? = "${base}v1/editor/content/files/$path"
 
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String {
         val p = call { editorPresign(EditorPresignRequest(contentType, file.length(), purpose)) }

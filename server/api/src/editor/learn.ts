@@ -63,7 +63,7 @@ export function recipeFromProject(p: M.EditProject, o: { takeId: string; version
     const cx = x.transform?.x ?? 0.5, cy = x.transform?.y ?? 0.75;
     const anim = (a?: M.Anim) => (!a || a.kind === 'none' ? 'cut' : 'fade') as 'cut' | 'fade';
     return { id: x.id, startSec: r3(x.startSec), endSec: r3(x.startSec + x.durationSec), box: { x: r3(cx - w / 2), y: r3(cy - h / 2), w: r3(w), h: r3(h) },
-      words: x.text, sizeFrac: r3(size), color: x.style.color, fontId: x.style.font, animIn: anim(x.animIn), animOut: anim(x.animOut), confidence: 1 };
+      words: x.text, sizeFrac: r3(size), color: x.style.color, fontId: M.FONT_FALLBACK[x.style.font] as 'sans' /* a recipe names the built-in families */, animIn: anim(x.animIn), animOut: anim(x.animOut), confidence: 1 };
   });
   const lut = main.find(c => c.look?.lut)?.look?.lut ?? '';
   const palId = lut.startsWith('palette:') ? lut.slice(8) : '';

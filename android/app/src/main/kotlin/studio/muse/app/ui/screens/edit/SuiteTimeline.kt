@@ -391,8 +391,10 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
                             if (r < 0 || l > w) return@forEachIndexed
                             clipTile(c, l, r, top, h, frames[c.asset].orEmpty(), p.asset(c.asset)?.durationSec ?: 1.0, ppsPx, m.t.surface2)
-                            if (c.speedCurve != null || c.speed != 1.0 || c.holdSec != null) {
-                                val lbl = if (c.holdSec != null) "${trim(c.holdSec!!)} s" else if (c.speedCurve != null) "Curve" else "${trim(c.speed)}×"
+                            val reversed = p.asset(c.asset)?.reverseOf != null
+                            if (c.speedCurve != null || c.speed != 1.0 || c.holdSec != null || reversed) {
+                                val sp = if (c.holdSec != null) "${trim(c.holdSec!!)} s" else if (c.speedCurve != null) "Curve" else if (c.speed != 1.0) "${trim(c.speed)}×" else null
+                                val lbl = if (reversed) listOfNotNull("Reversed", sp).joinToString(" ") else sp!!
                                 val tl = measurer.measure(lbl, TextStyle(fontFamily = m.t.body, fontSize = 11.sp, color = Color.White, fontFeatureSettings = "tnum"))
                                 drawRect(Color.Black.copy(alpha = .55f), Offset(l + 3 * dp, top + h - tl.size.height - 4 * dp), Size(tl.size.width + 6f * dp, tl.size.height.toFloat()))
                                 drawText(tl, topLeft = Offset(l + 6 * dp, top + h - tl.size.height - 4 * dp))

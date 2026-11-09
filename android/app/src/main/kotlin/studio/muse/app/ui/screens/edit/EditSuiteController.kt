@@ -261,6 +261,14 @@ sealed interface EditAction {
     data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
+    /** A caption template from the content library: the whole caption style. */
+    data class CaptionTemplate(val style: studio.muse.core.edit.CaptionStyle, val name: String) : EditAction
+    /** A sticker from the content library ([ref]) placed at the playhead. */
+    data class AddSticker(val ref: String, val width: Int, val height: Int) : EditAction
+    /** A sound effect from the content library ([ref]) at the playhead. */
+    data class AddSoundEffect(val ref: String, val durationSec: Double, val name: String) : EditAction
+    /** The active clip played backwards ([on]) or forwards again: the server's reversed copy the first time, then a swap. */
+    data class Reverse(val on: Boolean) : EditAction
     /** HSL per hue on the picture the Adjust panel acts on: [band]'s [field] (hue, sat or light) to [value] (−1…1); a null [band] resets every band. */
     data class SetHsl(val band: studio.muse.core.edit.HueBand?, val field: String = "", val value: Double = 0.0, val done: Boolean = true) : EditAction
     /** An own font (an editor upload named [name]) added to the edit and set on the selected text. */
@@ -419,7 +427,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -870,6 +878,20 @@ class EditSuiteController(
                 p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animLoop = l); is ImageItem -> it.copy(animLoop = l); is VideoClip -> it.copy(animLoop = l); else -> it } }
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
+            is EditAction.Reverse -> reverse(u, a.on)
+            is EditAction.CaptionTemplate -> if (change(refused = "Make captions first") { p -> SuiteOps.captionStyle(p) { a.style } }) say("${a.name} captions")
+            is EditAction.AddSticker -> {
+                var newId: String? = null
+                if (change(refused = "Couldn't add that sticker here") { p -> SuiteOps.addSticker(p, a.ref, a.width, a.height, u.playheadSec)?.let { (q, id) -> newId = id; q } })
+                    _ui.update { it.copy(selectedId = newId) }
+            }
+            is EditAction.AddSoundEffect -> {
+                var newId: String? = null
+                if (change(refused = "Couldn't add that sound here") { p -> SuiteOps.addSoundEffect(p, a.ref, a.durationSec, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {
+                    _ui.update { it.copy(selectedId = newId) }
+                    say("${a.name} added at ${"%.1f".format(u.playheadSec)} s")
+                }
+            }
             is EditAction.SetHsl -> {
                 val id = visualId(u) ?: return
                 val v = r2(a.value.coerceIn(-1.0, 1.0)).takeIf { it != 0.0 }
@@ -1046,7 +1068,7 @@ class EditSuiteController(
             val (result, err) = if (model == null) backend.run(kind, src, options, progress) else backend.run(kind, src, options, model, progress)
             setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
             if (result != null) {
-                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; else -> "Edit" }
+                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; else -> "Edit" }
                 apply(result)
             } else if (err != null) say(err)
         }
@@ -1247,6 +1269,49 @@ class EditSuiteController(
                 say("Background removed · the person is on an overlay track")
             }
             val id = matteId
+            if (id != null && url != null) backend.assetArrived(id, url)
+        }
+    }
+
+    /**
+     * Reverse: the clip switches to the reversed copy of its video ([reverseClip]), made once by the server's reverse
+     * helper (free) and reused after; back again is the same swap to the original.
+     */
+    private fun reverse(u: EditSuiteUi, on: Boolean) {
+        val p = project ?: return
+        val clip = u.activeClip ?: return say("Pick a clip")
+        if (clip.holdSec != null) return say("A freeze frame has nothing to reverse")
+        val asset = p.asset(clip.asset) ?: return
+        val reversedNow = asset.reverseOf != null
+        if (on == reversedNow) return
+        if (!on) {
+            val orig = p.asset(asset.reverseOf!!) ?: return
+            val d = orig.durationSec ?: return say("Couldn't reverse this clip")
+            if (change { pp -> pp.updateItem(clip.id) { (it as? VideoClip)?.let { c -> studio.muse.core.edit.reverseClip(c, orig.id, d) } ?: it } }) say("Plays forwards")
+            return
+        }
+        val d = asset.durationSec ?: return say("Couldn't reverse this clip")
+        // What the reversed clip loses (lined up with the original's frames), said once it's reversed.
+        val lost = listOfNotNull(if (clip.alphaMatte != null) "background removal" else null, if (clip.audioAsset != null) "the separate sound" else null)
+        val done = if (lost.isEmpty()) "Plays backwards" else "Plays backwards · ${lost.joinToString(" and ")} turned off (run it again on the reversed clip; reversing back won't bring it back)"
+        p.assets.firstOrNull { it.reverseOf == asset.id }?.let { have ->
+            if (change { pp -> pp.updateItem(clip.id) { (it as? VideoClip)?.let { c -> studio.muse.core.edit.reverseClip(c, have.id, d) } ?: it } }) say(done)
+            return
+        }
+        if (d > 60.0 + 1e-6) return say("Reverse works on videos up to 60 s")
+        runAi("reverse", null, sourceOf(asset)) { r ->
+            val a = r["asset"] as? JsonObject ?: return@runAi
+            val upload = (a["upload"] as? JsonPrimitive)?.content ?: return@runAi
+            val url = (a["url"] as? JsonPrimitive)?.content
+            var revId: String? = null
+            if (change(refused = "Couldn't reverse this clip") { pp ->
+                    val id = pp.assets.firstOrNull { it.reverseOf == asset.id }?.id ?: SuiteOps.newAssetId(pp, "${asset.id}_rev").also { revId = it }
+                    val withAsset = if (pp.assets.any { it.id == id }) pp else pp.copy(assets = pp.assets + Asset(id, AssetKind.VIDEO, upload = upload, durationSec = d,
+                        width = (r["width"] as? JsonPrimitive)?.content?.toIntOrNull(), height = (r["height"] as? JsonPrimitive)?.content?.toIntOrNull(),
+                        hasAudio = (r["hasAudio"] as? JsonPrimitive)?.content == "true", reverseOf = asset.id))
+                    withAsset.updateItem(clip.id) { (it as? VideoClip)?.let { c -> studio.muse.core.edit.reverseClip(c, id, d) } ?: it }
+                }) say(done)
+            val id = revId
             if (id != null && url != null) backend.assetArrived(id, url)
         }
     }

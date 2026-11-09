@@ -6,6 +6,8 @@ import Foundation
 
 public enum EditorJobKind: String, Codable, Hashable, Sendable, CaseIterable {
     case captions, cuts, matte, denoise, beats
+    /// Reverse (WS8 cb5413e): a reversed copy of the whole source (≤ 60 s), local and free.
+    case reverse
 }
 
 /// The media a job works on: a video take of the studio, or an upload of the studio (+ its length).
@@ -76,7 +78,7 @@ extension EditorJobKind {
         case .captions, .cuts: return .captions
         case .matte: return options?.points != nil ? .track : .matte
         case .denoise: return .denoise
-        case .beats: return nil
+        case .beats, .reverse: return nil
         }
     }
 }
@@ -108,13 +110,13 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
         case .captions: return captions
         case .matte: return matte
         case .denoise: return denoise
-        case .cuts, .beats: return nil   // the free passes are always offered
+        case .cuts, .beats, .reverse: return nil   // the free passes are always offered
         }
     }
     private var paidOn: Bool { paid?.available != false }
     public func isAvailable(_ k: EditorJobKind) -> Bool {
         guard let h = helper(k) else { return true }
-        return h.available != false && (paidOn || k == .cuts || k == .beats)
+        return h.available != false && (paidOn || k == .cuts || k == .beats || k == .reverse)
     }
     /// Why a helper can't run, in plain words: the owner's switch, else "Coming soon" (background removal not ready yet).
     public func note(_ k: EditorJobKind) -> String? {
@@ -182,6 +184,10 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var mode: String?
     public var points: [KeepPoint]?
     public var suggestion: DenoiseSuggestion?
+    // reverse: the reversed copy's picture size and sound
+    public var width: Int?
+    public var height: Int?
+    public var hasAudio: Bool?
     // beats
     public var bpm: Double?
     public var beats: [Double]?

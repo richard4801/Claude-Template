@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -177,6 +178,24 @@ class EditFixtureTest {
             assertJson("adjustLayer t=$t", sm.obj["matrix"], adjustLayerMatrix(p, t)?.let(::numbers) ?: kotlinx.serialization.json.JsonNull)
         }
         assertEquals(al["project"], EditJson.encode(p)) // round trip
+    }
+
+    @Test fun reverseClips() {
+        // Each clip through a one-clip project (the JSON parser is the project's), reversed and back.
+        fun clipOf(o: JsonElement): VideoClip = EditJson.parse(buildJsonObject {
+            put("version", 2); put("sourceTakeId", "t")
+            put("canvas", buildJsonObject { put("width", 1080); put("height", 1920); put("fps", 30); put("background", "#000000") })
+            put("assets", buildJsonArray { add(buildJsonObject { put("id", "src"); put("kind", "video"); put("take", "t"); put("durationSec", 20) }) })
+            put("tracks", buildJsonArray { add(buildJsonObject { put("id", "main"); put("kind", "main"); put("items", buildJsonArray { add(o) }) }) })
+        }).mainClips.single()
+        fun enc(c: VideoClip?): JsonElement = c?.let { EditJson.encodeItem(it) } ?: JsonNull
+        for (c in fn["reverse"]!!.arr) {
+            val clip = clipOf(c.obj["clip"]!!)
+            val d = c.obj["durationSec"]!!.num
+            val rev = reverseClip(clip, "src_rev", d)
+            assertJson("reverse ${clip.id}", c.obj["reversed"], enc(rev))
+            assertJson("reverse back ${clip.id}", c.obj["back"], enc(rev?.let { reverseClip(it, clip.asset, d) }))
+        }
     }
 
     @Test fun audioSpeedTiming() {

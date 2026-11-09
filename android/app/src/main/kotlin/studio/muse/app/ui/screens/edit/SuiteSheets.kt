@@ -126,6 +126,11 @@ data class SuiteHost(
     val headphones: Boolean = false,
     /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
     val addPhoto: (() -> Unit)? = null,
+    /** The content library: a file's download URL, adding a sticker or sound, and the sound preview (null: no library). */
+    val contentUrl: (String) -> String? = { null },
+    val addContent: ((studio.muse.app.platform.edit.ContentItem) -> Unit)? = null,
+    val previewSound: (studio.muse.app.platform.edit.ContentItem?) -> Unit = {},
+    val soundPlaying: String? = null,
     /** "Your font": opens the system file picker for a .ttf/.otf (null: not offered). */
     val addFont: (() -> Unit)? = null,
     /** Style kits: save this edit's style under a name; delete a saved one. */
@@ -329,6 +334,16 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         SuiteSlider(lenFrac.coerceIn(0f, 1f), { f, done -> val target = (src / 10) * 10.0.pow(f * 2.0); act(EditAction.Speed(((src / target) * 100).roundToInt() / 100.0, done)) },
             label = "Length", valueText = "${fmt1(clipLength(c))} s")
         T("${fmt1(src)} s of video → ${fmt1(clipLength(c))} s · pitch kept", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+    }
+    // Reverse: plays the clip backwards (the first time, the server makes the reversed copy).
+    if (c.holdSec == null) {
+        val reversed = ui.project?.asset(c.asset)?.reverseOf != null
+        val job = ui.ai["reverse"]
+        OptRow("Reverse", when {
+            job?.running == true -> "${job.phase.ifEmpty { "Reversing" }}… ${job.progress}%"
+            job?.error != null && !reversed -> job.error
+            else -> "Plays the clip backwards, sound too"
+        }, reversed, { if (job?.running != true) act(EditAction.Reverse(!reversed)) })
     }
 }
 
@@ -562,6 +577,11 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     val playAlong = ui.voPlayback ?: host.headphones
     OptRow("Play the video while recording", if (host.headphones) "You'll hear it in your headphones" else "Off on the speaker, so the mic doesn't pick it up", playAlong,
         { act(EditAction.VoPlayback(!playAlong)) })
+    val cat = ui.content
+    if (cat != null && host.addContent != null && cat.pack("sfx").isNotEmpty()) {
+        SuiteLabel("Sound effects")
+        SoundEffectPicker(cat, host.soundPlaying, host.previewSound, host.addContent)
+    }
 }
 
 private fun r1(v: Double) = Math.round(v * 10) / 10.0
@@ -580,7 +600,7 @@ private fun TextBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
             Modifier.fillMaxWidth().background(m.t.surface).border(1.dp, m.t.line).padding(12.dp).semantics { contentDescription = "Text" },
             textStyle = m.type.body.copy(color = m.t.ink), cursorBrush = SolidColor(m.t.accent),
         )
-        TextStyleEditor(sel, ui.project?.assets.orEmpty().filter { it.kind == studio.muse.core.edit.AssetKind.FONT }, host.addFont, act)
+        TextStyleEditor(ui, sel, ui.project?.assets.orEmpty().filter { it.kind == studio.muse.core.edit.AssetKind.FONT }, host.addFont, act)
         AnimPicker(sel.id, sel.animIn, sel.animOut, sel.durationSec, text = true, act = act)
         LoopPicker(sel.id, sel.animLoop, act)
     }
@@ -606,13 +626,13 @@ private val TEXT_COLOURS = listOf("#FFFFFF", "#111111", "#FFE600", "#FF2D87", "#
 
 /** Font, weight, size, colour, alignment, outline, shadow and background of a text item (every field of the contract's TextStyle). */
 @Composable
-private fun TextStyleEditor(t: TextItem, fonts: List<studio.muse.core.edit.Asset>, addFont: (() -> Unit)?, act: (EditAction) -> Unit) {
+private fun TextStyleEditor(ui: EditSuiteUi, t: TextItem, fonts: List<studio.muse.core.edit.Asset>, addFont: (() -> Unit)?, act: (EditAction) -> Unit) {
     val m = muse
     val st = t.style
     fun set(n: studio.muse.core.edit.TextStyle, done: Boolean = true) = act(EditAction.SetTextStyle(t.id, n, done))
     SuiteLabel("Font")
     // The six families, the edit's own fonts by name, then "Your font" (picks a .ttf/.otf). Picking a family clears an own font.
-    val chips = Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) } + fonts.map { "asset:${it.id}" to (it.name ?: "Your font") } +
+    val chips = fontChips() + fonts.map { "asset:${it.id}" to (it.name ?: "Your font") } +
         listOfNotNull(addFont?.let { "add-font" to "Your font…" })
     SuiteChips(chips, st.fontAsset?.let { "asset:$it" } ?: st.font.wire, { k ->
         when {
@@ -621,6 +641,7 @@ private fun TextStyleEditor(t: TextItem, fonts: List<studio.muse.core.edit.Asset
             else -> set(st.copy(font = Font.entries.first { it.wire == k }, fontAsset = null))
         }
     })
+    if (st.fontAsset == null) FontDownloadNote(ui, st.font, st.weight)
     if (st.fontAsset != null) T("Your font draws in its own weight. The ${st.font.wire} family stands in where it isn't available.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         if (st.fontAsset == null) SuiteSeg(listOf("400" to "Regular", "700" to "Bold", "900" to "Black"), st.weight.toString(), { set(st.copy(weight = it.toInt())) }, Modifier.weight(1f), height = 34.dp, fill = true)
@@ -729,7 +750,8 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
     when (ui.captionTab) {
         "Font" -> {
             SuiteLabel("Font")
-            SuiteChips(Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, ct.style.text.font.wire, { w -> act(EditAction.CaptionFont(Font.entries.first { it.wire == w })) })
+            SuiteChips(fontChips(), ct.style.text.font.wire, { w -> act(EditAction.CaptionFont(Font.entries.first { it.wire == w })) })
+            FontDownloadNote(ui, ct.style.text.font, ct.style.text.weight)
             SuiteLabel("Colours")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 T("Text", m.type.body.copy(fontSize = 13.sp), m.t.muted)
@@ -748,6 +770,15 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
         }
         "Words" -> WordsBody(ui, p, act)
         else -> {
+            // The content library's caption templates (styles in its fonts), above the presets.
+            ui.content?.pack("captions")?.flatMap { it.items }?.takeIf { it.isNotEmpty() }?.let { tpl ->
+                SuiteLabel("Templates")
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(tpl.size) { i -> val t = tpl[i]; SuiteChip(t.name, false, {
+                        runCatching { studio.muse.core.edit.EditJson.parseCaptionStyle(t.raw["style"]!!) }.getOrNull()?.let { act(EditAction.CaptionTemplate(it, t.name)) }
+                    }) }
+                }
+            }
             val labels = Presets.CAPTION_STYLE_LABELS.take(6)
             labels.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -828,6 +859,18 @@ private fun EffectsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
         }
     }
     SuiteChip("Dip to black", cur?.kind == TransitionKind.BLACK, { act(EditAction.SetTransition(TransitionKind.BLACK, cur?.durationSec ?: .4)) })
+    // The content library's transition presets (new kinds and tuned lengths).
+    ui.content?.pack("transitions")?.flatMap { it.items }?.takeIf { it.isNotEmpty() }?.let { presets ->
+        SuiteLabel("More transitions")
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            presets.forEach { t ->
+                val o = t.raw["transition"] as? kotlinx.serialization.json.JsonObject ?: return@forEach
+                val kind = TransitionKind.entries.firstOrNull { it.wire == (o["kind"] as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: return@forEach
+                val dur = (o["durationSec"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: .4
+                SuiteChip(t.name, cur?.kind == kind && kotlin.math.abs((cur.durationSec) - dur) < 1e-6, { act(EditAction.SetTransition(kind, dur)) })
+            }
+        }
+    }
     val d = cur?.durationSec ?: .4
     SuiteSlider(((d - .1) / 1.9).toFloat(), { f, done -> cur?.let { act(EditAction.SetTransition(it.kind, r2(.1 + f * 1.9), done)) } }, label = "Duration", valueText = "${fmt1(d)} s", enabled = cur != null)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -988,6 +1031,16 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
             SuiteButton("Remove", { act(EditAction.PickLook(null, null)) }, height = 34.dp)
         }
     }
+    // The content library's looks (effects on the pack's grades), as chips under the grid.
+    ui.content?.pack("looks")?.flatMap { it.items }?.takeIf { it.isNotEmpty() }?.let { more ->
+        SuiteLabel("More looks")
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            more.forEach { l ->
+                val parsed = remember(l.ref) { runCatching { studio.muse.core.edit.EditJson.parseLook(l.raw["look"]!!) }.getOrNull() }
+                if (parsed != null) SuiteChip(l.name, look == parsed, { act(EditAction.PickLook(null, parsed)) }, enabled = v != null)
+            }
+        }
+    }
     val strength = look?.strength ?: 1.0
     SuiteSlider(strength.toFloat(), { f, done -> act(EditAction.LookStrength(f.toDouble(), done)) }, label = "Intensity", valueText = "${(strength * 100).roundToInt()}%", enabled = look != null)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1041,6 +1094,25 @@ private fun AdjustLayerBody(ui: EditSuiteUi, layer: studio.muse.core.edit.Adjust
     row("Temperature", KfProp.TEMPERATURE, a?.temperature ?: 0.0, true)
     row("Tint", KfProp.TINT, a?.tint ?: 0.0, true)
     row("Strength", KfProp.OPACITY, layer.opacity ?: 1.0, false)
+}
+
+/** The family chips: the six bundled ones, then the content library's by their names. */
+private fun fontChips(): List<Pair<String, String>> = Font.entries.map { it.wire to FONT_LABELS.getValue(it) }
+
+private val FONT_LABELS = mapOf(
+    Font.SANS to "Sans", Font.SERIF to "Serif", Font.ROUNDED to "Rounded", Font.CONDENSED to "Condensed", Font.MONO to "Mono", Font.MARKER to "Marker",
+    Font.INTER to "Inter", Font.MONTSERRAT to "Montserrat", Font.ROBOTO_CONDENSED to "Roboto Condensed", Font.PLAYFAIR to "Playfair", Font.UNBOUNDED to "Unbounded",
+    Font.RUBIK to "Rubik", Font.JETBRAINS_MONO to "JetBrains Mono", Font.CAVEAT to "Caveat", Font.OSWALD to "Oswald",
+)
+
+/** While a content family's file is downloading, a line saying so (the text draws in its fallback meanwhile). */
+@Composable
+private fun FontDownloadNote(ui: EditSuiteUi, font: Font, weight: Int) {
+    if (!font.isContent) return
+    val path = ui.content?.fontPath(font, weight)
+    if (path != null && path in ui.contentHere) return
+    T(if (ui.content == null) "${FONT_LABELS.getValue(font)} needs the studio server · ${FONT_LABELS.getValue(font.fallback)} stands in"
+      else "Downloading ${FONT_LABELS.getValue(font)}… ${FONT_LABELS.getValue(font.fallback)} stands in until it's here", muse.type.tiny.copy(fontSize = 12.sp), muse.t.muted)
 }
 
 /** HSL per hue: pick a band (a colour dot), then its hue, saturation and luminance. */
@@ -1174,6 +1246,11 @@ private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     host.importLink?.let { SuiteButton("Add a video from a link", it, Modifier.fillMaxWidth(), icon = "link") }
     host.addPhoto?.let { SuiteButton("Add a photo", it, Modifier.fillMaxWidth(), icon = "image") }
     SuiteButton("Music from uploads", host.pickAudio, Modifier.fillMaxWidth(), icon = "music")
+    val cat = ui.content
+    if (cat != null && host.addContent != null && cat.pack("stickers").isNotEmpty()) {
+        SuiteLabel("Stickers")
+        StickerPicker(cat, host.contentUrl, host.addContent)
+    }
 }
 
 // ======================================================================= Ratio and export (EM5, E4)

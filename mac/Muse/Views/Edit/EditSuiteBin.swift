@@ -126,7 +126,7 @@ struct EditSuiteBin: View {
         switch session.binTab {
         case .takes: takes
         case .uploads: VStack(alignment: .leading, spacing: Space.s3) { mediaList; audioList }
-        case .music: audioList
+        case .music: VStack(alignment: .leading, spacing: Space.s5) { audioList; ContentSounds(session: session) }
         case .text: textList
         case .stickers: stickers
         case .templates: templates
@@ -212,11 +212,13 @@ struct EditSuiteBin: View {
         }
     }
 
-    /// Pictures (PNG with transparency works as a sticker) from this Mac; a sticker library needs licensed content
-    /// (plans/edit-parity.md, content licensing).
+    /// The content library's emoji stickers, then pictures from this Mac (PNG with transparency works as a sticker).
     private var stickers: some View {
         let pics = session.pictureAssets
         return VStack(alignment: .leading, spacing: Space.s3) {
+            // The content library's stickers (WS8 84df583), then this edit's own pictures.
+            ContentStickers(session: session)
+            SuiteLabel("Your pictures").padding(.top, Space.s2)
             Text("Add your own pictures and logos. PNGs keep their transparency. They go on the Stickers row at the playhead.")
                 .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s2), GridItem(.flexible(), spacing: Space.s2)], spacing: Space.s2) {
