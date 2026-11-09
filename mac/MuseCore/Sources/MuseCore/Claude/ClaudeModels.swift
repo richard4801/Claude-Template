@@ -16,9 +16,15 @@ public struct ClaudeThread: Codable, Hashable, Sendable, Identifiable {
     /// Recreate and edit threads (workstream 1): the role, the MUSE tools for that screen and the id they act on. The Mac
     /// seeds its Claude Code with it. nil on older servers and camera threads.
     public var brief: ClaudeBrief?
+    /// The list of chats this one belongs to (`suite:photo`, `recreate:rx_1`…). nil on an older server.
+    public var contextKey: String?
+    /// The owner's name for the chat, else its first words (set by the server). nil until something is said.
+    public var title: String?
+    /// In a list: how many messages (yours and Claude's) it has.
+    public var messageCount: Int?
 
     public init(id: String, contextKind: String, contextId: String, claudeSessionId: String? = nil, createdAt: Double, updatedAt: Double,
-                brief: ClaudeBrief? = nil) {
+                brief: ClaudeBrief? = nil, contextKey: String? = nil, title: String? = nil, messageCount: Int? = nil) {
         self.id = id
         self.contextKind = contextKind
         self.contextId = contextId
@@ -26,9 +32,12 @@ public struct ClaudeThread: Codable, Hashable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.brief = brief
+        self.contextKey = contextKey
+        self.title = title
+        self.messageCount = messageCount
     }
 
-    enum CodingKeys: String, CodingKey { case id, contextKind, contextId, claudeSessionId, createdAt, updatedAt, brief }
+    enum CodingKeys: String, CodingKey { case id, contextKind, contextId, claudeSessionId, createdAt, updatedAt, brief, contextKey, title, messageCount }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -38,6 +47,25 @@ public struct ClaudeThread: Codable, Hashable, Sendable, Identifiable {
         createdAt = (try? c.decode(Double.self, forKey: .createdAt)) ?? 0
         updatedAt = (try? c.decode(Double.self, forKey: .updatedAt)) ?? 0
         brief = try? c.decodeIfPresent(ClaudeBrief.self, forKey: .brief)
+        contextKey = try? c.decodeIfPresent(String.self, forKey: .contextKey)
+        title = try? c.decodeIfPresent(String.self, forKey: .title)
+        messageCount = try? c.decodeIfPresent(Int.self, forKey: .messageCount)
+    }
+}
+
+/// GET /v1/claude/threads?key=: one place's chats, newest first.
+public struct ClaudeThreadList: Codable, Hashable, Sendable {
+    public var key: String
+    public var threads: [ClaudeThread]
+    public init(key: String, threads: [ClaudeThread]) {
+        self.key = key
+        self.threads = threads
+    }
+    enum CodingKeys: String, CodingKey { case key, threads }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        key = (try? c.decode(String.self, forKey: .key)) ?? ""
+        threads = (try? c.decode([ClaudeThread].self, forKey: .threads)) ?? []
     }
 }
 

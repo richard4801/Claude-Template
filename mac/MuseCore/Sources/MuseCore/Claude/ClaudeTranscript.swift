@@ -65,7 +65,9 @@ public struct ClaudeTranscript: Hashable, Sendable {
         } else if m.image != nil {
             idx = live.firstIndex { if case .image = $0 { return true }; return false }
         } else if m.role == "user" {
-            idx = live.firstIndex { if case .user(_, let text, _) = $0 { return text == m.text }; return false }
+            // Matched on the words typed (WS18): the app's context line in front must not make the same message show twice.
+            let typed = ClaudeSessions.typedText(m.text)
+            idx = live.firstIndex { if case .user(_, let text, _) = $0 { return ClaudeSessions.typedText(text) == typed }; return false }
         } else if m.role == "assistant" {
             idx = live.firstIndex { if case .assistant(_, let text, let s) = $0 { return !s && text == m.text }; return false }
         } else {
@@ -84,7 +86,9 @@ public struct ClaudeTranscript: Hashable, Sendable {
         streaming = true
         lastError = nil
         let t = userText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty, !messages.contains(where: { $0.role == "user" && $0.text == t && $0.createdAt > 0 && isRecent($0) }) {
+        let typed = ClaudeSessions.typedText(t)
+        guard !live.contains(where: { if case .user(_, let x, _) = $0 { return ClaudeSessions.typedText(x) == typed }; return false }) else { return }
+        if !t.isEmpty, !messages.contains(where: { $0.role == "user" && ClaudeSessions.typedText($0.text) == typed && $0.createdAt > 0 && isRecent($0) }) {
             live.append(.user(id: nextId("user"), text: t, source: source))
         }
     }
@@ -96,7 +100,9 @@ public struct ClaudeTranscript: Hashable, Sendable {
     public mutating func apply(_ e: ClaudeEvent) {
         switch e {
         case .user(let text, _):
-            if live.contains(where: { if case .user(_, let t, _) = $0 { return t == text }; return false }) { streaming = true } else {
+            // The runner's echo of a message typed here (with or without the context line) is the bubble already shown.
+            let typed = ClaudeSessions.typedText(text)
+            if live.contains(where: { if case .user(_, let t, _) = $0 { return ClaudeSessions.typedText(t) == typed }; return false }) { streaming = true } else {
                 begin(userText: text, source: "mac")
             }
         case .text(let d):

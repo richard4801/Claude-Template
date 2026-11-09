@@ -70,11 +70,19 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
 
     public func thread(contextKind: String, contextId: String) async throws -> ClaudeThread {
+        try await thread(contextKind: contextKind, contextId: contextId, new: false)
+    }
+
+    /// The Suite's list key for a draft (set by tests and demo mode as the server reads it from the shared draft).
+    public var suiteToolOf: @Sendable (String) -> String = { _ in "shot" }
+
+    private func thread(contextKind: String, contextId: String, new: Bool) async throws -> ClaudeThread {
         guard ["camera", "edit", "recreate", "suite"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
         // A recreate thread is on one of the owner's references (rx_…), else 404 (as the server).
         if contextKind == "recreate", !contextId.hasPrefix("rx_") { throw ApiError("not_found", "Reference not found") }
+        let key = contextKind == "suite" ? "suite:\(suiteToolOf(contextId))" : "\(contextKind):\(contextId)"
         return locked {
-            if let t = threads.values.first(where: { $0.contextKind == contextKind && $0.contextId == contextId }) { return t }
+            if !new, let t = threads.values.filter({ $0.contextKind == contextKind && $0.contextId == contextId }).max(by: { ($0.updatedAt, $0.id) < ($1.updatedAt, $1.id) }) { return t }
             let brief: ClaudeBrief? = switch contextKind {
             case "recreate": ClaudeBrief(prompt: "You help the studio owner recreate a reference video's edit with MUSE's recreate tools. Price new shots first; the owner approves them in the app.",
                                          tools: ["get_recipe", "set_slot_briefs", "match_slots", "fill_slot", "open_edit", "apply_recipe", "apply_edit_ops"], referenceId: contextId)
@@ -83,10 +91,65 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
                                       tools: ["suite_options", "suite_get_draft", "suite_set_draft", "suite_estimate", "suite_request_shot", "suite_feed"], assistId: contextId)
             default: nil
             }
-            let t = ClaudeThread(id: nextId("ct"), contextKind: contextKind, contextId: contextId, createdAt: now(), updatedAt: now(), brief: brief)
+            let t = ClaudeThread(id: nextId("ct"), contextKind: contextKind, contextId: contextId, createdAt: now(), updatedAt: now(), brief: brief, contextKey: key)
             threads[t.id] = t
             return t
         }
+    }
+
+    // MARK: Chat sessions (WS18, as the server)
+
+    public func threads(key: String) async throws -> [ClaudeThread] {
+        locked {
+            threads.values.filter { $0.contextKey == key }
+                .sorted { ($0.updatedAt, $0.id) > ($1.updatedAt, $1.id) }
+                .map { t in
+                    var t = t
+                    t.messageCount = (messages[t.id] ?? []).filter { $0.role != "tool" }.count
+                    return t
+                }
+        }
+    }
+
+    public func newThread(contextKind: String, contextId: String) async throws -> ClaudeThread {
+        let t = try await thread(contextKind: contextKind, contextId: contextId, new: true)
+        emit(.thread(t))
+        return t
+    }
+
+    public func renameThread(_ id: String, title: String) async throws -> ClaudeThread {
+        let t: ClaudeThread = try locked {
+            guard var t = threads[id] else { throw ApiError("not_found", "No such thread") }
+            let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            t.title = name.isEmpty ? (messages[id] ?? []).first { $0.role == "user" }.flatMap { ClaudeSessions.autoTitle($0.text) } : String(name.prefix(80))
+            threads[id] = t
+            return t
+        }
+        emit(.thread(t))
+        return t
+    }
+
+    public func deleteThread(_ id: String) async throws {
+        try locked {
+            guard threads[id] != nil else { throw ApiError("not_found", "No such thread") }
+            threads[id] = nil
+            messages[id] = nil
+            for (k, t) in turns where t.threadId == id { turns[k] = nil }
+        }
+        emit(.threadDeleted(threadId: id))
+    }
+
+    /// A stored user message names a chat that has no name yet; any message moves it up its list.
+    private func touch(_ threadId: String, userText: String?) -> ClaudeThread? {
+        guard var t = threads[threadId] else { return nil }
+        t.updatedAt = max(now(), t.updatedAt + 1)
+        var named = false
+        if t.title == nil, let u = userText, let title = ClaudeSessions.autoTitle(u) {
+            t.title = title
+            named = true
+        }
+        threads[threadId] = t
+        return named ? t : nil
     }
 
     public func threadDetail(_ id: String) async throws -> ClaudeThreadDetail {
@@ -116,6 +179,7 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
             let m = ClaudeMessage(id: nextId("cmsg"), threadId: threadId, role: "user", source: "phone", text: text, turnId: turn.id, createdAt: now())
             turns[turn.id] = turn
             messages[threadId, default: []].append(m)
+            _ = touch(threadId, userText: text)
             return ClaudeMessagePosted(message: m, turn: turn)
         }
         emit(.message(threadId: threadId, r.message))
@@ -159,6 +223,7 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
 
     public func postEvents(threadId: String, _ batch: ClaudeEventBatch) async throws {
         var stored: [ClaudeMessage] = []
+        var named: [ClaudeThread] = []
         try locked {
             guard threads[threadId] != nil else { throw ApiError("not_found", "No such thread") }
             let size = (try? JSONEncoder().encode(batch).count) ?? 0
@@ -190,9 +255,11 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
                 if let m {
                     messages[threadId, default: []].append(m)
                     stored.append(m)
+                    if let t = touch(threadId, userText: m.role == "user" ? m.text : nil) { named.append(t) }
                 }
             }
         }
+        for t in named { emit(.thread(t)) }
         for e in batch.events { emit(.event(threadId: threadId, turnId: batch.turnId, e)) }
         for m in stored { emit(.message(threadId: threadId, m)) }
     }

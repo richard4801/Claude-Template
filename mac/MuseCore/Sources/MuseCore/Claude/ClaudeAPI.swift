@@ -26,6 +26,24 @@ public protocol ClaudeAPI: Sendable {
     func mcpSessionToken(ttlMinutes: Int?) async throws -> McpSessionToken
     /// `claude` live events; `.connected` each time the stream (re)opens.
     func events() -> AsyncStream<ClaudeLiveEvent>
+
+    // Chat sessions (WS18): each place keeps a list of chats on the server.
+    /// GET /v1/claude/threads?key=: the place's chats, newest first.
+    func threads(key: String) async throws -> [ClaudeThread]
+    /// POST /v1/claude/threads {new: true}: a new chat about the same context.
+    func newThread(contextKind: String, contextId: String) async throws -> ClaudeThread
+    /// PATCH {title}: "" goes back to the chat's first words.
+    func renameThread(_ id: String, title: String) async throws -> ClaudeThread
+    /// DELETE: the chat and its messages.
+    func deleteThread(_ id: String) async throws
+}
+
+/// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
+public extension ClaudeAPI {
+    func threads(key: String) async throws -> [ClaudeThread] { throw ApiError("not_found", "This server keeps one chat per place") }
+    func newThread(contextKind: String, contextId: String) async throws -> ClaudeThread { throw ApiError("not_found", "This server keeps one chat per place") }
+    func renameThread(_ id: String, title: String) async throws -> ClaudeThread { throw ApiError("not_found", "This server keeps one chat per place") }
+    func deleteThread(_ id: String) async throws { throw ApiError("not_found", "This server keeps one chat per place") }
 }
 
 enum ClaudeIds {
@@ -105,7 +123,8 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
 
     private struct Settings: Encodable { var apiFallback: Bool }
-    private struct NewThread: Encodable { var contextKind: String; var contextId: String }
+    private struct NewThread: Encodable { var contextKind: String; var contextId: String; var new: Bool? = nil }
+    private struct TitlePatch: Encodable { var title: String }
     private struct SessionPatch: Encodable { var claudeSessionId: String }
     private struct Text: Encodable { var text: String }
     private struct TokenReq: Encodable { var ttlMinutes: Int? }
@@ -119,6 +138,20 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         try await call("POST", "v1/claude/threads", NewThread(contextKind: contextKind, contextId: contextId))
     }
     public func threadDetail(_ id: String) async throws -> ClaudeThreadDetail { try await call("GET", "v1/claude/threads/\(try ClaudeIds.check(id))") }
+    public func threads(key: String) async throws -> [ClaudeThread] {
+        guard let q = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "_-"))) else { throw ApiError("bad_request", "Bad key") }
+        let list: ClaudeThreadList = try await call("GET", "v1/claude/threads?key=\(q)")
+        return list.threads
+    }
+    public func newThread(contextKind: String, contextId: String) async throws -> ClaudeThread {
+        try await call("POST", "v1/claude/threads", NewThread(contextKind: contextKind, contextId: contextId, new: true))
+    }
+    public func renameThread(_ id: String, title: String) async throws -> ClaudeThread {
+        try await call("PATCH", "v1/claude/threads/\(try ClaudeIds.check(id))", TitlePatch(title: title))
+    }
+    public func deleteThread(_ id: String) async throws {
+        _ = try await send(request("DELETE", "v1/claude/threads/\(try ClaudeIds.check(id))"))
+    }
     public func setClaudeSession(threadId: String, claudeSessionId: String) async throws -> ClaudeThread {
         try await call("PATCH", "v1/claude/threads/\(try ClaudeIds.check(threadId))", SessionPatch(claudeSessionId: claudeSessionId))
     }

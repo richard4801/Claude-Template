@@ -5,6 +5,8 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
     case connected
     case disconnected
     case thread(ClaudeThread)
+    /// A chat was deleted (on any device).
+    case threadDeleted(threadId: String)
     case message(threadId: String, ClaudeMessage)
     /// Streaming text and tool progress of a turn (the Mac's own turns have no turnId).
     case event(threadId: String, turnId: String?, ClaudeEvent)
@@ -56,6 +58,7 @@ public struct ClaudeLiveEventFilter: Sendable {
         guard let e = try? JSONDecoder().decode(Envelope.self, from: json), e.type == "claude" else { return nil }
         switch e.op {
         case "thread": return e.thread.map { .thread($0) }
+        case "threadDeleted": return e.threadId.map { .threadDeleted(threadId: $0) }
         case "message":
             guard let m = e.message else { return nil }
             return .message(threadId: e.threadId ?? m.threadId, m)
