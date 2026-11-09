@@ -45,12 +45,13 @@ public enum EditSuite {
     }
 
     public enum Resolution: Int, CaseIterable, Codable, Hashable, Sendable, Identifiable {
-        case p720 = 720, p1080 = 1080, k4 = 2160
+        case p720 = 720, p1080 = 1080, k2 = 1440, k4 = 2160
         public var id: Int { rawValue }
         public var label: String {
             switch self {
             case .p720: return "720p"
             case .p1080: return "1080p"
+            case .k2: return "2K"
             case .k4: return "4K"
             }
         }
@@ -200,6 +201,7 @@ public enum EditSuite {
             switch resolution {
             case .p720: base = 8e6
             case .p1080: base = 16e6
+            case .k2: base = 28e6
             case .k4: base = 45e6
             }
             // Relative to a 9:16 / 16:9 frame of the same short side (a square has fewer pixels).

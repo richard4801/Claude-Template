@@ -153,6 +153,8 @@ struct EditSuiteBin: View {
                     .contextMenu {
                         Button("Add to the end") { session.addTake(tk) }
                         Button("Add as overlay at the playhead") { session.addTake(tk, overlay: true) }
+                        Button("Add its sound at the playhead") { session.addTakeSound(tk) }
+                        Button("Replace the clip with this take") { session.replaceClip(with: tk) }
                     }
                     .help("Double-click to add to the end, right-click for an overlay")
                     .accessibilityElement(children: .ignore)

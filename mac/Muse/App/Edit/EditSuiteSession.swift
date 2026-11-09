@@ -474,6 +474,26 @@ final class EditSuiteSession {
         edit { $0.addVideo(a, overlay: overlay) }
     }
 
+    /// A take as an asset of this edit (named after it).
+    private func takeAsset(_ t: Take) -> E.Asset? {
+        guard let d = t.durationSec, d > 0 else { lastError = "That take has no video yet"; return nil }
+        let id = project.newId("t")
+        state.assetNames[id] = t.title.isEmpty ? "Take" : t.displayTitle
+        return E.Asset(id: id, kind: .video, take: t.id, durationSec: d, width: t.width, height: t.height, hasAudio: true, url: t.videoUrl)
+    }
+
+    /// Parity: another take's sound at the playhead (sound effects row).
+    func addTakeSound(_ t: Take) {
+        guard let a = takeAsset(t) else { return }
+        if edit({ $0.addTakeSound(a) }) { notice = "Sound added · on the sound effects row" }
+    }
+
+    /// Parity: the selected (or current) main clip plays this take instead, keeping its edits.
+    func replaceClip(with t: Take) {
+        guard let a = takeAsset(t) else { return }
+        if edit({ $0.replaceClip(with: a) }) { notice = "Clip replaced · its edits stay" }
+    }
+
     /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row.
     func importAudio(_ url: URL, kind: E.TrackKind) async {
         guard isReady else { return }
@@ -954,6 +974,29 @@ final class EditSuiteSession {
             self.edit { $0.setBeats(m.id, beats: r.beats ?? [], strong: r.strong ?? []) }
             if let bpm = r.bpm { self.notice = "\(Int(bpm.rounded())) BPM" }
         }
+    }
+
+    // MARK: Even out volume (parity)
+
+    /// Measures each main and voice clip's sound over the part that plays (RMS above a −50 dB gate, and the loudest
+    /// sample), then evens them out to the median (EditSuiteState.evenVolume).
+    func evenVolume() async {
+        var levels: [String: (rms: Double, peak: Double)] = [:]
+        for t in project.tracks where t.kind == .main || t.kind == .voice {
+            for it in t.items {
+                let (id, assetId, a, b): (String, String, Double, Double)
+                switch it {
+                case .video(let c): (id, assetId, a, b) = (c.id, c.audioAsset ?? c.asset, c.inSec, c.outSec)
+                case .audio(let c): (id, assetId, a, b) = (c.id, c.asset, c.inSec, c.outSec)
+                default: continue
+                }
+                guard let url = files[assetId], let l = await EditSuiteMedia.level(url, from: a, to: b) else { continue }
+                levels[id] = l
+            }
+        }
+        var changed = 0
+        edit { s in changed = s.evenVolume(levels: levels); return changed > 0 }
+        if changed > 0 { notice = "Evened out \(changed) clip\(changed == 1 ? "" : "s")" }
     }
 
     // MARK: Export → upload → new version

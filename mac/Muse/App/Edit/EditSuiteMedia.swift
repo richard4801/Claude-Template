@@ -121,4 +121,33 @@ enum EditSuiteMedia {
         try text.write(to: url, atomically: true, encoding: .utf8)
         return url
     }
+
+    /// The loudness of source seconds [a, b) of a file's sound: the RMS of the samples above the −50 dB gate, and the loudest
+    /// sample (0–1). Nil when it's silent or has no sound. For evening clips out against each other.
+    static func level(_ url: URL, from a: Double, to b: Double) async -> (rms: Double, peak: Double)? {
+        await Task.detached(priority: .utility) { () -> (rms: Double, peak: Double)? in
+            let asset = AVURLAsset(url: url)
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first, let reader = try? AVAssetReader(asset: asset) else { return nil }
+            reader.timeRange = CMTimeRange(start: CMTime(seconds: max(0, a), preferredTimescale: 600), end: CMTime(seconds: max(a + 0.01, b), preferredTimescale: 600))
+            let out = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32,
+                                                                               AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false,
+                                                                               AVLinearPCMIsBigEndianKey: false])
+            guard reader.canAdd(out) else { return nil }
+            reader.add(out)
+            guard reader.startReading() else { return nil }
+            var sum = 0.0, n = 0, peak = 0.0
+            while let sb = out.copyNextSampleBuffer() {
+                guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+                let len = CMBlockBufferGetDataLength(bb)
+                var data = [Float](repeating: 0, count: len / 4)
+                _ = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: $0.baseAddress!) }
+                for v in data {
+                    let x = Double(abs(v))
+                    if x > peak { peak = x }
+                    if x > 0.00316 { sum += x * x; n += 1 }
+                }
+            }
+            return n > 0 ? ((sum / Double(n)).squareRoot(), peak) : nil
+        }.value
+    }
 }

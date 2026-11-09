@@ -26,6 +26,11 @@ struct VideoPanels: View {
         if let v = session.state.selectedVisual {
             TransformPanel(session: session, visual: v)
             if session.state.selectedBlend != nil { BlendPanel(session: session) }
+            if session.state.selectedIsMain, let c = session.state.selectedVideo, c.holdSec == nil,
+               let d = session.project.asset(c.asset)?.durationSec, d - (c.outSec - c.inSec) > 0.05 {
+                SlipPanel(session: session, clip: c, sourceSec: d)
+            }
+            if session.state.clipsHere.count >= 2 { SplitScreenPanel(session: session) }
             if session.state.selectedIsMain { BackgroundPanel(session: session) }
             if session.state.selectedItem?.textItem == nil {
                 LooksPanel(session: session, visual: v)
@@ -131,6 +136,43 @@ struct TransformPanel: View {
                 let v = prop == .x || prop == .y ? value + 0.5 : value
                 if here { session.edit { $0.removeKeyframe(prop) } } else { session.edit { $0.addKeyframe(prop, value: v) } }
             }
+        }
+    }
+}
+
+/// Slip (parity): the clip plays another part of its source, keeping its length.
+struct SlipPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    var clip: EditV2.VideoClip
+    var sourceSec: Double
+
+    var body: some View {
+        let len = clip.outSec - clip.inSec
+        EditPanel(title: "Slip") {
+            SuiteSlider("Starts at", value: clip.inSec, range: 0...max(0.01, sourceSec - len), format: { String(format: "%.1f s of the take", $0) }) { v in
+                session.edit { $0.slip(to: v) }
+            }
+            Text("Plays another part of the take; its length stays.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+        }
+    }
+}
+
+/// Split screen (parity): the clips on screen at the playhead, side by side, top and bottom, in three rows or a grid.
+struct SplitScreenPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+
+    var body: some View {
+        EditPanel(title: "Split screen") {
+            FlowLayout(spacing: 6) {
+                ForEach(EditSuite.SplitLayout.allCases) { l in
+                    Chip(l.label, on: false) { session.edit { $0.splitScreen(l) } }
+                        .accessibilityLabel("Split screen \(l.label)")
+                }
+            }
+            Text("Uses the \(session.state.clipsHere.count) clips on screen at the playhead. Each stays editable.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -323,6 +365,12 @@ struct AdjustPanel: View {
             SuiteSlider("Temperature", value: a.temperature ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.temperature = v } }
             SuiteSlider("Highlights", value: a.highlights ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.highlights = v } }
             SuiteSlider("Shadows", value: a.shadows ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.shadows = v } }
+            // The look's effects (parity): 0 removes each.
+            ForEach(EditSuite.LookEffect.allCases) { e in
+                SuiteSlider(e.label, value: session.state.lookEffect(e), range: e.range, format: { e == .vignette ? signed100($0) : "\(Int(($0 * 100).rounded()))" }) { v in
+                    session.edit { $0.setLookEffect(e, v) }
+                }
+            }
             SuiteSlider("Grain", value: visual.look?.grain?.amount ?? 0, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
                 session.edit { s in
                     s.changeVisual { vv in
@@ -661,6 +709,10 @@ struct AudioPanels: View {
                 .task(id: session.state.selection) { await session.loadEstimate(.denoise) }
                 HelperNote(text: session.helperNotes[.denoise])
             }
+            if session.state.selectedItem?.audioClip != nil {
+                SuiteToolButton(title: "Loop to the end", icon: "arrows-clockwise", plain: true) { session.edit { $0.loopToEnd() } }
+                    .help("Repeat this sound until the video ends")
+            }
             SuiteToggleRow(title: "Voice enhance", hint: "Clearer speech", isOn: snd.enhance == true) { on in setSound { $0.enhance = on ? true : nil } }
             SuiteLabel("Voice effect")
             FlowLayout(spacing: 6) {
@@ -674,6 +726,8 @@ struct AudioPanels: View {
     @ViewBuilder private var mixPanel: some View {
         let music = session.state.musicTrack
         EditPanel(title: "Audio · mix & beats") {
+            SuiteToolButton(title: "Even out volume", icon: "faders", plain: true) { Task { await session.evenVolume() } }
+                .help("Spoken clips and voice-overs to the same level (music is left to ducking)")
             if music == nil {
                 Text("Add music (Music in the media bin) to duck it under the voice and cut on its beats.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             } else {
@@ -715,6 +769,19 @@ struct AudioPanels: View {
                 SuiteToggleRow(title: "Snap cuts to beats", hint: "Auto-cut on the beat", isOn: session.state.snapToBeats) { on in
                     session.view { $0.snapToBeats = on }
                 }
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: "Mark a beat", icon: "metronome", plain: true) { session.edit { $0.markBeat() } }
+                        .help("A beat mark at the playhead on the music")
+                    SuiteToolButton(title: "Clear beats", icon: "x", disabled: session.state.bpm == nil && session.state.beats.isEmpty, plain: true) {
+                        session.edit { $0.clearBeats() }
+                    }
+                }
+                SuiteToolButton(title: "Cut clips to the beat", icon: "scissors", disabled: session.state.beats.isEmpty) {
+                    var n = 0
+                    session.edit { s in n = s.cutToBeats(); return n > 0 }
+                    if n > 0 { session.notice = "\(n) clip\(n == 1 ? "" : "s") now end on the beat" }
+                }
+                .help("Each clip ends on the beat nearest its end")
             }
         }
     }
@@ -752,6 +819,10 @@ struct SpeedPanel: View {
                 } else {
                     SuiteSlider("Speed", value: log10(c.speed), range: -1...1, format: { String(format: "%.2g×", pow(10, $0)) }) { v in
                         session.edit { $0.setSpeed(pow(10, v)) }
+                    }
+                    let srcLen = c.outSec - c.inSec
+                    SuiteSlider("Length", value: EditV2.clipLength(c), range: max(0.1, srcLen / 10)...max(0.2, srcLen * 10), format: { String(format: "%.1f s", $0) }) { v in
+                        session.edit { $0.setClipLength((v * 10).rounded() / 10) }
                     }
                     FlowLayout(spacing: 6) {
                         ForEach([0.25, 0.5, 1, 1.5, 2, 4], id: \.self) { sp in
