@@ -132,6 +132,22 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect(fake.state.creates).toEqual([]);
   });
 
+  it('Character swap sent as a one-person Recast (the apps) with a swap model picked runs as a swap on that model', async () => {
+    const asRecast = { mode: 'recast', clipId: 'c_swap', quality: 'standard', cast: [{ characterId: char.id }] };
+    for (const m of ['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']) {
+      const e = await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, engineModel: m });
+      expect(e.status, `${m}: ${JSON.stringify(e.body)}`).toBe(200);
+      expect(e.body).toMatchObject({ mode: 'swap', engine: { model: m, source: 'request' } });
+    }
+    expect((await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, engineModel: 'h3-lite' })).body.estimate).toBeCloseTo(0.02 * 8, 2);
+    // A real Recast model stays a Recast; two people stay a Recast (a swap model is refused there).
+    const two = await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, cast: [{ characterId: char.id }, { characterId: char.id }], engineModel: 'h3-lite' });
+    expect(two.body.code).toBe('engine_not_allowed');
+    // Auto (no model) is unchanged.
+    expect((await owner.req('POST', '/v1/suite/shots/estimate', asRecast)).status).toBe(200);
+    expect(fake.state.creates).toEqual([]);
+  });
+
   it('swap (POST /v1/jobs): the job carries the hosted model and its price; highspeed sends no resolution', async () => {
     const j = (await owner.req('POST', '/v1/jobs', { modelId: char.id, clipId: 'c_swap', engine: 'replicate', quality: 'hd', engineModel: 'h3-lite', queue: true })).body;
     const [row] = await a.ctx.db.execute(sql`select request, cost from jobs where id = ${j.id}`).then((r: any) => r.rows ?? r);

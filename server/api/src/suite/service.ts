@@ -28,7 +28,7 @@ import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
-import { purposeOfShot, SWAP_ENGINES, videoPurposes } from '../engines/purposes.js';
+import { purposeOfShot, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
 export const STUDIO_DEFAULT_SKIPPED = 'The studio’s chosen engine can’t make this shot · the quality’s usual engine is used';
@@ -254,6 +254,13 @@ export class SuiteService {
     if (r.engineModel?.startsWith('c_')) { // WS5: a custom model makes plain shots only
       if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
       await this.byo.checkUse(u, r.engineModel, 'video');
+    }
+    // The apps send Character swap as a one-person Recast (mode "recast", cast[0] = who she becomes). With a swap model
+    // picked (H3, H3 Lite, Highspeed, Higgsfield, Edit, Fast) that isn't a Recast model, it IS a swap: run it as one.
+    if (r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && r.engineModel && swapEngineById(r.engineModel)
+      && !(await modelChoice(this.ctx).candidates(u, 'recast')).some(e => e.model === r.engineModel)) {
+      const c = r.cast[0]!;
+      Object.assign(r, { mode: 'swap', modelId: c.characterId, outfitId: c.outfitId ?? r.outfitId, cast: undefined });
     }
     // WS13: the owner's override for this purpose (checked: a candidate, owner only), else the studio's default for it.
     const choice = await modelChoice(this.ctx).choose(u, purposeOfShot(r), r.engineModel);
