@@ -188,6 +188,9 @@ Mac CI: pending on 04047be (run 42550126329); this section is marked green once 
 | Look sliders (vignette, sharpen, fade, colour fringe, glow, light leak), split screen | Look; Split screen panel | EditSuiteParityTests |
 | Tint (`adjust.tint`) | Adjust → Tint | Shared fixtures (colors) |
 | Video clip in/out animations (`animIn` / `animOut`) | Animate panel on video clips | Shared fixtures; EditSuiteParityTests |
+| Keyframes on the timeline (drag a ◆ to move every property's key at that time) | Timeline, on the selected item | EditSuiteKeysTests; ops check (key drag, can't pass a neighbour) |
+| Curves (All / Red / Green / Blue) | Adjust → Curves | EditSuiteKeysTests; ops check (the preview darkens) |
+| Auto adjust | Adjust → Auto adjust | EditSuiteKeysTests (Android's AutoAdjustTest cases); ops check (red take gets cooler) |
 
 ## Left for the owner
 

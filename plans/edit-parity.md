@@ -131,9 +131,9 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Exposure, contrast, saturation, temperature, highlights, shadows, grain | Has | Has | — | |
 | Tint | Has | Has | S | Android: Filters → Adjust → Tint (`adjust.tint`, green ↔ magenta, after temperature in the colour matrix). Mac: Adjust → Tint under Temperature (`adjust.tint`; fixtures pass on the Mac). |
 | Vignette, sharpen, halation, light leak, chromatic aberration | Has | Has | S | Engine `look` has them; there are no sliders. Android: Filters → Adjust: vignette, sharpen, fade, glow, light leak, colour fringe, grain. Mac: Look sliders: vignette, sharpen, fade, colour fringe, glow, light leak. |
-| Curves | Has | Partial | M | Engine has curves; no editor. Mac: Engine only. Android: Filters → Adjust → Curves: All / Red / Green / Blue; drag to move, touch the line to add, tap a point to remove (`look.curves`). |
+| Curves | Has | Has | M | Engine has curves; no editor. Android: Filters → Adjust → Curves: All / Red / Green / Blue; drag to move, touch the line to add, tap a point to remove (`look.curves`). Mac: Adjust → Curves: All / Red / Green / Blue; drag to move, click the line to add, click a point to remove (`look.curves`). |
 | HSL (per-hue) | Missing | Missing | L | New engine stage (all three platforms) |
-| Auto adjust | Has | Missing | M | Android: Filters → Adjust → Auto adjust: the frame under the playhead → exposure, contrast, saturation, temperature and tint (core `autoAdjust`). |
+| Auto adjust | Has | Has | M | Android: Filters → Adjust → Auto adjust: the frame under the playhead → exposure, contrast, saturation, temperature and tint (core `autoAdjust`). Mac: Adjust → Auto adjust from the clip's source frame under the playhead (same numbers as Android's `autoAdjust`). |
 | Video effects library (glitch, blur, retro, …) | Missing | Missing | L | **Content** plus GL effects |
 | Body and face effects | Missing | Missing | XL | Segmentation and tracking; mostly **Content** |
 | Adjustment keyframes | Missing | Missing | M | |
@@ -149,7 +149,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Volume | Partial | Has | S | See Audio. Mac: See Audio (wave 1) |
 | Look / adjust / mask / crop keyframes | Missing | Missing | M each | |
 | Easing choice | Has | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold. Android: Linear, ease in, ease out, smooth, hold (wave 1). |
-| Keyframe list / move / delete on the timeline | Has | Partial | M | Engine has `remove_keyframe`. Mac: Delete at the playhead, previous / next key (WS9); no timeline list. Android: the selected item's ◆ on its timeline lane, dragged to move; Transform → Previous / Next keyframe, Remove keyframes here. |
+| Keyframe list / move / delete on the timeline | Has | Has | M | Engine has `remove_keyframe`. Android: the selected item's ◆ on its timeline lane, dragged to move; Transform → Previous / Next keyframe, Remove keyframes here. Mac: the selected item's ◆ on its timeline block, dragged to move every property's key at that time; previous / next key, delete at the playhead. |
 
 ## 8. Masks, chroma key and background removal
 
