@@ -67,6 +67,7 @@ extension EditSuiteState {
         case .image(let c): return c.keyframes
         case .text(let c): return c.keyframes
         case .audio(let c): return c.keyframes
+        case .adjust(let c): return c.keyframes
         }
     }
 
@@ -76,6 +77,7 @@ extension EditSuiteState {
         case .image(var c): c.keyframes = k; it = .image(c)
         case .text(var c): c.keyframes = k; it = .text(c)
         case .audio(var c): c.keyframes = k; it = .audio(c)
+        case .adjust(var c): c.keyframes = k; it = .adjust(c)
         }
     }
 
@@ -240,7 +242,7 @@ extension EditSuiteState {
             case .video(var c): c.animLoop = l; it = .video(c)
             case .image(var c): c.animLoop = l; it = .image(c)
             case .text(var c): c.animLoop = l; it = .text(c)
-            case .audio: break
+            case .audio, .adjust: break
             }
         }
     }
@@ -262,6 +264,44 @@ extension EditSuiteState {
             guard case .audio(var c) = it else { return }
             c.speed = abs(v - 1) < 1e-9 ? nil : v
             it = .audio(c)
+        }
+    }
+
+    // MARK: Adjustment layers (contract, WS8 3e20288)
+
+    /// The selected adjustment layer item, or nil.
+    public var selectedAdjust: E.AdjustItem? { selectedItem?.adjustItem }
+
+    /// Adds an adjustment layer at the playhead (3 s, or to the end), on the first adjustment track it fits, else a new one;
+    /// selected.
+    @discardableResult
+    public mutating func addAdjustLayer(durationSec: Double = 3) -> Bool {
+        let at = E.r6(min(max(0, playhead), max(0, duration - E.minItemSec)))
+        var newId: String?
+        let ok = apply { p in
+            let d = E.r6(min(durationSec, max(E.minItemSec, E.durationSec(p) - at)))
+            let id = p.newId("adj")
+            let item = E.AdjustItem(id: id, startSec: at, durationSec: d)
+            for t in p.tracks where t.kind == .adjust {
+                if let r = p.adding(.adjust(item), toTrack: t.id) { newId = id; return r }
+            }
+            guard let r = p.addingTrack(.adjust, name: "Adjustment") else { return nil }
+            newId = id
+            return r.project.adding(.adjust(item), toTrack: r.trackId)
+        }
+        if ok { selection = newId; tab = .video }
+        return ok
+    }
+
+    /// The selected layer's filter preset (nil removes it), amount 0–1.
+    @discardableResult
+    public mutating func setLayerFilter(_ id: String?, amount: Double = 1) -> Bool {
+        guard selectedAdjust != nil else { return false }
+        let f = id.map { E.FilterRef(id: $0, amount: E.r3(min(1, max(0, amount)))) }
+        return changeSelected { it in
+            guard case .adjust(var c) = it else { return }
+            c.filter = f
+            it = .adjust(c)
         }
     }
 }

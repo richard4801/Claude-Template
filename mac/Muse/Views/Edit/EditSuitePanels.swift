@@ -23,7 +23,9 @@ struct VideoPanels: View {
     @Bindable var session: EditSuiteSession
 
     var body: some View {
-        if let v = session.state.selectedVisual {
+        if session.state.selectedAdjust != nil {
+            AdjustLayerPanel(session: session)
+        } else if let v = session.state.selectedVisual {
             TransformPanel(session: session, visual: v)
             if session.state.selectedBlend != nil { BlendPanel(session: session) }
             if session.state.selectedIsMain, let c = session.state.selectedVideo, c.holdSec == nil,
@@ -40,6 +42,11 @@ struct VideoPanels: View {
             if session.state.selectedIsMain { TransitionsPanel(session: session) }
         } else {
             InspectorEmpty(text: "Select a clip, an overlay or a sticker on the timeline.")
+        }
+        // Adjustment layers (contract, WS8 3e20288): colour over the whole picture for a stretch of time.
+        EditPanel(title: "Adjustment layer") {
+            SuiteToolButton(title: "Add adjustment layer", icon: "sliders-horizontal", plain: true) { session.edit { $0.addAdjustLayer() } }
+                .help("Colour everything under the text for 3 s from the playhead")
         }
         // The whole edit's style (parity): shown whatever is selected.
         StyleKitsPanel(session: session)
@@ -461,6 +468,40 @@ struct KeyedRow: View {
                     let values = props.map { session.state.visualValue($0) ?? 0 }
                     session.edit { st in zip(props, values).reduce(false) { ok, pv in st.addKeyframe(pv.0, value: pv.1) || ok } }
                 }
+            }
+        }
+    }
+}
+
+/// The selected adjustment layer: a filter preset with its amount, the five colour controls and Strength, each with a ◆
+/// (layers carry no look, mask or transform; highlights and shadows are tone, not part of a layer).
+struct AdjustLayerPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+
+    var body: some View {
+        let f = session.state.selectedAdjust?.filter
+        EditPanel(title: "Adjustment layer") {
+            Text("Colours everything under the text while it's on the timeline.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            SuiteLabel("Filter")
+            FlowLayout(spacing: 6) {
+                Chip("None", on: f == nil) { session.edit { $0.setLayerFilter(nil) } }
+                ForEach(EditV2.filters) { p in
+                    Chip(p.label, on: f?.id == p.id) { session.edit { $0.setLayerFilter(p.id, amount: f?.amount ?? 1) } }
+                }
+            }
+            if let f {
+                SuiteSlider("Amount", value: f.amount, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                    session.edit { $0.setLayerFilter(f.id, amount: (v * 100).rounded() / 100) }
+                }
+            }
+            SuiteRule()
+            KeyedRow(session: session, label: "Strength", props: [.opacity], range: 0...1, format: { "\(Int(($0 * 100).rounded()))%" },
+                     store: { v, _ in (v * 100).rounded() / 100 })
+            ForEach([("Exposure", EditV2.KfProp.exposure), ("Contrast", .contrast), ("Saturation", .saturation), ("Temperature", .temperature), ("Tint", .tint)],
+                    id: \.1) { label, p in
+                KeyedRow(session: session, label: label, props: [p], range: -1...1, format: signed100, store: { v, _ in (v * 100).rounded() / 100 })
             }
         }
     }

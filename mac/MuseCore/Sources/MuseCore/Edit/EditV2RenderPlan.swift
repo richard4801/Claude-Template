@@ -139,6 +139,8 @@ extension EditV2 {
 
         for (ti, t) in p.tracks.enumerated() {
             switch t.kind {
+            case .adjust:
+                continue   // adjustment layers colour the composed frame (adjustLayerMatrix), no media
             case .main:
                 for (i, c) in t.items.compactMap(\.videoClip).enumerated() where i < spans.count {
                     let start = spans[i].startSec, end = min(spans[i].endSec, d)

@@ -78,7 +78,7 @@ extension EditV2.Project {
             if at == 0 { c.transitionIn = nil }
             p.tracks[ti].items.insert(.video(c), at: at)
             return p
-        case (.video, .video), (.image, .image), (.text, .text), (.music, .audio), (.voice, .audio), (.sfx, .audio):
+        case (.video, .video), (.image, .image), (.text, .text), (.music, .audio), (.voice, .audio), (.sfx, .audio), (.adjust, .adjust):
             guard Self.fits(p.tracks[ti].items, item) else { return nil }
             let at = p.tracks[ti].items.firstIndex { $0.startSec > item.startSec } ?? p.tracks[ti].items.count
             p.tracks[ti].items.insert(item, at: at)
@@ -110,7 +110,7 @@ extension EditV2.Project {
         guard let di = p.tracks.firstIndex(where: { $0.id == dest }), p.tracks[di].kind != .main else { return nil }
         guard Self.fits(p.tracks[di].items, item) else { return nil }
         switch (p.tracks[di].kind, item) {
-        case (.video, .video), (.image, .image), (.text, .text), (.music, .audio), (.voice, .audio), (.sfx, .audio): break
+        case (.video, .video), (.image, .image), (.text, .text), (.music, .audio), (.voice, .audio), (.sfx, .audio), (.adjust, .adjust): break
         default: return nil
         }
         let at = p.tracks[di].items.firstIndex { $0.startSec > start } ?? p.tracks[di].items.count

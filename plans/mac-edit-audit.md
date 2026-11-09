@@ -197,6 +197,7 @@ Mac CI run 42552492893 (4946284): build, click-through and every Edit operation 
 | Mask and look keyframes (mask x, y, size, rotation, feather; vignette, grain, light leak) | Mask: ◆ beside each slider; Adjust: ◆ beside Vignette, Grain, Light leak | Shared fixtures (motionKeys, validation); ops check (the corner darkens) |
 | Loop animations (pulse, sway, float, spin, blink) | Animate → Loop: chips, Speed, Amount (overlays, pictures, text) | Shared fixtures (loops, validation); EditV2ColorKeysTests (moving to main drops it); ops check (blink) |
 | Speed on music, voice and effect clips (0.5–2×, pitch kept) | Speed tab with a sound selected: slider and 0.5× / 1× / 1.5× / 2× | Shared fixtures (audioSpeed, validation); EditV2ColorKeysTests |
+| Adjustment layers | Video → Add adjustment layer; the layer's own panel (filter, colour, Strength, ◆) | Shared fixtures (adjustLayers, projects, validation); EditV2ColorKeysTests; ops check (darker under the layer, unchanged after it) |
 | Chroma key colour from the picture (design pass) | Mask → Chroma key → Pick from video, then click the preview | EditSuiteKeysTests (sourcePoint inverts fit, flip, crop); ops check (the red take's colour) |
 | Hear the video while recording a voice-over (design pass) | Bin → Record VO, "Play the video while recording" | EditSuiteParityTests (lands at its start, delay trimmed); the microphone itself can't run in CI |
 | Overlay photos at 2048 px at most (design pass) | Bin → Import picture | Ops check (3000 px PNG → 2048 × 683 PNG) |

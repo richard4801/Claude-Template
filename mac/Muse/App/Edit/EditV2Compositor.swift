@@ -141,7 +141,8 @@ final class EditV2Scene: @unchecked Sendable {
                          chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: E.maskAt(c.mask, c.keyframes, t - layer.segment.timelineStart), frame: frameNo, fps: fps, flip: c.transform, over: image)
         }
 
-        // Other tracks, bottom to top.
+        // Other tracks, bottom to top: pictures first (video and image tracks), then the adjustment layers' colour over the
+        // whole picture, then text and captions above everything (contract, WS8 3e20288; as Android draws text).
         for (ti, track) in project.tracks.enumerated() where track.kind != .main && track.hidden != true {
             switch track.kind {
             case .video:
@@ -162,6 +163,21 @@ final class EditV2Scene: @unchecked Sendable {
                                  mask: E.maskAt(im.mask, im.keyframes, t - im.startSec), frame: frameNo, fps: fps,
                                  flip: im.transform, blend: im.blend, over: image)
                 }
+            default:
+                break
+            }
+        }
+        if let m = E.adjustLayerMatrix(project, t) {
+            image = image.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: m[0], y: m[1], z: m[2], w: 0),
+                "inputGVector": CIVector(x: m[4], y: m[5], z: m[6], w: 0),
+                "inputBVector": CIVector(x: m[8], y: m[9], z: m[10], w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: m[3], y: m[7], z: m[11], w: 0),
+            ]).applyingFilter("CIColorClamp").cropped(to: canvas)
+        }
+        for track in project.tracks where track.hidden != true {
+            switch track.kind {
             case .text:
                 for case .text(let tx) in track.items where t >= tx.startSec && t < tx.startSec + tx.durationSec {
                     image = drawText(tx, local: t - tx.startSec, over: image)

@@ -599,8 +599,67 @@ extension EditV2 {
 
     public enum TrackKind: String, Codable, Hashable, Sendable, CaseIterable {
         case main, video, image, text, caption, music, voice, sfx
+        /// Adjustment layers (contract, WS8 3e20288): their colour applies to the whole picture under text and captions.
+        case adjust
         public var isAudio: Bool { self == .music || self == .voice || self == .sfx }
         public var isVideo: Bool { self == .main || self == .video }
+    }
+
+    /// An adjustment layer's item: colour (adjust, filter) and strength (opacity 0–1), keyframes on opacity and the colour
+    /// properties. `strayKeys` names picture fields it was given (look, mask, …) so validation can refuse them.
+    public struct AdjustItem: Codable, Hashable, Sendable, Identifiable {
+        public var id: String
+        public var startSec: Double
+        public var durationSec: Double
+        public var adjust: Adjust?
+        public var filter: FilterRef?
+        public var keyframes: Keyframes?
+        public var opacity: Double?
+        public var strayKeys: [String] = []
+
+        public init(id: String, startSec: Double, durationSec: Double, adjust: Adjust? = nil, filter: FilterRef? = nil, keyframes: Keyframes? = nil,
+                    opacity: Double? = nil) {
+            self.id = id; self.startSec = startSec; self.durationSec = durationSec; self.adjust = adjust; self.filter = filter
+            self.keyframes = keyframes; self.opacity = opacity
+        }
+
+        enum CodingKeys: String, CodingKey { case id, startSec, durationSec, adjust, filter, keyframes, opacity }
+        static let refused = ["look", "mask", "transform", "crop", "fit", "asset"]
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            startSec = try c.decode(Double.self, forKey: .startSec)
+            durationSec = try c.decode(Double.self, forKey: .durationSec)
+            adjust = try c.decodeIfPresent(Adjust.self, forKey: .adjust)
+            filter = try c.decodeIfPresent(FilterRef.self, forKey: .filter)
+            keyframes = try c.decodeIfPresent(Keyframes.self, forKey: .keyframes)
+            opacity = try c.decodeIfPresent(Double.self, forKey: .opacity)
+            let any = try decoder.container(keyedBy: AnyKey.self)
+            strayKeys = Self.refused.filter { k in any.allKeys.contains { $0.stringValue == k } }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(startSec, forKey: .startSec)
+            try c.encode(durationSec, forKey: .durationSec)
+            try c.encodeIfPresent(adjust, forKey: .adjust)
+            try c.encodeIfPresent(filter, forKey: .filter)
+            try c.encodeIfPresent(keyframes, forKey: .keyframes)
+            try c.encodeIfPresent(opacity, forKey: .opacity)
+        }
+
+        struct AnyKey: CodingKey {
+            var stringValue: String; var intValue: Int?
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { stringValue = String(intValue); self.intValue = intValue }
+        }
+
+        public static func == (a: AdjustItem, b: AdjustItem) -> Bool {
+            a.id == b.id && a.startSec == b.startSec && a.durationSec == b.durationSec && a.adjust == b.adjust && a.filter == b.filter
+                && a.keyframes == b.keyframes && a.opacity == b.opacity && a.strayKeys == b.strayKeys
+        }
     }
 
     /// An item of a track; which kind a track holds follows from the track's kind.
@@ -609,6 +668,7 @@ extension EditV2 {
         case image(ImageItem)
         case text(TextItem)
         case audio(AudioClip)
+        case adjust(AdjustItem)
 
         public var id: String {
             get {
@@ -617,6 +677,7 @@ extension EditV2 {
                 case .image(let c): return c.id
                 case .text(let c): return c.id
                 case .audio(let c): return c.id
+                case .adjust(let c): return c.id
                 }
             }
             set {
@@ -625,6 +686,7 @@ extension EditV2 {
                 case .image(var c): c.id = newValue; self = .image(c)
                 case .text(var c): c.id = newValue; self = .text(c)
                 case .audio(var c): c.id = newValue; self = .audio(c)
+                case .adjust(var c): c.id = newValue; self = .adjust(c)
                 }
             }
         }
@@ -637,6 +699,7 @@ extension EditV2 {
                 case .image(let c): return c.startSec
                 case .text(let c): return c.startSec
                 case .audio(let c): return c.startSec
+                case .adjust(let c): return c.startSec
                 }
             }
             set {
@@ -645,6 +708,7 @@ extension EditV2 {
                 case .image(var c): c.startSec = newValue; self = .image(c)
                 case .text(var c): c.startSec = newValue; self = .text(c)
                 case .audio(var c): c.startSec = newValue; self = .audio(c)
+                case .adjust(var c): c.startSec = newValue; self = .adjust(c)
                 }
             }
         }
@@ -656,6 +720,7 @@ extension EditV2 {
             case .image(let c): return c.durationSec
             case .text(let c): return c.durationSec
             case .audio(let c): return EditV2.clipLength(c)
+            case .adjust(let c): return c.durationSec
             }
         }
 
@@ -663,12 +728,14 @@ extension EditV2 {
         public var imageItem: ImageItem? { if case .image(let c) = self { return c }; return nil }
         public var textItem: TextItem? { if case .text(let c) = self { return c }; return nil }
         public var audioClip: AudioClip? { if case .audio(let c) = self { return c }; return nil }
+        public var adjustItem: AdjustItem? { if case .adjust(let c) = self { return c }; return nil }
         public var keyframes: Keyframes? {
             switch self {
             case .video(let c): return c.keyframes
             case .image(let c): return c.keyframes
             case .text(let c): return c.keyframes
             case .audio(let c): return c.keyframes
+            case .adjust(let c): return c.keyframes
             }
         }
 
@@ -687,6 +754,7 @@ extension EditV2 {
             case .image(let c): try c.encode(to: encoder)
             case .text(let c): try c.encode(to: encoder)
             case .audio(let c): try c.encode(to: encoder)
+            case .adjust(let c): try c.encode(to: encoder)
             }
         }
     }
@@ -732,6 +800,7 @@ extension EditV2 {
                 case .text: list.append(.text(try u.decode(TextItem.self)))
                 case .music, .voice, .sfx: list.append(.audio(try u.decode(AudioClip.self)))
                 case .caption: list.append(try u.decode(Item.self))
+                case .adjust: list.append(.adjust(try u.decode(AdjustItem.self)))
                 }
             }
             items = list

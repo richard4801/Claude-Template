@@ -384,6 +384,18 @@ extension SnapshotRunner {
             check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
         }
 
+        step("Adjustment layer (exposure down over the whole picture)")
+        s.seek(0.5)
+        let before = await previewPixel(s, at: 1)
+        s.edit { $0.addAdjustLayer() }
+        s.edit { $0.setVisualValue(.exposure, -1) }
+        check("project: an adjustment layer", s.project.tracks.contains { $0.kind == .adjust } && E.problem(s.project) == nil)
+        let after = await previewPixel(s, at: 1)
+        check("preview: darker under the layer", (after?.r ?? 255) + 40 < (before?.r ?? 0), "\(describe(before)) then \(describe(after))")
+        let outside = await previewPixel(s, at: 3.8)
+        check("preview: as before after the layer ends", isRed(outside), describe(outside))
+        for _ in 0..<2 { s.undo() }
+
         step("Loop animation (blink on an overlay)")
         s.seek(0.5)
         s.addTake(blue, overlay: true)

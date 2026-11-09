@@ -117,6 +117,45 @@ final class EditV2ColorKeysTests: XCTestCase {
         XCTAssertNil(s.project.tracks.first { $0.kind == .music }!.items[0].audioClip!.speed)
     }
 
+    /// Adjustment layers (WS8 3e20288): adjustLayerMatrix at 8 timeline times (functions.json → adjustLayers).
+    func testAdjustLayerMatrix() throws {
+        let f = try editorFixture("functions")["adjustLayers"]
+        let p = try f["project"].decode(E.Project.self)
+        XCTAssertNil(E.problem(p))
+        let samples = f["samples"].array
+        XCTAssertEqual(samples.count, 8)
+        for s in samples {
+            let t = s["t"].double!
+            let got = E.adjustLayerMatrix(p, t)
+            if s["matrix"].isNull { XCTAssertNil(got, "t \(t)"); continue }
+            let want = s["matrix"].array.compactMap(\.double)
+            let g = try XCTUnwrap(got, "t \(t)")
+            for (a, b) in zip(g, want) { XCTAssertEqual(a, b, accuracy: 1e-6, "t \(t)") }
+        }
+    }
+
+    func testAddAndEditAnAdjustmentLayer() throws {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        s.playhead = 2
+        XCTAssertTrue(s.addAdjustLayer())
+        let a = try XCTUnwrap(s.selectedAdjust)
+        XCTAssertEqual(a.startSec, 2); XCTAssertEqual(a.durationSec, 3)
+        XCTAssertNil(E.adjustLayerMatrix(s.project, 3), "an empty layer changes nothing")
+        XCTAssertTrue(s.setVisualValue(.exposure, 0.5))
+        XCTAssertTrue(s.setVisualValue(.opacity, 0.5))
+        XCTAssertTrue(s.setLayerFilter(E.filters[0].id, amount: 0.8))
+        XCTAssertNotNil(E.adjustLayerMatrix(s.project, 3))
+        XCTAssertNil(E.adjustLayerMatrix(s.project, 6), "outside its span")
+        s.playhead = 2.5
+        XCTAssertTrue(s.addKeyframe(.opacity, value: 0))
+        XCTAssertNil(E.problem(s.project))
+        // Another at the same time goes on a second adjustment track.
+        s.playhead = 3
+        XCTAssertTrue(s.addAdjustLayer())
+        XCTAssertEqual(s.project.tracks.filter { $0.kind == .adjust }.count, 2)
+        XCTAssertNil(E.problem(s.project))
+    }
+
     /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
     func testAutoAdjustFixtures() throws {
         let cases = try editorFixture("functions")["autoAdjust"].array
