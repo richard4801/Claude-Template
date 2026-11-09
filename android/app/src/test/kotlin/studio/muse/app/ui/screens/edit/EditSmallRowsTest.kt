@@ -149,4 +149,50 @@ class EditSmallRowsTest {
         val (w, h) = ExportSettings(shape = studio.muse.core.edit.ExportShape.CINEMA, resolution = ExportResolution.UHD).size
         assertEquals(4096, w); assertEquals(2.35, w.toDouble() / h, .01)
     }
+
+    @Test fun cutClipsToTheBeat() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(4.1, end = true)); c.act(EditAction.Split)
+        c.act(EditAction.Scrub(9.2, end = true)); c.act(EditAction.Split)
+        c.act(EditAction.CutToBeats); assertEquals("Detect beats in Audio first", c.ui.value.message)
+        c.act(EditAction.AddAudio("up_m", 15.0, voiceOver = false))
+        for (b in listOf(2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0)) { c.act(EditAction.Scrub(b, end = true)); c.act(EditAction.MarkBeat) }
+        c.act(EditAction.CutToBeats)
+        val ends = studio.muse.core.edit.timeline(c.p()).map { Math.round(it.endSec * 1000) / 1000.0 }
+        assertEquals(listOf(4.0, 10.0), ends.take(2)) // 4.1 → 4, then 4 + 5.1 = 9.1 → 10 (the source reaches)
+        valid(c.p())
+    }
+
+    @Test fun evenOutVolume() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(5.0, end = true)); c.act(EditAction.Split)
+        c.act(EditAction.Scrub(10.0, end = true)); c.act(EditAction.Split)
+        // The source: quiet for 0–5 s, loud 5–10 s, medium 10–15 s (50 slices a second).
+        val w = Peaks(50f, FloatArray(750) { i -> when { i < 250 -> .1f; i < 500 -> .8f; else -> .3f } })
+        c.act(EditAction.EvenVolume(mapOf("src" to w)))
+        val v = c.p().mainClips.map { it.volume ?: 1.0 }
+        assertEquals(listOf(2.0, .38, 1.0), v) // to the median (0.3): 3× capped at 2, 0.375 → 0.38, unchanged
+        valid(c.p())
+        c.act(EditAction.EvenVolume(emptyMap())); assertEquals("Nothing to even out · it needs two or more clips with sound", c.ui.value.message)
+    }
+
+    @Test fun splitScreenLayouts() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(2.0, end = true))
+        c.act(EditAction.SplitScreen(SuiteOps.SplitLayout.TOP_BOTTOM)); assertTrue(c.ui.value.message!!.startsWith("Add an overlay"))
+        c.act(EditAction.AddPip(TakeChoice("t2", "B", "Edit", null, 5.0, false, true)))
+        c.act(EditAction.SplitScreen(SuiteOps.SplitLayout.TOP_BOTTOM))
+        val p = c.p()
+        val main = p.mainClips[0]; val pip = p.tracks.first { it.kind == TrackKind.VIDEO }.items.single() as studio.muse.core.edit.VideoClip
+        // 9:16 into a 9:8 half: a quarter off the top and bottom; contain-fitted 1080 wide, so scale 1, centred in its half.
+        assertEquals(.25, main.crop!!.top!!, 1e-9); assertNull(main.crop!!.left)
+        assertEquals(studio.muse.core.edit.Transform(.5, .25, 1.0), main.transform)
+        assertEquals(.75, pip.transform!!.y!!, 1e-9); assertEquals(studio.muse.core.edit.Fit.CONTAIN, pip.fit)
+        valid(p)
+        c.act(EditAction.SplitScreen(SuiteOps.SplitLayout.SIDE_BY_SIDE))
+        val m2 = c.p().mainClips[0]
+        assertEquals(.25, m2.crop!!.left!!, 1e-9) // 9:16 into a 540 × 1920 cell (9:32): a quarter off each side
+        assertEquals(studio.muse.core.edit.Transform(.25, .5, 1.0), m2.transform)
+        valid(c.p())
+    }
 }

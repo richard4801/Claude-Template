@@ -237,6 +237,12 @@ sealed interface EditAction {
     data class PickModel(val purpose: String, val model: String?) : EditAction
     /** Another take added whole to the end of the video. */
     data class AppendTake(val take: TakeChoice) : EditAction
+    /** The clips on screen at the playhead arranged in a split-screen layout. */
+    data class SplitScreen(val layout: SuiteOps.SplitLayout) : EditAction
+    /** Main clips cut to end on the music's beats ([SuiteOps.syncToBeats]). */
+    data object CutToBeats : EditAction
+    /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
+    data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
     /** The selected clip moved between the main track and an overlay track (plans/edit-parity.md, S). */
     data object SwapTrack : EditAction
     /** A video imported from a link (or picked from the phone), added at the end. */
@@ -373,7 +379,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -728,6 +734,25 @@ class EditSuiteController(
                     _ui.update { it.copy(selectedId = newId) }
                     say("Added to the end")
                 }
+            }
+            is EditAction.SplitScreen -> {
+                val p0 = project ?: return
+                val ids = SuiteOps.clipsAt(p0, u.playheadSec).map { it.id }
+                if (ids.size < 2) return say("Add an overlay at the playhead first · split screen needs two or more clips on screen")
+                if (change(refused = "These clips can't be cropped to that layout") { p -> SuiteOps.splitScreen(p, ids, a.layout) })
+                    say(a.layout.label)
+            }
+            EditAction.CutToBeats -> {
+                val beats = project?.let { SuiteOps.beatTimes(it, false) }.orEmpty()
+                if (beats.isEmpty()) return say("Detect beats in Audio first")
+                var n = 0
+                if (change(refused = "The clips already end on beats") { p -> SuiteOps.syncToBeats(p, beats)?.let { (q, k) -> n = k; q } })
+                    say(if (n == 1) "1 clip now ends on a beat" else "$n clips now end on beats")
+            }
+            is EditAction.EvenVolume -> {
+                var n = 0
+                if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
+                    say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
             }
             EditAction.SwapTrack -> {
                 val id = (u.selection?.second as? VideoClip)?.id ?: u.activeClip?.id ?: return
