@@ -109,6 +109,16 @@ jobs:
           cat "$f"
           if grep -q '^CUT' "$f"; then echo "Generate is cut off"; exit 1; fi
 
+      # A screen change must never leave the old screen drawn (plans/claude-chat-mac.md): in themes C and D a live chat
+      # overlay closes in the same tick as openEdit + openRecreate, and 1 s later the window must hold only store.screen
+      # (SnapshotRunner+Chat.swift, staleScreenCheck). Its CUT lines already fail the fit check; this step makes sure it ran.
+      - name: Stale screen check
+        working-directory: mac
+        run: |
+          f=snapshots/fit-check.txt
+          grep 'stale_screen' "$f" || true
+          if [ "$(grep -c '^FITS stale_screen' "$f")" -ne 10 ]; then echo "stale screen check missing or failed"; exit 1; fi
+
       # Opening Edit with takes shaped like live ones must not crash (owner blocker 2026-11-07). The review run writes each
       # step before it runs (SnapshotRunner+Edit.swift), so a crash leaves the step that crashed as the last START line.
       - name: Edit check

@@ -20,10 +20,15 @@ import { mediaToolsAvailable, probe } from '../replicate/media.js';
 import { detectSilences, silenceCuts } from './silence.js';
 import { decodeMono, detectBeats } from './audio.js';
 import { REVERSE_LIMITS, reverseVideo } from './reverse.js';
+import { STABILIZE_LIMITS, smoothingOf, stabilizeVideo, vidstabAvailable } from './stabilize.js';
+import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError, captionLines, expectedTokens, translateAppLines, translateClient, translateUsd, translateWords, type AppLine, type Quality, type TranslateClient } from './translate.js';
+import { FalProvider } from '../suite/providers.js';
+import { SLOWMO_LIMITS, SLOWMO_MODEL, cutRange, falInterpolate, retime, slowmoComputeSec, slowmoUsd, type SlowmoFactor } from './slowmo.js';
+import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
@@ -32,13 +37,13 @@ export const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', briefs: 'Writing the briefs' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', briefs: 'Writing the briefs' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
 export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
 export const MAX_KEEP_POINTS = 10;
-export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
+export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -69,6 +74,38 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
     });
     if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
   }
+  if (kind === 'translate') {
+    if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage]) throw badRequest(`options.targetLanguage: one of ${Object.keys(TRANSLATE_LANGUAGES).join(', ')}`);
+    out.targetLanguage = o.targetLanguage;
+    if (o.sourceLanguage !== undefined) { if (typeof o.sourceLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.sourceLanguage]) throw badRequest('options.sourceLanguage: a language code'); out.sourceLanguage = o.sourceLanguage; }
+    if (o.lines !== undefined) {
+      // The app's caption lines as shown (edits included), instead of the transcript.
+      const L = TRANSLATE_LIMITS;
+      if (!Array.isArray(o.lines) || !o.lines.length || o.lines.length > L.maxLines) throw badRequest(`options.lines: 1 to ${L.maxLines} lines`);
+      const ids = new Set<string>();
+      out.lines = o.lines.map((l: any, i: number) => {
+        if (!l || typeof l !== 'object' || typeof l.id !== 'string' || !l.id || l.id.length > 100 || ids.has(l.id)) throw badRequest(`options.lines.${i}.id: a unique id`);
+        if (typeof l.text !== 'string' || !l.text.trim() || l.text.length > L.maxLineChars) throw badRequest(`options.lines.${i}.text: 1 to ${L.maxLineChars} characters`);
+        const t = (k: string) => { const v = l[k]; if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) throw badRequest(`options.lines.${i}.${k}: seconds from 0`); return Math.round(v * 1000) / 1000; };
+        const startSec = t('startSec'), endSec = t('endSec');
+        if (endSec < startSec) throw badRequest(`options.lines.${i}.endSec: not before startSec`);
+        ids.add(l.id);
+        return { id: l.id, text: l.text.trim(), startSec, endSec };
+      });
+    }
+    if (o.quality !== undefined) { if (o.quality !== 'standard' && o.quality !== 'best') throw badRequest('options.quality: "standard" or "best"'); out.quality = o.quality; }
+  }
+  if (kind === 'stabilize') {
+    if (o.strength !== undefined) { if (typeof o.strength !== 'number' || !Number.isFinite(o.strength) || o.strength < 0 || o.strength > 1) throw badRequest('options.strength: from 0 to 1'); out.strength = Math.round(o.strength * 100) / 100; }
+    if (o.zoom !== undefined) { if (o.zoom !== 'auto' && o.zoom !== 'none') throw badRequest('options.zoom: "auto" or "none"'); out.zoom = o.zoom; }
+  }
+  if (kind === 'slowmo') {
+    if (o.factor !== 2 && o.factor !== 4) throw badRequest('options.factor: 2 or 4');
+    const n = (k: 'startSec' | 'endSec') => { if (typeof o[k] !== 'number' || !Number.isFinite(o[k]) || o[k] < 0) throw badRequest(`options.${k}: seconds from 0`); return Math.round(o[k] * 1000) / 1000; };
+    out.factor = o.factor; out.startSec = n('startSec'); out.endSec = n('endSec');
+    const len = out.endSec - out.startSec;
+    if (len < SLOWMO_LIMITS.minRangeSec || len > SLOWMO_LIMITS.maxRangeSec) throw badRequest(`options.endSec: the range must be ${SLOWMO_LIMITS.minRangeSec} to ${SLOWMO_LIMITS.maxRangeSec} s long`);
+  }
   if (kind === 'denoise' && o.analyzeOnly !== undefined) { if (typeof o.analyzeOnly !== 'boolean') throw badRequest('options.analyzeOnly: true or false'); out.analyzeOnly = o.analyzeOnly; }
   return out;
 }
@@ -93,7 +130,7 @@ export class EditorAiService {
   private stopping = new Set<string>();
   private running = 0;
   private waiting: (() => void)[] = [];
-  constructor(private ctx: Ctx, provider?: EditorProvider) { this.provider = provider ?? makeProvider(ctx); }
+  constructor(private ctx: Ctx, provider?: EditorProvider) { this.provider = provider ?? makeProvider(ctx); this.fal = new FalProvider(ctx); this.assembly = new AssemblyAI(ctx.config.ASSEMBLYAI_API_KEY, ctx.config.ASSEMBLYAI_API_URL, fetch, ctx.log); }
 
   // ------------------------------------------------------------------ views and events
   view(r: Row, role: 'owner' | 'member') {
@@ -179,6 +216,7 @@ export class EditorAiService {
       if (!purpose) throw badRequest(`engineModel: ${kind} runs no model`);
       await (await import('../engines/service.js')).modelChoice(this.ctx).check(u, purpose, body.engineModel);
     }
+    const requested = typeof body?.engineModel === 'string' ? body.engineModel : null;
     const src = await this.source(u, body?.source);
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
@@ -186,14 +224,40 @@ export class EditorAiService {
     if (kind === 'matte' && !this.matteAvailable) throw badRequest('Background removal is coming soon');
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
     if (kind === 'reverse' && d > REVERSE_LIMITS.maxSec) throw badRequest(`source: reverse works on videos up to ${REVERSE_LIMITS.maxSec} s`);
-    const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats' || kind === 'reverse';
+    if (kind === 'stabilize' && d > STABILIZE_LIMITS.maxSec) throw badRequest(`source: stabilise works on videos up to ${STABILIZE_LIMITS.maxSec / 60} minutes`);
+    if (kind === 'stabilize' && !(await this.stabilizeAvailable())) throw badRequest('kind: stabilise is not available on this server');
+    const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats' || kind === 'reverse' || kind === 'stabilize';
     if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest(kind === 'beats' ? 'kind: beat detection is not available on this server' : kind === 'reverse' ? 'kind: reverse is not available on this server' : 'options.silenceOnly: not available on this server');
-    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, opts) : null;
+    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'translate' && !opts.lines) || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, kind === 'translate' ? { fromJobId: opts.fromJobId } : opts) : null;
+    if (kind === 'translate') {
+      if (!this.translator()) throw badRequest('kind: translating captions is not available on this server');
+      if (opts.lines) {
+        if (opts.sourceLanguage === opts.targetLanguage) throw badRequest('options.targetLanguage: the captions are already in that language');
+        return { kind, opts, src, reuse, usd: translateUsd(opts.quality ?? 'standard', expectedTokens(opts.lines), this.markup) };
+      }
+      if (!reuse) throw badRequest('options: make captions for this video first');
+      if (reuse.words.length > TRANSLATE_LIMITS.maxWords) throw badRequest(`source: at most ${TRANSLATE_LIMITS.maxWords} words`);
+      if (reuse.language === opts.targetLanguage) throw badRequest('options.targetLanguage: the captions are already in that language');
+      return { kind, opts, src, reuse, usd: translateUsd(opts.quality ?? 'standard', expectedTokens(captionLines(reuse.words)), this.markup) };
+    }
+    if (kind === 'slowmo') {
+      if (!(await this.slowmoAvailable())) throw badRequest('kind: smooth slow motion is not available on this server');
+      if (opts.endSec! > d + 0.05) throw badRequest(`options.endSec: within the clip (0–${d} s)`);
+      // The same range at the same speed done before (by anyone in the studio) is reused, free.
+      if (await this.slowmoBefore(u.studioId, src.key, opts)) return { kind, opts, src, reuse, usd: 0 };
+      const sz = src.size;
+      return { kind, opts, src, reuse, usd: slowmoUsd(slowmoComputeSec(opts.endSec! - opts.startSec!, sz?.fps ?? 30, opts.factor!, sz?.width ?? 1080, sz?.height ?? 1920), this.markup) };
+    }
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
-    let usd = 0;
+    let usd = 0, transcriber: string | null = null;
     if (silenceOnly) usd = 0;
-    else if (kind === 'captions' || kind === 'cuts') usd = reuse ? 0 : GPU_SEC.transcribe(d) * p.rates.transcribe;
+    else if (kind === 'captions' || kind === 'cuts') {
+      if (!reuse) {
+        transcriber = await this.transcriber(u, requested);
+        usd = transcriber === ASSEMBLY_MODEL ? d * ASSEMBLY_MAX_RATE : GPU_SEC.transcribe(d) * p.rates.transcribe;
+      }
+    }
     else if (kind === 'matte' && opts.points) {
       if (opts.points.some(q => q.t > d)) throw badRequest(`options.points: t must be within the clip (0–${d} s)`);
       usd = GPU_SEC.track(d) * p.rates.track;
@@ -201,7 +265,7 @@ export class EditorAiService {
     else if (!opts.analyzeOnly) usd = GPU_SEC.separate(d) * p.rates.separate;
     // workstream 1: the price is the provider's cost x EDITOR_MARKUP (the owner's choice: x 2, like Upscale).
     usd = usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0;
-    return { kind, opts, src, reuse, usd };
+    return { kind, opts, src, reuse, usd, transcriber };
   }
 
   // ------------------------------------------------------------------ jobs
@@ -209,7 +273,7 @@ export class EditorAiService {
     const e = await this.estimate(u, body);
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
+    const models = e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     try {
@@ -232,6 +296,45 @@ export class EditorAiService {
     this.running++;
   }
   private free() { this.running--; this.waiting.shift()?.(); }
+  /** Heavy local ffmpeg jobs (reverse, stabilise) run one at a time: each can take ~200 MB of the 512 MB box. */
+  private localBusy = false;
+  private localWaiting: (() => void)[] = [];
+  private async localSlot() {
+    if (!this.localBusy) { this.localBusy = true; return; }
+    await new Promise<void>(r => this.localWaiting.push(r));
+  }
+  private localFree() { const next = this.localWaiting.shift(); if (next) next(); else this.localBusy = false; }
+  private translateFake: TranslateClient | null = null;
+  private translateReal: TranslateClient | null = null;
+  /** Tests: a fake Claude client for translations. */
+  setTranslateClient(c: TranslateClient | null) { this.translateFake = c; }
+  /** The client translations use (the server's Anthropic key), or null when the server has none. */
+  translator(): TranslateClient | null { return this.translateFake ?? (this.translateReal ??= translateClient(this.ctx.config.ANTHROPIC_API_KEY)); }
+  /** fal (smooth slow motion), with the server's FAL_KEY. */
+  private fal: FalProvider;
+  /** Tests: how often fal is polled. */
+  falPollMs = 2000;
+  private slowTools: Promise<boolean> | null = null;
+  /** Whether slow motion can run: fal is set up and ffmpeg is here. */
+  async slowmoAvailable() { return !!this.ctx.config.FAL_KEY && await (this.slowTools ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH)); }
+  private async slowmoBefore(studioId: string, key: string, o: JobOptions) {
+    const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'slowmo'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20);
+    return prev.find(r => { const p = r.options as JobOptions; return p.factor === o.factor && p.startSec === o.startSec && p.endSec === o.endSec && !!r.result; }) ?? null;
+  }
+  /** AssemblyAI (captions and cuts) with the server's key. */
+  readonly assembly: AssemblyAI;
+  /**
+   * The transcriber for captions and cuts: the owner's pick (request, else the studio default for captions), else
+   * AssemblyAI when its key is set, else the Replicate model.
+   */
+  private async transcriber(u: AuthUser, requested: string | null): Promise<string> {
+    const c = await (await import('../engines/service.js')).modelChoice(this.ctx).choose(u, 'captions', requested);
+    if (c && (c.model !== ASSEMBLY_MODEL || this.assembly.configured())) return c.model;
+    return this.assembly.configured() ? ASSEMBLY_MODEL : this.provider.models.transcribe;
+  }
+  private vidstab: Promise<boolean> | null = null;
+  /** Whether this server's ffmpeg can stabilise (checked once). */
+  stabilizeAvailable() { return (this.vidstab ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH).then(ok => ok && vidstabAvailable(this.ctx.config.FFMPEG_PATH))); }
 
   private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource; size?: { width: number; height: number; fps?: number } }, reuse: { words: Word[]; language: string } | null) {
     const id = row.id, d = src.source.durationSec, o = row.options as JobOptions, p = this.provider;
@@ -243,13 +346,19 @@ export class EditorAiService {
     const needsGpu = row.estimate > 0;
     if (needsGpu) await this.slot();
     let file: string | null = null;
+    const temps: string[] = [];
     try {
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
       await this.patch(id, { phase: PHASE[row.kind], progress: 5 });
       const url = await this.ctx.storage.presignGet(src.key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
-      let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0;
+      let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0, spentUsd: number | null = null;
       const transcript = async () => {
         if (reuse) return reuse;
+        if (row.models[0] === ASSEMBLY_MODEL) {
+          const t = await this.assembly.transcribe(url, d, o.language ?? null, hooks);
+          spentUsd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(t.usd * this.markup * 10000) / 10000);
+          return t;
+        }
         const t = await p.transcribe(url, d, o.language ?? null, hooks);
         gpuSec = t.gpuSec; rate = p.rates.transcribe;
         return t;
@@ -261,21 +370,46 @@ export class EditorAiService {
         const samples = await this.withLocalInput(src.key, input => decodeMono(this.ctx.config.FFMPEG_PATH, input));
         await this.patch(id, { progress: 70 });
         result = { ...detectBeats(samples), durationSec: d };
-      } else if (row.kind === 'reverse') {
-        // The same source reversed before (by anyone in the studio) is reused.
-        const [prev] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, u.studioId), eq(editorJobs.kind, 'reverse'), eq(editorJobs.mediaKey, src.key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(1);
+      } else if (row.kind === 'reverse' || row.kind === 'stabilize') {
+        // The same source reversed / steadied before (by anyone in the studio) is reused.
+        // Stabilise: only with the same strength and zoom.
+        const same = (r: Row) => row.kind === 'reverse' || (smoothingOf((r.options as JobOptions).strength) === smoothingOf(o.strength) && ((r.options as JobOptions).zoom ?? 'auto') === (o.zoom ?? 'auto'));
+        const prev = (await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, u.studioId), eq(editorJobs.kind, row.kind), eq(editorJobs.mediaKey, src.key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20)).find(same);
         if (prev?.result) result = { ...(prev.result as Record<string, unknown>), reused: true };
         else {
-          const info = await this.withLocalInput(src.key, f => probe(this.ctx.config.FFPROBE_PATH, f));
-          // The duration a client sends for an upload isn't trusted: the reverse filters hold the whole file in memory.
-          if (!(info.duration > 0) || info.duration > REVERSE_LIMITS.maxSec + 0.5) throw new ReplicateError(`Reverse works on videos up to ${REVERSE_LIMITS.maxSec} s`, 'failed');
-          const out = path.join(os.tmpdir(), `${uid('rev')}.mp4`);
-          file = out;
-          await this.withLocalInput(src.key, input => reverseVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration));
-          await this.patch(id, { progress: 90 });
-          const asset = await this.store(u, src, out, 'video/mp4', 'video', d);
-          result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d };
+          // One heavy local ffmpeg job at a time (the 512 MB box).
+          await this.localSlot();
+          try {
+            const info = await this.withLocalInput(src.key, f => probe(this.ctx.config.FFPROBE_PATH, f));
+            // The duration a client sends for an upload isn't trusted: it decides how long the job may take.
+            const max = row.kind === 'reverse' ? REVERSE_LIMITS.maxSec : STABILIZE_LIMITS.maxSec;
+            if (!(info.duration > 0) || info.duration > max + 0.5) throw new ReplicateError(row.kind === 'reverse' ? `Reverse works on videos up to ${max} s` : `Stabilise works on videos up to ${max / 60} minutes`, 'failed');
+            const out = path.join(os.tmpdir(), `${uid(row.kind === 'reverse' ? 'rev' : 'stab')}.mp4`);
+            file = out;
+            await this.withLocalInput(src.key, input => row.kind === 'reverse' ? reverseVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration)
+              : stabilizeVideo(this.ctx.config.FFMPEG_PATH, input, out, !!info.audioCodec, info.duration, smoothingOf(o.strength), o.zoom ?? 'auto'));
+            await this.patch(id, { progress: 90 });
+            const asset = await this.store(u, src, out, 'video/mp4', 'video', d);
+            result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d, reused: false };
+          } finally { this.localFree(); }
         }
+      } else if (row.kind === 'slowmo') {
+        const prev = await this.slowmoBefore(u.studioId, src.key, o);
+        if (prev) { result = { ...(prev.result as Record<string, unknown>), reused: true }; spentUsd = 0; }
+        else {
+          const r = await this.slowmo(row, u, src, o, temps);
+          result = r.result;
+          if (r.computeSec != null) spentUsd = slowmoUsd(r.computeSec, this.markup);
+        }
+      } else if (row.kind === 'translate') {
+        const q = o.quality ?? 'standard';
+        const progress = (f: number) => this.patch(id, { progress: 5 + f * 90 }).then(() => undefined);
+        const t = o.lines ? await translateAppLines(this.translator()!, o.lines, o.sourceLanguage ?? null, o.targetLanguage!, q, progress)
+          : await translateWords(this.translator()!, reuse!.words, o.targetLanguage!, q, progress);
+        spentUsd = translateUsd(q, t.usage, this.markup);
+        // lines: each caption line (the app's ids when it sent its own), its text and time, translated or kept as it was.
+        const lines = t.lines.map(l => ({ ...('id' in l ? { id: l.id } : {}), text: l.text, startSec: l.startSec, endSec: l.endSec, translated: l.translated }));
+        result = { language: o.targetLanguage, sourceLanguage: o.lines ? o.sourceLanguage ?? null : reuse!.language, words: t.words, lines, untranslatedLines: t.missing, quality: q, durationSec: d };
       } else if (row.kind === 'cuts' && o.silenceOnly) {
         const minSilenceSec = o.minSilenceSec ?? CUT_DEFAULTS.minSilenceSec, keepPadSec = o.keepPadSec ?? CUT_DEFAULTS.keepPadSec;
         const sil = await this.withLocalInput(src.key, input => detectSilences(this.ctx.config.FFMPEG_PATH, input, d, { minSilenceSec, noiseDb: o.noiseDb }));
@@ -299,7 +433,7 @@ export class EditorAiService {
         result = { suggestion: noiseSuggestion(reuse?.words ?? []) };
       }
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
-      const actual = !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
+      const actual = spentUsd != null ? spentUsd : !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
       if (row.holdTokens || actual > 0) await this.ctx.money.settle(u.studioId, u.id, id, row.holdTokens, actual, `Editor ${row.kind}`);
       await this.patch(id, { state: 'done', progress: 100, phase: 'Done', result, cost: actual, finishedAt: Date.now() });
     } catch (e) {
@@ -308,13 +442,55 @@ export class EditorAiService {
       if (!cancelled) this.ctx.log.warn({ err: (e as Error).message, job: id, kind: row.kind }, 'editor job failed');
       const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
         : e instanceof ReplicateError && e.kind === 'out_of_credit' ? 'The studio is out of AI credit · ask the owner'
-        : e instanceof ReplicateError && row.kind === 'reverse' && e.message.startsWith('Reverse works') ? e.message : 'Something went wrong · try again';
+        : e instanceof TranslateError ? (e.kind === 'refused' ? 'These captions couldn’t be translated · you weren’t charged' : 'Couldn’t translate these captions this time · you weren’t charged')
+        : e instanceof ReplicateError && (row.kind === 'reverse' || row.kind === 'stabilize' || row.kind === 'slowmo') && /^(Reverse|Stabilise|Slow motion) works/.test(e.message) ? e.message : 'Something went wrong · try again';
       await this.patch(id, { state: cancelled ? 'cancelled' : 'failed', phase: msg, error: msg, finishedAt: Date.now() }).catch(() => {});
     } finally {
       rmQuiet(file);
+      for (const t of temps) rmQuiet(t);
       this.stopping.delete(id);
       if (needsGpu) this.free();
     }
+  }
+
+  /**
+   * Smooth slow motion: the range cut here (one local ffmpeg job at a time), stored for fal to fetch, interpolated by
+   * fal, then retimed here to play at the source's frame rate. The cut sent to fal is deleted again whatever happens.
+   */
+  private async slowmo(row: Row, u: AuthUser, src: { key: string; source: EditorSource }, o: JobOptions, temps: string[]) {
+    const ffmpeg = this.ctx.config.FFMPEG_PATH, ffprobe = this.ctx.config.FFPROBE_PATH, factor = o.factor!, cancelled = () => this.stopping.has(row.id);
+    const cut = path.join(os.tmpdir(), `${uid('slowcut')}.mp4`), raw = path.join(os.tmpdir(), `${uid('slowraw')}.mp4`), out = path.join(os.tmpdir(), `${uid('slow')}.mp4`);
+    temps.push(cut, raw, out);
+    let info: Awaited<ReturnType<typeof probe>>;
+    await this.localSlot();
+    try {
+      info = await this.withLocalInput(src.key, f => probe(ffprobe, f));
+      // The duration a client sends for an upload isn't trusted.
+      if (!(info.duration > 0) || o.endSec! > info.duration + 0.05) throw new ReplicateError(`Slow motion works on a range inside the clip (0–${Math.floor((info.duration || 0) * 10) / 10} s)`, 'failed');
+      await this.withLocalInput(src.key, input => cutRange(ffmpeg, input, cut, o.startSec!, o.endSec!, info.fps));
+    } finally { this.localFree(); }
+    const rangeSec = (await probe(ffprobe, cut)).duration || o.endSec! - o.startSec!;
+    await this.patch(row.id, { progress: 15 });
+    const key = `t/${uid('slowin')}.mp4`;
+    await this.ctx.storage.putStream(key, fs.createReadStream(cut), 'video/mp4', fs.statSync(cut).size);
+    let computeSec: number | null;
+    try {
+      const url = await this.ctx.storage.presignGet(key, 3600);
+      ({ computeSec } = await falInterpolate(this.fal, url, factor, raw, { cancelled, pollMs: this.falPollMs, onProgress: f => this.patch(row.id, { progress: 15 + f * 70 }).then(() => undefined) }));
+    } finally { await this.ctx.storage.delete(key).catch(() => {}); }
+    if (cancelled()) throw new ReplicateError('Cancelled', 'cancelled');
+    const got = await probe(ffprobe, raw);
+    if (!(got.duration > 0)) throw new ReplicateError('Slow motion came back empty', 'failed');
+    const seconds = Math.round(rangeSec * factor * 1000) / 1000, fps = Math.min(info.fps || 30, SLOWMO_LIMITS.maxFps);
+    await this.localSlot();
+    try { await retime(ffmpeg, raw, out, got.duration, seconds, fps); } finally { this.localFree(); }
+    await this.patch(row.id, { progress: 92 });
+    const asset = await this.store(u, src, out, 'video/mp4', 'video', seconds);
+    const fin = await probe(ffprobe, out).catch(() => null);
+    return {
+      computeSec,
+      result: { asset, factor, startSec: o.startSec, endSec: o.endSec, fps, width: fin?.width ?? got.width, height: fin?.height ?? got.height, hasAudio: false, durationSec: seconds, reused: false } as Record<string, unknown>,
+    };
   }
 
   /** The media as something ffmpeg can read: a presigned URL on R2, else a temporary copy of the local object. */
@@ -445,6 +621,9 @@ export class EditorAiService {
       matte: { available: paid && this.matteAvailable, maxSec: EDITOR_LIMITS.maxMatteSec },
       denoise: { available: paid },
       beats: { available: true, free: true },
+      stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
+      slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
+      translate: { available: paid && !!this.translator(), languages: Object.keys(TRANSLATE_LANGUAGES), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }
