@@ -135,3 +135,21 @@ By hand, the nearest equivalent is to open a Claude panel, then click a sidebar 
   3. The outgoing screen goes at once (`screenTransition`, `removal: .identity`). The incoming screen keeps each theme's entrance.
 - **The workaround is gone.** The chat shots no longer pause 0.8 s, and Recreate and Edit no longer retry through another screen.
 - **Seen on the way, still open:** in run 42580182117, closing the chat overlay while its sample reply was still streaming, in the same tick as the screen change, froze review mode. It never resumed and was killed at the 1800 s limit. The check now closes a chat that is not streaming, as in the original steps. The streaming case needs its own look; by hand, that is clicking a sidebar item while a reply streams.
+
+## WS18: the owner's bug report (2026-11-09)
+Branch `claude/muse-claude-chat-fixes`. Mac, Android and server.
+
+1. **Every message showed twice.** It was rendered twice, not posted twice.
+   - The Suite sends `[Suite · draft sa_x rev n …]\n<words>`. The bubble shown at once held the bare words, while the runner's echo and the stored copy carried the context line, so the transcript never matched them.
+   - Now the bubble begins with the message exactly as it is sent. User messages are matched on the words typed (`ClaudeSessions.typedText`) on Mac and Android.
+   - A second press of Return or the button is the same bubble, and the model's `busy` guard stops a second send.
+2. **Sessions.** Each place keeps a list of chats on the server (`claude_threads.context_key`, migration 0028):
+   - Keys: `suite:<tool>` for each Suite mode; `recreate:<id>`, `edit:<id>` and `camera:<id>` for the others.
+   - API: `GET /v1/claude/threads?key=`, `POST {new: true}`, `PATCH {title}` (an empty title goes back to the first words) and `DELETE`. The first message names a chat.
+   - Bar above the transcript: the chat's name opens the list (title and when it was last used, then Rename and Delete), and "+" starts a new chat.
+   - A Suite chat is bound to its shared draft. New chat makes a new draft from the composer; switching lays that chat's draft over the composer.
+3. **Messages kept.** Opening a mode returns to the chat open last on this device, else the server's newest, with its messages and draft.
+4. **Claude's changes didn't show.**
+   - The server's `suite_set_draft` set `tool = 'shot'` on every draft, and the composer refuses a draft for another tool, so nothing applied outside Shot. Drafts now keep their tool, and `suite_request_shot` is Shot only.
+   - The app also reads the draft again after each `suite_set_draft`, `suite_add_reference` or `suite_request_shot` step, in case the live event was missed.
+5. **CI:** `claude-chat-check.txt` (SnapshotRunner+ClaudeChecks.swift) runs one_bubble, reopen, sessions, draft_live, draft_after_tool, draft_bound and mode_sessions.
