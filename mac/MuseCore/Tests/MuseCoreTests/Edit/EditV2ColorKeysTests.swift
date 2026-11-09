@@ -85,6 +85,38 @@ final class EditV2ColorKeysTests: XCTestCase {
         XCTAssertNil(E.problem(s.project))
     }
 
+    /// Audio speed (WS8 dacb556): length, beats on the timeline and source times (functions.json → audioSpeed).
+    func testAudioSpeedFixtures() throws {
+        let cases = try editorFixture("functions")["audioSpeed"].array
+        XCTAssertEqual(cases.count, 2)
+        for c in cases {
+            let clip = try c["clip"].decode(E.AudioClip.self)
+            XCTAssertEqual(E.clipLength(clip), c["length"].double!, accuracy: 1e-6)
+            let beats = (clip.beats ?? []).map { E.r6(clip.startSec + ($0 - clip.inSec) / (clip.speed ?? 1)) }
+            let want = c["beatsOnTimeline"].array.compactMap(\.double)
+            XCTAssertEqual(beats.count, want.count)
+            for (g, w) in zip(beats, want) { XCTAssertEqual(g, w, accuracy: 1e-6) }
+            for s in c["sourceAt"].array {
+                XCTAssertEqual(clip.inSec + s["t"].double! * (clip.speed ?? 1), s["src"].double!, accuracy: 1e-6, "t \(s["t"])")
+            }
+        }
+    }
+
+    func testAudioSpeedOnASound() {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        let song = E.Asset(id: "a1", kind: .audio, upload: "u1", durationSec: 6, hasAudio: true)
+        XCTAssertTrue(s.addAudio(song, kind: .music))
+        XCTAssertTrue(s.setAudioSpeed(1.5))
+        let c = s.project.tracks.first { $0.kind == .music }!.items[0].audioClip!
+        XCTAssertEqual(c.speed, 1.5)
+        XCTAssertEqual(E.clipLength(c), (c.outSec - c.inSec) / 1.5, accuracy: 1e-9)
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertTrue(s.setAudioSpeed(9))
+        XCTAssertEqual(s.selectedAudioSpeed, 2, "clamped to 2×")
+        XCTAssertTrue(s.setAudioSpeed(1))
+        XCTAssertNil(s.project.tracks.first { $0.kind == .music }!.items[0].audioClip!.speed)
+    }
+
     /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
     func testAutoAdjustFixtures() throws {
         let cases = try editorFixture("functions")["autoAdjust"].array

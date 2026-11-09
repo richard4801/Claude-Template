@@ -244,4 +244,24 @@ extension EditSuiteState {
             }
         }
     }
+
+    // MARK: Audio speed (contract, WS8 dacb556)
+
+    /// The selected music, voice or effect clip's speed (pitch kept), or nil when no sound is selected.
+    public var selectedAudioSpeed: Double? {
+        guard case .audio(let c)? = selectedItem else { return nil }
+        return c.speed ?? 1
+    }
+
+    /// Sets the selected sound's speed, 0.5–2× (1 is left out); its length on the timeline follows.
+    @discardableResult
+    public mutating func setAudioSpeed(_ s: Double) -> Bool {
+        guard case .audio? = selectedItem else { return false }
+        let v = min(2, max(0.5, (s * 100).rounded() / 100))
+        return changeSelected { it in
+            guard case .audio(var c) = it else { return }
+            c.speed = abs(v - 1) < 1e-9 ? nil : v
+            it = .audio(c)
+        }
+    }
 }

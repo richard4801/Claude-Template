@@ -227,7 +227,8 @@ private struct Validator {
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video],
                                  voice: c.voiceEffect)
                     try num("\(g).startSec", c.startSec, 0, 600, optional: false)
-                    if let s = c.speed, s != 1 { throw bad("\(g).speed", "audio clips play at 1×") }
+                    // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept.
+                    try num("\(g).speed", c.speed, 0.5, 2)
                     try kfs("\(g).keyframes", c.keyframes, E.clipLength(c), allowed: [.volume])
                     if let b = c.beats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).beats", "must be up to 2000 times") }
                     if let b = c.strongBeats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).strongBeats", "must be up to 2000 times") }
