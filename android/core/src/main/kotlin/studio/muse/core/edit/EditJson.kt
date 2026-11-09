@@ -118,6 +118,7 @@ object EditJson {
         alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
         holdSec = o.numOrNull("holdSec"), blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
+        animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
     )
 
     private fun imageItem(o: Obj) = ImageItem(
@@ -259,7 +260,7 @@ object EditJson {
             it.chroma?.let { c -> put("chroma", buildJsonObject { put("color", c.color); num("similarity", c.similarity); num("smoothness", c.smoothness); num("spill", c.spill) }) }
             it.alphaMatte?.let { m -> put("alphaMatte", buildJsonObject { put("asset", m.asset); bool("invert", m.invert) }) }
             it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
-            num("holdSec", it.holdSec); str("blend", it.blend?.wire)
+            num("holdSec", it.holdSec); str("blend", it.blend?.wire); anim("animIn", it.animIn); anim("animOut", it.animOut)
         }
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)

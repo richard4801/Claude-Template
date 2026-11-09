@@ -228,6 +228,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         c.audioAsset?.let { aa -> val a = assets[aa]; if (a == null || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) bad("$g.audioAsset", "must be an audio or video asset") }
         // Background removal's matte (workstream 1): the asset must be a video of the project (the server's message).
         c.alphaMatte?.let { m -> if (assets[m.asset]?.kind != AssetKind.VIDEO) bad("$g.alphaMatte.asset", "must be a video asset") }
+        anim("$g.animIn", c.animIn, false); anim("$g.animOut", c.animOut, false)
         c.chroma?.let { ch ->
             color("$g.chroma.color", ch.color, false)
             num("$g.chroma.similarity", ch.similarity, 0.0, 1.0); num("$g.chroma.smoothness", ch.smoothness, 0.0, 1.0); num("$g.chroma.spill", ch.spill, 0.0, 1.0)

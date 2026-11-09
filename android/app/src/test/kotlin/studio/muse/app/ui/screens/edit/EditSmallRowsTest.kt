@@ -249,4 +249,24 @@ class EditSmallRowsTest {
         assertTrue(a.exposure!! > 0); assertEquals(.3, a.highlights!!, 1e-9)
         valid(c.p())
     }
+
+    @Test fun videoClipAnimations() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.FADE, 0.5), studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.ZOOM, 0.4)))
+        val clip = c.p().mainClips[0]
+        assertEquals(studio.muse.core.edit.AnimKind.FADE, clip.animIn!!.kind)
+        valid(c.p())
+        // The plan fades it in from nothing and zooms it out.
+        val plan = planRender(c.p(), infos)
+        val main = plan.layers.first { it.role == studio.muse.core.edit.LayerRole.MAIN }.index
+        assertEquals(0.0, plan.placement(main, 0.0).alpha, 1e-9)
+        assertEquals(1.0, plan.placement(main, 5.0).alpha, 1e-9)
+        assertTrue(plan.placement(main, 14.9).scale > 1.0)
+        // Round trip through the contract's JSON.
+        assertEquals(c.p(), studio.muse.core.edit.EditJson.parse(studio.muse.core.edit.EditJson.encode(c.p())))
+        // A typewriter isn't a video animation.
+        c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.TYPEWRITER, 1.0), null))
+        assertEquals(studio.muse.core.edit.AnimKind.FADE, c.p().mainClips[0].animIn!!.kind)
+    }
 }

@@ -44,7 +44,9 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
   /** Wave 1, freeze frame: the clip shows the single source frame at inSec for holdSec seconds, silent (clipLength = holdSec). */
   holdSec?: number;
   /** Wave 1: overlay tracks only. */
-  blend?: BlendMode };
+  blend?: BlendMode;
+  /** In / out animation (as images: fade, pop, slideUp, slideDown, zoom), main or overlay; [animState] over clipLength. */
+  animIn?: Anim; animOut?: Anim };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode };
@@ -886,6 +888,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
             if (m.invert !== undefined && typeof m.invert !== 'boolean') bad(`${g}.alphaMatte.invert`, 'true or false');
           }
         }
+        anim(`${g}.animIn`, c.animIn, false); anim(`${g}.animOut`, c.animOut, false);
         if (c.chroma !== undefined) {
           color(`${g}.chroma.color`, c.chroma.color, false);
           num(`${g}.chroma.similarity`, c.chroma.similarity, 0, 1); num(`${g}.chroma.smoothness`, c.chroma.smoothness, 0, 1); num(`${g}.chroma.spill`, c.chroma.spill, 0, 1);

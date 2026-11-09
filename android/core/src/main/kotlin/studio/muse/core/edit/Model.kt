@@ -189,6 +189,9 @@ data class VideoClip(
     val holdSec: Double? = null,
     /** Wave 1: overlay (video) tracks only. */
     val blend: BlendMode? = null,
+    /** In / out animation (as images; no typewriter), main or overlay: [animState] over [clipLength]. */
+    val animIn: Anim? = null,
+    val animOut: Anim? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }

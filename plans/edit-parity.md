@@ -76,8 +76,8 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Transitions (cut, fade, dip to black/white, slide, push, zoom, whip, spin, glitch) | Has | Has | — | 9 types, own design |
 | Duration, apply to all | Has | Has | — | |
 | More transition types | Partial | Partial | M each | Functional, but the value is in a curated set: **Content** |
-| Transitions on overlay tracks | Missing | Missing | M | |
-| Clip in/out animations (video) | Missing | Missing | M | Text and images have them |
+| Transitions on overlay tracks | Partial | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut` (no cross-dissolve between overlays). |
+| Clip in/out animations (video) | Has | Missing | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). |
 
 ## 4. Text, captions and animation
 

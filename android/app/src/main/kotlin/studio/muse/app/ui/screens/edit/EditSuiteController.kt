@@ -701,7 +701,7 @@ class EditSuiteController(
             }
             is EditAction.SetTextStyle -> change(a.done, "That style can't be used") { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(style = a.style) ?: it } }
             is EditAction.SetAnim -> change(a.done, "That animation is too long for the item") { p ->
-                p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animIn = a.animIn, animOut = a.animOut); is ImageItem -> it.copy(animIn = a.animIn, animOut = a.animOut); else -> it } }
+                p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animIn = a.animIn, animOut = a.animOut); is ImageItem -> it.copy(animIn = a.animIn, animOut = a.animOut); is VideoClip -> it.copy(animIn = a.animIn, animOut = a.animOut); else -> it } }
             }
             is EditAction.EditText -> change(done = true) { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(text = a.text.take(500).ifBlank { it.text }) ?: it } }
             EditAction.AutoCaptions -> u.helpersOff["captions"]?.let { say(it) } ?: autoCaptions()

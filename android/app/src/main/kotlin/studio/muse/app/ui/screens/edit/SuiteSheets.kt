@@ -376,6 +376,12 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         SuiteChip("Flip horizontally", tr.flipX == true, { act(EditAction.Mirror(x = tr.flipX != true)) })
         SuiteChip("Flip vertically", tr.flipY == true, { act(EditAction.Mirror(y = tr.flipY != true)) })
     }
+    // In / out animations of a picture (text has its own in the Text panel).
+    when (item) {
+        is VideoClip -> AnimPicker(item.id, item.animIn, item.animOut, clipLength(item), text = false, act = act)
+        is studio.muse.core.edit.ImageItem -> AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act)
+        else -> {}
+    }
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     if (!keys.isNullOrEmpty()) {
         SuiteLabel("Easing")
