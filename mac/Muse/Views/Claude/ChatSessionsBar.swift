@@ -13,7 +13,7 @@ struct ChatSessionsBar: View {
 
     var body: some View {
         let current = model.thread
-        let name = current.map { ClaudeSessions.displayTitle(model.threads.first(where: { x in x.id == $0.id }) ?? $0) } ?? "New chat"
+        let name = current.map { cur in ClaudeSessions.displayTitle(model.threads.first(where: { $0.id == cur.id }) ?? cur) } ?? "New chat"
         HStack(spacing: Space.s2) {
             Menu {
                 Section("Chats") {
