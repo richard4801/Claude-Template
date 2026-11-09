@@ -205,8 +205,11 @@ final class AppStore {
     // MARK: Navigation and overlays
 
     var screen: Screen = .home
-    /// Bumped on the turn after each screen change: ScreenHost reads it, so a screen change it missed inside a busy
-    /// transaction (plans/claude-chat-mac.md, "the old screen stays drawn") still redraws it a tick later.
+    /// Bumped on the turn after each screen change, and read by ScreenHost. Observation reports a change on `willSet`; when
+    /// SwiftUI redraws ScreenHost inside that window (review mode logged it: a body run that read the OLD screen after
+    /// `go(_:)` began), the redraw re-arms tracking before the new value lands, no further change is reported, and the
+    /// old screen stays drawn (plans/claude-chat-mac.md, "the old screen stays drawn"). This second change comes after
+    /// the new value is stored, so ScreenHost always redraws with it.
     var screenEpoch = 0
     var navForward = true
     var toast: Toast?

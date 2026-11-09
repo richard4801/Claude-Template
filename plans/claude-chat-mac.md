@@ -98,7 +98,7 @@ The shared parts are in `mac/Muse/Views/Claude/`: `ChatTranscriptView` (rows, st
   - same leak rules;
   - same markdown coverage.
 
-## Fixed: the old screen stayed drawn after a screen change
+## The old screen stayed drawn after a screen change (root cause found)
 _Seen only in review mode on the CI runner (macOS 15), four times over five runs; not reproduced by hand. For the owner of `RootView` and screen switching._
 
 **What happens.** After `store.go(…)` (or `openEdit`, which calls it), the sidebar shows the new screen as selected, and `store.screen` has the new value, but the main area keeps drawing the old screen. Seen:
@@ -126,12 +126,27 @@ By hand, the nearest equivalent is to open a Claude panel, then click a sidebar 
 
 **Workaround in review mode only.** The chat shots pause 0.8 s after the overlay closes. Recreate and Edit retry through another screen if their chat isn't drawn, up to three times, and log each try.
 
-**Fixed (WS17, branch `claude/muse-mac-stale-screen`, Mac CI 42594641852 green).**
-- **The check came first.** Review mode now has `staleScreenCheck` (`SnapshotRunner+Chat.swift`). It runs five tries each in themes C and D. Each try puts the chat overlay up with the sample thread, then closes it in the same tick as `openEdit` + `openRecreate`. About 1 s later the window must hold exactly one screen, `store.screen`. A `ScreenProbe` (an AppKit view in each screen, review mode only) reports what is really in the window. Mac CI's "Stale screen check" step needs all 10 tries to pass.
-- **The check caught it.** Run 42587379246 caught it on try 2 in theme D: `store.screen` was Edit and only Home was in the window. The new screen was never inserted, so the old removal transition was not the whole story.
-- **The fix:**
-  1. The screen swap moved out of `Shell`'s `GeometryReader` closure into its own view, `ScreenHost` (`RootView.swift`). It reads `store.screen` in its own body, so a screen change always redraws it.
-  2. `go(_:)` uses `MotionStyle.screenAnimation`: fixed-duration curves in every theme. C and D keep a slight overshoot that stands in for their springs.
-  3. The outgoing screen goes at once (`screenTransition`, `removal: .identity`). The incoming screen keeps each theme's entrance.
-- **The workaround is gone.** The chat shots no longer pause 0.8 s, and Recreate and Edit no longer retry through another screen.
-- **Seen on the way, still open:** in run 42580182117, closing the chat overlay while its sample reply was still streaming, in the same tick as the screen change, froze review mode. It never resumed and was killed at the 1800 s limit. The check now closes a chat that is not streaming, as in the original steps. The streaming case needs its own look; by hand, that is clicking a sidebar item while a reply streams.
+**Status (WS17): root cause found; fix pending two green Mac CI runs.** The first fix (ScreenHost alone, CI 42594641852) wasn't enough. Prod's runs at 231387e and 0d2b123 failed `stale_screen d`, and WS9's composer fit check drew Library under Video suite.
+
+**Root cause: a missed Observation update.**
+- `AppStore` is `@Observable`. Observation tells SwiftUI about a change on `willSet`, before the new value is stored.
+- Review mode logs every ScreenHost body run after a screen change. Run 42610578768, theme D, try 6 logged `bodies [home@e, edit@e+1]`. ScreenHost ran once after `go(.edit)` began and read the OLD screen, Home.
+- That body run re-armed tracking before `screen = .edit` landed, so nothing reported the change. ScreenHost stayed on Home until the next screen change (`edit@e+1` is the redraw below).
+- Every symptom fits: the sidebar shows the new screen while the main area keeps the old one, and passing through another screen draws it.
+- It is timing-dependent, which is why it showed up under the load of review mode on the CI runner.
+
+**The fix (`AppStore.go(_:)`, `ScreenHost` in `RootView.swift`).**
+- `go(_:)` bumps `screenEpoch` on the next main-actor turn, after the new screen is stored. ScreenHost reads it, so it always redraws with the stored screen.
+- Every screen change goes through `go(_:)`, so this covers all of them, the Suite and Library included.
+- Kept from before:
+  - ScreenHost is its own view.
+  - Screen changes use fixed-duration curves in every theme.
+  - The old screen is removed at once.
+
+**The checks (Mac CI).**
+- **Stale screen:** `staleScreenCheck` (`SnapshotRunner+Chat.swift`) runs 10 tries in each of the four themes. Each try closes the chat overlay in the same tick as `openEdit` + `openRecreate`. 1 s later the window must hold only `store.screen`, read from a `ScreenProbe` (an AppKit view per screen). Each line also lists the ScreenHost body runs. All 40 tries must pass.
+- **Stream close:** `streamCloseCheck` (`SnapshotRunner+StreamClose.swift`) runs first. In C and D it closes the chat mid-reply in the same tick as the screen change: 4 tries with the demo relay streaming slowly and 2 with the sample's streaming state. A main-thread watchdog runs alongside. If the main thread doesn't answer for 10 s, it writes a CUT line naming the stage, samples the app into `stream-close-sample.txt` and quits.
+
+**The freeze seen in run 42580182117** (review mode stalled 10 min in the same flow, with the chat streaming) has not come back. That is 12 of 12 stream-close tries across two runs, with the main thread back within 0.2 s. That run had no stage logging, so its cause is unknown. The watchdog stays in CI to catch it with a stack sample if it returns.
+
+**The review-mode workaround is gone**: the chat shots' 0.8 s pause and the Recreate/Edit retries through another screen.
