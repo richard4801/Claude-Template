@@ -6,35 +6,6 @@ import SwiftUI
 // Music, the in-house looks, caption templates and transition presets as chips in their pickers, and the licences in
 // Settings → About. All of it comes from GET /v1/editor/content; nothing shows until the catalog is here.
 
-/// Chips that wrap onto as many lines as they need.
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
-        for s in subviews {
-            let sz = s.sizeThatFits(.unspecified)
-            if x > 0, x + sz.width > width { y += line + spacing; x = 0; line = 0 }
-            x += sz.width + spacing
-            line = max(line, sz.height)
-            widest = max(widest, x - spacing)
-        }
-        return CGSize(width: width.isFinite ? width : widest, height: y + line)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
-        for s in subviews {
-            let sz = s.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + sz.width > bounds.maxX { y += line + spacing; x = bounds.minX; line = 0 }
-            s.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(sz))
-            x += sz.width + spacing
-            line = max(line, sz.height)
-        }
-    }
-}
-
 /// A search field in the bin's style.
 struct ContentSearchField: View {
     @Environment(\.theme) private var t
@@ -219,7 +190,7 @@ struct ContentLookChips: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: Space.s2) {
                 SuiteLabel("More looks")
-                FlowLayout {
+                FlowLayout(spacing: 6) {
                     ForEach(items, id: \.0.id) { pair in
                         Chip(pair.0.name, on: visual.look == pair.1) { session.applyContentLook(pair.1) }
                             .accessibilityLabel("Look \(pair.0.name)")
@@ -240,7 +211,7 @@ struct ContentCaptionChips: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: Space.s2) {
                 SuiteLabel("Templates")
-                FlowLayout {
+                FlowLayout(spacing: 6) {
                     ForEach(items, id: \.0.id) { pair in
                         Chip(pair.0.name, on: current == pair.1) { session.edit { $0.applyCaptionTemplate(pair.1) } }
                             .disabled(current == nil)
@@ -262,7 +233,7 @@ struct ContentTransitionChips: View {
         let current = session.state.selectedVideo?.transitionIn
         let presets = (session.content?.packs(.transitions) ?? []).flatMap(\.items).compactMap { (it: ContentItem) -> (ContentItem, EditV2.Transition)? in it.transitionValue.map { (it, $0) } }
         VStack(alignment: .leading, spacing: Space.s2) {
-            FlowLayout {
+            FlowLayout(spacing: 6) {
                 ForEach(EditV2.moreTransitionLabels, id: \.0) { pair in
                     let kind = EditV2.TransitionKind(rawValue: pair.0), label = pair.1
                     Chip(label, on: current?.kind == kind) {
@@ -274,7 +245,7 @@ struct ContentTransitionChips: View {
             }
             if !presets.isEmpty {
                 SuiteLabel("Presets")
-                FlowLayout {
+                FlowLayout(spacing: 6) {
                     ForEach(presets, id: \.0.id) { pair in
                         let tr = pair.1
                         Chip(pair.0.name, on: current == tr) { session.edit { $0.setTransition(tr.kind, duration: tr.durationSec) } }
