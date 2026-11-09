@@ -221,3 +221,24 @@ extension EditV2DerivedTests {
         }
     }
 }
+
+extension EditV2DerivedTests {
+    /// The effects library's reference maths (functions.json → effects, WS8 f7226f2): every sample pixel.
+    func testEffectsReference() throws {
+        let f = try editorFixture("functions")["effects"]
+        XCTAssertEqual(f["perm"].array.compactMap(\.double).map(Int.init), E.effectPerm)
+        let W = Int(try XCTUnwrap(f["width"].double)), H = Int(try XCTUnwrap(f["height"].double))
+        let px = f["pattern"].array.map { E.RGB($0[0].double!, $0[1].double!, $0[2].double!) }
+        let sample = E.imageSampler(width: W, height: H, px)
+        let cases = f["cases"].array
+        XCTAssertEqual(cases.count, E.effectIds.count * 4)
+        for c in cases {
+            let e = try c["effect"].decode(E.Effect.self), t = try XCTUnwrap(c["t"].double)
+            for s in c["samples"].array {
+                let got = E.effectPixel(e, t: t, width: Double(W), height: Double(H), u: s["u"].double!, v: s["v"].double!, sample: sample)
+                let want = s["rgb"].array.compactMap(\.double)
+                for k in 0..<3 { XCTAssertEqual(got[k], want[k], accuracy: 2e-6, "\(e.id) a=\(e.amount) t=\(t) at \(s["u"].double!),\(s["v"].double!)") }
+            }
+        }
+    }
+}
