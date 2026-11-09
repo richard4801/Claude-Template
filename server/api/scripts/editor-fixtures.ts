@@ -187,6 +187,11 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'adjust layer ok', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 }, opacity: 0.7 }, { id: 'ad2', startSec: 2, durationSec: 1, filter: { id: 'warm', amount: 1 }, keyframes: { opacity: [{ t: 0, v: 1 }], tint: [{ t: 0.5, v: 0.3 }] } }] }); }), ok: true },
   { name: 'adjust layer with a look', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, look: { vignette: { amount: 0.3 } } }] }); }), ok: false, field: 'edits.tracks.4.items.0.look' },
   { name: 'adjust layer overlap', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2 }, { id: 'ad2', startSec: 1.5, durationSec: 1 }] }); }), ok: false, field: 'edits.tracks.4.items.1.startSec' },
+  { name: 'adjust item on a video track', project: mut(p => { p.tracks.push({ id: 'ovx', kind: 'video', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
+  { name: 'video clip on an adjust track', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'v9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 2 }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
+  { name: 'adjust layer with highlights', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { highlights: 0.3 } }] }); }), ok: false, field: 'edits.tracks.4.items.0.adjust.highlights' },
+  { name: 'adjust layer with a transform', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, transform: { scale: 1.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.transform' },
+  { name: 'adjust layer scale key', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, keyframes: { scale: [{ t: 0, v: 1 }] } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.keyframes.scale' },
   { name: 'adjust layer strength too big', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, opacity: 1.5 }] }); }), ok: false, field: 'edits.tracks.4.items.0.opacity' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
@@ -441,7 +446,9 @@ const audioSpeedClips = [
   { id: 'v', asset: 'vo', startSec: 0.5, inSec: 0, outSec: 3, speed: 0.75, fadeInSec: 0.2 },
 ] as M.AudioClip[];
 const audioSpeed = audioSpeedClips.map(c => ({ clip: c, length: M.clipLength(c), beatsOnTimeline: (c.beats ?? []).map(b => Math.round((c.startSec + M.clipTimeAt(c, b)) * 1e6) / 1e6),
-  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })) }));
+  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })),
+  // A beat mark tapped at timeline time T is stored as its source time (rounded to 1 ms).
+  tappedMarks: [1.6, 4.25, 7].map(T => ({ timelineT: T, src: Math.round(M.clipSourceAt(c, T - c.startSec) * 1000) / 1000 })) }));
 // Adjustment layers (M): adjustLayerMatrix over time on a project with two adjust tracks.
 const adjustProject = (() => {
   const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;

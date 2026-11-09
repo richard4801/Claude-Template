@@ -685,6 +685,9 @@ export function toSrt(p: EditProject): string {
  * The adjustment layers' colour at timeline t: for each adjust item on screen (tracks in order, lower first), its
  * matrix mixed with the identity by its strength, multiplied together (the upper applied last). Null when none is on
  * screen or the result is the identity.
+ *
+ * Drawing order (every engine): text and captions are always drawn above video and image tracks; adjustment layers
+ * apply after the pictures, before text. The composed matrix is not clamped between layers, only at the end.
  */
 export function adjustLayerMatrix(p: EditProject, t: number, presets: FilterPreset[]): number[] | null {
   let m: M = ID, any = false;
