@@ -11,6 +11,8 @@ import studio.muse.app.data.ApiEvent
 import studio.muse.app.data.ApiException
 import studio.muse.app.data.ClaudeApi
 import studio.muse.app.data.ClaudeSend
+import studio.muse.app.data.ClaudeSessions
+import studio.muse.app.data.ClaudeThread
 
 /**
  * One chat thread (a camera or edit session): loads it, sends the phone's messages to the Mac, follows the live `claude`
@@ -24,9 +26,17 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
     /** Tests and previews. */
     fun set(ui: ClaudeChatUi) { _ui.value = ui }
 
+    /** WS18: the Suite's own sessions (each chat is bound to a shared draft); null for Recreate, Edit and Camera. */
+    class SessionHooks(val newChat: suspend () -> Unit, val open: suspend (ClaudeThread) -> Unit, val deleted: suspend (next: ClaudeThread?) -> Unit)
+    var hooks: SessionHooks? = null
+    /** A tool step finished (its name): the Suite reads its draft again. */
+    var onToolDone: ((String) -> Unit)? = null
+
     fun onLive(ev: ApiEvent) {
         if (ev.type == ApiEvent.CONNECTED) { scope.launch { reload() }; return }
         val l = ev.claude ?: return
+        if (l.op == "threadDeleted") { l.threadId?.let { id -> scope.launch { removed(id) } }; return }
+        if (l.op == "event" && l.event?.type == "tool" && l.event.status == "done" && l.threadId == _ui.value.thread?.id) l.event.name?.let { onToolDone?.invoke(it) }
         val before = _ui.value.turn
         _ui.update { ChatReducer.live(it, l) }
         // A turn just ended: the stored messages are the truth.
@@ -36,9 +46,85 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
 
     fun load() = scope.launch {
         runCatching { api().status() }.onSuccess { s -> _ui.update { it.copy(status = s) } }
-        runCatching { api().thread(_ui.value.contextKind, _ui.value.contextId) }
-            .onSuccess { t -> _ui.update { u -> ChatReducer.loaded(u, t) }; reload() }
+        val kind = _ui.value.contextKind
+        val id = _ui.value.contextId
+        // WS18: Recreate, Edit and Camera come back to the chat open last on this device (else the newest on the server).
+        val remembered = if (kind != "suite") ClaudeSessions.remembered(ClaudeSessions.contextKey(kind, id)) else null
+        val picked = remembered?.let { r -> runCatching { api().getThread(r) }.getOrNull()?.takeIf { it.contextKind == kind && it.contextId == id } }
+        if (picked != null) { show(picked); refreshThreads(); return@launch }
+        runCatching { api().thread(kind, id) }
+            .onSuccess { t -> _ui.update { u -> ChatReducer.loaded(u, t) }; ClaudeSessions.keyOf(t)?.let { ClaudeSessions.remember(it, t.id) }; reload(); refreshThreads() }
             .onFailure { e -> _ui.update { it.copy(loaded = true, error = e.message ?: "Couldn't open the chat") } }
+    }
+
+    // ------------------------------------------------------------ sessions (WS18)
+
+    /** A chat on screen with its messages (from GET), remembered as this place's open chat. */
+    private fun show(t: ClaudeThread) {
+        _ui.update { u -> ChatReducer.loaded(u.copy(thread = null, messages = emptyList(), turn = null, draft = "", notice = null, refusal = null, refusedText = null, attachments = emptyList()), t) }
+        ClaudeSessions.keyOf(t)?.let { ClaudeSessions.remember(it, t.id) }
+    }
+
+    suspend fun refreshThreads() {
+        val t = _ui.value.thread ?: return
+        val key = ClaudeSessions.keyOf(t) ?: return
+        runCatching { api().threads(key) }
+            .onSuccess { list -> _ui.update { u -> u.copy(threads = if (list.none { it.id == t.id }) ClaudeSessions.upsert(t, list) else list, sessions = true) } }
+            .onFailure { e -> if ((e as? ApiException)?.code == "not_found") _ui.update { it.copy(sessions = false) } }
+    }
+
+    /** Nothing said in the open chat yet (New chat on it does nothing). */
+    val isEmptyChat get() = _ui.value.messages.isEmpty() && _ui.value.turn == null
+
+    /** New chat: a fresh conversation in this place (the Suite: a new shared draft). */
+    fun newChat() = scope.launch {
+        val u = _ui.value
+        val t = u.thread ?: return@launch
+        if (u.busy || isEmptyChat) return@launch
+        hooks?.let { it.newChat(); return@launch }
+        runCatching { api().newThread(t.contextKind, t.contextId) }
+            .onSuccess { n -> show(n); _ui.update { it.copy(threads = ClaudeSessions.upsert(n, it.threads)) } }
+            .onFailure { e -> _ui.update { it.copy(notice = e.message ?: "Couldn't start a new chat") } }
+    }
+
+    /** Switch to another chat of this place. */
+    fun open(t: ClaudeThread) = scope.launch {
+        if (t.id == _ui.value.thread?.id) return@launch
+        hooks?.let { it.open(t); return@launch }
+        runCatching { api().getThread(t.id) }
+            .onSuccess { show(it) }
+            .onFailure { e -> _ui.update { it.copy(notice = e.message ?: "Couldn't open that chat") }; refreshThreads() }
+    }
+
+    fun rename(t: ClaudeThread, title: String) = scope.launch {
+        runCatching { api().renameThread(t.id, title) }
+            .onSuccess { n -> _ui.update { u -> u.copy(threads = ClaudeSessions.upsert(n, u.threads), thread = if (u.thread?.id == n.id) n.copy(messages = null, activeTurn = null) else u.thread) } }
+            .onFailure { e -> _ui.update { it.copy(notice = e.message ?: "Couldn't rename the chat") } }
+    }
+
+    fun delete(t: ClaudeThread) = scope.launch {
+        val r = runCatching { api().deleteThread(t.id) }
+        val e = r.exceptionOrNull()
+        if (e != null && (e as? ApiException)?.code != "not_found") { _ui.update { it.copy(notice = e.message ?: "Couldn't delete the chat") }; return@launch }
+        removed(t.id)
+    }
+
+    private val removing = mutableSetOf<String>()
+
+    /** A chat gone (here or on another device): out of the list; the open one is followed by the newest left. */
+    private suspend fun removed(id: String) {
+        if (!removing.add(id)) return
+        try {
+            val u = _ui.value
+            val next = ClaudeSessions.after(id, u.threads)
+            _ui.update { x -> x.copy(threads = x.threads.filter { it.id != id }) }
+            val gone = u.thread?.takeIf { it.id == id } ?: return
+            hooks?.let { it.deleted(next); return }
+            val n = next?.let { runCatching { api().getThread(it.id) }.getOrNull() } ?: runCatching { api().thread(gone.contextKind, gone.contextId) }.getOrNull()?.let { t ->
+                runCatching { api().getThread(t.id) }.getOrDefault(t)
+            }
+            if (n != null) { show(n); _ui.update { it.copy(threads = ClaudeSessions.upsert(n, it.threads)) } }
+        } finally { removing.remove(id) }
     }
 
     suspend fun reload() {

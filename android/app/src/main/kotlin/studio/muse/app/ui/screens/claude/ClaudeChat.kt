@@ -136,6 +136,8 @@ class ClaudeChatActions(
     val removeAttachment: (String) -> Unit = {},
     /** An image the server couldn't read: convert it to JPEG and upload it again. */
     val sendAsJpeg: (String) -> Unit = {},
+    /** WS18: New chat, switch, rename and delete (shown once the server keeps lists). */
+    val sessions: ChatSessionActions = ChatSessionActions(),
 )
 
 /** A store for one thread, fed by the app's live `claude` events, loaded once. */
@@ -197,6 +199,7 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
         dismissNotice = store::dismissNotice,
         retry = { store.load() },
         retryTurn = { store.retry() },
+        sessions = ChatSessionActions(newChat = { store.newChat() }, open = { store.open(it) }, rename = { t, n -> store.rename(t, n) }, delete = { store.delete(it) }),
     ), modifier)
 }
 
@@ -272,6 +275,7 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
     val compact = maxHeight < 360.dp
     Column(Modifier.fillMaxSize()) {
         ChatHeader(ui, title, horizontal, compact)
+        if (ui.sessions && ui.thread != null && !compact) ChatSessionsRow(ui, actions.sessions, horizontal)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 !ui.loaded -> ChatSkeleton(Modifier.padding(horizontal = horizontal, vertical = MuseSpace.s3))
@@ -654,9 +658,14 @@ fun ClaudeChatSheet(open: Boolean, onDismiss: () -> Unit, contextKind: String, c
     /** The sheet's share of the screen (the Suite keeps its composer in view above a shorter sheet). */
     heightFraction: Float = .88f,
     /** Shown above the chat (the Suite's "Claude wants to generate" approval). */
-    above: (@Composable () -> Unit)? = null) {
+    above: (@Composable () -> Unit)? = null,
+    /** WS18: the Suite's own sessions (each chat bound to a shared draft) and its tool-step hook. */
+    hooks: ClaudeChatStore.SessionHooks? = null,
+    onToolDone: ((String) -> Unit)? = null) {
     if (!open) return
     val store = rememberClaudeChatStore(contextKind, contextId)
+    store.hooks = hooks
+    store.onToolDone = onToolDone
     ClaudeSheetFrame(onDismiss, modifier, heightFraction) {
         Column(Modifier.fillMaxSize()) {
             above?.invoke()

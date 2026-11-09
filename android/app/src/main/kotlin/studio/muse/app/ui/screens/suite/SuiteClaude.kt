@@ -1,6 +1,10 @@
 package studio.muse.app.ui.screens.suite
 
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import studio.muse.app.data.ClaudeSessions
+import studio.muse.app.data.ClaudeThread
+import studio.muse.app.ui.screens.claude.ClaudeChatStore
 import studio.muse.app.data.ApiException
 import studio.muse.app.data.SuiteAssist
 import studio.muse.app.data.SuitePending
@@ -12,16 +16,58 @@ import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
  * and are applied like Reuse settings; the owner's own edits go back (PATCH), so Claude sees them. Claude never
  * generates: its Generate waits as a [SuitePending] until the owner approves it at the price shown.
  */
-data class SuiteAssistUi(val id: String, val revision: Int, val pending: SuitePending? = null, val answering: Boolean = false, val message: String? = null)
+data class SuiteAssistUi(val id: String, val revision: Int, val pending: SuitePending? = null, val answering: Boolean = false, val message: String? = null,
+    /** WS18: the mode's list of chats this draft belongs to (`suite:photo`…). */
+    val key: String? = null)
 
-/** The shared draft for the Claude sheet: the open one, or a new one from the composer as it is. Null (with a toast) when the server can't. */
+/** WS18: the composer's mode's list of chats. */
+val SuiteStore.claudeKey: String get() = ClaudeSessions.suiteKey(composer.value.tool.id)
+
+/**
+ * The shared draft for the Claude sheet (WS18): the mode's latest chat (the one open last on this device, else the newest on
+ * the server) with its draft laid over the composer, so the chat and the composer are one draft; a mode with no chat yet
+ * shares the composer as it is. Null (with a toast) when the server can't.
+ */
 suspend fun SuiteStore.openClaude(): String? {
-    assist.value?.let { return it.id }
+    val key = claudeKey
+    assist.value?.takeIf { it.key == key || it.key == null && key == ClaudeSessions.suiteKey("shot") }?.let { return it.id }
+    val list = runCatching { app.repo.api.claude.threads(key) }.getOrNull().orEmpty()
+    ClaudeSessions.pick(list, ClaudeSessions.remembered(key))?.let { t -> if (bindClaudeChat(t)) return assist.value?.id }
+    return newClaudeChat()
+}
+
+/** A chat picked from the mode's list: its shared draft becomes the composer's. False when the draft is gone. */
+suspend fun SuiteStore.bindClaudeChat(t: ClaudeThread): Boolean {
+    if (t.contextKind != "suite") return false
+    val a = runCatching { app.repo.api.suiteAssist(t.contextId) }.getOrNull() ?: return false
+    assist.value = SuiteAssistUi(a.id, 0, a.waiting, key = claudeKey)
+    assistSynced = null
+    applyAssist(a)
+    ClaudeSessions.remember(claudeKey, t.id)
+    return true
+}
+
+/** New chat in this mode: a new shared draft from the composer as it is now (the composer stays). */
+suspend fun SuiteStore.newClaudeChat(): String? {
     val (a, err) = app.repo.attemptInline { createSuiteAssist(ComposerDrafts.draft(composer.value)) }
     if (a == null) { app.repo.toast(err ?: "Claude in the Suite isn't available on this server yet"); return null }
-    assist.value = SuiteAssistUi(a.id, a.revision, a.waiting)
+    assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey)
     assistSynced = ComposerDrafts.draft(composer.value).json.toString()
     return a.id
+}
+
+/** The chat's sessions in the Suite: New chat is a new shared draft; switching or deleting binds another chat's. */
+fun SuiteStore.claudeHooks(scope: kotlinx.coroutines.CoroutineScope) = ClaudeChatStore.SessionHooks(
+    newChat = { newClaudeChat() },
+    open = { t -> if (!bindClaudeChat(t)) app.repo.toast("That chat's shot is gone. Start a new chat.") },
+    deleted = { next -> if (next == null || !bindClaudeChat(next)) newClaudeChat() },
+)
+
+/** Claude's tool step finished: a draft change is read again at once, even if the live event was missed. */
+fun SuiteStore.claudeToolDone(name: String, scope: kotlinx.coroutines.CoroutineScope) {
+    if (!(name.endsWith("suite_set_draft") || name.endsWith("suite_add_reference") || name.endsWith("suite_request_shot"))) return
+    val id = assist.value?.id ?: return
+    scope.launch { runCatching { app.repo.api.suiteAssist(id) }.getOrNull()?.let { applyAssist(it) } }
 }
 
 /** A `suiteAssist` event (or a fresh read): Claude's newer draft goes into the composer, as Reuse settings does. */
@@ -30,7 +76,8 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
     if (a.id != cur.id) return
     if (a.revision > cur.revision) {
         val before = composer.value
-        composer.value = ComposerDrafts.restore(a.draft, before)
+        // The composer keeps its mode (WS18): a draft an older server set to Shot doesn't switch Photo or Talking to Shot.
+        composer.value = ComposerDrafts.restore(a.draft, before).copy(tool = before.tool)
         assistSynced = ComposerDrafts.draft(composer.value).json.toString()
         // "Claude set Camera and Light", with Undo (the Rigs row's Undo; undoing goes back to Claude as the owner's edit).
         SuiteClaudeWords.claudeSet(SuiteClaudeWords.changed(before, composer.value))?.let { rigUndo.value = it to before }
@@ -41,6 +88,8 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
 /** The owner's own edit in the composer: sent so Claude sees it. When Claude changed the draft meanwhile, Claude's wins. */
 suspend fun SuiteStore.pushComposerToAssist() {
     val cur = assist.value ?: return
+    // Another mode's draft (WS18): the composer switched tools; that mode's chat is bound when Claude opens there.
+    if (cur.key != null && cur.key != claudeKey) return
     val d = ComposerDrafts.draft(composer.value)
     if (d.json.toString() == assistSynced) return
     try {

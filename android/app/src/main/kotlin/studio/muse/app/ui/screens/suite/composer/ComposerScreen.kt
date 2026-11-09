@@ -399,6 +399,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
             assist?.let { a ->
                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
+                    hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope) },
                     above = {
                         SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
                         if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))

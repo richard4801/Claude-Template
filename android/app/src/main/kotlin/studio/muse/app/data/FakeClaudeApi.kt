@@ -56,16 +56,57 @@ class FakeClaudeApi(
 
     override suspend fun setApiFallback(on: Boolean): ClaudePlanStatus { fallback = fallback.copy(enabled = on); pushStatus(); return statusNow() }
 
-    override suspend fun thread(contextKind: String, contextId: String): ClaudeThread = lock.withLock {
+    /** WS18: the Suite's list key for a shared draft (FakeMuseApi sets it from the draft's tool, as the server reads it). */
+    @Volatile var suiteToolOf: (String) -> String = { "shot" }
+
+    override suspend fun thread(contextKind: String, contextId: String): ClaudeThread = thread(contextKind, contextId, new = false)
+
+    private suspend fun thread(contextKind: String, contextId: String, new: Boolean): ClaudeThread = lock.withLock {
         // WS4: "recreate" (WS1 d7233b8): Claude on a Recreate reference; "suite" (WS1 1eda187): Claude in the AI Suite.
         if (contextKind !in setOf("camera", "edit", "recreate", "suite")) throw ApiException("bad_request", "contextKind: camera, edit, recreate or suite")
-        threads.firstOrNull { it.contextKind == contextKind && it.contextId == contextId } ?: run {
-            val t = ClaudeThread(uid("ct_"), contextKind, contextId, null, now(), now())
+        val key = if (contextKind == "suite") "suite:${suiteToolOf(contextId)}" else "$contextKind:$contextId"
+        threads.filter { !new && it.contextKind == contextKind && it.contextId == contextId }.maxByOrNull { it.updatedAt } ?: run {
+            val t = ClaudeThread(uid("ct_"), contextKind, contextId, null, now(), now(), contextKey = key)
             threads += t
             messages[t.id] = seed(t)
             live(ClaudeLive("thread", thread = t))
             t
         }
+    }
+
+    // WS18: lists of chats, as the server keeps them.
+    override suspend fun threads(key: String): List<ClaudeThread> = lock.withLock {
+        threads.filter { it.contextKey == key }.sortedWith(compareByDescending<ClaudeThread> { it.updatedAt }.thenByDescending { it.id })
+            .map { t -> t.copy(messageCount = messages[t.id].orEmpty().count { it.role != "tool" }) }
+    }
+
+    override suspend fun newThread(contextKind: String, contextId: String): ClaudeThread = thread(contextKind, contextId, new = true)
+
+    override suspend fun renameThread(id: String, title: String): ClaudeThread {
+        val t = lock.withLock {
+            val i = threads.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "No such thread")
+            val name = title.trim().ifEmpty { null }?.take(80) ?: messages[id].orEmpty().firstOrNull { it.role == "user" }?.let { ClaudeSessions.autoTitle(it.text) }
+            threads[i].copy(title = name).also { threads[i] = it }
+        }
+        live(ClaudeLive("thread", thread = t))
+        return t
+    }
+
+    override suspend fun deleteThread(id: String) {
+        lock.withLock {
+            if (threads.none { it.id == id }) throw ApiException("not_found", "No such thread")
+            threads.removeAll { it.id == id }
+            messages.remove(id)
+            turns.values.filter { it.threadId == id }.forEach { turns.remove(it.id); jobs.remove(it.id)?.cancel() }
+        }
+        live(ClaudeLive("threadDeleted", threadId = id))
+    }
+
+    /** A message moves its chat up the list; the first one names it. */
+    private fun touch(threadId: String, userText: String?) {
+        val i = threads.indexOfFirst { it.id == threadId }.takeIf { it >= 0 } ?: return
+        val t = threads[i]
+        threads[i] = t.copy(updatedAt = maxOf(now(), t.updatedAt + 1), title = t.title ?: userText?.let { ClaudeSessions.autoTitle(it) })
     }
 
     override suspend fun getThread(id: String): ClaudeThread = lock.withLock {
@@ -86,6 +127,7 @@ class FakeClaudeApi(
             val m = ClaudeMessage(uid("cmsg_"), threadId, "user", "phone", turn.text, turn.id, createdAt = now(), attachments = attachments.map(::demoAttachment))
             turnAttachments[turn.id] = attachments
             messages.getOrPut(threadId) { mutableListOf() } += m
+            touch(threadId, m.text)
             m to turn
         }
         live(ClaudeLive("message", threadId = threadId, message = m))
@@ -149,7 +191,7 @@ class FakeClaudeApi(
     // ---------------------------------------------------------------- the simulated Mac
 
     private suspend fun store(m: ClaudeMessage): ClaudeMessage {
-        lock.withLock { messages.getOrPut(m.threadId) { mutableListOf() } += m }
+        lock.withLock { messages.getOrPut(m.threadId) { mutableListOf() } += m; touch(m.threadId, if (m.role == "user") m.text else null) }
         live(ClaudeLive("message", threadId = m.threadId, message = m))
         return m
     }

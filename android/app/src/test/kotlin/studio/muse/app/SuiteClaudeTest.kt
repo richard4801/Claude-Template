@@ -23,6 +23,11 @@ import studio.muse.app.ui.screens.claude.ClaudeChatStore
 import studio.muse.app.ui.screens.suite.answerClaude
 import studio.muse.app.ui.screens.suite.applyAssist
 import studio.muse.app.ui.screens.suite.openClaude
+import studio.muse.app.ui.screens.suite.bindClaudeChat
+import studio.muse.app.ui.screens.suite.newClaudeChat
+import studio.muse.app.ui.screens.suite.claudeKey
+import studio.muse.app.ui.screens.suite.composer.ComposerTool
+import studio.muse.app.data.ClaudeSessions
 import studio.muse.app.ui.screens.suite.pushComposerToAssist
 import studio.muse.app.ui.screens.suite.removeDraftReference
 import studio.muse.app.ui.screens.suite.undoRig
@@ -152,5 +157,43 @@ class SuiteClaudeTest {
         assertEquals("Claude set Camera", studio.muse.app.ui.screens.suite.SuiteClaudeWords.claudeSet(listOf("Camera")))
         assertEquals("Claude set Camera and Light", studio.muse.app.ui.screens.suite.SuiteClaudeWords.claudeSet(listOf("Camera", "Light")))
         assertEquals(listOf("Fill this in from my idea", "Make it more cinematic", "Explain the settings"), studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions.map { it.first })
+    }
+
+    // WS18: each mode has its own chats, bound to their drafts; opening the mode again returns to its latest chat.
+    @Test fun eachModeKeepsItsOwnChatsAndReturnsToTheLatest() = withSuite { c, fake ->
+        val store = c.suite
+        val a = store.openClaude()!!
+        assertEquals("suite:shot", store.claudeKey)
+        val ta = fake.claude.thread("suite", a)
+        fake.claude.post(ta.id, "A café morning")
+        withTimeout(5_000) { while (fake.claude.getThread(ta.id).activeTurn != null) delay(10) }
+        val b = store.newClaudeChat()!!
+        assertTrue(a != b)
+        fake.claude.thread("suite", b)
+        assertEquals(2, fake.claude.threads("suite:shot").size)
+        // Switch back to A: its draft is the composer's again.
+        assertTrue(store.bindClaudeChat(fake.claude.threads("suite:shot").first { it.id == ta.id }))
+        assertEquals(a, store.assist.value!!.id)
+        // The app started again: Shot returns to A, with its messages on the server.
+        store.assist.value = null
+        assertEquals(a, store.openClaude())
+        assertTrue(fake.claude.getThread(ta.id).messages!!.any { it.role == "user" && it.text == "A café morning" })
+        // Photo has its own chats.
+        store.composer.value = store.composer.value.copy(tool = ComposerTool.PHOTO)
+        val p = store.openClaude()!!
+        assertTrue(p != a && p != b)
+        assertEquals("suite:photo", store.assist.value!!.key)
+        assertEquals("photo", fake.suiteAssist(p).draft.tool)
+    }
+
+    @Test fun claudesDraftNeverSwitchesTheComposersMode() = withSuite { c, fake ->
+        val store = c.suite
+        store.composer.value = store.composer.value.copy(tool = ComposerTool.PHOTO)
+        val id = store.openClaude()!!
+        // A draft an older server set to Shot: the rows apply, the composer stays in Photo.
+        fake.patchSuiteAssist(id, ComposerDrafts.draft(ComposerDraft(tool = ComposerTool.SHOT, quality = "cinema")), null)
+        store.applyAssist(fake.suiteAssist(id))
+        assertEquals(ComposerTool.PHOTO, store.composer.value.tool)
+        assertEquals("cinema", store.composer.value.quality)
     }
 }

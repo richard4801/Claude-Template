@@ -65,7 +65,13 @@ data class ClaudeTurn(
 data class ClaudeThread(
     val id: String, val contextKind: String = "camera", val contextId: String = "", val claudeSessionId: String? = null,
     val createdAt: Long = 0, val updatedAt: Long = 0, val messages: List<ClaudeMessage>? = null, val activeTurn: ClaudeTurn? = null,
+    /** WS18: the list of chats it belongs to (`suite:photo`, `recreate:rx_1`…), its name (the owner's or its first words) and, in a list, its message count. */
+    val contextKey: String? = null, val title: String? = null, val messageCount: Int? = null,
 )
+
+/** GET /v1/claude/threads?key= (WS18): one place's chats, newest first. */
+@Serializable
+data class ClaudeThreadList(val key: String = "", val threads: List<ClaudeThread> = emptyList())
 
 /**
  * One event of the Mac's Claude Code stream, relayed live. type: user (text) | text (delta) | assistant (text) |
@@ -124,7 +130,8 @@ sealed interface ClaudeSend {
     data object Busy : ClaudeSend
 }
 
-@Serializable private data class ThreadBody(val contextKind: String, val contextId: String)
+@Serializable private data class ThreadBody(val contextKind: String, val contextId: String, val new: Boolean? = null)
+@Serializable private data class TitleBody(val title: String)
 @Serializable private data class TextBody(val text: String, val attachments: List<UploadRef>? = null)
 @Serializable private data class UploadRef(val uploadId: String)
 @Serializable private data class FallbackBody(val apiFallback: Boolean)
@@ -147,6 +154,15 @@ interface ClaudeApi {
     suspend fun stop(turnId: String)
     /** The fallback on the studio API key (camera threads for now). Refusals (`fallback_off`) arrive as one `error` event. */
     fun apiTurn(threadId: String, text: String, attachments: List<String> = emptyList()): Flow<ChatEvent>
+
+    // WS18: each place keeps a list of chats on the server. An older server has none (`not_found`): one chat per place.
+    /** The place's chats, newest first. */
+    suspend fun threads(key: String): List<ClaudeThread> = throw ApiException("not_found", "This server keeps one chat per place")
+    /** A new chat about the same context. */
+    suspend fun newThread(contextKind: String, contextId: String): ClaudeThread = throw ApiException("not_found", "This server keeps one chat per place")
+    /** "" goes back to the chat's first words. */
+    suspend fun renameThread(id: String, title: String): ClaudeThread = throw ApiException("not_found", "This server keeps one chat per place")
+    suspend fun deleteThread(id: String): Unit = throw ApiException("not_found", "This server keeps one chat per place")
 
     object Unsupported : ClaudeApi {
         private fun no(): Nothing = throw ApiException("unsupported", "Claude chat needs the studio server")
@@ -218,6 +234,15 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
     override suspend fun thread(contextKind: String, contextId: String) =
         call("POST", "v1/claude/threads", json.encodeToString(ThreadBody.serializer(), ThreadBody(contextKind, contextId)), ClaudeThread.serializer()).absolute(origin)
     override suspend fun getThread(id: String) = call("GET", "v1/claude/threads/${enc(id)}", null, ClaudeThread.serializer()).absolute(origin)
+    override suspend fun threads(key: String) = call("GET", "v1/claude/threads?key=${enc(key)}", null, ClaudeThreadList.serializer()).threads
+    override suspend fun newThread(contextKind: String, contextId: String) =
+        call("POST", "v1/claude/threads", json.encodeToString(ThreadBody.serializer(), ThreadBody(contextKind, contextId, true)), ClaudeThread.serializer()).absolute(origin)
+    override suspend fun renameThread(id: String, title: String) =
+        call("PATCH", "v1/claude/threads/${enc(id)}", json.encodeToString(TitleBody.serializer(), TitleBody(title)), ClaudeThread.serializer())
+    override suspend fun deleteThread(id: String) {
+        val a = raw("DELETE", "v1/claude/threads/${enc(id)}", null)
+        if (a.code !in 200..299) throw errorOf(a.code, a.text)
+    }
 
     override suspend fun post(threadId: String, text: String, attachments: List<String>): ClaudeSend {
         val a = raw("POST", "v1/claude/threads/${enc(threadId)}/messages", json.encodeToString(TextBody.serializer(), body(text, attachments)))

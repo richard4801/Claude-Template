@@ -81,6 +81,8 @@ class AppContainer(
             // WAVs left by the removed UI sound effects: deleted off the main thread (no disk I/O on the launch path).
             scope.launch(Dispatchers.IO) { File(context.cacheDir, "sfx").deleteRecursively() }
             val fake = FakeMuseApi(scope, File(context.filesDir, "uploads"))
+            // WS18: the Claude chat open last in each place (read lazily; the server's newest is the fallback).
+            studio.muse.app.data.ClaudeSessions.prefs = context.getSharedPreferences("claude_chats", Context.MODE_PRIVATE)
             return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), postAlarms = studio.muse.app.platform.PostAlarms(context),
                 linkFetcher = studio.muse.app.platform.PhoneLinkFetcher(context))
         }

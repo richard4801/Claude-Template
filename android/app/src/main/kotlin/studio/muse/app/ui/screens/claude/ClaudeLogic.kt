@@ -120,6 +120,9 @@ data class ClaudeChatUi(
     val error: String? = null,
     /** Images picked for the next message (Recreate, Edit and Suite threads; ≤ 4): uploading until [ChatAttachment.uploadId]. */
     val attachments: List<ChatAttachment> = emptyList(),
+    /** WS18: this place's chats, newest first; [sessions] once the server answered with a list. */
+    val threads: List<ClaudeThread> = emptyList(),
+    val sessions: Boolean = false,
 ) {
     val busy get() = turn?.active == true
     /** Attaching images: not in Camera stage yet (the server refuses them there). */
@@ -148,7 +151,12 @@ object ChatReducer {
         val tid = ui.thread?.id
         return when (l.op) {
             "status" -> l.status?.let { s -> ui.copy(status = s, refusal = if (s.mac.ready) null else ui.refusal) } ?: ui
-            "thread" -> l.thread?.let { t -> if (t.id == tid) ui.copy(thread = t.copy(messages = null, activeTurn = null)) else ui } ?: ui
+            "thread" -> l.thread?.let { t ->
+                val key = ui.thread?.let { studio.muse.app.data.ClaudeSessions.keyOf(it) }
+                val listed = if (ui.sessions && (t.id == tid || (key != null && studio.muse.app.data.ClaudeSessions.keyOf(t) == key)))
+                    studio.muse.app.data.ClaudeSessions.upsert(t, ui.threads) else ui.threads
+                if (t.id == tid) ui.copy(thread = t.copy(messages = null, activeTurn = null), threads = listed) else ui.copy(threads = listed)
+            } ?: ui
             "message" -> { val m = l.message; if (m == null || tid == null || (l.threadId ?: m.threadId) != tid) ui else message(ui, m) }
             "event" -> { val e = l.event; if (e == null || tid == null || l.threadId != tid) ui else event(ui, l.turnId, e) }
             "turn" -> l.turn?.let { t -> if (t.threadId != tid) ui else turn(ui, t) } ?: ui
@@ -240,7 +248,9 @@ object ChatReducer {
         }
         val t = ui.turn ?: return out
         // The phone's message before it is stored (the API fallback stores it with the turn).
-        if (t.text.isNotBlank() && ui.messages.none { it.role == "user" && (it.turnId == t.id && t.id != null || it.text == t.text) })
+        // Matched on the words typed (WS18): the context line the Mac or the Suite puts in front never makes one message show twice.
+        val typed = studio.muse.app.data.ClaudeSessions.typedText(t.text)
+        if (t.text.isNotBlank() && ui.messages.none { it.role == "user" && (it.turnId == t.id && t.id != null || studio.muse.app.data.ClaudeSessions.typedText(it.text) == typed) })
             out += ChatItem.User("live-user", ChatClean.userText(t.text), if (t.api) "api" else "phone")
         t.parts.forEachIndexed { i, p ->
             out += when (p) {

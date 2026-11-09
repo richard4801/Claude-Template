@@ -94,7 +94,7 @@ class FakeMuseApi(
     override val camera: FakeCameraApi by lazy {
         FakeCameraApi(now, { models.toList().map { it.id to it.name } }, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700)
     }
-    override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700).also { it.suiteTurn = ::demoSuiteTurn } }
+    override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700).also { c -> c.suiteTurn = ::demoSuiteTurn; c.suiteToolOf = { id -> assists[id]?.draft?.tool ?: "shot" } } }
     // WS7: bring your own provider (a demo key, a sample catalog, two added models).
     override val providers: FakeProvidersApi by lazy { FakeProvidersApi(now, if (speed == 0.0) 0 else 400) }
     // WS7: import a video from a link (TikTok, Instagram and YouTube links; the sample clip as the result).
