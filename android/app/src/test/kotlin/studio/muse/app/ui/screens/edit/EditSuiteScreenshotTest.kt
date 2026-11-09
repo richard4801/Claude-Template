@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -182,6 +182,10 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 }
                 ui = c.ui.value.copy(message = null)
             }
+            "m_kits" -> ui = ui.copy(panel = Panel.EDIT, kits = listOf(
+                KitChoice("k1", "Warm vlog", studio.muse.core.edit.StyleKit(look = studio.muse.core.edit.Look(lut = "pack:film-gold"), adjust = studio.muse.core.edit.Adjust(contrast = .1), transition = studio.muse.core.edit.Transition(studio.muse.core.edit.TransitionKind.FADE, .4), captionStyle = studio.muse.core.edit.Presets.CAPTION_STYLES.values.first())),
+                KitChoice("k2", "Clean product", studio.muse.core.edit.StyleKit(textStyle = studio.muse.core.edit.Presets.HOOKS[1].style, background = "#FFFFFF")),
+            ))
             "m_curves" -> {
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
                 val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
@@ -234,6 +238,11 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                         TakeChoice("t3", "Living-room dance", "Edit", ImageRef.asset("g_side"), 7.0, false, false),
                     ), onBack = {}, onOpen = {},
                 )
+                else if (state == "m_kits") androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                    // The kits section on its own (it closes the Edit panel, below the fold in the phone sheet).
+                    KitsSection(ui, host) {}
+                }
                 else if (state == "m_curves") androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(studio.muse.app.ui.theme.muse.t.bg).padding(16.dp)) {
                     // The curves editor on its own (in the phone sheet it sits below the fold).
                     CurvesEditor(ui.project!!.mainClips[0].look?.curves, true) {}

@@ -261,6 +261,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
         autoAdjust = vm::autoAdjust,
+        saveKit = vm::saveKit,
+        deleteKit = vm::deleteKit,
         modelRow = { purpose ->
             studio.muse.app.data.ModelPurpose.of(purpose)?.let { mp ->
                 studio.muse.app.ui.screens.ModelChoiceRow(mp, studio.muse.app.ui.screens.ModelPick(ui.helperModels[purpose]), onPick = { pick -> vm.controller.act(EditAction.PickModel(purpose, pick.model)) })
@@ -369,6 +371,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     init {
         load()
+        loadKits()
         viewModelScope.launch {
             controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
                 if (p == null) return@collect
@@ -542,6 +545,35 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             if (f == null) return@launch c.repo.toast("Added · the preview can't show it until it downloads")
             files[a.id] = f
             rebuildPreview(p); loadWaves(p)
+        }
+    }
+
+    // ------------------------------------------------------------ style kits
+    private fun kitsOf(list: List<studio.muse.app.data.EditKit>) = list.mapNotNull { k -> runCatching { KitChoice(k.id, k.name, studio.muse.core.edit.parseKit(k.kit)) }.getOrNull() }
+
+    fun loadKits() {
+        viewModelScope.launch {
+            runCatching { c.repo.api.editKits() }
+                .onSuccess { l -> controller.update { it.copy(kits = kitsOf(l), kitsNote = null) } }
+                .onFailure { e -> controller.update { it.copy(kitsNote = (e as? studio.muse.app.data.ApiException)?.message ?: "Couldn't load your style kits") } }
+        }
+    }
+
+    /** Saves the edit's style ([studio.muse.core.edit.kitOf]) as kit [name]. */
+    fun saveKit(name: String) {
+        val p = controller.project ?: return
+        val kit = studio.muse.core.edit.kitOf(p)
+        if (kit.isEmpty) return c.repo.toast("This edit has no style to save yet · add a look, colour, transition or captions")
+        viewModelScope.launch {
+            runCatching { c.repo.api.saveEditKit(name.trim().take(60).ifEmpty { "${controller.ui.value.title} style" }, studio.muse.core.edit.encodeKit(kit)) }
+                .onSuccess { c.repo.toast("Saved “${it.name}”"); loadKits() }
+                .onFailure { e -> c.repo.toast((e as? studio.muse.app.data.ApiException)?.message ?: "Couldn't save the style kit · try again") }
+        }
+    }
+
+    fun deleteKit(id: String) {
+        viewModelScope.launch {
+            runCatching { c.repo.api.deleteEditKit(id) }.onSuccess { loadKits() }.onFailure { c.repo.toast("Couldn't delete that style kit · try again") }
         }
     }
 

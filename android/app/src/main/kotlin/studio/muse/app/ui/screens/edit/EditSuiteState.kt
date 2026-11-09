@@ -68,6 +68,15 @@ sealed interface SuitePhase {
 enum class BeatMarks { ALL, STRONG }
 
 /** One take the Edit home or the Overlay panel can open / add (a render or an edited version). */
+/** A saved style kit: its id, name and parts ([studio.muse.core.edit.StyleKit]). */
+data class KitChoice(val id: String, val name: String, val kit: studio.muse.core.edit.StyleKit) {
+    /** What it carries, in words ("Look, colour, transition, captions"). */
+    val parts: String get() = listOfNotNull(
+        "look".takeIf { kit.look != null || kit.filter != null }, "colour".takeIf { kit.adjust != null }, "transition".takeIf { kit.transition != null },
+        "captions".takeIf { kit.captionStyle != null }, "text".takeIf { kit.textStyle != null }, "background".takeIf { kit.background != null || kit.fill != null },
+    ).joinToString(", ").replaceFirstChar(Char::uppercase).ifEmpty { "Nothing yet" }
+}
+
 data class TakeChoice(val id: String, val title: String, val label: String, val thumb: ImageRef?, val durationSec: Double?, val edited: Boolean, val hasVideo: Boolean)
 
 /**
@@ -118,6 +127,9 @@ data class EditSuiteUi(
     val keyEase: studio.muse.core.edit.Ease = studio.muse.core.edit.Ease.EASE_IN_OUT,
     /** The owner's model per helper purpose (WS13; absent / null = the studio's default). */
     val helperModels: Map<String, String?> = emptyMap(),
+    /** Saved style kits (/v1/editor/kits), newest first; [kitsNote] when the server can't keep them. */
+    val kits: List<KitChoice> = emptyList(),
+    val kitsNote: String? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     /** The item the edit tools act on (a main clip by default: the one under the playhead). */

@@ -190,6 +190,13 @@
       "when": 1794179407089,
       "tag": "0026_engine_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794191981684,
+      "tag": "0027_edit_kits",
+      "breakpoints": true
     }
   ]
 }

@@ -469,6 +469,20 @@ export const templates = pgTable('templates', {
   updatedAt: ms('updated_at').notNull(),
 }, t => [index('templates_studio_idx').on(t.studioId, t.updatedAt), uniqueIndex('templates_slug_idx').on(t.studioId, t.slug)]);
 
+/**
+ * Edit style kits (plans/edit-parity.md, M): an edit's look, colour, transition, caption and text styles and background
+ * (editor/kit.ts StyleKit), saved by name. Members see their own; the owner sees the studio's.
+ */
+export const editKits = pgTable('edit_kits', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  createdBy: text('created_by').notNull(),
+  name: text('name').notNull(),
+  kit: jsonb('kit').$type<Record<string, unknown>>().notNull(),
+  createdAt: ms('created_at').notNull(),
+  updatedAt: ms('updated_at').notNull(),
+}, t => [index('edit_kits_studio_idx').on(t.studioId, t.updatedAt)]);
+
 export const templateFavourites = pgTable('template_favourites', {
   userId: text('user_id').notNull(),
   templateId: text('template_id').notNull().references(() => templates.id, { onDelete: 'cascade' }),

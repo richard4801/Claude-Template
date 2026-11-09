@@ -1,4 +1,1933 @@
 {
+ "kits": {
+  "kitOf": [
+   {
+    "name": "single clip",
+    "kit": {
+     "version": 1,
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "cut and speeds",
+    "kit": {
+     "version": 1,
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "transitions",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "fade",
+      "durationSec": 0.5
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "captions through cuts",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.12
+      },
+      "preset": "highlight",
+      "highlightColor": "#FFE600",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "captions single",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.065,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "preset": "single",
+      "highlightColor": "#FFFFFF",
+      "y": 0.6,
+      "wordsPerPage": 1,
+      "maxLines": 1
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "captions pop 2",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.05,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "preset": "pop",
+      "highlightColor": "#FFE600",
+      "y": 0.7,
+      "wordsPerPage": 2,
+      "maxLines": 1
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "music ducking",
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.1
+      },
+      "preset": "karaoke",
+      "highlightColor": "#22D3EE",
+      "y": 0.72,
+      "wordsPerPage": 4,
+      "maxLines": 2
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "volume keyframes",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "black",
+      "durationSec": 0.6
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "pip text image look",
+    "kit": {
+     "version": 1,
+     "filter": {
+      "id": "film",
+      "amount": 0.7
+     },
+     "adjust": {
+      "exposure": 0.2
+     },
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.06,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      }
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "speed curves, new transitions, attack/release ducking",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "whip",
+      "durationSec": 0.4
+     },
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.08
+      },
+      "preset": "highlighter",
+      "highlightColor": "#22C55E",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "background": "#000000"
+    }
+   },
+   {
+    "name": "wave 1: hold, mirror, blend, blur fill",
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "fade",
+      "durationSec": 0.4
+     },
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.12
+      },
+      "preset": "highlight",
+      "highlightColor": "#FFE600",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.06,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      }
+     },
+     "background": "#000000",
+     "fill": "blur"
+    }
+   }
+  ],
+  "apply": [
+   {
+    "project": 1,
+    "kit": 0,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#202020",
+      "fill": "blur"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 2,
+         "speed": 1,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 2,
+         "outSec": 4,
+         "speed": 0.5,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         },
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 10,
+         "speed": 2,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         },
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 1,
+    "kit": 1,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 2,
+         "speed": 1
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 2,
+         "outSec": 4,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 10,
+         "speed": 2,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.5
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 1,
+    "kit": 2,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 2,
+         "speed": 1,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 2,
+         "outSec": 4,
+         "speed": 0.5,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 10,
+         "speed": 2,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 2,
+    "kit": 0,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#202020",
+      "fill": "blur"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 4,
+         "speed": 1,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 7,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 7,
+         "outSec": 10,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "volume": 0.8,
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 2,
+    "kit": 1,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 4,
+         "speed": 1
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 7,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.5
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 7,
+         "outSec": 10,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.5
+         },
+         "volume": 0.8
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 2,
+    "kit": 2,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 4,
+         "speed": 1,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 4,
+         "outSec": 7,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 0.5
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 7,
+         "outSec": 10,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "slideLeft",
+          "durationSec": 1
+         },
+         "volume": 0.8,
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 9,
+    "kit": 0,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#202020",
+      "fill": "blur"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      },
+      {
+       "id": "song",
+       "kind": "audio",
+       "library": "music_upbeat_01",
+       "durationSec": 30
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 3,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "hero",
+          "points": [
+           [
+            0,
+            1
+           ],
+           [
+            0.3,
+            1
+           ],
+           [
+            0.42,
+            6
+           ],
+           [
+            0.58,
+            6
+           ],
+           [
+            0.7,
+            1
+           ],
+           [
+            1,
+            1
+           ]
+          ]
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 3,
+         "outSec": 5.5,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 5.5,
+         "outSec": 8,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        },
+        {
+         "id": "c4",
+         "asset": "src",
+         "inSec": 8,
+         "outSec": 10,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "custom",
+          "points": [
+           [
+            0,
+            0.1
+           ],
+           [
+            0.5,
+            2
+           ],
+           [
+            1,
+            10
+           ]
+          ]
+         },
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.6
+         },
+         "look": {
+          "lut": "pack:film-gold",
+          "strength": 0.6,
+          "grain": {
+           "amount": 0.2
+          }
+         },
+         "filter": {
+          "id": "warm",
+          "amount": 0.5
+         },
+         "adjust": {
+          "contrast": 0.1,
+          "tint": -0.2
+         }
+        }
+       ]
+      },
+      {
+       "id": "cap",
+       "kind": "caption",
+       "items": [],
+       "caption": {
+        "asset": "src",
+        "words": [
+         {
+          "text": "Okay",
+          "startSec": 0.2,
+          "endSec": 0.5
+         },
+         {
+          "text": "so",
+          "startSec": 0.55,
+          "endSec": 0.7
+         },
+         {
+          "text": "um",
+          "startSec": 0.9,
+          "endSec": 1.2
+         },
+         {
+          "text": "this",
+          "startSec": 1.6,
+          "endSec": 1.8
+         },
+         {
+          "text": "serum",
+          "startSec": 1.85,
+          "endSec": 2.3
+         },
+         {
+          "text": "changed",
+          "startSec": 2.35,
+          "endSec": 2.7
+         },
+         {
+          "text": "my",
+          "startSec": 2.75,
+          "endSec": 2.9
+         },
+         {
+          "text": "skin.",
+          "startSec": 2.95,
+          "endSec": 3.4
+         },
+         {
+          "text": "Honestly",
+          "startSec": 4.6,
+          "endSec": 5.1
+         },
+         {
+          "text": "uh",
+          "startSec": 5.2,
+          "endSec": 5.4
+         },
+         {
+          "text": "I",
+          "startSec": 5.6,
+          "endSec": 5.7
+         },
+         {
+          "text": "use",
+          "startSec": 5.75,
+          "endSec": 5.95
+         },
+         {
+          "text": "it",
+          "startSec": 6,
+          "endSec": 6.1
+         },
+         {
+          "text": "every",
+          "startSec": 6.15,
+          "endSec": 6.5
+         },
+         {
+          "text": "single",
+          "startSec": 6.55,
+          "endSec": 6.9
+         },
+         {
+          "text": "day!",
+          "startSec": 6.95,
+          "endSec": 7.4
+         },
+         {
+          "text": "Like",
+          "startSec": 8,
+          "endSec": 8.2
+         },
+         {
+          "text": "seriously",
+          "startSec": 8.25,
+          "endSec": 8.9
+         }
+        ],
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.045,
+         "color": "#FFD1E8",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "uppercase": true,
+         "shadow": {
+          "color": "#FF2D87",
+          "opacity": 0.9,
+          "blurPct": 0.5,
+          "dyPct": 0
+         },
+         "preset": "neon",
+         "highlightColor": "#FF2D87",
+         "y": 0.72,
+         "wordsPerPage": 3,
+         "maxLines": 2
+        }
+       }
+      },
+      {
+       "id": "mus",
+       "kind": "music",
+       "duck": {
+        "level": 0.25,
+        "attackSec": 0.2,
+        "releaseSec": 0.6,
+        "under": [
+         "speech"
+        ]
+       },
+       "items": [
+        {
+         "id": "m1",
+         "asset": "song",
+         "startSec": 0,
+         "inSec": 0,
+         "outSec": 20
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 9,
+    "kit": 1,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      },
+      {
+       "id": "song",
+       "kind": "audio",
+       "library": "music_upbeat_01",
+       "durationSec": 30
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 3,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "hero",
+          "points": [
+           [
+            0,
+            1
+           ],
+           [
+            0.3,
+            1
+           ],
+           [
+            0.42,
+            6
+           ],
+           [
+            0.58,
+            6
+           ],
+           [
+            0.7,
+            1
+           ],
+           [
+            1,
+            1
+           ]
+          ]
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 3,
+         "outSec": 5.5,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.117
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 5.5,
+         "outSec": 8,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.25
+         }
+        },
+        {
+         "id": "c4",
+         "asset": "src",
+         "inSec": 8,
+         "outSec": 10,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "custom",
+          "points": [
+           [
+            0,
+            0.1
+           ],
+           [
+            0.5,
+            2
+           ],
+           [
+            1,
+            10
+           ]
+          ]
+         },
+         "transitionIn": {
+          "kind": "fade",
+          "durationSec": 1.25
+         }
+        }
+       ]
+      },
+      {
+       "id": "cap",
+       "kind": "caption",
+       "items": [],
+       "caption": {
+        "asset": "src",
+        "words": [
+         {
+          "text": "Okay",
+          "startSec": 0.2,
+          "endSec": 0.5
+         },
+         {
+          "text": "so",
+          "startSec": 0.55,
+          "endSec": 0.7
+         },
+         {
+          "text": "um",
+          "startSec": 0.9,
+          "endSec": 1.2
+         },
+         {
+          "text": "this",
+          "startSec": 1.6,
+          "endSec": 1.8
+         },
+         {
+          "text": "serum",
+          "startSec": 1.85,
+          "endSec": 2.3
+         },
+         {
+          "text": "changed",
+          "startSec": 2.35,
+          "endSec": 2.7
+         },
+         {
+          "text": "my",
+          "startSec": 2.75,
+          "endSec": 2.9
+         },
+         {
+          "text": "skin.",
+          "startSec": 2.95,
+          "endSec": 3.4
+         },
+         {
+          "text": "Honestly",
+          "startSec": 4.6,
+          "endSec": 5.1
+         },
+         {
+          "text": "uh",
+          "startSec": 5.2,
+          "endSec": 5.4
+         },
+         {
+          "text": "I",
+          "startSec": 5.6,
+          "endSec": 5.7
+         },
+         {
+          "text": "use",
+          "startSec": 5.75,
+          "endSec": 5.95
+         },
+         {
+          "text": "it",
+          "startSec": 6,
+          "endSec": 6.1
+         },
+         {
+          "text": "every",
+          "startSec": 6.15,
+          "endSec": 6.5
+         },
+         {
+          "text": "single",
+          "startSec": 6.55,
+          "endSec": 6.9
+         },
+         {
+          "text": "day!",
+          "startSec": 6.95,
+          "endSec": 7.4
+         },
+         {
+          "text": "Like",
+          "startSec": 8,
+          "endSec": 8.2
+         },
+         {
+          "text": "seriously",
+          "startSec": 8.25,
+          "endSec": 8.9
+         }
+        ],
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.045,
+         "color": "#FFFFFF",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "uppercase": true,
+         "stroke": {
+          "color": "#000000",
+          "widthPct": 0.08
+         },
+         "preset": "highlighter",
+         "highlightColor": "#22C55E",
+         "y": 0.72,
+         "wordsPerPage": 3,
+         "maxLines": 2
+        }
+       }
+      },
+      {
+       "id": "mus",
+       "kind": "music",
+       "duck": {
+        "level": 0.25,
+        "attackSec": 0.2,
+        "releaseSec": 0.6,
+        "under": [
+         "speech"
+        ]
+       },
+       "items": [
+        {
+         "id": "m1",
+         "asset": "song",
+         "startSec": 0,
+         "inSec": 0,
+         "outSec": 20
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "project": 9,
+    "kit": 2,
+    "result": {
+     "version": 2,
+     "sourceTakeId": "take_src",
+     "canvas": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 30,
+      "background": "#000000"
+     },
+     "assets": [
+      {
+       "id": "src",
+       "kind": "video",
+       "take": "take_src",
+       "durationSec": 10,
+       "width": 1080,
+       "height": 1920,
+       "hasAudio": true
+      },
+      {
+       "id": "song",
+       "kind": "audio",
+       "library": "music_upbeat_01",
+       "durationSec": 30
+      }
+     ],
+     "tracks": [
+      {
+       "id": "main",
+       "kind": "main",
+       "items": [
+        {
+         "id": "c1",
+         "asset": "src",
+         "inSec": 0,
+         "outSec": 3,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "hero",
+          "points": [
+           [
+            0,
+            1
+           ],
+           [
+            0.3,
+            1
+           ],
+           [
+            0.42,
+            6
+           ],
+           [
+            0.58,
+            6
+           ],
+           [
+            0.7,
+            1
+           ],
+           [
+            1,
+            1
+           ]
+          ]
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c2",
+         "asset": "src",
+         "inSec": 3,
+         "outSec": 5.5,
+         "speed": 0.5,
+         "transitionIn": {
+          "kind": "whip",
+          "durationSec": 0.4
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c3",
+         "asset": "src",
+         "inSec": 5.5,
+         "outSec": 8,
+         "speed": 1,
+         "transitionIn": {
+          "kind": "spin",
+          "durationSec": 0.5
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        },
+        {
+         "id": "c4",
+         "asset": "src",
+         "inSec": 8,
+         "outSec": 10,
+         "speed": 1,
+         "speedCurve": {
+          "preset": "custom",
+          "points": [
+           [
+            0,
+            0.1
+           ],
+           [
+            0.5,
+            2
+           ],
+           [
+            1,
+            10
+           ]
+          ]
+         },
+         "transitionIn": {
+          "kind": "glitch",
+          "durationSec": 0.3
+         },
+         "filter": {
+          "id": "film",
+          "amount": 0.7
+         },
+         "adjust": {
+          "exposure": 0.2
+         }
+        }
+       ]
+      },
+      {
+       "id": "cap",
+       "kind": "caption",
+       "items": [],
+       "caption": {
+        "asset": "src",
+        "words": [
+         {
+          "text": "Okay",
+          "startSec": 0.2,
+          "endSec": 0.5
+         },
+         {
+          "text": "so",
+          "startSec": 0.55,
+          "endSec": 0.7
+         },
+         {
+          "text": "um",
+          "startSec": 0.9,
+          "endSec": 1.2
+         },
+         {
+          "text": "this",
+          "startSec": 1.6,
+          "endSec": 1.8
+         },
+         {
+          "text": "serum",
+          "startSec": 1.85,
+          "endSec": 2.3
+         },
+         {
+          "text": "changed",
+          "startSec": 2.35,
+          "endSec": 2.7
+         },
+         {
+          "text": "my",
+          "startSec": 2.75,
+          "endSec": 2.9
+         },
+         {
+          "text": "skin.",
+          "startSec": 2.95,
+          "endSec": 3.4
+         },
+         {
+          "text": "Honestly",
+          "startSec": 4.6,
+          "endSec": 5.1
+         },
+         {
+          "text": "uh",
+          "startSec": 5.2,
+          "endSec": 5.4
+         },
+         {
+          "text": "I",
+          "startSec": 5.6,
+          "endSec": 5.7
+         },
+         {
+          "text": "use",
+          "startSec": 5.75,
+          "endSec": 5.95
+         },
+         {
+          "text": "it",
+          "startSec": 6,
+          "endSec": 6.1
+         },
+         {
+          "text": "every",
+          "startSec": 6.15,
+          "endSec": 6.5
+         },
+         {
+          "text": "single",
+          "startSec": 6.55,
+          "endSec": 6.9
+         },
+         {
+          "text": "day!",
+          "startSec": 6.95,
+          "endSec": 7.4
+         },
+         {
+          "text": "Like",
+          "startSec": 8,
+          "endSec": 8.2
+         },
+         {
+          "text": "seriously",
+          "startSec": 8.25,
+          "endSec": 8.9
+         }
+        ],
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.045,
+         "color": "#FFFFFF",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "uppercase": true,
+         "stroke": {
+          "color": "#000000",
+          "widthPct": 0.08
+         },
+         "preset": "highlighter",
+         "highlightColor": "#22C55E",
+         "y": 0.72,
+         "wordsPerPage": 3,
+         "maxLines": 2
+        }
+       }
+      },
+      {
+       "id": "mus",
+       "kind": "music",
+       "duck": {
+        "level": 0.25,
+        "attackSec": 0.2,
+        "releaseSec": 0.6,
+        "under": [
+         "speech"
+        ]
+       },
+       "items": [
+        {
+         "id": "m1",
+         "asset": "song",
+         "startSec": 0,
+         "inSec": 0,
+         "outSec": 20
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "kits": [
+   {
+    "version": 1,
+    "look": {
+     "lut": "pack:film-gold",
+     "strength": 0.6,
+     "grain": {
+      "amount": 0.2
+     }
+    },
+    "filter": {
+     "id": "warm",
+     "amount": 0.5
+    },
+    "adjust": {
+     "contrast": 0.1,
+     "tint": -0.2
+    },
+    "transition": {
+     "kind": "whip",
+     "durationSec": 0.6
+    },
+    "captionStyle": {
+     "font": "sans",
+     "weight": 900,
+     "sizePct": 0.045,
+     "color": "#FFD1E8",
+     "align": "center",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "uppercase": true,
+     "shadow": {
+      "color": "#FF2D87",
+      "opacity": 0.9,
+      "blurPct": 0.5,
+      "dyPct": 0
+     },
+     "preset": "neon",
+     "highlightColor": "#FF2D87",
+     "y": 0.72,
+     "wordsPerPage": 3,
+     "maxLines": 2
+    },
+    "textStyle": {
+     "font": "mono",
+     "weight": 700,
+     "sizePct": 0.035,
+     "color": "#FFFFFF",
+     "align": "left",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "background": {
+      "color": "#000000",
+      "opacity": 0.6,
+      "paddingPct": 0.3,
+      "radiusPct": 0.1
+     }
+    },
+    "background": "#202020",
+    "fill": "blur"
+   },
+   {
+    "version": 1,
+    "transition": {
+     "kind": "fade",
+     "durationSec": 2
+    }
+   },
+   {
+    "version": 1,
+    "filter": {
+     "id": "film",
+     "amount": 0.7
+    },
+    "adjust": {
+     "exposure": 0.2
+    },
+    "textStyle": {
+     "font": "sans",
+     "weight": 900,
+     "sizePct": 0.06,
+     "color": "#FFFFFF",
+     "align": "center",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "stroke": {
+      "color": "#000000",
+      "widthPct": 0.14
+     }
+    },
+    "background": "#000000"
+   }
+  ],
+  "validate": [
+   {
+    "kit": {
+     "version": 1
+    },
+    "field": null
+   },
+   {
+    "kit": {
+     "version": 1,
+     "look": {
+      "lut": "pack:film-gold",
+      "strength": 0.6,
+      "grain": {
+       "amount": 0.2
+      }
+     },
+     "filter": {
+      "id": "warm",
+      "amount": 0.5
+     },
+     "adjust": {
+      "contrast": 0.1,
+      "tint": -0.2
+     },
+     "transition": {
+      "kind": "whip",
+      "durationSec": 0.6
+     },
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.045,
+      "color": "#FFD1E8",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "shadow": {
+       "color": "#FF2D87",
+       "opacity": 0.9,
+       "blurPct": 0.5,
+       "dyPct": 0
+      },
+      "preset": "neon",
+      "highlightColor": "#FF2D87",
+      "y": 0.72,
+      "wordsPerPage": 3,
+      "maxLines": 2
+     },
+     "textStyle": {
+      "font": "mono",
+      "weight": 700,
+      "sizePct": 0.035,
+      "color": "#FFFFFF",
+      "align": "left",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "background": {
+       "color": "#000000",
+       "opacity": 0.6,
+       "paddingPct": 0.3,
+       "radiusPct": 0.1
+      }
+     },
+     "background": "#202020",
+     "fill": "blur"
+    },
+    "field": null
+   },
+   {
+    "kit": {
+     "version": 2
+    },
+    "field": "kit.version"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "mask": {}
+    },
+    "field": "kit.mask"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "adjust": {
+      "tint": 2
+     }
+    },
+    "field": "kit.adjust.tint"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "fade",
+      "durationSec": 5
+     }
+    },
+    "field": "kit.transition.durationSec"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "transition": {
+      "kind": "swirl",
+      "durationSec": 0.5
+     }
+    },
+    "field": "kit.transition.kind"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "look": {
+      "lut": "cube"
+     }
+    },
+    "field": "kit.look.lut"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "captionStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.05,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "uppercase": true,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "preset": "pop",
+      "highlightColor": "yellow",
+      "y": 0.7,
+      "wordsPerPage": 2,
+      "maxLines": 1
+     }
+    },
+    "field": "kit.captionStyle.highlightColor"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 9,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      }
+     }
+    },
+    "field": "kit.textStyle.sizePct"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "fill": "mirror"
+    },
+    "field": "kit.fill"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "background": "red"
+    },
+    "field": "kit.background"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "filter": {
+      "id": "nope",
+      "amount": 1
+     }
+    },
+    "field": "kit.filter.id"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "look": {
+      "vignette": {
+       "amount": 3
+      }
+     }
+    },
+    "field": "kit.look.vignette.amount"
+   },
+   {
+    "kit": "kit",
+    "field": "kit"
+   }
+  ]
+ },
  "colorKeys": [
   {
    "item": {

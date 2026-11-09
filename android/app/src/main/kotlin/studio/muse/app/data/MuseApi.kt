@@ -222,6 +222,10 @@ interface MuseApi {
 
     // The learning editor (workstream 3, plans/api.md "Learning editor", owner only). Defaults: a server without it.
     suspend fun playbook(): List<LearnRule> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    // Edit style kits (/v1/editor/kits): members their own, the owner the studio's.
+    suspend fun editKits(): List<EditKit> = throw ApiException("not_found", "This studio server can't keep style kits yet")
+    suspend fun saveEditKit(name: String, kit: kotlinx.serialization.json.JsonObject): EditKit = throw ApiException("not_found", "This studio server can't keep style kits yet")
+    suspend fun deleteEditKit(id: String) { throw ApiException("not_found", "This studio server can't keep style kits yet") }
     suspend fun addRule(req: LearnRuleRequest): LearnRule = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
     suspend fun patchRule(id: String, req: LearnRuleRequest): LearnRule = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
     suspend fun deleteRule(id: String) { throw ApiException("not_found", "This studio server doesn't have the playbook yet") }
