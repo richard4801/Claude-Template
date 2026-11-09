@@ -141,6 +141,10 @@ data class EditSuiteUi(
     val helperModels: Map<String, String?> = emptyMap(),
     /** Saved style kits (/v1/editor/kits), newest first; [kitsNote] when the server can't keep them. */
     val kits: List<KitChoice> = emptyList(),
+    /** The content library catalog (stickers, sound effects, fonts, in-house packs); null until loaded or without a server. */
+    val content: studio.muse.app.platform.edit.ContentCatalog? = null,
+    /** Catalog paths downloaded so far (font chips show a download state until theirs are here). */
+    val contentHere: Set<String> = emptySet(),
     val kitsNote: String? = null,
     /** Auto-captions' spoken language: a two-letter code, or null for automatic detection. */
     val captionLanguage: String? = null,

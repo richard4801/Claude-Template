@@ -57,6 +57,8 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             a.name?.let { if (it.isBlank() || it.length > 80) bad("$f.name", "must be 1–80 characters") }
             val refs = listOfNotNull(a.take, a.upload, a.library)
             if (refs.size != 1 || refs.any { it.isEmpty() || it.length > 100 }) bad(f, "needs exactly one of take, upload or library")
+            // The content library (catalog items): `content:<pack>/<item>`, for stickers (image) and sound effects (audio).
+            a.library?.takeIf { it.startsWith("content:") }?.let { if (!CONTENT_REF.matches(it) || (a.kind != AssetKind.IMAGE && a.kind != AssetKind.AUDIO)) bad("$f.library", "unknown content") }
             num("$f.durationSec", a.durationSec, 0.01, 36_000.0)
             num("$f.width", a.width?.toDouble(), 1.0, 16384.0); num("$f.height", a.height?.toDouble(), 1.0, 16384.0)
             assets[a.id] = a
@@ -344,3 +346,6 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         val VISUAL_PROPS = setOf(KfProp.X, KfProp.Y, KfProp.SCALE, KfProp.ROTATION, KfProp.OPACITY)
     }
 }
+
+/** A project's reference to a content library item (catalog pack and item ids), model.ts CONTENT_REF. */
+val CONTENT_REF = Regex("^content:[a-z0-9-]+/[a-z0-9_.-]+$")

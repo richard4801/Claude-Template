@@ -126,6 +126,9 @@ fun AccountSettingsScreen() {
             RowItem("Version") { RowValue(BuildConfig.VERSION_NAME) }
             // Model names are owner-only; the owner sees the licence attribution.
             Caption(if (s.prefs.owner) "MiniMax H3 licence terms apply." else "Third-party model licence terms apply.")
+            var licences by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+            RowItem("Content licences", "Stickers, sound effects and fonts in the editor", onClick = { licences = !licences }) { Chevron() }
+            if (licences) CONTENT_LICENCES.forEach { Caption(it) }
         }
         if (s.prefs.owner) Column {
             RowItem("Show advanced settings", "Server, testing and performance tools", onClick = { vm.showAdvanced(!s.prefs.showAdvanced) }) {
@@ -296,3 +299,11 @@ private fun OwnerPhotoService() {
         PhotoServiceForm(vm, s)
     }
 }
+
+/** The edit content library's attributions (plans/edit-content-licences.md); the licence texts ship with the catalog. */
+private val CONTENT_LICENCES = listOf(
+    "Stickers: Twemoji graphics by Twitter, Inc. and other contributors, licensed under CC BY 4.0 (creativecommons.org/licenses/by/4.0). Rasterized to PNG.",
+    "Sticker names and search words: emojibase-data (MIT), from Unicode CLDR annotations.",
+    "Sound effects: UI SFX by Romain Simon, and sounds by Kenney (kenney.nl), both CC0 1.0.",
+    "Fonts: Inter, Montserrat, Roboto Condensed, Playfair Display, Unbounded, Rubik, JetBrains Mono, Caveat and Oswald, under the SIL Open Font License 1.1.",
+)

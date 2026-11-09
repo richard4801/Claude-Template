@@ -210,6 +210,8 @@ object EditJson {
 
     /** Parses a look on its own (e.g. a pack entry); [path] names it in problems. */
     fun parseLook(el: JsonElement, path: String = "look"): Look = lookOf(Obj.of(el, path))
+    /** A caption style (a content library caption template). */
+    fun parseCaptionStyle(el: JsonElement, path: String = "style"): CaptionStyle = captionStyle(Obj.of(el, path))
 
     private fun adjustItem(o: Obj): AdjustItem {
         for (k in listOf("look", "mask", "transform", "crop", "fit", "asset")) if (o.el(k) != null) o.bad(k, "is not part of an adjustment layer")

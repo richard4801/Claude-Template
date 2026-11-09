@@ -224,6 +224,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val vm: EditSuiteViewModel = viewModel(key = "edit-suite-$takeId") { EditSuiteViewModel(c, takeId, context) }
     val ui by vm.controller.ui.collectAsState()
+    val soundPlaying by vm.soundPlaying.collectAsState()
     val frames by vm.frames.collectAsState()
     val thumbs by vm.lookThumbs.collectAsState()
     val player by vm.player.collectAsState()
@@ -267,6 +268,10 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         importLink = { importing = true },
         headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        contentUrl = { path -> vm.contentUrl(path) },
+        addContent = vm::addContent,
+        previewSound = vm::previewSound,
+        soundPlaying = soundPlaying,
         addFont = { font.launch(arrayOf("font/ttf", "font/otf", "font/sfnt", "application/x-font-ttf", "application/vnd.ms-opentype", "application/octet-stream")) },
         autoAdjust = vm::autoAdjust,
         saveKit = vm::saveKit,
@@ -387,6 +392,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 // export include it (before, only takes in the project when it opened were fetched).
                 if (sourceFile != null && p.assets.any { (it.take != null || (it.upload != null && it.kind != AssetKind.LUT && it.kind != AssetKind.FONT && it.id !in fetchTried)) && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
                 if (p.assets.any { it.kind == AssetKind.FONT && it.upload?.let(OwnFonts::has) == false }) fetchFonts(p)
+                if (contentMissing(p).isNotEmpty()) ensureContent(p)
                 rebuildPreview(p)
             }
         }
@@ -449,6 +455,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 loadFrames(project)
                 fetchTakeAssets(controller.project ?: project)
                 fetchFonts(controller.project ?: project)
+                loadContent()
                 loadWaves(controller.project ?: project)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) {
@@ -641,6 +648,89 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     // ------------------------------------------------------------ style kits
     private fun kitsOf(list: List<studio.muse.app.data.EditKit>) = list.mapNotNull { k -> runCatching { KitChoice(k.id, k.name, studio.muse.core.edit.parseKit(k.kit)) }.getOrNull() }
+
+    // ------------------------------------------------------------ content library
+    private val contentDir get() = File(app.cacheDir, "edit-suite/content").apply { mkdirs() }
+
+    /** The catalog: from the server (kept on disk for next time), else the copy on disk. */
+    private suspend fun loadContent() {
+        val disk = File(contentDir, "catalog.json")
+        val text = runCatching { c.repo.api.editorContentCatalog() }.getOrNull()?.also { t -> withContext(Dispatchers.IO) { runCatching { disk.writeText(t) } } }
+            ?: withContext(Dispatchers.IO) { disk.takeIf { it.exists() }?.readText() } ?: return
+        val cat = runCatching { studio.muse.app.platform.edit.ContentCatalog.parse(text) }.getOrNull() ?: return
+        studio.muse.app.platform.edit.ContentLibrary.catalog = cat
+        // Files already on disk for this version.
+        val here = HashSet<String>()
+        File(contentDir, cat.version).takeIf { it.exists() }?.walkTopDown()?.filter { it.isFile }?.forEach { f ->
+            val rel = f.relativeTo(File(contentDir, cat.version)).path
+            studio.muse.app.platform.edit.ContentLibrary.register(rel, f); here += rel
+        }
+        controller.update { it.copy(content = cat, contentHere = here) }
+        controller.project?.let { if (contentMissing(it).isNotEmpty()) ensureContent(it) }
+    }
+
+    /** Catalog paths the edit uses that aren't on this phone yet: its stickers and sounds, and its content fonts' weights. */
+    private fun contentMissing(p: EditProject): List<String> {
+        val cat = studio.muse.app.platform.edit.ContentLibrary.catalog ?: return emptyList()
+        val paths = p.assets.mapNotNull { a -> a.library?.let { cat.item(it)?.file } } +
+            p.tracks.flatMap { t -> t.items.filterIsInstance<studio.muse.core.edit.TextItem>().map { it.style } + listOfNotNull(t.caption?.style?.text) }
+                .filter { it.font.isContent }.mapNotNull { cat.fontPath(it.font, it.weight) }
+        return paths.distinct().filter { !studio.muse.app.platform.edit.ContentLibrary.has(it) }
+    }
+
+    private var contentJob: kotlinx.coroutines.Job? = null
+    /** Downloads what the edit uses from the content library, then links its assets' files and redraws. */
+    private fun ensureContent(p: EditProject) {
+        if (contentJob?.isActive == true) return
+        contentJob = viewModelScope.launch {
+            for (path in contentMissing(p)) contentFile(path)
+            val cur = controller.project ?: return@launch
+            for (a in cur.assets) a.library?.let { studio.muse.app.platform.edit.ContentLibrary.fileOf(it) }?.let { files[a.id] = it }
+            rebuildPreview(cur)
+        }
+    }
+
+    /** One catalog file on this phone (downloaded once per catalog version). */
+    suspend fun contentFile(path: String): File? {
+        studio.muse.app.platform.edit.ContentLibrary.file(path)?.let { return it }
+        val cat = studio.muse.app.platform.edit.ContentLibrary.catalog ?: return null
+        val url = c.repo.api.editorContentUrl(path) ?: return null
+        val dst = File(contentDir, "${cat.version}/$path").apply { parentFile?.mkdirs() }
+        val got = runCatching { engine.fetchSource(url) {} }.getOrNull() ?: return null
+        withContext(Dispatchers.IO) { runCatching { got.copyTo(dst, overwrite = true) } }.getOrNull() ?: return null
+        studio.muse.app.platform.edit.ContentLibrary.register(path, dst)
+        controller.update { it.copy(contentHere = it.contentHere + path) }
+        return dst
+    }
+
+    /** A sticker or sound effect: its file first (so the preview has it), then into the edit. */
+    fun addContent(item: studio.muse.app.platform.edit.ContentItem) {
+        viewModelScope.launch {
+            val f = item.file?.let { contentFile(it) } ?: return@launch c.repo.toast("Couldn't download that · try again")
+            if (item.kind == "stickers") controller.act(EditAction.AddSticker(item.ref, item.width ?: 160, item.height ?: 160))
+            else controller.act(EditAction.AddSoundEffect(item.ref, item.durationSec ?: 1.0, item.name))
+            controller.project?.assets?.firstOrNull { it.library == item.ref }?.let { files[it.id] = f }
+            controller.project?.let { rebuildPreview(it); loadWaves(it) }
+        }
+    }
+
+    /** The local file if downloaded, else the server's URL (sticker thumbnails). */
+    fun contentUrl(path: String): String? = studio.muse.app.platform.edit.ContentLibrary.file(path)?.absolutePath ?: c.repo.api.editorContentUrl(path)
+
+    private val _soundPlaying = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val soundPlaying: kotlinx.coroutines.flow.StateFlow<String?> = _soundPlaying
+
+    private var preview: android.media.MediaPlayer? = null
+    /** Plays a sound effect once (the list's preview); a second tap or another sound stops it. */
+    fun previewSound(item: studio.muse.app.platform.edit.ContentItem?) {
+        preview?.runCatching { stop(); release() }; preview = null
+        _soundPlaying.value = item?.ref
+        val path = item?.file ?: return
+        viewModelScope.launch {
+            val f = contentFile(path) ?: return@launch
+            preview = android.media.MediaPlayer().apply { runCatching { setDataSource(f.absolutePath); prepare(); start(); setOnCompletionListener { it.release(); if (preview === it) { preview = null; _soundPlaying.value = null } } } }
+        }
+    }
 
     fun loadKits() {
         viewModelScope.launch {
