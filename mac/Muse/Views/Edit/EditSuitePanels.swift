@@ -1073,13 +1073,16 @@ struct SpeedPanel: View {
                             EditSeg(options: [(1.0, "1 s"), (2.0, "2 s"), (4.0, "4 s")], selection: session.slowmoLength, small: true) { session.slowmoLength = $0 }
                         }
                         HStack(spacing: Space.s2) {
-                            SuiteToolButton(title: session.isRunning(.slowmo) ? "Slowing down…" : "Slow down from the playhead", icon: "gauge",
-                                            disabled: session.isRunning(.slowmo) || session.features?.isAvailable(.slowmo) == false) {
+                            let busy = session.isRunning(.slowmo) || session.slowmoLocalProgress != nil
+                            SuiteToolButton(title: busy ? "Slowing down…" : "Slow down from the playhead", icon: "gauge",
+                                            disabled: busy || (!session.slowmoOnDevice && session.features?.isAvailable(.slowmo) == false)) {
                                 Task { await session.smoothSlowmo() }
                             }
-                            if session.isRunning(.slowmo) { ProgressView().controlSize(.small) }
+                            if let p = session.slowmoLocalProgress { ProgressView(value: p).frame(maxWidth: 100) }
+                            else if session.isRunning(.slowmo) { ProgressView().controlSize(.small) }
                         }
-                        Text(session.features?.note(.slowmo) ?? "New frames in between, so it stays smooth. The slowed part is muted.")
+                        Text(session.slowmoOnDevice ? "Made on this Mac, free. New frames in between, so it stays smooth. The slowed part is muted."
+                             : session.features?.note(.slowmo) ?? "New frames in between, so it stays smooth. The slowed part is muted.")
                             .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                 }

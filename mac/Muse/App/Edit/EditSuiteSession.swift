@@ -969,6 +969,10 @@ final class EditSuiteSession {
     /// 2 or 4, and the length of the range from the playhead (seconds of source).
     var slowmoFactor: Double = 4
     var slowmoLength: Double = 2
+    /// 0…1 while this Mac makes the slowed copy itself; nil otherwise.
+    var slowmoLocalProgress: Double?
+    /// Whether this Mac makes the copy itself (free) rather than the paid server job.
+    var slowmoOnDevice: Bool { EditV2SlowmoLocal.available }
 
     /// The selected main clip from the playhead, `slowmoLength` long, slowed `slowmoFactor`×: the copy is made once (the
     /// paid server job, its price confirmed first) and reused; the clip is split around it with the shared applySlowmo,
@@ -981,6 +985,30 @@ final class EditSuiteSession {
         let factor = slowmoFactor
         if let copy = state.slowmoCopy(of: c.asset, startSec: r.startSec, endSec: r.endSec, factor: factor) { applySlowmo(copy); return }
         guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Smooth slow motion needs a take or an upload"; return }
+        // On this Mac first (macOS 15.4+, free): Apple's frame interpolation, uploaded so the render and other devices have it.
+        if EditV2SlowmoLocal.available, #available(macOS 15.4, *), let file = files[a.id], slowmoLocalProgress == nil {
+            slowmoLocalProgress = 0
+            defer { slowmoLocalProgress = nil }
+            do {
+                let made = try await EditV2SlowmoLocal.make(file, startSec: r.startSec, endSec: r.endSec, factor: Int(factor)) { [weak self] v in
+                    self?.slowmoLocalProgress = v
+                }
+                notice = "Uploading the slowed clip…"
+                let up = try await api.uploadEditorFile(made.file, contentType: "video/mp4", purpose: nil, progress: nil)
+                notice = nil
+                let id = project.newId("v")
+                var copy = E.Asset(id: id, kind: .video, upload: up, durationSec: made.durationSec, width: made.width, height: made.height, hasAudio: false)
+                copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .slowmo, startSec: r.startSec, endSec: r.endSec, factor: factor)
+                files[id] = made.file
+                state.assetNames[id] = "Smooth \(Int(factor))×"
+                applySlowmo(copy)
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                notice = nil   // falls through to the server job
+            }
+        }
         var o = EditorJobOptions()
         o.factor = factor; o.startSec = r.startSec; o.endSec = r.endSec
         await run(.slowmo, source: src, options: o) { [weak self] res in
