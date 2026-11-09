@@ -422,6 +422,14 @@ fun transitionState(kind: TransitionKind, p0: Double): TransitionState {
             LayerState(opacity = if (p < 0.5) 1.0 else 0.0, dx = 0.04 * peak * jit(1), rgbSplit = peak),
             LayerState(opacity = if (p < 0.5) 0.0 else 1.0, dx = 0.04 * peak * jit(2), rgbSplit = peak), null,
         )
+        TransitionKind.ZOOM_OUT -> TransitionState(LayerState(scale = 1 - 0.2 * e, opacity = 1 - p), LayerState(scale = 1.2 - 0.2 * e, opacity = p), null)
+        TransitionKind.WHIP_RIGHT -> TransitionState(LayerState(dx = e3, blur = peak), LayerState(dx = -(1 - e3), blur = peak), null)
+        // Cover: the incoming clip slides over the outgoing one, which stays still and fully shown underneath.
+        TransitionKind.COVER_LEFT -> TransitionState(l, LayerState(dx = 1 - e), null)
+        TransitionKind.COVER_RIGHT -> TransitionState(l, LayerState(dx = -(1 - e)), null)
+        TransitionKind.COVER_UP -> TransitionState(l, LayerState(dy = 1 - e), null)
+        TransitionKind.COVER_DOWN -> TransitionState(l, LayerState(dy = -(1 - e)), null)
+        TransitionKind.SPLIT_FADE -> TransitionState(LayerState(rgbSplit = peak), LayerState(opacity = p, rgbSplit = peak), null)
     }
 }
 

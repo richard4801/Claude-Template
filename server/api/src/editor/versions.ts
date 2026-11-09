@@ -9,6 +9,7 @@ import { FILTERS } from './presets.js';
 import { CubeError, parseCube, type Lut } from './look.js';
 import { LOOK_IDS } from './lookpack.js';
 import { fontOfUpload } from './font.js';
+import { contentItem } from './content.js';
 import { paletteIds } from './photo.js';
 import { ApiError } from '../errors.js';
 
@@ -58,6 +59,12 @@ export async function checkProject(ctx: Ctx, studioId: string, project: unknown,
       if (a.kind === 'audio' && !isVideo) throw badRequest(`edits.assets.${i}: that take has no sound`);
     });
   }
+  // Content library items must be in the catalog, as the right kind (stickers are images, sound effects audio).
+  p.assets.forEach((a, i) => {
+    if (!a.library?.startsWith('content:')) return;
+    const hit = contentItem(a.library);
+    if (!hit || (a.kind === 'image' ? hit.pack.kind !== 'stickers' : hit.pack.kind !== 'sfx')) throw badRequest(`edits.assets.${i}: unknown content`);
+  });
   if (uploadIds.length) {
     const found = await ctx.db.select({ id: uploads.id, contentType: uploads.contentType }).from(uploads).where(and(eq(uploads.studioId, studioId), inArray(uploads.id, uploadIds)));
     for (const id of uploadIds) if (!found.some(f => f.id === id)) throw notFound(`Upload ${id}`);

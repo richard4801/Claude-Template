@@ -181,14 +181,18 @@ private fun Placed(x: Double, y: Double, w: Dp, h: Dp, scale: Float, rotation: F
     }
 }
 
-fun fontFamilyOf(f: Font): FontFamily = when (f) {
+/** A family for Compose: a content family's file for [weight] once downloaded, else its bundled fallback. */
+fun fontFamilyOf(f: Font, weight: Int = 400): FontFamily = studio.muse.app.platform.edit.ContentLibrary.family(f, weight) ?: when (f.fallback) {
     Font.SANS -> Fonts.archivo
     Font.ROUNDED -> Fonts.outfit
     Font.SERIF -> Fonts.instrumentSerif
     Font.CONDENSED -> Fonts.barlowCondensed
     Font.MONO -> Fonts.plexMono
-    Font.MARKER -> Fonts.marker
+    else -> Fonts.marker
 }
+
+/** Whether [f] draws from its own downloaded weight file (so Compose mustn't embolden it again). */
+private fun ownWeight(f: Font, weight: Int) = studio.muse.app.platform.edit.ContentLibrary.family(f, weight) != null
 
 private fun weightOf(w: Int) = when { w >= 900 -> FontWeight.Black; w >= 700 -> FontWeight.Bold; else -> FontWeight.Normal }
 
@@ -198,7 +202,7 @@ fun colorOf(hex: String): Color = Color(hexArgb(hex))
 @Composable
 fun StyledText(text: String, s: EditTextStyle, h: Dp, alpha: Float = 1f, maxW: Dp, family: FontFamily? = null) {
     val size: TextUnit = (h.value * s.sizePct).sp
-    val base = TextStyle(fontFamily = family ?: fontFamilyOf(s.font), fontWeight = if (family != null) FontWeight.Normal else weightOf(s.weight), fontSize = size, lineHeight = size * (s.lineHeight ?: 1.15).toFloat(),
+    val base = TextStyle(fontFamily = family ?: fontFamilyOf(s.font, s.weight), fontWeight = if (family != null || ownWeight(s.font, s.weight)) FontWeight.Normal else weightOf(s.weight), fontSize = size, lineHeight = size * (s.lineHeight ?: 1.15).toFloat(),
         textAlign = when (s.align) { studio.muse.core.edit.Align.LEFT -> TextAlign.Start; studio.muse.core.edit.Align.RIGHT -> TextAlign.End; else -> TextAlign.Center },
         shadow = s.shadow?.let { sh -> Shadow(colorOf(sh.color).copy(alpha = sh.opacity.toFloat()), Offset(0f, (sh.dyPct * h.value * s.sizePct).toFloat()), (sh.blurPct * h.value * s.sizePct * 2).toFloat()) })
     val bg = s.background
@@ -239,7 +243,7 @@ fun CaptionLine(words: List<String>, active: Int, style: CaptionStyle, h: Dp, ma
             val stripe = style.preset == CaptionPreset.HIGHLIGHTER && k == active
             val scale = if (style.preset == CaptionPreset.POP && k == active) 1.15f else 1f
             val ts = TextStyle(
-                fontFamily = fontFamilyOf(s.font), fontWeight = weightOf(s.weight), fontSize = size * scale,
+                fontFamily = fontFamilyOf(s.font, s.weight), fontWeight = if (ownWeight(s.font, s.weight)) FontWeight.Normal else weightOf(s.weight), fontSize = size * scale,
                 shadow = when {
                     glow -> Shadow(hl.copy(alpha = .9f), Offset.Zero, size.value * 1.2f)
                     s.shadow != null -> Shadow(colorOf(s.shadow!!.color).copy(alpha = s.shadow!!.opacity.toFloat()), Offset(0f, (s.shadow!!.dyPct * size.value).toFloat()), (s.shadow!!.blurPct * size.value * 2).toFloat())
