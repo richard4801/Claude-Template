@@ -155,7 +155,15 @@ data class Asset(
     val name: String? = null,
     /** A video asset that is another video asset played backwards (the Reverse helper's copy); see [reverseClip]. */
     val reverseOf: String? = null,
+    /**
+     * A video made from another by a server helper (owner-approved 2026-11-09): the same length and timing, so a clip
+     * switches between them with only its asset changing ([deriveClip]). Chains are allowed, never cycles; see [sourceOf].
+     */
+    val derivedFrom: DerivedFrom? = null,
 )
+
+enum class DerivedOp(override val wire: String) : Wire { STABILIZE("stabilize"), SMOOTH("smooth") }
+data class DerivedFrom(val asset: String, val op: DerivedOp)
 
 /** Anything on a track. Which class an item is follows from its track's kind. */
 sealed interface Item { val id: String }

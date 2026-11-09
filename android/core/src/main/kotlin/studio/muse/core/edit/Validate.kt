@@ -63,10 +63,26 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             num("$f.width", a.width?.toDouble(), 1.0, 16384.0); num("$f.height", a.height?.toDouble(), 1.0, 16384.0)
             assets[a.id] = a
         }
+        // Helper copies: a reversed copy of a video (not of another reversed copy: switching back un-reverses), or a derived
+        // copy (stabilize/smooth) of a video not made with the same step; at most one of the two, chains of up to 4, no cycles.
         p.assets.forEachIndexed { i, a ->
-            val of = a.reverseOf ?: return@forEachIndexed
-            val o = assets[of]
-            if (a.kind != AssetKind.VIDEO || o == null || o.kind != AssetKind.VIDEO || o.reverseOf != null || o.id == a.id) bad("edits.assets.$i.reverseOf", "must be a video asset")
+            val f = "edits.assets.$i"
+            if (a.reverseOf != null && a.derivedFrom != null) bad(f, "is either a reversed or a derived copy")
+            a.reverseOf?.let { of ->
+                val o = assets[of]
+                if (a.kind != AssetKind.VIDEO || o == null || o.kind != AssetKind.VIDEO || o.reverseOf != null || o.id == a.id) bad("$f.reverseOf", "must be a video asset")
+            }
+            a.derivedFrom?.let { d ->
+                val o = assets[d.asset]
+                if (a.kind != AssetKind.VIDEO || o == null || o.kind != AssetKind.VIDEO || o.id == a.id || o.derivedFrom?.op == d.op) bad("$f.derivedFrom.asset", "must be a video asset")
+            }
+            var id: String? = a.id
+            var n = 0
+            while (id != null) {
+                if (n++ > 4) bad(f, "too many helper copies in a row")
+                val x = assets[id]
+                id = x?.derivedFrom?.asset ?: x?.reverseOf
+            }
         }
         if (p.tracks.isEmpty() || p.tracks.size > EditLimits.MAX_TRACKS) bad("edits.tracks", "must have 1–${EditLimits.MAX_TRACKS} tracks")
         if (p.tracks[0].kind != TrackKind.MAIN) bad("edits.tracks.0.kind", "the first track must be the main track")

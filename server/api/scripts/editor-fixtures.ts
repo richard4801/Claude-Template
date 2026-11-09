@@ -204,6 +204,16 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'reversed image', project: mut(p => { p.assets.push({ id: 'img_rev', kind: 'image', upload: 'up_imgrev', reverseOf: 'src' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
   { name: 'reversed asset chain', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'src' }, { id: 'src_rev2', kind: 'video', upload: 'up_rev2', reverseOf: 'src_rev' }); }), ok: false, field: 'edits.assets.4.reverseOf' },
   { name: 'reversed asset missing', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'nope' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
+  // Derived copies (stabilize/smooth, 2026-11-09).
+  { name: 'stabilized asset ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', durationSec: 10, derivedFrom: { asset: 'src', op: 'stabilize' } }); }), ok: true },
+  { name: 'stabilized then reversed ok', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'src', op: 'stabilize' } }, { id: 'src_st_rev', kind: 'video', upload: 'up_strev', reverseOf: 'src_st' }); }), ok: true },
+  { name: 'reversed then smooth ok', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'src' }, { id: 'src_rev_sm', kind: 'video', upload: 'up_revsm', derivedFrom: { asset: 'src_rev', op: 'smooth' } }); }), ok: true },
+  { name: 'derived unknown op', project: mut(p => { p.assets.push({ id: 'src_x', kind: 'video', upload: 'up_x', derivedFrom: { asset: 'src', op: 'sharpen' as M.DerivedOp } }); }), ok: false, field: 'edits.assets.3.derivedFrom.op' },
+  { name: 'derived of an image', project: mut(p => { p.assets.push({ id: 'logo_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'logo', op: 'stabilize' } }); }), ok: false, field: 'edits.assets.3.derivedFrom.asset' },
+  { name: 'derived missing', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'nope', op: 'stabilize' } }); }), ok: false, field: 'edits.assets.3.derivedFrom.asset' },
+  { name: 'stabilized twice', project: mut(p => { p.assets.push({ id: 'src_st', kind: 'video', upload: 'up_st', derivedFrom: { asset: 'src', op: 'stabilize' } }, { id: 'src_st2', kind: 'video', upload: 'up_st2', derivedFrom: { asset: 'src_st', op: 'stabilize' } }); }), ok: false, field: 'edits.assets.4.derivedFrom.asset' },
+  { name: 'derived and reversed at once', project: mut(p => { p.assets.push({ id: 'src_x', kind: 'video', upload: 'up_x', reverseOf: 'src', derivedFrom: { asset: 'src', op: 'smooth' } }); }), ok: false, field: 'edits.assets.3' },
+  { name: 'derived cycle', project: mut(p => { p.assets.push({ id: 'a1', kind: 'video', upload: 'up_a1', derivedFrom: { asset: 'a2', op: 'stabilize' } }, { id: 'a2', kind: 'video', upload: 'up_a2', derivedFrom: { asset: 'a1', op: 'smooth' } }); }), ok: false, field: 'edits.assets.3' },
   { name: 'own font ok', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'Figtree Bold' }); (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'fnt'; }), ok: true },
   { name: 'own font is an image', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'logo'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
   { name: 'own font missing', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'nope'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
@@ -504,6 +514,22 @@ const reverseCases = [
   { clip: { id: 'r6', asset: 'src', inSec: 2, outSec: 7, speed: 1, alphaMatte: { asset: 'matte' }, audioAsset: 'voice', look: { lut: 'pack:film-gold' } }, durationSec: 10 },
 ] as { clip: M.VideoClip; durationSec: number }[];
 const reverse = reverseCases.map(c => { const rev = M.reverseClip(c.clip, 'src_rev', c.durationSec); return { ...c, reversed: rev, back: rev && M.reverseClip(rev, c.clip.asset, c.durationSec) }; });
+// Derived copies (M, 2026-11-09): sourceOf, derivedOps and the label for each asset of a chain; deriveClip swaps.
+const derivedAssets: M.Asset[] = [
+  { id: 'src', kind: 'video', take: 'tk_1', durationSec: 10 },
+  { id: 'src_st', kind: 'video', upload: 'up_st', durationSec: 10, derivedFrom: { asset: 'src', op: 'stabilize' } },
+  { id: 'src_st_rev', kind: 'video', upload: 'up_strev', durationSec: 10, reverseOf: 'src_st' },
+  { id: 'src_st_rev_sm', kind: 'video', upload: 'up_strevsm', durationSec: 10, derivedFrom: { asset: 'src_st_rev', op: 'smooth' } },
+  { id: 'src_sm', kind: 'video', upload: 'up_sm', durationSec: 10, derivedFrom: { asset: 'src', op: 'smooth' } },
+  { id: 'logo', kind: 'image', upload: 'up_logo' },
+];
+const derivedClip: M.VideoClip = { id: 'd1', asset: 'src', inSec: 1, outSec: 6, speed: 0.5, alphaMatte: { asset: 'matte' }, audioAsset: 'voice', volume: 0.8 };
+const derived = {
+  assets: derivedAssets,
+  chains: derivedAssets.map(a => ({ asset: a.id, source: M.sourceOf({ assets: derivedAssets }, a.id), ops: M.derivedOps({ assets: derivedAssets }, a.id), label: M.derivedLabel({ assets: derivedAssets }, a.id) })),
+  clip: derivedClip,
+  swaps: (['stabilize', 'smooth', null] as (M.DerivedOp | null)[]).map(op => ({ op, copy: op ? `src_${op}` : 'src', clip: M.deriveClip(derivedClip, op ? `src_${op}` : 'src', op) })),
+};
 // Adjustment layers (M): adjustLayerMatrix over time on a project with two adjust tracks.
 const adjustProject = (() => {
   const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;
@@ -531,7 +557,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { reverse, derived, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

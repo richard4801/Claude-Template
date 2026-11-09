@@ -252,6 +252,166 @@
    }
   }
  ],
+ "derived": {
+  "assets": [
+   {
+    "id": "src",
+    "kind": "video",
+    "take": "tk_1",
+    "durationSec": 10
+   },
+   {
+    "id": "src_st",
+    "kind": "video",
+    "upload": "up_st",
+    "durationSec": 10,
+    "derivedFrom": {
+     "asset": "src",
+     "op": "stabilize"
+    }
+   },
+   {
+    "id": "src_st_rev",
+    "kind": "video",
+    "upload": "up_strev",
+    "durationSec": 10,
+    "reverseOf": "src_st"
+   },
+   {
+    "id": "src_st_rev_sm",
+    "kind": "video",
+    "upload": "up_strevsm",
+    "durationSec": 10,
+    "derivedFrom": {
+     "asset": "src_st_rev",
+     "op": "smooth"
+    }
+   },
+   {
+    "id": "src_sm",
+    "kind": "video",
+    "upload": "up_sm",
+    "durationSec": 10,
+    "derivedFrom": {
+     "asset": "src",
+     "op": "smooth"
+    }
+   },
+   {
+    "id": "logo",
+    "kind": "image",
+    "upload": "up_logo"
+   }
+  ],
+  "chains": [
+   {
+    "asset": "src",
+    "source": "src",
+    "ops": [],
+    "label": ""
+   },
+   {
+    "asset": "src_st",
+    "source": "src",
+    "ops": [
+     "stabilize"
+    ],
+    "label": "Steadied"
+   },
+   {
+    "asset": "src_st_rev",
+    "source": "src",
+    "ops": [
+     "stabilize",
+     "reverse"
+    ],
+    "label": "Steadied, reversed"
+   },
+   {
+    "asset": "src_st_rev_sm",
+    "source": "src",
+    "ops": [
+     "stabilize",
+     "reverse",
+     "smooth"
+    ],
+    "label": "Steadied, reversed, smoothed"
+   },
+   {
+    "asset": "src_sm",
+    "source": "src",
+    "ops": [
+     "smooth"
+    ],
+    "label": "Smoothed"
+   },
+   {
+    "asset": "logo",
+    "source": "logo",
+    "ops": [],
+    "label": ""
+   }
+  ],
+  "clip": {
+   "id": "d1",
+   "asset": "src",
+   "inSec": 1,
+   "outSec": 6,
+   "speed": 0.5,
+   "alphaMatte": {
+    "asset": "matte"
+   },
+   "audioAsset": "voice",
+   "volume": 0.8
+  },
+  "swaps": [
+   {
+    "op": "stabilize",
+    "copy": "src_stabilize",
+    "clip": {
+     "id": "d1",
+     "asset": "src_stabilize",
+     "inSec": 1,
+     "outSec": 6,
+     "speed": 0.5,
+     "audioAsset": "voice",
+     "volume": 0.8
+    }
+   },
+   {
+    "op": "smooth",
+    "copy": "src_smooth",
+    "clip": {
+     "id": "d1",
+     "asset": "src_smooth",
+     "inSec": 1,
+     "outSec": 6,
+     "speed": 0.5,
+     "alphaMatte": {
+      "asset": "matte"
+     },
+     "audioAsset": "voice",
+     "volume": 0.8
+    }
+   },
+   {
+    "op": null,
+    "copy": "src",
+    "clip": {
+     "id": "d1",
+     "asset": "src",
+     "inSec": 1,
+     "outSec": 6,
+     "speed": 0.5,
+     "alphaMatte": {
+      "asset": "matte"
+     },
+     "audioAsset": "voice",
+     "volume": 0.8
+    }
+   }
+  ]
+ },
  "adjustLayers": {
   "project": {
    "version": 2,

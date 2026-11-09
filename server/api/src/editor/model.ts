@@ -46,8 +46,18 @@ export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* a
   durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string;
   /** A video asset that is another video asset played backwards (the Reverse helper's copy); see reverseClip. */
   reverseOf?: string;
+  /**
+   * A video asset made from another by a server helper (owner-approved 2026-11-09): the same length and timing, so a clip
+   * switches between them with only its asset changing (see deriveClip). stabilize: steadied (vidstab); smooth: frames
+   * interpolated for slow motion. Chains are allowed (steadied then reversed), never cycles; see sourceOf, derivedOps.
+   */
+  derivedFrom?: DerivedFrom;
   /** A font asset's family and style, read from the file (display only). */
   name?: string };
+
+export type DerivedOp = 'stabilize' | 'smooth';
+export type DerivedFrom = { asset: string; op: DerivedOp };
+export const DERIVED_OPS: readonly DerivedOp[] = ['stabilize', 'smooth'];
 
 type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
 /** Voice processing on a clip with sound (Edit suite audio panel). */
@@ -278,6 +288,47 @@ export function reverseClip(c: VideoClip, reversed: string, durationSec: number)
     out.speedCurve = { preset: same ? c.speedCurve.preset : 'custom', points }; // a mirrored preset is no longer that preset
   }
   return out;
+}
+
+/**
+ * A clip switched to a derived copy [copy] made with [op] (or back to its original, op null): only the asset changes,
+ * since the copy has the same length and timing. A steadied copy's frames are moved, so an alpha matte lined up with the
+ * original is dropped (the apps say so); a smooth copy keeps it.
+ */
+export function deriveClip(c: VideoClip, copy: string, op: DerivedOp | null): VideoClip {
+  const out: VideoClip = { ...c, asset: copy };
+  if (op === 'stabilize') delete out.alphaMatte;
+  return out;
+}
+/** The helper steps from the original to [assetId], in the order applied ('stabilize' | 'smooth' | 'reverse'). */
+export function derivedOps(p: Pick<EditProject, 'assets'>, assetId: string): (DerivedOp | 'reverse')[] {
+  const byId = new Map(p.assets.map(a => [a.id, a]));
+  const ops: (DerivedOp | 'reverse')[] = [];
+  let a = byId.get(assetId);
+  for (let n = 0; a && n < 8; n++) {
+    if (a.derivedFrom) { ops.push(a.derivedFrom.op); a = byId.get(a.derivedFrom.asset); }
+    else if (a.reverseOf !== undefined) { ops.push('reverse'); a = byId.get(a.reverseOf); }
+    else break;
+  }
+  return ops.reverse();
+}
+/** The original video an asset was made from (itself when it's not a copy). */
+export function sourceOf(p: Pick<EditProject, 'assets'>, assetId: string): string {
+  const byId = new Map(p.assets.map(a => [a.id, a]));
+  let id = assetId;
+  for (let n = 0; n < 8; n++) {
+    const a = byId.get(id);
+    const next = a?.derivedFrom?.asset ?? a?.reverseOf;
+    if (next === undefined || !byId.has(next)) break;
+    id = next;
+  }
+  return id;
+}
+const OP_WORD: Record<DerivedOp | 'reverse', string> = { stabilize: 'steadied', smooth: 'smoothed', reverse: 'reversed' };
+/** The clip's helper label in the order applied, e.g. "Steadied, reversed"; "" for an original. */
+export function derivedLabel(p: Pick<EditProject, 'assets'>, assetId: string): string {
+  const s = derivedOps(p, assetId).map(o => OP_WORD[o]).join(', ');
+  return s ? s[0]!.toUpperCase() + s.slice(1) : '';
 }
 
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
@@ -924,10 +975,27 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     num(`${f}.width`, a.width, 1, 16384); num(`${f}.height`, a.height, 1, 16384);
     assets.set(a.id, a);
   });
+  // Helper copies: a reversed copy of a video (not of another reversed copy: switching back un-reverses), or a derived
+  // copy (stabilize/smooth) of a video not made with the same step; at most one of the two, chains of up to 4, no cycles.
   p.assets.forEach((a, i) => {
-    if (a.reverseOf === undefined) return;
-    const o = typeof a.reverseOf === 'string' ? assets.get(a.reverseOf) : undefined;
-    if (a.kind !== 'video' || !o || o.kind !== 'video' || o.reverseOf !== undefined || o.id === a.id) bad(`edits.assets.${i}.reverseOf`, 'must be a video asset');
+    const f = `edits.assets.${i}`;
+    if (a.reverseOf !== undefined && a.derivedFrom !== undefined) bad(f, 'is either a reversed or a derived copy');
+    if (a.reverseOf !== undefined) {
+      const o = typeof a.reverseOf === 'string' ? assets.get(a.reverseOf) : undefined;
+      if (a.kind !== 'video' || !o || o.kind !== 'video' || o.reverseOf !== undefined || o.id === a.id) bad(`${f}.reverseOf`, 'must be a video asset');
+    }
+    if (a.derivedFrom !== undefined) {
+      const d = a.derivedFrom;
+      if (!d || typeof d !== 'object' || !DERIVED_OPS.includes(d.op)) bad(`${f}.derivedFrom.op`, 'must be stabilize or smooth');
+      const o = typeof d.asset === 'string' ? assets.get(d.asset) : undefined;
+      if (a.kind !== 'video' || !o || o.kind !== 'video' || o.id === a.id || o.derivedFrom?.op === d.op) bad(`${f}.derivedFrom.asset`, 'must be a video asset');
+    }
+    let id: string | undefined = a.id;
+    for (let n = 0; id !== undefined; n++) {
+      if (n > 4) bad(f, 'too many helper copies in a row');
+      const x = assets.get(id);
+      id = x?.derivedFrom?.asset ?? x?.reverseOf;
+    }
   });
   if (!Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > LIMITS.maxTracks) bad('edits.tracks', `must have 1–${LIMITS.maxTracks} tracks`);
   if (p.tracks[0]!.kind !== 'main') bad('edits.tracks.0.kind', 'the first track must be the main track');

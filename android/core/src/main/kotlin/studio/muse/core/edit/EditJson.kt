@@ -78,6 +78,7 @@ object EditJson {
         take = o.strOrNull("take"), upload = o.strOrNull("upload"), library = o.strOrNull("library"),
         durationSec = o.numOrNull("durationSec"), width = o.intOrNull("width"), height = o.intOrNull("height"),
         hasAudio = o.boolOrNull("hasAudio"), url = o.strOrNull("url"), name = o.strOrNull("name"), reverseOf = o.strOrNull("reverseOf"),
+        derivedFrom = o.objOrNull("derivedFrom")?.let { DerivedFrom(it.str("asset"), it.enum("op", "must be stabilize or smooth")) },
     )
 
     private fun track(o: Obj): Track {
@@ -257,6 +258,7 @@ object EditJson {
     internal fun encodeAsset(a: Asset) = buildJsonObject {
         put("id", a.id); put("kind", a.kind.wire); str("take", a.take); str("upload", a.upload); str("library", a.library)
         num("durationSec", a.durationSec); int("width", a.width); int("height", a.height); bool("hasAudio", a.hasAudio); str("url", a.url); str("name", a.name); str("reverseOf", a.reverseOf)
+        a.derivedFrom?.let { d -> put("derivedFrom", buildJsonObject { put("asset", d.asset); put("op", d.op.wire) }) }
     }
 
     internal fun encodeTrack(t: Track) = buildJsonObject {

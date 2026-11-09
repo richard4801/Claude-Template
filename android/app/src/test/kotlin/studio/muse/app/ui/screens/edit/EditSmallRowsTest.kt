@@ -447,6 +447,33 @@ class EditSmallRowsTest {
         assertEquals(1, c.p().assets.count { it.reverseOf != null })
     }
 
+    @Test fun stabilizeThenReverse() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val src = c.p().asset(clip.asset)!!
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.Stabilize(true)); advanceUntilIdle()
+        val st = c.p().assets.single { it.derivedFrom?.asset == src.id }
+        assertEquals(studio.muse.core.edit.DerivedOp.STABILIZE, st.derivedFrom!!.op)
+        var now = c.p().mainClips[0]
+        assertEquals(st.id, now.asset); assertEquals(clip.inSec, now.inSec, 1e-6); assertEquals(clip.outSec, now.outSec, 1e-6)
+        valid(c.p())
+        // Steadied, then reversed: both steps stack; stabilise can't switch off under the reverse.
+        c.act(EditAction.Reverse(true)); advanceUntilIdle()
+        assertEquals("Steadied, reversed", studio.muse.core.edit.derivedLabel(c.p(), c.p().mainClips[0].asset))
+        assertEquals(src.id, studio.muse.core.edit.sourceOf(c.p(), c.p().mainClips[0].asset))
+        valid(c.p())
+        c.act(EditAction.Stabilize(false))
+        assertEquals("Steadied, reversed", studio.muse.core.edit.derivedLabel(c.p(), c.p().mainClips[0].asset))
+        c.act(EditAction.Reverse(false)); c.act(EditAction.Stabilize(false))
+        now = c.p().mainClips[0]
+        assertEquals(clip.asset, now.asset); assertEquals(clip.inSec, now.inSec, 1e-6)
+        // On again without a new job: the steadied copy is reused.
+        c.act(EditAction.Stabilize(true))
+        assertEquals(st.id, c.p().mainClips[0].asset)
+        assertEquals(1, c.p().assets.count { it.derivedFrom != null })
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

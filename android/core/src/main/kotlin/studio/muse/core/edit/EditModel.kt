@@ -158,6 +158,45 @@ fun reverseClip(c: VideoClip, reversed: String, durationSec: Double): VideoClip?
         alphaMatte = null, audioAsset = null)
 }
 
+/**
+ * A clip switched to a derived copy [copy] made with [op] (or back to its original, op null): only the asset changes,
+ * since the copy has the same length and timing. A steadied copy's frames are moved, so an alpha matte lined up with the
+ * original is dropped (the apps say so); a smooth copy keeps it.
+ */
+fun deriveClip(c: VideoClip, copy: String, op: DerivedOp?): VideoClip =
+    c.copy(asset = copy, alphaMatte = if (op == DerivedOp.STABILIZE) null else c.alphaMatte)
+
+/** The helper steps from the original to [assetId], in the order applied ("stabilize", "smooth", "reverse"). */
+fun derivedOps(p: EditProject, assetId: String): List<String> {
+    val ops = ArrayList<String>()
+    var a = p.asset(assetId)
+    var n = 0
+    while (a != null && n++ < 8) {
+        val d = a.derivedFrom
+        a = if (d != null) { ops += d.op.wire; p.asset(d.asset) }
+            else if (a.reverseOf != null) { ops += "reverse"; p.asset(a.reverseOf!!) }
+            else break
+    }
+    return ops.reversed()
+}
+
+/** The original video an asset was made from (itself when it's not a copy). */
+fun sourceOf(p: EditProject, assetId: String): String {
+    var id = assetId
+    repeat(8) {
+        val a = p.asset(id)
+        val next = a?.derivedFrom?.asset ?: a?.reverseOf
+        if (next == null || p.asset(next) == null) return id
+        id = next
+    }
+    return id
+}
+
+/** The clip's helper label in the order applied, e.g. "Steadied, reversed"; "" for an original. */
+fun derivedLabel(p: EditProject, assetId: String): String =
+    derivedOps(p, assetId).joinToString(", ") { when (it) { "stabilize" -> "steadied"; "smooth" -> "smoothed"; else -> "reversed" } }
+        .replaceFirstChar { it.uppercase() }
+
 fun clipLength(c: MediaClip): Double = (c as? VideoClip)?.holdSec ?: clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 /** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */

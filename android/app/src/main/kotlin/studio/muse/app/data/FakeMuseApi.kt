@@ -742,7 +742,7 @@ class FakeMuseApi(
         checkKeepPoints(req)
         val silenceOnly = (req.options?.get("silenceOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
         val usd = when (req.kind) {
-            "beats", "reverse" -> 0.0
+            "beats", "reverse", "stabilize" -> 0.0
             "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
             // Tap to keep has its own price: GPU 15 + 3·d seconds (plans/api.md).
             "matte" -> if (req.options?.get("points") != null) maxOf(0.01, Math.round((15 + 3 * d) * 0.0004 * 100) / 100.0) else maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
@@ -1867,6 +1867,11 @@ object FakeEditorResults {
             // Reverse: the whole source backwards, as a new video upload (free; local ffmpeg on the server).
             "reverse" -> obj(
                 "asset" to obj("kind" to p("video"), "upload" to p("up_rev_$id"), "durationSec" to p(d)),
+                "width" to p(1080), "height" to p(1920), "hasAudio" to p(true), "durationSec" to p(d),
+            )
+            // Stabilise: the steadied copy, same length and timing (free; vidstab on the server).
+            "stabilize" -> obj(
+                "asset" to obj("kind" to p("video"), "upload" to p("up_st_$id"), "durationSec" to p(d)),
                 "width" to p(1080), "height" to p(1920), "hasAudio" to p(true), "durationSec" to p(d),
             )
             else -> obj()

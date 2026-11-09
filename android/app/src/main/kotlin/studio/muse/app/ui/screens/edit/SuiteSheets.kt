@@ -346,6 +346,14 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             job?.error != null && !reversed -> job.error
             else -> "Plays the clip backwards, sound too"
         }, reversed, { if (job?.running != true) act(EditAction.Reverse(!reversed)) })
+        // Stabilise: smooths out shaky handheld camera movement (the first time, the server makes the steadied copy).
+        val steady = ui.project?.asset(c.asset)?.derivedFrom?.op == studio.muse.core.edit.DerivedOp.STABILIZE
+        val sj = ui.ai["stabilize"]
+        OptRow("Stabilise", when {
+            sj?.running == true -> "${sj.phase.ifEmpty { "Steadying" }}… ${sj.progress}%"
+            sj?.error != null && !steady -> sj.error
+            else -> "Smooths out shaky handheld footage"
+        }, steady, { if (sj?.running != true) act(EditAction.Stabilize(!steady)) })
     }
 }
 
