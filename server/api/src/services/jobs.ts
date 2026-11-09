@@ -20,6 +20,7 @@ import { pods } from '../db/schema.js';
 import { shotPromptFor } from '../templates/service.js';
 import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
 import { draftOf } from '../suite/drafts.js';
+import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
 
 export const JobRequestSchema = z.object({
   title: z.string().max(200).optional(),
@@ -105,11 +106,16 @@ export class JobService {
   async get(id: string) { return (await this.ctx.db.select().from(jobs).where(eq(jobs.id, id)))[0] ?? null; }
 
   // ------------------------------------------------------------------ create
-  async create(user: AuthUser, body: unknown) {
+  /** `opts.swapChoice`: a swap engine the caller (the Suite, Recreate) already chose and checked; undefined = choose here. */
+  async create(user: AuthUser, body: unknown, opts: { swapChoice?: Choice | null } = {}) {
     const parsed = JobRequestSchema.safeParse(body);
     if (!parsed.success) throw badRequest(`Invalid job: ${parsed.error.issues[0]?.path.join('.')} ${parsed.error.issues[0]?.message}`);
     const draft = draftOf(body); // AI suite (workstream 1): the composer's draft, for "Reuse settings"
-    const r = { ...parsed.data, engine: parsed.data.engine ?? this.ctx.config.videoEngineDefault };
+    const { engineModel: requested, ...data } = parsed.data as typeof parsed.data & { engineModel?: unknown };
+    if (requested !== undefined && (typeof requested !== 'string' || requested.length > 40)) throw badRequest('engineModel: a model id');
+    // WS13: the swap engine (`engineModel`, owner only; else the studio's Swap default for the hosted swap).
+    const r = { ...data, engine: parsed.data.engine ?? this.ctx.config.videoEngineDefault };
+    await applySwapEngine(modelChoice(this.ctx), user, r as Record<string, any>, requested as string | undefined, opts.swapChoice);
     const [archived] = await this.ctx.db.select({ at: models.archivedAt }).from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
     if (archived?.at) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
     r.takes = Math.min(P.TAKES_MAX, Math.max(1, r.takes));
@@ -121,7 +127,8 @@ export class JobService {
       if (!(await this.ctx.replicateVideo.toolsReady())) throw new ApiError(400, 'engine_unavailable', "Draft, Standard and HD aren't available right now · try Edit");
       r.use = 'full';
       r.quality = r.quality ?? this.ctx.config.VIDEO_QUALITY_DEFAULT;
-      (r as P.RenderReq).pricePerSec = this.qualityPrice(r.quality);
+      const swapEngine = (r as Record<string, any>).swapEngine as string | undefined;
+      (r as P.RenderReq).pricePerSec = swapEngine ? (await modelChoice(this.ctx).swapQuote(user.studioId, swapEngine, r.quality, null)).perSec : this.qualityPrice(r.quality);
     } else delete r.quality;
     const [clip] = r.clipId ? await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, user.studioId))) : [];
     // Clip checks are advice only (owner decision): a clip that fails them can still be rendered; the apps show a

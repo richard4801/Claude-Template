@@ -34,6 +34,7 @@ import { ToolService } from './services/tools.js';
 import { EngineHealth } from './services/engines.js';
 import { SuiteService } from './suite/service.js';
 import { registerSuiteRoutes } from './routes/suite.js';
+import { registerEngineRoutes } from './routes/engines.js'; // WS13: model choice everywhere
 import { registerProviderRoutes } from './routes/providers.js'; // WS5: bring your own provider
 import { registerImportRoutes } from './routes/imports.js'; // WS12: import a video from a link
 import { recreateOf } from './recreate/references.js';
@@ -153,6 +154,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerWorkerRoutes(app, ctx);
   await registerVersionRoutes(app, ctx);
   await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)
+  await registerEngineRoutes(app, ctx); // WS13: model choice everywhere
   await registerProviderRoutes(app, ctx); // WS5: bring your own provider
   await registerImportRoutes(app, ctx); // WS12: import a video from a link
   await registerCameraRoutes(app, ctx); // workstream 2: camera sessions, Direct with Claude, Blender relay, MCP server

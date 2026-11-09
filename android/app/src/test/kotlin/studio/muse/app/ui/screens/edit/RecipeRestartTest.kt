@@ -72,4 +72,14 @@ class RecipeRestartTest {
         assertEquals("Something went wrong on the studio server. Try again.", ErrorText.of("http_500", "Server error 500"))
         for (s in listOf(400, 404, 409, 500, 502, 503, 504, 520)) assertTrue(!ErrorText.http(s).contains(Regex("""\d{3}""")))
     }
+
+    @Test fun aFailedReferenceIsRetriedOnTheServer() = runBlocking {
+        val api = fake()
+        val start = api.createReference("up_1", "Café", null)
+        api.debugFailReference(start.id)
+        val ui = follow(api, start, pause = noWait) {}
+        val failed = ui.phase as RecipePhase.Failed
+        assertEquals("Retry", failed.retryLabel) // the server's words say "tap Retry"
+        assertTrue(resume(api, failed.retry!!, noWait) {}.phase is RecipePhase.Ready)
+    }
 }

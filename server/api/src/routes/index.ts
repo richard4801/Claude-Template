@@ -34,6 +34,8 @@ import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
 import { PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
+import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
+import type { StepOverrides } from '../images/steps.js'; // WS13
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 10_000;
@@ -58,7 +60,7 @@ export function modelView(m: typeof models.$inferSelect) {
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
 setViews(modelView, outfitView);
-const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks,
+const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: P.wireFps(c.fps), checks: c.checks,
   /* prompt scripts: talking detection */ audio: audioView(c) ?? undefined });
 
 export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -221,7 +223,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const missing = m.slots.filter(s => !s.image && !s.busy);
     // Her identity images within the shot model's limit (plans/api.md "Identity images"); one sheet image each.
     const fillIds = await idRefs(req.user.studioId, m);
-    const fillPlan = await ctx.images.shotPlan(req.user.studioId, fillIds, [], 1);
+    const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'character', (req.body ?? {}) as Record<string, unknown>); // WS13: `imageModel`, else the Character photos default
+    const fillPlan = await ctx.images.shotPlan(req.user.studioId, fillIds, [], 1, undefined, stepModels);
     const cost = missing.length ? missing.length * fillPlan.perShot : 0;
     const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('f')}`, cost, `Character sheet · ${missing.length} angle${missing.length === 1 ? '' : 's'}`).start();
     const slots = m.slots.map(s => (missing.includes(s) ? { ...s, busy: true } : s));
@@ -236,7 +239,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       let failed = 0;
       for (const s of missing) {
         try {
-          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, maxImages: refs.length, panels, bill,
+          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, maxImages: refs.length, panels, bill, models: stepModels,
             req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!, texts).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
@@ -263,7 +266,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
       description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
     const m = await model(req.user, b.modelId, true);
-    const stepModels = ctx.imageModels.overridesFrom(req.user.role, b as { models?: unknown });
+    const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'outfit', b); // WS13: `imageModel`, else the Outfits default
     const mode = b.mode ?? 'describe';
     const id = uid('o');
     const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
@@ -467,7 +470,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // Upscale a finished render (plans/api.md "App clean-up" §2): SeedVR2 on the add-on GPU, priced per output second
   // (UPSCALE_PRICES, measured). A job like any add-on render: held, queued for a pod, settled at the quoted price.
   app.post<{ Params: { id: string } }>('/v1/takes/:id/upscale', async req => {
-    const b = parse(z.object({ size: z.enum(P.UPSCALE_SIZES.map(x => x.id) as [P.UpscaleSize, ...P.UpscaleSize[]]) }), req.body);
+    const b = parse(z.object({ size: z.enum(P.UPSCALE_SIZES.map(x => x.id) as [P.UpscaleSize, ...P.UpscaleSize[]]), engineModel: z.string().max(40).optional() }), req.body);
+    if (b.engineModel) await modelChoice(ctx).check(req.user, 'upscale', b.engineModel); // WS13: today only SeedVR2
     const [t] = await db.select().from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
     if (!t) throw notFound('Take');
     if (t.kind !== 'take') throw badRequest('Upscale works on a finished video take');
@@ -515,13 +519,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     imageEngine: ImageEngineOverride.optional() }).passthrough();
 
   /** Everything a shoot (or its preview) needs: the model, outfit, images to send, the prompt and the estimate. */
-  async function planShoot(u: AuthUser, body: unknown, still?: StillRig, engine?: EngineSelection) {
+  async function planShoot(u: AuthUser, body: unknown, still?: StillRig, engine?: EngineSelection, models?: StepOverrides) {
     const b = parse(ShootBody, body);
     if (engine) (b as { imageEngine?: unknown }).imageEngine = engine; // WS5: a custom image model (checked by the caller)
     const m = await model(u, b.modelId, true);
     const o = await outfitOf(u, b.outfitId);
     const count = Math.min(4, Math.max(1, b.count ?? 4));
-    const stepModels = ctx.imageModels.overridesFrom(u.role, b as { models?: unknown });
+    const stepModels = models ?? ctx.imageModels.overridesFrom(u.role, b as { models?: unknown }); // WS13: `models` = already checked
     const texts = await ctx.prompts.texts(u.studioId);
     const refsIn = (b.refs ?? []) as ShootRefIn[];
     if (b.templateId) {
@@ -655,11 +659,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // Owner only: `imageModel` picks any image model for this run (a Replicate "owner/name" or a custom "c_…").
     if (p.imageModel && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the image model');
     if (p.imageModel && p.engineModel) throw badRequest('Use imageModel or engineModel, not both');
-    const custom = p.engineModel ?? (p.imageModel?.startsWith('c_') ? p.imageModel : undefined);
+    // WS13: nothing picked → the studio's Photo default (a Replicate model or a custom one), if it is still available.
+    const imageModel = p.imageModel ?? (p.engineModel ? undefined : (await modelChoice(ctx).choose(u, 'photo'))?.model);
+    const custom = p.engineModel ?? (imageModel?.startsWith('c_') ? imageModel : undefined);
     const engine = custom ? (await ctx.suite.byo.checkUse(u, custom, 'image'), { provider: 'byo' as const, model: custom }) : undefined;
-    if (p.imageModel && !custom && !MODEL_ID_RE.test(p.imageModel)) throw badRequest('imageModel: use owner/name or a custom model id');
-    if (p.imageModel && !custom) (shoot as Record<string, unknown>).models = { shot: p.imageModel }; // priced on that model (planShoot)
-    const s = await planShoot(u, shoot, p.presetId ? undefined : still, engine);
+    if (imageModel && !custom && !MODEL_ID_RE.test(imageModel)) throw badRequest('imageModel: use owner/name or a custom model id');
+    // Priced and run on that model (planShoot); passed as checked step models so a member can run on the studio default.
+    const s = await planShoot(u, shoot, p.presetId ? undefined : still, engine, imageModel && !custom ? { shot: imageModel } : undefined);
     const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
     return { p, s, notes, graded };
   };

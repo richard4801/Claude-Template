@@ -122,6 +122,17 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     expect(clip.storage_key).toBe(r.body.videoKey);
   }, 60_000);
 
+  it('a 29.97 fps video (most phone and platform videos) comes back with a whole-number fps the apps can read', async () => {
+    const ntsc = path.join(dir, 'ntsc.mp4');
+    ff('-f', 'lavfi', '-i', 'testsrc2=s=90x160:r=30000/1001', '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-threads', '1', ntsc);
+    const r = await member.req('POST', '/v1/imports', { uploadId: await upload(member, ntsc), sourceUrl: 'https://www.tiktok.com/@muse.studio/video/7431234567890002997' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.fps).toBe(30);
+    expect((await member.req('GET', '/v1/imports')).body.every((i: any) => Number.isInteger(i.fps))).toBe(true);
+    expect((await member.req('POST', '/v1/links/check', { url: 'https://www.tiktok.com/@muse.studio/video/7431234567890002997' })).body.cached.fps).toBe(30);
+    expect((await member.req('DELETE', `/v1/imports/${r.body.id}`)).status).toBe(204);
+  }, 60_000);
+
   it('lists: a member sees their own imports, the owner all; rename and delete', async () => {
     const mine = (await member.req('GET', '/v1/imports')).body;
     expect(mine).toHaveLength(1);

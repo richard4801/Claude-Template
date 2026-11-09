@@ -66,3 +66,22 @@ class RecreateServerRenderTest {
         assertNull(RecreateServerRender(slow, tmp.root, pollMs = 1, maxWaitMs = 5).preview("es_1"))
     }
 }
+
+/** The phone's fallback plays the built edit only from real video: never stills or posters standing in for shots. */
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35])
+class RecreateLocalEditRuleTest {
+    private val clips = listOf(studio.muse.core.edit.VideoClip("c1", "a1", 0.0, 2.0, 1.0), studio.muse.core.edit.VideoClip("c2", "a2", 0.0, 2.0, 1.0))
+    private fun project(items: List<studio.muse.core.edit.Item>) = studio.muse.core.edit.EditProject(
+        sourceTakeId = "t1", canvas = studio.muse.core.edit.Canvas(1080, 1920, 30.0),
+        assets = listOf(studio.muse.core.edit.Asset("a1", studio.muse.core.edit.AssetKind.VIDEO, take = "t1"), studio.muse.core.edit.Asset("a2", studio.muse.core.edit.AssetKind.VIDEO, take = "t2")),
+        tracks = listOf(studio.muse.core.edit.Track("main", studio.muse.core.edit.TrackKind.MAIN, items = items)))
+
+    @org.junit.Test fun onlyAnEditWithEveryShotsVideoPlays() {
+        org.junit.Assert.assertTrue(RecreateLocalEdit.isRealEdit(project(clips), setOf("a1", "a2")))
+        org.junit.Assert.assertFalse(RecreateLocalEdit.isRealEdit(project(clips), setOf("a1"))) // a shot without its video
+        org.junit.Assert.assertFalse(RecreateLocalEdit.isRealEdit(project(emptyList()), emptySet()))
+        // A still standing in for a shot (the slideshow the owner saw) is never the edit.
+        org.junit.Assert.assertFalse(RecreateLocalEdit.isRealEdit(project(clips + studio.muse.core.edit.ImageItem("i1", "a1", 4.0, 2.0)), setOf("a1", "a2")))
+    }
+}

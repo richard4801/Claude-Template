@@ -60,7 +60,10 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // Remove background → tap what to keep (workstream 1's tracked cut-out), phone and tablet.
                 "keep", "tablet_keep",
                 // The cut-out isn't live yet (the server's matte.available is false): "Coming soon".
-                "matte_soon").map { arrayOf<Any>(t, it) }
+                "matte_soon",
+                // The owner's report (2026-11-08): one 15 s 9:16 take — the start state, a split with the second clip
+                // selected (trim handles), and its sound detached to its own lane.
+                "take_start", "take_split", "take_detached").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -106,6 +109,16 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
         return runBlocking { LookThumbnails.renderPack(frame, lib, heightPx = 48, dispatcher = kotlinx.coroutines.Dispatchers.Unconfined) }.mapValues { it.value.asImageBitmap() }
     }
 
+    /** Stand-in sound levels (speech-like bursts), so the sound lanes show real-looking waveforms from [Peaks]. */
+    private fun waves(): Map<String, Peaks> = listOf("src" to 1, "music1" to 2, "vo1" to 3).associate { (id, seed) ->
+        id to Peaks(50f, FloatArray(50 * 40) { i ->
+            val t = i / 50.0
+            val env = (0.35 + 0.65 * kotlin.math.abs(kotlin.math.sin(t * (1.3 + seed * .4)))).toFloat()
+            val n = (((i * 1103515245 + seed * 12345) ushr 8) and 1023) / 1023f
+            (env * (0.25f + 0.75f * n)).coerceIn(0f, 1f)
+        })
+    }
+
     @Test fun capture() {
         if (state == "editor_360") org.robolectric.RuntimeEnvironment.setQualifiers("w360dp-h780dp-xhdpi")
         if (state == "tablet" || state == "tablet_captions" || state == "tablet_collapsed" || state == "tablet_keep") org.robolectric.RuntimeEnvironment.setQualifiers("w1280dp-h800dp-mdpi")
@@ -118,7 +131,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
             phase = SuitePhase.Ready, export = ExportSettings.forProject(p), bpm = 118.0, looks = looks,
             takes = listOf(TakeChoice("t2", "Counter", "Edit", ImageRef.asset("c_front"), 4.2, false, true)),
         )
-        var host = SuiteHost()
+        var host = SuiteHost(waves = waves())
         when (state) {
             "captions" -> ui = ui.copy(panel = Panel.CAPTIONS, ai = mapOf("silences" to AiTask("silences", price = "Free")))
             "audio" -> {
@@ -135,6 +148,20 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 host = host.copy(lookThumbs = thumbs())
             }
             "export" -> ui = ui.copy(panel = Panel.EXPORT)
+            "take_start", "take_split", "take_detached" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                ui = ui.copy(project = one, playheadSec = 0.0, canUndo = false, selectedId = null)
+                if (state != "take_start") {
+                    val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                        override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                        override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                    }, ui)
+                    c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.Split)
+                    c.act(EditAction.Select(c.project!!.mainClips[1].id))
+                    if (state == "take_detached") { c.act(EditAction.Scrub(8.0, end = true)); c.act(EditAction.DetachAudio) }
+                    ui = c.ui.value.copy(message = null)
+                }
+            }
             "editor", "editor_360", "tablet", "tablet_portrait" -> ui = ui.copy(selectedId = "c2")
             "tablet_captions" -> ui = ui.copy(panel = Panel.CAPTIONS, ai = mapOf("silences" to AiTask("silences", price = "Free")))
             "tablet_collapsed" -> ui = ui.copy(selectedId = "c2", inspectorHidden = true)

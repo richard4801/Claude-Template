@@ -239,4 +239,30 @@ class RecreateBuildTest {
         model.setLocation(slot, null)
         assertEquals("generated", model.ui.value.estimates[slot]!!.background!!.source)
     }
+
+    @Test fun aRefusedBuildNeverShowsTheServersInternalText() = runBlocking {
+        val f = FakeMuseApi(MainScope(), null, speed = 0.0, genDelayMs = 0)
+        val ref = ready(f)
+        val api = object : studio.muse.app.data.MuseApi by f {
+            override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
+                throw studio.muse.app.data.ApiException("bad_request", "project.tracks.1.items.2.startSec: items on a track must be in order and not overlap")
+        }
+        val takes = f.listTakes().filter { it.kind == "take" }.map { RecreateTakeChoice(it.id, it.title, it.durationSec) }
+        val model = RecreateBuildModel(api, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default), RecreateBuildUi(ref.id, ref.recipe!!, ref.name, takes = takes), defaultModelId = { "m_demo" }, pollMs = 5)
+        model.load()
+        // Every shot from your takes: Build goes straight to apply.
+        ref.recipe!!.slots.forEach { s -> model.useTake(s.id, takes.first()) }
+        model.requestBuild(); model.confirmBuild().join()
+        withTimeout(5_000) { while (model.ui.value.building) delay(10) }
+        assertEquals(BUILD_FAILED, model.ui.value.message)
+    }
+
+    @Test fun internalServerTextIsRecognised() {
+        val e = studio.muse.app.data.ErrorText
+        assertTrue(e.looksInternal("project.tracks.1.items.2.startSec: items on a track must be in order and not overlap"))
+        assertTrue(e.looksInternal("Invalid request: slots.s2 Required"))
+        assertFalse(e.looksInternal("This shot isn't in the edit any more · rebuild the edit"))
+        assertFalse(e.looksInternal("Not enough in the studio balance · add a top-up in Credit"))
+        assertEquals("Couldn’t swap the shot", e.plain(studio.muse.app.data.ApiException("bad_request", "rig.lens: \"x\" isn't offered"), "Couldn’t swap the shot"))
+    }
 }

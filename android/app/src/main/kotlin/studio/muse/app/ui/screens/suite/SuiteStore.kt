@@ -114,8 +114,8 @@ class SuiteStore(private val c: AppContainer) {
      * Upscale [takeId] to [size]: the job (followed like any render), or null. `upscale_unavailable` (409) greys every size
      * with "Upscale is coming soon" and keeps the sheet open; other errors are a toast.
      */
-    suspend fun upscale(takeId: String, size: String): Job? {
-        val (j, code, msg) = c.repo.upscaleInline(takeId, size)
+    suspend fun upscale(takeId: String, size: String, engineModel: String? = null): Job? {
+        val (j, code, msg) = c.repo.upscaleInline(takeId, size, engineModel)
         if (j != null) {
             shotJobs.update { (it - j.id) + j.id }
             upscaleFor.value = null

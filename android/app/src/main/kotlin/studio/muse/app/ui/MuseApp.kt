@@ -135,6 +135,10 @@ object Routes {
     const val SUITE_COMPOSE = "suite/compose/{tool}"
     fun suiteTake(jobId: String) = "suite/take/$jobId"
     fun suiteCompose(tool: String) = "suite/compose/$tool"
+    /** WS7: Share → MUSE asks what to do with the shared video (Recreate, Use for swap, Import to library). */
+    const val SHARE = "share"
+    /** WS7: Settings → Default models (owner): what Auto uses per kind of work. */
+    const val DEFAULT_MODELS = "default-models"
     const val CAMERA_STAGE = "camera-stage"; const val EDIT = "edit"; const val EDIT_TAKE = "edit/{id}"; const val CONNECTIONS = "connections"
     fun editTake(takeId: String) = "edit/$takeId"
 
@@ -259,6 +263,8 @@ fun MuseApp(
                     composable(Routes.SUITE_ENGINES) { studio.muse.app.ui.screens.suite.SuiteEnginesScreen() }
                     composable(Routes.CAMERA_STAGE) { studio.muse.app.ui.screens.camera.CameraStageScreen() }
                     composable(Routes.EDIT) { studio.muse.app.ui.screens.edit.EditSuiteScreen(null, onBack = { n.back() }) }
+                    composable(Routes.SHARE) { studio.muse.app.ui.screens.ShareChooserScreen() } // WS7
+                    composable(Routes.DEFAULT_MODELS) { studio.muse.app.ui.screens.DefaultModelsScreen() } // WS7
                     composable(Routes.EDIT_TAKE) { e -> studio.muse.app.ui.screens.edit.EditSuiteScreen(e.arguments?.getString("id"), onBack = { n.back() }) }
                     composable(Routes.CONNECTIONS) { studio.muse.app.ui.screens.camera.ConnectionsScreen(onBack = { n.back() }) }
                     composable(Routes.LORA) { LoraScreen() }

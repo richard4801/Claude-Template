@@ -247,6 +247,9 @@ export function loraParts(p: number) {
 }
 
 /** Source clip checks. People and watermark come from the client's metadata until server-side detection exists. */
+/** Clips' fps on the wire is a whole number (the apps read it as an Int); probed sources can be 29.97. */
+export const wireFps = (fps: number) => Math.max(1, Math.round(fps || 30));
+
 export function clipChecks(m: { people?: number | null; watermark?: string | null; width: number; height: number; fps: number; durationSec: number; talking?: boolean | null }): ClipCheck[] {
   const out: ClipCheck[] = [];
   out.push(m.people === 1 || m.people == null ? { label: 'One person in frame', value: 'Yes', status: 'good' }

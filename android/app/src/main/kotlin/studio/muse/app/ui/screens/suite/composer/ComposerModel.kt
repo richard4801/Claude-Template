@@ -101,6 +101,8 @@ data class ComposerDraft(
     val addon: String? = null,
     /** Owner only: the engine pinned for this shot (one of the tier's `models`) and its resolution; null = Auto (the ladder). */
     val engineModel: String? = null,
+    /** WS7: the tool the pick was made for (Swap / Recast / Extend send it only when it's theirs). */
+    val engineTool: ComposerTool? = null,
     val resolution: String? = null,
     /** Extend: "after" (what happens next) or "before" (what happens before). */
     val extendDirection: String = "after",
@@ -133,7 +135,11 @@ data class ComposerDraft(
     val characterOutfit: String? get() = tokens.outfit?.id ?: outfitId.takeIf { tokens.character == null || tokens.character?.id == modelId }
 
     /** Switches tool without leaving the page (Change). The prompt and chips stay; a tool's own defaults apply. */
-    fun withTool(t: ComposerTool): ComposerDraft = copy(tool = t, collapsed = false, settings = if (t == ComposerTool.SHOT) settings else settings.copy(preset = null))
+    fun withTool(t: ComposerTool): ComposerDraft = copy(tool = t, collapsed = false, settings = if (t == ComposerTool.SHOT) settings else settings.copy(preset = null)).let { d ->
+        // A model picked for one kind of work (a shot model, a swap model) doesn't carry to another (WS7).
+        val group = { x: ComposerTool -> if (x in PROMPT_TOOLS) "shot" else x.id }
+        if (group(t) != group(tool)) d.copy(engineModel = null, resolution = null) else d
+    }
 
     /**
      * Picks a ready-made combo (the beginner path): the tool card becomes the preset, the chips take its values, its move
@@ -187,7 +193,8 @@ data class ComposerDraft(
         val sized = if (duration in r) this else copy(duration = duration.coerceIn(r))
         // A pin the catalog doesn't have (a member's catalog has none), or a ladder engine of another quality, goes back to Auto.
         val e = ModelPicker.find(cat, engineModel)
-        val ok = engineModel == null || (e != null && (e.tiers.isEmpty() || quality in e.tiers))
+        // Swap, Recast and Extend pick from their own lists (WS13), not the shot engines: kept as picked.
+        val ok = engineModel == null || tool in MODEL_TOOLS || (e != null && (e.tiers.isEmpty() || quality in e.tiers))
         return if (ok) sized else sized.copy(engineModel = null, resolution = null)
     }
 
@@ -237,7 +244,10 @@ data class ComposerDraft(
      */
     fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
         baseRequest(slots, inputs, recast, own).let { r ->
-            if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null }) else r
+            if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null })
+            // WS7: Character swap (on the quality ladder), Recast and Extend take the owner's model too (the server's pickRecast / pickExtend).
+            else if (tool in MODEL_TOOLS && engineModel != null && engineTool == tool) r.copy(engineModel = engineModel, resolution = resolution)
+            else r
         }.let { r -> if (tool in PROMPT_TOOLS) withDraftReferences(r) else r }
             .copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes
 
@@ -330,6 +340,8 @@ data class ComposerDraft(
         val PHOTO_PRESETS = setOf("product_hero")
         /** Tools with a prompt that takes @ tokens and reference images. */
         val PROMPT_TOOLS = setOf(ComposerTool.SHOT, ComposerTool.TALKING, ComposerTool.UGC)
+        /** WS7: the other tools with an owner model pick (their own purposes, not the shot engines). */
+        val MODEL_TOOLS = setOf(ComposerTool.SWAP, ComposerTool.RECAST, ComposerTool.EXTEND)
         val SHAPES = listOf("9:16", "1:1", "16:9")
     }
 }
@@ -384,6 +396,7 @@ object SwapAddons {
     fun request(d: ComposerDraft, recast: RecastDraft, a: SwapAddon, clipSeconds: Double?): JobRequest =
         draft(a, d.takes, recast.keepAudio, d.speaking).request(d.title.trim().ifBlank { "Character swap · ${a.label}" }, d.characterId.orEmpty(),
             d.characterOutfit.orEmpty(), recast.clipId.orEmpty(), clipSeconds)
+            .copy(engineModel = d.engineModel.takeIf { d.engineTool == ComposerTool.SWAP }) // WS13: the owner's swap model
 }
 
 /**

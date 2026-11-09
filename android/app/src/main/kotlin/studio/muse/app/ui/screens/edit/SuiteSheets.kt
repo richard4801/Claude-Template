@@ -103,6 +103,8 @@ data class SuiteHost(
     val export: (toPhone: Boolean) -> Unit = {},
     val cancelExport: () -> Unit = {},
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** Decoded sound levels per asset id, for the timeline's sound lanes. */
+    val waves: Map<String, Peaks> = emptyMap(),
 )
 
 /** The open panel as a bottom sheet. */
@@ -136,6 +138,9 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
         }
     }
 }
+
+private const val GREEN_KEY = "#2BD15F"
+private const val BLUE_KEY = "#2B5BD1"
 
 private fun fmt1(v: Double) = String.format(java.util.Locale.ROOT, "%.1f", v)
 private fun signed(v: Int) = if (v > 0) "+$v" else if (v < 0) "−${-v}" else "0"
@@ -205,7 +210,6 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         SuiteChips(listOf("0.5", "1", "1.5", "2", "3").map { it to "$it×" }, c.speed.let { if (it == it.toInt().toDouble()) it.toInt().toString() else it.toString() }, { act(EditAction.Speed(it.toDouble())) })
         T("${fmt1(c.outSec - c.inSec)} s → ${fmt1(clipLength(c))} s · pitch kept", m.type.body.copy(fontSize = 13.sp), m.t.ink)
     }
-    OptRow("Smooth slow-mo", "Fills in frames (AI) · Coming soon", false, {}, trailing = { Box(Modifier.semantics { contentDescription = "Coming soon" }) { Toggle(false, {}, Modifier) } })
 }
 
 /** The speed curve editor: log scale 0.1×–10×, points draggable, double-tap adds one, the playhead as a line. */
@@ -293,6 +297,21 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     line("Scale", KfProp.SCALE, "${(sc * 100).roundToInt()}%", ((sc - .1) / 2.9).toFloat()) { f -> tr.copy(scale = r2(.1 + f * 2.9)) }
     line("Rotation", KfProp.ROTATION, "${rot.roundToInt()}°", ((rot + 180) / 360).toFloat()) { f -> tr.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()) }
     T("◆ adds a keyframe at the playhead", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    // Crop (pictures only): how much is cut from each side, 0–45 %.
+    if (item is Visual) {
+        val cr = item.crop ?: studio.muse.core.edit.Crop()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SuiteLabel("Crop", Modifier.weight(1f))
+            if (item.crop != null) SuiteLink("Reset crop") { act(EditAction.SetCrop(null)) }
+        }
+        @Composable
+        fun side(label: String, v: Double?, set: (Double) -> studio.muse.core.edit.Crop) =
+            SuiteSlider(((v ?: 0.0) / .45).toFloat(), { f, done -> act(EditAction.SetCrop(set(f * .45), done)) }, label = label, valueText = "${((v ?: 0.0) * 100).roundToInt()}%")
+        side("Left", cr.left) { cr.copy(left = it) }
+        side("Right", cr.right) { cr.copy(right = it) }
+        side("Top", cr.top) { cr.copy(top = it) }
+        side("Bottom", cr.bottom) { cr.copy(bottom = it) }
+    }
 }
 
 private fun r2(v: Double) = Math.round(v * 100) / 100.0
@@ -304,8 +323,17 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     val p = ui.project ?: return
     val clip = SuiteOps.soundClip(p, ui.selectedId, ui.activeClip)
     val music = SuiteOps.musicTrack(p)
-    val name = if (clip is VideoClip) "voice" else "clip"
+    val name = if (clip is VideoClip) "clip sound" else "clip"
     val gain = clip?.let { if (it.muted == true) 0.0 else it.volume ?: 1.0 } ?: 1.0
+    // The clip's own sound (owner report 2026-11-08): on/off, and detach it to its own lane.
+    if (clip != null) {
+        val on = clip.muted != true
+        val what = when { clip is VideoClip -> "Clip ${(p.mainClips.indexOfFirst { it.id == clip.id } + 1).takeIf { it > 0 } ?: ""}".trim(); else -> "This sound" }
+        val hasSound = clip !is VideoClip || SuiteOps.hasSound(p, clip)
+        OptRow("Sound", if (!hasSound) "$what has no sound" else if (on) "$what plays its sound" else "$what is silent", on && hasSound, { if (hasSound) act(EditAction.MuteClip(on)) })
+        if (clip is VideoClip && hasSound && p.main.items.any { it.id == clip.id })
+            SuiteButton("Detach audio", { act(EditAction.DetachAudio) }, Modifier.fillMaxWidth(), icon = "waveform", enabled = on)
+    }
     val db = SuiteOps.gainToDb(gain).coerceIn(-24.0, 6.0)
     SuiteSlider(((db + 24) / 30).toFloat(), { f, done -> act(EditAction.Volume(f * 30.0 - 24, done)) }, label = "Volume · $name",
         valueText = if (gain <= 0) "Muted" else "${if (db < -0.05) "−" else if (db > 0.05) "+" else ""}${fmt1(kotlin.math.abs(db)).removeSuffix(".0")} dB")
@@ -343,7 +371,7 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     if (hasBeats) OptRow("Snap cuts to beats", "Split lands on the nearest beat", ui.snapToBeats, { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         SuiteButton("Music from uploads", host.pickAudio, Modifier.weight(1f), icon = "music")
-        SuiteButton("Record VO", host.recordVo, Modifier.weight(1f), icon = "mic")
+        SuiteButton(if (ui.recordingAt != null) "Stop recording" else "Record VO", host.recordVo, Modifier.weight(1f), icon = "mic", primary = ui.recordingAt != null)
     }
 }
 
@@ -525,10 +553,18 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     }
     val clip = v as? VideoClip
     if (clip != null) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SuiteLabel("Chroma key", Modifier.weight(1f))
-            Box(Modifier.size(20.dp).background(colorOf(clip.chroma?.color ?: "#2BD15F")))
-            T(clip.chroma?.color ?: "Off", m.type.mono.copy(fontSize = 12.sp), m.t.muted)
+        // Chroma key (green or blue screen): on/off, the key colour, how much around it goes, the edge and the spill.
+        val ck = clip.chroma
+        OptRow("Chroma key", if (ck == null) "Removes a green or blue screen" else "Removing ${if (ck.color.equals(BLUE_KEY, true)) "blue" else "green"}", ck != null, {
+            act(EditAction.SetChroma(if (ck == null) studio.muse.core.edit.Chroma(GREEN_KEY, .4, .08, .5) else null))
+        })
+        if (ck != null) {
+            SuiteSeg(listOf(GREEN_KEY to "Green screen", BLUE_KEY to "Blue screen"), if (ck.color.equals(BLUE_KEY, true)) BLUE_KEY else GREEN_KEY,
+                { act(EditAction.SetChroma(ck.copy(color = it))) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+            val sim = ck.similarity ?: .4; val sm = ck.smoothness ?: .08; val sp = ck.spill ?: .5
+            SuiteSlider(sim.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(similarity = f.toDouble()), done)) }, label = "Strength", valueText = "${(sim * 100).roundToInt()}")
+            SuiteSlider(sm.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(smoothness = f.toDouble()), done)) }, label = "Edge softness", valueText = "${(sm * 100).roundToInt()}")
+            SuiteSlider(sp.toFloat(), { f, done -> act(EditAction.SetChroma(ck.copy(spill = f.toDouble()), done)) }, label = "Spill", valueText = "${(sp * 100).roundToInt()}")
         }
         // The cut-out isn't live yet (the server says so): both read "Coming soon", plainly, with nothing to press.
         val keyed = clip.alphaMatte != null
@@ -652,7 +688,7 @@ private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
 @Composable
 private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
-    T("Your takes and edited versions. Add one to the end of the video, or over it as picture-in-picture.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+    T("Your takes and edited versions. Add one to the end of the video, or over it as an overlay at the playhead.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
     if (ui.takes.isEmpty()) T("No other videos yet", m.type.body, m.t.muted)
     ui.takes.forEach { t ->
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -661,7 +697,8 @@ private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
                 T(t.title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
                 T(listOfNotNull(t.label, t.durationSec?.let { "${fmt1(it)} s" }).joinToString(" · "), m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
             }
-            SuiteButton("PiP", { act(EditAction.AddPip(t)) }, height = 34.dp, icon = "layers")
+            SuiteButton("Add to end", { act(EditAction.AppendTake(t)) }, height = 34.dp, enabled = t.hasVideo)
+            SuiteButton("Overlay", { act(EditAction.AddPip(t)) }, height = 34.dp, icon = "layers", enabled = t.hasVideo)
         }
     }
     SuiteButton("Music from uploads", host.pickAudio, Modifier.fillMaxWidth(), icon = "music")
@@ -723,7 +760,6 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
         }
     }
     OptRow("Label as AI-generated", "Your choice, per export", s.aiLabel, { set(s.copy(aiLabel = !s.aiLabel)) })
-    OptRow("Content Credentials (C2PA)", if (s.contentCredentials) "Coming soon · not added to this file yet" else "Signed provenance in the file", s.contentCredentials, { set(s.copy(contentCredentials = !s.contentCredentials)) })
     val (w, h) = s.size
     Row(verticalAlignment = Alignment.CenterVertically) {
         val d = ui.duration
