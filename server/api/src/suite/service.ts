@@ -205,20 +205,12 @@ export class SuiteService {
           perRun: m.byo?.perRunUsd ? Math.round(m.byo.perRunUsd * scale * 10000) / 10000 : null,
           minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios, inputs: inputSlotsOf([m]) };
       });
-    // The studio's photo model (the Photo tool's default) and its price for one photo with the usual 3 identity images.
-    const shot = await this.ctx.imageModels.resolve(studioId, 'shot').catch(() => null);
-    const image: Record<string, unknown>[] = [];
-    if (shot) {
-      const n = 3, inMp = P.PHOTO_REF_MP * n;
-      const perRun = this.ctx.imageModels.isRecipe('shot', shot.model) ? P.newShotEstimateImages(this.ctx.images.photoPrices(), 2, n)
-        : await this.ctx.imageModels.estimate(shot.model, { outMp: 2, inMp }).catch(() => null);
-      image.push({ model: shot.model, name: modelName(shot.model), kind: 'image', custom: false, purposes: ['photo', 'outfit', 'character', 'plate'], tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
-        perRun: perRun == null ? null : Math.round(perRun * 10000) / 10000, minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: [],
-        inputs: { ...NO_INPUTS, images: Math.min(6, this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS) } });
-    }
-    for (const c of await this.byo.catalog({ studioId, role: 'owner' } as AuthUser)) if (c.kind === 'image')
-      image.push({ model: c.id, name: c.name, kind: 'image', custom: true, purposes: ['photo'], tier: null, tiers: [], resolution: null, resolutions: [], perSec: null, perRun: c.price.usd,
-        minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: c.aspectRatios, inputs: c.inputs });
+    // Every image model the owner can pick (the same list as GET /v1/engines: the studio's photo model, the curated ones,
+    // Replicate's popular image models, and the studio's own), so the Photo picker isn't limited to the default.
+    const image: Record<string, unknown>[] = (await modelChoice(this.ctx).all({ studioId, role: 'owner' } as AuthUser, ['image']).catch(() => [])).map(e => ({
+      model: e.model, name: e.name, kind: 'image', custom: e.custom, purposes: e.purposes, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
+      perRun: e.price?.basis === 'per_run' ? e.price.usd : null, minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: e.limits.aspectRatios ?? [],
+      inputs: e.inputs, ...(e.members ? { members: e.members } : {}) }));
     // One price per entry for the picker: per run for per-run custom models and image models, else per second.
     return [...video, ...image].map(e => ({ ...e, price: e.perRun != null ? { basis: 'per_run' as const, usd: e.perRun as number }
       : e.perSec != null ? { basis: 'per_second' as const, usd: e.perSec as number } : null }));
