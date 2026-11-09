@@ -268,6 +268,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         importLink = { importing = true },
         headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        reframe = vm::reframe,
         contentUrl = { path -> vm.contentUrl(path) },
         addContent = vm::addContent,
         previewSound = vm::previewSound,
@@ -701,6 +702,32 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         studio.muse.app.platform.edit.ContentLibrary.register(path, dst)
         controller.update { it.copy(contentHere = it.contentHere + path) }
         return dst
+    }
+
+    /**
+     * Auto reframe: the active clip's source sampled at 5 fps, faces found on this phone (ML Kit), then its x keyframes
+     * set to follow the speaker (studio.muse.core.edit.Reframe).
+     */
+    fun reframe() {
+        val u = controller.ui.value
+        val p = controller.project ?: return
+        val clip = (u.selection?.second as? studio.muse.core.edit.VideoClip) ?: u.activeClip ?: return
+        if (u.reframing != null) return
+        val a = p.asset(clip.asset) ?: return
+        val file = files[clip.asset] ?: return c.repo.toast("This clip isn't on the phone yet · try again in a moment")
+        val cover = studio.muse.core.edit.Reframe.coverWidth(a.width ?: return, a.height ?: return, p.canvas.width, p.canvas.height, clip.transform?.scale ?: 1.0)
+        if (cover <= 1.05) return c.repo.toast("This clip already fills the frame")
+        viewModelScope.launch {
+            controller.update { it.copy(reframing = 0f) }
+            try {
+                val times = studio.muse.core.edit.Reframe.sampleTimes(studio.muse.core.edit.clipLength(clip))
+                val samples = studio.muse.app.platform.edit.FaceSampler.sample(file, times, { studio.muse.core.edit.clipSourceAt(clip, it) }) { f -> controller.update { it.copy(reframing = f) } }
+                val keys = studio.muse.core.edit.Reframe.keyframes(samples, cover)
+                if (keys.isEmpty()) c.repo.toast("No face found in this clip") else controller.act(EditAction.ApplyReframe(clip.id, keys))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) { c.repo.toast("Couldn't look for faces · try again")
+            } finally { controller.update { it.copy(reframing = null) } }
+        }
     }
 
     /** A sticker or sound effect: its file first (so the preview has it), then into the edit. */

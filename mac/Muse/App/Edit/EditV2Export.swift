@@ -1,4 +1,5 @@
 import AVFoundation
+import VideoToolbox
 import CoreImage
 import ImageIO
 import MuseCore
@@ -38,7 +39,8 @@ extension EditV2Engine {
 
     /// Writes `built` through AVAssetReader → AVAssetWriter: video at `bitrate` bits/s (H.264 or HEVC) with AAC sound, or
     /// with `audioOnly` just the mix as AAC 192 kbit/s in an .m4a. Progress 0…1; cancelling stops it and deletes the file.
-    static func write(_ built: Built, to url: URL, audioOnly: Bool = false, hevc: Bool = false, bitrate: Double = 16e6,
+    /// `hdr`: HEVC Main 10, BT.2020 / HLG (built with `hdr`).
+    static func write(_ built: Built, to url: URL, audioOnly: Bool = false, hevc: Bool = false, bitrate: Double = 16e6, hdr: Bool = false,
                       progress: @escaping @MainActor (Double) -> Void) async throws {
         try? FileManager.default.removeItem(at: url)
         let asset = built.composition
@@ -50,18 +52,24 @@ extension EditV2Engine {
         if !audioOnly {
             let vTracks = try await asset.loadTracks(withMediaType: .video)
             guard !vTracks.isEmpty else { throw ApiError("edit_export_failed", "This edit has no picture to export") }
-            let vOut = AVAssetReaderVideoCompositionOutput(videoTracks: vTracks, videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+            let vOut = AVAssetReaderVideoCompositionOutput(videoTracks: vTracks, videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: hdr ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_32BGRA])
             vOut.videoComposition = built.videoComposition
             vOut.alwaysCopiesSampleData = false
             guard reader.canAdd(vOut) else { throw ApiError("edit_export_failed", "Couldn't read this edit's picture") }
             reader.add(vOut)
             let size = built.videoComposition.renderSize
             let fps = built.plan.fps.isFinite && built.plan.fps > 0 ? built.plan.fps : 30
-            let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
-                AVVideoCodecKey: hevc ? AVVideoCodecType.hevc : AVVideoCodecType.h264,
-                AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
-                AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: Int(max(200_000, bitrate)), AVVideoExpectedSourceFrameRateKey: Int(fps.rounded())],
-            ])
+            var compression: [String: Any] = [AVVideoAverageBitRateKey: Int(max(200_000, bitrate)), AVVideoExpectedSourceFrameRateKey: Int(fps.rounded())]
+            var video: [String: Any] = [AVVideoCodecKey: hevc || hdr ? AVVideoCodecType.hevc : AVVideoCodecType.h264,
+                                        AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height)]
+            if hdr {
+                compression[AVVideoProfileLevelKey] = kVTProfileLevel_HEVC_Main10_AutoLevel as String
+                video[AVVideoColorPropertiesKey] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+                                                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
+                                                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020]
+            }
+            video[AVVideoCompressionPropertiesKey] = compression
+            let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: video)
             vIn.expectsMediaDataInRealTime = false
             guard writer.canAdd(vIn) else { throw ApiError("edit_export_failed", "This Mac can't encode this video") }
             writer.add(vIn)

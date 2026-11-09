@@ -489,6 +489,31 @@ extension SnapshotRunner {
             check("the content catalog loads", false, "no stickers or sounds in it")
         }
 
+        step("Stabilise: a steadied copy, then off again (only the last step switches off)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.lastError = nil
+        let unsteady = s.project
+        await s.toggleStabilize()
+        for _ in 0..<200 where s.isRunning(.stabilize) || s.state.selectedSteps.isEmpty && s.lastError == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        let steadied = s.project.mainClips.first.map { E.derivedLabel(s.project, $0.asset) } ?? ""
+        check("stabilise: the clip plays a steadied copy", steadied == "Steadied" && E.problem(s.project) == nil, s.lastError ?? steadied)
+        await s.toggleStabilize()
+        check("stabilise: off again, the copy kept", s.state.selectedSteps.isEmpty && s.project.assets.contains { $0.derivedFrom?.kind == .stabilize },
+              s.lastError ?? "\(s.state.selectedSteps)")
+        for _ in 0..<2 { s.undo() }
+        check("stabilise: undone", s.project.mainClips == unsteady.mainClips)
+        s.lastError = nil
+
+        step("Auto reframe: Vision runs over the clip (no face in the test take)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.lastError = nil
+        let beforeReframe = s.project
+        s.followFaces()
+        for _ in 0..<300 where s.reframeProgress != nil { try? await Task.sleep(for: .milliseconds(100)) }
+        check("reframe: finished", s.reframeProgress == nil)
+        check("reframe: no face, no change, and says why", s.project == beforeReframe && (s.lastError ?? "").contains("No face"), s.lastError ?? "no message")
+        s.lastError = nil
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }
@@ -560,6 +585,27 @@ extension SnapshotRunner {
             let rms = await audioRMS(silent.url, from: 0.2, to: 2.8)
             check("export: muted is silent", rms < 0.005, String(format: "RMS %.4f", rms))
         }
+        note("STEP export: HDR (HEVC 10-bit HLG)")
+        if let hdr = await exportFile(s, media: media, name: "hdr", labelAI: false, hdr: true, note: note) {
+            let asset = AVURLAsset(url: hdr.url)
+            let vt = try? await asset.loadTracks(withMediaType: .video).first
+            let desc = (try? await vt?.load(.formatDescriptions))?.first
+            let codec = desc.map { CMFormatDescriptionGetMediaSubType($0) } ?? 0
+            let ext = desc.flatMap { CMFormatDescriptionGetExtensions($0) as? [String: Any] } ?? [:]
+            let transfer = ext[kCMFormatDescriptionExtension_TransferFunction as String] as? String ?? ""
+            let primaries = ext[kCMFormatDescriptionExtension_ColorPrimaries as String] as? String ?? ""
+            let depth = ext[kCMFormatDescriptionExtension_Depth as String] as? Int ?? 0
+            check("export HDR: HEVC", codec == kCMVideoCodecType_HEVC, String(format: "%08x", codec))
+            check("export HDR: BT.2020 / HLG", transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String)
+                  && primaries == (kCMFormatDescriptionColorPrimaries_ITU_R_2020 as String), "\(primaries) / \(transfer) depth \(depth)")
+            let gen = AVAssetImageGenerator(asset: asset)
+            gen.requestedTimeToleranceBefore = .zero; gen.requestedTimeToleranceAfter = .zero
+            let frame = try? await gen.image(at: CMTime(seconds: 1.5, preferredTimescale: 600)).image
+            let px = frame.flatMap { pixel($0, 0.5, 0.5) }
+            // SDR content sits at HLG reference white (BT.2408, 75 %), below HDR peak, so it reads darker when decoded to
+            // SDR (rgb(150, 1, 10) on CI): check the hue, not the brightness.
+            check("export HDR: the picture", px.map { $0.r > 100 && $0.g < 50 && $0.b < 50 } ?? false, describe(px))
+        }
     }
 
     /// Parity formats: a video at a chosen bitrate (the reader → writer path), Sound only (.m4a) and GIF.
@@ -623,13 +669,14 @@ extension SnapshotRunner {
 
     /// Runs the session's export to a file next to the check's media; returns the file and the saved version.
     @MainActor
-    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, note: (String) -> Void) async -> (url: URL, take: Take?)? {
+    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, hdr: Bool = false, note: (String) -> Void) async -> (url: URL, take: Take?)? {
         var settings = s.state.export
         settings.ratio = .portrait
         settings.resolution = .p720
         settings.fps = 30
         settings.codec = .h264
         settings.labelAI = labelAI
+        settings.hdr = hdr
         let url = media.appendingPathComponent("export-\(name).mp4")
         try? FileManager.default.removeItem(at: url)
         var saved: Take?

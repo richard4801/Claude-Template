@@ -390,3 +390,50 @@ extension EditSuiteState {
         return ok ? dropped : nil
     }
 }
+
+// MARK: Helper copies: steps and Stabilise (XL, WS8 2df521a)
+
+extension EditSuiteState {
+    /// The helper steps behind the selected clip's picture, in the order applied ("stabilize", "reverse", "slowmo").
+    public var selectedSteps: [String] { selectedVideo.map { E.derivedOps(project, $0.asset) } ?? [] }
+
+    /// Only the last step applied can be switched off (as Android): steadied then reversed comes off Reverse first.
+    public func blockingStep(for step: String) -> String? {
+        let steps = selectedSteps
+        guard steps.contains(step), let last = steps.last, last != step else { return nil }
+        return last
+    }
+
+    /// Words for a step in "Turn off … first".
+    public static func stepName(_ step: String) -> String {
+        switch step {
+        case "stabilize": return "Stabilise"
+        case "reverse": return "Reverse"
+        case "slowmo": return "Smooth slow motion"
+        default: return step
+        }
+    }
+
+    /// The selected clip plays a steadied copy as its last step.
+    public var steadiedFrom: String? {
+        guard let c = selectedVideo, let d = project.asset(c.asset)?.derivedFrom, d.kind == .stabilize else { return nil }
+        return d.asset
+    }
+
+    /// The steadied copy already in the project for an asset, if any.
+    public func steadiedCopy(of assetId: String) -> E.Asset? {
+        project.assets.first { $0.derivedFrom?.kind == .stabilize && $0.derivedFrom?.asset == assetId }
+    }
+
+    /// Switches the selected clip to `target`: the steadied copy (on) or the original it was made from (off), adding
+    /// `target` if new; one undo step. Returns the parts dropped (background removal when steadying), or nil when refused.
+    @discardableResult
+    public mutating func stabilizeSelected(to target: E.Asset) -> [String]? {
+        guard let c = selectedVideo else { return nil }
+        let on = target.derivedFrom?.kind == .stabilize
+        let next = E.deriveClip(c, copy: target.id, op: on ? .stabilize : nil)
+        let dropped = on && c.alphaMatte != nil ? ["background removal"] : []
+        let ok = apply { p in p.addingAsset(target).updating(c.id) { $0 = .video(next) } }
+        return ok ? dropped : nil
+    }
+}
