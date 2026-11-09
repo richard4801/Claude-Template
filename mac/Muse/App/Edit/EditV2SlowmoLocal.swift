@@ -139,6 +139,6 @@ enum EditV2SlowmoLocal {
         }
         await progress(1)
         let size = natural.applying(transform)
-        return Made(file: file, width: Int(abs(size.width)), height: Int(abs(size.height)), durationSec: EditV2.r6(Double(index) / fps))
+        return Made(file: file, width: Int(abs(size.width)), height: Int(abs(size.height)), durationSec: (Double(index) / fps * 1e6).rounded() / 1e6)
     }
 }

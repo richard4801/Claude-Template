@@ -1060,7 +1060,7 @@ final class EditSuiteSession {
     private func addSlowmo(_ r: EditorJobResult, of a: E.Asset, startSec: Double, endSec: Double, factor: Double) async {
         guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't slow this clip down"; return }
         let id = project.newId("v")
-        let len = ra.durationSec ?? r.durationSec ?? E.r6((endSec - startSec) * factor)
+        let len = ra.durationSec ?? r.durationSec ?? ((endSec - startSec) * factor * 1e6).rounded() / 1e6
         var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: len,
                            width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: false, url: ra.url)
         copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .slowmo, startSec: r.startSec ?? startSec, endSec: r.endSec ?? endSec, factor: r.factor ?? factor)
