@@ -34,6 +34,7 @@ import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
 import { PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
+import { referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
 import type { StepOverrides } from '../images/steps.js'; // WS13
 
@@ -92,7 +93,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     referenceCount: Math.max(1, sent ?? m.slots.filter(s => s.image && !s.busy).length), lora: await activeLora(m),
   });
   /** Her identity images for a photo step (plans/api.md "Identity images"), with the studio's budget. */
-  const idRefs = async (studioId: string, m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect | null, opts: { outfit?: boolean; extra?: IdentityRef[] } = {}) =>
+  const idRefs = async (studioId: string, m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect | null, opts: { outfit?: boolean; extra?: IdentityRef[]; count?: number } = {}) =>
     identityRefs(m, o, { count: await ctx.images.identityCount(studioId), ...opts });
   const personCount = (ids: IdentityRef[]) => ids.filter(i => i.role === 'person').length;
   /** "Identity from N locked reference images": the ones a plan really sends (identity images come first). */
@@ -536,7 +537,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       const identity = await identityOf(m, sentOf(ids, plan));
       return { kind: 'template' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, t, product };
     }
-    const ids = await shootRefs(u, m, o);
+    // A custom (provider) model that takes many images gets her whole sheet (up to 7 views; references keep their room), not
+    // the default 3; a per-run price, so more images cost nothing more.
+    const cap = (await ctx.images.shotInputs(u.studioId, b.imageEngine, stepModels)).capacity;
+    const wide = (b.imageEngine as { provider?: string } | undefined)?.provider === 'byo' && cap >= 6 ? Math.min(7, Math.max(await ctx.images.identityCount(u.studioId), cap - refsIn.length)) : undefined;
+    const ids = wide ? await idRefs(u.studioId, m, o, { outfit: !!o, count: wide }) : await shootRefs(u, m, o);
     const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels);
     const identity = await identityOf(m, sentOf(ids, plan));
     const spec = { identity, outfit: outfitSpec(o) ?? { name: 'outfit' }, scene: b.scene, light: b.light, grade: b.grade, direction: b.direction, lockSeed: b.lockSeed,
@@ -653,7 +658,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const r = PhotoRequestSchema.safeParse(body ?? {});
     if (!r.success) throw badRequest(`Invalid photo: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
     const p = r.data, still = stillRig(p), graded = photoFilter(p);
-    const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: p.references, templateId: p.presetId,
+    // References Claude added to the composer's draft (suite_add_reference) count too, after the ones sent (max 3).
+    const fromDraft = referencesOf((draftOf(body) ?? {}) as Draft).map(r => ({ image: { url: r.url }, guides: [r.use === 'pose' ? 'pose' : r.use === 'location' ? 'scene' : 'look'] as ('pose' | 'look' | 'scene')[] }));
+    const refsAll = [...(p.references ?? []), ...fromDraft.filter(d => !(p.references ?? []).some(x => x.image?.url === d.image.url))].slice(0, 3);
+    const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refsAll.length ? refsAll : undefined, templateId: p.presetId,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true };
     // WS5: a custom image model the user may use replaces the studio's image engine for this run.
     // Owner only: `imageModel` picks any image model for this run (a Replicate "owner/name" or a custom "c_…").
