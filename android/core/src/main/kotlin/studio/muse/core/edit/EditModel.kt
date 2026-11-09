@@ -142,6 +142,22 @@ fun speedPieces(c: MediaClip): List<Piece> = (c as? VideoClip)?.holdSec?.let { l
 fun clipLength(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve? = null): Double =
     if (curve != null) speedPieces(inSec, outSec, speed, curve).sumOf { (it.outSec - it.inSec) / it.speed } else (outSec - inSec) / (speed ?: 1.0)
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
+/**
+ * A clip switched to the reversed copy [reversed] of a source [durationSec] long (or back to the original), model.ts
+ * `reverseClip`: in' = D − out, out' = D − in, a speed curve mirrored in x (custom unless symmetric); alphaMatte and
+ * audioAsset dropped. Null for a freeze.
+ */
+fun reverseClip(c: VideoClip, reversed: String, durationSec: Double): VideoClip? {
+    if (c.holdSec != null) return null
+    val curve = c.speedCurve?.let { sc ->
+        val pts = sc.points.map { SpeedPoint(r6(1 - it.x), it.speed) }.sortedBy { it.x }
+        SpeedCurve(if (pts == sc.points) sc.preset else SpeedPreset.CUSTOM, pts)
+    }
+    // alphaMatte and audioAsset are lined up with the original's frames, so they'd play the wrong way: dropped.
+    return c.copy(asset = reversed, inSec = r6(maxOf(0.0, durationSec - c.outSec)), outSec = r6(minOf(durationSec, durationSec - c.inSec)), speedCurve = curve,
+        alphaMatte = null, audioAsset = null)
+}
+
 fun clipLength(c: MediaClip): Double = (c as? VideoClip)?.holdSec ?: clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 /** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */

@@ -191,6 +191,11 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'adjust layer ok', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 }, opacity: 0.7 }, { id: 'ad2', startSec: 2, durationSec: 1, filter: { id: 'warm', amount: 1 }, keyframes: { opacity: [{ t: 0, v: 1 }], tint: [{ t: 0.5, v: 0.3 }] } }] }); }), ok: true },
   { name: 'adjust layer with a look', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, look: { vignette: { amount: 0.3 } } }] }); }), ok: false, field: 'edits.tracks.4.items.0.look' },
   { name: 'adjust layer overlap', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2 }, { id: 'ad2', startSec: 1.5, durationSec: 1 }] }); }), ok: false, field: 'edits.tracks.4.items.1.startSec' },
+  { name: 'reversed asset ok', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', durationSec: 10, reverseOf: 'src' }); }), ok: true },
+  { name: 'reversed asset of an image', project: mut(p => { p.assets.push({ id: 'logo_rev', kind: 'video', upload: 'up_rev', reverseOf: 'logo' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
+  { name: 'reversed image', project: mut(p => { p.assets.push({ id: 'img_rev', kind: 'image', upload: 'up_imgrev', reverseOf: 'src' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
+  { name: 'reversed asset chain', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'src' }, { id: 'src_rev2', kind: 'video', upload: 'up_rev2', reverseOf: 'src_rev' }); }), ok: false, field: 'edits.assets.4.reverseOf' },
+  { name: 'reversed asset missing', project: mut(p => { p.assets.push({ id: 'src_rev', kind: 'video', upload: 'up_rev', reverseOf: 'nope' }); }), ok: false, field: 'edits.assets.3.reverseOf' },
   { name: 'own font ok', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'Figtree Bold' }); (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'fnt'; }), ok: true },
   { name: 'own font is an image', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'logo'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
   { name: 'own font missing', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'nope'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
@@ -481,6 +486,16 @@ const audioSpeed = audioSpeedClips.map(c => ({ clip: c, length: M.clipLength(c),
   sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })),
   // A beat mark tapped at timeline time T is stored as its source time (rounded to 1 ms).
   tappedMarks: [1.6, 4.25, 7].map(T => ({ timelineT: T, src: Math.round(M.clipSourceAt(c, T - c.startSec) * 1000) / 1000 })) }));
+// Reverse (M): clips switched to a reversed copy and back (in/out mirrored, a speed curve mirrored in x).
+const reverseCases = [
+  { clip: { id: 'r1', asset: 'src', inSec: 0, outSec: 10, speed: 1 }, durationSec: 10 },
+  { clip: { id: 'r2', asset: 'src', inSec: 1.25, outSec: 4.5, speed: 1.5, volume: 0.5 }, durationSec: 10 },
+  { clip: { id: 'r3', asset: 'src', inSec: 2, outSec: 8, speed: 1, speedCurve: { preset: 'custom', points: [[0, 1], [0.3, 0.4], [1, 2]] } }, durationSec: 12.5 },
+  { clip: { id: 'r4', asset: 'src', inSec: 0, outSec: 6, speed: 1, speedCurve: { preset: 'bullet', points: [[0, 1], [0.5, 0.25], [1, 1]] } }, durationSec: 6 },
+  { clip: { id: 'r5', asset: 'src', inSec: 3, outSec: 3.1, speed: 1, holdSec: 2 }, durationSec: 10 },
+  { clip: { id: 'r6', asset: 'src', inSec: 2, outSec: 7, speed: 1, alphaMatte: { asset: 'matte' }, audioAsset: 'voice', look: { lut: 'pack:film-gold' } }, durationSec: 10 },
+] as { clip: M.VideoClip; durationSec: number }[];
+const reverse = reverseCases.map(c => { const rev = M.reverseClip(c.clip, 'src_rev', c.durationSec); return { ...c, reversed: rev, back: rev && M.reverseClip(rev, c.clip.asset, c.durationSec) }; });
 // Adjustment layers (M): adjustLayerMatrix over time on a project with two adjust tracks.
 const adjustProject = (() => {
   const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;
@@ -508,7 +523,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { reverse, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

@@ -525,6 +525,46 @@ describe('Edit suite additions', () => {
   });
 });
 
+describe('reverse (local ffmpeg)', () => {
+  it('reverses a video and its sound for free, reuses the result, refuses long sources', async () => {
+    const a = await makeApp();
+    try {
+      const { owner } = await people(a, 0) as any;
+      const file = path.join(a.dir, 'ramp.mp4');
+      // Red for the first second, then blue; a tone that gets louder.
+      try {
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=64x96:r=30:d=1', '-f', 'lavfi', '-i', 'color=c=blue:s=64x96:r=30:d=1',
+          '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]', '-map', '[v]', '-map', '2:a',
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-y', file]);
+      } catch { return; }
+      const p = (await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'video/mp4' })).body;
+      const u = new URL(p.url);
+      await a.app.inject({ method: 'PUT', url: u.pathname + u.search, headers: { 'content-type': 'video/mp4' }, payload: fs.readFileSync(file) });
+      const source = { uploadId: p.uploadId, durationSec: 2 };
+      expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'reverse', source })).body).toMatchObject({ free: true, usd: 0 });
+      const j = (await owner.req('POST', '/v1/editor/jobs', { kind: 'reverse', source })).body;
+      const r = await until(async () => { const x = (await owner.req('GET', `/v1/editor/jobs/${j.id}`)).body; return x.state !== 'running' ? x : null; });
+      expect(r.state, JSON.stringify(r)).toBe('done');
+      expect(r.costUsd).toBe(0);
+      expect(r.result).toMatchObject({ width: 64, height: 96, hasAudio: true, asset: { kind: 'video' } });
+      // The reversed file starts blue.
+      const up = (await owner.req('GET', `/v1/editor/uploads/${r.result.asset.upload}`)).body;
+      const key = new URL(up.url, 'http://x').pathname.replace(/^\/uploads\//, '');
+      const obj = await a.ctx.storage.get(key);
+      const out = path.join(a.dir, 'rev.mp4');
+      await (await import('node:stream/promises')).pipeline(obj!.body as NodeJS.ReadableStream, fs.createWriteStream(out));
+      const px = execFileSync('ffmpeg', ['-v', 'error', '-ss', '0.2', '-i', out, '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+      expect(px[2]!).toBeGreaterThan(150); expect(px[0]!).toBeLessThan(80);
+      // Again: the same file back, no new render.
+      const j2 = (await owner.req('POST', '/v1/editor/jobs', { kind: 'reverse', source })).body;
+      const r2 = await until(async () => { const x = (await owner.req('GET', `/v1/editor/jobs/${j2.id}`)).body; return x.state !== 'running' ? x : null; });
+      expect(r2.result).toMatchObject({ reused: true, asset: { upload: r.result.asset.upload } });
+      const long = await owner.req('POST', '/v1/editor/estimate', { kind: 'reverse', source: { uploadId: p.uploadId, durationSec: 61 } });
+      expect(long.status).toBe(400); expect(long.body.error).toMatch(/up to 60 s/);
+    } finally { await a.close(); }
+  }, 60_000);
+});
+
 // Wave 1 (plans/edit-parity.md): freeze frames, mirror, blend modes, blur fill.
 describe('editor wave 1', () => {
   it('a hold lasts holdSec, shows one frame, is silent and has no caption words', async () => {

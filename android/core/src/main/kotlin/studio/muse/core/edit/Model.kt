@@ -134,6 +134,8 @@ data class Asset(
     val url: String? = null,
     /** A font asset's family and style, read from the file (display only). */
     val name: String? = null,
+    /** A video asset that is another video asset played backwards (the Reverse helper's copy); see [reverseClip]. */
+    val reverseOf: String? = null,
 )
 
 /** Anything on a track. Which class an item is follows from its track's kind. */

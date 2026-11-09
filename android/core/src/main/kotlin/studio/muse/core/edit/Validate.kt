@@ -61,6 +61,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             num("$f.width", a.width?.toDouble(), 1.0, 16384.0); num("$f.height", a.height?.toDouble(), 1.0, 16384.0)
             assets[a.id] = a
         }
+        p.assets.forEachIndexed { i, a ->
+            val of = a.reverseOf ?: return@forEachIndexed
+            val o = assets[of]
+            if (a.kind != AssetKind.VIDEO || o == null || o.kind != AssetKind.VIDEO || o.reverseOf != null || o.id == a.id) bad("edits.assets.$i.reverseOf", "must be a video asset")
+        }
         if (p.tracks.isEmpty() || p.tracks.size > EditLimits.MAX_TRACKS) bad("edits.tracks", "must have 1–${EditLimits.MAX_TRACKS} tracks")
         if (p.tracks[0].kind != TrackKind.MAIN) bad("edits.tracks.0.kind", "the first track must be the main track")
         if (p.tracks.count { it.kind == TrackKind.MAIN } != 1) bad("edits.tracks", "needs exactly one main track")
