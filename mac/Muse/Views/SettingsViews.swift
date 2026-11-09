@@ -21,7 +21,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollViewReader { proxy in
         ScreenPage {
-            ScreenTitle("Settings")
+            ScreenTitle("Settings").id("settings.top")
             HStack(alignment: .top, spacing: Space.s6) {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(sections.filter { $0 != .advanced }, id: \.self) { s in
@@ -46,6 +46,9 @@ struct SettingsView: View {
         }
         // Review screenshots only (SnapshotRunner): scroll a section to an anchor.
         .onChange(of: SnapshotRunner.state.scrollTo) { _, id in if let id { proxy.scrollTo(id, anchor: .top) } }
+        // Each section (and the Prompts subpage) opens at the top, not where the last one was scrolled to.
+        .onChange(of: store.settingsSection) { _, _ in proxy.scrollTo("settings.top", anchor: .top) }
+        .onChange(of: store.settingsPrompts) { _, _ in proxy.scrollTo("settings.top", anchor: .top) }
         }
         // A member (or Advanced switched off) never stays on a section they can't see.
         .onAppear { if !sections.contains(store.settingsSection) { store.settingsSection = .account } }
