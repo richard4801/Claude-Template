@@ -748,6 +748,7 @@ class FakeMuseApi(
                 fun opt(k: String) = (req.options?.get(k) as? JsonPrimitive)?.content?.toDoubleOrNull()
                 maxOf(0.01, Math.round(((opt("endSec") ?: 1.0) - (opt("startSec") ?: 0.0)) * (opt("factor") ?: 2.0) * 0.01 * 100) / 100.0)
             }
+            "translate" -> if ((req.options?.get("quality") as? JsonPrimitive)?.content == "best") 0.05 else 0.01
             "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
             // Tap to keep has its own price: GPU 15 + 3·d seconds (plans/api.md).
             "matte" -> if (req.options?.get("points") != null) maxOf(0.01, Math.round((15 + 3 * d) * 0.0004 * 100) / 100.0) else maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
@@ -760,7 +761,7 @@ class FakeMuseApi(
     override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
         checkKeepPoints(req)
         // WS1 guardrails: paid helpers switched off by the owner (the free ones, cuts and beats, still run).
-        if (!editorSettingsDemo.on && req.kind in listOf("captions", "matte", "denoise")) throw ApiException("editor_paid_off", "AI editing helpers are switched off for this studio")
+        if (!editorSettingsDemo.on && req.kind in listOf("captions", "matte", "denoise", "translate", "slowmo")) throw ApiException("editor_paid_off", "AI editing helpers are switched off for this studio")
         if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
         val d = editorDuration(req.source)
         val id = "ej_${++editorSeq}"
@@ -1344,7 +1345,7 @@ class FakeMuseApi(
     override suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject = lock.withLock {
         val on = editorSettingsDemo.on
         fun avail(b: Boolean) = kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(b)))
-        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "cuts" to avail(true)))
+        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "translate" to avail(on), "slowmo" to avail(on), "cuts" to avail(true)))
     }
 
     override suspend fun matchReference(id: String, modelId: String?) { lock.withLock { recreateSlots(id) } }
@@ -1838,6 +1839,12 @@ object FakeEditorResults {
         val wordsArray = JsonArray(ws.map { (w, s, e) -> obj("text" to p(w), "startSec" to p(s), "endSec" to p(e)) })
         return when (kind) {
             "captions" -> obj("language" to p("en"), "words" to wordsArray, "durationSec" to p(d), "reused" to p(false))
+            // Translated captions (demo): the same timings, each word tagged with the target language.
+            "translate" -> {
+                val lang = (options?.get("targetLanguage") as? JsonPrimitive)?.content ?: "es"
+                obj("language" to p(lang), "sourceLanguage" to p("en"), "words" to JsonArray(ws.map { (w, s, e) -> obj("text" to p("$w·$lang"), "startSec" to p(s), "endSec" to p(e)) }),
+                    "quality" to p((options?.get("quality") as? JsonPrimitive)?.content ?: "standard"), "durationSec" to p(d))
+            }
             "cuts" -> {
                 val silenceOnly = (options?.get("silenceOnly") as? JsonPrimitive)?.content == "true"
                 val cuts = ArrayList<Triple<Double, Double, String>>()

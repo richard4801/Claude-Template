@@ -354,7 +354,24 @@ data class CaptionStyle(
 )
 
 data class CaptionWord(val text: String, val startSec: Double, val endSec: Double)
-data class CaptionTrack(val asset: String, val words: List<CaptionWord>, val style: CaptionStyle)
+/**
+ * Captions on the timeline. Translated captions (owner-approved 2026-11-09): [language] is the words' language code;
+ * [original] keeps the words they were translated from, so the apps can switch back ([swapCaptionOriginal]).
+ */
+data class CaptionTrack(val asset: String, val words: List<CaptionWord>, val style: CaptionStyle, val language: String? = null, val original: CaptionOriginal? = null)
+data class CaptionOriginal(val language: String? = null, val words: List<CaptionWord>)
+
+val LANGUAGE_CODE = Regex("^[a-z]{2,3}(-[A-Z]{2})?$")
+
+/** The caption track shown in its original words (and back): words and language swap with [CaptionTrack.original]'s. */
+fun swapCaptionOriginal(ct: CaptionTrack): CaptionTrack {
+    val o = ct.original ?: return ct
+    return ct.copy(words = o.words, language = o.language, original = CaptionOriginal(ct.language, ct.words))
+}
+
+/** The caption track with translated [words] in [language]; the first original is kept (translating again replaces the translation). */
+fun translateCaptions(ct: CaptionTrack, language: String, words: List<CaptionWord>, sourceLanguage: String? = null): CaptionTrack =
+    ct.copy(words = words, language = language, original = ct.original ?: CaptionOriginal(ct.language ?: sourceLanguage, ct.words))
 data class Duck(
     val level: Double? = null, val fadeSec: Double? = null, val under: List<DuckUnder>,
     /** Edit suite: ramp down before speech / back up after it (else [fadeSec] for both). */

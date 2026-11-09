@@ -95,7 +95,27 @@ export type AudioClip = Voice & { id: string; asset: string; strongBeats?: numbe
 export type CaptionPreset = 'plain' | 'highlight' | 'box' | 'karaoke' | 'pop' | 'single' | 'highlighter' | 'neon';
 export type CaptionStyle = TextStyle & { preset: CaptionPreset; highlightColor: string; y?: number; wordsPerPage?: number; maxLines?: number };
 export type CaptionWord = { text: string; startSec: number; endSec: number };
-export type CaptionTrack = { asset: string; words: CaptionWord[]; style: CaptionStyle };
+/**
+ * Captions on the timeline. Translated captions (owner-approved 2026-11-09): [language] is the words' language (a
+ * language code, e.g. "es"); [original] keeps the words they were translated from, so the apps can switch back
+ * (swapCaptionOriginal). The translated words come timed from the server; nothing is spread on the device.
+ */
+export type CaptionTrack = { asset: string; words: CaptionWord[]; style: CaptionStyle; language?: string; original?: CaptionOriginal };
+export type CaptionOriginal = { language?: string; words: CaptionWord[] };
+export const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Z]{2})?$/;
+/** The caption track shown in its original words (and back): words and language swap with [original]'s. Unchanged without one. */
+export function swapCaptionOriginal(ct: CaptionTrack): CaptionTrack {
+  if (!ct.original) return ct;
+  const { language: _l, original, ...rest } = ct;
+  return { ...rest, words: original.words, ...(original.language !== undefined ? { language: original.language } : {}),
+    original: { ...(ct.language !== undefined ? { language: ct.language } : {}), words: ct.words } };
+}
+/** The caption track with translated [words] in [language]; the first original is kept (translating again replaces the translation). */
+export function translateCaptions(ct: CaptionTrack, language: string, words: CaptionWord[], sourceLanguage?: string): CaptionTrack {
+  const lang = ct.language ?? sourceLanguage;
+  const original = ct.original ?? { ...(lang !== undefined ? { language: lang } : {}), words: ct.words };
+  return { ...ct, words, language, original };
+}
 export type Duck = { level?: number; fadeSec?: number; attackSec?: number; releaseSec?: number; under: ('voice' | 'speech')[] };
 export type TrackKind = 'main' | 'video' | 'image' | 'text' | 'caption' | 'music' | 'voice' | 'sfx' | 'adjust';
 /**
@@ -1174,11 +1194,19 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
       const a = assets.get(c!.asset);
       if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${f}.caption.asset`, 'must be a video or audio asset');
       if (!Array.isArray(c!.words) || c!.words.length > LIMITS.maxWords) bad(`${f}.caption.words`, `at most ${LIMITS.maxWords} words`);
-      c!.words.forEach((w, j) => {
-        if (typeof w.text !== 'string' || w.text.length < 1 || w.text.length > 60) bad(`${f}.caption.words.${j}.text`, 'must be 1–60 characters');
-        num(`${f}.caption.words.${j}.startSec`, w.startSec, 0, 36_000, false);
-        num(`${f}.caption.words.${j}.endSec`, w.endSec, w.startSec, 36_000, false);
+      const words = (ws: CaptionWord[], g: string) => ws.forEach((w, j) => {
+        if (typeof w.text !== 'string' || w.text.length < 1 || w.text.length > 60) bad(`${g}.${j}.text`, 'must be 1–60 characters');
+        num(`${g}.${j}.startSec`, w.startSec, 0, 36_000, false);
+        num(`${g}.${j}.endSec`, w.endSec, w.startSec, 36_000, false);
       });
+      words(c!.words, `${f}.caption.words`);
+      if (c!.language !== undefined && (typeof c!.language !== 'string' || !LANGUAGE_CODE.test(c!.language))) bad(`${f}.caption.language`, 'must be a language code');
+      if (c!.original !== undefined) {
+        const o = c!.original;
+        if (!o || typeof o !== 'object' || !Array.isArray(o.words) || o.words.length > LIMITS.maxWords) bad(`${f}.caption.original.words`, `at most ${LIMITS.maxWords} words`);
+        words(o.words, `${f}.caption.original.words`);
+        if (o.language !== undefined && (typeof o.language !== 'string' || !LANGUAGE_CODE.test(o.language))) bad(`${f}.caption.original.language`, 'must be a language code');
+      }
       textStyle(`${f}.caption.style`, c!.style, false);
       if (!CAPTION_PRESETS.includes(c!.style.preset)) bad(`${f}.caption.style.preset`, 'unknown preset');
       color(`${f}.caption.style.highlightColor`, c!.style.highlightColor, false);

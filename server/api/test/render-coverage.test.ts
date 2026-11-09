@@ -164,7 +164,8 @@ const captionStyleKeys: Table<Omit<M.CaptionStyle, keyof M.TextStyle>> = { prese
   highlightColor: { prep: o => { (o.style as Obj).preset = 'karaoke'; }, mut: o => { (o.style as Obj).highlightColor = '#00FF00'; } },
   y: { mut: o => { (o.style as Obj).y = 0.3; } }, wordsPerPage: { mut: o => { (o.style as Obj).wordsPerPage = 1; } },
   maxLines: { prep: o => { (o.style as Obj).maxWidthPct = 0.1; }, mut: o => { (o.style as Obj).maxLines = 1; } } };
-const captionKeys: Table<M.CaptionTrack> = { asset: set('asset', 'b'), words: set('words', [{ text: 'hey', startSec: 0.2, endSec: 0.9 }]), style: nested };
+const captionKeys: Table<M.CaptionTrack> = { asset: set('asset', 'b'), words: set('words', [{ text: 'hey', startSec: 0.2, endSec: 0.9 }]), style: nested,
+  language: meta('which language the words are in (the words are what is drawn)'), original: meta('the untranslated words, kept to switch back; not drawn') };
 const wordKeys: Table<M.CaptionWord> = { text: { mut: o => { (o.words as Obj[])[0]!.text = 'uno'; } }, startSec: { mut: o => { (o.words as Obj[])[0]!.startSec = 0.2; } },
   endSec: { mut: o => { (o.words as Obj[])[2]!.endSec = 1.5; } } }; // the page's tail
 const captionFields = { asset: captionKeys.asset, words: captionKeys.words, ...nest('word', wordKeys),

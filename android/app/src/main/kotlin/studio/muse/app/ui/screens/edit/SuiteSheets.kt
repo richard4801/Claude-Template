@@ -791,7 +791,7 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
         return
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        listOf("Style", "Font", "Animation", "Words").forEach { tab ->
+        listOf("Style", "Font", "Animation", "Words", "Language").forEach { tab ->
             val on = ui.captionTab == tab
             Column(Modifier.press { act(EditAction.CaptionTab(tab)) }) {
                 T(tab, m.type.body.copy(fontSize = 13.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal), if (on) m.t.ink else m.t.muted)
@@ -822,6 +822,7 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
             T("Pages break at pauses and sentence ends too.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
         }
         "Words" -> WordsBody(ui, p, act)
+        "Language" -> LanguageBody(ui, ct, act)
         else -> {
             // The content library's caption templates (styles in its fonts), above the presets.
             ui.content?.pack("captions")?.flatMap { it.items }?.takeIf { it.isNotEmpty() }?.let { tpl ->
@@ -863,6 +864,43 @@ private fun Swatch(hex: String, on: Boolean, onClick: () -> Unit) {
 }
 
 /** Edit by text: the transcript, word-timed; tapping a word cuts it out of the video (fillers in red, cut words struck). */
+private fun languageName(code: String?) = code?.let { c -> CAPTION_LANGUAGES.firstOrNull { it.first == c.substringBefore('-') }?.second ?: c } ?: "Original"
+
+/**
+ * Translated captions (paid): pick a language and a quality, the price on the button; the words come back timed, and
+ * the track keeps the words they came from, so either language can be shown.
+ */
+@Composable
+private fun LanguageBody(ui: EditSuiteUi, ct: studio.muse.core.edit.CaptionTrack, act: (EditAction) -> Unit) {
+    val m = muse
+    ct.original?.let { o ->
+        SuiteLabel("Showing")
+        SuiteSeg(listOf("cur" to languageName(ct.language), "other" to languageName(o.language)), "cur", { if (it == "other") act(EditAction.CaptionOriginal(o.language)) },
+            Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    }
+    ui.helpersOff["translate"]?.let { return ComingSoon("Translate captions", it) }
+    // Not the language shown, nor the kept one (the switch above shows that).
+    val have = setOfNotNull(ct.language, ct.original?.language).map { it.substringBefore('-') }
+    val choices = CAPTION_LANGUAGES.filter { it.first != "auto" && it.first !in have }
+    var target by rememberSaveable { mutableStateOf(choices.firstOrNull()?.first ?: "es") }
+    var best by rememberSaveable { mutableStateOf(false) }
+    val job = ui.ai["translate"]
+    LaunchedEffect(target, best) { act(EditAction.TranslatePrice(target, best)) }
+    SuiteLabel("Translate into")
+    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        choices.forEach { (code, label) -> SuiteChip(label, code == target, { target = code }, enabled = job?.running != true) }
+    }
+    SuiteSeg(listOf("standard" to "Standard", "best" to "Best quality"), if (best) "best" else "standard", { best = it == "best" }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    T("Word timings follow the speech. Your style stays; word fixes apply to the language shown.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Translating" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Translate · $it" } ?: "Translate", { act(EditAction.Translate(target, best)) }, Modifier.fillMaxWidth(), enabled = job?.price != null, primary = true)
+        }
+    }
+}
+
 @Composable
 private fun WordsBody(ui: EditSuiteUi, p: EditProject, act: (EditAction) -> Unit) {
     val m = muse
