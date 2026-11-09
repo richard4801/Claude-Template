@@ -55,6 +55,8 @@ extension SnapshotRunner {
                          isOpen: { store.outfitSheet != nil },
                          note: note)
         store.outfitSheet = nil
+        if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
+        try? await Task.sleep(for: .seconds(1))
         // The owner's model picker: Auto and every model's resolutions pin without spending (Generate isn't in the list).
         await walkScreen("model_picker", ax: ax, minimum: 8, deny: ["Generate"],
                          only: { $0.hasPrefix("Use ") },
@@ -163,6 +165,11 @@ extension SnapshotRunner {
         let chrome = Set(before.map(\.key))
         open()
         try? await Task.sleep(for: .seconds(1.5))
+        // A slow runner can take longer to show a popover or sheet: wait up to 6 s more for new controls.
+        for _ in 0..<12 {
+            if await ax.controls().controls.contains(where: { !chrome.contains($0.key) }) { break }
+            try? await Task.sleep(for: .seconds(0.5))
+        }
         var used = Set<String>(), skipped = Set<String>(), pressedLabels = Set<String>()
         var presses = 0
         for _ in 0..<300 {
@@ -199,7 +206,12 @@ extension SnapshotRunner {
         if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
         let missing = required.filter { !pressedLabels.contains($0) }
         if !missing.isEmpty { note("FAIL walk_\(name): never pressed \(missing.joined(separator: ", "))") }
-        if presses < minimum { note("FAIL walk_\(name): only \(presses) controls found (expected \(minimum) or more)") }
+        if presses < minimum {
+            note("FAIL walk_\(name): only \(presses) controls found (expected \(minimum) or more)")
+            // Why: what the window showed (new controls, the open state, a sheet still attached).
+            let now = await ax.controls().controls
+            note("  open=\(isOpen()) sheet=\(mainWindow?.attachedSheet != nil) new=\(now.filter { !chrome.contains($0.key) }.prefix(8).map(\.label)) all=\(now.count)")
+        }
         note("DONE walk_\(name) (\(presses) pressed, \(skipped.count) skipped)")
     }
 }
