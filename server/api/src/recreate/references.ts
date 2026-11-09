@@ -35,6 +35,8 @@ import { rendersOf, type RenderState } from '../editor/renders.js';
 import type { EditProject } from '../editor/model.js';
 import { assertPublicHost, checkInfo, FALLBACK, linkError, linkFor, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
 import { recreateReferences } from './schema.js';
+import { modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
+import { swapEngineById } from '../engines/purposes.js';
 
 export const MAX_REFERENCE_SEC = 60;
 /** Analysis runs before a reference fails for good: the second one is lite (workstream 1, the 512 MB box). */
@@ -83,10 +85,19 @@ const FillBody = z.object({
   locationId: z.string().max(80).optional(),
   /** The price the member confirmed (the estimate's `estimate`): a fill that would cost more is refused with the new price. */
   maxUsd: z.number().min(0).max(1000).optional(),
+  /**
+   * WS13 · owner only: the model for this fill. A swap engine (plans/model-choice.md, purpose "swap") swaps on it; a shot
+   * model (with method "generate", or one that can't swap) generates on it. Else the studio's Swap / Shot default.
+   */
+  engineModel: z.string().max(40).optional(),
+  /** WS13 · owner only: the image model for a generated background plate ("Use your own setting"); else the Plate default. */
+  imageModel: z.string().max(170).optional(),
 }).strict();
 type FillBody = z.infer<typeof FillBody>;
 type Location = typeof suiteLocations.$inferSelect;
-type Background = { source: 'location'; location: Location; usd: 0; matched: boolean } | { source: 'generated'; setting: string; usd: number; reused?: { asset?: string; url?: string } };
+type Background = { source: 'location'; location: Location; usd: 0; matched: boolean } | { source: 'generated'; setting: string; usd: number; reused?: { asset?: string; url?: string };
+  /** WS13: the plate's image model (`imageModel`, else the studio's Plate default); none = the image engine's own. */
+  model?: string };
 /** The place a slot's brief names (its location, else its notes), for "Use your own setting". */
 export const settingOf = (slot: Recipe['slots'][number]) => [slot.brief?.location, slot.brief?.notes].map(x => (x ?? '').trim()).filter(Boolean).join(', ') || 'a clean, bright everyday room';
 /** A studio location the setting names: its name inside the setting, or the setting inside its name (case-insensitive). */
@@ -536,24 +547,28 @@ export class RecreateReferences {
    * G2: the engines that can swap the model into the reference's segment, in order: Edit (our pods), then the hosted
    * swap. Your own setting needs Edit (the hosted swap keeps the clip's background).
    */
-  private swapEngines(keepBackground: boolean): ('h3' | 'replicate')[] {
-    const out: ('h3' | 'replicate')[] = [];
+  private swapEngines(keepBackground: boolean, choice: Choice | null = null): ('h3' | 'replicate' | 'viggle')[] {
+    // WS13: a chosen swap engine is the only one tried (own setting needs Edit: the background goes in as a reference).
+    if (choice) { const e = swapEngineById(choice.model)!; const eng = e.runs === 'gpu' ? e.gpuEngine! : 'replicate' as const; return keepBackground || eng === 'h3' ? [eng] : []; }
+    const out: ('h3' | 'replicate' | 'viggle')[] = [];
     if (this.ctx.jobs.capabilities().includes('h3')) out.push('h3');
     if (keepBackground && this.ctx.replicate.configured) out.push('replicate');
     return out;
   }
   /** Why a slot can't be swapped (null when it can). */
-  private swapBlocked(r: Row, keepBackground: boolean) {
+  private swapBlocked(r: Row, keepBackground: boolean, choice: Choice | null = null) {
     if (!r.storageKey) return 'The reference’s video is gone (deleted after 30 days), so its shots can’t be swapped · generate them instead';
-    if (!this.swapEngines(keepBackground).length) return keepBackground ? 'Swapping isn’t available right now · generate this shot instead' : 'Your own setting needs Edit, which isn’t available right now · keep the reference’s setting, or generate this shot';
+    if (!this.swapEngines(keepBackground, choice).length) return keepBackground ? 'Swapping isn’t available right now · generate this shot instead' : 'Your own setting needs Edit, which isn’t available right now · keep the reference’s setting, or generate this shot';
     return null;
   }
   /** The swap job for a slot on one engine: the Jobs request (without its clip), the segment and the price. */
-  private swapPlan(recipe: Recipe, r: Row, slot: Recipe['slots'][number], b: FillBody, engine: 'h3' | 'replicate') {
+  private async swapPlan(u: AuthUser, recipe: Recipe, r: Row, slot: Recipe['slots'][number], b: FillBody, engine: 'h3' | 'replicate' | 'viggle', choice: Choice | null = null) {
     const seg = swapSegment(recipe, slot, engine === 'replicate' ? P.REPLICATE_MIN_SEC : 2);
     const seconds = Math.round((seg.endSec - seg.startSec) * 1000) / 1000;
     const quality = b.quality === 'cinema' ? 'hd' : b.quality;
-    const rr: P.RenderReq = engine === 'replicate'
+    // WS13: a chosen swap engine is priced as POST /v1/jobs prices it (the job gets the same choice).
+    const rr: P.RenderReq = choice ? (await modelChoice(this.ctx).swapQuote(u.studioId, choice.model, quality, seconds, 1)).rr
+      : engine === 'replicate'
       ? { engine, quality, takes: 1, clipSeconds: seconds, pricePerSec: this.ctx.jobs.qualityPrice(quality) }
       : { engine, use: 'full', steps: P.STEPS_DEFAULT, takes: 1, clipSeconds: seconds };
     const cost = Math.round(P.totalCost(rr) * 100) / 100;
@@ -575,8 +590,18 @@ export class RecreateReferences {
     if (m.archivedAt) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
   }
   /** "swap" when the reference's segment can be swapped (the default), else "generate"; a swap asked for and blocked is refused. */
-  private methodFor(r: Row, b: FillBody): { method: 'swap' | 'generate'; blocked: string | null } {
-    const blocked = this.swapBlocked(r, b.keepBackground);
+  /**
+   * WS13: the fill's model. A model that is a swap engine (unless method "generate") is the swap's choice, checked for
+   * purpose "swap"; any other model is for generating (checked by the Suite); none: the studio's Swap default.
+   */
+  private async fillChoice(u: AuthUser, b: FillBody): Promise<{ swap: Choice | null; generate: string | undefined }> {
+    const forSwap = !b.engineModel || (b.method !== 'generate' && !!swapEngineById(b.engineModel)) || b.method === 'swap';
+    if (!forSwap) return { swap: null, generate: b.engineModel };
+    return { swap: b.method === 'generate' ? null : await modelChoice(this.ctx).choose(u, 'swap', b.engineModel), generate: undefined };
+  }
+  private methodFor(r: Row, b: FillBody, choice: Choice | null = null): { method: 'swap' | 'generate'; blocked: string | null } {
+    if (b.engineModel && !choice && b.method !== 'swap') return { method: 'generate', blocked: null }; // a model picked for generating
+    const blocked = this.swapBlocked(r, b.keepBackground, choice);
     if (b.method === 'generate') return { method: 'generate', blocked };
     if (blocked && b.method === 'swap') throw new ApiError(409, 'swap_unavailable', blocked);
     return { method: blocked ? 'generate' : 'swap', blocked };
@@ -589,16 +614,18 @@ export class RecreateReferences {
   async estimateSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
     const { slot, b, request } = this.fillRequest(recipe, r, slotId, body);
-    const { method, blocked } = this.methodFor(r, b);
+    const fc = await this.fillChoice(u, b);
+    const { method, blocked } = this.methodFor(r, b, fc.swap);
     if (method === 'swap') {
       await this.checkModel(u, b.modelId);
-      const plan = this.swapPlan(recipe, r, slot, b, this.swapEngines(b.keepBackground)[0]!);
+      const plan = await this.swapPlan(u, recipe, r, slot, b, this.swapEngines(b.keepBackground, fc.swap)[0]!, fc.swap);
       const bg = b.keepBackground ? null : await this.backgroundFor(u, r, recipe, slot, b);
       return { slotId, method, keepBackground: b.keepBackground, segment: plan.segment, baked: [...BAKED_ELEMENTS], request: plan.request,
         estimate: bg ? withBackground(plan.estimate, bg) : plan.estimate, ...(bg ? { background: backgroundView(bg) } : {}) };
     }
     // promptFrom: "brief", or "summary"/"default" while the slot has no brief yet (the apps suggest writing one).
-    return { slotId, method, ...(blocked ? { swapUnavailable: blocked } : {}), request, promptFrom: promptSource(recipe, slot), estimate: await this.ctx.suite.estimate(u, request) };
+    const gen = fc.generate ? { ...request, engineModel: fc.generate } : request;
+    return { slotId, method, ...(blocked ? { swapUnavailable: blocked } : {}), request: gen, promptFrom: promptSource(recipe, slot), estimate: await this.ctx.suite.estimate(u, gen) };
   }
   /**
    * Fills a slot (the caller confirmed the price): a swap job on the reference's segment (Edit, else the hosted swap),
@@ -607,22 +634,23 @@ export class RecreateReferences {
   async fillSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
     const { slot, b, request } = this.fillRequest(recipe, r, slotId, body);
-    const { method } = this.methodFor(r, b);
-    if (method === 'swap') return this.fillBySwap(u, r, recipe, slot, b);
-    const job = await this.ctx.suite.create(u, request) as { id: string; cost?: number };
+    const fc = await this.fillChoice(u, b);
+    const { method } = this.methodFor(r, b, fc.swap);
+    if (method === 'swap') return this.fillBySwap(u, r, recipe, slot, b, fc.swap);
+    const job = await this.ctx.suite.create(u, fc.generate ? { ...request, engineModel: fc.generate } : request) as { id: string; cost?: number };
     const fresh = await this.row(u, id);
     await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slotId]: { jobId: job.id, estimate: job.cost, at: Date.now(), method: 'generate' } } });
     return { slotId, method, job };
   }
-  private async fillBySwap(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], b: FillBody) {
+  private async fillBySwap(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], b: FillBody, choice: Choice | null = null) {
     await this.checkModel(u, b.modelId);
     // Your own setting: the background photo first (a studio location, else a plate made now and charged on its own).
     const bg = b.keepBackground ? null : await this.backgroundFor(u, r, recipe, slot, b);
     const bgImage = bg ? await this.backgroundImage(u, r, recipe, slot, bg) : null;
     let last: unknown = null;
-    const engines = this.swapEngines(b.keepBackground);
+    const engines = this.swapEngines(b.keepBackground, choice);
     for (const engine of engines) {
-      const plan = this.swapPlan(recipe, r, slot, b, engine);
+      const plan = await this.swapPlan(u, recipe, r, slot, b, engine, choice);
       // The other engine has its own price (and a longer minimum): never charged unless it fits what was confirmed.
       const total = Math.round((plan.estimate.estimate + (bg?.usd ?? 0)) * 100) / 100;
       if (engine !== engines[0] && (b.maxUsd == null || total > b.maxUsd + 0.005)) {
@@ -633,7 +661,7 @@ export class RecreateReferences {
       const clip = await this.segmentClip(u, r, recipe, slot.id, plan.segment);
       { const f0 = await this.row(u, r.id); await this.saveFill(f0, { ...(f0.fill ?? {}), clips: [...(f0.fill?.clips ?? []), { id: clip.id, key: clip.key }] }); }
       try {
-        const job = await this.ctx.jobs.create(u, { ...plan.request, clipId: clip.id, ...(bgImage ? { backgroundImage: bgImage } : {}) }) as { id: string; cost?: number };
+        const job = await this.ctx.jobs.create(u, { ...plan.request, clipId: clip.id, ...(bgImage ? { backgroundImage: bgImage } : {}) }, { swapChoice: choice }) as { id: string; cost?: number };
         const fresh = await this.row(u, r.id);
         await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slot.id]: {
           jobId: job.id, estimate: job.cost, at: Date.now(), method: 'swap', segment: plan.segment, clipId: clip.id, clipKey: clip.key,
@@ -666,8 +694,10 @@ export class RecreateReferences {
     if (match) return { source: 'location', location: match, usd: 0, matched: true };
     const plate = r.fill?.plates?.[slot.id];
     if (plate && plate.setting === setting) return { source: 'generated', setting, usd: 0, reused: plate.image };
-    const usd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(P.newShotEstimateImages(this.ctx.images.photoPrices(), 1, 0) * this.ctx.config.EDITOR_MARKUP * 100) / 100);
-    return { source: 'generated', setting, usd };
+    const pc = await modelChoice(this.ctx).choose(u, 'plate', b.imageModel);
+    const base = pc && !this.ctx.imageModels.isRecipe('shot', pc.model) ? await this.ctx.imageModels.estimate(pc.model, { outMp: 1, inMp: 0 }) : P.newShotEstimateImages(this.ctx.images.photoPrices(), 1, 0);
+    const usd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(base * this.ctx.config.EDITOR_MARKUP * 100) / 100);
+    return { source: 'generated', setting, usd, ...(pc ? { model: pc.model } : {}) };
   }
   /** The background image itself: the location's photo, a plate already made, or a new plate (held, made, settled). */
   private async backgroundImage(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], bg: Background): Promise<{ asset?: string; url?: string }> {
@@ -678,7 +708,7 @@ export class RecreateReferences {
     let settled = false;
     try {
       const out = await this.ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'recreate_background', refId: r.id,
-        req: { prompt: platePrompt(bg.setting), width: w, height: h, count: 1 } });
+        req: { prompt: platePrompt(bg.setting), width: w, height: h, count: 1 }, ...(bg.model ? { models: { shot: bg.model } } : {}) });
       const image = out.images[0];
       if (!image) throw new Error('no image');
       const actual = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(out.costUsd * this.ctx.config.EDITOR_MARKUP * 10000) / 10000);

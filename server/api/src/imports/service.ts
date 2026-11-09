@@ -60,7 +60,7 @@ export class Imports {
   view(c: ClipRow, extra: { cached?: boolean } = {}) {
     const m = metaOf(c);
     const out: Record<string, unknown> = {
-      id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks, audio: audioView(c) ?? undefined,
+      id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: P.wireFps(c.fps), checks: c.checks, audio: audioView(c) ?? undefined,
       source: 'import', sourceUrl: m.sourceUrl ?? undefined, platform: m.platform ?? undefined, bytes: m.bytes,
       posterUrl: m.posterKey ? this.url(m.posterKey) : undefined, thumb: m.posterKey ? { url: this.url(m.posterKey) } : undefined /* ImageRef, as on takes */, videoUrl: c.storageKey ? this.url(c.storageKey) : undefined, videoKey: c.storageKey ?? undefined,
       uploadId: m.uploadId, createdBy: c.createdBy ?? undefined, createdAt: c.createdAt, ...(extra.cached ? { cached: true } : {}),

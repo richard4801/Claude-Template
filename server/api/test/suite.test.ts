@@ -495,6 +495,8 @@ describe.skipIf(!hasFfmpeg)('AI suite · live mode against a FAKE Replicate (no 
     const st = (await owner.req('GET', '/v1/suite/settings')).body;
     expect(st.models.find((x: any) => x.id === 'h3-max-3d').configured).toBe(false);
     const g = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', engineModel: 'h3-max-3d', resolution: '768P', camera: { mode: 'directed', guide: { video: { url: 'https://x.test/g.mp4' } } } });
-    expect(g.body.code).toBe('nothing_fits');
+    // WS13: a model whose provider isn't set up is not a candidate: refused up front with the valid list.
+    expect([g.status, g.body.code]).toEqual([400, 'engine_not_allowed']);
+    expect(g.body.valid).not.toContain('h3-max-3d');
   });
 });
