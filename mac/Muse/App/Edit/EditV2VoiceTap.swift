@@ -10,7 +10,24 @@ final class EditV2VoiceTap: @unchecked Sendable {
     struct Span {
         let start: Double
         let end: Double
-        let voice: EditV2.VoiceSettings
+        /// The clip's voice processing, or nil (only a boost).
+        let voice: EditV2.VoiceSettings?
+        /// Gain above 1× (Mac Edit audit 2026-11-08: AVAudioMix volumes stop at 1, so a clip at +6 dB played at 0 dB): the
+        /// clip's envelope points; the tap multiplies by max(1, gain) while the mix applies min(1, gain).
+        var boost: [EditV2.GainPoint] = []
+        init(start: Double, end: Double, voice: EditV2.VoiceSettings?, boost: [EditV2.GainPoint] = []) {
+            self.start = start; self.end = end; self.voice = voice; self.boost = boost
+        }
+        /// The boost factor (≥ 1) at timeline t.
+        func boostAt(_ t: Double) -> Double {
+            guard let f = boost.first else { return 1 }
+            if t <= f.t { return max(1, f.gain) }
+            for (a, b) in zip(boost, boost.dropFirst()) where t >= a.t && t <= b.t {
+                let g = b.t - a.t < 1e-9 ? b.gain : a.gain + (b.gain - a.gain) * (t - a.t) / (b.t - a.t)
+                return max(1, g)
+            }
+            return max(1, boost[boost.count - 1].gain)
+        }
     }
 
     private let spans: [Span]
@@ -60,7 +77,7 @@ final class EditV2VoiceTap: @unchecked Sendable {
         isFloat = f.mFormatFlags & kAudioFormatFlagIsFloat != 0 && f.mBitsPerChannel == 32
         interleaved = f.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
         channels = max(1, Int(f.mChannelsPerFrame))
-        chains = spans.map { $0.voice.chain(sampleRate: sampleRate) }
+        chains = spans.map { $0.voice?.chain(sampleRate: sampleRate) ?? [] }
         current = -1
     }
 
@@ -86,6 +103,18 @@ final class EditV2VoiceTap: @unchecked Sendable {
             if let start { use(span(at: start + Double(f0) / sampleRate)) }
             if current >= 0 {
                 let chain = chains[current]
+                let gain = start.map { Float(spans[current].boostAt($0 + Double(f0) / sampleRate)) } ?? 1
+                if gain > 1.0001 {
+                    for (c, buf) in abl.enumerated() {
+                        guard let raw = buf.mData else { continue }
+                        let p = raw.assumingMemoryBound(to: Float.self)
+                        let ch = interleaved ? max(1, Int(buf.mNumberChannels)) : 1
+                        let n = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
+                        let a = f0 * ch, b = min(n, f1 * ch)
+                        if a < b { for i in a..<b { p[i] = max(-1, min(1, p[i] * gain)) } }
+                        if interleaved && c == 0 { break }
+                    }
+                }
                 if !chain.isEmpty {
                     if interleaved {
                         if let buf = abl.first, let raw = buf.mData {

@@ -60,7 +60,7 @@ export function modelView(m: typeof models.$inferSelect) {
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
 setViews(modelView, outfitView);
-const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks,
+const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: P.wireFps(c.fps), checks: c.checks,
   /* prompt scripts: talking detection */ audio: audioView(c) ?? undefined });
 
 export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {

@@ -5,6 +5,8 @@ import Foundation
 
 extension EditV2 {
     public static let maxJsonBytes = 256 * 1024
+    /// Wave 1: a freeze frame lasts 0.1–30 s.
+    public static let holdMinSec = 0.1, holdMaxSec = 30.0
     public static let maxTracks = 16, maxItemsPerTrack = 300, maxItems = 600, maxAssets = 60, maxWords = 3000, maxKeyframes = 100
     public static let minClipSourceSec = 0.1, minItemSec = 0.05, minOutputSec = 0.5, maxOutputSec = 600.0
     public static let minSpeed = 0.1, maxSpeed = 10.0, endSlackSec = 0.05, minTransitionSec = 0.1, maxTransitionSec = 2.0
@@ -84,6 +86,7 @@ extension EditV2 {
     // MARK: Timeline
 
     public static func clipLength(_ c: VideoClip) -> Double {
+        if let h = c.holdSec { return h }   // wave 1: a freeze frame lasts holdSec whatever its source range
         if c.speedCurve != nil { return speedPieces(c).reduce(0) { $0 + ($1.outSec - $1.inSec) / $1.speed } }
         return (c.outSec - c.inSec) / c.speed
     }
@@ -129,10 +132,14 @@ extension EditV2 {
         }
         return out
     }
-    public static func speedPieces(_ c: VideoClip) -> [Piece] { speedPieces(inSec: c.inSec, outSec: c.outSec, speed: c.speed, curve: c.speedCurve) }
+    public static func speedPieces(_ c: VideoClip) -> [Piece] {
+        if c.holdSec != nil { return [Piece(inSec: c.inSec, outSec: c.inSec, speed: 1)] }   // wave 1: a hold is one frame
+        return speedPieces(inSec: c.inSec, outSec: c.outSec, speed: c.speed, curve: c.speedCurve)
+    }
 
     /// Seconds from the clip's start on the timeline at source time `sec` (clamped to the clip).
     public static func clipTimeAt(_ c: VideoClip, _ sec: Double) -> Double {
+        if c.holdSec != nil { return 0 }
         var acc = 0.0
         for p in speedPieces(c) {
             if sec <= p.outSec { return acc + max(0, sec - p.inSec) / p.speed }
@@ -143,6 +150,7 @@ extension EditV2 {
 
     /// The source time at `local` seconds from the clip's start on the timeline (the inverse of clipTimeAt).
     public static func clipSourceAt(_ c: VideoClip, _ local: Double) -> Double {
+        if c.holdSec != nil { return c.inSec }
         var acc = 0.0
         for p in speedPieces(c) {
             let len = (p.outSec - p.inSec) / p.speed
@@ -253,6 +261,11 @@ extension EditV2 {
         var items: [VideoClip] = []
         for it in p.tracks[mi].items.compactMap(\.videoClip) {
             if it.asset != assetId { items.append(it); continue }
+            // A hold (freeze frame) has no source span: it goes when a cut covers its frame, else it stays as it is.
+            if it.holdSec != nil {
+                if !rs.contains(where: { it.inSec >= $0.startSec && it.inSec < $0.endSec }) { items.append(it) }
+                continue
+            }
             var pieces = [SecRange(startSec: it.inSec, endSec: it.outSec)]
             for r in rs {
                 pieces = pieces.flatMap { pc -> [SecRange] in
@@ -308,7 +321,7 @@ extension EditV2 {
         guard let ct = p.captionTrack else { return [] }
         let spans = timeline(p)
         var out: [TimedWord] = []
-        for (i, c) in p.mainClips.enumerated() where c.asset == ct.asset {
+        for (i, c) in p.mainClips.enumerated() where c.asset == ct.asset && c.holdSec == nil {   // a hold has no speech
             let s = spans[i]
             for (idx, w) in ct.words.enumerated() {
                 let mid = (w.startSec + w.endSec) / 2

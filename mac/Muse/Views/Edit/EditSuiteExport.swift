@@ -124,9 +124,6 @@ struct EditSuiteExportSheet: View {
                 Text("Your choice, per export").font(t.body(12)).foregroundStyle(t.muted)
             }
             SuiteToggleRow(title: "Label as AI-generated", hint: "Adds the platform’s AI label when you post from MUSE", isOn: settings.labelAI) { settings.labelAI = $0 }
-            SuiteToggleRow(title: "Content Credentials (C2PA)", hint: settings.c2pa ? "Coming soon · signing isn't available yet, the file is exported without it"
-                                                                                    : "Signed provenance inside the file",
-                           isOn: settings.c2pa) { settings.c2pa = $0 }
             Text("Ads with realistic AI people may need a label in some places (EU, New York). We remind you when posting an ad.")
                 .font(t.body(12)).foregroundStyle(t.muted)
         }

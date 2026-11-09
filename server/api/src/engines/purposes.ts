@@ -63,15 +63,20 @@ export function videoPurposes(m: ModelSpec): Purpose[] {
  * the MiniMax H3 family on Replicate (same input schema; services/replicateVideo.ts). Our GPU: Edit (H3 open weights,
  * the existing path the owner kept) and Fast · beta (Viggle), when the pods offer them.
  */
-export type SwapEngine = { id: string; name: string; runs: 'replicate' | 'gpu'; ref?: string; gpuEngine?: 'h3' | 'viggle'; capability?: string; noResolution?: boolean; notice?: string };
+export type SwapEngine = { id: string; name: string; runs: 'replicate' | 'higgsfield' | 'gpu'; ref?: string; gpuEngine?: 'h3' | 'viggle'; capability?: string; noResolution?: boolean; notice?: string };
 export const SWAP_ENGINES: SwapEngine[] = [
   { id: 'h3', name: 'MiniMax H3', runs: 'replicate', ref: 'minimax/h3' },
   { id: 'h3-lite', name: 'MiniMax H3 Lite', runs: 'replicate', ref: 'minimax/h3-lite' },
   { id: 'h3-highspeed', name: 'MiniMax H3 Highspeed', runs: 'replicate', ref: 'minimax/h3-highspeed', noResolution: true },
+  // The owner's Higgsfield plan (half Replicate's 2K price): H3 reference-to-video with the clip as the reference video
+  // (Higgsfield has no H3 edit endpoint); 2K only, 5–15 s. Out of credit or down at the start → Replicate H3.
+  { id: 'h3-hf', name: 'MiniMax H3 (Higgsfield)', runs: 'higgsfield', ref: 'minimax/h3/reference-to-video' },
   { id: 'h3-open', name: 'Edit · MiniMax H3 open weights (own GPU)', runs: 'gpu', gpuEngine: 'h3', capability: 'h3',
     notice: 'Powered by MiniMax H3 · open-weights licence excludes the US, EU, UK and South Korea' },
   { id: 'viggle', name: 'Fast · beta · Viggle (own GPU)', runs: 'gpu', gpuEngine: 'viggle', capability: 'viggle' },
 ];
+/** Higgsfield's H3 takes 5–15 s (a shorter clip is padded to 5 s and the take is cut back). */
+export const HF_SWAP_MIN_SEC = 5;
 export const swapEngineById = (id: string) => SWAP_ENGINES.find(e => e.id === id);
 
 /** Curated Replicate image models for the image purposes (any other "owner/name" is accepted too, checked when it runs). */

@@ -91,6 +91,14 @@ extension EditV2 {
         }
     }
 
+    /// A clip's pieces for the engines. A freeze frame (wave 1) is one source frame stretched over its hold (the reference's
+    /// zero-length piece can't be placed in a composition).
+    static func renderPieces(_ c: VideoClip, fps: Double) -> [Piece] {
+        guard let h = c.holdSec, h > 0 else { return speedPieces(c) }
+        let frame = 1 / max(1, fps.isFinite ? fps : 30)
+        return [Piece(inSec: c.inSec, outSec: c.inSec + frame, speed: frame / h)]
+    }
+
     /// Lays the project out for rendering. Sources missing from `media` (or without video/sound) are left out; overlays and
     /// sounds past the project's end are cut there; hidden tracks don't draw; silent clips get no audio segment.
     public static func renderPlan(_ p: Project, media: [String: MediaInfo]) -> RenderPlan {
@@ -135,7 +143,7 @@ extension EditV2 {
                 for (i, c) in t.items.compactMap(\.videoClip).enumerated() where i < spans.count {
                     let start = spans[i].startSec, end = min(spans[i].endSec, d)
                     guard end - start > 1e-3 else { continue }
-                    let all = speedPieces(c)
+                    let all = renderPieces(c, fps: p.canvas.fps)
                     if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
                         video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: i % 2, mainIndex: i, layer: 0,
                                                   timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,
@@ -150,7 +158,7 @@ extension EditV2 {
                 for c in t.items.compactMap(\.videoClip) {
                     let start = r6(c.startSec ?? 0), end = min(r6(start + clipLength(c)), d)
                     guard end - start > 1e-3 else { continue }
-                    let all = speedPieces(c)
+                    let all = renderPieces(c, fps: p.canvas.fps)
                     if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
                         video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: vLane, mainIndex: nil, layer: ti,
                                                   timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,

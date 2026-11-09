@@ -12,8 +12,11 @@ export type EditOp = { op: string; [k: string]: unknown };
 type P = M.EditProject;
 const RATIOS: Record<string, [number, number]> = { '9:16': [9, 16], '1:1': [1, 1], '4:5': [4, 5], '16:9': [16, 9] };
 export const OP_NAMES = ['trim', 'split', 'delete', 'move', 'speed', 'add_text', 'add_hook', 'edit_text', 'caption_style', 'look', 'adjust',
-  'transition', 'mask', 'transform', 'keyframe', 'remove_keyframe', 'volume', 'duck', 'voice', 'add_music', 'ratio', 'patch'] as const;
+  'transition', 'mask', 'transform', 'keyframe', 'remove_keyframe', 'volume', 'duck', 'voice', 'add_music', 'ratio', 'patch',
+  // wave 1 (plans/edit-parity.md): mirror, freeze frame, blend modes, the background fill
+  'flip', 'freeze', 'blend', 'fill'] as const;
 
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
 const t2 = (s: number) => { const m = Math.floor(s / 60), r = s - m * 60; return `${m}:${r.toFixed(1).padStart(4, '0')}`; };
 const num = (o: EditOp, k: string, req = false): number | undefined => {
   const v = o[k];
@@ -86,6 +89,14 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       const k = spans.findIndex(s => at > s.startSec + 0.05 && at < s.endSec - 0.05);
       if (k < 0) throw badRequest('split.at: not inside a clip (or too close to a cut)');
       const c = main.items[k] as M.VideoClip, src = M.clipSourceAt(c, at - spans[k]!.startSec);
+      if (c.holdSec !== undefined) {
+        // A freeze frame splits into two holds of the same frame.
+        const a = r3(at - spans[k]!.startSec), b = r3(c.holdSec - a);
+        if (a < M.HOLD_MIN_SEC || b < M.HOLD_MIN_SEC) throw badRequest('split.at: too close to the freeze frame\'s edge');
+        const { transitionIn: _t, ...restH } = c;
+        main.items.splice(k, 1, { ...c, holdSec: a, fadeOutSec: undefined }, { ...restH, id: newId(p, 'c'), holdSec: b, fadeInSec: undefined });
+        return `Split at ${t2(at)}`;
+      }
       if (src - c.inSec < M.LIMITS.minClipSourceSec || c.outSec - src < M.LIMITS.minClipSourceSec) throw badRequest('split.at: too close to the clip edge');
       const { transitionIn, ...rest } = c;
       const x = (src - c.inSec) / (c.outSec - c.inSec);
@@ -258,6 +269,62 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       const long = Math.max(p.canvas.width, p.canvas.height), even = (v: number) => Math.max(16, Math.round(v / 2) * 2);
       [p.canvas.width, p.canvas.height] = r[0] >= r[1] ? [even(long), even((long * r[1]) / r[0])] : [even((long * r[0]) / r[1]), even(long)];
       return `Shape ${o.ratio}`;
+    }
+    case 'flip': {
+      const v = find(p, str(o, 'itemId', true)!).item as M.VideoClip;
+      const tr = { ...(v.transform ?? {}) };
+      for (const k of ['x', 'y'] as const) {
+        const val = o[k];
+        if (val === undefined) continue;
+        if (typeof val !== 'boolean') throw badRequest(`flip.${k}: true or false`);
+        const key = k === 'x' ? 'flipX' : 'flipY';
+        if (val) tr[key] = true; else delete tr[key];
+      }
+      v.transform = tr;
+      return 'Mirrored';
+    }
+    case 'freeze': {
+      // A freeze frame at timeline `at` for durationSec: the clip there splits and a hold of that frame goes between.
+      const at = num(o, 'at', true)!, dur = num(o, 'durationSec') ?? 1;
+      if (dur < M.HOLD_MIN_SEC || dur > M.HOLD_MAX_SEC) throw badRequest(`freeze.durationSec: ${M.HOLD_MIN_SEC}–${M.HOLD_MAX_SEC}`);
+      const spans = M.timeline(p), main = M.mainTrack(p);
+      const k = spans.findIndex(s => at >= s.startSec && at < s.endSec);
+      if (k < 0) throw badRequest('freeze.at: not inside a clip');
+      const c = main.items[k] as M.VideoClip;
+      const local = at - spans[k]!.startSec, src = M.clipSourceAt(c, local);
+      const dur0 = p.assets.find(a => a.id === c.asset)?.durationSec ?? c.outSec;
+      const frame = r3(Math.min(src, dur0 - M.LIMITS.minClipSourceSec));
+      const { transitionIn: _t, speedCurve: _s, keyframes: _k, fadeInSec: _fi, fadeOutSec: _fo, ...base } = c;
+      const hold: M.VideoClip = { ...base, id: newId(p, 'c'), inSec: frame, outSec: r3(frame + M.LIMITS.minClipSourceSec), speed: 1, holdSec: r3(dur) };
+      const insertAt = local < 0.05 ? k : k + 1;
+      if (local >= 0.05 && spans[k]!.endSec - at >= 0.05 && c.holdSec === undefined) {
+        // Cut the clip at the frame (both pieces need 0.1 s of source), then the hold goes between them.
+        if (src - c.inSec >= M.LIMITS.minClipSourceSec && c.outSec - src >= M.LIMITS.minClipSourceSec) {
+          const { transitionIn: _tr, ...rest } = c;
+          const x = (src - c.inSec) / (c.outSec - c.inSec);
+          main.items.splice(k, 1, { ...c, outSec: src, ...(c.speedCurve ? { speedCurve: M.subCurve(c.speedCurve, 0, x) } : {}) },
+            { ...rest, id: newId({ ...p, assets: [...p.assets, { id: hold.id } as M.Asset] }, 'c'), inSec: src, ...(c.speedCurve ? { speedCurve: M.subCurve(c.speedCurve, x, 1) } : {}) });
+        }
+      }
+      main.items.splice(insertAt, 0, hold);
+      return `Freeze frame ${dur.toFixed(1)} s at ${t2(at)}`;
+    }
+    case 'blend': {
+      const { track, item } = find(p, str(o, 'itemId', true)!);
+      const mode = str(o, 'mode', true)! as M.BlendMode;
+      if (!M.BLEND_MODES.includes(mode)) throw badRequest(`blend.mode: one of ${M.BLEND_MODES.join(', ')}`);
+      if (track.kind !== 'video' && track.kind !== 'image') throw badRequest('blend: only overlays (video and image tracks) blend');
+      const v = item as M.VideoClip | M.ImageItem;
+      if (mode === 'normal') delete v.blend; else v.blend = mode;
+      return `Blend ${mode}`;
+    }
+    case 'fill': {
+      const kind = str(o, 'kind', true)!;
+      if (kind !== 'color' && kind !== 'blur') throw badRequest('fill.kind: color or blur');
+      const c = str(o, 'color');
+      if (c !== undefined) p.canvas.background = c;
+      if (kind === 'blur') p.canvas.fill = 'blur'; else delete p.canvas.fill;
+      return kind === 'blur' ? 'Blurred background' : 'Background colour';
     }
     case 'patch': {
       if (!Array.isArray(o.patch)) throw badRequest('patch.patch: a JSON Patch array');

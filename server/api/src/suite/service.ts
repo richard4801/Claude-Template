@@ -28,7 +28,7 @@ import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
-import { purposeOfShot, SWAP_ENGINES, videoPurposes } from '../engines/purposes.js';
+import { purposeOfShot, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
 export const STUDIO_DEFAULT_SKIPPED = 'The studio’s chosen engine can’t make this shot · the quality’s usual engine is used';
@@ -198,7 +198,7 @@ export class SuiteService {
         const scale = p.models?.[m.id]?.priceScale ?? 1, tiers = tiersOf(m.id);
         const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
         // WS13: what this model can be picked for (plans/model-choice.md); the hosted H3 family also swaps.
-        const purposes = [...videoPurposes(m), ...(this.ctx.replicate.configured && SWAP_ENGINES.some(e => e.id === m.id && e.runs === 'replicate') ? ['swap' as const] : [])];
+        const purposes = [...videoPurposes(m), ...(SWAP_ENGINES.some(e => e.id === m.id && (e.runs === 'replicate' ? this.ctx.replicate.configured : e.runs === 'higgsfield' && this.providers.higgsfield.configured())) ? ['swap' as const] : [])];
         return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, purposes, tier: tiers[0] ?? null, tiers, resolution,
           resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
           perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
@@ -254,6 +254,13 @@ export class SuiteService {
     if (r.engineModel?.startsWith('c_')) { // WS5: a custom model makes plain shots only
       if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
       await this.byo.checkUse(u, r.engineModel, 'video');
+    }
+    // The apps send Character swap as a one-person Recast (mode "recast", cast[0] = who she becomes). With a swap model
+    // picked (H3, H3 Lite, Highspeed, Higgsfield, Edit, Fast) that isn't a Recast model, it IS a swap: run it as one.
+    if (r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && r.engineModel && swapEngineById(r.engineModel)
+      && !(await modelChoice(this.ctx).candidates(u, 'recast')).some(e => e.model === r.engineModel)) {
+      const c = r.cast[0]!;
+      Object.assign(r, { mode: 'swap', modelId: c.characterId, outfitId: c.outfitId ?? r.outfitId, cast: undefined });
     }
     // WS13: the owner's override for this purpose (checked: a candidate, owner only), else the studio's default for it.
     const choice = await modelChoice(this.ctx).choose(u, purposeOfShot(r), r.engineModel);
@@ -420,7 +427,7 @@ export class SuiteService {
     const base = {
       quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
       estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
-      buttonLabel: `Generate · ${plan.seconds} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
+      buttonLabel: `Generate · ${Math.round(plan.seconds * 10) / 10} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',

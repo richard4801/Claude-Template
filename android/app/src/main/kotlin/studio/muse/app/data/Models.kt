@@ -1143,7 +1143,9 @@ data class ScriptPreview(
 data class EditorSourceDto(val takeId: String? = null, val uploadId: String? = null, val durationSec: Double? = null)
 
 @Serializable
-data class EditorJobRequest(val kind: String, val source: EditorSourceDto, val options: JsonObject? = null)
+data class EditorJobRequest(val kind: String, val source: EditorSourceDto, val options: JsonObject? = null,
+    /** WS13 (owner): the model to run this helper on (captions/cuts → captions, matte → matte or track with points, denoise). Null = the studio's default. */
+    val engineModel: String? = null)
 
 /** POST /v1/editor/estimate. [free] = nothing is charged ("Free" in the UI). */
 @Serializable

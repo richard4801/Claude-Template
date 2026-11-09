@@ -741,6 +741,9 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var name: String?
     /// AI suite (workstream 1): the composer's draft it was made from (its job's, or the photo run's): "Reuse settings".
     public var draft: SuiteDraft?
+    /// Edit suite export "Label as AI-generated" (Mac Edit audit 2026-11-08): the version was saved with the label on, so
+    /// posting it starts with the platform's AI label on.
+    public var aiLabel: Bool?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -765,6 +768,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
              templateId, templateName, shuffleSeed, variation, refs, parentTakeId, edits, fps, look
         case name // Edit suite (workstream 3)
         case draft // AI suite (workstream 1)
+        case aiLabel // Edit suite export (Mac Edit audit)
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -797,6 +801,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         look = c.o(.look) // AI suite (workstream 1)
         name = c.o(.name) // Edit suite (workstream 3)
         draft = c.o(.draft) // AI suite (workstream 1)
+        aiLabel = c.o(.aiLabel) // Edit suite export (Mac Edit audit)
         // Edit suite (workstream 3)
         editsV2 = edits == nil ? (try? c.decodeIfPresent(EditV2.Project.self, forKey: .edits)) ?? nil : nil
 

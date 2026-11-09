@@ -1,3 +1,13 @@
+import com.android.build.api.instrumentation.AsmClassVisitorFactory
+import com.android.build.api.instrumentation.ClassContext
+import com.android.build.api.instrumentation.ClassData
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationParameters
+import com.android.build.api.instrumentation.InstrumentationScope
+import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.commons.ClassRemapper
+import org.objectweb.asm.commons.SimpleRemapper
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -151,4 +161,22 @@ dependencies {
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit.rule)
+}
+
+// Edit blend modes (WS8, plans/video-editor.md "Wave 1 additions"): Media3 1.11 draws every multi-layer composite with
+// its package-private DefaultCompositorGlProgram and lets no app replace it (Transformer can't even take a custom video
+// graph). The app ships androidx.media3.effect.MuseCompositorGlProgram (app/src/main/java/androidx/media3/effect/), a
+// copy that also blends layers by mode, and this instrumentation rewrites Media3's references to the library class to
+// it (DefaultVideoCompositor, the frame processors), so the preview player and the export both use it.
+abstract class MuseCompositorRemap : AsmClassVisitorFactory<InstrumentationParameters.None> {
+    override fun createClassVisitor(classContext: ClassContext, nextClassVisitor: ClassVisitor): ClassVisitor =
+        ClassRemapper(nextClassVisitor, SimpleRemapper("androidx/media3/effect/DefaultCompositorGlProgram", "androidx/media3/effect/MuseCompositorGlProgram"))
+    override fun isInstrumentable(classData: ClassData): Boolean =
+        classData.className.startsWith("androidx.media3.effect.") && !classData.className.startsWith("androidx.media3.effect.Muse")
+}
+androidComponents {
+    onVariants { variant ->
+        variant.instrumentation.transformClassesWith(MuseCompositorRemap::class.java, InstrumentationScope.ALL) {}
+        variant.instrumentation.setAsmFramesComputationMode(FramesComputationMode.COPY_FRAMES)
+    }
 }

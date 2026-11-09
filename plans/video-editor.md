@@ -197,7 +197,7 @@ Asset.kind gains "lut" (must be an `upload`; the server parses it when the proje
 
 ## Edit suite additions (phase 2 · designs E1–E4, EM1–EM5)
 Engine features the approved designs need, added to the same contract (project stays `version: 2`; reference `model.ts`, `audio.ts`, `look.ts`; fixtures updated; Kotlin and Swift ports must match):
-- **Speed** 0.1–10× (was 0.25–4). **Speed curves** `speedCurve?: { preset: "montage"|"hero"|"bullet"|"flashIn"|"flashOut"|"custom", points: [x 0–1 of the kept source, speed 0.1–10][] }` (2–16 points, x from 0 to 1, rising). Speed at x = smoothstep between points in log speed (`curveSpeed`). Rendering and timing use **48 equal source pieces**, each at the curve's speed at its middle (`speedPieces`): engines render those pieces as constant-speed sub-clips (pitch kept). `clipLength`, `clipTimeAt` (captions, cuts) go through them; `applyCuts`/split keep the curve on each piece (`subCurve`, preset becomes custom). Presets: `SPEED_PRESETS`. The **"Smooth slow-mo" (AI, frame interpolation)** switch in EM4 is **not built yet** (no model chosen): show it disabled with "Coming soon".
+- **Speed** 0.1–10× (was 0.25–4). **Speed curves** `speedCurve?: { preset: "montage"|"hero"|"bullet"|"flashIn"|"flashOut"|"custom", points: [x 0–1 of the kept source, speed 0.1–10][] }` (2–16 points, x from 0 to 1, rising). Speed at x = smoothstep between points in log speed (`curveSpeed`). Rendering and timing use **48 equal source pieces**, each at the curve's speed at its middle (`speedPieces`): engines render those pieces as constant-speed sub-clips (pitch kept). `clipLength`, `clipTimeAt` (captions, cuts) go through them; `applyCuts`/split keep the curve on each piece (`subCurve`, preset becomes custom). Presets: `SPEED_PRESETS`. The **"Smooth slow-mo" (AI, frame interpolation)** switch in EM4 is **not built yet** (no model chosen): it is **not shown** until it is built (owner, 2026-11-08: no placeholders; being priced as an XL item).
 - **Transitions** add `whip` (cubic push with motion `blur`), `spin` (rotate 180° and scale through a hard switch at the middle), `glitch` (hard switch with jitter and `rgbSplit`). `LayerState` gains `rotation` (deg, clockwise), `blur` (0–1 → up to 4 % of the canvas along the move), `rgbSplit` (0–1 → R/B offset up to 2 %). UI names (`TRANSITION_LABELS`): Cut (none), X-fade = fade, Zoom, Whip, Slide = slideLeft, Flash = white, Glitch, Spin (+ Dip to black).
 - **Masks** on video/image items: `mask?: { shape: "linear"|"mirror"|"circle"|"rect"|"heart"|"star", x?, y? (centre, item fractions, 0.5), width?, height? (0.5), rotation? (deg), feather? 0–1 (0.1), invert? }`, opacity `maskAlpha(mask, u, v)` multiplied into the item's alpha (after chroma key).
 - **Adjust** gains `highlights`, `shadows` (−1…1): `toneAdjust` after the colour matrix, before the look's curves (bake it into the colour LUT with the rest). "Grain" in the Adjust panel edits `look.grain.amount`.
@@ -205,7 +205,7 @@ Engine features the approved designs need, added to the same contract (project s
 - **Ducking** gains `attackSec` (0.05–2) and `releaseSec` (0.05–3) (else `fadeSec` for both); "−12 dB" in the UI = `level` 10^(dB/20).
 - **Voice**: `voiceEffect?: "none"|"warm"|"radio"|"phone"|"deep"`, `enhance?: boolean` on clips with sound → biquad chains (`voiceChain(clip, sampleRate)`, RBJ cookbook, fixture coefficients + impulse responses): Android an `AudioProcessor`, Mac an audio processing tap. **Noise reduction** = the `denoise` AI job (its voice stem becomes the clip's `audioAsset`).
 - **Beats**: `beats`/`strongBeats` (source seconds) on music clips, from the free `beats` job (`detectBeats`, server ffmpeg decode, BPM). "Every beat / strong beats" chooses which marks show and snap; "Snap cuts to beats" snaps split/trim to the nearest mark.
-- **Export**: shape 9:16 / 1:1 / 4:5 / 16:9 (canvas; re-framing keeps faces in view — Android ML Kit face detection / Mac Vision to set each clip's transform), 720p/1080p/4K, 24/30/60 fps, MP4 H.264 or HEVC, captions **burn in** or **.SRT** (`toSrt(project)`), and the **Disclosure** switches "Label as AI-generated" and "Content Credentials (C2PA)" — both **off by default**, per export (owner rule). C2PA signing isn't implemented yet: keep the switch, say "Coming soon" when on.
+- **Export**: shape 9:16 / 1:1 / 4:5 / 16:9 (canvas; re-framing keeps faces in view — Android ML Kit face detection / Mac Vision to set each clip's transform), 720p/1080p/4K, 24/30/60 fps, MP4 H.264 or HEVC, captions **burn in** or **.SRT** (`toSrt(project)`), and the **Disclosure** switch "Label as AI-generated" — **off by default**, per export (owner rule). "Content Credentials (C2PA)" joins it, also off by default, once signing is built; until then it is **not shown** (owner, 2026-11-08: no placeholders; the certificate is being priced as an XL item).
 
 ## Edit sessions and edit ops (Claude in the Edit suite, 2026-11-06)
 _Spec: `plans/claude-editing.md` A. API: `plans/api.md` "Edit sessions". Reference: `server/api/src/editor/{sessions,ops,jsonpatch,mcpTools,frame}.ts`._
@@ -223,3 +223,59 @@ _Spec: `plans/claude-editing.md` A. API: `plans/api.md` "Edit sessions". Referen
 
 ## Not in phase 1
 Speed curves, freeze frame, reverse, masks/blend modes, motion tracking, stabilization, reframe, LUT files (`.cube`), beat detection, TTS, stickers library, Lottie. The schema leaves room (`version`, unknown kinds rejected until added).
+
+## Wave 1 additions (plans/edit-parity.md, owner decision 2026-11-08)
+Contract additions. The project stays `version: 2`, and older apps ignore these fields.
+- Reference: `server/api/src/editor/model.ts`.
+- Fixtures: `functions.json → wave1`, the "wave 1" project in `projects.json`, and validation cases.
+- Ports: Kotlin `core/edit/Wave1.kt` (+ model, JSON, validate); Swift by WS9.
+
+### Mirror
+- `Transform.flipX?`, `flipY?` (only `true` is written). Allowed on video, image and text items.
+- Order: crop → flip → scale → rotate → move.
+- `itemCorners(canvas, w, h, fit, transform)` gives the picture's own corners on the canvas (fixture).
+- Android: a negative overlay scale for the axis; text uses the canvas mirrored about its centre.
+
+### Freeze frame
+- `VideoClip.holdSec` (0.1–30): the clip shows the single source frame at `inSec` for `holdSec` seconds. It is silent.
+- A hold requires speed 1 and no `speedCurve`. Its `outSec` is `inSec + 0.1` (only so the 0.1 s source rule holds).
+- Timing:
+  - `clipLength` = holdSec.
+  - `clipSourceAt` = inSec.
+  - `clipTimeAt` = 0.
+- Captions: `captionWords` skips holds.
+- Cuts: `applyCuts` removes a hold whose frame is inside a cut; otherwise it keeps it unchanged.
+- Split: splitting a hold makes two holds, each at least 0.1 s.
+- Freezing:
+  - The `freeze {at, durationSec=1}` op, and the app's Freeze frame, cut the clip at that frame and insert the hold between the two pieces.
+  - At a clip's edge, the hold goes before or after the clip.
+  - The frame is clamped to the asset's end − 0.1 s.
+- Trimming a hold's edge changes `holdSec`. Transitions in and out of a hold are allowed.
+- Android renders a hold as a one-frame slice of the source at speed `frame / holdSec`. The frame shows until the hold ends, as slow motion does. No frames are invented.
+
+### Blend modes
+- `blend?: normal|multiply|screen|overlay|softLight|darken|lighten|add` on video and image items of overlay tracks. On the main track it is refused.
+- `blendChannel` uses the W3C compositing formulas: overlay is hard-light with the layers swapped; softLight is W3C's D(Cb) form.
+- `blendPixel` = below + (blend − below) × a, where a = the item's alpha × opacity. Values are straight sRGB 0–1.
+- **Android:** Media3 1.11 composites every layer with its package-private `DefaultCompositorGlProgram`, and no app can replace it (Transformer can't even take a custom video graph). The app therefore ships its own copy:
+  - `MuseCompositorGlProgram`, in `app/src/main/java/androidx/media3/effect/`, Apache-2.0.
+  - AGP class instrumentation (`MuseCompositorRemap` in `app/build.gradle.kts`) rewrites Media3's references to the library class to point at it, so the preview player and the export both use it.
+  - A blended layer copies what is drawn so far into a backdrop texture. The blend shader then applies `blendChannel` and the alpha mix; every other layer alpha-blends as before.
+  - The shader is checked against the fixtures on a software GL by `android/tools/check_blend_shader.py` (32/32 cases).
+  - The same compositor can later take overlay transitions, adjustment layers and split-screen.
+- Mac: Core Image.
+
+### Blur fill
+- `Canvas.fill?: color|blur` (default `color` = `background`). With `blur`, the main clip fills the frame behind contain-fitted main clips:
+  - It is cover-fitted, with its look applied but not its transform, crop, mask or key.
+  - It is box-blurred with radius `blurFillRadius` = max(1, round(0.04 × short side)), applied once, separable, clamped to the edge.
+  - RGB is then multiplied by 0.85.
+- During a transition the fill shows the incoming clip from half-way through (`blurFillClip`).
+- Android: a FILL layer behind the main layers. It uses a Gaussian blur with the box's variance (σ = r/√3), then the 0.85 darkening.
+- Main clips get the `fit` choice in the UI (Ratio → "This clip": Fill the frame / Whole picture).
+
+### Edit ops (Claude)
+- `flip {itemId, x?, y?}`
+- `freeze {at, durationSec?}`
+- `blend {itemId, mode}`
+- `fill {kind: color|blur, color?}`

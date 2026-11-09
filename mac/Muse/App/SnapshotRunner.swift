@@ -149,6 +149,7 @@ enum SnapshotRunner {
             store.themeID = .a
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+            await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
@@ -730,6 +731,9 @@ enum SnapshotRunner {
             store.closeRecreate()
             try? await Task.sleep(for: .seconds(0.5))
         }
+        // The lanes on a 29.7 s reference with 7 uneven shots (owner test 2026-11-08), at 1280 and 1470 wide.
+        let laneLines = await recreateLanesShots(store, dir: dir, window: w)
+        lines.append(contentsOf: laneLines)
         // The swatches (owner note 1): the analysis's palette, then the strip the Recipe shows.
         if let ref = try? await FakeRecreateAPI().listReferences().first, let raw = ref.recipe?.grade?.swatches {
             let soft = RecreateSwatches.soften(raw)
