@@ -129,13 +129,13 @@ object SuiteOps {
             val list = (k?.get(prop).orEmpty().filter { abs(it.t - t) > 0.05 } + Keyframe(old?.t ?: ((t * 1000).roundToInt() / 1000.0), v, ease ?: old?.ease ?: studio.muse.core.edit.Ease.EASE_IN_OUT)).sortedBy { it.t }
             return (k.orEmpty() + (prop to list))
         }
-        when (it) { is VideoClip -> it.copy(keyframes = keys(it.keyframes)); is ImageItem -> it.copy(keyframes = keys(it.keyframes)); is TextItem -> it.copy(keyframes = keys(it.keyframes)); else -> it }
+        when (it) { is VideoClip -> it.copy(keyframes = keys(it.keyframes)); is ImageItem -> it.copy(keyframes = keys(it.keyframes)); is TextItem -> it.copy(keyframes = keys(it.keyframes)); is studio.muse.core.edit.AdjustItem -> it.copy(keyframes = keys(it.keyframes)); else -> it }
     }
 
     /** The item's keyframes, changed by [f] (empty lists and maps are dropped). */
     fun editKeys(p: EditProject, id: String, f: (Map<KfProp, List<Keyframe>>) -> Map<KfProp, List<Keyframe>>): EditProject? = p.updateItem(id) { it ->
         fun g(k: Map<KfProp, List<Keyframe>>?) = f(k.orEmpty()).filterValues { v -> v.isNotEmpty() }.ifEmpty { null }
-        when (it) { is VideoClip -> it.copy(keyframes = g(it.keyframes)); is ImageItem -> it.copy(keyframes = g(it.keyframes)); is TextItem -> it.copy(keyframes = g(it.keyframes)); is AudioClip -> it.copy(keyframes = g(it.keyframes)) }
+        when (it) { is VideoClip -> it.copy(keyframes = g(it.keyframes)); is ImageItem -> it.copy(keyframes = g(it.keyframes)); is TextItem -> it.copy(keyframes = g(it.keyframes)); is AudioClip -> it.copy(keyframes = g(it.keyframes)); is studio.muse.core.edit.AdjustItem -> it.copy(keyframes = g(it.keyframes)) }
     }
 
     /** Easing of every keyframe at item-local [t] (±0.05 s). */
@@ -144,7 +144,7 @@ object SuiteOps {
 
     /** The item's keyframe times (item-local seconds, every property, sorted, ±0.05 s merged). */
     fun keyTimes(item: studio.muse.core.edit.Item?): List<Double> {
-        val ks = when (item) { is VideoClip -> item.keyframes; is ImageItem -> item.keyframes; is TextItem -> item.keyframes; is AudioClip -> item.keyframes; else -> null }
+        val ks = when (item) { is VideoClip -> item.keyframes; is ImageItem -> item.keyframes; is TextItem -> item.keyframes; is AudioClip -> item.keyframes; is studio.muse.core.edit.AdjustItem -> item.keyframes; else -> null }
         val out = ArrayList<Double>()
         for (t in ks.orEmpty().values.flatten().map { it.t }.sorted()) if (out.isEmpty() || t - out.last() > 0.05) out += t
         return out
@@ -448,6 +448,23 @@ object SuiteOps {
     }
 
     /**
+     * A new adjustment layer at [atSec] (3 s, or to the end of the edit), on the first adjustment track with room there
+     * (a new one otherwise). It grades everything under it; text and captions stay on top. Returns the project and the
+     * layer's id.
+     */
+    fun addAdjustLayer(p: EditProject, atSec: Double): Pair<EditProject, String>? {
+        val dur = studio.muse.core.edit.durationSec(p)
+        if (dur < EditLimits.MIN_ITEM_SEC) return null
+        val start = atSec.coerceIn(0.0, maxOf(0.0, dur - EditLimits.MIN_ITEM_SEC))
+        val len = minOf(3.0, maxOf(EditLimits.MIN_ITEM_SEC, dur - start))
+        val base = p.tracks.firstOrNull { t -> t.kind == TrackKind.ADJUST && fitsAt(p, t, start, len) }?.let { p }
+            ?: p.copy(tracks = p.tracks + Track(p.newId("adj"), TrackKind.ADJUST, name = "Adjustment"))
+        val tid = base.tracks.last { t -> t.kind == TrackKind.ADJUST && fitsAt(base, t, start, len) }.id
+        val id = base.newId("a")
+        return base.addItem(tid, studio.muse.core.edit.AdjustItem(id, Math.round(start * 1000) / 1000.0, Math.round(len * 1000) / 1000.0))?.let { it to id }
+    }
+
+    /**
      * Overlay clip [id] moved onto the main track, at the clip boundary nearest to where it starts (the clips after it
      * move later). It fills the frame there: its overlay placing (position and size, keyframes, opacity, blend, mask,
      * chroma key, cut-out) is dropped; its trim, speed, sound and look stay. An overlay track left empty goes.
@@ -459,7 +476,7 @@ object SuiteOps {
         val start = itemSpan(p, t, c).startSec
         val bounds = listOf(0.0) + timeline(p).map { it.endSec }
         val at = bounds.indices.minBy { abs(bounds[it] - start) }
-        val moved = c.copy(startSec = null, fit = null, transform = null, keyframes = null, opacity = null, blend = null, mask = null, chroma = null, alphaMatte = null)
+        val moved = c.copy(startSec = null, fit = null, transform = null, keyframes = null, opacity = null, blend = null, mask = null, chroma = null, alphaMatte = null, animLoop = null)
         var q = p.removeItem(id) ?: return null
         if (q.track(t.id)?.items?.isEmpty() == true) q = q.removeTrack(t.id) ?: q
         return q.addItem(q.main.id, moved, at)
@@ -568,6 +585,8 @@ object SuiteOps {
                 else item.copy(durationSec = r(maxOf(min, item.durationSec + deltaSec)))
             is ImageItem -> if (left) { val d = deltaSec.coerceIn(-item.startSec, item.durationSec - min); item.copy(startSec = r(item.startSec + d), durationSec = r(item.durationSec - d)) }
                 else item.copy(durationSec = r(maxOf(min, item.durationSec + deltaSec)))
+            is studio.muse.core.edit.AdjustItem -> if (left) { val d = deltaSec.coerceIn(-item.startSec, item.durationSec - min); item.copy(startSec = r(item.startSec + d), durationSec = r(item.durationSec - d)) }
+                else item.copy(durationSec = r(maxOf(min, item.durationSec + deltaSec)))
             else -> return null
         }
         if (next == item) return null
@@ -672,10 +691,12 @@ object SuiteOps {
     // ------------------------------------------------------------ helpers
     fun withStart(it: Item, s: Double): Item = when (it) {
         is VideoClip -> it.copy(startSec = s); is AudioClip -> it.copy(startSec = s); is ImageItem -> it.copy(startSec = s); is TextItem -> it.copy(startSec = s)
+        is studio.muse.core.edit.AdjustItem -> it.copy(startSec = s)
     }
 
     fun withId(it: Item, id: String): Item = when (it) {
         is VideoClip -> it.copy(id = id); is AudioClip -> it.copy(id = id); is ImageItem -> it.copy(id = id); is TextItem -> it.copy(id = id)
+        is studio.muse.core.edit.AdjustItem -> it.copy(id = id)
     }
 
     /** The clip with sound the audio tools act on: the selected video/audio clip, else the main clip. */

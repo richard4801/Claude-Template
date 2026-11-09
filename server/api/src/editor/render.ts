@@ -2,6 +2,7 @@
 // export). ffmpeg, CPU, one render at a time. What it draws:
 // - the main track: trims, speed and speed curves (the same constant-speed pieces the apps use), cover/contain fit,
 //   transform and x/y/scale keyframes (camera moves), transitions (xfade), and the Look's LUT at its strength;
+// - adjustment layers over the joined picture, under the text (runs of one colour matrix; keyed ones sampled);
 // - text items: the apps' fonts, size, colour, stroke, position, timing;
 // - sound: each clip's own sound (at its speed) plus music/voice/sfx clips, or an external guide track instead.
 // Anything else in the project (masks, chroma, mattes, colour adjustments, overlays, captions, text animations, library
@@ -12,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOOK_IDS } from './lookpack.js';
+import { FILTERS } from './presets.js';
 import * as M from './model.js';
 import { hash01 } from './look.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
@@ -82,6 +84,7 @@ function lutFile(ref: string, files: Record<string, string>): string | null {
 }
 
 const n4 = (x: number) => String(Math.round(x * 10000) / 10000);
+const n6 = (x: number) => String(Math.round(x * 1e6) / 1e6);
 /** Piecewise-linear value of keyframes at `t` as an ffmpeg expression (constant before the first and after the last). */
 export function kfExpr(keys: M.Keyframe[] | undefined, fallback: number): string {
   const k = [...(keys ?? [])].sort((a, b) => a.t - b.t);
@@ -208,12 +211,26 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     g.push(`[${acc}]format=gbrp,sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=yuv420p[gfx]`);
     acc = 'gfx';
   }
+  // Adjustment layers: over the joined picture, under the text. Each run of one colour is a channel mix plus its
+  // offsets, on only while the run lasts.
+  const runs = adjustRuns(p);
+  if (runs.length) {
+    const st: string[] = ['format=rgb24'];
+    for (const { a, b, m } of runs) {
+      const on = `enable='gte(t,${n4(a)})*lt(t,${n4(b)})'`;
+      st.push(`colorchannelmixer=rr=${n6(m[0]!)}:rg=${n6(m[1]!)}:rb=${n6(m[2]!)}:gr=${n6(m[4]!)}:gg=${n6(m[5]!)}:gb=${n6(m[6]!)}:br=${n6(m[8]!)}:bg=${n6(m[9]!)}:bb=${n6(m[10]!)}:${on}`);
+      if (m[3] || m[7] || m[11]) st.push(`lutrgb=r='clip(val+${n4(m[3]! * 255)},0,255)':g='clip(val+${n4(m[7]! * 255)},0,255)':b='clip(val+${n4(m[11]! * 255)},0,255)':${on}`);
+    }
+    g.push(`[${acc}]${st.join(',')},format=yuv420p[adj]`);
+    acc = 'adj';
+  }
   // Text items: one drawtext per line (centred by its own width; works on ffmpeg 5.1).
   let vlast = acc, ti = 0;
   for (const tr of p.tracks) {
     if (tr.hidden) continue;
     if (tr.kind === 'caption') { if (tr.items.length || tr.caption) unsupported.add('captions'); continue; }
     if (tr.kind === 'video' || tr.kind === 'image') { if (tr.items.length) unsupported.add('overlays'); continue; }
+    if (tr.kind === 'adjust') continue; // drawn above
     if (tr.kind !== 'text') continue;
     for (const it of tr.items as M.TextItem[]) {
       const st = it.style, px = Math.max(6, st.sizePct * H);
@@ -272,6 +289,34 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   const args = ['-y', '-v', 'error', ...inputs.flatMap(x => ['-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]', ...(amix.length ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '128k'] : []),
     '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-movflags', '+faststart', '-threads', '2', '-t', n4(total), out];
   return { args, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp };
+}
+
+/**
+ * Adjustment layers ([M.adjustLayerMatrix]) as runs of one matrix: split at every layer's start and end, and every
+ * [stepSec] inside a layer with keyframes; equal neighbours merged; identity left out. A long keyed layer samples
+ * more coarsely so the graph stays under [maxRuns].
+ */
+export function adjustRuns(p: M.EditProject, stepSec = 0.1, maxRuns = 600): { a: number; b: number; m: number[] }[] {
+  const items = p.tracks.filter(t => t.kind === 'adjust' && !t.hidden).flatMap(t => t.items as M.AdjustItem[]);
+  if (!items.length) return [];
+  const keyed = items.filter(it => it.keyframes && Object.values(it.keyframes).some(k => k?.length));
+  const keyedSec = keyed.reduce((s, it) => s + it.durationSec, 0);
+  const step = Math.max(stepSec, keyedSec / maxRuns);
+  const cuts = new Set<number>();
+  const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+  for (const it of items) { cuts.add(r4(it.startSec)); cuts.add(r4(it.startSec + it.durationSec)); }
+  for (const it of keyed) for (let t = it.startSec + step; t < it.startSec + it.durationSec - 1e-6; t += step) cuts.add(r4(t));
+  const ts = [...cuts].sort((x, y) => x - y);
+  const out: { a: number; b: number; m: number[] }[] = [];
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const a = ts[i]!, b = ts[i + 1]!;
+    const m = M.adjustLayerMatrix(p, a, FILTERS);
+    const last = out.at(-1);
+    if (!m) continue;
+    if (last && Math.abs(last.b - a) < 1e-9 && last.m.every((v, k) => v === m[k])) last.b = b;
+    else out.push({ a, b, m });
+  }
+  return out;
 }
 
 /** Probes each asset file (size, sound), plans and runs the render. */

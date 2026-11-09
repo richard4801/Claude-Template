@@ -191,6 +191,7 @@ private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
         when (sel) {
             null -> clip?.let { "Clip ${(ui.project?.mainClips?.indexOf(it) ?: 0) + 1} · ${fmt1(clipLength(it))} s" } ?: "No clip"
             is TextItem -> "Text · “${sel.text.take(24)}”"
+            is studio.muse.core.edit.AdjustItem -> "Adjustment layer · ${fmt1(sel.durationSec)} s"
             is MediaClip -> "${if (sel is VideoClip) "Clip" else "Audio"} · ${fmt1(clipLength(sel))} s"
             else -> "Image"
         },
@@ -925,6 +926,7 @@ private val CATEGORIES = listOf("all" to "All", "natural" to "Natural", "film" t
 @Composable
 private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
+    (ui.selection?.second as? studio.muse.core.edit.AdjustItem)?.let { return AdjustLayerBody(ui, it, act) }
     SuiteSeg(listOf("Looks" to "Looks", "Adjust" to "Adjust"), ui.filtersTab, { act(EditAction.FiltersTab(it)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual } ?: ui.activeClip)?.id
@@ -933,7 +935,9 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
         // Item-local playhead, for colour keyframes.
         val local = ui.project?.let { p -> (v as? studio.muse.core.edit.Item)?.id?.let { id -> p.locate(id)?.let { (t, i) -> itemSpan(p, t, t.items[i]) } } }
             ?.let { sp -> (ui.playheadSec - sp.startSec).takeIf { it >= -1e-6 && ui.playheadSec <= sp.endSec + 1e-6 } }
-        return AdjustBody(v, host, act, local)
+        AdjustBody(v, host, act, local)
+        SuiteButton("Add adjustment layer", { act(EditAction.AddAdjustLayer) }, Modifier.fillMaxWidth(), icon = "sliders")
+        return
     }
     val look = v?.look
     val current = look?.lut?.removePrefix("pack:")
@@ -980,6 +984,51 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     }
     ui.cubeNote?.let { T(it, m.type.tiny.copy(fontSize = 12.sp), m.t.muted) }
     T("Same looks as the Camera bag palettes", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    SuiteButton("Add adjustment layer", { act(EditAction.AddAdjustLayer) }, Modifier.fillMaxWidth(), icon = "sliders")
+}
+
+/**
+ * The selected adjustment layer: a filter preset, colour sliders and its strength, each with ◆ for keyframes. It grades
+ * everything under it on the timeline; text and captions stay on top.
+ */
+@Composable
+private fun AdjustLayerBody(ui: EditSuiteUi, layer: studio.muse.core.edit.AdjustItem, act: (EditAction) -> Unit) {
+    val m = muse
+    val p = ui.project ?: return
+    val local = p.locate(layer.id)?.let { (t, i) -> itemSpan(p, t, t.items[i]) }
+        ?.let { sp -> (ui.playheadSec - sp.startSec).takeIf { it >= -1e-6 && ui.playheadSec <= sp.endSec + 1e-6 } }
+    T("Adjustment layer · ${fmt1(layer.durationSec)} s", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+    T("Grades everything under it. Text and captions stay on top.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    val current = layer.filter?.id ?: "none"
+    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(studio.muse.core.edit.Presets.FILTERS.size) { i ->
+            val f = studio.muse.core.edit.Presets.FILTERS[i]
+            SuiteChip(f.label, current == f.id, { act(EditAction.LayerFilter(f.id, layer.filter?.amount ?: 1.0)) })
+        }
+    }
+    layer.filter?.let { f ->
+        SuiteSlider(f.amount.toFloat(), { x, done -> act(EditAction.LayerFilter(f.id, x.toDouble(), done)) }, label = "Filter amount", valueText = "${(f.amount * 100).roundToInt()}%")
+    }
+    @Composable
+    fun row(label: String, kp: KfProp, static: Double, signedRange: Boolean) {
+        val keys = layer.keyframes?.get(kp)
+        val value = if (!keys.isNullOrEmpty() && local != null) studio.muse.core.edit.keyframeValue(keys, local) else static
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (signedRange) SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.LayerField(kp.wire, f * 2.0 - 1, done)) }, Modifier.weight(1f), label = label, valueText = signed((value * 100).roundToInt()))
+            else SuiteSlider(value.toFloat(), { f, done -> act(EditAction.LayerField("opacity", f.toDouble(), done)) }, Modifier.weight(1f), label = label, valueText = "${(value * 100).roundToInt()}%")
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.size(48.dp).press(enabled = local != null) { act(EditAction.AddKeyframe(kp)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+                EIc(if (keys.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys.isNullOrEmpty()) m.t.muted else m.t.accent)
+            }
+        }
+    }
+    val a = layer.adjust
+    row("Exposure", KfProp.EXPOSURE, a?.exposure ?: 0.0, true)
+    row("Contrast", KfProp.CONTRAST, a?.contrast ?: 0.0, true)
+    row("Saturation", KfProp.SATURATION, a?.saturation ?: 0.0, true)
+    row("Temperature", KfProp.TEMPERATURE, a?.temperature ?: 0.0, true)
+    row("Tint", KfProp.TINT, a?.tint ?: 0.0, true)
+    row("Strength", KfProp.OPACITY, layer.opacity ?: 1.0, false)
 }
 
 /** A stand-in swatch per category while thumbnails render. */

@@ -521,6 +521,8 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
                 }
                 if (clips.isNotEmpty()) audioLanes += AudioLane(t.id, lane(clips))
             }
+            // Adjustment layers colour the composed picture (RenderPlan.adjustMatrix), not a layer of their own.
+            TrackKind.ADJUST -> {}
             TrackKind.MAIN -> {}
         }
     }

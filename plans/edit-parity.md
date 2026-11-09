@@ -51,7 +51,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Mirror / flip | Has | Has | S | Transform `scaleX −1`; needs a contract field. Android: `transform.flipX/flipY`; Transform panel (wave 1). Mac: Transform → Mirror / Flip (wave 1). |
 | Layers (overlay / PiP) | Has | Has | — | |
 | Hide or mute tracks | Has | Has | S | Track headers are tablet-only; phone has none. Mac: And lock. Android: Edit → Tracks on the phone; headers on the tablet. |
-| Adjustment layer | Missing | Missing | M | |
+| Adjustment layer | Has | Has | M | Android: Filters → "Add adjustment layer" at the playhead (3 s) on an "Adjustment" lane; a selected layer takes a filter preset, exposure, contrast, saturation, temperature, tint and strength, each with ◆ keyframes. It grades everything under it; text and captions stay on top (`AdjustItem` on an `adjust` track, `adjustLayerMatrix`; one composition-level matrix effect). No look, mask, highlights/shadows or transform on a layer. Server render: drawn over the joined picture, under the text (one colour run per stretch; keyed layers sampled every 0.1 s). Screenshot: android-edit/m5_adjust_layer.png. Mac: Video → Add adjustment layer (3 s at the playhead, on an "Adjustment" lane); the selected layer has a filter with its amount, exposure, contrast, saturation, temperature, tint and Strength, each with a ◆; one colour matrix over the whole picture before text and captions (text now always draws above pictures, as on Android). |
 | Undo / redo (100 steps), shared history with Claude | Has | Has | — | Mac: ⌘Z / ⇧⌘Z |
 | Drafts / autosave | Has | Has | — | Edit sessions and local drafts |
 | Apply to all (looks, transitions) | Has | Partial | — | Mac: Transitions only; looks per clip |

@@ -302,6 +302,7 @@ public final class EditSessionSync {
         case .voice?: return "Voice-over"
         case .sfx?: return "Sound effects"
         case .video?, .image?: return "Overlay"
+        case .adjust?: return "Adjustment"
         case nil: return "Edit"
         }
     }

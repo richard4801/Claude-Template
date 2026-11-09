@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -391,6 +392,36 @@ class EditSmallRowsTest {
         c.act(EditAction.Scrub(4.5, end = true)); c.act(EditAction.AddImage("up_3", 800, 800))
         assertEquals(2, c.p().tracks.count { it.kind == TrackKind.IMAGE })
         valid(c.p())
+    }
+
+    @Test fun adjustmentLayer() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(2.0, end = true)); c.act(EditAction.AddAdjustLayer)
+        val tr = c.p().tracks.single { it.kind == TrackKind.ADJUST }
+        val layer = tr.items.single() as studio.muse.core.edit.AdjustItem
+        assertEquals(2.0, layer.startSec, 1e-9); assertEquals(3.0, layer.durationSec, 1e-9)
+        assertEquals(layer.id, c.ui.value.selectedId); assertEquals(Panel.FILTERS, c.ui.value.panel)
+        assertTrue(lanesOf(c.p()).any { it.track?.kind == TrackKind.ADJUST }); assertEquals("Adjustment", trackName(tr))
+        // Colour and strength on the layer; the graded frame changes only inside its span.
+        c.act(EditAction.LayerField("exposure", .5)); c.act(EditAction.LayerField("opacity", .5))
+        c.act(EditAction.LayerFilter("warm", .8))
+        var l = c.p().tracks.single { it.kind == TrackKind.ADJUST }.items.single() as studio.muse.core.edit.AdjustItem
+        assertEquals(.5, l.adjust!!.exposure!!, 1e-9); assertEquals(.5, l.opacity!!, 1e-9); assertEquals(studio.muse.core.edit.FilterRef("warm", .8), l.filter)
+        assertNotNull(studio.muse.core.edit.adjustLayerMatrix(c.p(), 3.0)); assertNull(studio.muse.core.edit.adjustLayerMatrix(c.p(), 6.0))
+        valid(c.p())
+        // ◆ keys exposure at the playhead; the slider then sets the key there.
+        c.act(EditAction.Scrub(2.5, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.EXPOSURE))
+        c.act(EditAction.Scrub(4.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.EXPOSURE)); c.act(EditAction.LayerField("exposure", -.4))
+        l = c.p().tracks.single { it.kind == TrackKind.ADJUST }.items.single() as studio.muse.core.edit.AdjustItem
+        val keys = l.keyframes!![studio.muse.core.edit.KfProp.EXPOSURE]!!
+        assertEquals(listOf(.5, 2.0), keys.map { it.t }); assertEquals(listOf(.5, -.4), keys.map { it.v })
+        assertEquals(.5, l.adjust!!.exposure!!, 1e-9)
+        valid(c.p())
+        // A transform key does nothing on a layer; trims work like an image's.
+        c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.SCALE))
+        assertNull(l.keyframes!![studio.muse.core.edit.KfProp.SCALE])
+        val trimmed = SuiteOps.trimBy(c.p(), l.id, left = false, deltaSec = -1.0)!!
+        assertEquals(2.0, (trimmed.tracks.single { it.kind == TrackKind.ADJUST }.items.single() as studio.muse.core.edit.AdjustItem).durationSec, 1e-9)
     }
 
     @Test fun loopAnimations() = runTest {

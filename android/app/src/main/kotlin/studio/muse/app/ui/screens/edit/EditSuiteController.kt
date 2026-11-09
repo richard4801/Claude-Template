@@ -20,6 +20,8 @@ import studio.muse.app.data.EditorEstimate
 import studio.muse.app.data.EditorJob
 import studio.muse.app.data.EditorSourceDto
 import studio.muse.core.edit.Adjust
+import studio.muse.core.edit.AdjustItem
+import studio.muse.core.edit.FilterRef
 import studio.muse.core.edit.AlphaMatte
 
 import studio.muse.core.edit.Asset
@@ -259,6 +261,12 @@ sealed interface EditAction {
     data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
+    /** A new adjustment layer at the playhead (3 s): it grades everything under it. */
+    data object AddAdjustLayer : EditAction
+    /** The selected adjustment layer's colour [field] (exposure…tint) or "opacity" (its strength). */
+    data class LayerField(val field: String, val value: Double, val done: Boolean = true) : EditAction
+    /** The selected adjustment layer's filter preset (null or "none": none) at [amount]. */
+    data class LayerFilter(val id: String?, val amount: Double = 1.0, val done: Boolean = true) : EditAction
     /** A photo from the phone (an editor upload, [width] × [height]) placed over the edit at the playhead. */
     data class AddImage(val upload: String, val width: Int, val height: Int) : EditAction
     /** The chroma eyedropper on (pauses; the view model loads the frame) or off. */
@@ -407,7 +415,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -858,6 +866,19 @@ class EditSuiteController(
                 p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animLoop = l); is ImageItem -> it.copy(animLoop = l); is VideoClip -> it.copy(animLoop = l); else -> it } }
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
+            EditAction.AddAdjustLayer -> {
+                var newId: String? = null
+                if (change(refused = "Couldn't add an adjustment layer here") { p -> SuiteOps.addAdjustLayer(p, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {
+                    _ui.update { it.copy(selectedId = newId, panel = Panel.FILTERS, filtersTab = "Adjust") }
+                    say("Adjustment layer added · it grades everything under it")
+                }
+            }
+            is EditAction.LayerField -> layerField(u, a)
+            is EditAction.LayerFilter -> {
+                val id = layerId(u) ?: return
+                val f = a.id?.takeIf { it != "none" }?.let { FilterRef(it, r2(a.amount.coerceIn(0.0, 1.0))) }
+                change(a.done) { p -> p.updateItem(id) { if (it is AdjustItem) it.copy(filter = f) else it } }
+            }
             is EditAction.AddImage -> {
                 var newId: String? = null
                 if (change(refused = "Couldn't add that photo here") { p -> SuiteOps.addImage(p, a.upload, a.width, a.height, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {
@@ -1314,8 +1335,46 @@ class EditSuiteController(
         else change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(opacity = v.takeIf { o -> o < 1 }); is ImageItem -> it.copy(opacity = v.takeIf { o -> o < 1 }); is TextItem -> it.copy(opacity = v.takeIf { o -> o < 1 }); else -> it } } }
     }
 
+    /** The selected adjustment layer's id, if one is selected. */
+    private fun layerId(u: EditSuiteUi): String? = (u.selection?.second as? AdjustItem)?.id
+
+    /** A colour field or the strength of the selected adjustment layer; a keyframed one gets a key at the playhead. */
+    private fun layerField(u: EditSuiteUi, a: EditAction.LayerField) {
+        val id = layerId(u) ?: return
+        val layer = u.selection?.second as? AdjustItem ?: return
+        val kp = if (a.field == "opacity") KfProp.OPACITY else KfProp.COLOR.firstOrNull { it.wire == a.field } ?: return
+        val v = r2(if (kp == KfProp.OPACITY) a.value.coerceIn(0.0, 1.0) else a.value.coerceIn(-1.0, 1.0))
+        if (!layer.keyframes?.get(kp).isNullOrEmpty()) {
+            val local = localAt(u, id) ?: return say("Move the playhead over this layer to set its keyframe")
+            change(a.done) { p -> SuiteOps.keyframe(p, id, kp, local, v, u.keyEase) }
+            return
+        }
+        change(a.done) { p ->
+            p.updateItem(id) { it ->
+                if (it !is AdjustItem) return@updateItem it
+                if (kp == KfProp.OPACITY) return@updateItem it.copy(opacity = v.takeIf { o -> o < 1 })
+                val ad = it.adjust ?: Adjust()
+                val x = v.takeIf { n -> n != 0.0 }
+                val n = when (kp) {
+                    KfProp.EXPOSURE -> ad.copy(exposure = x); KfProp.CONTRAST -> ad.copy(contrast = x); KfProp.SATURATION -> ad.copy(saturation = x)
+                    KfProp.TEMPERATURE -> ad.copy(temperature = x); KfProp.TINT -> ad.copy(tint = x); else -> ad
+                }
+                it.copy(adjust = n.takeIf { d -> d != Adjust() })
+            }
+        }
+    }
+
     private fun addKeyframe(u: EditSuiteUi, prop: KfProp) {
         val p = project ?: return
+        (u.selection?.second as? AdjustItem)?.let { layer ->
+            // An adjustment layer keys its colour fields and its strength, at the value showing now.
+            if (prop != KfProp.OPACITY && prop !in KfProp.COLOR) return
+            val local = localAt(u, layer.id) ?: return say("Move the playhead over this layer to add a keyframe")
+            val static = if (prop == KfProp.OPACITY) layer.opacity ?: 1.0 else adjustField(layer.adjust, prop) ?: 0.0
+            val v = studio.muse.core.edit.propAt(layer.keyframes, prop, static, local)
+            if (change { SuiteOps.keyframe(it, layer.id, prop, local, v, u.keyEase) }) say("Keyframe added at ${"%.1f".format(local)} s")
+            return
+        }
         if (prop in KfProp.MASK || prop in KfProp.LOOK) {
             // Mask and look keyframes: on the picture the Mask / Adjust panels act on, at the value showing now.
             val id = visualId(u) ?: return

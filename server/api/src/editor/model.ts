@@ -74,8 +74,13 @@ export type CaptionStyle = TextStyle & { preset: CaptionPreset; highlightColor: 
 export type CaptionWord = { text: string; startSec: number; endSec: number };
 export type CaptionTrack = { asset: string; words: CaptionWord[]; style: CaptionStyle };
 export type Duck = { level?: number; fadeSec?: number; attackSec?: number; releaseSec?: number; under: ('voice' | 'speech')[] };
-export type TrackKind = 'main' | 'video' | 'image' | 'text' | 'caption' | 'music' | 'voice' | 'sfx';
-export type Item = VideoClip | ImageItem | TextItem | AudioClip;
+export type TrackKind = 'main' | 'video' | 'image' | 'text' | 'caption' | 'music' | 'voice' | 'sfx' | 'adjust';
+/**
+ * An adjustment layer (M): while on screen, its colour (adjust and filter, mixed with the identity by its strength
+ * `opacity`) applies to the whole composed picture under the text and captions (`adjustLayerMatrix`).
+ */
+export type AdjustItem = { id: string; startSec: number; durationSec: number; adjust?: Adjust; filter?: FilterRef; keyframes?: Keyframes; opacity?: number };
+export type Item = VideoClip | ImageItem | TextItem | AudioClip | AdjustItem;
 export type Track = { id: string; kind: TrackKind; name?: string; muted?: boolean; hidden?: boolean; volume?: number; items: Item[];
   caption?: CaptionTrack; duck?: Duck };
 /** fill (wave 1): what shows where a contain-fitted main clip leaves the frame empty: the background colour (default) or a blurred copy of the clip (blurFill). */
@@ -676,6 +681,32 @@ export function toSrt(p: EditProject): string {
   }).join('\n');
 }
 
+/**
+ * The adjustment layers' colour at timeline t: for each adjust item on screen (tracks in order, lower first), its
+ * matrix mixed with the identity by its strength, multiplied together (the upper applied last). Null when none is on
+ * screen or the result is the identity.
+ *
+ * Drawing order (every engine): text and captions are always drawn above video and image tracks; adjustment layers
+ * apply after the pictures, before text. The composed matrix is not clamped between layers, only at the end.
+ */
+export function adjustLayerMatrix(p: EditProject, t: number, presets: FilterPreset[]): number[] | null {
+  let m: M = ID, any = false;
+  for (const tr of p.tracks) {
+    if (tr.kind !== 'adjust' || tr.hidden) continue;
+    for (const it of tr.items as AdjustItem[]) {
+      if (t < it.startSec - 1e-9 || t >= it.startSec + it.durationSec - 1e-9) continue;
+      const local = t - it.startSec;
+      const s = clamp(propAt(it, 'opacity', it.opacity ?? 1, local), 0, 1);
+      const c = colorMatrix(adjustAt(it, local), it.filter, presets);
+      m = mul(c.map((v, i) => ID[i]! + s * (v - ID[i]!)), m);
+      any = true;
+    }
+  }
+  if (!any) return null;
+  const out = m.map(r6);
+  return out.every((v, i) => Math.abs(v - ID[i]!) < 1e-9) ? null : out;
+}
+
 /** One 3×4 affine RGB matrix for the item's look (exposure → temperature → green/magenta tint → contrast → saturation → preset tint). */
 export function colorMatrix(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): number[] {
   const { adjust: a, tint } = effectiveAdjust(adjust, filter, presets);
@@ -934,7 +965,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     id(`${f}.id`, t.id);
     if (ids.has(t.id)) bad(`${f}.id`, 'is used twice');
     ids.add(t.id);
-    if (!['main', 'video', 'image', 'text', 'caption', 'music', 'voice', 'sfx'].includes(t.kind)) bad(`${f}.kind`, 'unknown track kind');
+    if (!['main', 'video', 'image', 'text', 'caption', 'music', 'voice', 'sfx', 'adjust'].includes(t.kind)) bad(`${f}.kind`, 'unknown track kind');
     num(`${f}.volume`, t.volume, 0, 2);
     if (!Array.isArray(t.items) || t.items.length > LIMITS.maxItemsPerTrack) bad(`${f}.items`, `at most ${LIMITS.maxItemsPerTrack} items`);
     total += t.items.length;
@@ -1041,6 +1072,13 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.opacity`, tx.opacity, 0, 1);
         kfs(`${g}.keyframes`, tx.keyframes, tx.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
         anim(`${g}.animIn`, tx.animIn, true); anim(`${g}.animOut`, tx.animOut, true); loop(`${g}.animLoop`, tx.animLoop);
+      } else if (t.kind === 'adjust') {
+        const ad = it as AdjustItem & Record<string, unknown>;
+        for (const k of ['look', 'mask', 'transform', 'crop', 'fit', 'asset'] as const) if (ad[k] !== undefined) bad(`${g}.${k}`, 'is not part of an adjustment layer');
+        num(`${g}.startSec`, ad.startSec, 0, 600, false); num(`${g}.durationSec`, ad.durationSec, LIMITS.minItemSec, 600, false);
+        for (const k of ['highlights', 'shadows'] as const) if (ad.adjust?.[k] !== undefined) bad(`${g}.adjust.${k}`, 'is not part of an adjustment layer');
+        visual(g, { adjust: ad.adjust, filter: ad.filter, opacity: ad.opacity }, ad.durationSec);
+        kfs(`${g}.keyframes`, ad.keyframes, ad.durationSec, ['opacity', ...COLOR_KF_PROPS]);
       } else if (t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') {
         const c = it as AudioClip;
         clipBase(g, c, ['audio', 'video']);

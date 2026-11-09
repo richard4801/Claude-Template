@@ -184,6 +184,15 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'loop period too short', project: mut(p => { p.tracks[2].items[0].animLoop = { kind: 'spin', periodSec: 0.1 }; }), ok: false, field: 'edits.tracks.2.items.0.animLoop.periodSec' },
   { name: 'audio speed ok', project: mut(p => { p.assets.push({ id: 'mus9', kind: 'audio', upload: 'up_m9', durationSec: 20 }); p.tracks.push({ id: 'mu9', kind: 'music', items: [{ id: 'a9', asset: 'mus9', startSec: 0, inSec: 0, outSec: 9, speed: 1.5 }] }); }), ok: true },
   { name: 'audio speed too fast', project: mut(p => { p.assets.push({ id: 'mus9', kind: 'audio', upload: 'up_m9', durationSec: 20 }); p.tracks.push({ id: 'mu9', kind: 'music', items: [{ id: 'a9', asset: 'mus9', startSec: 0, inSec: 0, outSec: 9, speed: 3 }] }); }), ok: false, field: 'edits.tracks.4.items.0.speed' },
+  { name: 'adjust layer ok', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 }, opacity: 0.7 }, { id: 'ad2', startSec: 2, durationSec: 1, filter: { id: 'warm', amount: 1 }, keyframes: { opacity: [{ t: 0, v: 1 }], tint: [{ t: 0.5, v: 0.3 }] } }] }); }), ok: true },
+  { name: 'adjust layer with a look', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, look: { vignette: { amount: 0.3 } } }] }); }), ok: false, field: 'edits.tracks.4.items.0.look' },
+  { name: 'adjust layer overlap', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2 }, { id: 'ad2', startSec: 1.5, durationSec: 1 }] }); }), ok: false, field: 'edits.tracks.4.items.1.startSec' },
+  { name: 'adjust item on a video track', project: mut(p => { p.tracks.push({ id: 'ovx', kind: 'video', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
+  { name: 'video clip on an adjust track', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'v9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 2 }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
+  { name: 'adjust layer with highlights', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { highlights: 0.3 } }] }); }), ok: false, field: 'edits.tracks.4.items.0.adjust.highlights' },
+  { name: 'adjust layer with a transform', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, transform: { scale: 1.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.transform' },
+  { name: 'adjust layer scale key', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, keyframes: { scale: [{ t: 0, v: 1 }] } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.keyframes.scale' },
+  { name: 'adjust layer strength too big', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, opacity: 1.5 }] }); }), ok: false, field: 'edits.tracks.4.items.0.opacity' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
@@ -437,7 +446,18 @@ const audioSpeedClips = [
   { id: 'v', asset: 'vo', startSec: 0.5, inSec: 0, outSec: 3, speed: 0.75, fadeInSec: 0.2 },
 ] as M.AudioClip[];
 const audioSpeed = audioSpeedClips.map(c => ({ clip: c, length: M.clipLength(c), beatsOnTimeline: (c.beats ?? []).map(b => Math.round((c.startSec + M.clipTimeAt(c, b)) * 1e6) / 1e6),
-  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })) }));
+  sourceAt: [0, 0.4, 1, 2.5, 4].map(t => ({ t, src: M.clipSourceAt(c, t) })),
+  // A beat mark tapped at timeline time T is stored as its source time (rounded to 1 ms).
+  tappedMarks: [1.6, 4.25, 7].map(T => ({ timelineT: T, src: Math.round(M.clipSourceAt(c, T - c.startSec) * 1000) / 1000 })) }));
+// Adjustment layers (M): adjustLayerMatrix over time on a project with two adjust tracks.
+const adjustProject = (() => {
+  const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;
+  q.tracks.push({ id: 'adj1', kind: 'adjust', items: [{ id: 'ad1', startSec: 1, durationSec: 4, adjust: { contrast: 0.2 }, opacity: 0.5, keyframes: { exposure: [{ t: 0, v: -0.5 }, { t: 2, v: 0.5, ease: 'easeInOut' }] } }] } as M.Track);
+  q.tracks.push({ id: 'adj2', kind: 'adjust', items: [{ id: 'ad2', startSec: 3, durationSec: 3, filter: { id: 'film', amount: 0.8 }, keyframes: { opacity: [{ t: 0, v: 0 }, { t: 1, v: 1 }] } }, { id: 'ad3', startSec: 7, durationSec: 1, adjust: { saturation: -1 } }] } as M.Track);
+  M.validate(q, FILTERS);
+  return q;
+})();
+const adjustLayers = { project: adjustProject, samples: [0, 1, 2, 3, 3.5, 4.99, 6, 7.5].map(t => ({ t, matrix: M.adjustLayerMatrix(adjustProject, t, FILTERS) })) };
 const wave1 = projects[projects.length - 1]!.project;
 const holdClip = (wave1.tracks[0]!.items[1]) as M.VideoClip;
 const holdFns = { clip: holdClip, length: M.clipLength(holdClip), sourceAt: [0, 0.7, 1.5].map(t => ({ t, src: M.clipSourceAt(holdClip, t) })), timeAt: M.clipTimeAt(holdClip, 4.05),
@@ -456,7 +476,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

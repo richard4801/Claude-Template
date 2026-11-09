@@ -232,6 +232,15 @@ private struct Validator {
                     try kfs("\(g).keyframes", c.keyframes, E.clipLength(c), allowed: [.volume])
                     if let b = c.beats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).beats", "must be up to 2000 times") }
                     if let b = c.strongBeats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).strongBeats", "must be up to 2000 times") }
+                case (.adjust, .adjust(let ad)):
+                    // Adjustment layers (contract, WS8 3e20288): colour and strength only.
+                    if let k = ad.strayKeys.first { throw bad("\(g).\(k)", "is not part of an adjustment layer") }
+                    try num("\(g).startSec", ad.startSec, 0, 600, optional: false)
+                    try num("\(g).durationSec", ad.durationSec, E.minItemSec, 600, optional: false)
+                    if ad.adjust?.highlights != nil { throw bad("\(g).adjust.highlights", "is not part of an adjustment layer") }
+                    if ad.adjust?.shadows != nil { throw bad("\(g).adjust.shadows", "is not part of an adjustment layer") }
+                    try visual(g, fit: nil, transform: nil, crop: nil, opacity: ad.opacity, adjust: ad.adjust, filter: ad.filter, look: nil)
+                    try kfs("\(g).keyframes", ad.keyframes, ad.durationSec, allowed: [.opacity] + E.KfProp.color)
                 default:
                     break
                 }

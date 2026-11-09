@@ -168,6 +168,17 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun adjustmentLayers() {
+        val al = fn["adjustLayers"]!!.obj
+        val p = EditJson.parse(al["project"]!!)
+        assertEquals(null, problemOf(p)?.message)
+        for (sm in al["samples"]!!.arr) {
+            val t = sm.obj["t"]!!.num
+            assertJson("adjustLayer t=$t", sm.obj["matrix"], adjustLayerMatrix(p, t)?.let(::numbers) ?: kotlinx.serialization.json.JsonNull)
+        }
+        assertEquals(al["project"], EditJson.encode(p)) // round trip
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj
@@ -177,6 +188,8 @@ class EditFixtureTest {
             val beats = c.obj["beatsOnTimeline"]!!.arr.map { it.num }
             assertEquals(beats, clip.beats.orEmpty().map { Math.round((clip.startSec + clipTimeAt(clip, it)) * 1e6) / 1e6 })
             for (sm in c.obj["sourceAt"]!!.arr) assertEquals(sm.obj["src"]!!.num, clipSourceAt(clip, sm.obj["t"]!!.num), 1e-9)
+            // MarkBeat stores a tap at timeline T as r3(clipSourceAt(clip, T - start)).
+            for (sm in c.obj["tappedMarks"]!!.arr) assertEquals(sm.obj["src"]!!.num, Math.round(clipSourceAt(clip, sm.obj["timelineT"]!!.num - clip.startSec) * 1000) / 1000.0, 1e-9)
         }
     }
 

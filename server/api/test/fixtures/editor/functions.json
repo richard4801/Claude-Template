@@ -1,4 +1,217 @@
 {
+ "adjustLayers": {
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0.5,
+       "outSec": 9.8,
+       "speed": 1
+      }
+     ]
+    },
+    {
+     "id": "adj1",
+     "kind": "adjust",
+     "items": [
+      {
+       "id": "ad1",
+       "startSec": 1,
+       "durationSec": 4,
+       "adjust": {
+        "contrast": 0.2
+       },
+       "opacity": 0.5,
+       "keyframes": {
+        "exposure": [
+         {
+          "t": 0,
+          "v": -0.5
+         },
+         {
+          "t": 2,
+          "v": 0.5,
+          "ease": "easeInOut"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "adj2",
+     "kind": "adjust",
+     "items": [
+      {
+       "id": "ad2",
+       "startSec": 3,
+       "durationSec": 3,
+       "filter": {
+        "id": "film",
+        "amount": 0.8
+       },
+       "keyframes": {
+        "opacity": [
+         {
+          "t": 0,
+          "v": 0
+         },
+         {
+          "t": 1,
+          "v": 1
+         }
+        ]
+       }
+      },
+      {
+       "id": "ad3",
+       "startSec": 7,
+       "durationSec": 1,
+       "adjust": {
+        "saturation": -1
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "samples": [
+   {
+    "t": 0,
+    "matrix": null
+   },
+   {
+    "t": 1,
+    "matrix": [
+     0.924264,
+     0,
+     0,
+     -0.05,
+     0,
+     0.924264,
+     0,
+     -0.05,
+     0,
+     0,
+     0.924264,
+     -0.05
+    ]
+   },
+   {
+    "t": 2,
+    "matrix": [
+     1.1,
+     0,
+     0,
+     -0.05,
+     0,
+     1.1,
+     0,
+     -0.05,
+     0,
+     0,
+     1.1,
+     -0.05
+    ]
+   },
+   {
+    "t": 3,
+    "matrix": [
+     1.348528,
+     0,
+     0,
+     -0.05,
+     0,
+     1.348528,
+     0,
+     -0.05,
+     0,
+     0,
+     1.348528,
+     -0.05
+    ]
+   },
+   {
+    "t": 3.5,
+    "matrix": [
+     1.301336,
+     0.058498,
+     0.005811,
+     -0.038986,
+     0.017667,
+     1.33257,
+     0.005811,
+     -0.044403,
+     0.017667,
+     0.058498,
+     1.270286,
+     -0.050949
+    ]
+   },
+   {
+    "t": 4.99,
+    "matrix": [
+     1.254145,
+     0.116996,
+     0.011622,
+     -0.027972,
+     0.035334,
+     1.316611,
+     0.011622,
+     -0.038806,
+     0.035334,
+     0.116996,
+     1.192043,
+     -0.051898
+    ]
+   },
+   {
+    "t": 6,
+    "matrix": null
+   },
+   {
+    "t": 7.5,
+    "matrix": [
+     0.2126,
+     0.7152,
+     0.0722,
+     0,
+     0.2126,
+     0.7152,
+     0.0722,
+     0,
+     0.2126,
+     0.7152,
+     0.0722,
+     0
+    ]
+   }
+  ]
+ },
  "audioSpeed": [
   {
    "clip": {
@@ -45,6 +258,20 @@
      "t": 4,
      "src": 8
     }
+   ],
+   "tappedMarks": [
+    {
+     "timelineT": 1.6,
+     "src": 2.9
+    },
+    {
+     "timelineT": 4.25,
+     "src": 6.875
+    },
+    {
+     "timelineT": 7,
+     "src": 11
+    }
    ]
   },
   {
@@ -78,6 +305,20 @@
     },
     {
      "t": 4,
+     "src": 3
+    }
+   ],
+   "tappedMarks": [
+    {
+     "timelineT": 1.6,
+     "src": 0.825
+    },
+    {
+     "timelineT": 4.25,
+     "src": 2.813
+    },
+    {
+     "timelineT": 7,
      "src": 3
     }
    ]
