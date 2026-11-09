@@ -560,6 +560,8 @@ const captionScripts = {
 const songUp: M.Asset = { id: 'tune', kind: 'audio', upload: 'up_tune', durationSec: 12 };
 const lyricProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
   { id: 'mus', kind: 'music', items: [{ id: 'm1', asset: 'tune', startSec: 0, inSec: 0, outSec: 4 }, { id: 'm2', asset: 'tune', startSec: 4, inSec: 5, outSec: 11, speed: 1.5 }] } as M.Track,
+  // The same song again on a voice track, overlapping the first clip: both copies are kept (no de-duplication).
+  { id: 'vox', kind: 'voice', items: [{ id: 'v1', asset: 'tune', startSec: 1.5, inSec: 0.4, outSec: 1.4 }] } as M.Track,
   { id: 'cap', kind: 'caption', items: [], caption: { asset: 'tune', words: [W('Hold', 0.5, 0.9), W('on', 1.0, 1.3), W('to', 3.7, 3.95), W('me', 4.2, 4.6), W('stay', 5.5, 6.0), W('close', 6.1, 6.8), W('tonight', 10.6, 11.4)], style: CAPTION_STYLES.karaoke! } } as M.Track],
   [src, songUp]);
 M.validate(lyricProject, FILTERS);

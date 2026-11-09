@@ -1140,6 +1140,7 @@ class EditSuiteController(
                 val lang = (r["language"] as? JsonPrimitive)?.content?.takeIf { studio.muse.core.edit.LANGUAGE_CODE.matches(it) }
                 if (change { pp -> SuiteOps.withCaptions(pp, asset.id, words, if (song != null) studio.muse.core.edit.CaptionPreset.KARAOKE else studio.muse.core.edit.CaptionPreset.POP).let { np -> np.copy(tracks = np.tracks.map { t -> if (t.kind == TrackKind.CAPTION) t.copy(caption = t.caption?.copy(language = lang, original = null)) else t }) } })
                     say("Captions added · ${words.size} words")
+                _ui.update { it.copy(captionNotice = (r["exportNotice"] as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.ifBlank { null }) }
             }
         }
     }
@@ -1461,7 +1462,10 @@ class EditSuiteController(
                     // The captions as shown are what was translated: they become the kept words (an earlier pair is replaced).
                     val base = cur.copy(original = null)
                     pp.copy(tracks = pp.tracks.map { if (it === t) it.copy(caption = studio.muse.core.edit.translateCaptions(base, lang, words)) else it })
-                }) say("Captions translated · ${words.size} words")
+                }) {
+                    say("Captions translated · ${words.size} words")
+                    _ui.update { it.copy(captionNotice = (r["exportNotice"] as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.ifBlank { null }) }
+                }
         }
     }
 
