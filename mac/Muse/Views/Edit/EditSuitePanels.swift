@@ -399,6 +399,8 @@ struct AdjustPanel: View {
                 SuiteRule()
                 SuiteLabel("Curves")
                 CurvesEditor(session: session)
+                SuiteRule()
+                HslEditor(session: session)
             }
         }
     }
@@ -502,6 +504,54 @@ struct AdjustLayerPanel: View {
             ForEach([("Exposure", EditV2.KfProp.exposure), ("Contrast", .contrast), ("Saturation", .saturation), ("Temperature", .temperature), ("Tint", .tint)],
                     id: \.1) { label, p in
                 KeyedRow(session: session, label: label, props: [p], range: -1...1, format: signed100, store: { v, _ in (v * 100).rounded() / 100 })
+            }
+        }
+    }
+}
+
+/// HSL per hue (contract, WS8 9afb6aa): a band picker of eight colour dots, then Hue, Saturation and Luminance for the
+/// picked band, and Reset HSL. Part of the look (after the curves, before the LUT).
+struct HslEditor: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    @State private var band = "red"
+
+    private static let dots: [String: Color] = ["red": Color(hex: 0xE5484D), "orange": Color(hex: 0xF0883E), "yellow": Color(hex: 0xE9C46A),
+                                                 "green": Color(hex: 0x46A758), "aqua": Color(hex: 0x3DB9CF), "blue": Color(hex: 0x3E63DD),
+                                                 "purple": Color(hex: 0x8E4EC6), "magenta": Color(hex: 0xD6409F)]
+
+    var body: some View {
+        let s = session.state
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack {
+                SuiteLabel("HSL")
+                Spacer()
+                SuiteToolButton(title: "Reset HSL", disabled: s.selectedVisual?.look?.hsl == nil, plain: true) { session.edit { $0.resetHsl() } }
+            }
+            HStack(spacing: 6) {
+                ForEach(EditV2.hueBands, id: \.0) { b, _ in
+                    let set = ["hue", "sat", "light"].contains { s.hslValue(b, $0) != 0 }
+                    Button { band = b } label: {
+                        Circle().fill(Self.dots[b] ?? .gray).frame(width: 18, height: 18)
+                            .overlay(Circle().strokeBorder(band == b ? t.roles.ink : .clear, lineWidth: 2).padding(-3))
+                            .overlay(alignment: .bottomTrailing) { if set { Circle().fill(t.roles.ink).frame(width: 5, height: 5) } }
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(b.capitalized)
+                    .accessibilityLabel("\(b.capitalized) hues")
+                    .accessibilityAddTraits(band == b ? .isSelected : [])
+                }
+            }
+            SuiteSlider("Hue", value: s.hslValue(band, "hue"), range: -1...1, format: { "\(Int(($0 * 30).rounded()))°" }) { v in
+                session.edit { $0.setHsl(band, "hue", (v * 100).rounded() / 100) }
+            }
+            SuiteSlider("Saturation", value: s.hslValue(band, "sat"), range: -1...1, format: signed100) { v in
+                session.edit { $0.setHsl(band, "sat", (v * 100).rounded() / 100) }
+            }
+            SuiteSlider("Luminance", value: s.hslValue(band, "light"), range: -1...1, format: signed100) { v in
+                session.edit { $0.setHsl(band, "light", (v * 100).rounded() / 100) }
             }
         }
     }

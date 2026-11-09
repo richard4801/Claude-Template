@@ -191,6 +191,20 @@ final class EditV2ColorKeysTests: XCTestCase {
         XCTAssertNil(s.selectedItem?.textItem?.style.fontAsset)
     }
 
+    func testHslSetter() {
+        var s = EditSuiteState(E.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 6), E.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        s.selection = s.project.mainClips[0].id
+        XCTAssertTrue(s.setHsl("blue", "sat", 0.4))
+        XCTAssertTrue(s.setHsl("red", "hue", -2))
+        XCTAssertEqual(s.hslValue("red", "hue"), -1, "clamped")
+        XCTAssertNil(E.problem(s.project))
+        XCTAssertFalse(s.setHsl("cyan", "sat", 0.2), "not a band")
+        XCTAssertTrue(s.setHsl("blue", "sat", 0))
+        XCTAssertNil(s.project.mainClips[0].look?.hsl?["blue"])
+        XCTAssertTrue(s.resetHsl())
+        XCTAssertNil(s.project.mainClips[0].look)
+    }
+
     /// Auto adjust: the reference's numbers on its four synthetic frames (functions.json → autoAdjust, WS8 03928ae).
     func testAutoAdjustFixtures() throws {
         let cases = try editorFixture("functions")["autoAdjust"].array

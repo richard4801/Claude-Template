@@ -118,14 +118,14 @@ extension EditV2 {
         let noMatrix = (matrix.map { isIdentity($0) } ?? true) && tone == nil
         guard let look else { return noMatrix }
         let noLut = lut == nil || clamp(look.strength ?? 1, 0, 1) <= 0
-        return noMatrix && curvesFn(look.curves) == nil && noLut && clamp(look.lift ?? 0, 0, 1) <= 0
+        return noMatrix && curvesAndHslFn(look) == nil && noLut && clamp(look.lift ?? 0, 0, 1) <= 0
     }
 
     /// RGBA float data (alpha 1, red fastest, then green, then blue) of a `size`³ colour cube holding steps 3–6 of the
     /// pipeline — the colour matrix, curves, LUT (blended by strength) and lift — for Core Image's
     /// CIColorCubeWithColorSpace (sRGB).
     public static func lookCube(matrix: [Double]?, tone: Tone? = nil, look: Look?, lut: Lut?, size: Int = 33) -> [Float] {
-        let curves = curvesFn(look?.curves)
+        let curves = curvesAndHslFn(look)
         let strength = clamp(look?.strength ?? 1, 0, 1), lift = 0.12 * clamp(look?.lift ?? 0, 0, 1)
         let m = matrix.flatMap { isIdentity($0) ? nil : $0 }
         var out = [Float](repeating: 1, count: size * size * size * 4)

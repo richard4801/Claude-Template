@@ -328,4 +328,37 @@ extension EditSuiteState {
             return q
         }
     }
+
+    // MARK: HSL per hue (contract, WS8 9afb6aa)
+
+    /// The selected picture's HSL value for a band ("red" …) and key ("hue", "sat", "light"), 0 when unset.
+    public func hslValue(_ band: String, _ key: String) -> Double { selectedVisual?.look?.hsl?[band]?[key] ?? 0 }
+
+    /// Sets one band's hue / sat / light (−1…1; 0 removes it, and empty bands and an empty HSL go too).
+    @discardableResult
+    public mutating func setHsl(_ band: String, _ key: String, _ value: Double) -> Bool {
+        guard E.hueBands.contains(where: { $0.0 == band }), ["hue", "sat", "light"].contains(key), selectedItem?.textItem == nil,
+              selectedAdjust == nil, selectedVisual != nil else { return false }
+        let v = E.r3(min(1, max(-1, value)))
+        return changeVisual { vis in
+            var l = vis.look ?? E.Look()
+            var h = l.hsl ?? [:]
+            var b = h[band] ?? [:]
+            b[key] = abs(v) < 0.0005 ? nil : v
+            h[band] = b.isEmpty ? nil : b
+            l.hsl = h.isEmpty ? nil : h
+            vis.look = l == E.Look() ? nil : l
+        }
+    }
+
+    /// Removes every HSL setting of the selected picture.
+    @discardableResult
+    public mutating func resetHsl() -> Bool {
+        guard selectedVisual?.look?.hsl != nil else { return false }
+        return changeVisual { vis in
+            var l = vis.look ?? E.Look()
+            l.hsl = nil
+            vis.look = l == E.Look() ? nil : l
+        }
+    }
 }
