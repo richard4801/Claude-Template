@@ -98,6 +98,17 @@ inside a line are spread evenly.
   docs EU files are never used for model training. Each transcript is deleted at AssemblyAI as soon as its words are stored.
 - **No live test from the server side:** the owner's first real Captions run in the app is the check.
 
+**Scripts the export draws (WS16, 2026-11-09):** the server render draws text with opentype.js. To keep "nothing
+half-works", translate offers only languages the export can draw, and captions in any other script carry `exportNotice`.
+- Step 1: Latin, Cyrillic, Greek and Vietnamese (DejaVu Sans).
+- Step 2: Chinese, Japanese and Korean (Noto Sans SC/JP/KR; the face follows the script and `CaptionTrack.language`).
+  Only the face a block needs is loaded, and it is released after the render's text (a 1080p export with a Japanese
+  caption peaks at 190 MB Node and 149 MB ffmpeg). Captions in ja, zh and th are drawn with no spaces between words.
+- Step 3: Arabic, Hebrew, Hindi (Devanagari) and Thai (their Noto faces, shaped by HarfBuzz via harfbuzzjs, with words
+  in Unicode bidi order via bidi-js). Pixel tests match HarfBuzz's own drawing.
+- Fonts: scripts/cjk-fonts.mjs, pinned npm packages with SHA-256 checks, run by the Docker build (about 46 MB, OFL).
+- Still not drawn: Bengali, Tamil and the other Indic scripts (no face yet). Their captions get the notice.
+
 ## 5. AI music: Dropped by the owner 2026-11-09
 
 **Not being built.** Nothing was built on the server: no job, no stubs, no key. The research below is kept for the
