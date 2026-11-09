@@ -1053,13 +1053,25 @@ struct SpeedPanel: View {
                 }
                 // Reverse (contract, WS8 cb5413e): the clip plays a reversed copy of its source (made once, up to 60 s).
                 SuiteRule()
-                SuiteToggleRow(title: "Reverse", hint: "Plays backwards", isOn: session.state.reversedFrom != nil, busy: session.isRunning(.reverse)) { _ in
+                let steps = session.state.selectedSteps
+                SuiteToggleRow(title: "Reverse", hint: stepHint("reverse", "Plays backwards"), isOn: steps.contains("reverse"), busy: session.isRunning(.reverse)) { _ in
                     Task { await session.toggleReverse() }
                 }
+                // Stabilise (XL, owner-approved): a steadied copy made once by the server (free, up to 3 minutes).
+                SuiteToggleRow(title: "Stabilise", hint: stepHint("stabilize", session.features?.note(.stabilize) ?? "Smooths out shaky hands; crops the edges a little"),
+                               isOn: steps.contains("stabilize"), busy: session.isRunning(.stabilize)) { _ in
+                    Task { await session.toggleStabilize() }
+                }
+                .disabled(session.features?.isAvailable(.stabilize) == false && !steps.contains("stabilize"))
             }
         } else {
             InspectorEmpty(text: "Select a video clip to change its speed.")
         }
+    }
+
+    /// "Turn off Reverse first" when another step came after this one (only the last step switches off).
+    private func stepHint(_ step: String, _ normal: String) -> String {
+        session.state.blockingStep(for: step).map { "Turn off \(EditSuiteState.stepName($0)) first" } ?? normal
     }
 
     private func presetLabel(_ p: EditV2.SpeedPreset) -> String {

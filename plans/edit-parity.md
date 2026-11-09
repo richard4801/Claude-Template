@@ -211,7 +211,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Claude edits the project (shared session) | Has | Has | — | Others' "AI assistant" equivalent; MUSE's is deeper |
 | Auto-edit / AutoCut from clips and music | Missing | Missing | L | Claude plus beats could drive it |
 | Long video to shorts | Missing | Missing | L | |
-| Stabilisation | Has | Missing | L | Owner-approved 2026-11-09. Server job `stabilize` (free, up to 3 min); `Asset.derivedFrom {op:"stabilize"}` is the same length, so the clip only switches asset (shared fixture). Android: Speed sheet, "Stabilise". Mac: WS9 |
+| Stabilisation | Has | Has | L | Owner-approved 2026-11-09. Server job `stabilize` (free, up to 3 min); `Asset.derivedFrom {op:"stabilize"}` is the same length, so the clip only switches asset (shared fixture). Android: Speed sheet, "Stabilise". Mac: Speed panel → "Stabilise" over the same job; only the last helper step switches off ("Turn off Reverse first"); background removal is dropped and the notice says so (WS9). |
 | Enhance / upscale | Partial | Partial | — | The Suite has upscale for takes; not in Edit |
 | Relight, retouch / beauty | Missing | Missing | XL | |
 | Text-to-speech | Missing | Missing | L | See Text |

@@ -765,6 +765,7 @@ final class EditSuiteSession {
         case .cuts: return "Cut silences"
         case .beats: return "Detect beats"
         case .reverse: return "Reverse"
+        case .stabilize: return "Stabilise"
         }
     }
 
@@ -892,6 +893,7 @@ final class EditSuiteSession {
     /// separate sound are aligned to the original's frames, so they're dropped (and the notice says so).
     func toggleReverse() async {
         guard let c = state.selectedVideo else { lastError = "Select a clip to reverse"; return }
+        if let last = state.blockingStep(for: "reverse") { lastError = "Turn off \(EditSuiteState.stepName(last)) first"; return }
         if let orig = state.reversedFrom, let a = project.asset(orig) { switchReverse(to: a); return }
         if let copy = state.reversedCopy(of: c.asset) { switchReverse(to: copy); return }
         guard c.holdSec == nil else { lastError = "A freeze frame has nothing to reverse"; return }
@@ -921,6 +923,44 @@ final class EditSuiteSession {
         let backwards = target.reverseOf != nil
         if dropped.isEmpty { notice = backwards ? "Plays backwards" : "Plays forwards again" }
         else { notice = "\(backwards ? "Plays backwards" : "Plays forwards again") · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)" }
+    }
+
+    /// Stabilise (XL, WS16's free job, WS8's derivedFrom): the selected clip plays a steadied copy of its source, made once
+    /// by the server (up to 3 minutes) and kept in the edit; toggling back switches to the original at once. Only the last
+    /// helper step switches off. The steadied frames move, so background removal is dropped (the notice says so).
+    func toggleStabilize() async {
+        guard let c = state.selectedVideo else { lastError = "Select a clip to steady"; return }
+        if let last = state.blockingStep(for: "stabilize") { lastError = "Turn off \(EditSuiteState.stepName(last)) first"; return }
+        if let orig = state.steadiedFrom, let a = project.asset(orig) { switchStabilize(to: a); return }
+        if let copy = state.steadiedCopy(of: c.asset) { switchStabilize(to: copy); return }
+        guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Stabilise needs a take or an upload"; return }
+        if let max = features?.stabilize?.maxSec, let d = a.durationSec, d > max + 0.01 {
+            lastError = "Stabilise works on videos up to \(Int(max / 60)) minutes"; return
+        }
+        await run(.stabilize, source: src) { [weak self] r in
+            Task { @MainActor in await self?.addSteadied(r, of: a) }
+        }
+    }
+
+    private func addSteadied(_ r: EditorJobResult, of a: E.Asset) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't steady this clip"; return }
+        let id = project.newId("v")
+        var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: ra.durationSec ?? r.durationSec ?? a.durationSec,
+                           width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: r.hasAudio ?? a.hasAudio, url: ra.url)
+        copy.derivedFrom = E.DerivedFrom(asset: a.id, op: .stabilize)
+        let link = ra.url ?? ra.take.flatMap { lookupTake($0)?.videoUrl }
+        if let link, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? ra.take ?? id) { files[id] = local }
+        else if ra.upload == a.upload, ra.take == a.take { files[id] = files[a.id] }   // the fake hands back the source itself
+        state.assetNames[id] = "Steadied"
+        switchStabilize(to: copy)
+    }
+
+    private func switchStabilize(to target: E.Asset) {
+        var dropped: [String]?
+        edit { s in dropped = s.stabilizeSelected(to: target); return dropped != nil }
+        guard let dropped else { return }
+        let on = target.derivedFrom?.kind == .stabilize
+        notice = (on ? "Steadied" : "Stabilise off") + (dropped.isEmpty ? "" : " · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)")
     }
 
     func setRemoveBackground(_ on: Bool) async {

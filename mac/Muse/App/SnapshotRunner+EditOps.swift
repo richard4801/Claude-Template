@@ -489,6 +489,21 @@ extension SnapshotRunner {
             check("the content catalog loads", false, "no stickers or sounds in it")
         }
 
+        step("Stabilise: a steadied copy, then off again (only the last step switches off)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.lastError = nil
+        let unsteady = s.project
+        await s.toggleStabilize()
+        for _ in 0..<200 where s.isRunning(.stabilize) || s.state.selectedSteps.isEmpty && s.lastError == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        let steadied = s.project.mainClips.first.map { E.derivedLabel(s.project, $0.asset) } ?? ""
+        check("stabilise: the clip plays a steadied copy", steadied == "Steadied" && E.problem(s.project) == nil, s.lastError ?? steadied)
+        await s.toggleStabilize()
+        check("stabilise: off again, the copy kept", s.state.selectedSteps.isEmpty && s.project.assets.contains { $0.derivedFrom?.kind == .stabilize },
+              s.lastError ?? "\(s.state.selectedSteps)")
+        for _ in 0..<2 { s.undo() }
+        check("stabilise: undone", s.project.mainClips == unsteady.mainClips)
+        s.lastError = nil
+
         step("Auto reframe: Vision runs over the clip (no face in the test take)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.lastError = nil

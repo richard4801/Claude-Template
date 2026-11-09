@@ -110,10 +110,45 @@ private struct Validator {
             assets[a.id] = a
         }
         assetKinds = assets.mapValues(\.kind)
-        for (i, a) in p.assets.enumerated() where a.reverseOf != nil {
-            let o = assets[a.reverseOf!]
-            if a.kind != .video || o == nil || o!.kind != .video || o!.reverseOf != nil || o!.id == a.id {
-                throw bad("edits.assets.\(i).reverseOf", "must be a video asset")
+        // Helper copies (WS8 2df521a): a reversed copy (not of another reversed copy) or a derived copy (stabilize / slowmo)
+        // of a video not made with the same step; at most one of the two, chains of up to 4, no cycles.
+        for (i, a) in p.assets.enumerated() {
+            let f = "edits.assets.\(i)"
+            if a.reverseOf != nil && a.derivedFrom != nil { throw bad(f, "is either a reversed or a derived copy") }
+            if let r = a.reverseOf {
+                let o = assets[r]
+                if a.kind != .video || o == nil || o!.kind != .video || o!.reverseOf != nil || o!.id == a.id {
+                    throw bad("\(f).reverseOf", "must be a video asset")
+                }
+            }
+            if let d = a.derivedFrom {
+                guard let op = d.kind else { throw bad("\(f).derivedFrom.op", "must be stabilize or slowmo") }
+                let o = assets[d.asset]
+                if a.kind != .video || o == nil || o!.kind != .video || o!.id == a.id || o!.derivedFrom?.op == d.op {
+                    throw bad("\(f).derivedFrom.asset", "must be a video asset")
+                }
+                if op == .stabilize {
+                    if d.startSec != nil { throw bad("\(f).derivedFrom.startSec", "is not part of a steadied copy") }
+                    if d.endSec != nil { throw bad("\(f).derivedFrom.endSec", "is not part of a steadied copy") }
+                    if d.factor != nil { throw bad("\(f).derivedFrom.factor", "is not part of a steadied copy") }
+                } else {
+                    if !E.slowmoFactors.contains(d.factor ?? -1) { throw bad("\(f).derivedFrom.factor", "must be 2 or 4") }
+                    try num("\(f).derivedFrom.startSec", d.startSec, 0, 36_000, optional: false)
+                    try num("\(f).derivedFrom.endSec", d.endSec, 0, 36_000, optional: false)
+                    let len = d.endSec! - d.startSec!
+                    if len < E.slowmoMinRangeSec - 1e-9 || len > E.slowmoMaxRangeSec + 1e-9 {
+                        throw bad("\(f).derivedFrom.endSec", "the range must be \(E.slowmoMinRangeSec)–\(Int(E.slowmoMaxRangeSec)) s")
+                    }
+                    if let od = o?.durationSec, d.endSec! > od + 0.01 { throw bad("\(f).derivedFrom.endSec", "is past the end of the video") }
+                }
+            }
+            var id: String? = a.id
+            var n = 0
+            while let cur = id {
+                if n > 4 { throw bad(f, "too many helper copies in a row") }
+                let x = assets[cur]
+                id = x?.derivedFrom?.asset ?? x?.reverseOf
+                n += 1
             }
         }
         if p.tracks.isEmpty || p.tracks.count > E.maxTracks { throw bad("edits.tracks", "must have 1–\(E.maxTracks) tracks") }
