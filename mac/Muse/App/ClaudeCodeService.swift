@@ -275,6 +275,40 @@ final class ClaudeCodeService: ObservableObject {
         return try await api.threadDetail(id)
     }
 
+    // MARK: Chat sessions (WS18)
+
+    /// A chat picked from the list (or remembered): its messages, and its Claude Code session and brief for the next turn.
+    func loadThread(_ id: String) async throws -> ClaudeThreadDetail {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        let d = try await api.threadDetail(id)
+        await relay?.remember(threadId: d.thread.id, claudeSessionId: d.thread.claudeSessionId, brief: d.thread.brief)
+        return d
+    }
+
+    /// The place's chats, newest first (`not_found` on an older server: one chat per place).
+    func threads(key: String) async throws -> [ClaudeThread] {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        return try await api.threads(key: key)
+    }
+
+    /// A new chat about the same context, opened.
+    func newThread(contextKind: String, contextId: String) async throws -> ClaudeThreadDetail {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        let t = try await api.newThread(contextKind: contextKind, contextId: contextId)
+        return try await loadThread(t.id)
+    }
+
+    func renameThread(_ id: String, title: String) async throws -> ClaudeThread {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        return try await api.renameThread(id, title: title)
+    }
+
+    func deleteThread(_ id: String) async throws {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        if relayState.running[id] != nil { await relay?.stop(threadId: id) }
+        try await api.deleteThread(id)
+    }
+
     /// A turn typed on this Mac (queued behind the thread's running turn).
     func send(threadId: String, text: String, files: [ClaudeAttachmentFile] = []) {
         guard let relay else { return }

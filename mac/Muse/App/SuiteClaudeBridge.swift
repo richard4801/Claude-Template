@@ -19,6 +19,8 @@ final class SuiteClaudeBridge {
     /// The panel beside the rail (in the picture's place).
     var open = false
     var assist: SuiteAssist?
+    /// WS18: the mode's chat list the shared draft belongs to (`suite:photo`…). Each mode returns to its own latest chat.
+    var key: String?
     var creating = false
     /// Why there is no shared draft (an older server, a member).
     var error: String?
@@ -79,6 +81,7 @@ final class SuiteClaudeBridge {
         pushTask = nil
         if !keepOpen { open = false }
         assist = nil
+        key = nil
         error = nil
         revision = 0
         synced = nil
@@ -116,7 +119,11 @@ extension AppStore {
         guard isOwner else { return }
         c.open = true
         suite.feedOpen = false
-        Task { await ensureSuiteAssist() }
+        Task {
+            await ensureSuiteAssist()
+            // Edits made while the panel was closed go to the same draft now, so Claude sees the composer as it is.
+            suiteComposerChanged(now: true)
+        }
     }
 
     /// The composer switched tools: a new shared draft for the new tool.
@@ -129,20 +136,61 @@ extension AppStore {
         if c.open { Task { await ensureSuiteAssist() } }
     }
 
-    /// Shares the composer with Claude (POST /v1/suite/assist) the first time the panel opens.
+    /// The mode's list of chats (the composer's tool).
+    var suiteClaudeKey: String { ClaudeSessions.suiteKey(suite.composer.tool.rawValue) }
+
+    /// Opens Claude for the composer's mode (WS18): its latest chat (the one open last on this Mac, else the newest on the
+    /// server) with that chat's shared draft laid over the composer, so the chat, its context line and the composer are one
+    /// draft. A mode with no chat yet shares the composer as it is (POST /v1/suite/assist) and starts one.
     func ensureSuiteAssist() async {
         let c = suite.claude
-        guard c.assist == nil, !c.creating else { return }
+        let key = suiteClaudeKey
+        guard c.assist == nil || c.key != key, !c.creating else { return }
         guard let api = suiteAssistAPI else {
             c.error = "This server doesn't have Claude in the Suite yet. Update the server, then open this panel again."
             return
         }
         c.creating = true
         defer { c.creating = false }
+        let chats = ClaudeCodeService.shared
+        if chats.configured, let list = try? await chats.threads(key: key),
+           let latest = ClaudeSessions.pick(list, preferred: ClaudeChatModel.remembered(key)),
+           await bindSuiteChat(latest, api: api, key: key) {
+            return
+        }
+        await newSuiteAssist(api: api, key: key)
+    }
+
+    /// A chat picked from the mode's list: its shared draft becomes the composer's (with Undo). False when the draft is gone.
+    @discardableResult
+    func bindSuiteChat(_ t: ClaudeThread, api: any SuiteAssistAPI, key: String) async -> Bool {
+        guard t.contextKind == "suite", let a = try? await api.suiteAssist(id: t.contextId) else { return false }
+        let c = suite.claude
+        let lines = c.demoLines
+        c.reset(keepOpen: true)
+        c.demoLines = lines
+        c.key = key
+        c.assist = a
+        c.revision = 0
+        c.synced = nil
+        takeSuiteAssist(a, force: true)
+        ClaudeChatModel.remember(key, threadId: t.id)
+        return true
+    }
+
+    /// A new chat in this mode: a new shared draft from the composer as it is now (the composer stays).
+    func newSuiteAssist(api: any SuiteAssistAPI, key: String) async {
+        let c = suite.claude
+        if c.assist != nil {
+            let lines = c.demoLines
+            c.reset(keepOpen: true)
+            c.demoLines = lines
+        }
         let mine = suite.composer
         do {
             let a = try await api.createSuiteAssist(SuiteAssistCreate(draft: ComposerDrafts.draft(mine)))
             c.error = nil
+            c.key = key
             c.assist = a
             c.revision = a.revision
             c.synced = mine
@@ -158,6 +206,40 @@ extension AppStore {
         } catch {
             c.error = "Couldn't share the composer with Claude. \(error.localizedDescription)"
         }
+    }
+
+    /// The chat's sessions in the Suite (WS18): New chat is a new shared draft; switching or deleting binds another chat's.
+    var suiteChatHooks: ClaudeChatModel.SessionHooks {
+        ClaudeChatModel.SessionHooks(
+            newChat: { [weak self] in
+                guard let self, let api = self.suiteAssistAPI else { return }
+                await self.newSuiteAssist(api: api, key: self.suiteClaudeKey)
+            },
+            open: { [weak self] t in
+                guard let self, let api = self.suiteAssistAPI else { return }
+                if !(await self.bindSuiteChat(t, api: api, key: self.suiteClaudeKey)) {
+                    self.showToast("That chat's shot is gone. Start a new chat.")
+                }
+            },
+            deleted: { [weak self] next in
+                guard let self, let api = self.suiteAssistAPI else { return }
+                let key = self.suiteClaudeKey
+                if let next, await self.bindSuiteChat(next, api: api, key: key) { return }
+                await self.newSuiteAssist(api: api, key: key)
+            })
+    }
+
+    /// A tool step of Claude's finished: a draft change is read again and laid over the composer at once, even if the live
+    /// `suiteAssist` event was missed (WS18: the owner saw "I set the rig" and an unchanged composer).
+    func suiteClaudeToolDone(_ name: String) {
+        guard name.hasSuffix("suite_set_draft") || name.hasSuffix("suite_add_reference") || name.hasSuffix("suite_request_shot") else { return }
+        Task { await refreshSuiteAssist() }
+    }
+
+    /// The shared draft read again (GET) and laid over the composer when it is newer than what the composer shows.
+    func refreshSuiteAssist() async {
+        guard let api = suiteAssistAPI, let id = suite.claude.assist?.id, let n = try? await api.suiteAssist(id: id) else { return }
+        takeSuiteAssist(n)
     }
 
     // MARK: Claude's changes → the composer

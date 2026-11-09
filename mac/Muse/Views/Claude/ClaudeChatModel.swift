@@ -23,6 +23,22 @@ final class ClaudeChatModel {
     var attachNote: String?
     /// Images sent from this Mac, by the words they went with, for the thumbnails in that bubble.
     private(set) var sentLocal: [String: [Data]] = [:]
+    /// WS18: this place's chats (newest first), when the server keeps lists.
+    private(set) var threads: [ClaudeThread] = []
+    private(set) var sessionsAvailable = false
+
+    /// The Suite's own sessions: a new chat is a new shared draft, and opening or deleting one binds its draft to the
+    /// composer. nil: Recreate, Edit and Camera, where the chats are about the same context.
+    struct SessionHooks {
+        var newChat: () async -> Void
+        var open: (ClaudeThread) async -> Void
+        /// The open chat was deleted; `next` is the newest one left.
+        var deleted: (_ next: ClaudeThread?) async -> Void
+    }
+    @ObservationIgnored var sessionHooks: SessionHooks?
+    /// A tool step finished (its name, e.g. `mcp__muse__suite_set_draft`): the Suite reads its draft again.
+    @ObservationIgnored var onToolDone: ((String) -> Void)?
+    @ObservationIgnored private var removing: Set<String> = []
 
     @ObservationIgnored private var key: String?
     @ObservationIgnored private var feedTask: Task<Void, Never>?
@@ -77,18 +93,25 @@ final class ClaudeChatModel {
         loading = true
         defer { loading = false }
         do {
-            let d: ClaudeThreadDetail
-            do {
-                d = try await service.openThread(contextKind: contextKind, contextId: contextId)
-            } catch {
-                guard let fallback else { throw error }
-                d = try await service.openThread(contextKind: fallback.kind, contextId: fallback.id)
+            var d: ClaudeThreadDetail?
+            // WS18: Recreate, Edit and Camera come back to the chat open last time on this Mac (else the newest).
+            if contextKind != "suite", let id = Self.remembered(ClaudeSessions.contextKey(kind: contextKind, id: contextId)) {
+                d = try? await service.loadThread(id)
+                if let t = d?.thread, t.contextKind != contextKind || t.contextId != contextId { d = nil }
             }
-            thread = d.thread
-            transcript.load(d.messages)
-            remoteTurn = d.activeTurn.flatMap { $0.isOpen ? $0 : nil }
+            if d == nil {
+                do {
+                    d = try await service.openThread(contextKind: contextKind, contextId: contextId)
+                } catch {
+                    guard let fallback else { throw error }
+                    d = try await service.openThread(contextKind: fallback.kind, contextId: fallback.id)
+                }
+            }
+            guard let d else { throw ApiError("not_found", "Chat not found") }
+            show(d)
             loadError = nil
             offline = false
+            await refreshThreads()
         } catch {
             let code = (error as? ApiError)?.code ?? ""
             let raw = (error as? ApiError)?.message ?? error.localizedDescription
@@ -109,9 +132,114 @@ final class ClaudeChatModel {
 
     func reload() async {
         guard sampleKey == nil, let service, let id = thread?.id, let d = try? await service.threadDetail(id) else { return }
+        guard thread?.id == d.thread.id else { return }
         thread = d.thread
         transcript.load(d.messages)
         remoteTurn = d.activeTurn.flatMap { $0.isOpen ? $0 : nil }
+    }
+
+    /// A chat on screen: its messages, its turn still running, and remembered as this place's open chat.
+    private func show(_ d: ClaudeThreadDetail) {
+        thread = d.thread
+        transcript = ClaudeTranscript()
+        transcript.load(d.messages)
+        remoteTurn = d.activeTurn.flatMap { $0.isOpen ? $0 : nil }
+        composer = ""
+        localImages = []
+        attachNote = nil
+        if let key = d.thread.contextKey ?? listKey(d.thread) { Self.remember(key, threadId: d.thread.id) }
+    }
+
+    // MARK: Sessions (WS18)
+
+    private func listKey(_ t: ClaudeThread) -> String? {
+        t.contextKind == "suite" ? nil : ClaudeSessions.contextKey(kind: t.contextKind, id: t.contextId)
+    }
+    private var key_: String? { thread.flatMap { $0.contextKey ?? listKey($0) } }
+
+    /// The chat open last in each place, on this Mac.
+    static func remembered(_ key: String) -> String? { UserDefaults.standard.string(forKey: "claude.chat.\(key)") }
+    static func remember(_ key: String, threadId: String) { UserDefaults.standard.set(threadId, forKey: "claude.chat.\(key)") }
+
+    /// The place's list from the server (an older server has none: one chat per place, no switcher).
+    func refreshThreads() async {
+        guard let service, let key = key_ else { return }
+        do {
+            var list = try await service.threads(key: key)
+            if let t = thread, !list.contains(where: { $0.id == t.id }) { ClaudeSessions.upsert(t, into: &list) }
+            threads = list
+            sessionsAvailable = true
+        } catch {
+            if (error as? ApiError)?.code == "not_found" { sessionsAvailable = false }
+        }
+    }
+
+    /// The open chat has nothing in it yet (New chat on it again does nothing).
+    var isEmptyChat: Bool { transcript.items.isEmpty && !busy }
+
+    /// New chat: a fresh conversation in this place. The Suite starts a new shared draft for it.
+    func newChat() async {
+        guard !busy, !isEmptyChat, let service, let t = thread else { return }
+        if let hooks = sessionHooks { await hooks.newChat(); return }
+        do {
+            let d = try await service.newThread(contextKind: t.contextKind, contextId: t.contextId)
+            show(d)
+            ClaudeSessions.upsert(d.thread, into: &threads)
+        } catch {
+            attachNote = "Couldn't start a new chat. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)"
+        }
+    }
+
+    /// Switch to another chat in the list.
+    func open(_ t: ClaudeThread) async {
+        guard t.id != thread?.id, let service else { return }
+        if let hooks = sessionHooks { await hooks.open(t); return }
+        do {
+            show(try await service.loadThread(t.id))
+        } catch {
+            attachNote = "Couldn't open that chat. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)"
+            await refreshThreads()
+        }
+    }
+
+    func rename(_ t: ClaudeThread, to title: String) async {
+        guard let service else { return }
+        do {
+            let n = try await service.renameThread(t.id, title: title)
+            ClaudeSessions.upsert(n, into: &threads)
+            if thread?.id == n.id { thread = n }
+        } catch {
+            attachNote = "Couldn't rename the chat. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)"
+        }
+    }
+
+    func delete(_ t: ClaudeThread) async {
+        guard let service else { return }
+        do {
+            try await service.deleteThread(t.id)
+        } catch where (error as? ApiError)?.code != "not_found" {
+            attachNote = "Couldn't delete the chat. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)"
+            return
+        } catch {}
+        await removed(t.id)
+    }
+
+    /// A chat gone (here or on another device): out of the list; the open one is followed by the newest left.
+    private func removed(_ id: String) async {
+        // The delete here and its live echo can both arrive: follow it once.
+        guard !removing.contains(id) else { return }
+        removing.insert(id)
+        defer { removing.remove(id) }
+        let next = ClaudeSessions.after(deleting: id, in: threads)
+        threads.removeAll { $0.id == id }
+        guard thread?.id == id, let service, let gone = thread else { return }
+        if let hooks = sessionHooks { await hooks.deleted(next); return }
+        if let next, let d = try? await service.loadThread(next.id) {
+            show(d)
+        } else if let d = try? await service.openThread(contextKind: gone.contextKind, contextId: gone.contextId) {
+            show(d)
+            ClaudeSessions.upsert(d.thread, into: &threads)
+        }
     }
 
     private func scheduleReload() {
@@ -128,11 +256,13 @@ final class ClaudeChatModel {
         switch f {
         case .local(let t, _, let e) where t == tid:
             transcript.apply(e)
-            if case .done = e { scheduleReload() }
+            toolDone(e)
+            if case .done = e { scheduleReload(); Task { await refreshThreads() } }
         case .live(.message(let t, let m)) where t == tid:
             transcript.upsert(m)
         case .live(.event(let t, let turnId, let e)) where t == tid:
             transcript.apply(e)
+            toolDone(e)
             if case .done = e {
                 if remoteTurn?.id == turnId || turnId == nil { remoteTurn = nil }
                 scheduleReload()
@@ -141,11 +271,20 @@ final class ClaudeChatModel {
             remoteTurn = turn.isOpen ? turn : nil
         case .live(.thread(let th)) where th.id == tid:
             thread = th
+            ClaudeSessions.upsert(th, into: &threads)
+        case .live(.thread(let th)) where th.contextKey != nil && th.contextKey == key_:
+            ClaudeSessions.upsert(th, into: &threads)
+        case .live(.threadDeleted(let id)):
+            Task { await removed(id) }
         case .live(.connected):
             Task { await reload() }
         default:
             break
         }
+    }
+
+    private func toolDone(_ e: ClaudeEvent) {
+        if case .tool(_, let name, .done, _, _) = e { onToolDone?(name) }
     }
 
     // MARK: Actions
@@ -172,13 +311,17 @@ final class ClaudeChatModel {
     @discardableResult
     private func deliver(_ text: String, images: [ChatPendingImage] = []) -> Bool {
         guard !text.isEmpty, !busy, let service, let tid = thread?.id, service.info.ready else { return false }
-        transcript.begin(userText: text, source: "mac")
+        // The owner's report (WS18): every message showed twice. The bubble began with the bare words while the runner's
+        // echo and the stored copy carry the context line in front, so they never matched. The bubble now begins with the
+        // message exactly as it is sent and stored (the files are taken first: the Suite's line names them).
         var files = takeFiles?(tid) ?? []
+        let outgoing = wrapOutgoing?(text) ?? text
+        transcript.begin(userText: outgoing, source: "mac")
         if !images.isEmpty {
             files += images.compactMap { save($0, threadId: tid) }
             sentLocal[ChatLeakFilter.userText(text)] = images.map(\.data)
         }
-        service.send(threadId: tid, text: wrapOutgoing?(text) ?? text, files: files)
+        service.send(threadId: tid, text: outgoing, files: files)
         return true
     }
 

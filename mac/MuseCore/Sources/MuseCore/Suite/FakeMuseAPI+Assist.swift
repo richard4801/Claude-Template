@@ -24,7 +24,7 @@ extension FakeMuseAPI: SuiteAssistAPI {
         return r
     }
 
-    private func savedAssist(_ a: SuiteAssist, draft: SuiteDraft?) -> SuiteAssist {
+    private func savedAssist(_ a: SuiteAssist, draft: SuiteDraft?, emit: Bool = true) -> SuiteAssist {
         var n = a
         if let d = draft {
             n.draft = d
@@ -35,7 +35,7 @@ extension FakeMuseAPI: SuiteAssistAPI {
         n.revision += 1
         n.updatedAt = max(nowMs(), a.updatedAt + 1)
         suiteAssists[n.id] = n
-        emitAssist(n)
+        if emit { emitAssist(n) }
         return n
     }
 
@@ -108,6 +108,9 @@ extension FakeMuseAPI: SuiteAssistAPI {
         return a.pending[i]
     }
 
+    /// The tool of a shared draft (demo mode's Claude chats are listed by it, as on the server).
+    public func demoAssistTool(_ id: String) -> String? { suiteAssists[id]?.draft?.tool }
+
     /// Demo mode keeps the image on this Mac (a data link) and charges nothing.
     public func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment {
         guard let m = SuiteClaudeAttachments.mime(name: name, mime: mime) else { throw ApiError("bad_request", SuiteClaudeAttachments.refusal) }
@@ -117,9 +120,10 @@ extension FakeMuseAPI: SuiteAssistAPI {
 
     /// Demo mode only: Claude sets the draft (suite_set_draft) and/or asks to generate it (suite_request_shot with confirm),
     /// which adds a waiting ask priced like the shot. Nothing is held.
-    public func demoClaudeAssist(id: String, draft: SuiteDraft?, generate: Bool) async throws -> SuiteAssist {
+    /// `quiet`: no live event (review mode's check that the app reads the draft again after Claude's tool step).
+    public func demoClaudeAssist(id: String, draft: SuiteDraft?, generate: Bool, quiet: Bool = false) async throws -> SuiteAssist {
         try assistOwnerOnly()
-        var a = savedAssist(try storedAssist(id), draft: draft)
+        var a = savedAssist(try storedAssist(id), draft: draft, emit: !quiet)
         if generate {
             guard let req = a.request else { throw ApiError("bad_request", "Nothing to generate") }
             let e = try await suiteEstimate(req)

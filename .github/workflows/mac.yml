@@ -142,6 +142,18 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^STEP' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # The owner's Claude chat report (WS18): one message shows one bubble; chats survive closing; New chat, switch, rename
+      # and delete; Claude's rig, prompt and reference reach the composer (live, and read again after the tool step); each
+      # Suite mode returns to its own latest chat (SnapshotRunner+ClaudeChecks.swift). Fails on any FAIL or a missing ALL DONE.
+      - name: Claude chat check
+        working-directory: mac
+        run: |
+          f=snapshots/claude-chat-check.txt
+          if [ ! -f "$f" ]; then echo "no claude-chat-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped early"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # When review mode stops early, the crash report says where (thread, frames, exception).
       - name: Crash report
         if: failure()

@@ -65,6 +65,8 @@ struct SuiteClaudePanel: View {
                            emptyHint: SuiteClaudeWords.emptyHint,
                            wrapOutgoing: { [store] text in store.suiteClaudeOutgoing(text) },
                            unwrapShown: SuiteAssistClaude.stripContext, sendShortcut: false)
+                // WS18: this mode's chats (each bound to its shared draft), and the draft read again after each tool step.
+                .sessions(store.suiteChatHooks, onToolDone: { [store] name in store.suiteClaudeToolDone(name) })
                 .attachments(top: AnyView(SuiteClaudeAttachRow(inComposer: true)), sendBlocked: c.uploading, userImages: SuiteClaudeAttachments.images(in:),
                              takeFiles: { [store] tid in store.suiteClaudeTakeFiles(threadId: tid) },
                              attach: { [store] in SuiteClaudeAttachRow.pick(store) },

@@ -74,7 +74,7 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
 
     /// The Suite's list key for a draft (set by tests and demo mode as the server reads it from the shared draft).
-    public var suiteToolOf: @Sendable (String) -> String = { _ in "shot" }
+    public var suiteToolOf: (String) -> String = { _ in "shot" }
 
     private func thread(contextKind: String, contextId: String, new: Bool) async throws -> ClaudeThread {
         guard ["camera", "edit", "recreate", "suite"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }

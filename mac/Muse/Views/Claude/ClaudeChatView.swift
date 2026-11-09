@@ -41,6 +41,19 @@ struct ClaudeChatView: View {
     /// The Suite's own routes for "+", paste and drop (it uploads); nil keeps images on this Mac.
     var suiteAttach: (() -> Void)?
     var suiteImages: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)?
+    /// WS18: the Suite's own new/open/delete (its chats are bound to shared drafts), and a finished tool step.
+    var sessionHooks: ClaudeChatModel.SessionHooks?
+    var onToolDone: ((String) -> Void)?
+    /// The Suite: the model, so the bridge can follow the open chat.
+    var onModel: ((ClaudeChatModel) -> Void)?
+
+    func sessions(_ hooks: ClaudeChatModel.SessionHooks?, onToolDone: ((String) -> Void)? = nil, onModel: ((ClaudeChatModel) -> Void)? = nil) -> ClaudeChatView {
+        var c = self
+        c.sessionHooks = hooks
+        c.onToolDone = onToolDone
+        c.onModel = onModel
+        return c
+    }
 
     func attachments(top: AnyView?, sendBlocked: Bool, userImages: ((String) -> [String])?,
                      takeFiles: ((String) -> [ClaudeAttachmentFile])? = nil,
@@ -94,6 +107,9 @@ struct ClaudeChatView: View {
             model.wrapOutgoing = wrapOutgoing
             model.unwrapShown = unwrapShown
             model.takeFiles = takeFiles
+            model.sessionHooks = sessionHooks
+            model.onToolDone = onToolDone
+            onModel?(model)
             await model.attach(service, contextKind: contextKind, contextId: contextId, fallback: fallback)
         }
         .onDisappear { model.detach() }
@@ -146,6 +162,10 @@ struct ClaudeChatView: View {
         } else if !service.info.signedIn {
             setup(installed: true)
         } else {
+            if model.sessionsAvailable, model.thread != nil {
+                ChatSessionsBar(model: model)
+                Rectangle().fill(t.roles.hairline).frame(height: 1)
+            }
             transcript
             if model.answeringPhone { phoneStrip }
             composer
