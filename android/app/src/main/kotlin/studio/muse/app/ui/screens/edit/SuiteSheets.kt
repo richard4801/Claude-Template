@@ -789,20 +789,32 @@ private fun MaskBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
     val v = p.tracks.flatMap { it.items }.firstOrNull { it.id == id } as? Visual ?: return
     // Tap to keep is on: only its controls, so they sit right under the picture being tapped.
     ui.keep?.let { k -> if (v is VideoClip) { SuiteLabel("Tap what to keep"); KeepPanel(ui, k, host, act); return } }
-    val mask = v.mask
+    // Mask keyframes: the mask at the playhead; ◆ keys a field there.
+    val local = (v as? studio.muse.core.edit.Item)?.id?.let { iid -> p.locate(iid)?.let { (t, i) -> itemSpan(p, t, t.items[i]) } }
+        ?.let { sp -> (ui.playheadSec - sp.startSec).takeIf { it >= -1e-6 && ui.playheadSec <= sp.endSec + 1e-6 } }
+    val mask = if (local != null) studio.muse.core.edit.maskAt(v.mask, v.keyframes, local) else v.mask
+    @Composable
+    fun keyed(label: String, vararg props: KfProp, slider: @Composable (Modifier) -> Unit) = Row(verticalAlignment = Alignment.CenterVertically) {
+        slider(Modifier.weight(1f))
+        Spacer(Modifier.width(10.dp))
+        val on = props.any { !v.keyframes?.get(it).isNullOrEmpty() }
+        Box(Modifier.size(48.dp).press(enabled = local != null) { props.forEach { act(EditAction.AddKeyframe(it)) } }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+            EIc(if (on) "diamond" else "keyframe", 14.dp, if (on) m.t.accent else m.t.muted)
+        }
+    }
     SuiteLabel("Mask")
     SuiteChips(listOf("none" to "None") + MaskShape.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, mask?.shape?.wire ?: "none", { w ->
         act(EditAction.SetMask(MaskShape.entries.firstOrNull { it.wire == w }?.let { s -> (mask ?: Mask(s)).copy(shape = s) }))
     })
     if (mask != null) {
         val f = mask.feather ?: .1
-        SuiteSlider(f.toFloat(), { x, done -> act(EditAction.SetMask(mask.copy(feather = r2(x.toDouble())), done)) }, label = "Feather", valueText = "${(f * 100).roundToInt()}")
+        keyed("Feather", KfProp.MASK_FEATHER) { md -> SuiteSlider(f.toFloat(), { x, done -> act(EditAction.SetMask(mask.copy(feather = r2(x.toDouble())), done)) }, md, label = "Feather", valueText = "${(f * 100).roundToInt()}") }
         val sz = mask.width ?: .5
-        SuiteSlider(((sz - .1) / 1.4).toFloat(), { x, done -> val s = r2(.1 + x * 1.4); act(EditAction.SetMask(mask.copy(width = s, height = s * ((mask.height ?: .5) / (mask.width ?: .5))), done)) }, label = "Size", valueText = "${(sz * 100).roundToInt()}%")
+        keyed("Size", KfProp.MASK_WIDTH, KfProp.MASK_HEIGHT) { md -> SuiteSlider(((sz - .1) / 1.4).toFloat(), { x, done -> val s = r2(.1 + x * 1.4); act(EditAction.SetMask(mask.copy(width = s, height = s * ((mask.height ?: .5) / (mask.width ?: .5))), done)) }, md, label = "Size", valueText = "${(sz * 100).roundToInt()}%") }
         val mx = mask.x ?: .5; val my = mask.y ?: .5; val mr = mask.rotation ?: 0.0
-        SuiteSlider(((mx + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(x = r2(f * 3.0 - 1)), done)) }, label = "Position x", valueText = "${((mx - .5) * 200).roundToInt()}")
-        SuiteSlider(((my + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(y = r2(f * 3.0 - 1)), done)) }, label = "Position y", valueText = "${((my - .5) * 200).roundToInt()}")
-        SuiteSlider(((mr + 180) / 360).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()), done)) }, label = "Rotation", valueText = "${mr.roundToInt()}°")
+        keyed("Position x", KfProp.MASK_X) { md -> SuiteSlider(((mx + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(x = r2(f * 3.0 - 1)), done)) }, md, label = "Position x", valueText = "${((mx - .5) * 200).roundToInt()}") }
+        keyed("Position y", KfProp.MASK_Y) { md -> SuiteSlider(((my + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(y = r2(f * 3.0 - 1)), done)) }, md, label = "Position y", valueText = "${((my - .5) * 200).roundToInt()}") }
+        keyed("Rotation", KfProp.MASK_ROTATION) { md -> SuiteSlider(((mr + 180) / 360).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()), done)) }, md, label = "Rotation", valueText = "${mr.roundToInt()}°") }
         OptRow("Invert", "Show outside the shape", mask.invert == true, { act(EditAction.SetMask(mask.copy(invert = if (mask.invert == true) null else true))) })
     }
     val clip = v as? VideoClip
@@ -934,7 +946,7 @@ private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit, l
     @Composable
     fun row(label: String, field: String, static: Double) {
         // A colour field with keyframes shows (and sets) its value at the playhead; ◆ adds a key there.
-        val kp = KfProp.COLOR.firstOrNull { it.wire == field }
+        val kp = (KfProp.COLOR + KfProp.LOOK).firstOrNull { it.wire == field }
         val keys = kp?.let { v?.keyframes?.get(it) }
         val value = if (!keys.isNullOrEmpty() && local != null) studio.muse.core.edit.keyframeValue(keys, local) else static
         val n = (value * 100).roundToInt()
@@ -958,8 +970,21 @@ private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit, l
     // The look's effects (0 = off).
     val lk = v?.look
     @Composable
-    fun eff(label: String, field: String, value: Double) =
-        SuiteSlider(value.toFloat(), { f, done -> act(EditAction.AdjustField(field, f.toDouble(), done)) }, label = label, valueText = "${(value * 100).roundToInt()}", enabled = v != null)
+    fun eff(label: String, field: String, static: Double) {
+        // Grain and light leak take keyframes (their amount over time), like the colour rows.
+        val kp = KfProp.LOOK.firstOrNull { it.wire == field }
+        val keys = kp?.let { v?.keyframes?.get(it) }
+        val value = if (!keys.isNullOrEmpty() && local != null) studio.muse.core.edit.keyframeValue(keys, local) else static
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SuiteSlider(value.toFloat(), { f, done -> act(EditAction.AdjustField(field, f.toDouble(), done)) }, Modifier.weight(1f), label = label, valueText = "${(value * 100).roundToInt()}", enabled = v != null)
+            if (kp != null) {
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(48.dp).press(enabled = v != null && local != null) { act(EditAction.AddKeyframe(kp)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+                    EIc(if (keys.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys.isNullOrEmpty()) m.t.muted else m.t.accent)
+                }
+            }
+        }
+    }
     eff("Grain", "grain", lk?.grain?.amount ?: 0.0)
     row("Vignette", "vignette", lk?.vignette?.amount ?: 0.0)
     eff("Sharpen", "sharpen", lk?.sharpen ?: 0.0)

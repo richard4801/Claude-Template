@@ -148,4 +148,10 @@ class LookEffectsTest {
         // No look: the timed matrix alone.
         assertEquals(1, LookEffects.stages(null, null, null, 30.0, timed = timed).size)
     }
+
+    @Test fun lookKeyframesKeepTheFinishingPassEvenAtZero() {
+        val at = { _: Long -> Look() }
+        val st = LookEffects.stages(null, null, null, 30.0, finishAt = at)
+        assertEquals(1, st.size); assertTrue(st[0] is Stage.Finish && (st[0] as Stage.Finish).at != null)
+    }
 }

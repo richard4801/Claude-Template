@@ -173,6 +173,11 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'colour key too big', project: mut(p => { p.tracks[0].items[0].keyframes = { exposure: [{ t: 0, v: 1.5 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.exposure.0.v' },
   { name: 'colour key on audio', project: mut(p => { p.tracks.push({ id: 'mus', kind: 'music', items: [{ id: 'a9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 1, keyframes: { exposure: [{ t: 0, v: 0.1 }] } }] }); }), ok: false, field: 'edits.tracks.4.items.0.keyframes.exposure' },
   { name: 'colour keys on an image ok', project: mut(p => { p.tracks[2].items[0].keyframes = { tint: [{ t: 0, v: -0.2 }, { t: 1, v: 0.4 }], saturation: [{ t: 0.5, v: 1 }] }; }), ok: true },
+  { name: 'mask keys ok', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'circle' }; p.tracks[1].items[0].keyframes = { maskX: [{ t: 0, v: 0.3 }, { t: 1, v: 0.7 }], maskFeather: [{ t: 0.5, v: 0.4 }] }; p.tracks[2].items[0].keyframes = { vignette: [{ t: 0, v: -0.5 }], grain: [{ t: 0, v: 0.2 }], leak: [{ t: 0, v: 0.6 }] }; }), ok: true },
+  { name: 'mask key without a mask', project: mut(p => { delete p.tracks[0].items[0].mask; p.tracks[0].items[0].keyframes = { maskX: [{ t: 0, v: 0.3 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.maskX' },
+  { name: 'mask key out of range', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'rect' }; p.tracks[1].items[0].keyframes = { maskWidth: [{ t: 0, v: 5 }] }; }), ok: false, field: 'edits.tracks.1.items.0.keyframes.maskWidth.0.v' },
+  { name: 'look key on text', project: mut(p => { p.tracks[3].items[0].keyframes = { vignette: [{ t: 0, v: 0.2 }] }; }), ok: false, field: 'edits.tracks.3.items.0.keyframes.vignette' },
+  { name: 'grain key negative', project: mut(p => { p.tracks[0].items[0].keyframes = { grain: [{ t: 0, v: -0.1 }] }; }), ok: false, field: 'edits.tracks.0.items.0.keyframes.grain.0.v' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
@@ -403,6 +408,15 @@ const kits = {
     { version: 1, look: { vignette: { amount: 3 } } }, 'kit',
   ].map(kit => ({ kit, field: kitProblem(kit) })),
 };
+// Mask and look keyframes (M): maskAt and lookAt over time.
+const motionKeyItems = [
+  { mask: { shape: 'circle', x: 0.5, y: 0.4, width: 0.6, height: 0.5, feather: 0.2 },
+    keyframes: { maskX: [{ t: 0, v: 0.2 }, { t: 2, v: 0.8, ease: 'easeInOut' }], maskWidth: [{ t: 1, v: 0.3 }, { t: 3, v: 0.9 }], maskFeather: [{ t: 0, v: 0, ease: 'hold' }, { t: 1.5, v: 0.5 }] } },
+  { mask: { shape: 'rect' }, look: { vignette: { amount: 0.2, size: 0.6 }, lift: 0.1 },
+    keyframes: { maskRotation: [{ t: 0, v: -45 }, { t: 3, v: 45 }], vignette: [{ t: 0, v: 0 }, { t: 2, v: -0.6 }], grain: [{ t: 0.5, v: 0.4 }], leak: [{ t: 1, v: 0 }, { t: 3, v: 0.8 }] } },
+  { look: { grain: { amount: 0.3, size: 2 }, leak: { kind: 'teal', amount: 0.1, angle: 90 } }, keyframes: { grain: [{ t: 0, v: 0.1 }, { t: 1, v: 0.9 }], leak: [{ t: 2, v: 0.5 }] } },
+] as unknown as { mask?: M.Mask; look?: K.Look; keyframes: M.Keyframes }[];
+const motionKeys = motionKeyItems.map(item => ({ item, samples: [0, 0.5, 1, 1.25, 2, 3].map(t => ({ t, mask: M.maskAt(item, t) ?? null, look: M.lookAt(item, t) ?? null })) }));
 const wave1 = projects[projects.length - 1]!.project;
 const holdClip = (wave1.tracks[0]!.items[1]) as M.VideoClip;
 const holdFns = { clip: holdClip, length: M.clipLength(holdClip), sourceAt: [0, 0.7, 1.5].map(t => ({ t, src: M.clipSourceAt(holdClip, t) })), timeAt: M.clipTimeAt(holdClip, 4.05),
@@ -421,7 +435,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

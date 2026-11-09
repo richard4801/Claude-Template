@@ -147,7 +147,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Position, scale, rotation | Has | Has | — | Mac: Sliders set the key at the playhead once keyed (fixed in WS9) |
 | Opacity | Has | Has | S | Engine yes; no button. Android: Transform → Opacity with ◆ (wave 1). |
 | Volume | Partial | Has | S | See Audio. Mac: See Audio (wave 1) |
-| Look / adjust / mask / crop keyframes | Missing | Missing | M each | |
+| Look / adjust / mask / crop keyframes | Partial | Missing | M each | Android: adjust (colour keys), mask (x, y, size, rotation, feather; Effects → Mask ◆) and the finishing look (vignette, grain, light leak; Filters → Adjust ◆) keyframe; `maskAt` / `lookAt`. Crop keyframes deferred: Media3 crops are static per clip (scale / x / y keys cover push-ins). |
 | Easing choice | Has | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold. Android: Linear, ease in, ease out, smooth, hold (wave 1). |
 | Keyframe list / move / delete on the timeline | Has | Partial | M | Engine has `remove_keyframe`. Mac: Delete at the playhead, previous / next key (WS9); no timeline list. Android: the selected item's ◆ on its timeline lane, dragged to move; Transform → Previous / Next keyframe, Remove keyframes here. |
 

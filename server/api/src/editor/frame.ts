@@ -96,11 +96,12 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
   }
   // Colour keyframes: the adjust at this frame.
   const adj = M.adjustAt(clip, t - spans[k]!.startSec);
-  const hasColour = clip.look || clip.filter || adj;
+  const look = M.lookAt(clip, t - spans[k]!.startSec);
+  const hasColour = look || clip.filter || adj;
   if (hasColour) {
     const f = new Float32Array(W * H * 3);
     for (let i = 0; i < f.length; i++) f[i] = rgb[i]! / 255;
-    const out = renderLook({ width: W, height: H, data: f }, clip.look ?? {}, {
+    const out = renderLook({ width: W, height: H, data: f }, look ?? {}, {
       matrix: M.colorMatrix(adj, clip.filter, FILTERS), tone: adj ? { shadows: adj.shadows, highlights: adj.highlights } : null,
       lut, frame: Math.round(t * p.canvas.fps), fps: p.canvas.fps,
     });

@@ -642,7 +642,32 @@ class EditSuiteController(
             is EditAction.StepFrame -> { val fps = u.project?.canvas?.fps ?: 30.0; act(EditAction.Scrub(TimelineMath.snapFrame(u.playheadSec, fps) + a.frames / fps, end = true)) }
             is EditAction.Background -> change { p -> if (p.canvas.background.equals(a.color, true)) null else p.copy(canvas = p.canvas.copy(background = a.color)) }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
-            is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
+            is EditAction.SetMask -> {
+                val id = visualId(u) ?: return
+                val vis = project?.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual
+                val keys = vis?.keyframes
+                val local = localAt(u, id)
+                val old = vis?.mask; val n = a.mask
+                if (old != null && n != null && n.shape == old.shape && local != null && KfProp.MASK.any { !keys?.get(it).isNullOrEmpty() }) {
+                    // Mask keyframes: a keyed field changed from what shows at the playhead sets its key there; the rest change the mask.
+                    val shown = studio.muse.core.edit.maskAt(old, keys, local)!!
+                    val fields = listOf<Triple<KfProp, (Mask) -> Double?, Double>>(Triple(KfProp.MASK_X, { it.x }, .5), Triple(KfProp.MASK_Y, { it.y }, .5),
+                        Triple(KfProp.MASK_WIDTH, { it.width }, .5), Triple(KfProp.MASK_HEIGHT, { it.height }, .5), Triple(KfProp.MASK_ROTATION, { it.rotation }, 0.0),
+                        Triple(KfProp.MASK_FEATHER, { it.feather }, .1))
+                    fun keyedP(p: KfProp) = !keys?.get(p).isNullOrEmpty()
+                    val static = n.copy(x = if (keyedP(KfProp.MASK_X)) old.x else n.x, y = if (keyedP(KfProp.MASK_Y)) old.y else n.y,
+                        width = if (keyedP(KfProp.MASK_WIDTH)) old.width else n.width, height = if (keyedP(KfProp.MASK_HEIGHT)) old.height else n.height,
+                        rotation = if (keyedP(KfProp.MASK_ROTATION)) old.rotation else n.rotation, feather = if (keyedP(KfProp.MASK_FEATHER)) old.feather else n.feather)
+                    change(a.done) { p ->
+                        var q = p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = static); is ImageItem -> it.copy(mask = static); else -> it } } ?: return@change null
+                        for ((prop, get, d) in fields) if (keyedP(prop)) {
+                            val nv = get(n) ?: d
+                            if (kotlin.math.abs(nv - (get(shown) ?: d)) > 1e-9) q = SuiteOps.keyframe(q, id, prop, local, nv, u.keyEase) ?: q
+                        }
+                        q
+                    }
+                } else change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } }
+            }
             is EditAction.SetCrop -> {
                 val id = visualId(u) ?: return
                 val c = a.crop?.let { k -> studio.muse.core.edit.Crop(k.left?.let { r2(it.coerceIn(0.0, .45)) }, k.top?.let { r2(it.coerceIn(0.0, .45)) }, k.right?.let { r2(it.coerceIn(0.0, .45)) }, k.bottom?.let { r2(it.coerceIn(0.0, .45)) }) }
@@ -1141,8 +1166,8 @@ class EditSuiteController(
     private fun adjust(u: EditSuiteUi, a: EditAction.AdjustField) {
         val id = visualId(u) ?: return
         val v = r2(a.value)
-        // A keyframed colour field: the slider sets its key at the playhead (like the transform's).
-        val kp = KfProp.COLOR.firstOrNull { it.wire == a.field }
+        // A keyframed colour or look field: the slider sets its key at the playhead (like the transform's).
+        val kp = (KfProp.COLOR + KfProp.LOOK).firstOrNull { it.wire == a.field }
         val vis = project?.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual
         if (kp != null && !vis?.keyframes?.get(kp).isNullOrEmpty()) {
             val local = localAt(u, id) ?: return say("Move the playhead over this clip to set its keyframe")
@@ -1228,6 +1253,23 @@ class EditSuiteController(
 
     private fun addKeyframe(u: EditSuiteUi, prop: KfProp) {
         val p = project ?: return
+        if (prop in KfProp.MASK || prop in KfProp.LOOK) {
+            // Mask and look keyframes: on the picture the Mask / Adjust panels act on, at the value showing now.
+            val id = visualId(u) ?: return
+            val local = localAt(u, id) ?: return say("Move the playhead over this clip to add a keyframe")
+            val vis = p.locate(id)?.let { (t, i) -> t.items[i] } as? studio.muse.core.edit.Visual ?: return
+            if (prop in KfProp.MASK && vis.mask == null) return say("Add a mask first")
+            val mk = studio.muse.core.edit.maskAt(vis.mask, vis.keyframes, local)
+            val lk = studio.muse.core.edit.lookAt(vis.look, vis.keyframes, local)
+            val v = when (prop) {
+                KfProp.MASK_X -> mk?.x ?: .5; KfProp.MASK_Y -> mk?.y ?: .5; KfProp.MASK_WIDTH -> mk?.width ?: .5; KfProp.MASK_HEIGHT -> mk?.height ?: .5
+                KfProp.MASK_ROTATION -> mk?.rotation ?: 0.0; KfProp.MASK_FEATHER -> mk?.feather ?: .1
+                KfProp.VIGNETTE -> lk?.vignette?.amount ?: 0.0; KfProp.GRAIN -> lk?.grain?.amount ?: 0.0; KfProp.LEAK -> lk?.leak?.amount ?: 0.0
+                else -> return
+            }
+            if (change { SuiteOps.keyframe(it, id, prop, local, v, u.keyEase) }) say("Keyframe added at ${"%.1f".format(local)} s")
+            return
+        }
         if (prop in KfProp.COLOR) {
             // Colour keyframes: on the picture the Adjust panel acts on, at the value showing now.
             val id = visualId(u) ?: return

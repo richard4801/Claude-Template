@@ -331,4 +331,29 @@ class EditSmallRowsTest {
         assertEquals(3.0, studio.muse.core.edit.timeline(c.p())[0].endSec, 1e-6)
         valid(c.p())
     }
+
+    @Test fun maskAndLookKeyframes() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.MASK_X)); assertEquals("Add a mask first", c.ui.value.message)
+        c.act(EditAction.SetMask(Mask(MaskShape.CIRCLE)))
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.MASK_X))
+        c.act(EditAction.Scrub(4.0, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.MASK_X))
+        // At 4 s the keyed x moves its key; the unkeyed feather changes the mask itself.
+        c.act(EditAction.SetMask(Mask(MaskShape.CIRCLE, x = .8, feather = .3)))
+        val clip = c.p().mainClips[0]
+        assertEquals(listOf(1.0 to .5, 4.0 to .8), clip.keyframes!![studio.muse.core.edit.KfProp.MASK_X]!!.map { it.t to it.v })
+        assertEquals(.3, clip.mask!!.feather!!, 1e-9); assertNull(clip.mask!!.x)
+        // Look keys: vignette from nothing; the slider at the playhead sets the key.
+        c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.VIGNETTE))
+        c.act(EditAction.AdjustField("vignette", -.5))
+        assertEquals(-.5, c.p().mainClips[0].keyframes!![studio.muse.core.edit.KfProp.VIGNETTE]!!.single().v, 1e-9)
+        valid(c.p())
+        val look = planRender(c.p(), infos).layers.flatMap { it.clips }.first { it.itemId == id }.look!!
+        val mk = look.motionKeys!!
+        assertTrue(mk.masked && mk.looked)
+        assertEquals(.65, mk.maskAt(2.5)!!.x!!, .1)
+        assertEquals(-.5, mk.lookAt(4.0).vignette!!.amount, 1e-9)
+    }
 }

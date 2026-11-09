@@ -168,6 +168,18 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun maskAndLookKeyframes() {
+        for ((i, c) in fn["motionKeys"]!!.arr.withIndex()) {
+            val o = Obj.of(c.obj["item"]!!, "item")
+            val mask = EditJson.mask(o); val look = o.objOrNull("look")?.let(EditJson::lookOf); val keys = EditJson.keyframes(o)
+            for (sm in c.obj["samples"]!!.arr) {
+                val t = sm.obj["t"]!!.num
+                assertJson("motionKeys $i mask t=$t", sm.obj["mask"], maskAt(mask, keys, t)?.let(EditJson::encodeMask) ?: kotlinx.serialization.json.JsonNull)
+                assertJson("motionKeys $i look t=$t", sm.obj["look"], lookAt(look, keys, t)?.let(EditJson::encodeLook) ?: kotlinx.serialization.json.JsonNull)
+            }
+        }
+    }
+
     @Test fun autoAdjustTable() {
         for (c in fn["autoAdjust"]!!.arr) {
             val o = c.obj

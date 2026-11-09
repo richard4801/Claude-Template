@@ -49,6 +49,30 @@ fun propAt(keyframes: Keyframes?, prop: KfProp, fallback: Double, t: Double): Do
     return if (!k.isNullOrEmpty()) keyframeValue(k, t) else fallback
 }
 
+private fun keyed(k: Keyframes?, p: KfProp) = !k?.get(p).isNullOrEmpty()
+private fun at(k: Keyframes?, p: KfProp, static: Double, t: Double) = Math.round(propAt(k, p, static, t) * 1e6) / 1e6
+
+/** The mask at item-local [t]: each keyed mask field ([KfProp.MASK]) at its keyframes' value there (model.ts `maskAt`). */
+fun maskAt(mask: Mask?, keyframes: Keyframes?, t: Double): Mask? {
+    if (mask == null || KfProp.MASK.none { keyed(keyframes, it) }) return mask
+    fun v(p: KfProp, static: Double?, d: Double) = if (keyed(keyframes, p)) at(keyframes, p, static ?: d, t) else static
+    return mask.copy(x = v(KfProp.MASK_X, mask.x, 0.5), y = v(KfProp.MASK_Y, mask.y, 0.5), width = v(KfProp.MASK_WIDTH, mask.width, 0.5),
+        height = v(KfProp.MASK_HEIGHT, mask.height, 0.5), rotation = v(KfProp.MASK_ROTATION, mask.rotation, 0.0), feather = v(KfProp.MASK_FEATHER, mask.feather, 0.1))
+}
+
+/**
+ * The look at item-local [t]: each keyed finishing amount ([KfProp.LOOK]) at its keyframes' value there; a keyed effect
+ * the look lacks is added with only its amount (a leak as warm). model.ts `lookAt`.
+ */
+fun lookAt(look: Look?, keyframes: Keyframes?, t: Double): Look? {
+    if (KfProp.LOOK.none { keyed(keyframes, it) }) return look
+    var l = look ?: Look()
+    if (keyed(keyframes, KfProp.VIGNETTE)) l = l.copy(vignette = (l.vignette ?: Vignette(0.0)).let { it.copy(amount = at(keyframes, KfProp.VIGNETTE, it.amount, t)) })
+    if (keyed(keyframes, KfProp.GRAIN)) l = l.copy(grain = (l.grain ?: Grain(0.0)).let { it.copy(amount = at(keyframes, KfProp.GRAIN, it.amount, t)) })
+    if (keyed(keyframes, KfProp.LEAK)) l = l.copy(leak = (l.leak ?: Leak(LeakKind.WARM, 0.0)).let { it.copy(amount = at(keyframes, KfProp.LEAK, it.amount, t)) })
+    return l
+}
+
 /** Whether [keyframes] key any colour property ([KfProp.COLOR]). */
 fun hasColorKeys(keyframes: Keyframes?): Boolean = KfProp.COLOR.any { !keyframes?.get(it).isNullOrEmpty() }
 
