@@ -60,7 +60,9 @@ extension AppStore {
         s.loadingModels = true
         defer { s.loadingModels = false }
         do {
-            async let page = api.providerModels(id, query: s.search, kind: s.filter == "video" || s.filter == "image" ? s.filter : nil, cursor: nil)
+            let query = s.search
+            let kind: String? = s.filter == "video" || s.filter == "image" ? s.filter : nil
+            async let page = api.providerModels(id, query: query, kind: kind, cursor: nil)
             async let mine = api.customModels()
             let (p, c) = try await (page, mine)
             guard s.selected == id else { return }
