@@ -117,6 +117,8 @@ data class SuiteHost(
     val export: (toPhone: Boolean) -> Unit = {},
     val cancelExport: () -> Unit = {},
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** After an export: opens Post for the saved version (its take id). */
+    val post: ((String) -> Unit)? = null,
     /** The effects library's tiles: each effect on the frame under the playhead (id or "none" → picture). */
     val effectThumbs: Map<String, ImageBitmap> = emptyMap(),
     val renderEffectThumbs: (() -> Unit)? = null,

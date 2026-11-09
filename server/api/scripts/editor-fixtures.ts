@@ -623,10 +623,14 @@ const fxPattern: FX.RGB[] = Array.from({ length: FXW * FXH }, (_, i) => { const 
   return [Math.round((x / 15 * 0.8 + chk) * 1000) / 1000, Math.round((y / 15 * 0.7 + 0.1) * 1000) / 1000, Math.round(((x + y) / 30 * 0.6 + 0.2 - chk) * 1000) / 1000] as FX.RGB; });
 const fxPoints: [number, number][] = [[0.03, 0.03], [0.5, 0.5], [0.97, 0.03], [0.03, 0.97], [0.97, 0.97], [0.25, 0.6], [0.7, 0.3], [0.41, 0.13], [0.59, 0.84], [0.12, 0.45], [0.88, 0.55], [0.33, 0.33]];
 const fxSampler = FX.imageSampler(FXW, FXH, fxPattern);
-const effects = { width: FXW, height: FXH, pattern: fxPattern, perm: FX.PERM, cases: FX.EFFECT_IDS.flatMap(id => [0.4, 1].flatMap(amount => [0.37, 1.2].map(t => {
+// A non-square frame too (16×9: blur's H/W factor and pixelate's cell height show only when W ≠ H). The pattern image
+// is 16×16 either way; the frame size is what the effect is told (W, H). u, v are the exact sample points (the image is
+// sampled bilinearly between pixel centres, (x + 0.5) / W).
+const effects = { pattern: { width: FXW, height: FXH, pixels: fxPattern }, perm: FX.PERM, uv: 'exact points; the image is bilinear between pixel centres (x + 0.5)/W, clamped',
+  cases: ([[16, 16], [16, 9]] as [number, number][]).flatMap(([W, H]) => FX.EFFECT_IDS.flatMap(id => [0.4, 1].flatMap(amount => [0.37, 1.2].map(t => {
   const e: FX.Effect = { id, amount, ...(id === 'flash' || id === 'rain' ? { speed: 1.5 } : {}), ...(id === 'duotone' && amount === 1 ? { colors: ['#003344', '#FFE600'] as [string, string] } : {}) };
-  return { effect: e, t, samples: fxPoints.map(([u, v]) => ({ u, v, rgb: FX.effectPixel(e, t, FXW, FXH, u, v, fxSampler).map(x => Math.round(x * 1e6) / 1e6) })) };
-}))) };
+  return { width: W, height: H, effect: e, t, samples: fxPoints.map(([u, v]) => ({ u, v, rgb: FX.effectPixel(e, t, W, H, u, v, fxSampler).map(x => Math.round(x * 1e6) / 1e6) })) };
+})))) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });

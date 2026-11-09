@@ -228,6 +228,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     val frames by vm.frames.collectAsState()
     val thumbs by vm.lookThumbs.collectAsState()
     val fxThumbs by vm.effectThumbs.collectAsState()
+    val nav = studio.muse.app.ui.LocalNav.current
     val player by vm.player.collectAsState()
     val waves by vm.waves.collectAsState()
     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); vm.controller.act(EditAction.ClearMessage) } }
@@ -269,6 +270,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        post = { id -> nav.go(studio.muse.app.ui.Routes.post(id)) },
         headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         reframe = vm::reframe,
