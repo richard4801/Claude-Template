@@ -39,7 +39,8 @@ struct ChatSessionsBar: View {
             } label: {
                 HStack(spacing: Space.s1) {
                     Text(name).scaled(t.scale.label, t.roles.ink).lineLimit(1).truncationMode(.tail)
-                    Ph("caret-down", 12).foregroundStyle(t.roles.ink2)
+                    // macOS menu labels drop custom image sizing (the caret drew huge): use the system chevron, sized by its font.
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(t.roles.ink2)
                 }
                 .contentShape(Rectangle())
             }
