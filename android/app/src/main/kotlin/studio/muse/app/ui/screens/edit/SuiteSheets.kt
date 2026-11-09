@@ -28,6 +28,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -354,6 +357,36 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             sj?.error != null && !steady -> sj.error
             else -> "Smooths out shaky handheld footage"
         }, steady, { if (sj?.running != true) act(EditAction.Stabilize(!steady)) })
+    }
+    if (c.holdSec == null && c.speedCurve == null) SlowmoSection(ui, c, act)
+}
+
+/**
+ * Smooth slow motion (paid): a stretch of the clip from the playhead made 2× or 4× slower with new frames in between,
+ * without sound. The price is on the button; the slowed stretch becomes its own piece of the clip.
+ */
+@Composable
+private fun SlowmoSection(ui: EditSuiteUi, c: VideoClip, act: (EditAction) -> Unit) {
+    val m = muse
+    val maxLen = minOf(10.0, c.outSec - c.inSec)
+    if (maxLen < 0.3) return
+    var factor by rememberSaveable(c.id) { mutableIntStateOf(2) }
+    var len by rememberSaveable(c.id) { mutableDoubleStateOf(minOf(2.0, maxLen)) }
+    val job = ui.ai["slowmo"]
+    LaunchedEffect(c.id, factor) { act(EditAction.SlowmoPrice(factor, len)) }
+    T("Smooth slow motion", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.padding(top = 8.dp))
+    T("From the playhead, slowed with new frames in between. The slowed part has no sound.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+    SuiteChips(listOf("2" to "2× slower", "4" to "4× slower"), factor.toString(), { factor = it.toInt() }, enabled = job?.running != true)
+    SuiteSlider(((len - 0.3) / (maxLen - 0.3).coerceAtLeast(1e-6)).toFloat().coerceIn(0f, 1f), { f, done ->
+        len = Math.round((0.3 + f * (maxLen - 0.3)) * 10) / 10.0
+        if (done) act(EditAction.SlowmoPrice(factor, len))
+    }, label = "Length", valueText = "${fmt1(len)} s → ${fmt1(len * factor)} s", enabled = job?.running != true)
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Slowing down" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Slow down · $it" } ?: "Slow down", { act(EditAction.Slowmo(factor, len)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+        }
     }
 }
 

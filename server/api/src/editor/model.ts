@@ -47,17 +47,19 @@ export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* a
   /** A video asset that is another video asset played backwards (the Reverse helper's copy); see reverseClip. */
   reverseOf?: string;
   /**
-   * A video asset made from another by a server helper (owner-approved 2026-11-09): the same length and timing, so a clip
-   * switches between them with only its asset changing (see deriveClip). stabilize: steadied (vidstab); smooth: frames
-   * interpolated for slow motion. Chains are allowed (steadied then reversed), never cycles; see sourceOf, derivedOps.
+   * A video asset made from another by a helper (owner-approved 2026-11-09). stabilize: the whole source steadied, the
+   * same length and timing, so a clip switches with only its asset changing (deriveClip). slowmo: the source range
+   * [startSec, endSec] with frames interpolated, factor× as long and silent; a clip is split around it (applySlowmo).
+   * Chains are allowed (steadied then reversed), never cycles; see sourceOf, derivedOps.
    */
   derivedFrom?: DerivedFrom;
   /** A font asset's family and style, read from the file (display only). */
   name?: string };
 
-export type DerivedOp = 'stabilize' | 'smooth';
-export type DerivedFrom = { asset: string; op: DerivedOp };
-export const DERIVED_OPS: readonly DerivedOp[] = ['stabilize', 'smooth'];
+export type DerivedOp = 'stabilize' | 'slowmo';
+export type DerivedFrom = { asset: string; op: 'stabilize' } | { asset: string; op: 'slowmo'; startSec: number; endSec: number; factor: 2 | 4 };
+export const DERIVED_OPS: readonly DerivedOp[] = ['stabilize', 'slowmo'];
+export const SLOWMO = { factors: [2, 4] as const, minRangeSec: 0.3, maxRangeSec: 10 };
 
 type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
 /** Voice processing on a clip with sound (Edit suite audio panel). */
@@ -291,16 +293,68 @@ export function reverseClip(c: VideoClip, reversed: string, durationSec: number)
 }
 
 /**
- * A clip switched to a derived copy [copy] made with [op] (or back to its original, op null): only the asset changes,
- * since the copy has the same length and timing. A steadied copy's frames are moved, so an alpha matte lined up with the
- * original is dropped (the apps say so); a smooth copy keeps it.
+ * A clip switched to a steadied copy [copy] (op 'stabilize') or back to its original (op null): only the asset
+ * changes, since the copy has the same length and timing. The steadied frames are moved, so an alpha matte lined up
+ * with the original is dropped (the apps say so).
  */
-export function deriveClip(c: VideoClip, copy: string, op: DerivedOp | null): VideoClip {
+export function deriveClip(c: VideoClip, copy: string, op: 'stabilize' | null): VideoClip {
   const out: VideoClip = { ...c, asset: copy };
   if (op === 'stabilize') delete out.alphaMatte;
   return out;
 }
-/** The helper steps from the original to [assetId], in the order applied ('stabilize' | 'smooth' | 'reverse'). */
+
+/** Keyframes of the item-local window [a, b]: the value at each edge plus the keys between, times from a × scale. */
+function sliceKeys(k: Keyframes | undefined, a: number, b: number, scale: number): Keyframes | undefined {
+  if (!k) return undefined;
+  const out: Keyframes = {};
+  for (const [prop, keys] of Object.entries(k) as [KfProp, Keyframe[]][]) {
+    if (!keys?.length) continue;
+    const ease = [...keys].reverse().find(x => x.t <= a + 1e-9)?.ease;
+    out[prop] = [{ t: 0, v: r6(keyframeValue(keys, a)), ...(ease ? { ease } : {}) },
+      ...keys.filter(x => x.t > a + 1e-9 && x.t < b - 1e-9).map(x => ({ ...x, t: r6((x.t - a) * scale) })),
+      { t: r6((b - a) * scale), v: r6(keyframeValue(keys, b)) }];
+  }
+  return out;
+}
+/**
+ * Smooth slow motion: the main clip [clipId] split around the source range of the slowmo copy [slowId] (made from the
+ * clip's own asset, the range inside the clip), the middle piece playing the copy (in 0, out range × factor, speed 1,
+ * muted; no alpha matte or separate sound, which were lined up with the original). Side pieces under 0.1 s of source
+ * are dropped. The first piece keeps the id, transition, fade and animation in; the last the fade and animation out;
+ * keyframes are sliced per piece (the middle's stretched). New ids are the next free `<id>.N`. Null when it can't apply
+ * (a freeze frame, a speed curve, another asset, the range outside the clip).
+ */
+export function applySlowmo(p: EditProject, clipId: string, slowId: string): { project: EditProject; id: string } | null {
+  const main = mainTrack(p);
+  const i = main.items.findIndex(x => x.id === clipId);
+  const c = main.items[i] as VideoClip | undefined;
+  const slow = p.assets.find(a => a.id === slowId);
+  const d = slow?.derivedFrom;
+  if (!c || !slow || !d || d.op !== 'slowmo' || d.asset !== c.asset || c.holdSec !== undefined || c.speedCurve) return null;
+  if (d.startSec < c.inSec - 1e-6 || d.endSec > c.outSec + 1e-6 || d.endSec - d.startSec < LIMITS.minClipSourceSec) return null;
+  const speed = c.speed ?? 1;
+  const midLen = r6(Math.min((d.endSec - d.startSec) * d.factor, slow.durationSec ?? Infinity));
+  const la = (d.startSec - c.inSec) / speed, lb = (d.endSec - c.inSec) / speed, len = clipLength(c);
+  const ids = new Set(p.tracks.flatMap(t => t.items.map(x => x.id)));
+  const nextId = () => { let n = 2; while (ids.has(`${c.id}.${n}`)) n++; const id = `${c.id}.${n}`; ids.add(id); return id; };
+  const { transitionIn, fadeInSec, fadeOutSec, animIn, animOut, keyframes, ...base } = c;
+  const hasBefore = d.startSec - c.inSec >= LIMITS.minClipSourceSec - 1e-9;
+  const hasAfter = c.outSec - d.endSec >= LIMITS.minClipSourceSec - 1e-9;
+  const pieces: VideoClip[] = [];
+  const first = (v: VideoClip) => ({ ...v, ...(transitionIn ? { transitionIn } : {}), ...(fadeInSec !== undefined ? { fadeInSec } : {}), ...(animIn ? { animIn } : {}) });
+  const last = (v: VideoClip) => ({ ...v, ...(fadeOutSec !== undefined ? { fadeOutSec } : {}), ...(animOut ? { animOut } : {}) });
+  const withKeys = (v: VideoClip, a: number, b: number, scale: number): VideoClip => { const k = sliceKeys(keyframes, a, b, scale); return k ? { ...v, keyframes: k } : v; };
+  if (hasBefore) pieces.push(withKeys({ ...base, outSec: r6(d.startSec) }, 0, la, 1));
+  const { alphaMatte: _m, audioAsset: _a, ...plain } = base;
+  const midId = hasBefore ? nextId() : c.id;
+  pieces.push(withKeys({ ...plain, id: midId, asset: slowId, inSec: 0, outSec: midLen, speed: 1, muted: true }, la, lb, lb > la ? midLen / (lb - la) : 1));
+  if (hasAfter) pieces.push(withKeys({ ...base, id: nextId(), inSec: r6(d.endSec) }, lb, len, 1));
+  pieces[0] = first(pieces[0]!); pieces[pieces.length - 1] = last(pieces[pieces.length - 1]!);
+  const items = [...main.items.slice(0, i), ...pieces, ...main.items.slice(i + 1)];
+  return { project: { ...p, tracks: p.tracks.map(t => (t === main ? { ...t, items } : t)) }, id: midId };
+}
+
+/** The helper steps from the original to [assetId], in the order applied ('stabilize' | 'slowmo' | 'reverse'). */
 export function derivedOps(p: Pick<EditProject, 'assets'>, assetId: string): (DerivedOp | 'reverse')[] {
   const byId = new Map(p.assets.map(a => [a.id, a]));
   const ops: (DerivedOp | 'reverse')[] = [];
@@ -324,10 +378,18 @@ export function sourceOf(p: Pick<EditProject, 'assets'>, assetId: string): strin
   }
   return id;
 }
-const OP_WORD: Record<DerivedOp | 'reverse', string> = { stabilize: 'steadied', smooth: 'smoothed', reverse: 'reversed' };
-/** The clip's helper label in the order applied, e.g. "Steadied, reversed"; "" for an original. */
+/** The clip's helper label in the order applied, e.g. "Steadied, reversed" or "Steadied, smooth 4×"; "" for an original. */
 export function derivedLabel(p: Pick<EditProject, 'assets'>, assetId: string): string {
-  const s = derivedOps(p, assetId).map(o => OP_WORD[o]).join(', ');
+  const byId = new Map(p.assets.map(a => [a.id, a]));
+  const words: string[] = [];
+  let a = byId.get(assetId);
+  for (let n = 0; a && n < 8; n++) {
+    const d: DerivedFrom | undefined = a.derivedFrom;
+    if (d) { words.push(d.op === 'stabilize' ? 'steadied' : `smooth ${d.factor}×`); a = byId.get(d.asset); }
+    else if (a.reverseOf !== undefined) { words.push('reversed'); a = byId.get(a.reverseOf); }
+    else break;
+  }
+  const s = words.reverse().join(', ');
   return s ? s[0]!.toUpperCase() + s.slice(1) : '';
 }
 
@@ -986,9 +1048,20 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     }
     if (a.derivedFrom !== undefined) {
       const d = a.derivedFrom;
-      if (!d || typeof d !== 'object' || !DERIVED_OPS.includes(d.op)) bad(`${f}.derivedFrom.op`, 'must be stabilize or smooth');
+      if (!d || typeof d !== 'object' || !DERIVED_OPS.includes(d.op)) bad(`${f}.derivedFrom.op`, 'must be stabilize or slowmo');
       const o = typeof d.asset === 'string' ? assets.get(d.asset) : undefined;
       if (a.kind !== 'video' || !o || o.kind !== 'video' || o.id === a.id || o.derivedFrom?.op === d.op) bad(`${f}.derivedFrom.asset`, 'must be a video asset');
+      const r = d as { startSec?: unknown; endSec?: unknown; factor?: unknown };
+      if (d.op === 'stabilize') {
+        for (const k of ['startSec', 'endSec', 'factor'] as const) if (r[k] !== undefined) bad(`${f}.derivedFrom.${k}`, 'is not part of a steadied copy');
+      } else {
+        if (!(SLOWMO.factors as readonly unknown[]).includes(r.factor)) bad(`${f}.derivedFrom.factor`, 'must be 2 or 4');
+        num(`${f}.derivedFrom.startSec`, r.startSec as number, 0, 36_000, false);
+        num(`${f}.derivedFrom.endSec`, r.endSec as number, 0, 36_000, false);
+        const len = (r.endSec as number) - (r.startSec as number);
+        if (len < SLOWMO.minRangeSec - 1e-9 || len > SLOWMO.maxRangeSec + 1e-9) bad(`${f}.derivedFrom.endSec`, `the range must be ${SLOWMO.minRangeSec}–${SLOWMO.maxRangeSec} s`);
+        if (o?.durationSec !== undefined && (r.endSec as number) > o.durationSec + 0.01) bad(`${f}.derivedFrom.endSec`, 'is past the end of the video');
+      }
     }
     let id: string | undefined = a.id;
     for (let n = 0; id !== undefined; n++) {

@@ -743,6 +743,11 @@ class FakeMuseApi(
         val silenceOnly = (req.options?.get("silenceOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
         val usd = when (req.kind) {
             "beats", "reverse", "stabilize" -> 0.0
+            // Smooth slow motion: priced per second of output (range × factor).
+            "slowmo" -> {
+                fun opt(k: String) = (req.options?.get(k) as? JsonPrimitive)?.content?.toDoubleOrNull()
+                maxOf(0.01, Math.round(((opt("endSec") ?: 1.0) - (opt("startSec") ?: 0.0)) * (opt("factor") ?: 2.0) * 0.01 * 100) / 100.0)
+            }
             "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
             // Tap to keep has its own price: GPU 15 + 3·d seconds (plans/api.md).
             "matte" -> if (req.options?.get("points") != null) maxOf(0.01, Math.round((15 + 3 * d) * 0.0004 * 100) / 100.0) else maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
@@ -1869,6 +1874,15 @@ object FakeEditorResults {
                 "asset" to obj("kind" to p("video"), "upload" to p("up_rev_$id"), "durationSec" to p(d)),
                 "width" to p(1080), "height" to p(1920), "hasAudio" to p(true), "durationSec" to p(d),
             )
+            // Smooth slow motion: the range factor× as long, silent.
+            "slowmo" -> {
+                val o = options
+                val s = (o?.get("startSec") as? JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0
+                val e = (o?.get("endSec") as? JsonPrimitive)?.content?.toDoubleOrNull() ?: 1.0
+                val f = (o?.get("factor") as? JsonPrimitive)?.content?.toIntOrNull() ?: 2
+                obj("asset" to obj("kind" to p("video"), "upload" to p("up_sm_$id"), "durationSec" to p((e - s) * f)),
+                    "factor" to p(f), "startSec" to p(s), "endSec" to p(e), "fps" to p(30), "width" to p(1080), "height" to p(1920), "hasAudio" to p(false), "durationSec" to p((e - s) * f))
+            }
             // Stabilise: the steadied copy, same length and timing (free; vidstab on the server).
             "stabilize" -> obj(
                 "asset" to obj("kind" to p("video"), "upload" to p("up_st_$id"), "durationSec" to p(d)),

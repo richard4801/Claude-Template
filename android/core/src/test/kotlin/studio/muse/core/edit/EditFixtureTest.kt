@@ -219,6 +219,19 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun slowmo() {
+        for (c in fn["slowmo"]!!.arr) {
+            val name = c.obj["name"]!!.str
+            val p = EditJson.parse(c.obj["project"]!!)
+            val r = applySlowmo(p, "c1", "src_sm")
+            val want = c.obj["result"]
+            if (want == null || want is JsonNull) { assertEquals(name, null, r); continue }
+            assertEquals(name, want.obj["id"]!!.str, r!!.second)
+            assertJson("slowmo $name", want.obj["project"], EditJson.encode(r.first))
+            validate(r.first)
+        }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

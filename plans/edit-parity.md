@@ -65,7 +65,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Constant speed 0.1–10×, pitch kept | Has | Has | — | |
 | Speed curves (presets + custom graph) | Has | Has | — | |
-| **Smooth slow-mo (frame interpolation)** | Missing | Missing | XL | Needs a model choice (server job like denoise, or on-device). The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
+| **Smooth slow-mo (frame interpolation)** | Has | Missing | XL | Owner-approved 2026-11-09. Server job `slowmo` (paid, price on the button), 2× or 4×, 0.3–10 s from the playhead; `Asset.derivedFrom {op:"slowmo"}` plus `applySlowmo` split the clip (shared fixture). Android: Speed sheet, "Smooth slow motion" (x_slowmo). Mac: on-device on macOS 15.4+, the job otherwise (WS9). |
 | Speed on audio-only clips | Has | Has | M | Android: Speed panel on a selected music, voice or effect clip: 0.5–2×, pitch kept (contract: audio speed 0.5–2; beats map through clipTimeAt; server render uses atempo). Mac: Speed on a selected music, voice or effect clip: 0.5–2× (slider and 0.5× / 1× / 1.5× / 2×), pitch kept (spectral); beats, loops and beat marks go through clipTimeAt / clipSourceAt. |
 | Set the duration (speed computed) | Has | Has | S | Android: Speed → Length slider. Mac: Speed → Length slider. |
 
@@ -211,11 +211,11 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Claude edits the project (shared session) | Has | Has | — | Others' "AI assistant" equivalent; MUSE's is deeper |
 | Auto-edit / AutoCut from clips and music | Missing | Missing | L | Claude plus beats could drive it |
 | Long video to shorts | Missing | Missing | L | |
-| Stabilisation | Missing | Missing | L | Server or on-device |
+| Stabilisation | Has | Missing | L | Owner-approved 2026-11-09. Server job `stabilize` (free, up to 3 min); `Asset.derivedFrom {op:"stabilize"}` is the same length, so the clip only switches asset (shared fixture). Android: Speed sheet, "Stabilise". Mac: WS9 |
 | Enhance / upscale | Partial | Partial | — | The Suite has upscale for takes; not in Edit |
 | Relight, retouch / beauty | Missing | Missing | XL | |
 | Text-to-speech | Missing | Missing | L | See Text |
-| Frame interpolation | Missing | Missing | XL | See Speed |
+| Frame interpolation | Has | Missing | XL | See Speed (smooth slow motion) |
 
 ## 14. Export
 
@@ -295,9 +295,7 @@ All are functional, with no content cost, and use engines that already exist:
 
 Bigger bets, each needing a decision:
 
-- Smooth slow-mo (model).
 - Music library (licensing).
-- Stabilisation.
 - Motion tracking.
 - C2PA (certificate).
 

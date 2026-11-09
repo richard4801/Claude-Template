@@ -474,6 +474,24 @@ class EditSmallRowsTest {
         assertEquals(1, c.p().assets.count { it.derivedFrom != null })
     }
 
+    @Test fun smoothSlowMotion() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val n = c.p().mainClips.size
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.SlowmoPrice(4, 1.0)); advanceUntilIdle()
+        assertTrue(c.ui.value.ai["slowmo"]?.price != null)
+        c.act(EditAction.Slowmo(4, 1.0)); advanceUntilIdle()
+        val slow = c.p().assets.single { it.derivedFrom?.op == studio.muse.core.edit.DerivedOp.SLOWMO }
+        val d = slow.derivedFrom!!
+        assertEquals(1.0, d.endSec!! - d.startSec!!, 1e-6); assertEquals(4, d.factor)
+        val mid = c.p().mainClips.single { it.asset == slow.id }
+        assertEquals(4.0, mid.outSec - mid.inSec, 1e-6); assertEquals(true, mid.muted); assertEquals(1.0, mid.speed, 0.0)
+        assertTrue(c.p().mainClips.size in n + 1..n + 2)
+        assertEquals("Smooth 4×", studio.muse.core.edit.derivedLabel(c.p(), slow.id))
+        valid(c.p())
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

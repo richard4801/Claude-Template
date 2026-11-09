@@ -75,6 +75,18 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             a.derivedFrom?.let { d ->
                 val o = assets[d.asset]
                 if (a.kind != AssetKind.VIDEO || o == null || o.kind != AssetKind.VIDEO || o.id == a.id || o.derivedFrom?.op == d.op) bad("$f.derivedFrom.asset", "must be a video asset")
+                if (d.op == DerivedOp.STABILIZE) {
+                    if (d.startSec != null) bad("$f.derivedFrom.startSec", "is not part of a steadied copy")
+                    if (d.endSec != null) bad("$f.derivedFrom.endSec", "is not part of a steadied copy")
+                    if (d.factor != null) bad("$f.derivedFrom.factor", "is not part of a steadied copy")
+                } else {
+                    if (d.factor != 2 && d.factor != 4) bad("$f.derivedFrom.factor", "must be 2 or 4")
+                    num("$f.derivedFrom.startSec", d.startSec, 0.0, 36_000.0, optional = false)
+                    num("$f.derivedFrom.endSec", d.endSec, 0.0, 36_000.0, optional = false)
+                    val len = d.endSec!! - d.startSec!!
+                    if (len < SLOWMO_MIN_RANGE_SEC - 1e-9 || len > SLOWMO_MAX_RANGE_SEC + 1e-9) bad("$f.derivedFrom.endSec", "the range must be 0.3–10 s")
+                    o?.durationSec?.let { if (d.endSec > it + 0.01) bad("$f.derivedFrom.endSec", "is past the end of the video") }
+                }
             }
             var id: String? = a.id
             var n = 0
