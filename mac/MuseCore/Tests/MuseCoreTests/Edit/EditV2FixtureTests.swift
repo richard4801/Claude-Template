@@ -94,7 +94,7 @@ final class EditV2FixtureTests: XCTestCase {
 
     func testTransitions() throws {
         let cases = try editorFixture("functions")["transitions"].array
-        XCTAssertEqual(cases.count, 11 * 7)
+        XCTAssertEqual(cases.count, E.TransitionKind.allCases.count * 7)   // 18 kinds since the content pack
         for c in cases {
             let kind = try c["kind"].decode(E.TransitionKind.self), p = try XCTUnwrap(c["p"].double)
             assertJSON(E.transitionState(kind, p), c["state"], "\(kind) \(p)")

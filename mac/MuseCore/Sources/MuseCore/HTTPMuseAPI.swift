@@ -361,6 +361,19 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         try await call("PATCH", "v1/editor/kits/\(Self.pathKey(id))", EditKitBody(name: name, kit: kit))
     }
     public func deleteEditKit(id: String) async throws { _ = try await send(request("DELETE", "v1/editor/kits/\(Self.pathKey(id))")) }
+    public func editorContent() async throws -> ContentCatalog? {
+        do { return try await call("GET", "v1/editor/content") as ContentCatalog } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" { return nil }
+    }
+    public func editorContentFile(_ path: String, version: String) async throws -> URL {
+        let dst = try ContentFiles.local(path, version: version)
+        if FileManager.default.fileExists(atPath: dst.path) { return dst }
+        // Public and static: no token, and the redirect to storage is followed.
+        var r = URLRequest(url: url("v1/editor/content/files/" + path))
+        r.timeoutInterval = 60
+        let data = try await send(r)
+        try ContentFiles.store(data, at: dst)
+        return dst
+    }
     public func validateLut(uploadId: String) async throws -> LutValidation { try await call("POST", "v1/editor/luts/validate", LutValidateBody(uploadId: uploadId)) }
     public func checkFont(uploadId: String) async throws -> FontCheck { try await call("POST", "v1/editor/uploads/font-check", LutValidateBody(uploadId: uploadId)) }
 

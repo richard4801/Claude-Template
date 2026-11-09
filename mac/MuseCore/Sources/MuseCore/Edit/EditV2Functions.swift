@@ -478,7 +478,15 @@ extension EditV2 {
         case .glitch:
             return TransitionState(a: L(opacity: p < 0.5 ? 1 : 0, dx: 0.04 * peak * jit(1), rgbSplit: peak),
                                    b: L(opacity: p < 0.5 ? 0 : 1, dx: 0.04 * peak * jit(2), rgbSplit: peak), color: nil)
-
+        // Content pack (WS8 929bcf2).
+        case .zoomOut: return TransitionState(a: L(opacity: 1 - p, scale: 1 - 0.2 * e), b: L(opacity: p, scale: 1.2 - 0.2 * e), color: nil)
+        case .whipRight: return TransitionState(a: L(dx: e3, blur: peak), b: L(dx: -(1 - e3), blur: peak), color: nil)
+        // Cover: the incoming clip slides over the outgoing one, which stays still and fully shown underneath.
+        case .coverLeft: return TransitionState(a: L(), b: L(dx: 1 - e), color: nil)
+        case .coverRight: return TransitionState(a: L(), b: L(dx: -(1 - e)), color: nil)
+        case .coverUp: return TransitionState(a: L(), b: L(dy: 1 - e), color: nil)
+        case .coverDown: return TransitionState(a: L(), b: L(dy: -(1 - e)), color: nil)
+        case .splitFade: return TransitionState(a: L(rgbSplit: peak), b: L(opacity: p, rgbSplit: peak), color: nil)
         }
     }
 

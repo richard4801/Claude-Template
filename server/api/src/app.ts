@@ -38,6 +38,7 @@ import { registerEngineRoutes } from './routes/engines.js'; // WS13: model choic
 import { registerProviderRoutes } from './routes/providers.js'; // WS5: bring your own provider
 import { registerImportRoutes } from './routes/imports.js'; // WS12: import a video from a link
 import { registerKitRoutes } from './editor/kits.js'; // WS8: edit style kits
+import { registerContentRoutes } from './editor/content.js'; // WS8: stickers, SFX, fonts, in-house packs
 import { recreateOf } from './recreate/references.js';
 
 declare module 'fastify' {
@@ -159,6 +160,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerProviderRoutes(app, ctx); // WS5: bring your own provider
   await registerImportRoutes(app, ctx); // WS12: import a video from a link
   await registerKitRoutes(app, ctx); // WS8: edit style kits
+  await registerContentRoutes(app, ctx); // WS8: the edit content library
   await registerCameraRoutes(app, ctx); // workstream 2: camera sessions, Direct with Claude, Blender relay, MCP server
   await registerEditorAiRoutes(app, ctx); // Editor v2 (workstream 3)
 

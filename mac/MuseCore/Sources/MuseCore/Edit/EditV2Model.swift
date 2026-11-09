@@ -214,6 +214,8 @@ extension EditV2 {
         case fade, black, white, slideLeft, slideRight, slideUp, slideDown, zoom
         /// Edit suite additions.
         case whip, spin, glitch
+        /// Content pack (WS8 929bcf2): made of the same layer values.
+        case zoomOut, whipRight, coverLeft, coverRight, coverUp, coverDown, splitFade
     }
 
     /// Speed-curve preset (`custom` = edited points). Decodes any string so validate() can name an unknown one.
@@ -331,6 +333,8 @@ extension EditV2 {
         public var url: String?
         /// A font asset's family and style, read from the file (display only), 1–80 characters.
         public var name: String?
+        /// Reverse (WS8 cb5413e): this video asset is that video asset played backwards.
+        public var reverseOf: String?
         public init(id: String, kind: AssetKind, take: String? = nil, upload: String? = nil, library: String? = nil, durationSec: Double? = nil,
                     width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil, name: String? = nil) {
             self.id = id; self.kind = kind; self.take = take; self.upload = upload; self.library = library; self.durationSec = durationSec
@@ -423,7 +427,33 @@ extension EditV2 {
         }
     }
 
-    public enum Font: String, Codable, Hashable, Sendable, CaseIterable { case sans, serif, rounded, condensed, mono, marker }
+    public enum Font: String, Codable, Hashable, Sendable, CaseIterable {
+        case sans, serif, rounded, condensed, mono, marker
+        /// The content library's families (catalog `fonts` pack; Cyrillic and Latin Extended), WS8 929bcf2.
+        case inter, montserrat, robotoCondensed, playfair, unbounded, rubik, jetbrainsMono, caveat, oswald
+        /// The six bundled families.
+        public static let bundled: [Font] = [.sans, .serif, .rounded, .condensed, .mono, .marker]
+        public var isContent: Bool { !Font.bundled.contains(self) }
+        /// The bundled family a content font draws in until its file is on this Mac (model.ts FONT_FALLBACK).
+        public var fallback: Font {
+            switch self {
+            case .inter, .montserrat, .unbounded: return .sans
+            case .robotoCondensed, .oswald: return .condensed
+            case .playfair: return .serif
+            case .rubik: return .rounded
+            case .jetbrainsMono: return .mono
+            case .caveat: return .marker
+            default: return self
+            }
+        }
+        public var label: String {
+            switch self {
+            case .robotoCondensed: return "Roboto Condensed"
+            case .jetbrainsMono: return "JetBrains Mono"
+            default: return rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+            }
+        }
+    }
     public enum Align: String, Codable, Hashable, Sendable { case left, center, right }
 
     public struct Stroke: Codable, Hashable, Sendable {

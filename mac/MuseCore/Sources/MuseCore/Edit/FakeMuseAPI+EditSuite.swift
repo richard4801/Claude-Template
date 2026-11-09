@@ -48,7 +48,7 @@ extension FakeMuseAPI {
         switch req.kind {
         case .captions, .matte: return true
         case .denoise: return req.options?.analyzeOnly != true
-        case .cuts, .beats: return false
+        case .cuts, .beats, .reverse: return false
         }
     }
 
@@ -107,6 +107,7 @@ extension FakeMuseAPI {
     public func startEditorJob(_ req: EditorJobRequest) throws -> EditorJob {
         let d = try editorSourceDuration(req.source)
         try checkGuardrails(req)
+        if req.kind == .reverse && d > 60 { throw ApiError("bad_request", "Reverse works on videos up to 60 s") }
         if req.kind == .matte && d > 120 { throw ApiError("bad_request", "Background removal works on videos up to 2 minutes") }
         // Tap to keep: the points are checked before anything starts (as the server does before it holds).
         if req.kind == .matte, let pts = req.options?.points, let problem = EditSuite.keepPointsProblem(pts, sourceSec: d) {
@@ -120,6 +121,7 @@ extension FakeMuseAPI {
         case .matte: phase = "Cutting out"
         case .denoise: phase = "Cleaning up"
         case .beats: phase = "Finding the beat"
+        case .reverse: phase = "Reversing"
         }
         let job = EditorJob(id: id, kind: req.kind, state: "running", progress: 5, phase: phase, estimateUsd: 0, costUsd: 0)
         editorJobs[id] = job
@@ -163,6 +165,10 @@ extension FakeMuseAPI {
             r.alpha = true
             r.mode = req.options?.points?.isEmpty == false ? "tracked" : "person"
             r.points = req.options?.points
+        case .reverse:
+            // The fake hands back the source itself as the "reversed" copy.
+            r.asset = EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
+            r.width = 1080; r.height = 1920; r.hasAudio = true
         case .denoise:
             r.suggestion = DenoiseSuggestion(level: "light", reason: "Some background hum", confidence: 0.7)
             if req.options?.analyzeOnly != true {

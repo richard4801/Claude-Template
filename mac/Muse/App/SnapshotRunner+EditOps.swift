@@ -466,6 +466,29 @@ extension SnapshotRunner {
         check("2048 × 683, still a PNG", resized.map { $0.2 == 2048 && abs($0.3 - 683) <= 1 && $0.1 == "image/png" } ?? false,
               resized.map { "\($0.2) × \($0.3) \($0.1)" } ?? "failed")
 
+        step("Content library: a sticker, a sound effect, a transition preset")
+        await s.loadContent()
+        if let c = s.content, let sp = c.packs(.stickers).first, let st = sp.items.first, let fp = c.packs(.sfx).first, let fx = fp.items.first {
+            s.view { $0.selection = nil }
+            s.seek(1)
+            await s.addContentSticker(sp, st)
+            let ref = ContentCatalog.ref(pack: sp.id, item: st.id)
+            check("project: the sticker is a library picture", s.project.assets.contains { $0.library == ref && $0.kind == .image } && E.problem(s.project) == nil)
+            let px = await previewPixel(s, at: 2, 0.5, 0.4)
+            check("preview: the sticker over the clip", px.map { $0.r > 150 && $0.g > 120 && $0.b < 90 } ?? false, describe(px))
+            await s.addContentSound(fp, fx)
+            check("project: the sound effect on its row", s.project.tracks.contains { $0.kind == .sfx && !$0.items.isEmpty } && E.problem(s.project) == nil)
+            s.view { $0.selection = s.project.mainClips.dropFirst().first?.id }
+            if let tr = c.packs(.transitions).flatMap(\.items).compactMap(\.transitionValue).first(where: { $0.kind == .zoomOut }), s.project.mainClips.count > 1 {
+                s.edit { $0.setTransition(tr.kind, duration: tr.durationSec) }
+                check("project: the zoom out preset", s.project.mainClips[1].transitionIn?.kind == .zoomOut && E.problem(s.project) == nil)
+                s.undo()
+            }
+            for _ in 0..<2 { s.undo() }
+        } else {
+            check("the content catalog loads", false, "no stickers or sounds in it")
+        }
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }

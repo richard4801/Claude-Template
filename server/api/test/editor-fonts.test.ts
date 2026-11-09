@@ -1,6 +1,7 @@
 // Own fonts (Edit suite text): the .ttf/.otf check and name, uploads, the contract's font asset and fontAsset, kits
 // dropping it, and the render drawing with the file.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
@@ -53,13 +54,20 @@ describe('own fonts: the file and the contract', () => {
 
   it('the render draws with the downloaded file, else the fallback (and says so)', () => {
     const p = project();
-    const local = planRender(p, { src: '/tmp/src.mp4', fnt: '/tmp/fonts/mine.ttf' }, { src: { width: 1080, height: 1920, hasAudio: false } }, '/tmp/out.mp4');
-    expect(local.args.join(' ')).toContain("fontfile='/tmp/fonts/mine.ttf'");
+    // The member's file (here DM Mono under another name) draws its own outlines; without it the family stands in.
+    const mine = path.join(os.tmpdir(), `muse-own-font-${process.pid}.ttf`);
+    fs.copyFileSync(path.resolve('assets/fonts/dm_mono_400.ttf'), mine);
+    const local = planRender(p, { src: '/tmp/src.mp4', fnt: mine }, { src: { width: 1080, height: 1920, hasAudio: false } }, '/tmp/out.mp4');
     expect(local.unsupported).not.toContain('own fonts');
     const none = planRender(p, { src: '/tmp/src.mp4' }, { src: { width: 1080, height: 1920, hasAudio: false } }, '/tmp/out.mp4');
-    expect(none.args.join(' ')).toContain('figtree_700.ttf');
     expect(none.unsupported).toContain('own fonts');
-    for (const f of [...local.temp, ...none.temp]) fs.rmSync(f, { force: true });
+    const svg = (r: typeof local) => JSON.stringify(r.stills.map(x => x.svg));
+    expect(svg(local)).not.toEqual(svg(none));
+    const asFamily = planRender({ ...p, assets: p.assets, tracks: p.tracks.map(t => ({ ...t, items: t.items.map(i => ({ ...i, style: { ...(i as M.TextItem).style, fontAsset: undefined } })) })) } as M.EditProject,
+      { src: '/tmp/src.mp4' }, { src: { width: 1080, height: 1920, hasAudio: false } }, '/tmp/out.mp4');
+    expect(svg(none)).toEqual(svg(asFamily)); // the fallback is the text's own family
+    fs.rmSync(mine, { force: true });
+    for (const r of [local, none, asFamily]) for (const f of r.temp) fs.rmSync(f, { force: true, recursive: true });
   });
 });
 

@@ -28,7 +28,9 @@ export type Adjust = { exposure?: number; contrast?: number; saturation?: number
   /** Edit suite (phase 2): tone, applied after the colour matrix (`toneAdjust`). */ highlights?: number; shadows?: number };
 export type FilterRef = { id: string; amount: number };
 export type Chroma = { color: string; similarity?: number; smoothness?: number; spill?: number };
-export type TransitionKind = 'fade' | 'black' | 'white' | 'slideLeft' | 'slideRight' | 'slideUp' | 'slideDown' | 'zoom' | 'whip' | 'spin' | 'glitch';
+export type TransitionKind = 'fade' | 'black' | 'white' | 'slideLeft' | 'slideRight' | 'slideUp' | 'slideDown' | 'zoom' | 'whip' | 'spin' | 'glitch'
+  // Content pack (2026-11-09): made of the same layer values.
+  | 'zoomOut' | 'whipRight' | 'coverLeft' | 'coverRight' | 'coverUp' | 'coverDown' | 'splitFade';
 export type SpeedPreset = 'montage' | 'hero' | 'bullet' | 'flashIn' | 'flashOut' | 'custom';
 /** A speed curve over the clip's source: points [x 0–1 of the kept source, speed 0.1–10], x from 0 to 1. */
 export type SpeedCurve = { preset: SpeedPreset; points: [number, number][] };
@@ -42,6 +44,8 @@ export type Fit = 'cover' | 'contain';
 
 export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* an imported .cube (Looks) */ | 'font' /* the member's own .ttf/.otf */; take?: string; upload?: string; library?: string;
   durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string;
+  /** A video asset that is another video asset played backwards (the Reverse helper's copy); see reverseClip. */
+  reverseOf?: string;
   /** A font asset's family and style, read from the file (display only). */
   name?: string };
 
@@ -63,7 +67,10 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop };
-export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
+/** The six bundled families, then the content library's (catalog `fonts` pack; Cyrillic and Latin Extended). */
+export type FontFamily = 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'
+  | 'inter' | 'montserrat' | 'robotoCondensed' | 'playfair' | 'unbounded' | 'rubik' | 'jetbrainsMono' | 'caveat' | 'oswald';
+export type TextStyle = { font: FontFamily; weight: 400 | 700 | 900; sizePct: number; color: string;
   align: 'left' | 'center' | 'right'; maxWidthPct?: number; lineHeight?: number; letterSpacing?: number; uppercase?: boolean;
   stroke?: { color: string; widthPct: number }; shadow?: { color: string; opacity: number; blurPct: number; dyPct: number };
   background?: { color: string; opacity: number; paddingPct: number; radiusPct: number };
@@ -100,7 +107,8 @@ export const LIMITS = {
   minTransitionSec: 0.1, maxTransitionSec: 2, maxText: 500, overlapSlackSec: 0.001,
 } as const;
 export const V1_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom', 'whip', 'spin', 'glitch'];
+export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom', 'whip', 'spin', 'glitch',
+  'zoomOut', 'whipRight', 'coverLeft', 'coverRight', 'coverUp', 'coverDown', 'splitFade'];
 export const MASK_SHAPES: MaskShape[] = ['linear', 'mirror', 'circle', 'rect', 'heart', 'star'];
 export const BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'softLight', 'darken', 'lighten', 'add'];
 /** Freeze frame: a hold lasts 0.1–30 s. */
@@ -116,7 +124,12 @@ export const SPEED_PRESETS: Record<Exclude<SpeedPreset, 'custom'>, [number, numb
   flashOut: [[0, 1], [0.4, 1], [0.6, 6], [1, 6]],
 };
 export const ANIMS: AnimKind[] = ['none', 'fade', 'pop', 'slideUp', 'slideDown', 'zoom', 'typewriter'];
-export const FONTS = ['sans', 'serif', 'rounded', 'condensed', 'mono', 'marker'] as const;
+/** A project's reference to a content library item (catalog pack and item ids). */
+export const CONTENT_REF = /^content:[a-z0-9-]+\/[a-z0-9_.-]+$/;
+export const FONTS = ['sans', 'serif', 'rounded', 'condensed', 'mono', 'marker', 'inter', 'montserrat', 'robotoCondensed', 'playfair', 'unbounded', 'rubik', 'jetbrainsMono', 'caveat', 'oswald'] as const;
+/** The built-in family a content font draws in until its file is on the device. */
+export const FONT_FALLBACK: Record<FontFamily, FontFamily> = { sans: 'sans', serif: 'serif', rounded: 'rounded', condensed: 'condensed', mono: 'mono', marker: 'marker',
+  inter: 'sans', montserrat: 'sans', robotoCondensed: 'condensed', playfair: 'serif', unbounded: 'sans', rubik: 'rounded', jetbrainsMono: 'mono', caveat: 'marker', oswald: 'condensed' };
 export const CAPTION_PRESETS: CaptionPreset[] = ['plain', 'highlight', 'box', 'karaoke', 'pop', 'single', 'highlighter', 'neon'];
 /** Caption paging constants (plans/video-editor.md "Text, hooks and captions"). */
 export const CAPTION_GAP_SEC = 0.6, CAPTION_TAIL_SEC = 0.4, SPEECH_JOIN_SEC = 0.4;
@@ -249,6 +262,24 @@ export function speedPieces(c: Timed): Piece[] {
   const n = CURVE_PIECES, len = (c.outSec - c.inSec) / n;
   return Array.from({ length: n }, (_, i) => ({ inSec: r6(c.inSec + i * len), outSec: r6(i === n - 1 ? c.outSec : c.inSec + (i + 1) * len), speed: r6(curveSpeed(c.speedCurve!, (i + 0.5) / n)) }));
 }
+/**
+ * A clip switched to the reversed copy [reversed] of a source [durationSec] long (or back to the original): the same
+ * stretch of the source, mirrored (in' = D − out, out' = D − in), a speed curve mirrored in x (custom unless symmetric). Keyframes, look and the
+ * rest are timeline-local and stay; alphaMatte and audioAsset (aligned to the original's frames) are dropped. Null for a freeze frame (holdSec), which has nothing to reverse.
+ */
+export function reverseClip(c: VideoClip, reversed: string, durationSec: number): VideoClip | null {
+  if (c.holdSec !== undefined) return null;
+  const out: VideoClip = { ...c, asset: reversed, inSec: r6(Math.max(0, durationSec - c.outSec)), outSec: r6(Math.min(durationSec, durationSec - c.inSec)) };
+  // Lined up frame for frame with the original, so they'd play the wrong way: dropped (the apps say so).
+  delete out.alphaMatte; delete out.audioAsset;
+  if (c.speedCurve) {
+    const points = c.speedCurve.points.map(([x, v]) => [r6(1 - x), v] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const same = points.length === c.speedCurve.points.length && points.every((q, i) => q[0] === c.speedCurve!.points[i]![0] && q[1] === c.speedCurve!.points[i]![1]);
+    out.speedCurve = { preset: same ? c.speedCurve.preset : 'custom', points }; // a mirrored preset is no longer that preset
+  }
+  return out;
+}
+
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
 export const clipLength = (c: Timed) => c.holdSec !== undefined ? c.holdSec :
   c.speedCurve ? speedPieces(c).reduce((s, p) => s + (p.outSec - p.inSec) / p.speed, 0) : (c.outSec - c.inSec) / (c.speed ?? 1);
@@ -473,6 +504,14 @@ export function transitionState(kind: TransitionKind, p: number): TransitionStat
     case 'whip': return { a: L({ dx: -e3, blur: peak }), b: L({ dx: 1 - e3, blur: peak }), color: null };
     case 'spin': return { a: L({ rotation: 180 * e, scale: 1 - 0.6 * e, opacity: p < 0.5 ? 1 : 0 }), b: L({ rotation: -180 * (1 - e), scale: 0.4 + 0.6 * e, opacity: p < 0.5 ? 0 : 1 }), color: null };
     case 'glitch': return { a: L({ opacity: p < 0.5 ? 1 : 0, dx: 0.04 * peak * jit(1), rgbSplit: peak }), b: L({ opacity: p < 0.5 ? 0 : 1, dx: 0.04 * peak * jit(2), rgbSplit: peak }), color: null };
+    case 'zoomOut': return { a: L({ scale: 1 - 0.2 * e, opacity: 1 - p }), b: L({ scale: 1.2 - 0.2 * e, opacity: p }), color: null };
+    case 'whipRight': return { a: L({ dx: e3, blur: peak }), b: L({ dx: -(1 - e3), blur: peak }), color: null };
+    // Cover: the incoming clip slides over the outgoing one, which stays still and fully shown underneath.
+    case 'coverLeft': return { a: L(), b: L({ dx: 1 - e }), color: null };
+    case 'coverRight': return { a: L(), b: L({ dx: -(1 - e) }), color: null };
+    case 'coverUp': return { a: L(), b: L({ dy: 1 - e }), color: null };
+    case 'coverDown': return { a: L(), b: L({ dy: -(1 - e) }), color: null };
+    case 'splitFade': return { a: L({ rgbSplit: peak }), b: L({ opacity: p, rgbSplit: peak }), color: null };
   }
 }
 
@@ -879,9 +918,16 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (a.name !== undefined && (typeof a.name !== 'string' || !a.name.trim() || a.name.length > 80)) bad(`${f}.name`, 'must be 1–80 characters');
     const refs = [a.take, a.upload, a.library].filter(x => x !== undefined);
     if (refs.length !== 1 || refs.some(r => typeof r !== 'string' || !r || r.length > 100)) bad(f, 'needs exactly one of take, upload or library');
+    // The content library (catalog items): `content:<pack>/<item>`, for stickers (image) and sound effects (audio).
+    if (typeof a.library === 'string' && a.library.startsWith('content:') && (!CONTENT_REF.test(a.library) || (a.kind !== 'image' && a.kind !== 'audio'))) bad(`${f}.library`, 'unknown content');
     num(`${f}.durationSec`, a.durationSec, 0.01, 36_000);
     num(`${f}.width`, a.width, 1, 16384); num(`${f}.height`, a.height, 1, 16384);
     assets.set(a.id, a);
+  });
+  p.assets.forEach((a, i) => {
+    if (a.reverseOf === undefined) return;
+    const o = typeof a.reverseOf === 'string' ? assets.get(a.reverseOf) : undefined;
+    if (a.kind !== 'video' || !o || o.kind !== 'video' || o.reverseOf !== undefined || o.id === a.id) bad(`edits.assets.${i}.reverseOf`, 'must be a video asset');
   });
   if (!Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > LIMITS.maxTracks) bad('edits.tracks', `must have 1–${LIMITS.maxTracks} tracks`);
   if (p.tracks[0]!.kind !== 'main') bad('edits.tracks.0.kind', 'the first track must be the main track');

@@ -148,6 +148,9 @@ private struct AccountSettings: View {
             Text("Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL); Permanent Marker (Apache 2.0)")
                 .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true).padding(.leading, Space.s5)
         }
+        // The edit content library (WS8 84df583): stickers, sound effects and fonts under their own licences.
+        SectionTitle("Licences")
+        SettingsContentLicences()
         if store.isOwner {
             SettingRow("Show advanced settings", hint: "Server, testing and performance tools") {
                 RSwitch(label: "Show advanced settings", isOn: $showAdvanced)

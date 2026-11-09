@@ -179,6 +179,7 @@ final class EditSuiteSession {
             }
             phase = .ready
             Task { [weak self] in await self?.refreshFeatures() }
+            Task { [weak self] in await self?.loadContent() }
             observeTime()
             await ensureFiles()
             rebuild(immediately: true)
@@ -200,11 +201,30 @@ final class EditSuiteSession {
     /// Downloads every asset file the project needs and doesn't have yet (takes by their video, uploads by their url hint).
     private func ensureFiles() async {
         for a in project.assets where files[a.id] == nil {
+            // Content stickers and sound effects (WS8 84df583): the catalog's file, downloaded once per catalog version.
+            if let ref = a.contentRef {
+                if content == nil { await loadContent() }
+                if let path = content?.item(ref: ref)?.item.file, let u = await contentFile(path) { files[a.id] = u }
+                continue
+            }
             var link: String?
             if let t = a.take { link = lookupTake(t)?.videoUrl }
             if link == nil { link = a.url }
             guard let link, let url = URL(string: link) else { continue }
             if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
+        }
+        await ensureContentFonts()
+    }
+
+    /// The content fonts this edit's text and captions use, loaded for the preview (each family draws in its bundled
+    /// fallback until its file is here).
+    private func ensureContentFonts() async {
+        let need = project.contentFonts.filter { !EditV2TextRenderer.hasContentFont($0) }
+        guard !need.isEmpty else { return }
+        if content == nil { await loadContent() }
+        for k in need {
+            guard let path = content?.fontFile(k.font, weight: k.weight), let u = await contentFile(path) else { continue }
+            EditV2TextRenderer.registerContentFont(k, file: u)
         }
     }
 
@@ -744,6 +764,7 @@ final class EditSuiteSession {
         case .denoise: return "Noise reduction"
         case .cuts: return "Cut silences"
         case .beats: return "Detect beats"
+        case .reverse: return "Reverse"
         }
     }
 
@@ -866,6 +887,42 @@ final class EditSuiteSession {
 
     /// Remove background on the selected clip: the person, as an alpha matte on the clip (2026-11-08 contract); off takes
     /// it away (and puts an older cut-out's original picture back).
+    /// Reverse (contract, WS8 cb5413e): the selected clip plays a reversed copy of its source, made once by the server
+    /// (free, up to 60 s) and kept in the edit; toggling back switches to the original at once. Background removal and a
+    /// separate sound are aligned to the original's frames, so they're dropped (and the notice says so).
+    func toggleReverse() async {
+        guard let c = state.selectedVideo else { lastError = "Select a clip to reverse"; return }
+        if let orig = state.reversedFrom, let a = project.asset(orig) { switchReverse(to: a); return }
+        if let copy = state.reversedCopy(of: c.asset) { switchReverse(to: copy); return }
+        guard c.holdSec == nil else { lastError = "A freeze frame has nothing to reverse"; return }
+        guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Reverse needs a take or an upload"; return }
+        await run(.reverse, source: src) { [weak self] r in
+            Task { @MainActor in await self?.addReversed(r, of: a) }
+        }
+    }
+
+    private func addReversed(_ r: EditorJobResult, of a: E.Asset) async {
+        guard let ra = r.asset, ra.upload != nil || ra.take != nil else { lastError = "Couldn't reverse this clip"; return }
+        let id = project.newId("v")
+        var copy = E.Asset(id: id, kind: .video, take: ra.upload == nil ? ra.take : nil, upload: ra.upload, durationSec: ra.durationSec ?? r.durationSec ?? a.durationSec,
+                           width: r.width ?? a.width, height: r.height ?? a.height, hasAudio: r.hasAudio ?? a.hasAudio, url: ra.url)
+        copy.reverseOf = a.id
+        let link = ra.url ?? ra.take.flatMap { lookupTake($0)?.videoUrl }
+        if let link, let u = URL(string: link), let local = try? await EditSuiteMedia.localCopy(u, key: ra.upload ?? ra.take ?? id) { files[id] = local }
+        else if ra.upload == a.upload, ra.take == a.take { files[id] = files[a.id] }   // the fake hands back the source itself
+        state.assetNames[id] = "Reversed"
+        switchReverse(to: copy)
+    }
+
+    private func switchReverse(to target: E.Asset) {
+        var dropped: [String]?
+        edit { s in dropped = s.reverseSelected(to: target); return dropped != nil }
+        guard let dropped else { return }
+        let backwards = target.reverseOf != nil
+        if dropped.isEmpty { notice = backwards ? "Plays backwards" : "Plays forwards again" }
+        else { notice = "\(backwards ? "Plays backwards" : "Plays forwards again") · \(dropped.joined(separator: " and ")) turned off (run it again on this clip)" }
+    }
+
     func setRemoveBackground(_ on: Bool) async {
         guard let c = state.selectedVideo else { return }
         if !on {
@@ -1135,6 +1192,72 @@ final class EditSuiteSession {
             notice = nil
             lastError = (error as? ApiError)?.message ?? "Couldn't add that font"
         }
+    }
+
+    // MARK: Content library (WS8 84df583): stickers, sound effects, fonts and the in-house looks, captions and transitions
+
+    /// The content catalog: nil until loaded, or when this server has none.
+    var content: ContentCatalog?
+    /// The sound effect being previewed (its ref).
+    var previewingSound: String?
+    @ObservationIgnored private var contentTask: Task<ContentCatalog?, Never>?
+    @ObservationIgnored private var soundPreview: AVAudioPlayer?
+
+    func loadContent() async {
+        if content != nil { return }
+        let task = contentTask ?? Task { [api] in try? await api.editorContent() }
+        contentTask = task
+        content = await task.value
+        if content == nil { contentTask = nil }   // try again next time
+    }
+
+    /// A content file on this Mac (downloaded once per catalog version), or nil when it can't be had.
+    func contentFile(_ path: String) async -> URL? {
+        guard let c = content else { return nil }
+        return try? await api.editorContentFile(path, version: c.version)
+    }
+
+    /// A sticker at the playhead on the Stickers row (downloaded first, so the preview has it).
+    func addContentSticker(_ pack: ContentPack, _ item: ContentItem) async {
+        guard let path = item.file, let url = await contentFile(path) else { lastError = "Couldn't download that sticker · check the connection"; return }
+        let ref = ContentCatalog.ref(pack: pack.id, item: item.id)
+        if edit({ $0.addContentSticker(pack, item) }) {
+            for a in project.assets where a.library == ref { files[a.id] = url }
+            rebuild(immediately: true)
+            view { $0.tab = .video }
+        }
+    }
+
+    /// A sound effect at the playhead on the sound effects row.
+    func addContentSound(_ pack: ContentPack, _ item: ContentItem) async {
+        guard let path = item.file, let url = await contentFile(path) else { lastError = "Couldn't download that sound · check the connection"; return }
+        let ref = ContentCatalog.ref(pack: pack.id, item: item.id)
+        if edit({ $0.addContentSound(pack, item) }) {
+            for a in project.assets where a.library == ref { files[a.id] = url }
+            rebuild(immediately: true)
+        }
+    }
+
+    /// Plays a sound effect once (again: stops it).
+    func previewSound(_ pack: ContentPack, _ item: ContentItem) async {
+        let ref = ContentCatalog.ref(pack: pack.id, item: item.id)
+        soundPreview?.stop()
+        if previewingSound == ref { previewingSound = nil; return }
+        previewingSound = ref
+        guard let path = item.file, let url = await contentFile(path), previewingSound == ref,
+              let p = try? AVAudioPlayer(contentsOf: url) else { if previewingSound == ref { previewingSound = nil }; return }
+        soundPreview = p
+        p.play()
+        let len = p.duration
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(len + 0.05))
+            if self?.previewingSound == ref { self?.previewingSound = nil }
+        }
+    }
+
+    /// One of the in-house looks on the selected picture (its whole look: LUT, grain, vignette and the rest).
+    func applyContentLook(_ look: E.Look) {
+        edit { s in s.changeVisual { v in v.look = look } }
     }
 
     // MARK: Style kits (parity, shared kit engine)

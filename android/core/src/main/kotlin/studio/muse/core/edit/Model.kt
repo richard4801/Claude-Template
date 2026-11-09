@@ -38,6 +38,8 @@ enum class TransitionKind(override val wire: String) : Wire {
     /** Edit suite: cubic push with motion blur. */ WHIP("whip"),
     /** Edit suite: rotate 180° and scale through a hard switch at the middle. */ SPIN("spin"),
     /** Edit suite: hard switch with jitter and an RGB split. */ GLITCH("glitch"),
+    // Content pack (2026-11-09): made of the same layer values.
+    ZOOM_OUT("zoomOut"), WHIP_RIGHT("whipRight"), COVER_LEFT("coverLeft"), COVER_RIGHT("coverRight"), COVER_UP("coverUp"), COVER_DOWN("coverDown"), SPLIT_FADE("splitFade"),
 }
 
 /** Speed-curve presets (Edit suite, EM4). */
@@ -84,7 +86,24 @@ enum class TrackKind(override val wire: String) : Wire {
     val isVideo: Boolean get() = this == MAIN || this == VIDEO
 }
 
-enum class Font(override val wire: String) : Wire { SANS("sans"), SERIF("serif"), ROUNDED("rounded"), CONDENSED("condensed"), MONO("mono"), MARKER("marker") }
+/**
+ * Text families: the six bundled ones, then the content library's (catalog `fonts` pack; Cyrillic and Latin Extended),
+ * each with the bundled family it draws in until its file is on the device ([fallback]).
+ */
+enum class Font(override val wire: String) : Wire {
+    SANS("sans"), SERIF("serif"), ROUNDED("rounded"), CONDENSED("condensed"), MONO("mono"), MARKER("marker"),
+    INTER("inter"), MONTSERRAT("montserrat"), ROBOTO_CONDENSED("robotoCondensed"), PLAYFAIR("playfair"), UNBOUNDED("unbounded"),
+    RUBIK("rubik"), JETBRAINS_MONO("jetbrainsMono"), CAVEAT("caveat"), OSWALD("oswald");
+
+    /** True for the content library's families (downloaded on first use). */
+    val isContent: Boolean get() = ordinal > MARKER.ordinal
+
+    /** The bundled family this one draws in until its file is here (model.ts FONT_FALLBACK). */
+    val fallback: Font get() = when (this) {
+        INTER, MONTSERRAT, UNBOUNDED -> SANS; ROBOTO_CONDENSED, OSWALD -> CONDENSED; PLAYFAIR -> SERIF; RUBIK -> ROUNDED
+        JETBRAINS_MONO -> MONO; CAVEAT -> MARKER; else -> this
+    }
+}
 enum class Align(override val wire: String) : Wire { LEFT("left"), CENTER("center"), RIGHT("right") }
 
 enum class CaptionPreset(override val wire: String) : Wire {
@@ -134,6 +153,8 @@ data class Asset(
     val url: String? = null,
     /** A font asset's family and style, read from the file (display only). */
     val name: String? = null,
+    /** A video asset that is another video asset played backwards (the Reverse helper's copy); see [reverseClip]. */
+    val reverseOf: String? = null,
 )
 
 /** Anything on a track. Which class an item is follows from its track's kind. */

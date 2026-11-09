@@ -299,6 +299,7 @@ struct LooksPanel: View {
                     tile(id: e.id, name: e.name, image: session.lookThumbs[e.id], on: current == e.id)
                 }
             }
+            ContentLookChips(session: session, visual: visual)
             if let pid = visual.look?.paletteId { suiteLookCard(name: EditV2LookLibrary.shared.palettes.name(of: pid)) }
             if pack == nil { Note(warn: true, "The look pack is missing from this build.") }
             if let look = visual.look, look.lut != nil {
@@ -819,6 +820,8 @@ struct TransitionsPanel: View {
                 }
             }
             Chip("Dip to black", on: current == "black") { set("black") }.disabled(isFirst)
+            // Content library (WS8 929bcf2): seven more kinds, and the in-house presets.
+            ContentTransitionChips(session: session, disabled: isFirst, duration: duration)
             SuiteSlider("Duration", value: clip?.transitionIn?.durationSec ?? duration, range: 0.1...2, format: { String(format: "%.1f s", $0) }) { v in
                 duration = (v * 10).rounded() / 10
                 if let k = clip?.transitionIn?.kind { session.edit { $0.setTransition(k, duration: duration) } }
@@ -833,7 +836,7 @@ struct TransitionsPanel: View {
         }
     }
 
-    private func label(_ key: String) -> String { EditV2.transitionLabels.first { $0.0 == key }?.1 ?? key }
+    private func label(_ key: String) -> String { EditV2.transitionLabel(EditV2.TransitionKind(rawValue: key)) }
 
     private func set(_ key: String) {
         let kind = EditV2.TransitionKind(rawValue: key)
@@ -1034,6 +1037,11 @@ struct SpeedPanel: View {
                     Text(session.state.speedSummary ?? "").font(t.scale.caption.font).foregroundStyle(t.roles.ink)
                     Text("Keeps the pitch. Drag points; double-click to add one.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                // Reverse (contract, WS8 cb5413e): the clip plays a reversed copy of its source (made once, up to 60 s).
+                SuiteRule()
+                SuiteToggleRow(title: "Reverse", hint: "Plays backwards", isOn: session.state.reversedFrom != nil, busy: session.isRunning(.reverse)) { _ in
+                    Task { await session.toggleReverse() }
                 }
             }
         } else {
