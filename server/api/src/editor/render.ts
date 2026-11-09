@@ -3,7 +3,7 @@
 // - the main track: trims, speed and speed curves (the same constant-speed pieces the apps use), cover/contain fit,
 //   transform and x/y/scale keyframes (camera moves), transitions (xfade), and the Look's LUT at its strength;
 // - adjustment layers over the joined picture, under the text (runs of one colour matrix; keyed ones sampled);
-// - text items: the apps' fonts, size, colour, stroke, position, timing;
+// - text items: the apps' fonts (or the member's own font file), size, colour, stroke, position, timing;
 // - sound: each clip's own sound (at its speed) plus music/voice/sfx clips, or an external guide track instead.
 // Anything else in the project (masks, chroma, mattes, colour adjustments, overlays, captions, text animations, library
 // music) is left out and listed in `unsupported`, so the apps can say the render is a preview of the cut.
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { LOOK_IDS } from './lookpack.js';
 import { FILTERS } from './presets.js';
 import * as M from './model.js';
-import { hash01 } from './look.js';
+import { curvesFn, hash01, hslFn, lutSample, parseCube, writeCube, type Look, type Lut } from './look.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
 import { probe } from '../replicate/media.js';
 
@@ -74,6 +74,18 @@ export function glitchShifts(windows: { start: number; d: number }[], W: number,
     set(w.start + w.d, 0, 0, 0);
   }
   return cmds.join(';');
+}
+
+/** A look's curves (4), HSL (4b) and LUT at its strength (5) as one 33³ cube, the same steps as look.ts applyLook. */
+export function bakeLook(look: Look, lut: Lut | null): string {
+  const curves = curvesFn(look.curves), hsl = hslFn(look.hsl), s = Math.max(0, Math.min(1, look.strength ?? 1));
+  return writeCube(33, 'muse look', (r, g, b) => {
+    let rgb: [number, number, number] = [r, g, b];
+    if (curves) rgb = curves(rgb);
+    if (hsl) rgb = hsl(rgb);
+    if (lut && s > 0) { const t = lutSample(lut, rgb[0], rgb[1], rgb[2]); rgb = [0, 1, 2].map(i => Math.min(1, Math.max(0, rgb[i]! + (t[i]! - rgb[i]!) * s))) as [number, number, number]; }
+    return rgb;
+  });
 }
 
 /** A look's LUT file: a pack look, a palette, or an imported .cube (asset id → file from `files`). */
@@ -142,6 +154,7 @@ export type RenderPlan = { args: string[]; durationSec: number; width: number; h
 export function planRender(p: M.EditProject, files: Record<string, string>, sizes: Record<string, { width: number; height: number; hasAudio: boolean }>, out: string, o: RenderOptions = {}): RenderPlan {
   const unsupported = new Set<string>();
   const temp: string[] = [];
+  const baked = new Map<string, string>(); // look key → baked .cube (one per distinct look)
   const f = Math.min(1, (o.maxSide ?? Math.max(p.canvas.width, p.canvas.height)) / Math.max(p.canvas.width, p.canvas.height));
   const W = even(p.canvas.width * f), H = even(p.canvas.height * f), FPS = Math.min(o.fps ?? p.canvas.fps ?? 30, 60);
   const inputs: string[] = [], index = new Map<string, number>();
@@ -179,17 +192,28 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     g.push(`color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(len + 1)}[bg${i}]`);
     let last = `o${i}`;
     g.push(`[bg${i}][f${i}]overlay=x='${n4(W)}*(${X})-overlay_w/2':y='${n4(H)}*(${Y})-overlay_h/2':eval=${moving ? 'frame' : 'init'}[${last}]`);
-    // The Look: its LUT at its strength (the look's other parts are not drawn here).
-    const lut = c.look?.lut ? lutFile(c.look.lut, files) : null;
+    // The Look: its LUT at its strength; with curves or HSL, those and the LUT baked into one cube (look steps 4–5).
+    let lut = c.look?.lut ? lutFile(c.look.lut, files) : null;
     if (c.look?.lut && !lut) unsupported.add('a look that is not on the server');
+    const toned = !!(c.look && (curvesFn(c.look.curves) || hslFn(c.look.hsl)));
+    if (toned && (lut || !c.look!.lut)) {
+      const key = JSON.stringify([c.look!.curves, c.look!.hsl, lut, c.look!.lut ? c.look!.strength ?? 1 : 0]);
+      let file = baked.get(key);
+      if (!file) {
+        file = path.join(os.tmpdir(), `muse-look-${process.pid}-${Date.now()}-${baked.size}.cube`);
+        fs.writeFileSync(file, bakeLook(c.look!, lut ? parseCube(fs.readFileSync(lut, 'utf8')) : null));
+        temp.push(file); baked.set(key, file);
+      }
+      lut = file;
+    }
     if (lut) {
       const s = Math.max(0, Math.min(1, c.look!.strength ?? 1));
       const esc = lut.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '');
-      if (s >= 0.999) g.push(`[${last}]lut3d=file='${esc}'[l${i}]`);
+      if (s >= 0.999 || toned) g.push(`[${last}]lut3d=file='${esc}'[l${i}]`);
       else g.push(`[${last}]split[la${i}][lb${i}];[lb${i}]lut3d=file='${esc}'[lc${i}];[la${i}][lc${i}]blend=all_mode=normal:all_opacity=${n4(s)}[l${i}]`);
       last = `l${i}`;
-      const extra = Object.keys(c.look!).filter(x => !['lut', 'strength'].includes(x));
-      if (extra.length) unsupported.add('look details (curves, grain, …)');
+      const extra = Object.keys(c.look!).filter(x => !['lut', 'strength', 'curves', 'hsl'].includes(x));
+      if (extra.length) unsupported.add('look details (grain, vignette, …)');
     }
     // Exactly the clip's frames on the timeline (rounded once from the timeline, so cuts never drift).
     g.push(`[${last}]trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
@@ -234,6 +258,12 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if (tr.kind !== 'text') continue;
     for (const it of tr.items as M.TextItem[]) {
       const st = it.style, px = Math.max(6, st.sizePct * H);
+      // An own font draws from its downloaded file; without one (not fetched) the fallback family stands in.
+      const ownFont = (s: M.TextStyle) => {
+        const f = s.fontAsset ? files[s.fontAsset] : undefined;
+        if (s.fontAsset && (!f || /^https?:/.test(f))) unsupported.add('own fonts');
+        return f && !/^https?:/.test(f) ? f : fontFile(s.font, s.weight);
+      };
       if (it.animIn && it.animIn.kind !== 'none' || it.animOut && it.animOut.kind !== 'none' || it.keyframes || it.animLoop) unsupported.add('text animation');
       const lines = wrap(st.uppercase ? it.text.toUpperCase() : it.text, px, (st.maxWidthPct ?? 0.9) * W);
       const lh = px * (st.lineHeight ?? 1.15), cx = (it.transform?.x ?? 0.5) * W, cy = (it.transform?.y ?? 0.5) * H;
@@ -244,7 +274,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         const x = st.align === 'left' ? `${n4(cx - ((st.maxWidthPct ?? 0.9) * W) / 2)}` : st.align === 'right' ? `${n4(cx + ((st.maxWidthPct ?? 0.9) * W) / 2)}-text_w` : `${n4(cx)}-text_w/2`;
         const stroke = st.stroke ? `:borderw=${n4(Math.max(1, st.stroke.widthPct * px))}:bordercolor=${color(st.stroke.color)}` : '';
         const next = `t${ti}_${li}`;
-        g.push(`[${vlast}]drawtext=fontfile='${fontFile(st.font, st.weight).replace(/:/g, '\\:')}':textfile='${file.replace(/:/g, '\\:')}':fontsize=${n4(px)}:fontcolor=${color(st.color, it.opacity ?? 1)}${stroke}:x='${x}':y=${n4(y)}:enable='between(t,${n4(it.startSec)},${n4(it.startSec + it.durationSec)})'[${next}]`);
+        g.push(`[${vlast}]drawtext=fontfile='${ownFont(st).replace(/:/g, '\\:')}':textfile='${file.replace(/:/g, '\\:')}':fontsize=${n4(px)}:fontcolor=${color(st.color, it.opacity ?? 1)}${stroke}:x='${x}':y=${n4(y)}:enable='between(t,${n4(it.startSec)},${n4(it.startSec + it.durationSec)})'[${next}]`);
         vlast = next;
       });
       ti++;
@@ -324,7 +354,7 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
   const sizes: Record<string, { width: number; height: number; hasAudio: boolean }> = {};
   for (const [id, file] of Object.entries(files)) {
     const a = p.assets.find(x => x.id === id);
-    if (!a || a.kind === 'lut') continue;
+    if (!a || a.kind === 'lut' || a.kind === 'font') continue;
     const info = await probe(cfg.ffprobe, file).catch(() => null);
     if (info) sizes[id] = { width: info.width || a.width || 1080, height: info.height || a.height || 1920, hasAudio: !!info.audioCodec };
   }

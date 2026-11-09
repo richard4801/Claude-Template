@@ -1195,7 +1195,11 @@ data class TakeVersionV2Request(
 /** Edit sessions (workstream 3): a version name as the server takes it (trimmed, at most 80 characters; blank = none). */
 fun versionName(raw: String?): String? = raw?.trim()?.take(80)?.trim()?.ifEmpty { null }
 
-/** POST /v1/editor/uploads/presign (voice-over / music / .cube). */
+/** GET /v1/editor/uploads/{id}: where an upload of the studio can be fetched. */
+@Serializable
+data class EditorUploadDto(val uploadId: String, val url: String, val contentType: String? = null, val bytes: Long? = null)
+
+/** POST /v1/editor/uploads/presign (voice-over / music / .cube / font). */
 @Serializable
 data class EditorPresignRequest(val contentType: String, val bytes: Long? = null, val purpose: String? = null)
 

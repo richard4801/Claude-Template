@@ -234,6 +234,13 @@ public struct EditorJob: Codable, Hashable, Sendable, Identifiable {
 }
 
 /// POST /v1/editor/luts/validate.
+/// POST /v1/editor/uploads/font-check: the upload is a .ttf / .otf, and its display name.
+public struct FontCheck: Codable, Hashable, Sendable {
+    public var uploadId: String
+    public var name: String
+    public init(uploadId: String, name: String) { self.uploadId = uploadId; self.name = name }
+}
+
 public struct LutValidation: Codable, Hashable, Sendable {
     public var uploadId: String
     public var size: Int

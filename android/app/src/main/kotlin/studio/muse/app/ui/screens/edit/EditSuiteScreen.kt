@@ -71,6 +71,7 @@ import studio.muse.app.platform.SourceInfo
 import studio.muse.app.platform.VideoEditEngine
 import studio.muse.app.platform.edit.EditCompositionEngine
 import studio.muse.app.platform.edit.LookLibrary
+import studio.muse.app.platform.edit.OwnFonts
 import studio.muse.app.platform.edit.LookThumbnails
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.components.Pill
@@ -241,6 +242,8 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { savedVideo = uri; importing = true } }
     // "Add a photo": the system photo picker (images only; no storage permission).
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.addPhoto(it) } }
+    // "Your font": the system file picker (fonts have no reliable MIME type, so any file; the view model checks it).
+    val font = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.addFont(it) } }
     if (importing) studio.muse.app.ui.screens.ImportLinkDialog(studio.muse.app.ui.screens.ImportPurpose.EDIT, file = savedVideo,
         onClose = { importing = false; savedVideo = null }, onPickFile = { importing = false; video.launch("video/*") }) { v ->
         importing = false; savedVideo = null; vm.addImported(v)
@@ -264,6 +267,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         importLink = { importing = true },
         headphones = androidx.compose.runtime.remember(ui.recordingAt, ui.panel) { vm.outputRoute().headphones },
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        addFont = { font.launch(arrayOf("font/ttf", "font/otf", "font/sfnt", "application/x-font-ttf", "application/vnd.ms-opentype", "application/octet-stream")) },
         autoAdjust = vm::autoAdjust,
         saveKit = vm::saveKit,
         deleteKit = vm::deleteKit,
@@ -382,6 +386,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 // A take added while editing (an overlay, or a clip at the end): its file first, so the preview and the
                 // export include it (before, only takes in the project when it opened were fetched).
                 if (sourceFile != null && p.assets.any { it.take != null && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
+                if (p.assets.any { it.kind == AssetKind.FONT && it.upload?.let(OwnFonts::has) == false }) fetchFonts(p)
                 rebuildPreview(p)
             }
         }
@@ -443,6 +448,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 startSession(source.id, project, fromVersion = if (target?.initial != null && take.kind == "edit") take.id else null)
                 loadFrames(project)
                 fetchTakeAssets(controller.project ?: project)
+                fetchFonts(controller.project ?: project)
                 loadWaves(controller.project ?: project)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) {
@@ -520,6 +526,43 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     fun pause() { _player.value?.pause(); controller.setPlayback(controller.ui.value.playheadSec, false) }
 
     // ------------------------------------------------------------ files the user adds
+    /** The project's own fonts on this phone: from the cache, else downloaded (text draws its fallback until then). */
+    private suspend fun fetchFonts(p: EditProject) {
+        for (a in p.assets) {
+            val up = a.upload ?: continue
+            if (a.kind != AssetKind.FONT || OwnFonts.has(up)) continue
+            val cached = fontFile(up)
+            val f = if (cached.exists()) cached else {
+                val url = runCatching { c.repo.api.editorUploadUrl(up) }.getOrNull() ?: continue
+                runCatching { engine.fetchSource(url) {} }.getOrNull()?.let { got -> withContext(Dispatchers.IO) { runCatching { got.copyTo(cached, overwrite = true) }.getOrNull() } } ?: continue
+            }
+            OwnFonts.register(up, f)
+        }
+    }
+
+    private fun fontFile(upload: String) = File(app.cacheDir, "edit-suite/fonts/$upload.font").apply { parentFile?.mkdirs() }
+
+    /**
+     * "Your font": a .ttf/.otf from the phone, checked and named here ([studio.muse.core.edit.FontFile]), uploaded, then
+     * set on the selected text (the server checks it again when the edit is saved).
+     */
+    fun addFont(uri: Uri) {
+        viewModelScope.launch {
+            controller.update { it.copy(message = "Adding the font…") }
+            val f = copyIn(uri, "font_${System.currentTimeMillis()}") ?: return@launch c.repo.toast("Couldn't read that file")
+            if (f.length() > studio.muse.core.edit.FontFile.MAX_BYTES) return@launch c.repo.toast("Fonts can be up to 10 MB")
+            val bytes = withContext(Dispatchers.IO) { f.readBytes() }
+            val name = studio.muse.core.edit.FontFile.name(bytes) ?: return@launch c.repo.toast("That isn't a .ttf or .otf font")
+            val otf = bytes.size >= 4 && String(bytes, 0, 4, Charsets.ISO_8859_1) == "OTTO"
+            val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, if (otf) "font/otf" else "font/ttf", "font") } }.getOrElse { null to "Couldn't upload · try again" }
+            if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
+            val kept = withContext(Dispatchers.IO) { runCatching { f.copyTo(fontFile(id), overwrite = true) }.getOrNull() } ?: f
+            OwnFonts.register(id, kept)
+            controller.act(EditAction.AddFont(id, name))
+            controller.project?.let { rebuildPreview(it) }
+        }
+    }
+
     private suspend fun copyIn(uri: Uri, name: String): File? = withContext(Dispatchers.IO) {
         runCatching {
             val f = File(app.cacheDir, "edit-suite/$name").apply { parentFile?.mkdirs() }

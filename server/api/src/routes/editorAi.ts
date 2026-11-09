@@ -3,6 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import { uploads } from '../db/schema.js';
+import { FONT_EXT, FONT_LIMITS, fontOfUpload } from '../editor/font.js';
 import { and, eq } from 'drizzle-orm';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,14 +84,21 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
     return { uploadId: id, size: l.size, title: l.title };
   });
 
-  /** A presigned PUT for an audio file (voice-over, music), a video, a picture (stickers) or, with `purpose: "lut"`, a .cube look, to use as an asset upload. */
+  /** Checks an uploaded font (after its PUT): → {uploadId, name}; bad_request when it isn't a .ttf/.otf. */
+  app.post('/v1/editor/uploads/font-check', async req => {
+    const id = (req.body as { uploadId?: unknown } | null)?.uploadId;
+    if (typeof id !== 'string') throw badRequest('uploadId: Required');
+    return { uploadId: id, ...(await fontOfUpload(ctx, req.user.studioId, id)) };
+  });
+
+  /** A presigned PUT for an audio file (voice-over, music), a video, a picture (stickers), with `purpose: "lut"` a .cube look or with `purpose: "font"` a .ttf/.otf, to use as an asset upload. */
   app.post('/v1/editor/uploads/presign', async req => {
     const b = (req.body ?? {}) as { contentType?: unknown; bytes?: unknown; purpose?: unknown };
     const ct = typeof b.contentType === 'string' ? b.contentType.toLowerCase() : '';
-    const lut = b.purpose === 'lut';
-    const ext = lut ? (['text/plain', 'application/octet-stream', 'application/x-cube'].includes(ct) ? 'cube' : undefined) : (AUDIO_EXT[ct] ?? VIDEO_EXT[ct] ?? IMAGE_EXT[ct]);
-    if (!ext) throw badRequest(lut ? 'contentType: text/plain or application/octet-stream for a .cube' : `contentType: one of ${[...Object.keys(AUDIO_EXT), ...Object.keys(VIDEO_EXT), ...Object.keys(IMAGE_EXT)].join(', ')}`);
-    const max = lut ? LOOK_LIMITS.maxCubeBytes : VIDEO_EXT[ct] ? 2 * 1024 ** 3 : IMAGE_EXT[ct] ? 30 * 1024 ** 2 : 200 * 1024 ** 2;
+    const lut = b.purpose === 'lut', font = b.purpose === 'font';
+    const ext = lut ? (['text/plain', 'application/octet-stream', 'application/x-cube'].includes(ct) ? 'cube' : undefined) : font ? FONT_EXT[ct] : (AUDIO_EXT[ct] ?? VIDEO_EXT[ct] ?? IMAGE_EXT[ct]);
+    if (!ext) throw badRequest(lut ? 'contentType: text/plain or application/octet-stream for a .cube' : font ? `contentType: one of ${Object.keys(FONT_EXT).join(', ')} for a font` : `contentType: one of ${[...Object.keys(AUDIO_EXT), ...Object.keys(VIDEO_EXT), ...Object.keys(IMAGE_EXT)].join(', ')}`);
+    const max = lut ? LOOK_LIMITS.maxCubeBytes : font ? FONT_LIMITS.maxBytes : VIDEO_EXT[ct] ? 2 * 1024 ** 3 : IMAGE_EXT[ct] ? 30 * 1024 ** 2 : 200 * 1024 ** 2;
     if (b.bytes !== undefined && (typeof b.bytes !== 'number' || b.bytes <= 0 || b.bytes > max)) throw new ApiError(400, 'bad_request', `bytes: at most ${max / 1024 ** 2} MB`);
     const id = uid('up'), key = `c/${id}.${ext}`, ttl = 3600;
     const signed = await ctx.storage.presignPut(key, ct, ttl);

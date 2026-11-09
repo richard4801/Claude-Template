@@ -314,7 +314,7 @@ extension EditV2 {
     public enum Fit: String, Codable, Hashable, Sendable { case cover, contain }
 
     /// `lut` = an imported .cube (Looks); it must be an `upload`.
-    public enum AssetKind: String, Codable, Hashable, Sendable { case video, image, audio, lut }
+    public enum AssetKind: String, Codable, Hashable, Sendable { case video, image, audio, lut, font /* own fonts (WS8 6ccd9aa): a .ttf / .otf upload */ }
 
     public struct Asset: Codable, Hashable, Sendable, Identifiable {
         public var id: String
@@ -329,10 +329,12 @@ extension EditV2 {
         public var hasAudio: Bool?
         /// A hint, never trusted.
         public var url: String?
+        /// A font asset's family and style, read from the file (display only), 1–80 characters.
+        public var name: String?
         public init(id: String, kind: AssetKind, take: String? = nil, upload: String? = nil, library: String? = nil, durationSec: Double? = nil,
-                    width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil) {
+                    width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil, name: String? = nil) {
             self.id = id; self.kind = kind; self.take = take; self.upload = upload; self.library = library; self.durationSec = durationSec
-            self.width = width; self.height = height; self.hasAudio = hasAudio; self.url = url
+            self.width = width; self.height = height; self.hasAudio = hasAudio; self.url = url; self.name = name
         }
     }
 
@@ -452,6 +454,8 @@ extension EditV2 {
     }
 
     public struct TextStyle: Codable, Hashable, Sendable {
+        /// A copy with `fontAsset` set.
+        public func with(fontAsset f: String?) -> TextStyle { var c = self; c.fontAsset = f; return c }
         public var font: Font
         /// 400, 700 or 900.
         public var weight: Int
@@ -466,6 +470,8 @@ extension EditV2 {
         public var stroke: Stroke?
         public var shadow: Shadow?
         public var background: TextBackground?
+        /// Text items only: a `font` asset drawn as is (its own face; `weight` isn't synthesised); `font` stays the fallback.
+        public var fontAsset: String?
         public init(font: Font = .sans, weight: Int = 900, sizePct: Double = 0.045, color: String = "#FFFFFF", align: Align = .center,
                     maxWidthPct: Double? = nil, lineHeight: Double? = nil, letterSpacing: Double? = nil, uppercase: Bool? = nil,
                     stroke: Stroke? = nil, shadow: Shadow? = nil, background: TextBackground? = nil) {
@@ -544,6 +550,8 @@ extension EditV2 {
         public var stroke: Stroke?
         public var shadow: Shadow?
         public var background: TextBackground?
+        /// Refused on captions (they use the built-in fonts); decoded so validation can say so.
+        public var fontAsset: String?
         public var preset: CaptionPreset
         public var highlightColor: String
         /// Centre, 0–1 (default 0.72).
@@ -554,7 +562,7 @@ extension EditV2 {
         public init(_ s: TextStyle, preset: CaptionPreset, highlightColor: String, y: Double? = nil, wordsPerPage: Double? = nil, maxLines: Double? = nil) {
             font = s.font; weight = s.weight; sizePct = s.sizePct; color = s.color; align = s.align; maxWidthPct = s.maxWidthPct
             lineHeight = s.lineHeight; letterSpacing = s.letterSpacing; uppercase = s.uppercase; stroke = s.stroke; shadow = s.shadow
-            background = s.background
+            background = s.background; fontAsset = s.fontAsset
             self.preset = preset; self.highlightColor = highlightColor; self.y = y; self.wordsPerPage = wordsPerPage; self.maxLines = maxLines
         }
 
@@ -562,6 +570,7 @@ extension EditV2 {
         public var textStyle: TextStyle {
             TextStyle(font: font, weight: weight, sizePct: sizePct, color: color, align: align, maxWidthPct: maxWidthPct, lineHeight: lineHeight,
                       letterSpacing: letterSpacing, uppercase: uppercase, stroke: stroke, shadow: shadow, background: background)
+                .with(fontAsset: fontAsset)
         }
     }
 

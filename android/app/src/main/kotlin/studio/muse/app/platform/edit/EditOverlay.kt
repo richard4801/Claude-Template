@@ -76,7 +76,7 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
         val px = (s.sizePct * h * scale).toFloat().coerceAtLeast(1f)
         paint.reset(); paint.isAntiAlias = true
         paint.textSize = px
-        paint.typeface = typeface(s.font, s.weight)
+        paint.typeface = OwnFonts.typeface(OwnFonts.uploadOf(plan.project, s)) ?: typeface(s.font, s.weight)
         s.letterSpacing?.let { paint.letterSpacing = it.toFloat() }
         val maxW = ((s.maxWidthPct ?: 0.85) * w).roundToInt().coerceAtLeast(1)
         // Two spannables: sizes only (for the stroke and shadow passes, whose paint colour must win) and sizes + colours.

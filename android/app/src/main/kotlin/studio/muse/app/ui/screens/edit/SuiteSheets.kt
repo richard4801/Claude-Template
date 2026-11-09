@@ -126,6 +126,8 @@ data class SuiteHost(
     val headphones: Boolean = false,
     /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
     val addPhoto: (() -> Unit)? = null,
+    /** "Your font": opens the system file picker for a .ttf/.otf (null: not offered). */
+    val addFont: (() -> Unit)? = null,
     /** Style kits: save this edit's style under a name; delete a saved one. */
     val saveKit: (String) -> Unit = {},
     val deleteKit: (String) -> Unit = {},
@@ -155,7 +157,7 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
             Panel.SPEED -> SpeedBody(ui, act)
             Panel.TRANSFORM -> TransformBody(ui, act)
             Panel.AUDIO -> AudioBody(ui, host, act)
-            Panel.TEXT -> TextBody(ui, act)
+            Panel.TEXT -> TextBody(ui, host, act)
             Panel.CAPTIONS -> CaptionsBody(ui, host, act)
             Panel.EFFECTS -> EffectsBody(ui, host, act)
             Panel.FILTERS -> FiltersBody(ui, host, act)
@@ -566,7 +568,7 @@ private fun r1(v: Double) = Math.round(v * 10) / 10.0
 
 // ======================================================================= Text & hooks (E3)
 @Composable
-private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun TextBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val sel = ui.selection?.second as? TextItem
     SuiteButton("Add text", { act(EditAction.AddText) }, Modifier.fillMaxWidth(), icon = "text-t", primary = sel == null)
@@ -578,7 +580,7 @@ private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             Modifier.fillMaxWidth().background(m.t.surface).border(1.dp, m.t.line).padding(12.dp).semantics { contentDescription = "Text" },
             textStyle = m.type.body.copy(color = m.t.ink), cursorBrush = SolidColor(m.t.accent),
         )
-        TextStyleEditor(sel, act)
+        TextStyleEditor(sel, ui.project?.assets.orEmpty().filter { it.kind == studio.muse.core.edit.AssetKind.FONT }, host.addFont, act)
         AnimPicker(sel.id, sel.animIn, sel.animOut, sel.durationSec, text = true, act = act)
         LoopPicker(sel.id, sel.animLoop, act)
     }
@@ -604,14 +606,24 @@ private val TEXT_COLOURS = listOf("#FFFFFF", "#111111", "#FFE600", "#FF2D87", "#
 
 /** Font, weight, size, colour, alignment, outline, shadow and background of a text item (every field of the contract's TextStyle). */
 @Composable
-private fun TextStyleEditor(t: TextItem, act: (EditAction) -> Unit) {
+private fun TextStyleEditor(t: TextItem, fonts: List<studio.muse.core.edit.Asset>, addFont: (() -> Unit)?, act: (EditAction) -> Unit) {
     val m = muse
     val st = t.style
     fun set(n: studio.muse.core.edit.TextStyle, done: Boolean = true) = act(EditAction.SetTextStyle(t.id, n, done))
     SuiteLabel("Font")
-    SuiteChips(Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, st.font.wire, { w -> set(st.copy(font = Font.entries.first { it.wire == w })) })
+    // The six families, the edit's own fonts by name, then "Your font" (picks a .ttf/.otf). Picking a family clears an own font.
+    val chips = Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) } + fonts.map { "asset:${it.id}" to (it.name ?: "Your font") } +
+        listOfNotNull(addFont?.let { "add-font" to "Your font…" })
+    SuiteChips(chips, st.fontAsset?.let { "asset:$it" } ?: st.font.wire, { k ->
+        when {
+            k == "add-font" -> addFont?.invoke()
+            k.startsWith("asset:") -> set(st.copy(fontAsset = k.removePrefix("asset:")))
+            else -> set(st.copy(font = Font.entries.first { it.wire == k }, fontAsset = null))
+        }
+    })
+    if (st.fontAsset != null) T("Your font draws in its own weight. The ${st.font.wire} family stands in where it isn't available.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        SuiteSeg(listOf("400" to "Regular", "700" to "Bold", "900" to "Black"), st.weight.toString(), { set(st.copy(weight = it.toInt())) }, Modifier.weight(1f), height = 34.dp, fill = true)
+        if (st.fontAsset == null) SuiteSeg(listOf("400" to "Regular", "700" to "Bold", "900" to "Black"), st.weight.toString(), { set(st.copy(weight = it.toInt())) }, Modifier.weight(1f), height = 34.dp, fill = true)
         SuiteSeg(listOf("left" to "Left", "center" to "Centre", "right" to "Right"), st.align.wire, { w -> set(st.copy(align = studio.muse.core.edit.Align.entries.first { it.wire == w })) }, Modifier.weight(1f), height = 34.dp, fill = true)
     }
     SuiteSlider(((st.sizePct - .015) / (.25 - .015)).toFloat(), { f, done -> set(st.copy(sizePct = r3s(.015 + f * (.25 - .015))), done) }, label = "Size", valueText = "${(st.sizePct * 1000).roundToInt() / 10.0}%")
@@ -1031,6 +1043,42 @@ private fun AdjustLayerBody(ui: EditSuiteUi, layer: studio.muse.core.edit.Adjust
     row("Strength", KfProp.OPACITY, layer.opacity ?: 1.0, false)
 }
 
+/** HSL per hue: pick a band (a colour dot), then its hue, saturation and luminance. */
+@Composable
+internal fun HslSection(hsl: studio.muse.core.edit.Hsl?, enabled: Boolean, act: (EditAction) -> Unit) {
+    val m = muse
+    var band by remember { mutableStateOf(studio.muse.core.edit.HueBand.RED) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SuiteLabel("HSL", Modifier.weight(1f))
+        if (!hsl.isNullOrEmpty()) T("Reset HSL", m.type.tiny.copy(fontSize = 12.5.sp), m.t.ink, Modifier.press { act(EditAction.SetHsl(null)) }.padding(vertical = 12.dp).semantics { contentDescription = "Reset HSL" })
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        studio.muse.core.edit.HueBand.entries.forEach { b ->
+            val on = b == band
+            val set = hsl?.get(b)?.let { it != studio.muse.core.edit.HslBand() } == true
+            Box(Modifier.size(40.dp).press { band = b }.semantics { contentDescription = "${b.wire.replaceFirstChar(Char::uppercase)}${if (set) ", changed" else ""}" }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(if (on) 26.dp else 20.dp).clip(androidx.compose.foundation.shape.CircleShape).background(HUE_DOT.getValue(b))
+                    .border(if (on) 2.dp else 0.dp, if (on) m.t.ink else Color.Transparent, androidx.compose.foundation.shape.CircleShape))
+                if (set && !on) Box(Modifier.align(Alignment.BottomCenter).size(4.dp).clip(androidx.compose.foundation.shape.CircleShape).background(m.t.ink))
+            }
+        }
+    }
+    val cur = hsl?.get(band)
+    @Composable
+    fun s(label: String, field: String, value: Double) =
+        SuiteSlider(((value + 1) / 2).toFloat(), { f, done -> act(EditAction.SetHsl(band, field, f * 2.0 - 1, done)) }, label = "${band.wire.replaceFirstChar(Char::uppercase)} ${label.lowercase()}", valueText = signed((value * 100).roundToInt()), enabled = enabled)
+    s("Hue", "hue", cur?.hue ?: 0.0)
+    s("Saturation", "sat", cur?.sat ?: 0.0)
+    s("Luminance", "light", cur?.light ?: 0.0)
+}
+
+private val HUE_DOT = mapOf(
+    studio.muse.core.edit.HueBand.RED to Color(0xFFE5483B), studio.muse.core.edit.HueBand.ORANGE to Color(0xFFF08A2C),
+    studio.muse.core.edit.HueBand.YELLOW to Color(0xFFF2D13A), studio.muse.core.edit.HueBand.GREEN to Color(0xFF4CB653),
+    studio.muse.core.edit.HueBand.AQUA to Color(0xFF3CC4C9), studio.muse.core.edit.HueBand.BLUE to Color(0xFF3A6FE0),
+    studio.muse.core.edit.HueBand.PURPLE to Color(0xFF8A4FD8), studio.muse.core.edit.HueBand.MAGENTA to Color(0xFFD94BB2),
+)
+
 /** A stand-in swatch per category while thumbnails render. */
 private fun lookSwatch(l: LookChoice): List<Color> = when (l.category) {
     "film" -> listOf(Color(0xFF6B5A3E), Color(0xFFD9B98A)); "moody" -> listOf(Color(0xFF1F2B2E), Color(0xFF51666B)); "warm" -> listOf(Color(0xFF8A4B22), Color(0xFFF2B36B))
@@ -1067,6 +1115,7 @@ private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit, l
     row("Tint", "tint", a?.tint ?: 0.0)
     row("Highlights", "highlights", a?.highlights ?: 0.0)
     row("Shadows", "shadows", a?.shadows ?: 0.0)
+    HslSection(v?.look?.hsl, v != null, act)
     // The look's effects (0 = off).
     val lk = v?.look
     @Composable

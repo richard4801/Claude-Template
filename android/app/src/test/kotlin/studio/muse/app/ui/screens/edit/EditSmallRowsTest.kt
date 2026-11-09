@@ -394,6 +394,45 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun hslPerHue() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.ORANGE, "sat", -.4))
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.ORANGE, "light", .25))
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.BLUE, "hue", .5))
+        fun look() = (c.p().mainClips[0]).look
+        assertEquals(studio.muse.core.edit.HslBand(sat = -.4, light = .25), look()!!.hsl!![studio.muse.core.edit.HueBand.ORANGE])
+        assertEquals(.5, look()!!.hsl!![studio.muse.core.edit.HueBand.BLUE]!!.hue!!, 1e-9)
+        valid(c.p())
+        // Back to 0 drops the band; reset drops the rest (and the empty look).
+        c.act(EditAction.SetHsl(studio.muse.core.edit.HueBand.BLUE, "hue", 0.0))
+        assertNull(look()!!.hsl!![studio.muse.core.edit.HueBand.BLUE])
+        c.act(EditAction.SetHsl(null))
+        assertNull(look())
+    }
+
+    @Test fun ownFonts() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddText)
+        val tid = c.ui.value.selectedId!!
+        c.act(EditAction.AddFont("up_font_1", "Figtree Bold"))
+        fun text() = c.p().tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem
+        val font = c.p().assets.single { it.kind == studio.muse.core.edit.AssetKind.FONT }
+        assertEquals("up_font_1", font.upload); assertEquals("Figtree Bold", font.name)
+        assertEquals(font.id, text().style.fontAsset)
+        valid(c.p())
+        // The same upload again reuses the asset; a built-in family clears the own font (the asset stays for the chip).
+        c.act(EditAction.AddFont("up_font_1", "Figtree Bold"))
+        assertEquals(1, c.p().assets.count { it.kind == studio.muse.core.edit.AssetKind.FONT })
+        c.act(EditAction.SetTextStyle(tid, text().style.copy(font = studio.muse.core.edit.Font.SERIF, fontAsset = null)))
+        assertNull(text().style.fontAsset); assertEquals(1, c.p().assets.count { it.kind == studio.muse.core.edit.AssetKind.FONT })
+        // A kit from this edit carries the family only.
+        c.act(EditAction.SetTextStyle(tid, text().style.copy(fontAsset = font.id)))
+        assertNull(studio.muse.core.edit.kitOf(c.p()).textStyle!!.fontAsset)
+        valid(c.p())
+    }
+
     @Test fun adjustmentLayer() = runTest {
         val c = controller()
         c.act(EditAction.Scrub(2.0, end = true)); c.act(EditAction.AddAdjustLayer)

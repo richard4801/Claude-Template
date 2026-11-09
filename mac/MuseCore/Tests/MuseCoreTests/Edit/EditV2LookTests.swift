@@ -31,7 +31,7 @@ final class EditV2LookTests: XCTestCase {
         XCTAssertEqual(pic.data.count, 24 * 16 * 3)
         let L = try luts(f)
         let renders = f["renders"].array
-        XCTAssertEqual(renders.count, 11)
+        XCTAssertEqual(renders.count, 12)   // + "hsl + curves + lut" (WS8 9afb6aa)
         for r in renders {
             let name = r["name"].string ?? "?"
             let look = try r["look"].decode(E.Look.self)
@@ -47,6 +47,29 @@ final class EditV2LookTests: XCTestCase {
             for (i, (a, b)) in zip(out.data, want).enumerated() where abs(Double(a) - b) > worst { worst = abs(Double(a) - b); at = i }
             XCTAssertLessThanOrEqual(worst, 1e-3, "\(name): value \(at) is \(out.data[at]), reference \(want[at])")
         }
+    }
+
+    /// HSL per hue (WS8 9afb6aa): the band weights and hslFn on the reference's colours (looks.json → hsl, hueWeights).
+    func testHslPerHue() throws {
+        let f = try fixture()
+        let weights = f["hueWeights"].array
+        XCTAssertEqual(weights.count, 11)
+        for c in weights {
+            let got = E.hueWeights(c["h"].double!), want = nums(c["w"])
+            for (a, b) in zip(got, want) { XCTAssertEqual(a, b, accuracy: 1e-6, "h \(c["h"])") }
+        }
+        let cases = f["hsl"].array
+        XCTAssertEqual(cases.count, 3)
+        for c in cases {
+            let hsl = try c["hsl"].decode(E.Hsl.self)
+            let fn = try XCTUnwrap(E.hslFn(hsl))
+            for s in c["samples"].array {
+                let rgb = nums(s["rgb"]), want = nums(s["out"])
+                let o = fn(SIMD3(rgb[0], rgb[1], rgb[2]))
+                for i in 0..<3 { XCTAssertEqual(o[i], want[i], accuracy: 1e-6, "\(hsl) \(rgb)") }
+            }
+        }
+        XCTAssertNil(E.hslFn(["red": [:]]), "an empty band does nothing")
     }
 
     func testLutSamples() throws {

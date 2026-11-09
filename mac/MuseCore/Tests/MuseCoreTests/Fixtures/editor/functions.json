@@ -1622,6 +1622,93 @@
     }
    }
   ],
+  "ownFont": {
+   "project": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "fnt",
+      "kind": "font",
+      "upload": "up_font",
+      "name": "Figtree Bold"
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0.5,
+        "outSec": 9.8,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "txf",
+      "kind": "text",
+      "items": [
+       {
+        "id": "tf",
+        "startSec": 0,
+        "durationSec": 2,
+        "text": "Own font",
+        "style": {
+         "font": "sans",
+         "weight": 900,
+         "sizePct": 0.06,
+         "color": "#FFFFFF",
+         "align": "center",
+         "maxWidthPct": 0.85,
+         "lineHeight": 1.15,
+         "stroke": {
+          "color": "#000000",
+          "widthPct": 0.14
+         },
+         "fontAsset": "fnt"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "kit": {
+    "version": 1,
+    "textStyle": {
+     "font": "sans",
+     "weight": 900,
+     "sizePct": 0.06,
+     "color": "#FFFFFF",
+     "align": "center",
+     "maxWidthPct": 0.85,
+     "lineHeight": 1.15,
+     "stroke": {
+      "color": "#000000",
+      "widthPct": 0.14
+     }
+    },
+    "background": "#000000"
+   }
+  },
   "apply": [
    {
     "project": 1,
@@ -3303,6 +3390,26 @@
      }
     },
     "field": "kit.look.vignette.amount"
+   },
+   {
+    "kit": {
+     "version": 1,
+     "textStyle": {
+      "font": "sans",
+      "weight": 900,
+      "sizePct": 0.06,
+      "color": "#FFFFFF",
+      "align": "center",
+      "maxWidthPct": 0.85,
+      "lineHeight": 1.15,
+      "stroke": {
+       "color": "#000000",
+       "widthPct": 0.14
+      },
+      "fontAsset": "fnt"
+     }
+    },
+    "field": "kit.textStyle.fontAsset"
    },
    {
     "kit": "kit",

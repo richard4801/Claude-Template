@@ -384,6 +384,28 @@ extension SnapshotRunner {
             check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
         }
 
+        step("HSL per hue (red hues toward orange)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.setHsl("red", "hue", 1) }
+        check("project: an HSL setting", s.state.hslValue("red", "hue") == 1 && E.problem(s.project) == nil)
+        let hq = await previewPixel(s, at: 1)
+        check("preview: the red take turns orange", hq.map { $0.r > 150 && $0.g > 70 && $0.b < 70 } ?? false, describe(hq))
+        s.undo()
+
+        step("Own font on a text")
+        let sysFont = ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Georgia.ttf"]
+            .map(URL.init(fileURLWithPath:)).first { FileManager.default.fileExists(atPath: $0.path) }
+        if let sysFont {
+            s.edit { $0.addText("Own font") }
+            await s.importFont(sysFont)
+            let fa = s.state.selectedItem?.textItem?.style.fontAsset
+            check("project: the text uses the font asset", fa != nil && s.project.asset(fa ?? "")?.kind == .font && E.problem(s.project) == nil,
+                  "\(fa ?? "none") · \(s.lastError ?? s.notice ?? "")")
+            for _ in 0..<(fa == nil ? 1 : 2) { s.undo() }
+        } else {
+            log.note("SKIP no system .ttf on this runner")
+        }
+
         step("Adjustment layer (exposure down over the whole picture)")
         s.seek(0.5)
         let before = await previewPixel(s, at: 1)

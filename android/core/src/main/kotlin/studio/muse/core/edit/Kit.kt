@@ -34,7 +34,8 @@ fun kitOf(p: EditProject): StyleKit {
         look = look, filter = c?.filter, adjust = c?.adjust?.takeIf { it != Adjust() },
         transition = p.mainClips.firstOrNull { it.transitionIn != null }?.transitionIn,
         captionStyle = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION && it.caption != null }?.caption?.style,
-        textStyle = (p.tracks.firstOrNull { it.kind == TrackKind.TEXT && it.items.isNotEmpty() }?.items?.first() as? TextItem)?.style,
+        // Asset ids are per edit: a kit keeps the fallback family, not an own font.
+        textStyle = (p.tracks.firstOrNull { it.kind == TrackKind.TEXT && it.items.isNotEmpty() }?.items?.first() as? TextItem)?.style?.copy(fontAsset = null),
         background = p.canvas.background, fill = p.canvas.fill,
     )
 }

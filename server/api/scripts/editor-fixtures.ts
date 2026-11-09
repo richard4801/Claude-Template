@@ -143,6 +143,10 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'voice effect bad', project: mut(p => { p.tracks[0].items[0].voiceEffect = 'robot'; }), ok: false, field: 'edits.tracks.0.items.0.voiceEffect' },
   { name: 'adjust highlights', project: mut(p => { p.tracks[0].items[0].adjust = { highlights: -0.4, shadows: 2 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.shadows' },
   { name: 'palette look unknown without palettes', project: mut(p => { p.tracks[0].items[0].look = { lut: 'palette:teal_neon', strength: 0.8 }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
+  { name: 'look hsl ok', project: mut(p => { p.tracks[0].items[0].look = { hsl: { orange: { sat: -0.3, light: 0.2 }, blue: {} } }; }), ok: true },
+  { name: 'look hsl unknown colour', project: mut(p => { p.tracks[0].items[0].look = { hsl: { cyan: { sat: 0.3 } } as never }; }), ok: false, field: 'edits.tracks.0.items.0.look.hsl.cyan' },
+  { name: 'look hsl out of range', project: mut(p => { p.tracks[0].items[0].look = { hsl: { red: { light: 1.5 } } }; }), ok: false, field: 'edits.tracks.0.items.0.look.hsl.red.light' },
+  { name: 'look hsl unknown setting', project: mut(p => { p.tracks[0].items[0].look = { hsl: { red: { luma: 0.2 } as never } }; }), ok: false, field: 'edits.tracks.0.items.0.look.hsl.red.luma' },
   { name: 'look ok', project: mut(p => { p.tracks[0].items[0].look = { ...packLook('film-cine'), curves: { rgb: [[0, 0.05], [1, 0.95]] } }; }), ok: true },
   { name: 'look with imported lut', project: mut(p => { p.assets.push({ id: 'cube1', kind: 'lut', upload: 'up_cube' }); p.tracks[2].items[0].look = { lut: 'cube1', strength: 0.6 }; }), ok: true },
   { name: 'look unknown pack', project: mut(p => { p.tracks[0].items[0].look = { lut: 'pack:nope' }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
@@ -187,6 +191,14 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'adjust layer ok', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 }, opacity: 0.7 }, { id: 'ad2', startSec: 2, durationSec: 1, filter: { id: 'warm', amount: 1 }, keyframes: { opacity: [{ t: 0, v: 1 }], tint: [{ t: 0.5, v: 0.3 }] } }] }); }), ok: true },
   { name: 'adjust layer with a look', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, look: { vignette: { amount: 0.3 } } }] }); }), ok: false, field: 'edits.tracks.4.items.0.look' },
   { name: 'adjust layer overlap', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2 }, { id: 'ad2', startSec: 1.5, durationSec: 1 }] }); }), ok: false, field: 'edits.tracks.4.items.1.startSec' },
+  { name: 'own font ok', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'Figtree Bold' }); (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'fnt'; }), ok: true },
+  { name: 'own font is an image', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'logo'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
+  { name: 'own font missing', project: mut(p => { (p.tracks[3]!.items[0] as M.TextItem).style.fontAsset = 'nope'; }), ok: false, field: 'edits.tracks.3.items.0.style.fontAsset' },
+  { name: 'font asset from a take', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', take: 'take_font' }); }), ok: false, field: 'edits.assets.3' },
+  { name: 'font asset with a size', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', width: 10 }); }), ok: false, field: 'edits.assets.3.width' },
+  { name: 'font asset name empty', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: ' ' }); }), ok: false, field: 'edits.assets.3.name' },
+  { name: 'font asset name too long', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'x'.repeat(81) }); }), ok: false, field: 'edits.assets.3.name' },
+  { name: 'own font on captions', project: mut(p => { p.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font' }); const c = captionTrack(); (c.caption!.style as M.TextStyle).fontAsset = 'fnt'; p.tracks.push(c); }), ok: false, field: 'edits.tracks.4.caption.style.fontAsset' },
   { name: 'adjust item on a video track', project: mut(p => { p.tracks.push({ id: 'ovx', kind: 'video', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { exposure: 0.2 } }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
   { name: 'video clip on an adjust track', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'v9', asset: p.tracks[0].items[0].asset, startSec: 0, inSec: 0, outSec: 2 }] } as any); }), ok: false, field: 'edits.tracks.4.items.0.asset' },
   { name: 'adjust layer with highlights', project: mut(p => { p.tracks.push({ id: 'adj', kind: 'adjust', items: [{ id: 'ad1', startSec: 0, durationSec: 2, adjust: { highlights: 0.3 } }] }); }), ok: false, field: 'edits.tracks.4.items.0.adjust.highlights' },
@@ -302,6 +314,17 @@ addRender('vignette dark + grain', { vignette: { amount: 0.6, size: 0.3, softnes
 addRender('vignette light + leak', { vignette: { amount: -0.5 }, leak: { kind: 'rose', amount: 0.7, angle: 140 } }, { frame: 45 });
 addRender('everything', { lut: 'pack:test5', strength: 0.8, curves: { rgb: [[0, 0], [0.5, 0.55], [1, 1]] }, lift: 0.3, sharpen: 0.4, chromatic: 0.5,
   halation: { amount: 0.4 }, leak: { kind: 'amber', amount: 0.4 }, vignette: { amount: 0.4 }, grain: { amount: 0.4, size: 2 } }, { matrix: M1, lut: 'test5', frame: 12 });
+addRender('hsl + curves + lut', { lut: 'pack:test5', strength: 0.7, curves: { rgb: [[0, 0.02], [1, 0.98]] }, hsl: { orange: { sat: -0.4, light: 0.3 }, blue: { hue: 0.5, sat: 0.6 }, green: { light: -0.8 } } }, { lut: 'test5' });
+// HSL per hue (look step 4b): three settings over sample colours.
+const hslSettings: K.Hsl[] = [
+  { red: { hue: 1 } },
+  { orange: { sat: -0.5, light: 0.4 }, yellow: { sat: 0.3 }, aqua: { hue: -0.6, light: -0.5 } },
+  { red: { sat: -1 }, orange: { sat: -1 }, yellow: { sat: -1 }, green: { sat: -1 }, aqua: { sat: -1 }, blue: { sat: -1 }, purple: { sat: -1 }, magenta: { sat: 1, hue: 0.3 } },
+];
+const hslColours: [number, number, number][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [0, 1, 1], [1, 0, 1], [0.89, 0.62, 0.48], [0.55, 0.36, 0.26],
+  [0.5, 0.5, 0.5], [0.05, 0.1, 0.2], [0.95, 0.9, 0.8], [0.9, 0.45, 0.1]];
+const hsl = hslSettings.map(h => { const f = K.hslFn(h)!; return { hsl: h, samples: hslColours.map(c => ({ rgb: c, out: f(c).map(v => Math.round(v * 1e6) / 1e6) })) }; });
+const hueWeights = [0, 15, 30, 45, 90, 150, 210, 255, 285, 330, 359].map(h => ({ h, w: K.hueWeights(h).map(v => Math.round(v * 1e6) / 1e6) }));
 const curvesCases = [[[0, 0], [1, 1]], [[0, 0.1], [0.25, 0.2], [0.5, 0.6], [0.75, 0.8], [1, 0.9]], [[0.1, 0], [0.4, 0.9], [0.45, 0.95], [0.9, 1]], [[0, 1], [0.5, 0.2], [1, 0]]] as K.CurvePoint[][];
 const looks = {
   image: { width: pic.width, height: pic.height, data: Array.from(pic.data, r4) },
@@ -309,6 +332,7 @@ const looks = {
   cubes: { test5: small },
   lutSamples: [...[[0, 0, 0], [1, 1, 1], [0.5, 0.25, 0.75], [0.13, 0.87, 0.42], [0.99, 0.01, 0.5]].map(c => ({ lut: 'test5', rgb: c, out: K.lutSample(smallLut, c[0]!, c[1]!, c[2]!).map(r4) })),
     ...[[0.2, 0.3, 0.4], [0.8, 0.6, 0.5], [0.95, 0.85, 0.75]].map(c => ({ lut: 'pack:film-gold', rgb: c, out: K.lutSample(goldLut, c[0]!, c[1]!, c[2]!).map(r4) }))],
+  hsl, hueWeights,
   curves: curvesCases.map(pts => { const f = K.curveFn(pts)!; return { points: pts, samples: Array.from({ length: 21 }, (_, i) => [i / 20, r4(f(i / 20))]) }; }),
   hash: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [5, 7, 3], [1023, 767, 59], [12345, 6789, 100000]].map(([x, y, f]) => ({ x, y, frame: f, v: K.hash01(x!, y!, f!) })),
   vignette: [{ amount: 0.5 }, { amount: 0.5, size: 0.2, softness: 0.3 }].map(v => ({ vignette: v, samples: [[0.5, 0.5], [0, 0], [1, 0.5], [0.25, 0.75], [0.9, 0.1]].map(([u, w]) => [u, w, r4(K.vignetteMask(v as K.Vignette, u!, w!))]) })),
@@ -414,13 +438,21 @@ const kitList = [
 const kitProblem = (k: unknown) => { try { validateKit(k, FILTERS, LOOK_IDS, new Set()); return null; } catch (e) { return (e as M.EditProblem).field; } };
 const kits = {
   kitOf: projects.map(x => ({ name: x.name, kit: kitOf(x.project) })),
+  // A text item with an own font: the kit keeps the fallback family, not the asset.
+  ownFont: (() => {
+    const q = JSON.parse(JSON.stringify(projects[0]!.project)) as M.EditProject;
+    q.assets.push({ id: 'fnt', kind: 'font', upload: 'up_font', name: 'Figtree Bold' });
+    q.tracks.push({ id: 'txf', kind: 'text', items: [{ id: 'tf', startSec: 0, durationSec: 2, text: 'Own font', style: { ...HOOKS[0]!.style, fontAsset: 'fnt' } }] });
+    M.validate(q, FILTERS);
+    return { project: q, kit: kitOf(q) };
+  })(),
   apply: [1, 2, 9].flatMap(pi => kitList.map((kit, ki) => ({ project: pi, kit: ki, result: applyKit(projects[pi]!.project, kit as never) }))),
   kits: kitList,
   validate: [
     { version: 1 }, kitList[0], { version: 2 }, { version: 1, mask: {} }, { version: 1, adjust: { tint: 2 } }, { version: 1, transition: { kind: 'fade', durationSec: 5 } },
     { version: 1, transition: { kind: 'swirl', durationSec: 0.5 } }, { version: 1, look: { lut: 'cube' } }, { version: 1, captionStyle: { ...CAPTION_STYLES.pop, highlightColor: 'yellow' } },
     { version: 1, textStyle: { ...HOOKS[0]!.style, sizePct: 9 } }, { version: 1, fill: 'mirror' }, { version: 1, background: 'red' }, { version: 1, filter: { id: 'nope', amount: 1 } },
-    { version: 1, look: { vignette: { amount: 3 } } }, 'kit',
+    { version: 1, look: { vignette: { amount: 3 } } }, { version: 1, textStyle: { ...HOOKS[0]!.style, fontAsset: 'fnt' } }, 'kit',
   ].map(kit => ({ kit, field: kitProblem(kit) })),
 };
 // Mask and look keyframes (M): maskAt and lookAt over time.

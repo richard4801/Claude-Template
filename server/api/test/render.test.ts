@@ -140,6 +140,21 @@ describe.skipIf(!hasFfmpeg)('render an edit project (ffmpeg)', () => {
     expect(Math.max(...late)).toBeLessThan(Math.max(...early) - 30);
   }, 120_000);
 
+  it('a look\'s curves and HSL are baked with its LUT and drawn (red → grey by HSL; curves alone too)', async () => {
+    const p = project();
+    (p.tracks[0]!.items[0] as M.VideoClip).look = { hsl: { red: { sat: -1 } } };
+    (p.tracks[0]!.items[1] as M.VideoClip).look = { curves: { g: [[0, 0], [1, 0.3]] } };
+    M.validate(p);
+    const out = path.join(dir, 'hsl.mp4');
+    const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, files, out, { maxSide: 640 });
+    expect(r.unsupported.join()).not.toMatch(/look/);
+    const [r1, g1, b1] = await px(out, 0.1, 0.1, 0.1); // clip 1: red with no red saturation → grey
+    expect(Math.abs(r1 - g1)).toBeLessThan(25); expect(Math.abs(r1 - b1)).toBeLessThan(25);
+    const tl = M.timeline(p);
+    const [, g2] = await px(out, tl[1]!.startSec + 1, 0.1, 0.1); // clip 2: green through a curve to 0.3
+    expect(g2).toBeLessThan(55); expect(g2).toBeGreaterThan(25); // ffmpeg's green is 128, × 0.3 ≈ 38
+  }, 120_000);
+
   it('a glitch is a hard switch at the middle (no mixing), jittered and colour-split, with the same length and cut times as any transition', async () => {
     const p = project();
     (p.tracks[0]!.items[1] as M.VideoClip).transitionIn = { kind: 'glitch', durationSec: 0.4 };
