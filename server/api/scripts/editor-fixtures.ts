@@ -164,6 +164,9 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'tint ok', project: mut(p => { p.tracks[0].items[0].adjust = { temperature: 0.3, tint: -0.4 }; }), ok: true },
   { name: 'tint too big', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 1.5 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
   { name: 'tint not a number', project: mut(p => { p.tracks[0].items[0].adjust = { tint: 'pink' }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.tint' },
+  { name: 'video anim ok', project: mut(p => { p.tracks[0].items[0].animIn = { kind: 'fade', durationSec: 0.5 }; p.tracks[1].items[0].animOut = { kind: 'zoom', durationSec: 0.4 }; }), ok: true },
+  { name: 'video typewriter', project: mut(p => { p.tracks[1].items[0].animIn = { kind: 'typewriter', durationSec: 1 }; }), ok: false, field: 'edits.tracks.1.items.0.animIn.kind' },
+  { name: 'video anim too long', project: mut(p => { p.tracks[0].items[0].animOut = { kind: 'slideUp', durationSec: 3 }; }), ok: false, field: 'edits.tracks.0.items.0.animOut.durationSec' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {

@@ -121,6 +121,8 @@ data class SuiteHost(
     val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
+    /** Auto adjust from the frame under the playhead (the view model reads the frame). */
+    val autoAdjust: () -> Unit = {},
     /** "Add a video from a link" (WS7's import, then added at the end); null where imports aren't offered. */
     val importLink: (() -> Unit)? = null,
 )
@@ -374,13 +376,25 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         SuiteChip("Flip horizontally", tr.flipX == true, { act(EditAction.Mirror(x = tr.flipX != true)) })
         SuiteChip("Flip vertically", tr.flipY == true, { act(EditAction.Mirror(y = tr.flipY != true)) })
     }
+    // In / out animations of a picture (text has its own in the Text panel).
+    when (item) {
+        is VideoClip -> AnimPicker(item.id, item.animIn, item.animOut, clipLength(item), text = false, act = act)
+        is studio.muse.core.edit.ImageItem -> AnimPicker(item.id, item.animIn, item.animOut, item.durationSec, text = false, act = act)
+        else -> {}
+    }
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     if (!keys.isNullOrEmpty()) {
         SuiteLabel("Easing")
         SuiteChips(listOf(Ease.LINEAR to "Linear", Ease.EASE_IN to "Ease in", Ease.EASE_OUT to "Ease out", Ease.EASE_IN_OUT to "Smooth", Ease.HOLD to "Hold").map { it.first.wire to it.second },
             ui.keyEase.wire, { w -> act(EditAction.KeyEase(Ease.entries.first { it.wire == w })) })
         val here = keys.values.flatten().any { kotlin.math.abs(it.t - local) <= .05 }
-        if (here) SuiteLink("Remove keyframes here") { act(EditAction.RemoveKeyframes()) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SuiteButton("Previous", { act(EditAction.KeyNav(next = false)) }, height = 34.dp, icon = "back")
+            SuiteButton("Next", { act(EditAction.KeyNav(next = true)) }, height = 34.dp, icon = "chev-r")
+            Spacer(Modifier.weight(1f))
+            if (here) SuiteLink("Remove keyframes here") { act(EditAction.RemoveKeyframes()) }
+        }
+        T("Drag a ◆ on the timeline to move it.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     }
     // Crop (pictures only): how much is cut from each side, 0–45 %.
     if (item is Visual) {
@@ -798,7 +812,7 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual } ?: ui.activeClip)?.id
     val v = id?.let { i -> p.tracks.flatMap { it.items }.firstOrNull { it.id == i } } as? Visual
-    if (ui.filtersTab == "Adjust") return AdjustBody(v, act)
+    if (ui.filtersTab == "Adjust") return AdjustBody(v, host, act)
     val look = v?.look
     val current = look?.lut?.removePrefix("pack:")
     androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -854,8 +868,9 @@ private fun lookSwatch(l: LookChoice): List<Color> = when (l.category) {
 }
 
 @Composable
-private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
+private fun AdjustBody(v: Visual?, host: SuiteHost, act: (EditAction) -> Unit) {
     val a = v?.adjust
+    SuiteButton("Auto adjust", host.autoAdjust, Modifier.fillMaxWidth(), icon = "sliders", enabled = v != null)
     @Composable
     fun row(label: String, field: String, value: Double) {
         val n = (value * 100).roundToInt()
@@ -880,6 +895,7 @@ private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
     eff("Glow", "halation", lk?.halation?.amount ?: 0.0)
     eff("Light leak", "leak", lk?.leak?.amount ?: 0.0)
     eff("Colour fringe", "chromatic", lk?.chromatic ?: 0.0)
+    CurvesEditor(lk?.curves, v != null, act)
 }
 
 // ======================================================================= Overlay (PiP) and clips
@@ -1060,7 +1076,7 @@ private fun KeepPanel(ui: EditSuiteUi, k: KeepUi, host: SuiteHost, act: (EditAct
 
 /** A quiet text action (sentence case, the link colour), 48 dp tall. */
 @Composable
-private fun SuiteLink(text: String, onClick: () -> Unit) {
+internal fun SuiteLink(text: String, onClick: () -> Unit) {
     val m = muse
     Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick).semantics { role = androidx.compose.ui.semantics.Role.Button }, contentAlignment = Alignment.CenterStart) {
         T(text, m.scale.label, m.roles.link, maxLines = 1)

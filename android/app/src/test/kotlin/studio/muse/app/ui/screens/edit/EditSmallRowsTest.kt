@@ -205,4 +205,68 @@ class EditSmallRowsTest {
         valid(c.p())
         c.act(EditAction.AdjustField("tint", 0.0)); assertNull(c.p().mainClips[0].adjust)
     }
+
+    @Test fun keyframesListMoveAndJump() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.Select(id))
+        for (t in listOf(1.0, 4.0, 8.0)) { c.act(EditAction.Scrub(t, end = true)); c.act(EditAction.AddKeyframe(studio.muse.core.edit.KfProp.SCALE)) }
+        assertEquals(listOf(1.0, 4.0, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        // Drag the 4 s key to 5.5 s (a live drag, then the drop: one undo step).
+        c.act(EditAction.MoveKey(id, 4.0, 0.7, done = false)); c.act(EditAction.MoveKey(id, 4.0, 1.5, done = true))
+        assertEquals(listOf(1.0, 5.5, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        // It can't pass a neighbour.
+        c.act(EditAction.MoveKey(id, 5.5, 3.0)); assertEquals(listOf(1.0, 5.5, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        c.act(EditAction.Undo); assertEquals(listOf(1.0, 4.0, 8.0), SuiteOps.keyTimes(c.p().mainClips[0]))
+        // Previous / next.
+        c.act(EditAction.Scrub(5.0, end = true))
+        c.act(EditAction.KeyNav(next = true)); assertEquals(8.0, c.ui.value.playheadSec, 1e-6)
+        c.act(EditAction.KeyNav(next = false)); assertEquals(4.0, c.ui.value.playheadSec, 1e-6)
+        c.act(EditAction.KeyNav(next = false)); c.act(EditAction.KeyNav(next = false)); assertEquals("No keyframe before the playhead", c.ui.value.message)
+        valid(c.p())
+    }
+
+    @Test fun curvesAndAutoAdjust() = runTest {
+        val c = controller()
+        fun cp(x: Double, y: Double) = studio.muse.core.edit.CurvePoint(x, y)
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, listOf(cp(0.0, 0.05), cp(0.5, 0.6), cp(1.0, 0.95)), done = false))
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, listOf(cp(0.0, 0.05), cp(0.5, 0.62), cp(1.0, 0.95)), done = true))
+        assertEquals(.62, c.p().mainClips[0].look!!.curves!![studio.muse.core.edit.CurveChannel.RGB]!![1].y, 1e-9)
+        valid(c.p())
+        // Points out of order are sorted; two at the same x are refused by validation.
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.B, listOf(cp(1.0, 1.0), cp(0.0, 0.1))))
+        assertEquals(0.0, c.p().mainClips[0].look!!.curves!![studio.muse.core.edit.CurveChannel.B]!![0].x, 0.0)
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.G, listOf(cp(0.0, 0.0), cp(0.5, 0.4), cp(0.5, 0.6), cp(1.0, 1.0))))
+        assertNull(c.p().mainClips[0].look!!.curves!![studio.muse.core.edit.CurveChannel.G])
+        // The straight line (or null) removes a channel; no curves and nothing else: no look.
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.B, listOf(cp(0.0, 0.0), cp(1.0, 1.0))))
+        c.act(EditAction.SetCurve(studio.muse.core.edit.CurveChannel.RGB, null))
+        assertNull(c.p().mainClips[0].look)
+        // Auto adjust from a dark frame: brighter, highlights kept.
+        c.act(EditAction.AdjustField("highlights", .3))
+        c.act(EditAction.AutoAdjust(DoubleArray(300) { 0.1 + (it % 30) / 300.0 }))
+        val a = c.p().mainClips[0].adjust!!
+        assertTrue(a.exposure!! > 0); assertEquals(.3, a.highlights!!, 1e-9)
+        valid(c.p())
+    }
+
+    @Test fun videoClipAnimations() = runTest {
+        val c = controller()
+        val id = c.p().mainClips[0].id
+        c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.FADE, 0.5), studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.ZOOM, 0.4)))
+        val clip = c.p().mainClips[0]
+        assertEquals(studio.muse.core.edit.AnimKind.FADE, clip.animIn!!.kind)
+        valid(c.p())
+        // The plan fades it in from nothing and zooms it out.
+        val plan = planRender(c.p(), infos)
+        val main = plan.layers.first { it.role == studio.muse.core.edit.LayerRole.MAIN }.index
+        assertEquals(0.0, plan.placement(main, 0.0).alpha, 1e-9)
+        assertEquals(1.0, plan.placement(main, 5.0).alpha, 1e-9)
+        assertTrue(plan.placement(main, 14.9).scale > 1.0)
+        // Round trip through the contract's JSON.
+        assertEquals(c.p(), studio.muse.core.edit.EditJson.parse(studio.muse.core.edit.EditJson.encode(c.p())))
+        // A typewriter isn't a video animation.
+        c.act(EditAction.SetAnim(id, studio.muse.core.edit.Anim(studio.muse.core.edit.AnimKind.TYPEWRITER, 1.0), null))
+        assertEquals(studio.muse.core.edit.AnimKind.FADE, c.p().mainClips[0].animIn!!.kind)
+    }
 }

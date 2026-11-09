@@ -102,6 +102,8 @@ import studio.muse.core.edit.Track
 import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.VideoClip
 import studio.muse.core.edit.exportProject
+import studio.muse.core.edit.itemSpan
+import studio.muse.core.edit.locate
 import studio.muse.core.edit.fromV1
 import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.toSrt
@@ -258,6 +260,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         waves = waves,
         saveFrame = vm::saveFrame,
         importLink = { importing = true },
+        autoAdjust = vm::autoAdjust,
         modelRow = { purpose ->
             studio.muse.app.data.ModelPurpose.of(purpose)?.let { mp ->
                 studio.muse.app.ui.screens.ModelChoiceRow(mp, studio.muse.app.ui.screens.ModelPick(ui.helperModels[purpose]), onPick = { pick -> vm.controller.act(EditAction.PickModel(purpose, pick.model)) })
@@ -539,6 +542,36 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             if (f == null) return@launch c.repo.toast("Added · the preview can't show it until it downloads")
             files[a.id] = f
             rebuildPreview(p); loadWaves(p)
+        }
+    }
+
+    /**
+     * Auto adjust: the selected picture's (or the clip under the playhead's) source frame at the playhead, read small
+     * (96 px) from its file, then the controller's [EditAction.AutoAdjust].
+     */
+    fun autoAdjust() {
+        val p = controller.project ?: return
+        val u = controller.ui.value
+        val clip = (u.selection?.second as? VideoClip) ?: u.activeClip ?: return c.repo.toast("Select a clip to adjust")
+        val f = files[clip.asset] ?: return c.repo.toast("This clip's file isn't on the phone yet")
+        val (tr, i) = p.locate(clip.id) ?: return
+        val local = (u.playheadSec - itemSpan(p, tr, tr.items[i]).startSec).coerceAtLeast(0.0)
+        val src = studio.muse.core.edit.clipSourceAt(clip, local)
+        viewModelScope.launch {
+            val rgb = withContext(Dispatchers.IO) {
+                runCatching {
+                    val r = MediaMetadataRetriever()
+                    try {
+                        r.setDataSource(f.absolutePath)
+                        val bmp = r.getFrameAtTime((src * 1_000_000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return@runCatching null
+                        val k = 96f / maxOf(bmp.width, bmp.height)
+                        val small = android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).roundToInt()), maxOf(1, (bmp.height * k).roundToInt()), true)
+                        val px = IntArray(small.width * small.height).also { small.getPixels(it, 0, small.width, 0, 0, small.width, small.height) }
+                        DoubleArray(px.size * 3) { j -> val c2 = px[j / 3]; ((c2 shr (16 - 8 * (j % 3))) and 0xFF) / 255.0 }
+                    } finally { r.release() }
+                }.getOrNull()
+            } ?: return@launch c.repo.toast("Couldn't read this frame · try another spot")
+            controller.act(EditAction.AutoAdjust(rgb))
         }
     }
 

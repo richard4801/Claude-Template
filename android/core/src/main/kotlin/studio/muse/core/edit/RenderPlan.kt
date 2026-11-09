@@ -206,6 +206,13 @@ data class RenderPlan(
         )
     }
 
+    /** A video clip's in / out animation ([animState] over its length) on its placement. */
+    private fun animated(b: Placement, c: VideoClip, local: Double): Placement {
+        if (c.animIn == null && c.animOut == null) return b
+        val a = animState(clipLength(c), c.animIn, c.animOut, null, local)
+        return b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy)
+    }
+
     private fun itemPlacement(item: Item, track: Track, t: Double): Placement {
         val span = itemSpan(project, track, item)
         val local = t - span.startSec
@@ -215,7 +222,7 @@ data class RenderPlan(
                 val a = animState(item, local)
                 b.copy(alpha = b.alpha * a.opacity, scale = b.scale * a.scale, centerY = b.centerY + a.dy, blend = item.blend)
             }
-            is VideoClip -> basePlacement(item, local).copy(blend = item.blend)
+            is VideoClip -> basePlacement(item, local).let { b -> animated(b, item, local).copy(blend = item.blend) }
             else -> Placement.HIDDEN
         }
     }
@@ -223,7 +230,7 @@ data class RenderPlan(
     private fun mainPlacement(c: VideoClip, t: Double): Placement {
         val i = mainIndex[c.id] ?: return Placement.HIDDEN
         val me = spans[i]
-        val base = basePlacement(c, t - me.startSec)
+        val base = animated(basePlacement(c, t - me.startSec), c, t - me.startSec)
         val next = spans.getOrNull(i + 1)
         // Incoming: inside my own transition. Outgoing: inside the next clip's.
         val (kind, p, incoming) = when {
