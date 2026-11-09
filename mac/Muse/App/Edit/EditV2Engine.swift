@@ -158,11 +158,27 @@ enum EditV2Engine {
         // (Mac Edit audit 2026-11-08), so a black filler track runs under the whole edit; the compositor still draws the
         // background, pictures, text and captions over it (it never reads the filler's frames).
         var fillerId: CMPersistentTrackID?
-        if videoLanes.isEmpty, let f = fillerTrack, let t = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            let one = CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 1))
-            try t.insertTimeRange(one, of: f, at: .zero)
-            t.scaleTimeRange(one, toDuration: time(plan.durationSec))
-            fillerId = t.trackID
+        if videoLanes.isEmpty {
+            // First choice: the hidden main clips' own pictures, placed as if shown (never drawn: the compositor only draws
+            // what the plan shows). Else the black filler file.
+            var shown = project
+            if let mi = shown.tracks.firstIndex(where: { $0.kind == .main }) { shown.tracks[mi].hidden = nil }
+            let shadow = EditV2.renderPlan(shown, media: sources.infos).video.filter { $0.mainIndex != nil }
+            if !shadow.isEmpty, let t = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                for seg in shadow {
+                    guard let src = sources.media[seg.assetId]?.videoTrack else { continue }
+                    try placePieces(src, on: t, pieces: seg.pieces, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
+                }
+                fillerId = t.trackID
+            } else if let f = fillerTrack, let t = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                let fr = f.timeRange
+                let src = CMTimeRange(start: fr.start, duration: min(fr.duration, CMTime(value: 1, timescale: 2)))
+                if src.duration > .zero {
+                    try t.insertTimeRange(src, of: f, at: .zero)
+                    t.scaleTimeRange(CMTimeRange(start: .zero, duration: src.duration), toDuration: time(plan.durationSec))
+                    fillerId = t.trackID
+                }
+            }
         }
         // Remove background (2026-11-08): a clip's alpha matte plays on a track of its own per lane, with the clip's own
         // source times, so the compositor gets the matte frame that belongs to each picture frame.

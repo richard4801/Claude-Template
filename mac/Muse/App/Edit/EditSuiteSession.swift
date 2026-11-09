@@ -319,7 +319,7 @@ final class EditSuiteSession {
                 _ = await self.player.seek(to: CMTime(seconds: self.playhead, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 if wasPlaying { self.player.play() }
             } catch {
-                self.lastError = (error as? ApiError)?.message ?? "Couldn't update the preview"
+                self.lastError = (error as? ApiError)?.message ?? "Couldn't update the preview (\(error.localizedDescription))"
             }
         }
     }
