@@ -23,6 +23,7 @@ import studio.muse.core.edit.MediaInfo
 import studio.muse.core.edit.SourceSize
 import studio.muse.core.edit.TrackKind
 import studio.muse.core.edit.clipLength
+import studio.muse.core.edit.locate
 import studio.muse.core.edit.exportProject
 import studio.muse.core.edit.planRender
 import studio.muse.core.edit.problemOf
@@ -97,5 +98,55 @@ class EditSmallRowsTest {
         c.act(EditAction.ToggleTrackMuted("main")); assertEquals(true, c.p().main.muted)
         val out = exportProject(c.p(), ExportSettings(resolution = ExportResolution.QHD))
         assertEquals(1440, minOf(out.canvas.width, out.canvas.height))
+    }
+
+    @Test fun videoFromALinkGoesOnTheEnd() = runTest {
+        val c = controller()
+        c.act(EditAction.AppendUpload("up_9", 6.5, 720, 1280, hasAudio = false))
+        val p = c.p()
+        assertEquals(2, p.mainClips.size)
+        val a = p.assets.first { it.id == p.mainClips[1].asset }
+        assertEquals("up_9", a.upload); assertNull(a.take); assertEquals(false, a.hasAudio)
+        assertEquals(6.5, clipLength(p.mainClips[1]), 1e-9)
+        assertEquals(p.mainClips[1].id, c.ui.value.selectedId)
+        valid(p)
+        // The same import again reuses its asset.
+        c.act(EditAction.AppendUpload("up_9", 6.5)); assertEquals(1, c.p().assets.count { it.upload == "up_9" })
+        c.act(EditAction.AppendUpload("up_x", 0.01)); assertEquals(3, c.p().mainClips.size) // too short: refused
+    }
+
+    @Test fun clipsMoveBetweenTheMainTrackAndAnOverlay() = runTest {
+        val c = controller()
+        c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.Split)
+        val second = c.p().mainClips[1].id
+        c.act(EditAction.Select(second)); c.act(EditAction.SwapTrack)
+        var p = c.p()
+        assertEquals(1, p.mainClips.size)
+        val (t, _) = p.locate(second)!!
+        assertEquals(TrackKind.VIDEO, t.kind)
+        assertEquals(6.0, (t.items.single() as studio.muse.core.edit.VideoClip).startSec!!, 1e-6) // where it played
+        valid(p)
+        // The last main clip can't leave.
+        c.act(EditAction.Select(p.mainClips[0].id)); c.act(EditAction.SwapTrack); assertEquals(1, c.p().mainClips.size)
+        // Back: placed at the nearest boundary (the end), overlay placing dropped, its empty overlay track gone.
+        c.act(EditAction.Select(second)); c.act(EditAction.SetOpacity(.5)); c.act(EditAction.SwapTrack)
+        p = c.p()
+        assertEquals(listOf(second), p.mainClips.drop(1).map { it.id })
+        assertNull(p.mainClips[1].opacity); assertNull(p.mainClips[1].startSec)
+        assertTrue(p.tracks.none { it.kind == TrackKind.VIDEO })
+        assertEquals(15.0, studio.muse.core.edit.durationSec(p), 1e-6)
+        valid(p)
+    }
+
+    @Test fun fourThreeAndCinemaRatios() = runTest {
+        val c = controller()
+        c.act(EditAction.Ratio(studio.muse.core.edit.ExportShape.FOUR_THREE))
+        assertEquals(1440 to 1080, c.p().canvas.width to c.p().canvas.height)
+        c.act(EditAction.Ratio(studio.muse.core.edit.ExportShape.CINEMA))
+        assertEquals(2538 to 1080, c.p().canvas.width to c.p().canvas.height)
+        valid(c.p())
+        // 4K cinema: the long side capped at the contract's 4096 px, the shape kept.
+        val (w, h) = ExportSettings(shape = studio.muse.core.edit.ExportShape.CINEMA, resolution = ExportResolution.UHD).size
+        assertEquals(4096, w); assertEquals(2.35, w.toDouble() / h, .01)
     }
 }

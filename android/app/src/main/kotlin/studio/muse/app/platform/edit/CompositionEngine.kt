@@ -162,11 +162,14 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
     suspend fun export(plan: RenderPlan, files: Map<String, File>, onProgress: (Float) -> Unit): EditedVideo = export(plan, files, MimeTypes.VIDEO_H264, onProgress)
 
     /** Edit suite (workstream 3): [videoMime] = H.264 or HEVC ([MimeTypes.VIDEO_H265]; the encoder factory falls back when a phone lacks it). */
-    suspend fun export(plan: RenderPlan, files: Map<String, File>, videoMime: String, onProgress: (Float) -> Unit): EditedVideo {
+    suspend fun export(plan: RenderPlan, files: Map<String, File>, videoMime: String, onProgress: (Float) -> Unit): EditedVideo = export(plan, files, videoMime, null, null, onProgress)
+
+    /** As above, at [videoBitrate] (null: ~0.12 bit per pixel per frame, 4–40 Mbit/s) and [audioBitrate] (null: the encoder's default). */
+    suspend fun export(plan: RenderPlan, files: Map<String, File>, videoMime: String, videoBitrate: Int?, audioBitrate: Int?, onProgress: (Float) -> Unit): EditedVideo {
         val out = File(outDir, "edit_${System.currentTimeMillis()}.mp4")
         outDir.listFiles()?.filter { it != out && System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
         try {
-            withContext(Dispatchers.Main) { runTransformer(composition(plan, files), plan, out, videoMime, onProgress) }
+            withContext(Dispatchers.Main) { runTransformer(composition(plan, files), plan, out, videoMime, videoBitrate, audioBitrate, onProgress) }
             val got = probe(out, AssetKind.VIDEO)
             return EditedVideo(out, thumbnail(out, got.durationSec), got.durationSec, got.width, got.height, got.fps.takeIf { it > 0 })
         } catch (e: Throwable) {
@@ -299,11 +302,12 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
 
     private fun file(files: Map<String, File>, assetId: String): File = files[assetId] ?: throw IllegalArgumentException("no file for asset $assetId")
 
-    private suspend fun runTransformer(composition: Composition, plan: RenderPlan, out: File, videoMime: String, onProgress: (Float) -> Unit) = coroutineScope {
-        // Bitrate for the canvas: ~0.12 bit per pixel per frame, 4–40 Mbit/s.
-        val bitrate = (plan.width.toDouble() * plan.height * plan.fps * 0.12).toInt().coerceIn(4_000_000, 40_000_000)
+    private suspend fun runTransformer(composition: Composition, plan: RenderPlan, out: File, videoMime: String, videoBitrate: Int?, audioBitrate: Int?, onProgress: (Float) -> Unit) = coroutineScope {
+        // Bitrate for the canvas: ~0.12 bit per pixel per frame, 4–40 Mbit/s, unless the export chose one.
+        val bitrate = videoBitrate ?: (plan.width.toDouble() * plan.height * plan.fps * 0.12).toInt().coerceIn(4_000_000, 40_000_000)
         val encoders = DefaultEncoderFactory.Builder(context)
             .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(bitrate).build())
+            .apply { if (audioBitrate != null) setRequestedAudioEncoderSettings(androidx.media3.transformer.AudioEncoderSettings.Builder().setBitrate(audioBitrate).build()) }
             .setEnableFallback(true) // a phone that can't encode the full size gets the nearest size it can
             .build()
         val transformer = Transformer.Builder(context)

@@ -172,7 +172,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Overlay photos / images | Partial | Has | S | The model has image items; the phone can't pick a photo yet. Mac: Import picture (WS9) |
 | Opacity | Has | Has | S | Model yes; no slider. Android: Transform → Opacity with ◆ (wave 1). |
 | **Blend modes** (multiply, screen, overlay, soft light, …) | Has | Missing | M | New compositor mode (GL / Core Image) and a contract field. Android: Transform → Blend on overlays, drawn by MUSE's own compositor program in preview and export (wave 1). |
-| Move an overlay to the main track and back | Missing | Missing | S | |
+| Move an overlay to the main track and back | Has | Missing | S | Android: Edit → Move to main track / Move to an overlay track (app op; no contract change). On the main track the clip fills the frame (overlay placing, opacity, blend, mask and key dropped); off it, it plays at the same time, full frame. |
 | Split-screen layouts | Missing | Missing | M | |
 | Motion tracking (text or sticker follows an object) | Missing | Missing | XL | Tracker model |
 
@@ -181,7 +181,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | 9:16, 1:1, 4:5, 16:9 | Has | Has | — | |
-| More ratios (4:3, 2.35:1) | Missing | Missing | S | |
+| More ratios (4:3, 2.35:1) | Has | Missing | S | Android: Ratio and Export shapes; the canvas is free-size in the contract. 2.35:1 at 4K is capped at 4096 px wide. |
 | Background colour | Has | Partial | S | `canvas.background` exists; no picker. Mac: Engine only. Android: Ratio → Background (wave 1). |
 | Background blur fill | Has | Missing | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). |
 | Fit / fill per clip | Has | Partial | S | Model `fit`; no toggle. Mac: Engine only. Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
@@ -226,10 +226,10 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Captions burnt in or .SRT | Has | Has | — | Mac: Save to Library always burns them in (WS9) |
 | Label as AI-generated | Has | Has | — | Sent with the version (fixed in WS8). Mac: Sent with the version (WS9) |
 | Content Credentials (C2PA) | Missing | Missing | L | Signing needs a certificate decision. The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
-| 2K, bitrate choice | Partial | Missing | S |. Android: 2K added; bitrate choice not yet. |
+| 2K, bitrate choice | Has | Missing | S | Android: 2K, and Smaller file / Recommended / Higher quality bitrate (0.6× / 1× / 1.6× of ~0.12 bit per pixel per frame). |
 | HDR export | Missing | Missing | L | |
 | Share straight to TikTok / IG / Shorts | Partial | Partial | — | MUSE Socials (posting) |
-| GIF / audio-only export | Missing | Missing | S each | No competitor confirmed either |
+| GIF / audio-only export | Has | Missing | S each | No competitor confirmed either. Android: Export → Sound only (.m4a, AAC 192 kbit/s, into Music/MUSE) and GIF (loops, 15 fps, 480 px short side, up to 30 s, into Pictures/MUSE); both saved to the phone only, not as versions. |
 | Watermark | n/a | n/a | — | MUSE adds none |
 
 ## 15. Desktop only (Mac)

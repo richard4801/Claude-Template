@@ -66,7 +66,9 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 "take_start", "take_split", "take_detached",
                 // Wave 1 (plans/edit-parity.md): text style editor, transform with mirror and opacity, ratio with the
                 // blur fill, and a timeline with a freeze frame and a selected text item.
-                "w1_text", "w1_transform", "w1_ratio", "w1_timeline").map { arrayOf<Any>(t, it) }
+                "w1_text", "w1_transform", "w1_ratio", "w1_timeline",
+                // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
+                "export_gif", "export_sound", "overlay_link").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -151,6 +153,9 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 host = host.copy(lookThumbs = thumbs())
             }
             "export" -> ui = ui.copy(panel = Panel.EXPORT)
+            "export_gif" -> ui = ui.copy(panel = Panel.EXPORT, export = ui.export.copy(format = studio.muse.core.edit.ExportFormat.GIF))
+            "export_sound" -> ui = ui.copy(panel = Panel.EXPORT, export = ui.export.copy(format = studio.muse.core.edit.ExportFormat.SOUND))
+            "overlay_link" -> { ui = ui.copy(panel = Panel.OVERLAY); host = host.copy(importLink = {}) }
             "w1_text", "w1_transform", "w1_ratio", "w1_timeline" -> {
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
                 val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {

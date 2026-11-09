@@ -67,7 +67,13 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.core.edit.CaptionExport
 import studio.muse.core.edit.CaptionPreset
 import studio.muse.core.edit.EditProject
+import studio.muse.core.edit.ExportBitrate
 import studio.muse.core.edit.ExportCodec
+import studio.muse.core.edit.ExportFormat
+import studio.muse.core.edit.GIF_FPS
+import studio.muse.core.edit.GIF_MAX_SEC
+import studio.muse.core.edit.GIF_SHORT_SIDE
+import studio.muse.core.edit.SOUND_BITRATE
 import studio.muse.core.edit.ExportResolution
 import studio.muse.core.edit.ExportSettings
 import studio.muse.core.edit.ExportShape
@@ -115,6 +121,8 @@ data class SuiteHost(
     val modelRow: (@Composable (purpose: String) -> Unit)? = null,
     /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
     val saveFrame: () -> Unit = {},
+    /** "Add a video from a link" (WS7's import, then added at the end); null where imports aren't offered. */
+    val importLink: (() -> Unit)? = null,
 )
 
 /** The open panel as a bottom sheet. */
@@ -191,6 +199,13 @@ private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
     val hold = (sel as? VideoClip)?.holdSec
     if (hold != null) SuiteSlider(((hold - .1) / 9.9).toFloat(), { f, done -> act(EditAction.HoldLength(.1 + f * 9.9, done)) }, label = "Freeze frame length", valueText = "${fmt1(hold)} s")
     SuiteButton("Freeze frame", { act(EditAction.Freeze()) }, Modifier.fillMaxWidth(), icon = "pause")
+    // Main track ⇄ overlay: the selected video clip (a main clip when there's more than one).
+    ui.project?.let { p ->
+        val selVideo = sel as? VideoClip
+        val onMain = selVideo == null || p.main.items.any { it.id == selVideo.id }
+        if (!onMain) SuiteButton("Move to main track", { act(EditAction.SwapTrack) }, Modifier.fillMaxWidth(), icon = "layers")
+        else if (p.main.items.size > 1 && (selVideo != null || clip != null)) SuiteButton("Move to an overlay track", { act(EditAction.SwapTrack) }, Modifier.fillMaxWidth(), icon = "layers")
+    }
     SuiteButton("Save frame as photo", host.saveFrame, Modifier.fillMaxWidth(), icon = "image")
     OptRow("Ripple", "Deleting closes the gap on that track", ui.ripple, { act(EditAction.Ripple(!ui.ripple)) })
     // Tracks (the tablet has these on its track headers): sound on/off for sound lanes, shown/hidden for picture lanes.
@@ -870,18 +885,22 @@ private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
     T("Your takes and edited versions. Add one to the end of the video, or over it as an overlay at the playhead.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
     if (ui.takes.isEmpty()) T("No other videos yet", m.type.body, m.t.muted)
     ui.takes.forEach { t ->
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Name and length on top, the four actions under them (four buttons beside the name crushed it on phones).
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(Modifier.size(40.dp, 56.dp).clip(RoundedCornerShape(2.dp)).background(m.t.surface2)) { RefImage(t.thumb, Modifier.fillMaxSize()) }
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 T(t.title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
                 T(listOfNotNull(t.label, t.durationSec?.let { "${fmt1(it)} s" }).joinToString(" · "), m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SuiteButton("Add to end", { act(EditAction.AppendTake(t)) }, height = 34.dp, enabled = t.hasVideo)
+                    SuiteButton("Overlay", { act(EditAction.AddPip(t)) }, height = 34.dp, icon = "layers", enabled = t.hasVideo)
+                    SuiteButton("Replace", { act(EditAction.ReplaceClip(t)) }, height = 34.dp, enabled = t.hasVideo)
+                    SuiteButton("Sound", { act(EditAction.AddTakeSound(t)) }, height = 34.dp, enabled = t.hasVideo)
+                }
             }
-            SuiteButton("Sound", { act(EditAction.AddTakeSound(t)) }, height = 34.dp, enabled = t.hasVideo)
-            SuiteButton("Replace", { act(EditAction.ReplaceClip(t)) }, height = 34.dp, enabled = t.hasVideo)
-            SuiteButton("Add to end", { act(EditAction.AppendTake(t)) }, height = 34.dp, enabled = t.hasVideo)
-            SuiteButton("Overlay", { act(EditAction.AddPip(t)) }, height = 34.dp, icon = "layers", enabled = t.hasVideo)
         }
     }
+    host.importLink?.let { SuiteButton("Add a video from a link", it, Modifier.fillMaxWidth(), icon = "link") }
     SuiteButton("Music from uploads", host.pickAudio, Modifier.fillMaxWidth(), icon = "music")
 }
 
@@ -897,7 +916,9 @@ private fun ShapeTiles(selected: ExportShape, onPick: (ExportShape) -> Unit) {
                     .semantics { contentDescription = "Shape ${s.label}" },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
             ) {
-                val (w, h) = when (s) { ExportShape.PORTRAIT -> 20 to 36; ExportShape.SQUARE -> 30 to 30; ExportShape.FOUR_FIVE -> 27 to 34; ExportShape.LANDSCAPE -> 38 to 22 }
+                // The shape inside a 34 × 34 box.
+                val r = s.w.toFloat() / s.h
+                val (w, h) = if (r >= 1f) 34f to 34f / r else 34f * r to 34f
                 Box(Modifier.size(w.dp, h.dp).border(2.dp, m.t.ink).background(if (on) m.t.ink else Color.Transparent))
                 Spacer(Modifier.height(6.dp))
                 T(s.label, m.type.mono.copy(fontSize = 12.sp), m.t.ink)
@@ -934,37 +955,49 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
     val m = muse
     val s = ui.export
     fun set(n: ExportSettings) = act(EditAction.ExportOf(n))
-    ShapeTiles(s.shape) { set(s.copy(shape = it)) }
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SuiteLabel("Resolution")
-            SuiteSeg(ExportResolution.entries.map { it.name to it.label }, s.resolution.name, { set(s.copy(resolution = ExportResolution.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
+    SuiteSeg(ExportFormat.entries.map { it.name to it.label }, s.format.name, { set(s.copy(format = ExportFormat.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
+    if (s.format != ExportFormat.SOUND) ShapeTiles(s.shape) { set(s.copy(shape = it)) }
+    when (s.format) {
+        ExportFormat.VIDEO -> {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SuiteLabel("Resolution")
+                    SuiteSeg(ExportResolution.entries.map { it.name to it.label }, s.resolution.name, { set(s.copy(resolution = ExportResolution.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SuiteLabel("FPS")
+                    SuiteSeg(ExportSettings.FPS.map { it.toString() to it.toString() }, s.fps.toString(), { set(s.copy(fps = it.toInt())) }, Modifier.fillMaxWidth(), fill = true)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SuiteLabel("Codec")
+                    SuiteSeg(listOf(ExportCodec.H264.name to "H.264", ExportCodec.HEVC.name to "HEVC"), s.codec.name, { set(s.copy(codec = ExportCodec.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SuiteLabel("Captions")
+                    SuiteSeg(listOf(CaptionExport.BURN_IN.name to "Burn in", CaptionExport.SRT.name to ".SRT file"), s.captions.name, { set(s.copy(captions = CaptionExport.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
+                }
+            }
+            SuiteLabel("Bitrate")
+            SuiteSeg(ExportBitrate.entries.map { it.name to it.label }, s.bitrate.name, { set(s.copy(bitrate = ExportBitrate.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
+            OptRow("Label as AI-generated", "Your choice, per export", s.aiLabel, { set(s.copy(aiLabel = !s.aiLabel)) })
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SuiteLabel("FPS")
-            SuiteSeg(ExportSettings.FPS.map { it.toString() to it.toString() }, s.fps.toString(), { set(s.copy(fps = it.toInt())) }, Modifier.fillMaxWidth(), fill = true)
-        }
+        ExportFormat.GIF -> T("Loops, $GIF_FPS frames a second, $GIF_SHORT_SIDE\u00A0px on the short side. Up to ${GIF_MAX_SEC.roundToInt()}\u00A0s; captions are burned in.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        ExportFormat.SOUND -> T("The edit's mix on its own, as an .m4a file (AAC, ${SOUND_BITRATE / 1000}\u00A0kbit/s).", m.type.body.copy(fontSize = 13.sp), m.t.muted)
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SuiteLabel("Format")
-            SuiteSeg(listOf(ExportCodec.H264.name to "H.264", ExportCodec.HEVC.name to "HEVC"), s.codec.name, { set(s.copy(codec = ExportCodec.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SuiteLabel("Captions")
-            SuiteSeg(listOf(CaptionExport.BURN_IN.name to "Burn in", CaptionExport.SRT.name to ".SRT file"), s.captions.name, { set(s.copy(captions = CaptionExport.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
-        }
-    }
-    OptRow("Label as AI-generated", "Your choice, per export", s.aiLabel, { set(s.copy(aiLabel = !s.aiLabel)) })
     val (w, h) = s.size
+    val d = ui.duration
     Row(verticalAlignment = Alignment.CenterVertically) {
-        val d = ui.duration
-        T("${(d / 60).toInt()}:${"%02d".format((d % 60).roundToInt().coerceAtMost(59))} · ${w} × $h · ${s.fps} fps", m.type.body.copy(fontSize = 13.sp), m.t.ink, Modifier.weight(1f))
+        val len = "${(d / 60).toInt()}:${"%02d".format((d % 60).roundToInt().coerceAtMost(59))}"
+        T(if (s.format == ExportFormat.SOUND) "$len · AAC" else "$len · ${w} × $h · ${s.outFps} fps", m.type.body.copy(fontSize = 13.sp), m.t.ink, Modifier.weight(1f))
         T("≈ ${formatBytes(s.estimatedBytes(d))}", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink)
     }
+    val refusal = ui.project?.let { s.refusal(d, SuiteOps.editHasSound(it)) }
     when (val ph = ui.phase) {
         is SuitePhase.Exporting, is SuitePhase.Saving -> {
-            val (label, prog) = if (ph is SuitePhase.Exporting) "Making your video on this phone" to ph.progress else "Saving to Library" to (ph as SuitePhase.Saving).progress
+            val making = when (s.format) { ExportFormat.VIDEO -> "Making your video on this phone"; ExportFormat.SOUND -> "Making the sound file"; ExportFormat.GIF -> "Making the GIF" }
+            val (label, prog) = if (ph is SuitePhase.Exporting) making to ph.progress else (if (s.format == ExportFormat.VIDEO) "Saving to Library" else "Saving to this phone") to (ph as SuitePhase.Saving).progress
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     T("$label · ${(prog * 100).roundToInt()} %", m.type.body.copy(fontSize = 13.sp), m.t.ink, Modifier.weight(1f))
@@ -973,9 +1006,15 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
                 Box(Modifier.fillMaxWidth().height(4.dp).background(m.t.surface2)) { Box(Modifier.fillMaxWidth(prog.coerceIn(0f, 1f)).height(4.dp).background(m.t.accent)) }
             }
         }
-        else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SuiteButton("Save to Library", { host.export(false) }, height = 54.dp, enabled = ui.ready)
-            SuiteButton("Export", { host.export(true) }, Modifier.weight(1f), primary = true, height = 54.dp, enabled = ui.ready)
+        else -> {
+            if (refusal != null) T(refusal, m.type.tiny.copy(fontSize = 12.sp), m.t.warn)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (s.format == ExportFormat.VIDEO) {
+                    SuiteButton("Save to Library", { host.export(false) }, height = 54.dp, enabled = ui.ready)
+                    SuiteButton("Export", { host.export(true) }, Modifier.weight(1f), primary = true, height = 54.dp, enabled = ui.ready)
+                } else SuiteButton(if (s.format == ExportFormat.SOUND) "Save sound to phone" else "Save GIF to phone", { host.export(true) }, Modifier.weight(1f), primary = true, height = 54.dp,
+                    enabled = ui.ready && refusal == null)
+            }
         }
     }
     if (ui.phase is SuitePhase.Failed) T((ui.phase as SuitePhase.Failed).message, m.type.tiny.copy(fontSize = 12.sp), m.t.warn)

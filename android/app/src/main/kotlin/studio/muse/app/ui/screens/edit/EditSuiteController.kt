@@ -237,6 +237,10 @@ sealed interface EditAction {
     data class PickModel(val purpose: String, val model: String?) : EditAction
     /** Another take added whole to the end of the video. */
     data class AppendTake(val take: TakeChoice) : EditAction
+    /** The selected clip moved between the main track and an overlay track (plans/edit-parity.md, S). */
+    data object SwapTrack : EditAction
+    /** A video imported from a link (or picked from the phone), added at the end. */
+    data class AppendUpload(val upload: String, val durationSec: Double, val width: Int? = null, val height: Int? = null, val hasAudio: Boolean? = true) : EditAction
     /** Green/blue screen on the selected video: the key colour and how much around it goes (null = off). */
     data class SetChroma(val chroma: studio.muse.core.edit.Chroma?, val done: Boolean = true) : EditAction
     data class Ratio(val shape: ExportShape) : EditAction
@@ -369,7 +373,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake -> "Add clip"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -721,6 +725,22 @@ class EditSuiteController(
             is EditAction.AppendTake -> {
                 var newId: String? = null
                 if (change(refused = "That video can't be added at the end") { p -> SuiteOps.appendTake(p, a.take.id, a.take.durationSec ?: return@change null)?.let { (np, id) -> newId = id; np } }) {
+                    _ui.update { it.copy(selectedId = newId) }
+                    say("Added to the end")
+                }
+            }
+            EditAction.SwapTrack -> {
+                val id = (u.selection?.second as? VideoClip)?.id ?: u.activeClip?.id ?: return
+                val p0 = project ?: return
+                val onMain = p0.locate(id)?.first?.kind == TrackKind.MAIN
+                if (change(refused = if (onMain) "The main track needs at least one clip" else "That clip can't go on the main track") { p -> if (onMain) SuiteOps.toOverlay(p, id) else SuiteOps.toMain(p, id) }) {
+                    _ui.update { it.copy(selectedId = id) }
+                    say(if (onMain) "Moved to an overlay track" else "Moved to the main track")
+                }
+            }
+            is EditAction.AppendUpload -> {
+                var newId: String? = null
+                if (change(refused = "That video can't be added at the end") { p -> SuiteOps.appendUpload(p, a.upload, a.durationSec, a.width, a.height, a.hasAudio)?.let { (np, id) -> newId = id; np } }) {
                     _ui.update { it.copy(selectedId = newId) }
                     say("Added to the end")
                 }

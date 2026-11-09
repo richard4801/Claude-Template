@@ -34,6 +34,7 @@ import studio.muse.core.edit.clipTimeAt
 import studio.muse.core.edit.ids
 import studio.muse.core.edit.itemSpan
 import studio.muse.core.edit.locate
+import studio.muse.core.edit.removeTrack
 import studio.muse.core.edit.moveMainClip
 import studio.muse.core.edit.newId
 import studio.muse.core.edit.removeItem
@@ -193,6 +194,11 @@ object SuiteOps {
     /** Whether main clip [c]'s own sound is there to hear or detach (its asset has sound). */
     fun hasSound(p: EditProject, c: VideoClip): Boolean = p.asset(c.audioAsset ?: c.asset)?.hasAudio != false
 
+    /** Whether anything in the edit plays sound (a sound-only export needs some): an unmuted clip with sound on an unmuted track. */
+    fun editHasSound(p: EditProject): Boolean = p.tracks.any { t ->
+        t.muted != true && t.items.any { i -> i is MediaClip && i.muted != true && (i !is VideoClip || hasSound(p, i)) && p.asset(i.asset)?.hasAudio != false }
+    }
+
     /**
      * Detach audio (extract the clip's sound): main clip [clipId]'s sound becomes its own audio clip at the same place
      * on a "Clip sound" voice track (same source times, volume, fades and voice settings), and the video clip goes
@@ -281,6 +287,42 @@ object SuiteOps {
     }
 
     /**
+     * Overlay clip [id] moved onto the main track, at the clip boundary nearest to where it starts (the clips after it
+     * move later). It fills the frame there: its overlay placing (position and size, keyframes, opacity, blend, mask,
+     * chroma key, cut-out) is dropped; its trim, speed, sound and look stay. An overlay track left empty goes.
+     */
+    fun toMain(p: EditProject, id: String): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        if (t.kind != TrackKind.VIDEO) return null
+        val c = t.items[i] as? VideoClip ?: return null
+        val start = itemSpan(p, t, c).startSec
+        val bounds = listOf(0.0) + timeline(p).map { it.endSec }
+        val at = bounds.indices.minBy { abs(bounds[it] - start) }
+        val moved = c.copy(startSec = null, fit = null, transform = null, keyframes = null, opacity = null, blend = null, mask = null, chroma = null, alphaMatte = null)
+        var q = p.removeItem(id) ?: return null
+        if (q.track(t.id)?.items?.isEmpty() == true) q = q.removeTrack(t.id) ?: q
+        return q.addItem(q.main.id, moved, at)
+    }
+
+    /**
+     * Main clip [id] moved onto an overlay track at the time it played (the main track closes the gap), full frame, so
+     * it can be placed, keyed or blended over the others. The main track keeps at least one clip.
+     */
+    fun toOverlay(p: EditProject, id: String): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        if (t.kind != TrackKind.MAIN || t.items.size < 2) return null
+        val c = t.items[i] as? VideoClip ?: return null
+        val span = itemSpan(p, t, c)
+        val q = p.removeItem(id) ?: return null
+        val len = span.endSec - span.startSec
+        val moved = c.copy(startSec = span.startSec, transitionIn = null)
+        val base = q.tracks.firstOrNull { tr -> tr.kind == TrackKind.VIDEO && fitsAt(q, tr, span.startSec, len) }?.let { q }
+            ?: q.copy(tracks = q.tracks + Track(q.newId("pip"), TrackKind.VIDEO, name = "Overlay"))
+        val tid = base.tracks.last { tr -> tr.kind == TrackKind.VIDEO && fitsAt(base, tr, span.startSec, len) }.id
+        return base.addItem(tid, moved)
+    }
+
+    /**
      * Another take (or edited version) added to the end of the main track, whole, as a new clip (its asset is shared
      * with a PiP of the same take). Returns the project and the new clip's id.
      */
@@ -291,6 +333,15 @@ object SuiteOps {
         val id = withAsset.newId("c")
         val clip = VideoClip(id, assetId, 0.0, durationSec, 1.0)
         return withAsset.addItem(withAsset.main.id, clip, withAsset.main.items.size)?.let { it to id }
+    }
+
+    /** An uploaded video (an import from a link) added after the last main clip; the project and the new clip's id. */
+    fun appendUpload(p: EditProject, uploadId: String, durationSec: Double, width: Int? = null, height: Int? = null, hasAudio: Boolean? = true): Pair<EditProject, String>? {
+        if (durationSec < EditLimits.MIN_CLIP_SOURCE_SEC) return null
+        val assetId = p.assets.firstOrNull { it.upload == uploadId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "upload")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, upload = uploadId, durationSec = durationSec, width = width, height = height, hasAudio = hasAudio))
+        val id = withAsset.newId("c")
+        return withAsset.addItem(withAsset.main.id, VideoClip(id, assetId, 0.0, durationSec, 1.0), withAsset.main.items.size)?.let { it to id }
     }
 
     // ------------------------------------------------------------ moving and trimming on the timeline
@@ -429,11 +480,9 @@ object SuiteOps {
 
     /** The canvas for [shape] keeping the project's short side. */
     fun ratio(p: EditProject, shape: ExportShape): EditProject? {
-        val short = minOf(p.canvas.width, p.canvas.height)
-        fun even(v: Double) = (v / 2).roundToInt() * 2
-        val (w, h) = if (shape.w <= shape.h) short to even(short.toDouble() * shape.h / shape.w) else even(short.toDouble() * shape.w / shape.h) to short
+        val (w, h) = shape.sizeAt(minOf(p.canvas.width, p.canvas.height))
         if (w == p.canvas.width && h == p.canvas.height) return null
-        return p.copy(canvas = p.canvas.copy(width = w.coerceAtMost(4096), height = h.coerceAtMost(4096)))
+        return p.copy(canvas = p.canvas.copy(width = w, height = h))
     }
 
     // ------------------------------------------------------------ words (edit by text)

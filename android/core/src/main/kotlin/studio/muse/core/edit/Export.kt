@@ -9,7 +9,16 @@ import kotlin.math.roundToInt
  */
 
 enum class ExportShape(val label: String, val w: Int, val h: Int) {
-    PORTRAIT("9:16", 9, 16), SQUARE("1:1", 1, 1), FOUR_FIVE("4:5", 4, 5), LANDSCAPE("16:9", 16, 9);
+    PORTRAIT("9:16", 9, 16), SQUARE("1:1", 1, 1), FOUR_FIVE("4:5", 4, 5), FOUR_THREE("4:3", 4, 3), LANDSCAPE("16:9", 16, 9), CINEMA("2.35:1", 47, 20);
+
+    /** [short] px on the short side at this shape (even numbers), scaled down to fit the contract's 4096 px long side. */
+    fun sizeAt(short: Int): Pair<Int, Int> {
+        fun even(v: Double) = maxOf(16, (v / 2).roundToInt() * 2)
+        val r = w.toDouble() / h
+        val long = maxOf(r, 1 / r) * short
+        val k = if (long > 4096) 4096 / long else 1.0
+        return if (w <= h) even(short * k) to even(short * k / r) else even(short * k * r) to even(short * k)
+    }
 
     companion object {
         /** The shape closest to a canvas. */
@@ -21,6 +30,23 @@ enum class ExportResolution(val label: String, val shortSide: Int) { HD("720p", 
 enum class ExportCodec(val label: String) { H264("MP4 · H.264"), HEVC("MP4 · HEVC") }
 enum class CaptionExport { BURN_IN, SRT }
 
+/** What the export makes: the video (saved as a version), its sound alone (.m4a) or a GIF (both saved to the phone only). */
+enum class ExportFormat(val label: String) { VIDEO("Video"), SOUND("Sound only"), GIF("GIF") }
+
+/** The video bitrate against the recommended one (~0.12 bit per pixel per frame). */
+enum class ExportBitrate(val label: String, val factor: Double) { LOWER("Smaller file", 0.6), RECOMMENDED("Recommended", 1.0), HIGHER("Higher quality", 1.6) }
+
+/** GIF exports: short side, frame rate and the longest edit they take (longer GIFs get too big to share). */
+const val GIF_SHORT_SIDE = 480
+const val GIF_FPS = 15
+const val GIF_MAX_SEC = 30.0
+/** Sound-only exports: AAC at this bitrate. */
+const val SOUND_BITRATE = 192_000
+
+/** The video encoder's bitrate for a [w]×[h] canvas at [fps]: 4–40 Mbit/s recommended, scaled by [bitrate]; HEVC ≈ 60 %. */
+fun videoBitrate(w: Int, h: Int, fps: Int, bitrate: ExportBitrate = ExportBitrate.RECOMMENDED, codec: ExportCodec = ExportCodec.H264): Int =
+    ((w.toDouble() * h * fps * 0.12).coerceIn(4_000_000.0, 40_000_000.0) * bitrate.factor * (if (codec == ExportCodec.HEVC) 0.6 else 1.0)).roundToInt()
+
 data class ExportSettings(
     val shape: ExportShape = ExportShape.PORTRAIT,
     val resolution: ExportResolution = ExportResolution.FULL_HD,
@@ -31,23 +57,36 @@ data class ExportSettings(
     val aiLabel: Boolean = false,
     /** Disclosure: "Content Credentials (C2PA)" — off by default; signing is not built yet ("Coming soon"). */
     val contentCredentials: Boolean = false,
+    val format: ExportFormat = ExportFormat.VIDEO,
+    val bitrate: ExportBitrate = ExportBitrate.RECOMMENDED,
 ) {
-    /** The output size (even numbers, short side = the resolution). */
+    /** The output size (even numbers, short side = the resolution; a GIF's is [GIF_SHORT_SIDE]). */
     val size: Pair<Int, Int>
         get() {
-            val s = resolution.shortSide
-            fun even(v: Double) = (v / 2).roundToInt() * 2
-            return if (shape.w <= shape.h) s to even(s.toDouble() * shape.h / shape.w) else even(s.toDouble() * shape.w / shape.h) to s
+            return shape.sizeAt(if (format == ExportFormat.GIF) GIF_SHORT_SIDE else resolution.shortSide)
         }
 
+    /** The frame rate of what's made (a GIF's is [GIF_FPS]). */
+    val outFps: Int get() = if (format == ExportFormat.GIF) GIF_FPS else fps
+
     /**
-     * Estimated file size in bytes: the engine's bitrate (~0.12 bit per pixel per frame, 4–40 Mbit/s; HEVC ≈ 60 %) plus
-     * 128 kbit/s of audio, over [durationSec].
+     * Estimated file size in bytes over [durationSec]: video at [videoBitrate] plus 128 kbit/s of audio; sound only at
+     * [SOUND_BITRATE]; a GIF at about a third of a byte per pixel per frame (8-bit LZW on video footage).
      */
     fun estimatedBytes(durationSec: Double): Long {
         val (w, h) = size
-        val video = (w.toDouble() * h * fps * 0.12).coerceIn(4_000_000.0, 40_000_000.0) * (if (codec == ExportCodec.HEVC) 0.6 else 1.0)
-        return ((video + 128_000) * durationSec / 8).toLong()
+        return when (format) {
+            ExportFormat.VIDEO -> ((videoBitrate(w, h, fps, bitrate, codec) + 128_000.0) * durationSec / 8).toLong()
+            ExportFormat.SOUND -> (SOUND_BITRATE * durationSec / 8).toLong()
+            ExportFormat.GIF -> (w.toDouble() * h * 0.33 * GIF_FPS * durationSec).toLong()
+        }
+    }
+
+    /** Why this export can't be made from an edit of [durationSec] (with or without sound), or null. */
+    fun refusal(durationSec: Double, hasSound: Boolean): String? = when {
+        format == ExportFormat.SOUND && !hasSound -> "This edit has no sound to export"
+        format == ExportFormat.GIF && durationSec > GIF_MAX_SEC + 1e-6 -> "GIFs are up to ${GIF_MAX_SEC.roundToInt()} s · trim the edit or export a video"
+        else -> null
     }
 
     companion object {
@@ -73,8 +112,8 @@ data class ExportSettings(
  */
 fun exportProject(p: EditProject, s: ExportSettings): EditProject {
     val (w, h) = s.size
-    val tracks = if (s.captions == CaptionExport.SRT) p.tracks.map { if (it.kind == TrackKind.CAPTION) it.copy(hidden = true) else it } else p.tracks
-    return p.copy(canvas = p.canvas.copy(width = w, height = h, fps = s.fps.toDouble()), tracks = tracks)
+    val tracks = if (s.captions == CaptionExport.SRT && s.format == ExportFormat.VIDEO) p.tracks.map { if (it.kind == TrackKind.CAPTION) it.copy(hidden = true) else it } else p.tracks
+    return p.copy(canvas = p.canvas.copy(width = w, height = h, fps = s.outFps.toDouble()), tracks = tracks)
 }
 
 /** A byte count as "48 MB" / "1.2 GB". */
