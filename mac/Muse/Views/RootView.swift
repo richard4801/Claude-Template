@@ -64,6 +64,8 @@ struct ScreenHost: View {
     @Environment(\.theme) private var t
 
     var body: some View {
+        let _ = store.screenEpoch
+        let _ = SnapshotRunner.probing ? SnapshotRunner.noteScreenBody("\(store.screen)", store.screenEpoch) : ()
         ZStack(alignment: .top) {
             screen
                 .background { if SnapshotRunner.probing { ScreenProbe(name: "\(store.screen)") } }

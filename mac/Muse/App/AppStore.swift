@@ -205,6 +205,9 @@ final class AppStore {
     // MARK: Navigation and overlays
 
     var screen: Screen = .home
+    /// Bumped on the turn after each screen change: ScreenHost reads it, so a screen change it missed inside a busy
+    /// transaction (plans/claude-chat-mac.md, "the old screen stays drawn") still redraws it a tick later.
+    var screenEpoch = 0
     var navForward = true
     var toast: Toast?
     var paletteOpen = false
@@ -938,6 +941,7 @@ final class AppStore {
         // A fixed-duration curve, not a spring: a spring still settling when another animated change lands (an overlay
         // closing) could leave the old screen drawn (plans/claude-chat-mac.md, "the old screen stays drawn").
         withAnimation(MotionStyle.of(themeID).screenAnimation) { screen = s }
+        Task { @MainActor [weak self] in self?.screenEpoch &+= 1 }
     }
 
     func setTheme(_ id: ThemeID) {
