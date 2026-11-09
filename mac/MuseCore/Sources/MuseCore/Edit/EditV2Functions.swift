@@ -78,6 +78,50 @@ extension EditV2 {
     }
 
     /// A property at item-local t: its keyframes when it has any, else the static value.
+    /// The item's adjust at item-local `t`: each keyed colour property at its keyframes' value there (model.ts adjustAt).
+    /// Unchanged when no colour property is keyed; a keyed property without a static value appears with the curve's value.
+    public static func adjustAt(_ adjust: Adjust?, _ keyframes: Keyframes?, _ t: Double) -> Adjust? {
+        let keyed = KfProp.color.filter { !(keyframes?[$0] ?? []).isEmpty }
+        guard !keyed.isEmpty else { return adjust }
+        var out = adjust ?? Adjust()
+        for p in keyed { out[p] = r6(propAt(keyframes, p, fallback: adjust?[p] ?? 0, t)) }
+        return out
+    }
+
+    /// The item's mask at item-local `t`: each keyed mask field at its keyframes' value there (model.ts maskAt).
+    public static func maskAt(_ mask: Mask?, _ keyframes: Keyframes?, _ t: Double) -> Mask? {
+        guard let m = mask, KfProp.mask.contains(where: { !(keyframes?[$0] ?? []).isEmpty }) else { return mask }
+        func at(_ p: KfProp, _ cur: Double?, _ d: Double) -> Double? {
+            (keyframes?[p] ?? []).isEmpty ? cur : r6(propAt(keyframes, p, fallback: cur ?? d, t))
+        }
+        var out = m
+        out.x = at(.maskX, m.x, 0.5); out.y = at(.maskY, m.y, 0.5)
+        out.width = at(.maskWidth, m.width, 0.5); out.height = at(.maskHeight, m.height, 0.5)
+        out.rotation = at(.maskRotation, m.rotation, 0); out.feather = at(.maskFeather, m.feather, 0.1)
+        return out
+    }
+
+    /// The item's look at item-local `t`: each keyed finishing amount at its keyframes' value there; a keyed effect the
+    /// look lacks is added with only its amount (a leak as kind warm), so the renderer's defaults apply (model.ts lookAt).
+    public static func lookAt(_ look: Look?, _ keyframes: Keyframes?, _ t: Double) -> Look? {
+        func keyed(_ p: KfProp) -> Bool { !(keyframes?[p] ?? []).isEmpty }
+        guard KfProp.look.contains(where: keyed) else { return look }
+        var out = look ?? Look()
+        if keyed(.vignette) {
+            let v = r6(propAt(keyframes, .vignette, fallback: out.vignette?.amount ?? 0, t))
+            out.vignette = Vignette(amount: v, size: out.vignette?.size, softness: out.vignette?.softness)
+        }
+        if keyed(.grain) { out.grain = Grain(amount: r6(propAt(keyframes, .grain, fallback: out.grain?.amount ?? 0, t)), size: out.grain?.size) }
+        if keyed(.leak) {
+            let v = r6(propAt(keyframes, .leak, fallback: out.leak?.amount ?? 0, t))
+            out.leak = Leak(kind: out.leak?.kind ?? .warm, amount: v, angle: out.leak?.angle)
+        }
+        return out
+    }
+
+    /// Whether any colour property is keyed (the matrix then changes over time).
+    public static func hasColorKeys(_ keyframes: Keyframes?) -> Bool { KfProp.color.contains { !(keyframes?[$0] ?? []).isEmpty } }
+
     public static func propAt(_ keyframes: Keyframes?, _ prop: KfProp, fallback: Double, _ t: Double) -> Double {
         if let k = keyframes?[prop], !k.isEmpty { return keyframeValue(k, t) }
         return fallback

@@ -128,7 +128,7 @@ final class EditV2Scene: @unchecked Sendable {
         if project.canvas.fill == .blur, project.mainTrack?.hidden != true, let pick = E.blurFillClip(project, t),
            let layer = main.layers.first(where: { $0.segment.itemId == pick.clipId }) ?? main.layers.first,
            let i = layer.segment.mainIndex, i < project.mainClips.count, let frame = sourceImage(request, layer.segment) {
-            image = blurFill(frame, clip: project.mainClips[i], frame: frameNo, fps: fps).composited(over: image)
+            image = blurFill(frame, clip: project.mainClips[i], local: t - layer.segment.timelineStart, frame: frameNo, fps: fps).composited(over: image)
         }
         if let dip = main.dip { image = CIImage(color: color(dip)).cropped(to: canvas).composited(over: image) }
         let clips = project.mainClips
@@ -136,8 +136,9 @@ final class EditV2Scene: @unchecked Sendable {
             guard let i = layer.segment.mainIndex, i < clips.count, let frame = sourceImage(request, layer.segment) else { continue }
             let c = clips[i]
             let pl = E.placement(c, local: t - layer.segment.timelineStart)
-            image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: c.adjust, filter: c.filter, look: c.look,
-                         chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: c.mask, frame: frameNo, fps: fps, flip: c.transform, over: image)
+            image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: E.adjustAt(c.adjust, c.keyframes, t - layer.segment.timelineStart),
+                         colorKeyed: E.hasColorKeys(c.keyframes), filter: c.filter, look: E.lookAt(c.look, c.keyframes, t - layer.segment.timelineStart),
+                         chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: E.maskAt(c.mask, c.keyframes, t - layer.segment.timelineStart), frame: frameNo, fps: fps, flip: c.transform, over: image)
         }
 
         // Other tracks, bottom to top.
@@ -147,15 +148,18 @@ final class EditV2Scene: @unchecked Sendable {
                 for seg in plan.video where seg.layer == ti && seg.contains(t) {
                     guard let c = track.item(seg.itemId)?.videoClip, let frame = sourceImage(request, seg) else { continue }
                     let pl = E.placement(c, local: t - seg.timelineStart)
-                    image = draw(frame, crop: c.crop, fit: c.fit ?? .contain, placement: pl, state: E.LayerState(), adjust: c.adjust, filter: c.filter,
-                                 look: c.look, chroma: c.chroma, matte: matteImage(request, seg, c), mask: c.mask, frame: frameNo, fps: fps,
+                    image = draw(frame, crop: c.crop, fit: c.fit ?? .contain, placement: pl, state: E.LayerState(), adjust: E.adjustAt(c.adjust, c.keyframes, t - seg.timelineStart),
+                                 colorKeyed: E.hasColorKeys(c.keyframes), filter: c.filter,
+                                 look: E.lookAt(c.look, c.keyframes, t - seg.timelineStart), chroma: c.chroma, matte: matteImage(request, seg, c),
+                                 mask: E.maskAt(c.mask, c.keyframes, t - seg.timelineStart), frame: frameNo, fps: fps,
                                  flip: c.transform, blend: c.blend, over: image)
                 }
             case .image:
                 for case .image(let im) in track.items where t >= im.startSec && t < im.startSec + im.durationSec {
                     guard let pic = sources.images[im.asset] else { continue }
                     image = draw(pic, crop: im.crop, fit: im.fit ?? .contain, placement: E.placement(im, local: t - im.startSec), state: E.LayerState(),
-                                 adjust: im.adjust, filter: im.filter, look: im.look, chroma: nil, mask: im.mask, frame: frameNo, fps: fps,
+                                 adjust: E.adjustAt(im.adjust, im.keyframes, t - im.startSec), colorKeyed: E.hasColorKeys(im.keyframes), filter: im.filter, look: E.lookAt(im.look, im.keyframes, t - im.startSec), chroma: nil,
+                                 mask: E.maskAt(im.mask, im.keyframes, t - im.startSec), frame: frameNo, fps: fps,
                                  flip: im.transform, blend: im.blend, over: image)
                 }
             case .text:
@@ -190,7 +194,7 @@ final class EditV2Scene: @unchecked Sendable {
 
     /// Draws a picture (origin 0,0): crop → chroma key → look (sharpen, chromatic, colour matrix + curves + LUT + lift,
     /// halation, leak, vignette, grain; just the colour matrix without a look) → fit → scale/rotate/move → opacity, over `base`.
-    private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, filter: E.FilterRef?,
+    private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, colorKeyed: Bool = false, filter: E.FilterRef?,
                       look: E.Look?, chroma: E.Chroma?, matte: CIImage? = nil, mask: E.Mask? = nil, frame: Int, fps: Double,
                       flip: E.Transform? = nil, blend: E.BlendMode? = nil, over base: CIImage) -> CIImage {
         let opacity = pl.opacity * state.opacity
@@ -225,7 +229,7 @@ final class EditV2Scene: @unchecked Sendable {
                 kCIInputMaskImageKey: alpha,
             ]).cropped(to: img.extent)
         }
-        img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), tone: E.Tone(adjust), to: img, frame: frame, fps: fps)
+        img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), tone: E.Tone(adjust), keyed: colorKeyed, to: img, frame: frame, fps: fps)
         // Edit suite: the mask multiplies the alpha (after the chroma key).
         if let mask { img = looks.applyMask(mask, to: img) }
         let (fw, _) = E.fittedSize(width: Double(w), height: Double(h), crop: nil, fit: fit, canvasWidth: Double(size.width), canvasHeight: Double(size.height))
@@ -320,7 +324,7 @@ final class EditV2Scene: @unchecked Sendable {
 
     /// Wave 1 blur fill: the main clip's frame (its crop and look, not its transform) cover-fitted, box-blurred and darkened,
     /// drawn over the background colour (blurFillRadius, BLUR_FILL_DARKEN).
-    private func blurFill(_ frame: CIImage, clip c: E.VideoClip, frame frameNo: Int, fps: Double) -> CIImage {
+    private func blurFill(_ frame: CIImage, clip c: E.VideoClip, local: Double, frame frameNo: Int, fps: Double) -> CIImage {
         var img = frame
         let e = img.extent
         if let cr = c.crop {
@@ -330,7 +334,8 @@ final class EditV2Scene: @unchecked Sendable {
         img = img.transformed(by: CGAffineTransform(translationX: -img.extent.minX, y: -img.extent.minY))
         let w = img.extent.width, h = img.extent.height
         guard w > 0, h > 0 else { return CIImage(color: color(plan.background)).cropped(to: canvas) }
-        img = looks.apply(c.look, matrix: E.colorMatrix(c.adjust, c.filter), tone: E.Tone(c.adjust), to: img, frame: frameNo, fps: fps)
+        let adj = E.adjustAt(c.adjust, c.keyframes, local)
+        img = looks.apply(E.lookAt(c.look, c.keyframes, local), matrix: E.colorMatrix(adj, c.filter), tone: E.Tone(adj), keyed: E.hasColorKeys(c.keyframes), to: img, frame: frameNo, fps: fps)
         let k = max(size.width / w, size.height / h)
         img = img.transformed(by: CGAffineTransform(scaleX: k, y: k).concatenating(CGAffineTransform(translationX: (size.width - w * k) / 2, y: (size.height - h * k) / 2)))
         let radius = E.blurFillRadius(width: Int(size.width), height: Int(size.height))

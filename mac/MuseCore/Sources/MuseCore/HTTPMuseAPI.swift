@@ -355,6 +355,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func startEditorJob(_ req: EditorJobRequest) async throws -> EditorJob { try await call("POST", "v1/editor/jobs", req) }
     public func editorJob(id: String) async throws -> EditorJob { try await call("GET", "v1/editor/jobs/\(Self.pathKey(id))") }
     public func cancelEditorJob(id: String) async throws { let _: StateReply = try await call("DELETE", "v1/editor/jobs/\(Self.pathKey(id))") }
+    public func editKits() async throws -> [EditKit] { let r: EditKitList = try await call("GET", "v1/editor/kits"); return r.kits }
+    public func saveEditKit(name: String, kit: EditV2.StyleKit) async throws -> EditKit { try await call("POST", "v1/editor/kits", EditKitBody(name: name, kit: kit)) }
+    public func updateEditKit(id: String, name: String?, kit: EditV2.StyleKit?) async throws -> EditKit {
+        try await call("PATCH", "v1/editor/kits/\(Self.pathKey(id))", EditKitBody(name: name, kit: kit))
+    }
+    public func deleteEditKit(id: String) async throws { _ = try await send(request("DELETE", "v1/editor/kits/\(Self.pathKey(id))")) }
     public func validateLut(uploadId: String) async throws -> LutValidation { try await call("POST", "v1/editor/luts/validate", LutValidateBody(uploadId: uploadId)) }
 
     public func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String {

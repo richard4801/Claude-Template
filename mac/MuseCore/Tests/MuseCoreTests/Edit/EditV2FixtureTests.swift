@@ -114,7 +114,7 @@ final class EditV2FixtureTests: XCTestCase {
 
     func testColors() throws {
         let cases = try editorFixture("functions")["colors"].array
-        XCTAssertEqual(cases.count, 4 + E.filters.count)
+        XCTAssertEqual(cases.count, 4 + E.filters.count + 3, "+ 3 tint cases")
         for c in cases {
             let adjust = try c["adjust"].decode(E.Adjust.self)
             let filter = c["filter"].isNull ? nil : try c["filter"].decode(E.FilterRef.self)

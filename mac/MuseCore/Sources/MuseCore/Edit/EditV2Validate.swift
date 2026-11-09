@@ -169,13 +169,15 @@ private struct Validator {
                     }
                     let len = E.clipLength(c)
                     try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look, mask: c.mask)
-                    try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume])
+                    try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: c.mask != nil)
                     if let aa = c.audioAsset {
                         if let a = assets[aa], a.kind == .video || a.kind == .audio {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
                     }
                     if let m = c.alphaMatte {
                         if let a = assets[m.asset], a.kind == .video {} else { throw bad("\(g).alphaMatte.asset", "must be a video asset") }
                     }
+                    try anim("\(g).animIn", c.animIn, text: false)
+                    try anim("\(g).animOut", c.animOut, text: false)
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
                         try num("\(g).chroma.similarity", ck.similarity, 0, 1)
@@ -203,7 +205,7 @@ private struct Validator {
                     try num("\(g).durationSec", im.durationSec, E.minItemSec, 600, optional: false)
                     try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter, look: im.look,
                                mask: im.mask)
-                    try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
+                    try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: im.mask != nil)
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
                 case (.text, .text(let tx)):
@@ -274,6 +276,7 @@ private struct Validator {
             try num("\(f).adjust.contrast", a.contrast, -1, 1)
             try num("\(f).adjust.saturation", a.saturation, -1, 1)
             try num("\(f).adjust.temperature", a.temperature, -1, 1)
+            try num("\(f).adjust.tint", a.tint, -1, 1)
             try num("\(f).adjust.highlights", a.highlights, -1, 1)
             try num("\(f).adjust.shadows", a.shadows, -1, 1)
         }
@@ -296,10 +299,11 @@ private struct Validator {
         }
     }
 
-    func kfs(_ f: String, _ k: EditV2.Keyframes?, _ len: Double, allowed: [EditV2.KfProp]) throws {
+    func kfs(_ f: String, _ k: EditV2.Keyframes?, _ len: Double, allowed: [EditV2.KfProp], hasMask: Bool = false) throws {
         guard let k else { return }
         for (prop, list) in k.present {
             if !allowed.contains(prop) { throw bad("\(f).\(prop.rawValue)", "is not a keyframe property here") }
+            if prop.isMask && !hasMask { throw bad("\(f).\(prop.rawValue)", "needs a mask") }
             if list.count > E.maxKeyframes { throw bad("\(f).\(prop.rawValue)", "at most \(E.maxKeyframes) keyframes") }
             var prev = -Double.infinity
             let range: (Double, Double)
@@ -309,6 +313,11 @@ private struct Validator {
             case .rotation: range = (-3600, 3600)
             case .opacity: range = (0, 1)
             case .volume: range = (0, 2)
+            case .exposure, .contrast, .saturation, .temperature, .tint, .vignette: range = (-1, 1)
+            case .maskX, .maskY: range = (-1, 2)
+            case .maskWidth, .maskHeight: range = (0.01, 3)
+            case .maskRotation: range = (-360, 360)
+            case .maskFeather, .grain, .leak: range = (0, 1)
             }
             for (j, kf) in list.enumerated() {
                 let g = "\(f).\(prop.rawValue).\(j)"

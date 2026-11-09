@@ -178,6 +178,8 @@ struct TimelineCanvas: View {
     @State private var drag: DragState?
     /// A main clip being dragged to a new place: how far it has moved (points).
     @State private var reorderOffset: CGFloat = 0
+    /// A keyframe ◆ being dragged (parity): its item time when the drag started.
+    @State private var keyFrom: Double?
 
     /// Where a main clip dropped with its centre at timeline `centre` goes: the number of other clips whose centre is before it.
     static func reorderIndex(blocks: [EditSuite.Block], moving id: String, centre: Double) -> Int {
@@ -368,6 +370,15 @@ struct TimelineCanvas: View {
             ForEach(blocks) { b in
                 block(b, row: row, locked: locked)
             }
+            // Design pass: while a voice-over records, a red bar grows on the first voice row from where it started.
+            if session.isRecordingVO, row.kind == .voice, session.project.tracks.first(where: { $0.kind == .voice })?.id == row.trackId {
+                let from = session.voStartSec
+                Rectangle().fill(t.roles.danger.opacity(0.55))
+                    .frame(width: max(2, CGFloat(max(0, session.playhead - from)) * z), height: Self.rowHeight(row.kind) - 12)
+                    .offset(x: CGFloat(from) * z, y: 6)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Recording")
+            }
         }
         .opacity(session.project.track(row.trackId)?.hidden == true ? 0.4 : 1)
     }
@@ -414,6 +425,10 @@ struct TimelineCanvas: View {
                     Spacer(minLength: 0)
                     trimHandle(b, edge: .end, height: h)
                 }
+            }
+            if selected && !locked, let id = b.itemId {
+                // By position, so the ◆ being dragged keeps its identity while its time changes (keys can't pass each other).
+                ForEach(Array(s.keyTimes(id).enumerated()), id: \.offset) { _, kt in keyMark(id, at: kt, height: h) }
             }
         }
         .frame(width: w, height: h)
@@ -515,6 +530,31 @@ struct TimelineCanvas: View {
     }
 
     // MARK: Gestures
+
+    /// A keyframe of the selected item (every property at that time): drag it along the lane to move them all, one undo
+    /// step; it stops before a neighbour (parity, as Android's timeline ◆).
+    private func keyMark(_ id: String, at kt: Double, height: CGFloat) -> some View {
+        Rectangle().fill(t.roles.selection)
+            .frame(width: 8, height: 8)
+            .rotationEffect(.degrees(45))
+            .overlay(Rectangle().stroke(t.roles.canvas, lineWidth: 1).frame(width: 8, height: 8).rotationEffect(.degrees(45)))
+            .frame(width: 16, height: height)
+            .contentShape(Rectangle())
+            .offset(x: CGFloat(kt) * z - 8)
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .highPriorityGesture(DragGesture(minimumDistance: 1)
+                .onChanged { v in
+                    if keyFrom == nil { keyFrom = kt; session.beginGesture() }
+                    guard let from = keyFrom else { return }
+                    session.updateGesture { $0.movingKeys(id, from: from, by: Double(v.translation.width / z)) }
+                }
+                .onEnded { _ in
+                    keyFrom = nil
+                    session.endGesture()
+                })
+            .help("Keyframe at \(EditSuite.clockTenths(kt)) · drag to move")
+            .accessibilityLabel("Keyframe at \(EditSuite.clockTenths(kt))")
+    }
 
     private func trimHandle(_ b: EditSuite.Block, edge: EditSuiteState.Edge, height: CGFloat) -> some View {
         Rectangle().fill(t.roles.selection).frame(width: 6, height: height)

@@ -55,6 +55,7 @@ struct EditSuitePreview: View {
                 ZStack {
                     SuitePlayerSurface(player: session.player)
                     if let a = session.state.safeArea { SafeAreaGuide(area: a) }
+                    if session.pickingKeyColour { KeyColourPicker(session: session, scale: Double(c.width) / Double(max(1, w))) }
                 }
                 .frame(width: w, height: h)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
@@ -203,5 +204,52 @@ struct SafeAreaGuide: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// The chroma key eyedropper over the preview (design pass, owner-approved): a crosshair, and beside it the colour under
+/// the pointer at about 4× with its hex; a click sets the key colour, Esc cancels.
+struct KeyColourPicker: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    /// Canvas pixels per point.
+    var scale: Double
+    @State private var at: CGPoint?
+    @State private var hex: String?
+
+    var body: some View {
+        GeometryReader { g in
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let p):
+                            at = p
+                            hex = session.keyColour(canvasX: Double(p.x) * scale, canvasY: Double(p.y) * scale)
+                        case .ended:
+                            at = nil; hex = nil
+                        }
+                    }
+                    .onTapGesture { p in session.pickKeyColour(canvasX: Double(p.x) * scale, canvasY: Double(p.y) * scale) }
+                    .onHover { inside in if inside { NSCursor.crosshair.push() } else { NSCursor.pop() } }
+                if let p = at {
+                    let right = p.x + 96 < g.size.width
+                    HStack(spacing: Space.s2) {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(hex.map { Color(hex: UInt32($0.dropFirst(), radix: 16) ?? 0) } ?? .clear)
+                            .frame(width: 36, height: 36)
+                            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(.white.opacity(0.9), lineWidth: 1.5))
+                        Text(hex ?? "Off the clip").font(t.scale.caption.font).monospacedDigit().foregroundStyle(.white)
+                    }
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.black.opacity(0.7)))
+                    .offset(x: right ? p.x + 14 : p.x - 110, y: max(0, p.y - 50))
+                    .allowsHitTesting(false)
+                }
+            }
+        }
+        .onExitCommand { Task { await session.toggleKeyPick() } }
+        .accessibilityElement()
+        .accessibilityLabel("Pick the key colour: click on the picture")
     }
 }

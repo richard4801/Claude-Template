@@ -64,13 +64,16 @@ extension EditV2 {
     }
 
     /// One 3×4 affine RGB matrix (row-major; out = M · (r, g, b, 1)) for the item's look:
-    /// exposure → temperature → contrast → saturation → tint. Apply on sRGB values 0–1, then clamp.
+    /// exposure → temperature → tint (green ↔ magenta) → contrast → saturation → preset colour. Apply on sRGB values 0–1, then clamp.
     public static func colorMatrix(_ adjust: Adjust?, _ filter: FilterRef?, presets: [FilterPreset] = filters) -> [Double] {
         let (a, tint) = effectiveAdjust(adjust, filter, presets: presets)
         var m = identity
         let ex = pow(2, a.exposure)
         m = mul([ex, 0, 0, 0, 0, ex, 0, 0, 0, 0, ex, 0], m)
         m = mul([1 + 0.1 * a.temperature, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 - 0.1 * a.temperature, 0], m)
+        // Tint (the item's own adjust only; presets don't add it): green ↔ magenta.
+        let g = clamp(adjust?.tint ?? 0, -1, 1)
+        if g != 0 { m = mul([1 + 0.05 * g, 0, 0, 0, 0, 1 - 0.1 * g, 0, 0, 0, 0, 1 + 0.05 * g, 0], m) }
         let c = 1 + a.contrast, off = 0.5 * (1 - c)
         m = mul([c, 0, 0, off, 0, c, 0, off, 0, 0, c, off], m)
         let s = 1 + a.saturation

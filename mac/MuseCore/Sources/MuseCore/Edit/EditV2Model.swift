@@ -18,7 +18,22 @@ extension EditV2 {
         public init(t: Double, v: Double, ease: Ease? = nil) { self.t = t; self.v = v; self.ease = ease }
     }
 
-    public enum KfProp: String, Codable, Hashable, Sendable, CaseIterable { case x, y, scale, rotation, opacity, volume }
+    public enum KfProp: String, Codable, Hashable, Sendable, CaseIterable {
+        case x, y, scale, rotation, opacity, volume
+        /// Colour keyframes (contract, WS8 c10e398): replace the adjust field's static value over time (`adjustAt`).
+        case exposure, contrast, saturation, temperature, tint
+        /// Mask keyframes (contract, WS8 bfa44a6): replace the mask's field over time (`maskAt`); only on items with a mask.
+        case maskX, maskY, maskWidth, maskHeight, maskRotation, maskFeather
+        /// Look keyframes: the finishing effects' amounts over time (`lookAt`).
+        case vignette, grain, leak
+        /// The colour properties, in the contract's order (COLOR_KF_PROPS).
+        public static let color: [KfProp] = [.exposure, .contrast, .saturation, .temperature, .tint]
+        public static let mask: [KfProp] = [.maskX, .maskY, .maskWidth, .maskHeight, .maskRotation, .maskFeather]
+        public static let look: [KfProp] = [.vignette, .grain, .leak]
+        public var isColor: Bool { KfProp.color.contains(self) }
+        public var isMask: Bool { KfProp.mask.contains(self) }
+        public var isLook: Bool { KfProp.look.contains(self) }
+    }
 
     public struct Keyframes: Codable, Hashable, Sendable {
         public var x: [Keyframe]?
@@ -27,6 +42,20 @@ extension EditV2 {
         public var rotation: [Keyframe]?
         public var opacity: [Keyframe]?
         public var volume: [Keyframe]?
+        public var exposure: [Keyframe]?
+        public var contrast: [Keyframe]?
+        public var saturation: [Keyframe]?
+        public var temperature: [Keyframe]?
+        public var tint: [Keyframe]?
+        public var maskX: [Keyframe]?
+        public var maskY: [Keyframe]?
+        public var maskWidth: [Keyframe]?
+        public var maskHeight: [Keyframe]?
+        public var maskRotation: [Keyframe]?
+        public var maskFeather: [Keyframe]?
+        public var vignette: [Keyframe]?
+        public var grain: [Keyframe]?
+        public var leak: [Keyframe]?
         public init(x: [Keyframe]? = nil, y: [Keyframe]? = nil, scale: [Keyframe]? = nil, rotation: [Keyframe]? = nil,
                     opacity: [Keyframe]? = nil, volume: [Keyframe]? = nil) {
             self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.opacity = opacity; self.volume = volume
@@ -40,6 +69,20 @@ extension EditV2 {
                 case .rotation: return rotation
                 case .opacity: return opacity
                 case .volume: return volume
+                case .exposure: return exposure
+                case .contrast: return contrast
+                case .saturation: return saturation
+                case .temperature: return temperature
+                case .tint: return tint
+                case .maskX: return maskX
+                case .maskY: return maskY
+                case .maskWidth: return maskWidth
+                case .maskHeight: return maskHeight
+                case .maskRotation: return maskRotation
+                case .maskFeather: return maskFeather
+                case .vignette: return vignette
+                case .grain: return grain
+                case .leak: return leak
                 }
             }
             set {
@@ -50,6 +93,20 @@ extension EditV2 {
                 case .rotation: rotation = newValue
                 case .opacity: opacity = newValue
                 case .volume: volume = newValue
+                case .exposure: exposure = newValue
+                case .contrast: contrast = newValue
+                case .saturation: saturation = newValue
+                case .temperature: temperature = newValue
+                case .tint: tint = newValue
+                case .maskX: maskX = newValue
+                case .maskY: maskY = newValue
+                case .maskWidth: maskWidth = newValue
+                case .maskHeight: maskHeight = newValue
+                case .maskRotation: maskRotation = newValue
+                case .maskFeather: maskFeather = newValue
+                case .vignette: vignette = newValue
+                case .grain: grain = newValue
+                case .leak: leak = newValue
                 }
             }
         }
@@ -97,10 +154,35 @@ extension EditV2 {
         /// Edit suite: tone after the colour matrix (`toneAdjust`), −1…1.
         public var highlights: Double?
         public var shadows: Double?
+        /// Parity: green (−1) ↔ magenta (+1), right after temperature in the colour matrix.
+        public var tint: Double?
         public init(exposure: Double? = nil, contrast: Double? = nil, saturation: Double? = nil, temperature: Double? = nil,
-                    highlights: Double? = nil, shadows: Double? = nil) {
+                    highlights: Double? = nil, shadows: Double? = nil, tint: Double? = nil) {
             self.exposure = exposure; self.contrast = contrast; self.saturation = saturation; self.temperature = temperature
-            self.highlights = highlights; self.shadows = shadows
+            self.highlights = highlights; self.shadows = shadows; self.tint = tint
+        }
+        /// A colour keyframe property's field (nil for the other KfProps).
+        public subscript(_ p: KfProp) -> Double? {
+            get {
+                switch p {
+                case .exposure: return exposure
+                case .contrast: return contrast
+                case .saturation: return saturation
+                case .temperature: return temperature
+                case .tint: return tint
+                default: return nil
+                }
+            }
+            set {
+                switch p {
+                case .exposure: exposure = newValue
+                case .contrast: contrast = newValue
+                case .saturation: saturation = newValue
+                case .temperature: temperature = newValue
+                case .tint: tint = newValue
+                default: break
+                }
+            }
         }
     }
 
@@ -268,6 +350,9 @@ extension EditV2 {
         public var holdSec: Double?
         /// Wave 1: overlay tracks only.
         public var blend: BlendMode?
+        /// In / out animation (as pictures: fade, pop, slideUp, slideDown, zoom), main or overlay; animState over clipLength.
+        public var animIn: Anim?
+        public var animOut: Anim?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,

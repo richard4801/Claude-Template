@@ -24,7 +24,66 @@ extension EditSuiteState {
         case .rotation: return tf.rotation ?? 0
         case .opacity: return v.opacity ?? 1
         case .volume: return 1
+        case .exposure, .contrast, .saturation, .temperature, .tint: return v.adjust?[prop] ?? 0
+        case .maskX: return v.mask?.x ?? 0.5
+        case .maskY: return v.mask?.y ?? 0.5
+        case .maskWidth: return v.mask?.width ?? 0.5
+        case .maskHeight: return v.mask?.height ?? 0.5
+        case .maskRotation: return v.mask?.rotation ?? 0
+        case .maskFeather: return v.mask?.feather ?? 0.1
+        case .vignette: return v.look?.vignette?.amount ?? 0
+        case .grain: return v.look?.grain?.amount ?? 0
+        case .leak: return v.look?.leak?.amount ?? 0
         }
+    }
+
+    /// The range a property's value is clamped to (the contract's keyframe ranges).
+    static func range(_ prop: E.KfProp) -> ClosedRange<Double> {
+        switch prop {
+        case .x, .y: return -2...3
+        case .scale: return 0.05...10
+        case .rotation: return -3600...3600
+        case .opacity: return 0...1
+        case .volume: return 0...2
+        case .exposure, .contrast, .saturation, .temperature, .tint, .vignette: return -1...1
+        case .maskX, .maskY: return -1...2
+        case .maskWidth, .maskHeight: return 0.01...3
+        case .maskRotation: return -360...360
+        case .maskFeather, .grain, .leak: return 0...1
+        }
+    }
+
+    /// Writes a property's static value (what it shows without keyframes); colour and look amounts of 0 are left out.
+    static func setStatic(_ v: inout EditSuite.Visual, _ prop: E.KfProp, _ raw: Double) {
+        let r = range(prop)
+        let value = E.r6(min(r.upperBound, max(r.lowerBound, raw)))
+        var tf = v.transform ?? E.Transform()
+        switch prop {
+        case .x: tf.x = value
+        case .y: tf.y = value
+        case .scale: tf.scale = value
+        case .rotation: tf.rotation = value
+        case .opacity: v.opacity = value
+        case .volume: break
+        case .exposure, .contrast, .saturation, .temperature, .tint:
+            var a = v.adjust ?? E.Adjust(); a[prop] = abs(value) < 0.005 ? nil : value; v.adjust = a == E.Adjust() ? nil : a
+        case .maskX: v.mask?.x = value
+        case .maskY: v.mask?.y = value
+        case .maskWidth: v.mask?.width = value
+        case .maskHeight: v.mask?.height = value
+        case .maskRotation: v.mask?.rotation = value
+        case .maskFeather: v.mask?.feather = value
+        case .vignette, .grain, .leak:
+            var l = v.look ?? E.Look()
+            let on = abs(value) > 0.0005
+            switch prop {
+            case .vignette: l.vignette = on ? E.Vignette(amount: value, size: l.vignette?.size, softness: l.vignette?.softness) : nil
+            case .grain: l.grain = on ? E.Grain(amount: value, size: l.grain?.size) : nil
+            default: l.leak = on ? E.Leak(kind: l.leak?.kind ?? .warm, amount: value, angle: l.leak?.angle) : nil
+            }
+            v.look = l == E.Look() ? nil : l
+        }
+        if [.x, .y, .scale, .rotation].contains(prop) { v.transform = tf }
     }
 
     /// The value a transform property has at the playhead: its keyframes there when it has any, else the static value.
@@ -39,19 +98,12 @@ extension EditSuiteState {
     @discardableResult
     public mutating func setVisualValue(_ prop: E.KfProp, _ value: Double) -> Bool {
         guard let v = selectedVisual, prop != .volume else { return false }
+        if (prop.isColor || prop.isLook || prop.isMask) && selectedItem?.textItem != nil { return false }
+        if prop.isMask && v.mask == nil { return false }
+        let r = Self.range(prop)
+        let value = (prop.isColor || prop.isMask || prop.isLook) ? E.r6(min(r.upperBound, max(r.lowerBound, value))) : value
         if let keys = v.keyframes?[prop], !keys.isEmpty { return addKeyframe(prop, value: value, ease: keys.first?.ease ?? .easeInOut) }
-        return changeVisual { vv in
-            var tf = vv.transform ?? E.Transform()
-            switch prop {
-            case .x: tf.x = E.r6(value)
-            case .y: tf.y = E.r6(value)
-            case .scale: tf.scale = E.r6(min(10, max(0.05, value)))
-            case .rotation: tf.rotation = E.r6(min(3600, max(-3600, value)))
-            case .opacity: vv.opacity = E.r6(min(1, max(0, value))); return
-            case .volume: return
-            }
-            vv.transform = tf
-        }
+        return changeVisual { Self.setStatic(&$0, prop, value) }
     }
 
     /// Whether the selected item has a key of `prop` at the playhead (within half a frame).
@@ -71,18 +123,7 @@ extension EditSuiteState {
             let left = list.filter { abs($0.t - t) > tol }
             guard left.count != list.count else { return }
             // The last key gone: its value becomes the static one, so the picture doesn't jump.
-            if left.isEmpty, let last = list.first(where: { abs($0.t - t) <= tol }) {
-                var tf = v.transform ?? E.Transform()
-                switch prop {
-                case .x: tf.x = last.v
-                case .y: tf.y = last.v
-                case .scale: tf.scale = last.v
-                case .rotation: tf.rotation = last.v
-                case .opacity: v.opacity = last.v
-                case .volume: break
-                }
-                if prop != .opacity && prop != .volume { v.transform = tf }
-            }
+            if left.isEmpty, let last = list.first(where: { abs($0.t - t) <= tol }) { Self.setStatic(&v, prop, last.v) }
             k[prop] = left.isEmpty ? nil : left
             v.keyframes = k.isEmpty ? nil : k
         }
@@ -421,5 +462,65 @@ extension EditSuiteState {
             default: break
             }
         }
+    }
+}
+
+// MARK: Overlay ⇄ main track (parity, as Android's SuiteOps.toMain / toOverlay)
+
+extension EditSuiteState {
+    /// Whether the selected clip can move to the other kind of track: an overlay clip to main, or a main clip (not the last
+    /// one) to an overlay track.
+    public var selectedTrackSwap: (toMain: Bool, possible: Bool)? {
+        guard let t = selectedTrack, selectedVideo != nil else { return nil }
+        if t.kind == .video { return (true, true) }
+        if t.kind == .main { return (false, t.items.count >= 2) }
+        return nil
+    }
+
+    /// "Move to main track": the overlay clip goes to the main-track clip boundary nearest where it starts, filling the frame
+    /// there (its overlay placing, keyframes, opacity, blend, mask, chroma key and cut-out are dropped; trim, speed, sound and
+    /// look stay). An overlay track left empty goes.
+    @discardableResult
+    public mutating func moveToMain() -> Bool {
+        guard let id = selection else { return false }
+        let ok = apply { p in
+            guard let (ti, ii) = p.locate(id), p.tracks[ti].kind == .video, case .video(var c) = p.tracks[ti].items[ii], let main = p.mainTrack else { return nil }
+            let tid = p.tracks[ti].id
+            let start = E.itemSpan(p, p.tracks[ti], p.tracks[ti].items[ii]).startSec
+            let bounds = [0.0] + E.timeline(p).map(\.endSec)
+            let at = bounds.indices.min { abs(bounds[$0] - start) < abs(bounds[$1] - start) } ?? bounds.count - 1
+            c.startSec = nil; c.fit = nil; c.transform = nil; c.keyframes = nil; c.opacity = nil; c.blend = nil
+            c.mask = nil; c.chroma = nil; c.alphaMatte = nil
+            guard var q = p.removing(id) else { return nil }
+            if q.track(tid)?.items.isEmpty == true { q = q.removingTrack(tid) ?? q }
+            return q.adding(.video(c), toTrack: main.id, index: at)
+        }
+        if ok { selection = id }
+        return ok
+    }
+
+    /// "Move to an overlay track": the main clip plays at the time it played (the main track closes the gap), full frame, on
+    /// the first overlay track it fits on, or a new one named "Overlay". The main track keeps at least one clip.
+    @discardableResult
+    public mutating func moveToOverlay() -> Bool {
+        guard let id = selection else { return false }
+        let ok = apply { p in
+            guard let (ti, ii) = p.locate(id), p.tracks[ti].kind == .main, p.tracks[ti].items.count >= 2,
+                  case .video(var c) = p.tracks[ti].items[ii] else { return nil }
+            let span = E.itemSpan(p, p.tracks[ti], p.tracks[ti].items[ii])
+            guard var q = p.removing(id) else { return nil }
+            c.startSec = E.r6(span.startSec)
+            c.transitionIn = nil
+            for t in q.tracks where t.kind == .video {
+                if let r = q.adding(.video(c), toTrack: t.id) { return r }
+            }
+            guard let r = q.addingTrack(.video, name: "Overlay") else { return nil }
+            q = r.project
+            return q.adding(.video(c), toTrack: r.trackId)
+        }
+        if ok { selection = id } else if selectedTrack?.kind == .main, (selectedTrack?.items.count ?? 0) < 2 {
+            refuse("The main track needs at least one clip")
+        }
+        return ok
     }
 }

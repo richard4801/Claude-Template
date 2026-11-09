@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import AppKit
 import MuseCore
 import Vision
@@ -42,6 +43,73 @@ enum EditSuiteMedia {
         let a = AVURLAsset(url: url)
         guard let d = try? await a.load(.duration).seconds, d.isFinite, d > 0 else { return [] }
         return await VideoEditEngine.thumbnails(a, duration: d, count: count, height: height).map(\.1)
+    }
+
+    /// A file's frame at source time `t`, small (at most `size` px), as straight sRGB r, g, b, … 0–1: what auto adjust reads.
+    static func frameRGB(_ url: URL, at t: Double, size: Int = 96) async -> [Double]? {
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: size, height: size)
+        gen.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 30)
+        gen.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 30)
+        guard let cg = try? await gen.image(at: CMTime(seconds: max(0, t), preferredTimescale: 600)).image else { return nil }
+        let w = max(1, cg.width), h = max(1, cg.height)
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var out = [Double](); out.reserveCapacity(w * h * 3)
+        for i in 0..<(w * h) { for c in 0..<3 { out.append(Double(px[i * 4 + c]) / 255) } }
+        return out
+    }
+
+    // MARK: The Mac's sound output (recording a voice-over over playback)
+
+    private static func outputProperty<T>(_ device: AudioObjectID, _ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope,
+                                          _ initial: T) -> T? {
+        var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var value = initial
+        var size = UInt32(MemoryLayout<T>.size)
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
+    private static var defaultOutput: AudioObjectID? {
+        outputProperty(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, scope: kAudioObjectPropertyScopeGlobal,
+                       AudioObjectID(0)).flatMap { $0 == 0 ? nil : $0 }
+    }
+
+    /// Whether the sound goes somewhere the microphone won't hear it: headphones, Bluetooth or USB (the design pass: playing
+    /// the video while recording is on by default only then).
+    static var outputIsPrivate: Bool {
+        guard let dev = defaultOutput else { return false }
+        let transport = outputProperty(dev, kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal, UInt32(0)) ?? 0
+        if [kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE, kAudioDeviceTransportTypeUSB].contains(transport) { return true }
+        // The built-in jack: its data source says headphones ('hdpn').
+        let source = outputProperty(dev, kAudioDevicePropertyDataSource, scope: kAudioDevicePropertyScopeOutput, UInt32(0)) ?? 0
+        return source == 0x6864_706E
+    }
+
+    /// How late the Mac's sound output plays what it's given, in seconds (device + safety offset + stream latency + one
+    /// buffer): a voice-over recorded over playback is shifted by this, so lips stay in sync on Bluetooth.
+    static var outputLatencySec: Double {
+        guard let dev = defaultOutput else { return 0 }
+        let rate = outputProperty(dev, kAudioDevicePropertyNominalSampleRate, scope: kAudioObjectPropertyScopeGlobal, Float64(0)) ?? 0
+        guard rate > 0 else { return 0 }
+        let out = kAudioDevicePropertyScopeOutput
+        var frames = Double(outputProperty(dev, kAudioDevicePropertyLatency, scope: out, UInt32(0)) ?? 0)
+        frames += Double(outputProperty(dev, kAudioDevicePropertySafetyOffset, scope: out, UInt32(0)) ?? 0)
+        frames += Double(outputProperty(dev, kAudioDevicePropertyBufferFrameSize, scope: out, UInt32(0)) ?? 0)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: out, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        if AudioObjectGetPropertyDataSize(dev, &addr, 0, nil, &size) == noErr, size >= UInt32(MemoryLayout<AudioStreamID>.size) {
+            var streams = [AudioStreamID](repeating: 0, count: Int(size) / MemoryLayout<AudioStreamID>.size)
+            if AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &streams) == noErr, let first = streams.first, first != 0 {
+                frames += Double(outputProperty(first, kAudioStreamPropertyLatency, scope: kAudioObjectPropertyScopeGlobal, UInt32(0)) ?? 0)
+            }
+        }
+        return min(0.5, frames / rate)
     }
 
     /// What the waveform asks the reader for: 16-bit little-endian interleaved PCM at the track's own sample rate and channel
@@ -120,5 +188,34 @@ enum EditSuiteMedia {
         let url = video.deletingPathExtension().appendingPathExtension("srt")
         try text.write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    /// The loudness of source seconds [a, b) of a file's sound: the RMS of the samples above the −50 dB gate, and the loudest
+    /// sample (0–1). Nil when it's silent or has no sound. For evening clips out against each other.
+    static func level(_ url: URL, from a: Double, to b: Double) async -> (rms: Double, peak: Double)? {
+        await Task.detached(priority: .utility) { () -> (rms: Double, peak: Double)? in
+            let asset = AVURLAsset(url: url)
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first, let reader = try? AVAssetReader(asset: asset) else { return nil }
+            reader.timeRange = CMTimeRange(start: CMTime(seconds: max(0, a), preferredTimescale: 600), end: CMTime(seconds: max(a + 0.01, b), preferredTimescale: 600))
+            let out = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32,
+                                                                               AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false,
+                                                                               AVLinearPCMIsBigEndianKey: false])
+            guard reader.canAdd(out) else { return nil }
+            reader.add(out)
+            guard reader.startReading() else { return nil }
+            var sum = 0.0, n = 0, peak = 0.0
+            while let sb = out.copyNextSampleBuffer() {
+                guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+                let len = CMBlockBufferGetDataLength(bb)
+                var data = [Float](repeating: 0, count: len / 4)
+                _ = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: $0.baseAddress!) }
+                for v in data {
+                    let x = Double(abs(v))
+                    if x > peak { peak = x }
+                    if x > 0.00316 { sum += x * x; n += 1 }
+                }
+            }
+            return n > 0 ? ((sum / Double(n)).squareRoot(), peak) : nil
+        }.value
     }
 }
