@@ -2,6 +2,8 @@
 
 Goal: Claude must not miss fast actions when studying a video in Edit (and generally).
 
+## Decision (owner, Nov 9): on-demand, two stages. Stage 1 = items 1-3 (free). Stage 2 = item 4 only if Stage 1 still misses, run only when Claude is asked to study a clip, cached per clip. Any length: short clips full treatment; long videos overview first, then flip book on chosen parts. Starts after the Owner-bugs-first list.
+
 ## Plan, in order
 1. **Motion-aware frame picking (free).** Server measures change between every frame
    (ffmpeg scene/motion score). Quiet stretches get few frames; fast stretches get every frame.
