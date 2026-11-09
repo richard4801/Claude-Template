@@ -24,6 +24,7 @@ import { STABILIZE_LIMITS, smoothingOf, stabilizeVideo, vidstabAvailable } from 
 import { TRANSLATE_LANGUAGES, TRANSLATE_LIMITS, TRANSLATE_MODELS, TranslateError, captionLines, expectedTokens, translateAppLines, translateClient, translateUsd, translateWords, type AppLine, type Quality, type TranslateClient } from './translate.js';
 import { FalProvider } from '../suite/providers.js';
 import { SLOWMO_LIMITS, SLOWMO_MODEL, cutRange, falInterpolate, retime, slowmoComputeSec, slowmoUsd, type SlowmoFactor } from './slowmo.js';
+import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
@@ -129,7 +130,7 @@ export class EditorAiService {
   private stopping = new Set<string>();
   private running = 0;
   private waiting: (() => void)[] = [];
-  constructor(private ctx: Ctx, provider?: EditorProvider) { this.provider = provider ?? makeProvider(ctx); this.fal = new FalProvider(ctx); }
+  constructor(private ctx: Ctx, provider?: EditorProvider) { this.provider = provider ?? makeProvider(ctx); this.fal = new FalProvider(ctx); this.assembly = new AssemblyAI(ctx.config.ASSEMBLYAI_API_KEY, ctx.config.ASSEMBLYAI_API_URL, fetch, ctx.log); }
 
   // ------------------------------------------------------------------ views and events
   view(r: Row, role: 'owner' | 'member') {
@@ -215,6 +216,7 @@ export class EditorAiService {
       if (!purpose) throw badRequest(`engineModel: ${kind} runs no model`);
       await (await import('../engines/service.js')).modelChoice(this.ctx).check(u, purpose, body.engineModel);
     }
+    const requested = typeof body?.engineModel === 'string' ? body.engineModel : null;
     const src = await this.source(u, body?.source);
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
@@ -248,9 +250,14 @@ export class EditorAiService {
     }
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
-    let usd = 0;
+    let usd = 0, transcriber: string | null = null;
     if (silenceOnly) usd = 0;
-    else if (kind === 'captions' || kind === 'cuts') usd = reuse ? 0 : GPU_SEC.transcribe(d) * p.rates.transcribe;
+    else if (kind === 'captions' || kind === 'cuts') {
+      if (!reuse) {
+        transcriber = await this.transcriber(u, requested);
+        usd = transcriber === ASSEMBLY_MODEL ? d * ASSEMBLY_MAX_RATE : GPU_SEC.transcribe(d) * p.rates.transcribe;
+      }
+    }
     else if (kind === 'matte' && opts.points) {
       if (opts.points.some(q => q.t > d)) throw badRequest(`options.points: t must be within the clip (0–${d} s)`);
       usd = GPU_SEC.track(d) * p.rates.track;
@@ -258,7 +265,7 @@ export class EditorAiService {
     else if (!opts.analyzeOnly) usd = GPU_SEC.separate(d) * p.rates.separate;
     // workstream 1: the price is the provider's cost x EDITOR_MARKUP (the owner's choice: x 2, like Upscale).
     usd = usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0;
-    return { kind, opts, src, reuse, usd };
+    return { kind, opts, src, reuse, usd, transcriber };
   }
 
   // ------------------------------------------------------------------ jobs
@@ -266,7 +273,7 @@ export class EditorAiService {
     const e = await this.estimate(u, body);
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [this.provider.models.transcribe];
+    const models = e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     try {
@@ -314,6 +321,17 @@ export class EditorAiService {
     const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'slowmo'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20);
     return prev.find(r => { const p = r.options as JobOptions; return p.factor === o.factor && p.startSec === o.startSec && p.endSec === o.endSec && !!r.result; }) ?? null;
   }
+  /** AssemblyAI (captions and cuts) with the server's key. */
+  readonly assembly: AssemblyAI;
+  /**
+   * The transcriber for captions and cuts: the owner's pick (request, else the studio default for captions), else
+   * AssemblyAI when its key is set, else the Replicate model.
+   */
+  private async transcriber(u: AuthUser, requested: string | null): Promise<string> {
+    const c = await (await import('../engines/service.js')).modelChoice(this.ctx).choose(u, 'captions', requested);
+    if (c && (c.model !== ASSEMBLY_MODEL || this.assembly.configured())) return c.model;
+    return this.assembly.configured() ? ASSEMBLY_MODEL : this.provider.models.transcribe;
+  }
   private vidstab: Promise<boolean> | null = null;
   /** Whether this server's ffmpeg can stabilise (checked once). */
   stabilizeAvailable() { return (this.vidstab ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH).then(ok => ok && vidstabAvailable(this.ctx.config.FFMPEG_PATH))); }
@@ -336,6 +354,11 @@ export class EditorAiService {
       let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0, spentUsd: number | null = null;
       const transcript = async () => {
         if (reuse) return reuse;
+        if (row.models[0] === ASSEMBLY_MODEL) {
+          const t = await this.assembly.transcribe(url, d, o.language ?? null, hooks);
+          spentUsd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(t.usd * this.markup * 10000) / 10000);
+          return t;
+        }
         const t = await p.transcribe(url, d, o.language ?? null, hooks);
         gpuSec = t.gpuSec; rate = p.rates.transcribe;
         return t;
