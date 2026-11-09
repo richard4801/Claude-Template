@@ -19,6 +19,7 @@ import { FILTERS } from './presets.js';
 import * as M from './model.js';
 import { hash01 } from './look.js';
 import { voiceChain } from './audio.js';
+import * as TD from './textdraw.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -166,7 +167,8 @@ export type RenderOptions = {
   durationSec?: number;
   quality?: 'preview' | 'export';
 };
-export type RenderPlan = { args: string[]; durationSec: number; width: number; height: number; unsupported: string[]; temp: string[] };
+/** stills: text frames (SVG) and sprites: their shadows, drawn to PNG (renderProject) before ffmpeg runs; temp: files and folders to remove after. */
+export type RenderPlan = { args: string[]; durationSec: number; width: number; height: number; unsupported: string[]; temp: string[]; stills: { file: string; svg: string; crop: TD.Crop }[]; sprites: TD.Sprite[] };
 
 /**
  * The ffmpeg arguments for a project. `files` maps asset ids to local files or URLs; `sizes` gives each video asset's
@@ -177,7 +179,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   const temp: string[] = [];
   const f = Math.min(1, (o.maxSide ?? Math.max(p.canvas.width, p.canvas.height)) / Math.max(p.canvas.width, p.canvas.height));
   const W = even(p.canvas.width * f), H = even(p.canvas.height * f), FPS = Math.min(o.fps ?? p.canvas.fps ?? 30, 60);
-  const inputs: string[] = [], index = new Map<string, number>();
+  const inputs: string[] = [], index = new Map<string, number>(), inputArgs = new Map<number, string[]>();
   const input = (file: string) => { let i = index.get(file); if (i === undefined) { i = inputs.length; inputs.push(file); index.set(file, i); } return i; };
   const g: string[] = [];
   const main = M.mainTrack(p), clips = main.items as M.VideoClip[], tl = M.timeline(p);
@@ -261,41 +263,69 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     g.push(`[${acc}]${st.join(',')},format=yuv420p[adj]`);
     acc = 'adj';
   }
-  // Text items: one drawtext per line (centred by its own width; works on ffmpeg 5.1).
-  let vlast = acc, ti = 0;
+  g.push(`[${acc}]tpad=stop_mode=clone:stop_duration=${n4(Math.max(0, total))},trim=duration=${n4(total)},setpts=PTS-STARTPTS,format=yuv420p[vpad]`);
+  // Text and captions, above every picture (textdraw.ts): the whole canvas's text as one RGBA picture per change of
+  // what shows, as a still sequence (ffconcat) overlaid once. Static stretches are one still; moving ones one a frame.
+  const pieces: ((t: number) => TD.Piece | null)[] = [];
+  const pages = M.captionPages(p);
   for (const tr of p.tracks) {
     if (tr.hidden) continue;
-    if (tr.kind === 'caption') { if (tr.items.length || tr.caption) unsupported.add('captions'); continue; }
     if (tr.kind === 'video' || tr.kind === 'image') { if (tr.items.length) unsupported.add('overlays'); continue; }
-    if (tr.kind === 'adjust') continue; // drawn above
+    if (tr.kind === 'caption' && tr.caption) {
+      const ct = tr.caption, font = fontFile(ct.style.font, ct.style.weight);
+      if (pages.length) pieces.push(t => TD.captionPiece(ct, pages, t, font));
+    }
     if (tr.kind !== 'text') continue;
     for (const it of tr.items as M.TextItem[]) {
-      const st = it.style, px = Math.max(6, st.sizePct * H);
       // An own font draws from its downloaded file; without one (not fetched) the fallback family stands in.
-      const ownFont = (s: M.TextStyle) => {
-        const f = s.fontAsset ? files[s.fontAsset] : undefined;
-        if (s.fontAsset && (!f || /^https?:/.test(f))) unsupported.add('own fonts');
-        return f && !/^https?:/.test(f) ? f : fontFile(s.font, s.weight);
-      };
-      if (it.animIn && it.animIn.kind !== 'none' || it.animOut && it.animOut.kind !== 'none' || it.keyframes || it.animLoop) unsupported.add('text animation');
-      if (st.shadow || st.background || st.letterSpacing) unsupported.add('text styling (shadow, box, letter spacing)');
-      if ((it.transform?.scale ?? 1) !== 1 || it.transform?.rotation || it.transform?.flipX || it.transform?.flipY) unsupported.add('text scale and rotation');
-      const lines = wrap(st.uppercase ? it.text.toUpperCase() : it.text, px, (st.maxWidthPct ?? 0.9) * W);
-      const lh = px * (st.lineHeight ?? 1.15), cx = (it.transform?.x ?? 0.5) * W, cy = (it.transform?.y ?? 0.5) * H;
-      lines.forEach((line, li) => {
-        const file = path.join(os.tmpdir(), `muse-text-${process.pid}-${Date.now()}-${ti}-${li}.txt`);
-        fs.writeFileSync(file, line); temp.push(file);
-        const y = cy - (lines.length * lh) / 2 + li * lh;
-        const x = st.align === 'left' ? `${n4(cx - ((st.maxWidthPct ?? 0.9) * W) / 2)}` : st.align === 'right' ? `${n4(cx + ((st.maxWidthPct ?? 0.9) * W) / 2)}-text_w` : `${n4(cx)}-text_w/2`;
-        const stroke = st.stroke ? `:borderw=${n4(Math.max(1, st.stroke.widthPct * px))}:bordercolor=${color(st.stroke.color)}` : '';
-        const next = `t${ti}_${li}`;
-        g.push(`[${vlast}]drawtext=fontfile='${ownFont(st).replace(/:/g, '\\:')}':textfile='${file.replace(/:/g, '\\:')}':fontsize=${n4(px)}:fontcolor=${color(st.color, it.opacity ?? 1)}${stroke}:x='${x}':y=${n4(y)}:enable='between(t,${n4(it.startSec)},${n4(it.startSec + it.durationSec)})'[${next}]`);
-        vlast = next;
-      });
-      ti++;
+      const own = it.style.fontAsset ? files[it.style.fontAsset] : undefined;
+      if (it.style.fontAsset && (!own || /^https?:/.test(own) || !TD.face(own))) unsupported.add('own fonts');
+      const font = own && !/^https?:/.test(own) && TD.face(own) ? own : fontFile(it.style.font, it.style.weight);
+      pieces.push(t => TD.textPiece(it, t, font));
     }
   }
-  g.push(`[${vlast}]tpad=stop_mode=clone:stop_duration=${n4(Math.max(0, total))},trim=duration=${n4(total)},setpts=PTS-STARTPTS,format=yuv420p[vout]`);
+  let vlast = 'vpad';
+  const stills: RenderPlan['stills'] = [], sprites: TD.Sprite[] = [];
+  if (pieces.length) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-text-'));
+    temp.push(dir);
+    const missing = new Set<string>();
+    const byKey = new Map<string, number>(), frames: TD.Frame[] = [], spriteMap = new Map<string, TD.Sprite>();
+    const seq: { still: number; frames: number }[] = []; // still −1: nothing shows
+    const nFrames = Math.max(1, Math.round(total * FPS));
+    for (let fi = 0; fi < nFrames; fi++) {
+      const shown = pieces.map(f => f(fi / FPS)).filter((x): x is TD.Piece => !!x);
+      const key = shown.length ? JSON.stringify(shown) : '';
+      let k = key ? byKey.get(key) : -1;
+      if (k === undefined) {
+        const fr = TD.frameBody(shown, W, H, missing, spriteMap);
+        k = fr ? frames.push(fr) - 1 : -1;
+        byKey.set(key, k);
+      }
+      const last = seq.at(-1);
+      if (last && last.still === k) last.frames++; else seq.push({ still: k, frames: 1 });
+    }
+    if (missing.delete(TD.EMOJI)) unsupported.add('colour emoji (drawn in the text colour)');
+    if (missing.size) unsupported.add(`letters no font on the server has (${[...missing].slice(0, 8).join(' ')})`);
+    if (frames.length) {
+      // Every still is cropped to the box all the text ever paints (smaller stills are much cheaper to draw and read).
+      const x0 = Math.max(0, Math.floor(Math.min(...frames.map(f => f.box[0])) / 2) * 2), y0 = Math.max(0, Math.floor(Math.min(...frames.map(f => f.box[1])) / 2) * 2);
+      const x1 = Math.min(W, Math.ceil(Math.max(...frames.map(f => f.box[2])))), y1 = Math.min(H, Math.ceil(Math.max(...frames.map(f => f.box[3]))));
+      if (x1 > x0 && y1 > y0) {
+        const crop: TD.Crop = [x0, y0, even(x1 - x0), even(y1 - y0)];
+        const file = (k: number) => path.join(dir, k < 0 ? 'empty.png' : `s${k}.png`);
+        stills.push({ file: file(-1), svg: '', crop }, ...frames.map((f, k) => ({ file: file(k), svg: f.svg, crop })));
+        sprites.push(...spriteMap.values());
+        const list = path.join(dir, 'text.ffconcat');
+        fs.writeFileSync(list, ['ffconcat version 1.0', ...seq.flatMap(x => [`file '${file(x.still)}'`, `duration ${n6(x.frames / FPS)}`]), `file '${file(seq.at(-1)!.still)}'`].join('\n') + '\n');
+        const k = input(list);
+        inputArgs.set(k, ['-threads', '1', '-f', 'concat', '-safe', '0']);
+        g.push(`[${k}:v]format=rgba[txt]`, `[vpad][txt]overlay=${x0}:${y0}:format=auto:eof_action=repeat[vtxt]`);
+        vlast = 'vtxt';
+      }
+    }
+  }
+  g.push(`[${vlast}]format=yuv420p[vout]`);
 
   // Sound.
   const amix: string[] = [];
@@ -344,9 +374,9 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   if (amix.length) g.push(`${amix.map(x => `[${x}]`).join('')}amix=inputs=${amix.length}:normalize=0:duration=longest,apad,atrim=0:${n4(total)}[aout]`);
 
   const q = o.quality === 'export' ? ['-preset', 'veryfast', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
-  const args = ['-y', '-v', 'error', ...inputs.flatMap(x => ['-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]', ...(amix.length ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '128k'] : []),
+  const args = ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]', ...(amix.length ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '128k'] : []),
     '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-movflags', '+faststart', '-threads', '2', '-t', n4(total), out];
-  return { args, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp };
+  return { args, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp, stills, sprites };
 }
 
 /**
@@ -401,8 +431,10 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
   }
   const plan = planRender(p, files, sizes, out, o);
   try {
+    const sprites = await TD.drawSprites(plan.sprites);
+    for (const st of plan.stills) await TD.rasterize(st.svg, st.crop, st.file, sprites);
     await new Promise<void>((resolve, reject) => execFile(cfg.ffmpeg, plan.args, { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 },
       (err, _o, e) => (err ? reject(new Error(`render failed: ${String(e ?? err.message).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`)) : resolve())));
-  } finally { for (const t of plan.temp) fs.rmSync(t, { force: true }); }
+  } finally { for (const t of plan.temp) fs.rmSync(t, { force: true, recursive: true }); }
   return { durationSec: plan.durationSec, width: plan.width, height: plan.height, unsupported: plan.unsupported };
 }

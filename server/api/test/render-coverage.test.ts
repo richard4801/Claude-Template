@@ -7,6 +7,7 @@ import type { Look } from '../src/editor/look.js';
 import * as M from '../src/editor/model.js';
 import { planRender } from '../src/editor/render.js';
 import fs from 'node:fs';
+import path from 'node:path';
 
 type Obj = Record<string, unknown>;
 /** A probe: `prep` sets up both projects (e.g. gives the clip a mask), `mut` then sets the field on one of them. */
@@ -48,10 +49,13 @@ const sizes = { a: { width: 800, height: 1280, hasAudio: true }, b: { width: 128
 
 function plan(p: M.EditProject) {
   const r = planRender(p, files, sizes, '/x/out.mp4', { maxSide: 640 });
-  // Text goes to temporary files: their contents are part of the plan, their names are not.
-  const texts = r.temp.map(t => fs.existsSync(t) ? fs.readFileSync(t, 'utf8') : '');
-  for (const t of r.temp) fs.rmSync(t, { force: true });
-  return { args: JSON.stringify(r.args).replace(/muse-[a-z]+-[^'"]*?\.(txt|png|ass)/g, 'TEMP') + JSON.stringify(texts), unsupported: new Set(r.unsupported) };
+  // Text is drawn from stills (SVG) listed in a temporary folder: their content and timing are part of the plan, the
+  // folder's name is not.
+  const list = r.temp.map(t => path.join(t, 'text.ffconcat')).find(f => fs.existsSync(f));
+  const texts = [list ? fs.readFileSync(list, 'utf8') : '', ...r.stills.map(x => JSON.stringify([x.svg, x.crop])), JSON.stringify(r.sprites)].join('\n');
+  for (const t of r.temp) fs.rmSync(t, { force: true, recursive: true });
+  const tmp = (x: string) => x.replace(/muse-text-[^/'"\\]+/g, 'TEMP');
+  return { args: tmp(JSON.stringify(r.args)) + tmp(texts), unsupported: new Set(r.unsupported) };
 }
 
 // ------------------------------------------------------------------ the model's shapes
@@ -129,7 +133,9 @@ const imageFields = { startSec: imageKeys.startSec, durationSec: imageKeys.durat
 
 const styleKeys = (k: string): Table<M.TextStyle> => {
   const s = (f: string, v: unknown): Probe => ({ mut: o => { (o[k] as Obj)[f] = v; } });
-  return { font: s('font', 'serif'), weight: s('weight', 900), sizePct: s('sizePct', 0.1), color: s('color', '#FF0000'), align: s('align', 'left'), maxWidthPct: s('maxWidthPct', 0.3),
+  // Alignment shows only between lines of different lengths (the block is centred on the item).
+  const narrow = (o: Obj) => { (o[k] as Obj).maxWidthPct = 0.12; };
+  return { font: s('font', 'serif'), weight: s('weight', 900), sizePct: s('sizePct', 0.1), color: s('color', '#FF0000'), align: { prep: narrow, mut: o => { (o[k] as Obj).align = 'left'; } }, maxWidthPct: s('maxWidthPct', 0.3),
     lineHeight: s('lineHeight', 1.8), letterSpacing: s('letterSpacing', 0.2), uppercase: s('uppercase', true), stroke: s('stroke', { color: '#000000', widthPct: 0.1 }),
     shadow: s('shadow', { color: '#000000', opacity: 0.6, blurPct: 0.2, dyPct: 0.1 }), background: s('background', { color: '#000000', opacity: 0.6, paddingPct: 0.2, radiusPct: 0.3 }),
     fontAsset: s('fontAsset', 'font') };
@@ -154,10 +160,11 @@ const textFields = { startSec: textKeys.startSec, durationSec: textKeys.duration
 
 const captionStyleKeys: Table<Omit<M.CaptionStyle, keyof M.TextStyle>> = { preset: { mut: o => { (o.style as Obj).preset = 'karaoke'; } },
   highlightColor: { prep: o => { (o.style as Obj).preset = 'karaoke'; }, mut: o => { (o.style as Obj).highlightColor = '#00FF00'; } },
-  y: { mut: o => { (o.style as Obj).y = 0.3; } }, wordsPerPage: { mut: o => { (o.style as Obj).wordsPerPage = 1; } }, maxLines: { mut: o => { (o.style as Obj).maxLines = 2; } } };
+  y: { mut: o => { (o.style as Obj).y = 0.3; } }, wordsPerPage: { mut: o => { (o.style as Obj).wordsPerPage = 1; } },
+  maxLines: { prep: o => { (o.style as Obj).maxWidthPct = 0.1; }, mut: o => { (o.style as Obj).maxLines = 1; } } };
 const captionKeys: Table<M.CaptionTrack> = { asset: set('asset', 'b'), words: set('words', [{ text: 'hey', startSec: 0.2, endSec: 0.9 }]), style: nested };
 const wordKeys: Table<M.CaptionWord> = { text: { mut: o => { (o.words as Obj[])[0]!.text = 'uno'; } }, startSec: { mut: o => { (o.words as Obj[])[0]!.startSec = 0.2; } },
-  endSec: { mut: o => { (o.words as Obj[])[0]!.endSec = 0.45; } } };
+  endSec: { mut: o => { (o.words as Obj[])[2]!.endSec = 1.5; } } }; // the page's tail
 const captionFields = { asset: captionKeys.asset, words: captionKeys.words, ...nest('word', wordKeys),
   ...nest('style', Object.fromEntries(Object.entries({ ...styleKeys('style'), ...styleParts('style') }).filter(([k]) => k !== 'fontAsset'))), ...nest('style', captionStyleKeys) };
 
