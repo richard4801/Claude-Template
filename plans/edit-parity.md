@@ -44,7 +44,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | **Freeze frame** | Has | Has | M | A still item from the current frame. Android: `holdSec` hold clip; Edit → Freeze frame, length by slider or edges (wave 1). Mac: Timeline → Freeze frame at the playhead; length in Speed, or drag its edges (wave 1). |
 | **Reverse** | Missing | Missing | L | Needs a reversed proxy render on the device |
 | Slip edit | Has | Missing | S | `trimClip` both ends at once. Android: Edit → Slip slider. |
-| Snapping (to the playhead, edges, beats) | Partial | Partial | S | Beats only. Mac: Beats only |
+| Snapping (to the playhead, edges, beats) | Has | Partial | S | Beats only. Mac: Beats only. Android: moving and trimming snap to the playhead, other items' edges and beats (within 10 dp). |
 | Timeline zoom (pinch) | Has | Has | — | 8–480 dp/s. Mac: Slider and ± buttons, 12–400 pt/s |
 | Frame-by-frame stepping buttons | Has | Has | S | Scrub is frame-exact; ±1 frame buttons would help. Mac: ← / → keys and ‹ › in the transport (wave 1). Android: ◀ ▶ in the transport (wave 1). |
 | Crop / rotate | Has | Has | — | Crop added in WS8. Mac: Crop section added in WS9 |
@@ -93,7 +93,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Keyframed text | Has | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet. Android: The Transform panel acts on the selected text (wave 1 fixed it moving the clip). |
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |
-| Caption language choice | Missing | Missing | S | Server parameter |
+| Caption language choice | Has | Missing | S | Server parameter. Android: Captions → Spoken language (Detect or one of 14), sent as the job's `options.language`. |
 | Translated / bilingual captions | Missing | Partial | M | Server job (LLM). Mac: Translate on the Mac (macOS 15, on-device, WS9); not bilingual |
 | Edit caption text (fix a word) | Has | Has | S | You can cut words but not retype them. Mac: Double-click a word. Android: Captions → Words → Tap to fix text. |
 | Filler and silence removal, edit by transcript | Has | Has | — | |

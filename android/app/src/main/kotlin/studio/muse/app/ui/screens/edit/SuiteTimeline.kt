@@ -315,7 +315,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                                 when (mode) {
                                     Mode.SCRUB -> { send(TimelineMath.dragged(view.doubleValue, d.x, px, dur), false); ch.consume() }
                                     Mode.VSCROLL -> { vScroll.floatValue = (vScroll.floatValue - d.y / density).coerceIn(0f, max(0f, contentH - visibleH / density)); ch.consume() }
-                                    Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = false)); ch.consume() }
+                                    Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = false, snapSec = 10.0 / pps.floatValue)); ch.consume() }
                                     Mode.KEY -> { actNow(EditAction.MoveKey(selId!!, pendingKey!!, totalX / px.toDouble(), done = false)); ch.consume() }
                                     Mode.MOVE -> {
                                         val item = hit.item!!
@@ -334,7 +334,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val totalX = last.x - down.position.x
                             when (mode) {
                                 Mode.PINCH -> { actNow(EditAction.Zoom(pps.floatValue)); send(view.doubleValue, true); busy.value = false }
-                                Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = true)); busy.value = false }
+                                Mode.TRIM_LEFT, Mode.TRIM_RIGHT -> { actNow(EditAction.TrimBy(selId!!, mode == Mode.TRIM_LEFT, totalX / px.toDouble(), done = true, snapSec = 10.0 / pps.floatValue)); busy.value = false }
                                 Mode.KEY -> { actNow(EditAction.MoveKey(selId!!, pendingKey!!, totalX / px.toDouble(), done = true)); busy.value = false }
                                 Mode.MOVE -> {
                                     val item = hit.item!!

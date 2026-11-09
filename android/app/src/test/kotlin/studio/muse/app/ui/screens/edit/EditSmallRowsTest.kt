@@ -309,4 +309,26 @@ class EditSmallRowsTest {
         c.act(EditAction.Undo); assertNull(c.p().mainClips[0].adjust)
         assertEquals("Colour, transition, background", KitChoice("k1", "Warm", kit).parts)
     }
+
+    @Test fun captionLanguageAndTrimSnapping() = runTest {
+        val sent = ArrayList<JsonObject?>()
+        val c = EditSuiteController(this, object : EditBackend {
+            override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?) = EditorEstimate(kind, 0.02) to null
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
+                if (kind == "captions") sent += options
+                return FakeEditorResults.result(kind, source.durationSec ?: 15.0, "j", options) to null
+            }
+        }).also { it.load(EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true)), "T", "take_1", null, false) }
+        c.act(EditAction.CaptionLanguage("es")); c.act(EditAction.AutoCaptions); advanceUntilIdle()
+        assertEquals("\"es\"", sent.single()!!["language"].toString())
+        c.act(EditAction.CaptionLanguage(null)); c.act(EditAction.AutoCaptions); advanceUntilIdle()
+        assertNull(sent.last())
+        // Trimming snaps the dragged edge to the playhead within the snap distance.
+        c.act(EditAction.Scrub(6.0, end = true)); c.act(EditAction.Split)
+        c.act(EditAction.Scrub(3.0, end = true))
+        val first = c.p().mainClips[0].id
+        c.act(EditAction.TrimBy(first, left = false, deltaSec = -2.9, snapSec = 0.2))
+        assertEquals(3.0, studio.muse.core.edit.timeline(c.p())[0].endSec, 1e-6)
+        valid(c.p())
+    }
 }

@@ -130,6 +130,8 @@ data class EditSuiteUi(
     /** Saved style kits (/v1/editor/kits), newest first; [kitsNote] when the server can't keep them. */
     val kits: List<KitChoice> = emptyList(),
     val kitsNote: String? = null,
+    /** Auto-captions' spoken language: a two-letter code, or null for automatic detection. */
+    val captionLanguage: String? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     /** The item the edit tools act on (a main clip by default: the one under the playhead). */

@@ -107,7 +107,8 @@ sealed interface EditAction {
     /** Long-press drag of a main clip: it goes to position [toIndex]. */
     data class Reorder(val clipId: String, val toIndex: Int, val done: Boolean = true) : EditAction
     /** Dragging a selected item's [left] or right edge by [deltaSec] from where the drag began. */
-    data class TrimBy(val itemId: String, val left: Boolean, val deltaSec: Double, val done: Boolean = true) : EditAction
+    /** [snapSec] > 0: the moved edge snaps to the playhead, other items' edges and beats within that distance. */
+    data class TrimBy(val itemId: String, val left: Boolean, val deltaSec: Double, val done: Boolean = true, val snapSec: Double = 0.0) : EditAction
     /** Dragging a selected main clip's edge: its new source in/out ([done] when the finger lifts: one undo step). */
     data class Trim(val clipId: String, val inSec: Double, val outSec: Double, val done: Boolean = true) : EditAction
     data class Zoom(val pxPerSec: Float) : EditAction
@@ -251,6 +252,8 @@ sealed interface EditAction {
     data object CutToBeats : EditAction
     /** Spoken clips evened out to one level ([SuiteOps.evenVolume]) from the decoded sound levels. */
     data class EvenVolume(val waves: Map<String, Peaks>) : EditAction
+    /** Auto-captions' language (null: detect it). */
+    data class CaptionLanguage(val code: String?) : EditAction
     /** A saved style kit applied to the whole edit ([studio.muse.core.edit.applyKit]). */
     data class ApplyKit(val kit: KitChoice) : EditAction
     /** The selected clip moved between the main track and an overlay track (plans/edit-parity.md, S). */
@@ -465,7 +468,15 @@ class EditSuiteController(
                 if (next == null) { if (a.done) endDrag() } else change(a.done) { next }
             }
             is EditAction.TrimBy -> {
-                val next = SuiteOps.trimBy(dragBase ?: project ?: return, a.itemId, a.left, a.deltaSec)
+                val base = dragBase ?: project ?: return
+                var delta = a.deltaSec
+                if (a.snapSec > 0) base.locate(a.itemId)?.let { (t, i) ->
+                    val sp = itemSpan(base, t, t.items[i])
+                    val edge = (if (a.left) sp.startSec else sp.endSec) + delta
+                    snapPoints(base, a.itemId, u).minByOrNull { kotlin.math.abs(it - edge) }?.takeIf { kotlin.math.abs(it - edge) <= a.snapSec }
+                        ?.let { s -> delta = s - (if (a.left) sp.startSec else sp.endSec) }
+                }
+                val next = SuiteOps.trimBy(base, a.itemId, a.left, delta)
                 if (next == null) { if (a.done) endDrag() } else change(a.done, "That doesn't fit there") { next }
             }
             is EditAction.Trim -> {
@@ -799,6 +810,7 @@ class EditSuiteController(
                 if (change(refused = "Nothing to even out · it needs two or more clips with sound") { p -> SuiteOps.evenVolume(p, a.waves)?.let { (q, k) -> n = k; q } })
                     say(if (n == 1) "Volume evened out on 1 clip" else "Volume evened out on $n clips")
             }
+            is EditAction.CaptionLanguage -> _ui.update { it.copy(captionLanguage = a.code) }
             is EditAction.ApplyKit -> if (change(refused = "That style kit doesn't fit this edit") { p -> studio.muse.core.edit.applyKit(p, a.kit.kit).takeIf { it != p } })
                 say("Applied “${a.kit.name}”") else if (project != null) say("This edit already has that style")
             EditAction.SwapTrack -> {
@@ -932,7 +944,8 @@ class EditSuiteController(
     private fun autoCaptions() {
         val p = project ?: return
         val asset = SuiteOps.sourceAsset(p) ?: return
-        runAi("captions", null, sourceOf(asset)) { r ->
+        val lang = _ui.value.captionLanguage?.let { kotlinx.serialization.json.buildJsonObject { put("language", kotlinx.serialization.json.JsonPrimitive(it)) } }
+        runAi("captions", lang, sourceOf(asset)) { r ->
             val words = (r["words"] as? JsonArray).orEmpty().mapNotNull { w ->
                 val o = w as? JsonObject ?: return@mapNotNull null
                 val text = (o["text"] as? JsonPrimitive)?.content?.trim()?.take(60)?.ifEmpty { null } ?: return@mapNotNull null

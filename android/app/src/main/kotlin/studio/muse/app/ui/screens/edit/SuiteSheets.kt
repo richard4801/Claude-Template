@@ -3,6 +3,7 @@ package studio.muse.app.ui.screens.edit
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -165,6 +166,10 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
 private val BLENDS = listOf(studio.muse.core.edit.BlendMode.NORMAL to "Normal", studio.muse.core.edit.BlendMode.MULTIPLY to "Multiply", studio.muse.core.edit.BlendMode.SCREEN to "Screen",
     studio.muse.core.edit.BlendMode.OVERLAY to "Overlay", studio.muse.core.edit.BlendMode.SOFT_LIGHT to "Soft light", studio.muse.core.edit.BlendMode.DARKEN to "Darken",
     studio.muse.core.edit.BlendMode.LIGHTEN to "Lighten", studio.muse.core.edit.BlendMode.ADD to "Add")
+
+/** Auto-captions' language choices (ISO 639-1; "auto" lets the transcriber detect it). */
+private val CAPTION_LANGUAGES = listOf("auto" to "Detect", "en" to "English", "es" to "Spanish", "pt" to "Portuguese", "fr" to "French", "de" to "German",
+    "it" to "Italian", "ru" to "Russian", "uk" to "Ukrainian", "tr" to "Turkish", "ar" to "Arabic", "hi" to "Hindi", "ja" to "Japanese", "ko" to "Korean", "zh" to "Chinese")
 
 private const val GREEN_KEY = "#2BD15F"
 private const val BLUE_KEY = "#2B5BD1"
@@ -643,7 +648,15 @@ private fun CaptionsBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> 
     val ct = ui.captionTrack?.caption
     if (ct == null) {
         T("Word-timed captions from the speech, in the style you pick.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted)
-        if (ui.helpersOff["captions"] == null) host.modelRow?.invoke("captions")
+        if (ui.helpersOff["captions"] == null) {
+            host.modelRow?.invoke("captions")
+            SuiteLabel("Spoken language")
+            // One scrolling row (15 languages as wrapped chips took four rows).
+            val cur = ui.captionLanguage ?: "auto"
+            Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CAPTION_LANGUAGES.forEach { (code, label) -> SuiteChip(label, code == cur, { act(EditAction.CaptionLanguage(code.takeIf { it != "auto" })) }) }
+            }
+        }
         ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return

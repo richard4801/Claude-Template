@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -181,6 +181,10 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                     else -> c.act(EditAction.Scrub(2.0, end = true))
                 }
                 ui = c.ui.value.copy(message = null)
+            }
+            "m_caption_lang" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                ui = ui.copy(project = one, panel = Panel.CAPTIONS, captionLanguage = "es", selectedId = null)
             }
             "m_kits" -> ui = ui.copy(panel = Panel.EDIT, kits = listOf(
                 KitChoice("k1", "Warm vlog", studio.muse.core.edit.StyleKit(look = studio.muse.core.edit.Look(lut = "pack:film-gold"), adjust = studio.muse.core.edit.Adjust(contrast = .1), transition = studio.muse.core.edit.Transition(studio.muse.core.edit.TransitionKind.FADE, .4), captionStyle = studio.muse.core.edit.Presets.CAPTION_STYLES.values.first())),
