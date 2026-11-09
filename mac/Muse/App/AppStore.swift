@@ -205,6 +205,12 @@ final class AppStore {
     // MARK: Navigation and overlays
 
     var screen: Screen = .home
+    /// Bumped on the turn after each screen change, and read by ScreenHost. Observation reports a change on `willSet`; when
+    /// SwiftUI redraws ScreenHost inside that window (review mode logged it: a body run that read the OLD screen after
+    /// `go(_:)` began), the redraw re-arms tracking before the new value lands, no further change is reported, and the
+    /// old screen stays drawn (plans/claude-chat-mac.md, "the old screen stays drawn"). This second change comes after
+    /// the new value is stored, so ScreenHost always redraws with it.
+    var screenEpoch = 0
     var navForward = true
     var toast: Toast?
     var paletteOpen = false
@@ -938,6 +944,7 @@ final class AppStore {
         // A fixed-duration curve, not a spring: a spring still settling when another animated change lands (an overlay
         // closing) could leave the old screen drawn (plans/claude-chat-mac.md, "the old screen stays drawn").
         withAnimation(MotionStyle.of(themeID).screenAnimation) { screen = s }
+        Task { @MainActor [weak self] in self?.screenEpoch &+= 1 }
     }
 
     func setTheme(_ id: ThemeID) {

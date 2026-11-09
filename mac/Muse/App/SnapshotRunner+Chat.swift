@@ -183,14 +183,14 @@ extension SnapshotRunner {
     }
 
     /// The old screen must never stay drawn after a screen change (plans/claude-chat-mac.md, "the old screen stays
-    /// drawn"). In themes C and D: a live chat overlay with the sample thread closes in the same tick as `openEdit` +
-    /// `openRecreate` (five tries each); about 1 s later the window must hold exactly one screen, `store.screen` (ScreenProbe). One line per
+    /// drawn"). In every theme: a live chat overlay with the sample thread closes in the same tick as `openEdit` +
+    /// `openRecreate` (ten tries each); about 1 s later the window must hold exactly one screen, `store.screen` (ScreenProbe). One line per
     /// try in fit-check.txt: `FITS stale_screen …` or `CUT stale_screen …`.
     static func staleScreenCheck(_ store: AppStore) async -> [String] {
         var out: [String] = []
-        for theme in [ThemeID.c, .d] {
+        for theme in [ThemeID.a, .b, .c, .d] {
             store.themeID = theme
-            for attempt in 1...5 {
+            for attempt in 1...10 {
                 NSLog("[snapshot] stale screen %@ try %d: home, chat up", theme.rawValue, attempt)
                 store.closeRecreate()
                 store.go(.home)
@@ -198,6 +198,8 @@ extension SnapshotRunner {
                 try? await Task.sleep(for: .seconds(2))
                 NSLog("[snapshot] stale screen %@ try %d: chat closes, Edit + Recreate open", theme.rawValue, attempt)
                 // One tick: the overlay closes, the screen changes, Recreate opens.
+                screenBodies = []
+                let epoch = store.screenEpoch
                 state.overlay = nil
                 store.openEdit(takeId: nil)
                 store.openRecreate()
@@ -206,11 +208,19 @@ extension SnapshotRunner {
                 let want = "\(store.screen)"
                 let ok = drawn == [want]
                 NSLog("[snapshot] stale screen %@ try %d: store %@, drawn %@", theme.rawValue, attempt, want, drawn.joined(separator: ","))
-                out.append("\(ok ? "FITS" : "CUT") stale_screen \(theme.rawValue) try \(attempt): store.screen \(want), drawn [\(drawn.joined(separator: ", "))]")
+                // Which ScreenHost bodies ran after the change: "edit@e" is the change itself, "edit@e+1" the next tick's nudge.
+                let bodies = screenBodies.map { "\($0.screen)@e\($0.epoch == epoch ? "" : "+\($0.epoch - epoch)")" }
+                out.append("\(ok ? "FITS" : "CUT") stale_screen \(theme.rawValue) try \(attempt): store.screen \(want), drawn [\(drawn.joined(separator: ", "))], bodies [\(bodies.joined(separator: ", "))]")
             }
             store.closeRecreate()
         }
         return out
+    }
+
+    /// ScreenHost's body runs since the last reset (review mode): the screen and epoch it drew with.
+    static var screenBodies: [(screen: String, epoch: Int)] = []
+    static func noteScreenBody(_ screen: String, _ epoch: Int) {
+        if screenBodies.count < 50 { screenBodies.append((screen, epoch)) }
     }
 
     /// The screens in the window right now (each screen's ScreenProbe), sorted.
