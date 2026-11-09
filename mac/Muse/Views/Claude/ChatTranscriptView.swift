@@ -300,7 +300,7 @@ struct ChatUserBubble: View {
             }
         }
         .frame(width: 64, height: 64)
-        .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous))   // an image, never a pill
         .accessibilityLabel("Attached image")
     }
 }

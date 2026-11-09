@@ -357,7 +357,7 @@ struct ChatComposerBar: View {
                         if let ns = NSImage(data: img.data) { Image(nsImage: ns).resizable().aspectRatio(contentMode: .fill) } else { Rectangle().fill(t.roles.field) }
                     }
                     .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous))   // an image, never a pill
                     Button { onRemoveLocal?(img.id) } label: {
                         Ph("x", 10).foregroundStyle(t.roles.ink)
                             .frame(width: 18, height: 18)

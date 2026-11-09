@@ -293,7 +293,7 @@ struct SuiteClaudeAttachRow: View {
                 }
             }
             .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous))   // an image, never a pill
             .overlay {
                 if a.uploading { ProgressView().controlSize(.small) }
                 if a.error != nil { Ph("warning", 14).foregroundStyle(t.roles.danger) }
