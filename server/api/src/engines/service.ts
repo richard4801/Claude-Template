@@ -11,7 +11,7 @@ import { modelName, type StepOverrides } from '../images/steps.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
-import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
+import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, HF_SWAP_MIN_SEC, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
 
 export type Price = { basis: 'per_second' | 'per_run' | 'per_output_second'; usd: number };
 export type Engine = {
@@ -39,7 +39,9 @@ export class ModelChoice {
   /** Swap engines that can run now (hosted: Replicate set up and the model not switched off; GPU: the pods offer it). */
   private swapUsable(prefs: { models?: Record<string, { enabled?: boolean }> }) {
     const caps = this.ctx.jobs.capabilities();
-    return SWAP_ENGINES.filter(e => e.runs === 'replicate' ? this.ctx.replicate.configured && prefs.models?.[e.id]?.enabled !== false : caps.includes(e.capability!));
+    return SWAP_ENGINES.filter(e => e.runs === 'replicate' ? this.ctx.replicate.configured && prefs.models?.[e.id]?.enabled !== false
+      : e.runs === 'higgsfield' ? this.ctx.suite.providers.higgsfield.configured() && prefs.models?.[e.id]?.enabled !== false
+      : caps.includes(e.capability!));
   }
   /** $ per output second of a swap on `id` at `quality` (hosted: the registry price × priceScale; GPU: Edit/Fast's estimate). */
   swapPrice(id: string, quality: string, clipSeconds: number | null | undefined, priceScale = 1): { perSec: number; resolution: string | null; rr: P.RenderReq } {
@@ -90,11 +92,11 @@ export class ModelChoice {
     // Character swap (and Recreate swap fills): the hosted H3 family joins with "swap"; Edit / Fast on our GPU are added.
     for (const e of this.swapUsable(p)) {
       const cur = out.get(e.id);
-      if (e.runs === 'replicate') {
+      if (e.runs !== 'gpu') {
         const m = modelById(e.id)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
         const base = cur ?? this.videoEntry(m, [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
         out.set(e.id, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
-          limits: { ...base.limits, minSeconds: P.REPLICATE_MIN_SEC, maxInputSeconds: P.REPLICATE_MAX_SEC } });
+          limits: { ...base.limits, minSeconds: e.runs === 'higgsfield' ? HF_SWAP_MIN_SEC : P.REPLICATE_MIN_SEC, maxInputSeconds: P.REPLICATE_MAX_SEC } });
       } else {
         const sp = this.swapPrice(e.id, 'standard', P.SAMPLE_CLIP_SEC);
         out.set(e.id, { model: e.id, name: e.name, kind: 'video', purposes: ['swap', 'fill'], custom: false, provider: 'runpod', notice: e.notice ?? null,
@@ -318,7 +320,7 @@ export async function applySwapEngine(mc: ModelChoice, u: AuthUser, r: Record<st
   const e = swapEngineById(choice.model);
   if (!e) return null;
   if (e.runs === 'gpu') { r.engine = e.gpuEngine; r.use = 'full'; delete r.quality; }
-  else { r.engine = 'replicate'; r.videoModel = e.ref; if (e.noResolution) r.videoNoResolution = true; }
+  else { r.engine = 'replicate'; r.videoModel = e.ref; if (e.noResolution) r.videoNoResolution = true; } // Higgsfield runs on the hosted line too (swapEngine h3-hf)
   r.swapEngine = e.id;
   return choice;
 }

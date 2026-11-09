@@ -119,6 +119,76 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
     } finally { await a.close(); }
   });
 
+  /** A real 3.2 s clip in storage (a Character swap source). */
+  const clipOf = async (a: Awaited<ReturnType<typeof makeApp>>, owner: any) => {
+    const src = path.join(dir, 'swap-src.mp4');
+    if (!fs.existsSync(src)) execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=360x640:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=330', '-t', '3.2',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', src]);
+    const b = '----musehf', meta = JSON.stringify({ name: 'dance', durationSec: 3.2, width: 1080, height: 1920, fps: 30 });
+    const payload = Buffer.concat([Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="meta"\r\n\r\n${meta}\r\n`),
+      Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="dance.mp4"\r\nContent-Type: video/mp4\r\n\r\n`), fs.readFileSync(src), Buffer.from(`\r\n--${b}--\r\n`)]);
+    const r = await a.app.inject({ method: 'POST', url: '/v1/uploads/clips', headers: { authorization: `Bearer ${owner.token}`, 'content-type': `multipart/form-data; boundary=${b}` }, payload });
+    expect(r.statusCode).toBe(200);
+    return JSON.parse(r.body).id as string;
+  };
+  const swap = async (a: Awaited<ReturnType<typeof makeApp>>, owner: any) => {
+    const m = await demoModel(owner), clipId = await clipOf(a, owner);
+    const r = await owner.req('POST', '/v1/jobs', { modelId: m.id, clipId, engineModel: 'h3-hf', quality: 'hd' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const j = await until(async () => { const x = (await owner.req('GET', '/v1/jobs')).body.find((y: any) => y.id === r.body.id); return x && ['done', 'failed'].includes(x.state) ? x : null; }, 30_000);
+    return { req: r.body.request, j };
+  };
+
+  it('Character swap: MiniMax H3 (Higgsfield) is offered only with the key, at $0.065/s 2K, 5–15 s', async () => {
+    for (const [creds, offered] of [[true, true], [false, false]] as const) {
+      const a = await makeApp(env(creds ? { HF_CREDENTIALS: 'hfid:hfsecret' } : {}));
+      const { owner } = await people(a, 0, { topUp: 100 });
+      try {
+        const list = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
+        const hfRow = (list.engines ?? list).find((e: any) => e.model === 'h3-hf');
+        if (!offered) { expect(hfRow).toBeUndefined(); continue; }
+        expect(hfRow).toMatchObject({ name: 'MiniMax H3 (Higgsfield)', resolution: '2K', price: { basis: 'per_second', usd: 0.065 } });
+        expect(hfRow.purposes).toContain('swap');
+        expect(hfRow.limits).toMatchObject({ minSeconds: 5, maxInputSeconds: 15 });
+      } finally { await a.close(); }
+    }
+  });
+
+  it('Character swap on Higgsfield: the clip is the reference video, 2K, padded to 5 s, settled at $0.065/s (+$0.08 per image beyond 5)', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'ok';
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const { req, j } = await swap(a, owner);
+      expect(req).toMatchObject({ engine: 'replicate', swapEngine: 'h3-hf', videoModel: 'minimax/h3/reference-to-video', pricePerSec: 0.065 });
+      expect(j.state, j.error).toBe('done');
+      expect(rep).toHaveLength(0);
+      expect(hf).toHaveLength(1);
+      expect(hf[0]!.url).toBe('/minimax/h3/reference-to-video');
+      expect(hf[0]!.input).toMatchObject({ duration: 5, resolution: '2K', aspect_ratio: '9:16', aigc_watermark: false });
+      expect(hf[0]!.input.video_urls).toHaveLength(1);
+      expect(hf[0]!.input.prompt).toContain('<Video 1>');
+      const n = hf[0]!.input.image_urls.length;
+      expect(n).toBeGreaterThan(0);
+      const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, j.id))).find(x => x.kind === 'settle');
+      expect(settle!.amountUsd).toBeCloseTo(0.065 * 5 + 0.08 * Math.max(0, n - 5), 6);
+    } finally { await a.close(); }
+  });
+
+  it('Character swap: Higgsfield out of credit at the start → the swap runs on Replicate H3 2K', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'no_credit';
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const { j } = await swap(a, owner);
+      expect(j.state, j.error).toBe('done');
+      expect(hf).toHaveLength(1);
+      expect(rep).toHaveLength(1);
+      expect(rep[0]).toMatchObject({ model: 'minimax/h3', input: { resolution: '2K', ratio: '9:16' } });
+      expect(rep[0]!.input.reference_video_urls).toHaveLength(1);
+    } finally { await a.close(); }
+  });
+
   it('without HF_CREDENTIALS the Higgsfield model is skipped and HD runs on Replicate H3 2K', async () => {
     hf.length = 0; rep.length = 0; hfMode = 'ok';
     const a = await makeApp(env());

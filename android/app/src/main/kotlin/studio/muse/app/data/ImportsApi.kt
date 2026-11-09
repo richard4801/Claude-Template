@@ -159,17 +159,23 @@ class HttpImportsApi(baseUrl: String, private val client: OkHttpClient, private 
         }
     }
 
-    override suspend fun check(url: String) = send("POST", "v1/links/check", json.encodeToString(LinkCheckRequest.serializer(), LinkCheckRequest(url)), LinkCheckResult.serializer())
+    /** The server's links ("/uploads/…") made absolute, so the poster and the video load. */
+    private fun abs(u: String?) = u?.let { if (it.startsWith("/")) base.trimEnd('/') + it else it }
+    private fun ImportedVideo.absolute() = copy(thumbRef = thumbRef?.let { it.copy(url = abs(it.url)) }, posterUrl = abs(posterUrl), videoUrl = abs(videoUrl))
+    private fun LinkCheckResult.absolute() = copy(cached = cached?.absolute())
+
+    override suspend fun check(url: String) = send("POST", "v1/links/check", json.encodeToString(LinkCheckRequest.serializer(), LinkCheckRequest(url)), LinkCheckResult.serializer()).absolute()
     override suspend fun settings() = send("GET", "v1/links/settings", null, LinkSettings.serializer())
-    override suspend fun fromUpload(req: ImportUpload) = send("POST", "v1/imports", json.encodeToString(ImportUpload.serializer(), req), ImportedVideo.serializer())
-    override suspend fun fromLink(req: ImportFetch) = send("POST", "v1/imports", json.encodeToString(ImportFetch.serializer(), req), ImportedVideo.serializer())
+    override suspend fun fromUpload(req: ImportUpload) = send("POST", "v1/imports", json.encodeToString(ImportUpload.serializer(), req), ImportedVideo.serializer()).absolute()
+    override suspend fun fromLink(req: ImportFetch) = send("POST", "v1/imports", json.encodeToString(ImportFetch.serializer(), req), ImportedVideo.serializer()).absolute()
     override suspend fun list(): List<ImportedVideo> {
         // A bare list or {imports: [...]}: both read.
         val t = text("GET", "v1/imports", null)
         return runCatching { json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(ImportedVideo.serializer()), t) }
             .getOrElse { runCatching { json.decodeFromString(ImportedVideos.serializer(), t).imports }.getOrElse { throw ApiException("bad_response", "The server sent something this app version can't read") } }
+            .map { it.absolute() }
     }
-    override suspend fun rename(id: String, name: String) = send("PATCH", "v1/imports/$id", json.encodeToString(ImportRename.serializer(), ImportRename(name)), ImportedVideo.serializer())
+    override suspend fun rename(id: String, name: String) = send("PATCH", "v1/imports/$id", json.encodeToString(ImportRename.serializer(), ImportRename(name)), ImportedVideo.serializer()).absolute()
     override suspend fun delete(id: String) { text("DELETE", "v1/imports/$id", null) }
 }
 
