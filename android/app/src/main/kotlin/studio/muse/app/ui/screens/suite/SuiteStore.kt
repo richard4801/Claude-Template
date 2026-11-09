@@ -1,6 +1,7 @@
 package studio.muse.app.ui.screens.suite
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import studio.muse.app.AppContainer
 import studio.muse.app.data.ApiException
@@ -135,10 +136,12 @@ class SuiteStore(private val c: AppContainer) {
             catalogError.value = null
             composer.update { d -> d.copy(quality = if (d.quality in cat.tiers.map { t -> t.id } || cat.tiers.isEmpty()) d.quality else cat.defaultQuality).fit(cat) }
             // Settings → Studio → Start at: new shots start on the chosen quality (once per session, when the catalog has it).
+            // Only a draft nobody has set up yet: a pinned model, a handed-off shot or a chosen quality is never overwritten.
             if (!startAtApplied) {
                 startAtApplied = true
-                val q = c.prefs.value.startAt
-                if (cat.tiers.any { it.id == q && it.available }) composer.update { it.copy(quality = q).fit(cat) }
+                val q = c.prefsStore.prefs.first().startAt // the stored value, not the not-yet-collected default
+                val fresh = composer.value.let { d -> d.engineModel == null && d.quality == studio.muse.app.ui.screens.suite.composer.ComposerDraft().quality && d.tokens.isEmpty }
+                if (fresh && cat.tiers.any { it.id == q && it.available }) composer.update { it.copy(quality = q).fit(cat) }
             }
             if (board.value == null && c.repo.demo) board.value = demoBoard()
         } catch (e: ApiException) {

@@ -99,9 +99,9 @@ object ErrorText {
             "bad_signature" -> "The upload link expired. Try again."
             "warm_not_allowed" -> "Only the studio owner can do that."
             "owner_balance_low" -> NOT_ENOUGH_STUDIO
-            "no_gpu_free" -> "Every GPU is busy right now. Try again when a render finishes."
-            "no_gpu_available" -> "No GPU is free right now. Try again in a minute."
-            "not_warm" -> "The GPU isn't on any more."
+            "no_gpu_free" -> "Edit is busy right now. Try again when a render finishes."
+            "no_gpu_available" -> "Edit can't start right now. Try again in a minute."
+            "not_warm" -> "Keep ready is off now."
             // Never a raw "Server error 502" or a bare status (older builds and proxies said so).
             else -> Credit.dollarize(server).takeUnless { it.isBlank() || Regex("""^(Server error|HTTP)\s*\d{3}""", RegexOption.IGNORE_CASE).containsMatchIn(it) }
                 ?: Regex("""\d{3}""").find(server)?.value?.toIntOrNull()?.let(::http) ?: "Something went wrong."

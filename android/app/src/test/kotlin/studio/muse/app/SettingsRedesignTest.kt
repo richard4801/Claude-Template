@@ -37,6 +37,29 @@ class SettingsSectionsTest {
     }
 }
 
+/** Studio → Start at (the main dispatcher needs Robolectric). */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(sdk = [35])
+class StartAtTest {
+    @Test fun startAtAppliesToAFreshDraftOnly() {
+        shadowOf(Looper.getMainLooper()).idle()
+        kotlinx.coroutines.runBlocking {
+        fun container(startAt: String): AppContainer {
+            val scope = MainScope()
+            return AppContainer(scope, MemoryPrefs(AppPrefs(useFake = true, token = "t", role = "owner", startAt = startAt)), FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0), null)
+        }
+        val fresh = container("hd")
+        fresh.suite.load()
+        assertEquals("hd", fresh.suite.composer.value.quality)
+        // A draft someone set up (here: a chosen quality and a pinned model) keeps its quality.
+        val set = container("hd")
+        set.suite.composer.value = studio.muse.app.ui.screens.suite.composer.ComposerDraft(quality = "standard", engineModel = "kling-v4", resolution = "720p")
+        set.suite.load()
+        assertEquals("standard", set.suite.composer.value.quality)
+        }
+    }
+}
+
 /**
  * Every section of the redesigned Settings in all four themes (390 dp, tall enough to show a whole section): the owner's
  * list (with Advanced on), each section, a provider's models; the member's list and AI & spending.
