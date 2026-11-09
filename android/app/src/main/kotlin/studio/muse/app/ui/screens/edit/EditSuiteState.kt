@@ -145,6 +145,8 @@ data class EditSuiteUi(
     val content: studio.muse.app.platform.edit.ContentCatalog? = null,
     /** Catalog paths downloaded so far (font chips show a download state until theirs are here). */
     val contentHere: Set<String> = emptySet(),
+    /** Auto reframe in progress: 0–1 while faces are being found (null when idle). */
+    val reframing: Float? = null,
     val kitsNote: String? = null,
     /** Auto-captions' spoken language: a two-letter code, or null for automatic detection. */
     val captionLanguage: String? = null,

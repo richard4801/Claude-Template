@@ -394,6 +394,20 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun reframeFollowsTheFace() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val keys = listOf(studio.muse.core.edit.Keyframe(0.0, 1.2, studio.muse.core.edit.Ease.EASE_IN_OUT), studio.muse.core.edit.Keyframe(3.0, 0.4, studio.muse.core.edit.Ease.EASE_IN_OUT))
+        c.act(EditAction.ApplyReframe(clip.id, keys))
+        var now = c.p().mainClips[0]
+        assertEquals(keys, now.keyframes!![studio.muse.core.edit.KfProp.X]); assertEquals(1.2, now.transform!!.x!!, 1e-9); assertNull(now.fit)
+        valid(c.p())
+        // A still result: one position, no x keys left.
+        c.act(EditAction.ApplyReframe(clip.id, listOf(studio.muse.core.edit.Keyframe(0.0, 0.8, studio.muse.core.edit.Ease.EASE_IN_OUT))))
+        now = c.p().mainClips[0]
+        assertNull(now.keyframes?.get(studio.muse.core.edit.KfProp.X)); assertEquals(0.8, now.transform!!.x!!, 1e-9)
+    }
+
     @Test fun contentStickersSoundsAndCaptionTemplates() = runTest {
         val c = controller()
         c.act(EditAction.Scrub(2.0, end = true)); c.act(EditAction.AddSticker("content:twemoji/1f600", 160, 160))
@@ -431,6 +445,51 @@ class EditSmallRowsTest {
         c.act(EditAction.Reverse(true))
         assertEquals(rev.id, c.p().mainClips[0].asset)
         assertEquals(1, c.p().assets.count { it.reverseOf != null })
+    }
+
+    @Test fun stabilizeThenReverse() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val src = c.p().asset(clip.asset)!!
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.Stabilize(true)); advanceUntilIdle()
+        val st = c.p().assets.single { it.derivedFrom?.asset == src.id }
+        assertEquals(studio.muse.core.edit.DerivedOp.STABILIZE, st.derivedFrom!!.op)
+        var now = c.p().mainClips[0]
+        assertEquals(st.id, now.asset); assertEquals(clip.inSec, now.inSec, 1e-6); assertEquals(clip.outSec, now.outSec, 1e-6)
+        valid(c.p())
+        // Steadied, then reversed: both steps stack; stabilise can't switch off under the reverse.
+        c.act(EditAction.Reverse(true)); advanceUntilIdle()
+        assertEquals("Steadied, reversed", studio.muse.core.edit.derivedLabel(c.p(), c.p().mainClips[0].asset))
+        assertEquals(src.id, studio.muse.core.edit.sourceOf(c.p(), c.p().mainClips[0].asset))
+        valid(c.p())
+        c.act(EditAction.Stabilize(false))
+        assertEquals("Steadied, reversed", studio.muse.core.edit.derivedLabel(c.p(), c.p().mainClips[0].asset))
+        c.act(EditAction.Reverse(false)); c.act(EditAction.Stabilize(false))
+        now = c.p().mainClips[0]
+        assertEquals(clip.asset, now.asset); assertEquals(clip.inSec, now.inSec, 1e-6)
+        // On again without a new job: the steadied copy is reused.
+        c.act(EditAction.Stabilize(true))
+        assertEquals(st.id, c.p().mainClips[0].asset)
+        assertEquals(1, c.p().assets.count { it.derivedFrom != null })
+    }
+
+    @Test fun smoothSlowMotion() = runTest {
+        val c = controller()
+        val clip = c.p().mainClips[0]
+        val n = c.p().mainClips.size
+        c.act(EditAction.Select(clip.id))
+        c.act(EditAction.SlowmoPrice(4, 1.0)); advanceUntilIdle()
+        assertTrue(c.ui.value.ai["slowmo"]?.price != null)
+        c.act(EditAction.Slowmo(4, 1.0)); advanceUntilIdle()
+        val slow = c.p().assets.single { it.derivedFrom?.op == studio.muse.core.edit.DerivedOp.SLOWMO }
+        val d = slow.derivedFrom!!
+        assertEquals(1.0, d.endSec!! - d.startSec!!, 1e-6); assertEquals(4, d.factor)
+        val mid = c.p().mainClips.single { it.asset == slow.id }
+        assertEquals(4.0, mid.outSec - mid.inSec, 1e-6); assertEquals(true, mid.muted); assertEquals(1.0, mid.speed, 0.0)
+        assertTrue(c.p().mainClips.size in n + 1..n + 2)
+        assertEquals("Smooth 4×", studio.muse.core.edit.derivedLabel(c.p(), slow.id))
+        valid(c.p())
     }
 
     @Test fun hslPerHue() = runTest {

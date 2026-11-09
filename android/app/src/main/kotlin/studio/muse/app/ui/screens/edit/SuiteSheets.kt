@@ -28,6 +28,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -126,6 +129,8 @@ data class SuiteHost(
     val headphones: Boolean = false,
     /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
     val addPhoto: (() -> Unit)? = null,
+    /** Auto reframe: finds the face in the active clip and follows it (null: not offered). */
+    val reframe: (() -> Unit)? = null,
     /** The content library: a file's download URL, adding a sticker or sound, and the sound preview (null: no library). */
     val contentUrl: (String) -> String? = { null },
     val addContent: ((studio.muse.app.platform.edit.ContentItem) -> Unit)? = null,
@@ -160,7 +165,7 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
         when (panel) {
             Panel.EDIT -> EditBody(ui, host, act)
             Panel.SPEED -> SpeedBody(ui, act)
-            Panel.TRANSFORM -> TransformBody(ui, act)
+            Panel.TRANSFORM -> TransformBody(ui, host, act)
             Panel.AUDIO -> AudioBody(ui, host, act)
             Panel.TEXT -> TextBody(ui, host, act)
             Panel.CAPTIONS -> CaptionsBody(ui, host, act)
@@ -344,6 +349,44 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             job?.error != null && !reversed -> job.error
             else -> "Plays the clip backwards, sound too"
         }, reversed, { if (job?.running != true) act(EditAction.Reverse(!reversed)) })
+        // Stabilise: smooths out shaky handheld camera movement (the first time, the server makes the steadied copy).
+        val steady = ui.project?.asset(c.asset)?.derivedFrom?.op == studio.muse.core.edit.DerivedOp.STABILIZE
+        val sj = ui.ai["stabilize"]
+        OptRow("Stabilise", when {
+            sj?.running == true -> "${sj.phase.ifEmpty { "Steadying" }}… ${sj.progress}%"
+            sj?.error != null && !steady -> sj.error
+            else -> "Smooths out shaky handheld footage"
+        }, steady, { if (sj?.running != true) act(EditAction.Stabilize(!steady)) })
+    }
+    if (c.holdSec == null && c.speedCurve == null) SlowmoSection(ui, c, act)
+}
+
+/**
+ * Smooth slow motion (paid): a stretch of the clip from the playhead made 2× or 4× slower with new frames in between,
+ * without sound. The price is on the button; the slowed stretch becomes its own piece of the clip.
+ */
+@Composable
+private fun SlowmoSection(ui: EditSuiteUi, c: VideoClip, act: (EditAction) -> Unit) {
+    val m = muse
+    val maxLen = minOf(10.0, c.outSec - c.inSec)
+    if (maxLen < 0.3) return
+    var factor by rememberSaveable(c.id) { mutableIntStateOf(2) }
+    var len by rememberSaveable(c.id) { mutableDoubleStateOf(minOf(2.0, maxLen)) }
+    val job = ui.ai["slowmo"]
+    LaunchedEffect(c.id, factor) { act(EditAction.SlowmoPrice(factor, len)) }
+    T("Smooth slow motion", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.padding(top = 8.dp))
+    T("From the playhead, slowed with new frames in between. The slowed part has no sound.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+    SuiteChips(listOf("2" to "2× slower", "4" to "4× slower"), factor.toString(), { factor = it.toInt() }, enabled = job?.running != true)
+    SuiteSlider(((len - 0.3) / (maxLen - 0.3).coerceAtLeast(1e-6)).toFloat().coerceIn(0f, 1f), { f, done ->
+        len = Math.round((0.3 + f * (maxLen - 0.3)) * 10) / 10.0
+        if (done) act(EditAction.SlowmoPrice(factor, len))
+    }, label = "Length", valueText = "${fmt1(len)} s → ${fmt1(len * factor)} s", enabled = job?.running != true)
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Slowing down" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Slow down · $it" } ?: "Slow down", { act(EditAction.Slowmo(factor, len)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+        }
     }
 }
 
@@ -408,13 +451,23 @@ private fun CurveGraph(ui: EditSuiteUi, c: VideoClip, act: (EditAction) -> Unit)
 
 // ======================================================================= Transform & keyframes (E2)
 @Composable
-private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun TransformBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual || it is TextItem } ?: ui.activeClip)?.id ?: return
     val item = p.tracks.flatMap { it.items }.firstOrNull { it.id == id } ?: return
     val tr = when (item) { is Visual -> item.transform; is TextItem -> item.transform; else -> null } ?: Transform()
     val keys = when (item) { is Visual -> item.keyframes; is TextItem -> item.keyframes; else -> null }
+    // Auto reframe: a clip wider than the frame follows the speaker's face (found on the phone).
+    if (item is VideoClip && host.reframe != null) {
+        val a = p.asset(item.asset)
+        val wide = a?.width != null && a.height != null && studio.muse.core.edit.Reframe.coverWidth(a.width!!, a.height!!, p.canvas.width, p.canvas.height) > 1.05
+        if (wide) {
+            val busy = ui.reframing
+            SuiteButton(if (busy != null) "Finding faces… ${(busy * 100).toInt()}%" else "Follow faces", host.reframe, Modifier.fillMaxWidth(), icon = "user", enabled = busy == null)
+            T("Moves the picture to keep the speaker in frame. Found on this phone.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+        }
+    }
 
     @Composable
     fun line(label: String, prop: KfProp, value: String, frac: Float, set: (Float) -> Transform?) {
