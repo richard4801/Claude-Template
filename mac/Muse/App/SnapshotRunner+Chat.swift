@@ -53,6 +53,7 @@ extension SnapshotRunner {
         defer { store.takes.removeAll { $0.id == "rx_chat" } }
 
         state.chatSample = true
+        lines += await staleScreenCheck(store)
         for theme in [ThemeID.c, .a, .b, .d] {
             NSLog("[snapshot] chat %@", theme.rawValue)
             store.themeID = theme
@@ -82,34 +83,21 @@ extension SnapshotRunner {
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_camera_composer.png"))
             state.chatComposerText = nil
             state.chatAttach = false
+            // The overlay goes in the same tick as the screen change below (the stale-screen check's order).
             state.overlay = nil
-            // Let the overlay go before the screen changes: both in one tick can leave the old screen drawn.
-            try? await Task.sleep(for: .seconds(0.8))
 
             NSLog("[snapshot] chat recreate %@", theme.rawValue)
-            // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does). The screen change
-            // animates and can lose a tick on the runner, so the shot checks the chat is up and tries again (up to 3 times).
-            var recreateDrawn = false
-            for attempt in 1...3 where !recreateDrawn {
-                if attempt > 1 {
-                    // A screen change that didn't draw: pass through another screen so the next one is a fresh change.
-                    store.closeRecreate()
-                    store.go(.gallery)
-                    try? await Task.sleep(for: .seconds(1.5))
-                }
-                store.openEdit(takeId: nil)
-                try? await Task.sleep(for: .seconds(1))
-                store.openRecreate()
-                try? await Task.sleep(for: .seconds(1))
-                let refs = (try? await store.recreateAPI.listReferences()) ?? []
-                guard let ref = refs.first(where: { $0.id == "rx_demo" }) ?? refs.first(where: { $0.recipe != nil }) else { continue }
+            // Recreate: Claude beside the Recipe (Recreate opens from the editor, as recreateShots does).
+            store.openEdit(takeId: nil)
+            try? await Task.sleep(for: .seconds(1))
+            store.openRecreate()
+            try? await Task.sleep(for: .seconds(1))
+            let refs = (try? await store.recreateAPI.listReferences()) ?? []
+            if let ref = refs.first(where: { $0.id == "rx_demo" }) ?? refs.first(where: { $0.recipe != nil }) {
                 await store.openRecreateReference(ref.id)
-                if !store.recreate.claudeOpen { store.toggleRecreateClaude() }
-                try? await Task.sleep(for: .seconds(2.5))
-                recreateDrawn = store.recreate.open && state.composerFrames["chat composer"] != nil
-                NSLog("[snapshot] chat recreate %@ try %d: open %d, reference %@, claude %d, screen %@", theme.rawValue, attempt,
-                      store.recreate.open ? 1 : 0, store.recreate.reference?.id ?? "none", store.recreate.claudeOpen ? 1 : 0, "\(store.screen)")
             }
+            if !store.recreate.claudeOpen { store.toggleRecreateClaude() }
+            try? await Task.sleep(for: .seconds(2.5))
             lines.append(drawnLine("claude_recreate", theme, needsReply: true))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_recreate.png"))
             store.recreate.closeClaude()
@@ -119,19 +107,9 @@ extension SnapshotRunner {
             NSLog("[snapshot] chat edit %@", theme.rawValue)
             // Edit: the editor's Claude panel on its Chat tab.
             if let take {
-                var editDrawn = false
-                for attempt in 1...3 where !editDrawn {
-                    if attempt > 1 {
-                        state.claudeTab = nil
-                        store.go(.gallery)
-                        try? await Task.sleep(for: .seconds(1.5))
-                    }
-                    state.claudeTab = 0
-                    store.openEdit(takeId: take.id)
-                    try? await Task.sleep(for: .seconds(7))
-                    editDrawn = state.composerFrames["chat composer"] != nil
-                    NSLog("[snapshot] chat edit %@ try %d: drawn %d, screen %@", theme.rawValue, attempt, editDrawn ? 1 : 0, "\(store.screen)")
-                }
+                state.claudeTab = 0
+                store.openEdit(takeId: take.id)
+                try? await Task.sleep(for: .seconds(7))
                 lines.append(drawnLine("claude_edit", theme, needsReply: true))
                 capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_edit.png"))
                 state.claudeTab = nil
@@ -202,6 +180,42 @@ extension SnapshotRunner {
         size(Int(original.width), Int(original.height))
         w.setFrame(original, display: true)
         store.themeID = .a
+    }
+
+    /// The old screen must never stay drawn after a screen change (plans/claude-chat-mac.md, "the old screen stays
+    /// drawn"). In themes C and D: a live chat overlay (streaming, then idle) closes in the same tick as `openEdit` +
+    /// `openRecreate`; about 1 s later the window must hold exactly one screen, `store.screen` (ScreenProbe). One line per
+    /// try in fit-check.txt: `FITS stale_screen …` or `CUT stale_screen …`.
+    static func staleScreenCheck(_ store: AppStore) async -> [String] {
+        var out: [String] = []
+        for theme in [ThemeID.c, .d] {
+            store.themeID = theme
+            for attempt in 1...3 {
+                store.closeRecreate()
+                store.go(.home)
+                state.overlay = "chat"
+                state.chatStreaming = attempt == 2
+                try? await Task.sleep(for: .seconds(2))
+                // One tick: the overlay closes, the screen changes, Recreate opens.
+                state.overlay = nil
+                state.chatStreaming = false
+                store.openEdit(takeId: nil)
+                store.openRecreate()
+                try? await Task.sleep(for: .seconds(1))
+                let drawn = screensInWindow()
+                let want = "\(store.screen)"
+                let ok = drawn == [want]
+                NSLog("[snapshot] stale screen %@ try %d: store %@, drawn %@", theme.rawValue, attempt, want, drawn.joined(separator: ","))
+                out.append("\(ok ? "FITS" : "CUT") stale_screen \(theme.rawValue) try \(attempt): store.screen \(want), drawn [\(drawn.joined(separator: ", "))]")
+            }
+            store.closeRecreate()
+        }
+        return out
+    }
+
+    /// The screens in the window right now (each screen's ScreenProbe), sorted.
+    static func screensInWindow() -> [String] {
+        ScreenProbe.Probe.all.allObjects.filter { $0.window != nil }.map(\.name).sorted()
     }
 
     /// The chat is up with its rows: a reply drawn (the sample's markdown), else CUT.

@@ -935,7 +935,9 @@ final class AppStore {
         guard s != screen else { return }
         if s != .gallery { comparing = false }
         navForward = true
-        withAnimation(MotionStyle.of(themeID).animation) { screen = s }
+        // A fixed-duration curve, not a spring: a spring still settling when another animated change lands (an overlay
+        // closing) could leave the old screen drawn (plans/claude-chat-mac.md, "the old screen stays drawn").
+        withAnimation(MotionStyle.of(themeID).screenAnimation) { screen = s }
     }
 
     func setTheme(_ id: ThemeID) {
@@ -1090,6 +1092,27 @@ enum MotionStyle {
         case .b: return .timingCurve(0.4, 0, 0.2, 1, duration: 0.2)
         case .c: return .spring(response: 0.45, dampingFraction: 0.72)
         case .d: return .spring(response: 0.42, dampingFraction: 0.6)
+        }
+    }
+
+    /// Screen changes (`AppStore.go`): fixed-duration curves in every theme. C and D keep their springs' feel with a
+    /// slight overshoot, but always finish on time, so the outgoing screen is never left mid-removal.
+    var screenAnimation: Animation {
+        switch self {
+        case .a, .b: return animation
+        case .c: return .timingCurve(0.3, 1.2, 0.5, 1, duration: 0.42)
+        case .d: return .timingCurve(0.3, 1.45, 0.5, 1, duration: 0.4)
+        }
+    }
+
+    /// The screen swap in `Shell`: the new screen comes in with the theme's insertion; the old one goes at once
+    /// (`.identity`), so no removal can be left unfinished and only `store.screen` is ever drawn.
+    var screenTransition: AnyTransition {
+        switch self {
+        case .a: return .asymmetric(insertion: .opacity.combined(with: .offset(y: 14)), removal: .identity)
+        case .b: return .asymmetric(insertion: .opacity.combined(with: .offset(x: 24)), removal: .identity)
+        case .c: return .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)), removal: .identity)
+        case .d: return .asymmetric(insertion: .opacity.combined(with: .offset(y: 26)), removal: .identity)
         }
     }
 
