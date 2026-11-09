@@ -67,6 +67,6 @@ stack, adjust, LUT pack, caption styles). They are © MUSE, with no third-party 
 ## Where the files live
 
 `server/api/scripts/editor-content.ts` downloads the sources above at pinned versions and records each file's hash.
-It rasterizes the stickers to PNG and converts the sounds to AAC (m4a, which both apps can play) into
+It rasterizes the stickers to 160 px PNG and converts the sounds to AAC (m4a, which both apps can play) into
 `server/api/assets/content/`, with `catalog.json`. The server copies them into storage on start and serves the catalog.
 The apps download each file on first use (nothing is bundled in the APK).
