@@ -41,8 +41,6 @@ enum SnapshotRunner {
         var chatAttach = false
         /// Bumped to put the caret in the chat's field.
         var chatFocusTick = 0
-        /// Settings shows the proposed redesign's mock in this state (SnapshotRunner+Settings.swift).
-        var settingsMock: SettingsMockState?
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
