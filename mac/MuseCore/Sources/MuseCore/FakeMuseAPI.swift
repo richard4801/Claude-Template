@@ -73,6 +73,9 @@ public actor FakeMuseAPI: MuseAPI {
     /// Settings → Default models (EngineChoice.swift): the studio's pick per purpose.
     /// Imports in demo mode (LinkImport.swift), newest first.
     var demoImports: [LinkImportResult] = []
+    /// Settings → Providers in demo mode (Providers.swift).
+    var demoProviders: [ProviderAccount] = []
+    var demoCustomModels: [ProviderCustomModel] = []
     var engineDefaultsBox: [String: String?] = [:]
     /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
     var suiteLooks: [String: SuiteLook] = [:]

@@ -66,7 +66,7 @@ struct WarmIndicator: View {
         .frame(height: 30)
         .background(Capsule().fill(t.surface2))
         .help("Settings → Engines")
-        .onTapGesture { store.openSettings(.engines) }
+        .onTapGesture { store.openSettings(.spending) }
     }
 }
 

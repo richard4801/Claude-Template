@@ -69,3 +69,9 @@ Today the apps say "engines", "models" and "image engine" for the same thing. Ev
 - **Members:** inside Settings only; the sidebar item goes, ⌘8 still opens the section.
 - **Advanced:** hidden until switched on in Account.
 - Providers: as drawn (no extra columns for now).
+
+## Built on the Mac (WS6, 2026-11-09)
+- Sections in this order: **Account, Studio, Members, AI & spending, Providers, Apps & devices**, then **Advanced** (owner, only while "Show advanced settings" is on under Account). Members see Account, Studio and AI & spending.
+- Old links land here: Engines → AI & spending; Developer → Advanced (and switches it on); Connections → Apps & devices; Archived models and Prompts → Studio (Prompts is a page inside Studio, "Studio › Prompts"); Members (sidebar item removed, ⌘8 and the palette open it).
+- Every existing control is kept: spend caps and AI editing helpers (AI & spending, owner), Default models (`GET/PATCH /v1/engines/defaults`), "Engines and our own GPUs" disclosure (engine status, GPU limits, photo engine, the Suite's engine panel), Providers (WS5's API: keys, models, switch on, rename), Claude tokens, MCP, Blender relay and in-app chat (Apps & devices), notifications, server and test tools (Advanced).
+- Code: `mac/Muse/Views/SettingsViews.swift`, `mac/Muse/Views/Settings/ProvidersSettings.swift`, `mac/Muse/App/AppStore+Providers.swift`, `mac/MuseCore/Sources/MuseCore/Providers/Providers.swift`. CI: `mac_settings_<theme>_<section>.png` and a click-through per section (edit-check.txt).
