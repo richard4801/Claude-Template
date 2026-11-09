@@ -295,7 +295,7 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
     /** Edit suite: whip blur / glitch split for a main-layer clip when the project uses those transitions. */
     private fun transitionFx(plan: RenderPlan?, layerIndex: Int): List<Effect> {
         if (plan == null || layerIndex < 0 || plan.layers.getOrNull(layerIndex)?.role != LayerRole.MAIN) return emptyList()
-        val uses = plan.project.mainClips.any { it.transitionIn?.kind == TransitionKind.WHIP || it.transitionIn?.kind == TransitionKind.GLITCH }
+        val uses = plan.project.mainClips.any { it.transitionIn?.kind in BLUR_OR_SPLIT }
         if (!uses) return emptyList()
         return listOf(TransitionFxEffect { timeUs -> plan.placement(layerIndex, timeUs / 1_000_000.0).let { it.blur to it.rgbSplit } })
     }
@@ -367,3 +367,6 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
         override fun getNextSpeedChangeTimeUs(timeUs: Long) = C.TIME_UNSET
     }
 }
+
+/** Transitions that use the x motion blur or the RGB split (the layer effect is only added when the edit has one). */
+private val BLUR_OR_SPLIT = setOf(TransitionKind.WHIP, TransitionKind.WHIP_RIGHT, TransitionKind.GLITCH, TransitionKind.SPLIT_FADE)

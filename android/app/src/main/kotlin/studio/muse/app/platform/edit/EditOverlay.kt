@@ -160,13 +160,15 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
         canvas.restore()
     }
 
+    /** A content family's own file for the weight once downloaded, else its bundled fallback. */
     private fun typeface(font: Font, weight: Int): Typeface {
-        val family = when (font) {
+        ContentLibrary.typeface(font, weight)?.let { return it }
+        val family = when (font.fallback) {
             Font.SANS, Font.ROUNDED -> Typeface.SANS_SERIF
             Font.SERIF -> Typeface.SERIF
             Font.MONO -> Typeface.MONOSPACE
             Font.CONDENSED -> Typeface.create("sans-serif-condensed", Typeface.NORMAL)
-            Font.MARKER -> Typeface.create("casual", Typeface.NORMAL)
+            else -> Typeface.create("casual", Typeface.NORMAL)
         }
         return if (Build.VERSION.SDK_INT >= 28) Typeface.create(family, weight, false)
         else Typeface.create(family, if (weight >= 700) Typeface.BOLD else Typeface.NORMAL)

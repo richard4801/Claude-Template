@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { CONTENT_DIR, type Catalog, type Pack } from '../src/editor/content.js';
-import { IN_HOUSE } from '../src/editor/contentPacks.js';
+import { IN_HOUSE, validateInHouse } from '../src/editor/contentPacks.js';
 
 const SOURCES = {
   twemoji: 'https://cdn.jsdelivr.net/gh/jdecked/twemoji@17.0.2',
@@ -171,6 +171,7 @@ async function licences() {
 }
 
 async function main() {
+  await validateInHouse();
   fs.rmSync(CONTENT_DIR, { recursive: true, force: true });
   const packs = [await stickers(), ...(await sfx()), await fonts(), ...IN_HOUSE];
   await licences();

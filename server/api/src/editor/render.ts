@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOOK_IDS } from './lookpack.js';
+import { contentFont } from './content.js';
 import { FILTERS } from './presets.js';
 import * as M from './model.js';
 import { curvesFn, hash01, hslFn, lutSample, parseCube, writeCube, type Look, type Lut } from './look.js';
@@ -22,7 +23,7 @@ import { probe } from '../replicate/media.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const FONT_DIR = path.resolve(here, '../../assets/fonts');
 /** The apps' family per editor font (Mac EditV2TextRenderer; rounded has no bundled face, Outfit stands in). */
-const FONTS: Record<M.TextStyle['font'], Record<'regular' | 'bold' | 'black', string>> = {
+const FONTS: Partial<Record<M.TextStyle['font'], Record<'regular' | 'bold' | 'black', string>>> = {
   sans: { regular: 'figtree_400', bold: 'figtree_700', black: 'figtree_800' },
   serif: { regular: 'instrument_serif_400', bold: 'instrument_serif_400', black: 'instrument_serif_400' },
   rounded: { regular: 'outfit_400', bold: 'outfit_700', black: 'outfit_700' },
@@ -30,11 +31,12 @@ const FONTS: Record<M.TextStyle['font'], Record<'regular' | 'bold' | 'black', st
   mono: { regular: 'dm_mono_400', bold: 'dm_mono_500', black: 'dm_mono_500' },
   marker: { regular: 'permanent_marker_400', bold: 'permanent_marker_400', black: 'permanent_marker_400' },
 };
-export const fontFile = (f: M.TextStyle['font'], weight: number) =>
-  path.join(FONT_DIR, `${(FONTS[f] ?? FONTS.sans)[weight >= 900 ? 'black' : weight >= 700 ? 'bold' : 'regular']}.ttf`);
+/** A family's file: a bundled one, else the content library's (src/editor/content.ts; the nine Cyrillic families). */
+export const fontFile = (f: M.TextStyle['font'], weight: number) => (FONTS[f] ? null : contentFont(f, weight)) ??
+  path.join(FONT_DIR, `${(FONTS[f] ?? FONTS.sans!)[weight >= 900 ? 'black' : weight >= 700 ? 'bold' : 'regular']}.ttf`);
 
 /** The editor transition → ffmpeg xfade (ffmpeg 5.1 names). */
-const XFADE: Record<M.TransitionKind, string> = {
+const XFADE: Partial<Record<M.TransitionKind, string>> = { // kinds without one draw as a fade
   fade: 'fade', black: 'fadeblack', white: 'fadewhite', slideLeft: 'slideleft', slideRight: 'slideright', slideUp: 'slideup', slideDown: 'slidedown',
   zoom: 'zoomin', whip: 'smoothleft', spin: 'radial', glitch: 'pixelize',
 };
