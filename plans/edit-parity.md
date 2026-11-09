@@ -42,7 +42,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Duplicate | Has | Missing | — | |
 | Replace clip (keep edits) | Has | Has | S | Android: Overlay → Replace on the selected clip; its edits stay. Mac: Bin → take's menu → Replace the selected clip; its edits stay. |
 | **Freeze frame** | Has | Has | M | A still item from the current frame. Android: `holdSec` hold clip; Edit → Freeze frame, length by slider or edges (wave 1). Mac: Timeline → Freeze frame at the playhead; length in Speed, or drag its edges (wave 1). |
-| **Reverse** | Missing | Missing | L | Needs a reversed proxy render on the device |
+| **Reverse** | Has | Missing | L | Android: Speed → Reverse (main clips and video overlays). The server's free `reverse` helper (local ffmpeg, picture and sound, sources ≤ 60 s, reused per source) makes a reversed copy; the clip switches to it (`Asset.reverseOf`, `reverseClip`: in/out and any speed curve mirrored) and back instantly. Freeze frames can't be reversed. The timeline tile says "Reversed". Screenshot: android-edit/m8_reverse.png. |
 | Slip edit | Has | Has | S | `trimClip` both ends at once. Android: Edit → Slip slider. Mac: Slip panel (the source moves, the length stays). |
 | Snapping (to the playhead, edges, beats) | Has | Partial | S | Beats only. Mac: Beats only. Android: moving and trimming snap to the playhead, other items' edges and beats (within 10 dp). |
 | Timeline zoom (pinch) | Has | Has | — | 8–480 dp/s. Mac: Slider and ± buttons, 12–400 pt/s |
@@ -132,7 +132,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Tint | Has | Has | S | Android: Filters → Adjust → Tint (`adjust.tint`, green ↔ magenta, after temperature in the colour matrix). Mac: Adjust → Tint under Temperature (`adjust.tint`; fixtures pass on the Mac). |
 | Vignette, sharpen, halation, light leak, chromatic aberration | Has | Has | S | Engine `look` has them; there are no sliders. Android: Filters → Adjust: vignette, sharpen, fade, glow, light leak, colour fringe, grain. Mac: Look sliders: vignette, sharpen, fade, colour fringe, glow, light leak. |
 | Curves | Has | Has | M | Engine has curves; no editor. Android: Filters → Adjust → Curves: All / Red / Green / Blue; drag to move, touch the line to add, tap a point to remove (`look.curves`). Mac: Adjust → Curves: All / Red / Green / Blue; drag to move, click the line to add, click a point to remove (`look.curves`). |
-| HSL (per-hue) | Missing | Missing | L | New engine stage (all three platforms) |
+| HSL (per-hue) | Has | Missing | L | Android: Filters → Adjust → HSL: 8 colour dots (red…magenta), then hue, saturation and luminance for the picked band, and Reset HSL. Contract: `look.hsl` (look step 4b, after the curves and before the LUT; `hslFn`, `hueWeights`), baked into the look's one LUT; kits carry it with the look. Server render: curves + HSL + LUT baked into one .cube (curves are drawn there now too). Screenshot: android-edit/m7_hsl.png. |
 | Auto adjust | Has | Has | M | Android: Filters → Adjust → Auto adjust: the frame under the playhead → exposure, contrast, saturation, temperature and tint (core `autoAdjust`). Mac: Adjust → Auto adjust from the clip's source frame under the playhead (same numbers as Android's `autoAdjust`). |
 | Video effects library (glitch, blur, retro, …) | Missing | Missing | L | **Content** plus GL effects |
 | Body and face effects | Missing | Missing | XL | Segmentation and tracking; mostly **Content** |

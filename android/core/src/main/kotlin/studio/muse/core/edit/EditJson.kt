@@ -77,7 +77,7 @@ object EditJson {
         id = o.str("id"), kind = o.enum("kind", "must be video, image, audio, lut or font"),
         take = o.strOrNull("take"), upload = o.strOrNull("upload"), library = o.strOrNull("library"),
         durationSec = o.numOrNull("durationSec"), width = o.intOrNull("width"), height = o.intOrNull("height"),
-        hasAudio = o.boolOrNull("hasAudio"), url = o.strOrNull("url"), name = o.strOrNull("name"),
+        hasAudio = o.boolOrNull("hasAudio"), url = o.strOrNull("url"), name = o.strOrNull("name"), reverseOf = o.strOrNull("reverseOf"),
     )
 
     private fun track(o: Obj): Track {
@@ -190,6 +190,16 @@ object EditJson {
                 }
                 m
             },
+            hsl = l.objOrNull("hsl")?.let { h ->
+                val m = LinkedHashMap<HueBand, HslBand>()
+                for (k in h.o.keys) {
+                    val band = wireOf<HueBand>(k) ?: h.bad(k, "unknown colour")
+                    val o = h.objOrNull(k) ?: h.bad(k, "must be an object")
+                    o.o.keys.firstOrNull { it !in setOf("hue", "sat", "light") }?.let { o.bad(it, "is not an HSL setting") }
+                    m[band] = HslBand(o.numOrNull("hue"), o.numOrNull("sat"), o.numOrNull("light"))
+                }
+                m
+            },
             lift = l.numOrNull("lift"), sharpen = l.numOrNull("sharpen"), chromatic = l.numOrNull("chromatic"),
             halation = l.objOrNull("halation")?.let { Halation(it.num("amount"), it.numOrNull("radius"), it.numOrNull("threshold")) },
             leak = l.objOrNull("leak")?.let { Leak(it.enum("kind", "one of ${LeakKind.entries.joinToString(", ") { k -> k.wire }}"), it.num("amount"), it.numOrNull("angle")) },
@@ -244,7 +254,7 @@ object EditJson {
     // ------------------------------------------------------------------ emitting
     internal fun encodeAsset(a: Asset) = buildJsonObject {
         put("id", a.id); put("kind", a.kind.wire); str("take", a.take); str("upload", a.upload); str("library", a.library)
-        num("durationSec", a.durationSec); int("width", a.width); int("height", a.height); bool("hasAudio", a.hasAudio); str("url", a.url); str("name", a.name)
+        num("durationSec", a.durationSec); int("width", a.width); int("height", a.height); bool("hasAudio", a.hasAudio); str("url", a.url); str("name", a.name); str("reverseOf", a.reverseOf)
     }
 
     internal fun encodeTrack(t: Track) = buildJsonObject {
@@ -329,6 +339,7 @@ object EditJson {
                 for ((ch, pts) in c) put(ch.wire, JsonArray(pts.map { p -> buildJsonArray { add(number(p.x)); add(number(p.y)) } }))
             })
         }
+        l.hsl?.let { h -> put("hsl", buildJsonObject { for ((band, v) in h) put(band.wire, buildJsonObject { num("hue", v.hue); num("sat", v.sat); num("light", v.light) }) }) }
         num("lift", l.lift); num("sharpen", l.sharpen); num("chromatic", l.chromatic)
         l.halation?.let { h -> put("halation", buildJsonObject { num("amount", h.amount); num("radius", h.radius); num("threshold", h.threshold) }) }
         l.leak?.let { k -> put("leak", buildJsonObject { put("kind", k.kind.wire); num("amount", k.amount); num("angle", k.angle) }) }

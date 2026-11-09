@@ -42,6 +42,8 @@ export type Fit = 'cover' | 'contain';
 
 export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* an imported .cube (Looks) */ | 'font' /* the member's own .ttf/.otf */; take?: string; upload?: string; library?: string;
   durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string;
+  /** A video asset that is another video asset played backwards (the Reverse helper's copy); see reverseClip. */
+  reverseOf?: string;
   /** A font asset's family and style, read from the file (display only). */
   name?: string };
 
@@ -249,6 +251,24 @@ export function speedPieces(c: Timed): Piece[] {
   const n = CURVE_PIECES, len = (c.outSec - c.inSec) / n;
   return Array.from({ length: n }, (_, i) => ({ inSec: r6(c.inSec + i * len), outSec: r6(i === n - 1 ? c.outSec : c.inSec + (i + 1) * len), speed: r6(curveSpeed(c.speedCurve!, (i + 0.5) / n)) }));
 }
+/**
+ * A clip switched to the reversed copy [reversed] of a source [durationSec] long (or back to the original): the same
+ * stretch of the source, mirrored (in' = D − out, out' = D − in), a speed curve mirrored in x (custom unless symmetric). Keyframes, look and the
+ * rest are timeline-local and stay; alphaMatte and audioAsset (aligned to the original's frames) are dropped. Null for a freeze frame (holdSec), which has nothing to reverse.
+ */
+export function reverseClip(c: VideoClip, reversed: string, durationSec: number): VideoClip | null {
+  if (c.holdSec !== undefined) return null;
+  const out: VideoClip = { ...c, asset: reversed, inSec: r6(Math.max(0, durationSec - c.outSec)), outSec: r6(Math.min(durationSec, durationSec - c.inSec)) };
+  // Lined up frame for frame with the original, so they'd play the wrong way: dropped (the apps say so).
+  delete out.alphaMatte; delete out.audioAsset;
+  if (c.speedCurve) {
+    const points = c.speedCurve.points.map(([x, v]) => [r6(1 - x), v] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const same = points.length === c.speedCurve.points.length && points.every((q, i) => q[0] === c.speedCurve!.points[i]![0] && q[1] === c.speedCurve!.points[i]![1]);
+    out.speedCurve = { preset: same ? c.speedCurve.preset : 'custom', points }; // a mirrored preset is no longer that preset
+  }
+  return out;
+}
+
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
 export const clipLength = (c: Timed) => c.holdSec !== undefined ? c.holdSec :
   c.speedCurve ? speedPieces(c).reduce((s, p) => s + (p.outSec - p.inSec) / p.speed, 0) : (c.outSec - c.inSec) / (c.speed ?? 1);
@@ -882,6 +902,11 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     num(`${f}.durationSec`, a.durationSec, 0.01, 36_000);
     num(`${f}.width`, a.width, 1, 16384); num(`${f}.height`, a.height, 1, 16384);
     assets.set(a.id, a);
+  });
+  p.assets.forEach((a, i) => {
+    if (a.reverseOf === undefined) return;
+    const o = typeof a.reverseOf === 'string' ? assets.get(a.reverseOf) : undefined;
+    if (a.kind !== 'video' || !o || o.kind !== 'video' || o.reverseOf !== undefined || o.id === a.id) bad(`edits.assets.${i}.reverseOf`, 'must be a video asset');
   });
   if (!Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > LIMITS.maxTracks) bad('edits.tracks', `must have 1–${LIMITS.maxTracks} tracks`);
   if (p.tracks[0]!.kind !== 'main') bad('edits.tracks.0.kind', 'the first track must be the main track');

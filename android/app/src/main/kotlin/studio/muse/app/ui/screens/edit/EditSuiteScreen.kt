@@ -385,7 +385,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 if (p == null) return@collect
                 // A take added while editing (an overlay, or a clip at the end): its file first, so the preview and the
                 // export include it (before, only takes in the project when it opened were fetched).
-                if (sourceFile != null && p.assets.any { it.take != null && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
+                if (sourceFile != null && p.assets.any { (it.take != null || (it.upload != null && it.kind != AssetKind.LUT && it.kind != AssetKind.FONT && it.id !in fetchTried)) && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
                 if (p.assets.any { it.kind == AssetKind.FONT && it.upload?.let(OwnFonts::has) == false }) fetchFonts(p)
                 rebuildPreview(p)
             }
@@ -497,12 +497,20 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
-    /** PiP takes: their files (for preview/export). */
+    /** PiP takes and editor uploads (photos, sounds, reversed copies, cut-outs): their files (for preview/export). */
+    /** Upload assets already asked for once (so a missing one isn't fetched on every change). */
+    private val fetchTried = HashSet<String>()
+
     private suspend fun fetchTakeAssets(p: EditProject) {
         val takes = c.repo.state.value.takes
         for (a in p.assets) {
-            if (a.id in files || a.take == null) continue
-            val url = takes.firstOrNull { it.id == a.take }?.videoUrl ?: continue
+            if (a.id in files || a.kind == AssetKind.LUT || a.kind == AssetKind.FONT) continue
+            if (a.take == null && !fetchTried.add(a.id)) continue
+            val url = when {
+                a.take != null -> takes.firstOrNull { it.id == a.take }?.videoUrl
+                a.upload != null -> runCatching { c.repo.api.editorUploadUrl(a.upload!!) }.getOrNull()
+                else -> null
+            } ?: continue
             runCatching { engine.fetchSource(url) {} }.getOrNull()?.let { files[a.id] = it }
         }
     }

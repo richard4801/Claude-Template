@@ -52,9 +52,10 @@ function plan(p: M.EditProject) {
   // Text is drawn from stills (SVG) listed in a temporary folder: their content and timing are part of the plan, the
   // folder's name is not.
   const list = r.temp.map(t => path.join(t, 'text.ffconcat')).find(f => fs.existsSync(f));
-  const texts = [list ? fs.readFileSync(list, 'utf8') : '', ...r.stills.map(x => JSON.stringify([x.svg, x.crop])), JSON.stringify(r.sprites)].join('\n');
+  const cubes = r.temp.filter(t => t.endsWith('.cube') && fs.existsSync(t)).map(t => fs.readFileSync(t, 'utf8'));
+  const texts = [list ? fs.readFileSync(list, 'utf8') : '', ...cubes, ...r.stills.map(x => JSON.stringify([x.svg, x.crop])), JSON.stringify(r.sprites)].join('\n');
   for (const t of r.temp) fs.rmSync(t, { force: true, recursive: true });
-  const tmp = (x: string) => x.replace(/muse-text-[^/'"\\]+/g, 'TEMP');
+  const tmp = (x: string) => x.replace(/muse-text-[^/'"\\]+/g, 'TEMP').replace(/muse-look-[\d-]+\.cube/g, 'LOOK');
   return { args: tmp(JSON.stringify(r.args)) + tmp(texts), unsupported: new Set(r.unsupported) };
 }
 
@@ -87,7 +88,7 @@ const maskFields: Table<M.Mask> = { shape: sub('mask', { shape: 'rect' }, 'shape
   width: sub('mask', { shape: 'rect' }, 'width', 0.3), height: sub('mask', { shape: 'rect' }, 'height', 0.3), rotation: sub('mask', { shape: 'rect' }, 'rotation', 30),
   feather: sub('mask', { shape: 'rect' }, 'feather', 0.4), invert: sub('mask', { shape: 'rect' }, 'invert', true) };
 const lookFields: Table<Look> = { lut: set('look', { lut: 'pack:bw-classic' }), strength: sub('look', { lut: 'pack:bw-classic' }, 'strength', 0.5),
-  curves: set('look', { curves: { rgb: [[0, 0.1], [1, 0.9]] } }), lift: set('look', { lift: 0.3 }), sharpen: set('look', { sharpen: 0.5 }), chromatic: set('look', { chromatic: 0.5 }),
+  curves: set('look', { curves: { rgb: [[0, 0.1], [1, 0.9]] } }), hsl: set('look', { hsl: { red: { sat: -0.5 } } }), lift: set('look', { lift: 0.3 }), sharpen: set('look', { sharpen: 0.5 }), chromatic: set('look', { chromatic: 0.5 }),
   halation: set('look', { halation: { amount: 0.5 } }), leak: set('look', { leak: { kind: 'warm', amount: 0.5 } }), vignette: set('look', { vignette: { amount: 0.5 } }),
   grain: set('look', { grain: { amount: 0.5 } }) };
 const animFields = (k: 'animIn' | 'animOut'): Table<M.Anim> => ({ kind: set(k, { kind: 'fade', durationSec: 0.3 }), durationSec: sub(k, { kind: 'fade', durationSec: 0.3 }, 'durationSec', 0.6) });
@@ -191,7 +192,7 @@ const canvasKeys: Table<M.Canvas> = { width: set('width', 720), height: set('hei
 const projectKeys: Table<M.EditProject> = { version: meta('always 2'), sourceTakeId: meta('which take the project edits (a reference)'), canvas: nested, assets: meta('resolved by the caller into files'),
   tracks: nested, mute: { mut: (_o, p) => { p.mute = true; } } };
 const assetKeys: Table<M.Asset> = { id: meta('an id'), kind: meta('the kind of file'), take: meta('a reference the caller resolves into files'), upload: meta('a reference the caller resolves into files'),
-  library: meta('a reference the caller resolves into files (missing → listed)'), url: meta('a reference the caller resolves into files'), durationSec: meta('the file is probed'),
+  library: meta('a reference the caller resolves into files (missing → listed)'), reverseOf: meta('the reversed copy is a file of its own; clips play it as any asset'), url: meta('a reference the caller resolves into files'), durationSec: meta('the file is probed'),
   width: meta('the file is probed'), height: meta('the file is probed'), hasAudio: meta('the file is probed'), name: meta('display only') };
 
 // ------------------------------------------------------------------ every place a field can be

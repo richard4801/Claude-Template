@@ -3,7 +3,7 @@
 //
 // Per item, on sRGB values 0–1, in this order:
 //   1 sharpen (unsharp mask)  2 chromatic aberration  3 colour matrix (adjust + filter, model.ts)  3b highlights/shadows
-//   (Adjust, model.ts toneAdjust)  4 tone curves
+//   (Adjust, model.ts toneAdjust)  4 tone curves  4b HSL per hue band
 //   5 3D LUT (trilinear, blended by strength)  6 lift (faded blacks)  7 halation  8 light leak  9 vignette  10 grain
 // Steps 1, 2 and 7 look at neighbours (blur radii scale with the picture, so a thumbnail looks like the full frame).
 
@@ -15,8 +15,14 @@ export type Vignette = { amount: number; size?: number; softness?: number };
 export type Halation = { amount: number; radius?: number; threshold?: number };
 export type LeakKind = 'warm' | 'rose' | 'amber' | 'teal' | 'rainbow';
 export type Leak = { kind: LeakKind; amount: number; angle?: number };
+export type HueBand = 'red' | 'orange' | 'yellow' | 'green' | 'aqua' | 'blue' | 'purple' | 'magenta';
+/** Per hue band: hue shift (±1 = ±30°), saturation and luminance, each −1…1. */
+export type HslBand = { hue?: number; sat?: number; light?: number };
+export type Hsl = Partial<Record<HueBand, HslBand>>;
+/** The bands' centres in degrees, in order (the weights are linear between neighbours, wrapping at 360). */
+export const HUE_BANDS: [HueBand, number][] = [['red', 0], ['orange', 30], ['yellow', 60], ['green', 120], ['aqua', 180], ['blue', 240], ['purple', 270], ['magenta', 300]];
 /** A look: every part optional. `lut` = "pack:<id>" (a bundled look) or the id of a project asset of kind "lut". */
-export type Look = { lut?: string; strength?: number; curves?: Curves; lift?: number; sharpen?: number; chromatic?: number;
+export type Look = { lut?: string; strength?: number; curves?: Curves; hsl?: Hsl; lift?: number; sharpen?: number; chromatic?: number;
   halation?: Halation; leak?: Leak; vignette?: Vignette; grain?: Grain };
 
 export type Lut = { size: number; title: string | null; domainMin: [number, number, number]; domainMax: [number, number, number]; data: Float32Array };
@@ -139,6 +145,47 @@ export function curvesFn(c: Curves | undefined): ((rgb: [number, number, number]
   return rgb => rgb.map((v, i) => { let o = m ? m(v) : v; const f = ch[i]; if (f) o = f(o); return c01(o); }) as [number, number, number];
 }
 
+// ------------------------------------------------------------------ HSL per hue
+/** Each band's weight at hue [h] (degrees): linear between neighbouring centres, summing to 1. */
+export function hueWeights(h: number): number[] {
+  const w = new Array(HUE_BANDS.length).fill(0);
+  const x = ((h % 360) + 360) % 360;
+  for (let i = 0; i < HUE_BANDS.length; i++) {
+    const a = HUE_BANDS[i]![1], b = i + 1 < HUE_BANDS.length ? HUE_BANDS[i + 1]![1] : 360;
+    if (x >= a && x < b) { const t = (x - a) / (b - a); w[i] = 1 - t; w[(i + 1) % HUE_BANDS.length] += t; break; }
+  }
+  return w;
+}
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (d < 1e-9) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? 60 * (((g - b) / d) % 6) : mx === g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4);
+  return [(h + 360) % 360, Math.min(1, s), l];
+}
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s, hp = (((h % 360) + 360) % 360) / 60, x = c * (1 - Math.abs((hp % 2) - 1)), m = l - c / 2;
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  return [c01(r + m), c01(g + m), c01(b + m)];
+}
+/**
+ * HSL per hue band (look step 4b). Each pixel's bands by hue weight: hue += Σ w·hue·30°, saturation ×= 1 + Σ w·sat,
+ * lightness += Σ w·light · s·l·(1−l)·2 (greys and black/white never move). Null when nothing is set.
+ */
+export function hslFn(hsl: Hsl | undefined): ((rgb: [number, number, number]) => [number, number, number]) | null {
+  if (!hsl) return null;
+  const bands = HUE_BANDS.map(([k]) => hsl[k] ?? {});
+  if (!bands.some(b => b.hue || b.sat || b.light)) return null;
+  return rgb => {
+    const [h, s, l] = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+    if (s < 1e-6) return rgb;
+    const w = hueWeights(h);
+    let dh = 0, ds = 0, dl = 0;
+    for (let i = 0; i < bands.length; i++) { const b = bands[i]!, k = w[i]!; if (!k) continue; dh += k * (b.hue ?? 0) * 30; ds += k * (b.sat ?? 0); dl += k * (b.light ?? 0); }
+    return hslToRgb(h + dh, c01(s * (1 + ds)), c01(l + dl * s * l * (1 - l) * 2));
+  };
+}
+
 // ------------------------------------------------------------------ noise, vignette, leak
 /** 32-bit integer hash (lowbias32) → 0…1. Same bits in Kotlin (Int) and Swift (UInt32). */
 export function hash01(x: number, y: number, frame: number): number {
@@ -214,6 +261,7 @@ export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null
   // 2. chromatic aberration (red out, blue in, from the centre)
   const ca = clamp(look.chromatic ?? 0, 0, 1) * 0.006;
   const curves = curvesFn(look.curves);
+  const hsl = hslFn(look.hsl);
   const strength = clamp(look.strength ?? 1, 0, 1);
   const lift = 0.12 * clamp(look.lift ?? 0, 0, 1);
   const M = o.matrix ?? null, L = o.lut ?? null, sh0 = o.tone?.shadows ?? 0, hi0 = o.tone?.highlights ?? 0;
@@ -230,6 +278,8 @@ export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null
     if (sh0 || hi0) rgb = rgb.map(v => c01(v + 0.25 * (sh0 * 4 * v * (1 - v) * (1 - v) + hi0 * 4 * v * v * (1 - v)))) as [number, number, number];
     // 4. curves
     if (curves) rgb = curves(rgb);
+    // 4b. HSL per hue
+    if (hsl) rgb = hsl(rgb);
     // 5. LUT
     if (L && strength > 0) { const t = lutSample(L, rgb[0], rgb[1], rgb[2]); rgb = [0, 1, 2].map(i => c01(rgb[i]! + (t[i]! - rgb[i]!) * strength)) as [number, number, number]; }
     // 6. lift
@@ -307,6 +357,17 @@ export function lookProblem(look: unknown, assetKinds: Map<string, string>, pack
       }
     }
   }
+  if (l.hsl !== undefined) {
+    if (!l.hsl || typeof l.hsl !== 'object' || Array.isArray(l.hsl)) return { field: 'hsl', message: 'must be an object' };
+    for (const [k, band] of Object.entries(l.hsl)) {
+      if (!HUE_BANDS.some(([b]) => b === k)) return { field: `hsl.${k}`, message: 'unknown colour' };
+      if (!band || typeof band !== 'object') return { field: `hsl.${k}`, message: 'must be an object' };
+      for (const key of Object.keys(band)) {
+        if (!['hue', 'sat', 'light'].includes(key)) return { field: `hsl.${k}.${key}`, message: 'is not an HSL setting' };
+        const p = num(`hsl.${k}.${key}`, (band as Record<string, unknown>)[key], -1, 1); if (p) return p;
+      }
+    }
+  }
   const obj = (f: string, v: unknown, checks: [string, number, number, boolean][]) => {
     if (v === undefined) return null;
     if (!v || typeof v !== 'object') return { field: f, message: 'must be an object' };
@@ -319,7 +380,7 @@ export function lookProblem(look: unknown, assetKinds: Map<string, string>, pack
     ?? obj('leak', l.leak, [['amount', 0, 1, true], ['angle', -360, 360, false]]);
   if (o) return o;
   if (l.leak !== undefined && !LEAKS.includes(l.leak.kind)) return { field: 'leak.kind', message: `one of ${LEAKS.join(', ')}` };
-  const known = new Set(['lut', 'strength', 'curves', 'lift', 'sharpen', 'chromatic', 'halation', 'leak', 'vignette', 'grain']);
+  const known = new Set(['lut', 'strength', 'curves', 'hsl', 'lift', 'sharpen', 'chromatic', 'halation', 'leak', 'vignette', 'grain']);
   const extra = Object.keys(l).find(k => !known.has(k));
   if (extra) return { field: extra, message: 'is not a look setting' };
   return null;

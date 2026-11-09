@@ -61,6 +61,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
             num("$f.width", a.width?.toDouble(), 1.0, 16384.0); num("$f.height", a.height?.toDouble(), 1.0, 16384.0)
             assets[a.id] = a
         }
+        p.assets.forEachIndexed { i, a ->
+            val of = a.reverseOf ?: return@forEachIndexed
+            val o = assets[of]
+            if (a.kind != AssetKind.VIDEO || o == null || o.kind != AssetKind.VIDEO || o.reverseOf != null || o.id == a.id) bad("edits.assets.$i.reverseOf", "must be a video asset")
+        }
         if (p.tracks.isEmpty() || p.tracks.size > EditLimits.MAX_TRACKS) bad("edits.tracks", "must have 1–${EditLimits.MAX_TRACKS} tracks")
         if (p.tracks[0].kind != TrackKind.MAIN) bad("edits.tracks.0.kind", "the first track must be the main track")
         if (p.tracks.count { it.kind == TrackKind.MAIN } != 1) bad("edits.tracks", "needs exactly one main track")
@@ -202,6 +207,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
                 prev = pt.x
             }
         }
+        l.hsl?.forEach { (band, v) -> val g = "$f.hsl.${band.wire}"; num("$g.hue", v.hue, -1.0, 1.0); num("$g.sat", v.sat, -1.0, 1.0); num("$g.light", v.light, -1.0, 1.0) }
         l.grain?.let { num("$f.grain.amount", it.amount, 0.0, 1.0, false); num("$f.grain.size", it.size, 0.5, 3.0) }
         l.vignette?.let { num("$f.vignette.amount", it.amount, -1.0, 1.0, false); num("$f.vignette.size", it.size, 0.0, 1.0); num("$f.vignette.softness", it.softness, 0.0, 1.0) }
         l.halation?.let { num("$f.halation.amount", it.amount, 0.0, 1.0, false); num("$f.halation.radius", it.radius, 0.05, 1.0); num("$f.halation.threshold", it.threshold, 0.0, 0.99) }

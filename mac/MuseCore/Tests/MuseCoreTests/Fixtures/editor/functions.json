@@ -1,4 +1,257 @@
 {
+ "reverse": [
+  {
+   "clip": {
+    "id": "r1",
+    "asset": "src",
+    "inSec": 0,
+    "outSec": 10,
+    "speed": 1
+   },
+   "durationSec": 10,
+   "reversed": {
+    "id": "r1",
+    "asset": "src_rev",
+    "inSec": 0,
+    "outSec": 10,
+    "speed": 1
+   },
+   "back": {
+    "id": "r1",
+    "asset": "src",
+    "inSec": 0,
+    "outSec": 10,
+    "speed": 1
+   }
+  },
+  {
+   "clip": {
+    "id": "r2",
+    "asset": "src",
+    "inSec": 1.25,
+    "outSec": 4.5,
+    "speed": 1.5,
+    "volume": 0.5
+   },
+   "durationSec": 10,
+   "reversed": {
+    "id": "r2",
+    "asset": "src_rev",
+    "inSec": 5.5,
+    "outSec": 8.75,
+    "speed": 1.5,
+    "volume": 0.5
+   },
+   "back": {
+    "id": "r2",
+    "asset": "src",
+    "inSec": 1.25,
+    "outSec": 4.5,
+    "speed": 1.5,
+    "volume": 0.5
+   }
+  },
+  {
+   "clip": {
+    "id": "r3",
+    "asset": "src",
+    "inSec": 2,
+    "outSec": 8,
+    "speed": 1,
+    "speedCurve": {
+     "preset": "custom",
+     "points": [
+      [
+       0,
+       1
+      ],
+      [
+       0.3,
+       0.4
+      ],
+      [
+       1,
+       2
+      ]
+     ]
+    }
+   },
+   "durationSec": 12.5,
+   "reversed": {
+    "id": "r3",
+    "asset": "src_rev",
+    "inSec": 4.5,
+    "outSec": 10.5,
+    "speed": 1,
+    "speedCurve": {
+     "preset": "custom",
+     "points": [
+      [
+       0,
+       2
+      ],
+      [
+       0.7,
+       0.4
+      ],
+      [
+       1,
+       1
+      ]
+     ]
+    }
+   },
+   "back": {
+    "id": "r3",
+    "asset": "src",
+    "inSec": 2,
+    "outSec": 8,
+    "speed": 1,
+    "speedCurve": {
+     "preset": "custom",
+     "points": [
+      [
+       0,
+       1
+      ],
+      [
+       0.3,
+       0.4
+      ],
+      [
+       1,
+       2
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "clip": {
+    "id": "r4",
+    "asset": "src",
+    "inSec": 0,
+    "outSec": 6,
+    "speed": 1,
+    "speedCurve": {
+     "preset": "bullet",
+     "points": [
+      [
+       0,
+       1
+      ],
+      [
+       0.5,
+       0.25
+      ],
+      [
+       1,
+       1
+      ]
+     ]
+    }
+   },
+   "durationSec": 6,
+   "reversed": {
+    "id": "r4",
+    "asset": "src_rev",
+    "inSec": 0,
+    "outSec": 6,
+    "speed": 1,
+    "speedCurve": {
+     "preset": "bullet",
+     "points": [
+      [
+       0,
+       1
+      ],
+      [
+       0.5,
+       0.25
+      ],
+      [
+       1,
+       1
+      ]
+     ]
+    }
+   },
+   "back": {
+    "id": "r4",
+    "asset": "src",
+    "inSec": 0,
+    "outSec": 6,
+    "speed": 1,
+    "speedCurve": {
+     "preset": "bullet",
+     "points": [
+      [
+       0,
+       1
+      ],
+      [
+       0.5,
+       0.25
+      ],
+      [
+       1,
+       1
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "clip": {
+    "id": "r5",
+    "asset": "src",
+    "inSec": 3,
+    "outSec": 3.1,
+    "speed": 1,
+    "holdSec": 2
+   },
+   "durationSec": 10,
+   "reversed": null,
+   "back": null
+  },
+  {
+   "clip": {
+    "id": "r6",
+    "asset": "src",
+    "inSec": 2,
+    "outSec": 7,
+    "speed": 1,
+    "alphaMatte": {
+     "asset": "matte"
+    },
+    "audioAsset": "voice",
+    "look": {
+     "lut": "pack:film-gold"
+    }
+   },
+   "durationSec": 10,
+   "reversed": {
+    "id": "r6",
+    "asset": "src_rev",
+    "inSec": 3,
+    "outSec": 8,
+    "speed": 1,
+    "look": {
+     "lut": "pack:film-gold"
+    }
+   },
+   "back": {
+    "id": "r6",
+    "asset": "src",
+    "inSec": 2,
+    "outSec": 7,
+    "speed": 1,
+    "look": {
+     "lut": "pack:film-gold"
+    }
+   }
+  }
+ ],
  "adjustLayers": {
   "project": {
    "version": 2,

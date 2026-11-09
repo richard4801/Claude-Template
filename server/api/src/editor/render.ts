@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { LOOK_IDS } from './lookpack.js';
 import { FILTERS } from './presets.js';
 import * as M from './model.js';
-import { hash01 } from './look.js';
+import { curvesFn, hash01, hslFn, lutSample, parseCube, writeCube, type Look, type Lut } from './look.js';
 import { voiceChain } from './audio.js';
 import * as TD from './textdraw.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
@@ -77,6 +77,18 @@ export function glitchShifts(windows: { start: number; d: number }[], W: number,
     set(w.start + w.d, 0, 0, 0);
   }
   return cmds.join(';');
+}
+
+/** A look's curves (4), HSL (4b) and LUT at its strength (5) as one 33³ cube, the same steps as look.ts applyLook. */
+export function bakeLook(look: Look, lut: Lut | null): string {
+  const curves = curvesFn(look.curves), hsl = hslFn(look.hsl), s = Math.max(0, Math.min(1, look.strength ?? 1));
+  return writeCube(33, 'muse look', (r, g, b) => {
+    let rgb: [number, number, number] = [r, g, b];
+    if (curves) rgb = curves(rgb);
+    if (hsl) rgb = hsl(rgb);
+    if (lut && s > 0) { const t = lutSample(lut, rgb[0], rgb[1], rgb[2]); rgb = [0, 1, 2].map(i => Math.min(1, Math.max(0, rgb[i]! + (t[i]! - rgb[i]!) * s))) as [number, number, number]; }
+    return rgb;
+  });
 }
 
 /** A look's LUT file: a pack look, a palette, or an imported .cube (asset id → file from `files`). */
@@ -177,6 +189,7 @@ export type RenderPlan = { args: string[]; durationSec: number; width: number; h
 export function planRender(p: M.EditProject, files: Record<string, string>, sizes: Record<string, { width: number; height: number; hasAudio: boolean }>, out: string, o: RenderOptions = {}): RenderPlan {
   const unsupported = new Set<string>();
   const temp: string[] = [];
+  const baked = new Map<string, string>(); // look key → baked .cube (one per distinct look)
   const f = Math.min(1, (o.maxSide ?? Math.max(p.canvas.width, p.canvas.height)) / Math.max(p.canvas.width, p.canvas.height));
   const W = even(p.canvas.width * f), H = even(p.canvas.height * f), FPS = Math.min(o.fps ?? p.canvas.fps ?? 30, 60);
   const inputs: string[] = [], index = new Map<string, number>(), inputArgs = new Map<number, string[]>();
@@ -208,7 +221,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if ((c.opacity ?? 1) !== 1 || kf.opacity?.length) unsupported.add('opacity');
     if (c.animIn && c.animIn.kind !== 'none' || c.animOut && c.animOut.kind !== 'none') unsupported.add('clip animation');
     if (M.COLOR_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('colour keyframes');
-    if (M.LOOK_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('look details (curves, grain, …)');
+    if (M.LOOK_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('look details (grain, vignette, …)');
     if (tr.flipX || tr.flipY) unsupported.add('mirror (flip)');
     if (c.holdSec !== undefined) unsupported.add('freeze frames');
     if (p.canvas.fill === 'blur' && c.fit === 'contain') unsupported.add('blur fill');
@@ -219,17 +232,28 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     g.push(`color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(len + 1)}[bg${i}]`);
     let last = `o${i}`;
     g.push(`[bg${i}][f${i}]overlay=x='${n4(W)}*(${X})-overlay_w/2':y='${n4(H)}*(${Y})-overlay_h/2':eval=${moving ? 'frame' : 'init'}[${last}]`);
-    // The Look: its LUT at its strength (the look's other parts are not drawn here).
-    const lut = c.look?.lut ? lutFile(c.look.lut, files) : null;
+    // The Look: its LUT at its strength; with curves or HSL, those and the LUT baked into one cube (look steps 4–5).
+    let lut = c.look?.lut ? lutFile(c.look.lut, files) : null;
     if (c.look?.lut && !lut) unsupported.add('a look that is not on the server');
+    const toned = !!(c.look && (curvesFn(c.look.curves) || hslFn(c.look.hsl)));
+    if (toned && (lut || !c.look!.lut)) {
+      const key = JSON.stringify([c.look!.curves, c.look!.hsl, lut, c.look!.lut ? c.look!.strength ?? 1 : 0]);
+      let file = baked.get(key);
+      if (!file) {
+        file = path.join(os.tmpdir(), `muse-look-${process.pid}-${Date.now()}-${baked.size}.cube`);
+        fs.writeFileSync(file, bakeLook(c.look!, lut ? parseCube(fs.readFileSync(lut, 'utf8')) : null));
+        temp.push(file); baked.set(key, file);
+      }
+      lut = file;
+    }
     if (lut) {
       const s = Math.max(0, Math.min(1, c.look!.strength ?? 1));
       const esc = lut.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '');
-      if (s >= 0.999) g.push(`[${last}]lut3d=file='${esc}'[l${i}]`);
+      if (s >= 0.999 || toned) g.push(`[${last}]lut3d=file='${esc}'[l${i}]`);
       else g.push(`[${last}]split[la${i}][lb${i}];[lb${i}]lut3d=file='${esc}'[lc${i}];[la${i}][lc${i}]blend=all_mode=normal:all_opacity=${n4(s)}[l${i}]`);
       last = `l${i}`;
     }
-    if (c.look && Object.keys(c.look).some(x => !['lut', 'strength'].includes(x))) unsupported.add('look details (curves, grain, …)');
+    if (c.look && Object.keys(c.look).some(x => !['lut', 'strength', 'curves', 'hsl'].includes(x))) unsupported.add('look details (grain, vignette, …)');
     // Exactly the clip's frames on the timeline (rounded once from the timeline, so cuts never drift).
     g.push(`[${last}]trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
   });
