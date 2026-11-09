@@ -556,6 +556,14 @@ const captionScripts = {
   languages: ['en', 'ja', 'zh', 'zh-TW', 'th', 'ko', 'ar', 'he', 'hi', 'ru', 'pt-BR', null].map(l => ({ language: l, joiner: M.captionJoiner(l ?? undefined), rtl: M.isRtlLanguage(l ?? undefined), text: M.captionText(joinWords, l ?? undefined) })),
   srtJa: { project: jaProject, srt: M.toSrt(jaProject) },
 };
+// Lyric captions (M): captions of an uploaded song on the music track, mapped through its two clips (one at 1.5×).
+const songUp: M.Asset = { id: 'tune', kind: 'audio', upload: 'up_tune', durationSec: 12 };
+const lyricProject: M.EditProject = proj([main([clip('c1', 0, 10)]),
+  { id: 'mus', kind: 'music', items: [{ id: 'm1', asset: 'tune', startSec: 0, inSec: 0, outSec: 4 }, { id: 'm2', asset: 'tune', startSec: 4, inSec: 5, outSec: 11, speed: 1.5 }] } as M.Track,
+  { id: 'cap', kind: 'caption', items: [], caption: { asset: 'tune', words: [W('Hold', 0.5, 0.9), W('on', 1.0, 1.3), W('to', 3.7, 3.95), W('me', 4.2, 4.6), W('stay', 5.5, 6.0), W('close', 6.1, 6.8), W('tonight', 10.6, 11.4)], style: CAPTION_STYLES.karaoke! } } as M.Track],
+  [src, songUp]);
+M.validate(lyricProject, FILTERS);
+const lyricCaptions = { project: lyricProject, words: M.captionWords(lyricProject), pages: M.captionPages(lyricProject) };
 // Smooth slow motion (M): applySlowmo on one-clip projects; the clip, the copy's range, and the result (null: refused).
 const slowmoProject = (clip: M.VideoClip, slow: M.Asset, extra: M.VideoClip[] = []): M.EditProject => ({ version: 2, sourceTakeId: 'tk_1', canvas: { width: 1080, height: 1920, fps: 30, background: '#000000' },
   assets: [{ id: 'src', kind: 'video', take: 'tk_1', durationSec: 12 }, { id: 'other', kind: 'video', upload: 'up_o', durationSec: 5 }, slow], tracks: [{ id: 'main', kind: 'main', items: [clip, ...extra] }] });
@@ -600,7 +608,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { reverse, derived, slowmo, captionTranslate, captionScripts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
+  'functions.json': { reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

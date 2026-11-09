@@ -7,12 +7,40 @@
 // lineHeight / 1.15. Painted back to front: background box, caption word box / marker stripe, shadow, stroke, fill.
 // The item's scale (static × keyframes × animation × loop), rotation, mirror and opacity apply to the whole block.
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import opentype from 'opentype.js';
 import sharp from 'sharp';
 import * as M from './model.js';
 
 /** Faces for letters the editor's fonts lack (Cyrillic, Greek, …): Debian's fonts-dejavu-core (Dockerfile). */
 export const FALLBACK_FONTS = { regular: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', bold: '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' };
+
+/**
+ * Chinese, Japanese and Korean (plans/edit-xl-options.md §4, step 2): Noto Sans SC / JP / KR, Regular and Bold, put in
+ * assets/cjk by scripts/cjk-fonts.mjs (the Docker build runs it). Each face is 80–110 MB once parsed, so only the one a
+ * block needs is loaded, and releaseCjk() drops them once a render's text frames are drawn.
+ */
+export const CJK_DIR = process.env.MUSE_CJK_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/cjk');
+export type CjkKind = 'sc' | 'jp' | 'kr';
+export const cjkFile = (k: CjkKind, bold: boolean) => path.join(CJK_DIR, `NotoSans${k.toUpperCase()}-${bold ? 'Bold' : 'Regular'}.ttf`);
+const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/u;
+const KANA = /[぀-ヿㇰ-ㇿｦ-ﾟ]/u;
+const HAN = /[⺀-⿟　-〿㐀-䶿一-鿿豈-﫿＀-￯]/u;
+/** The CJK face for [text]: Korean for hangul, Japanese for kana, else the language's (ja, ko, zh), else Chinese. */
+export function cjkKind(text: string, language?: string | null): CjkKind | null {
+  if (HANGUL.test(text)) return 'kr';
+  if (KANA.test(text)) return 'jp';
+  if (!HAN.test(text)) return null;
+  const l = (language ?? '').toLowerCase().split(/[-_]/)[0];
+  return l === 'ja' ? 'jp' : l === 'ko' ? 'kr' : 'sc';
+}
+/** Languages written without spaces between words: their caption words are drawn touching. */
+export const UNSPACED_LANGUAGES = new Set(['ja', 'zh', 'th']);
+/** How many CJK faces are parsed right now (tests: only the one needed, none after a render). */
+export function cjkLoaded() { return [...faces.keys()].filter(k => k.startsWith(CJK_DIR) && faces.get(k)).length; }
+/** Drops the parsed CJK faces (call when a render's text is drawn). */
+export function releaseCjk() { for (const k of [...faces.keys()]) if (k.startsWith(CJK_DIR)) faces.delete(k); }
 
 /** Put in `missing` when an emoji is drawn: the fonts here have it in one colour (outline), the apps in full colour. */
 export const EMOJI = 'colour emoji';
@@ -37,11 +65,11 @@ type Word = { d: string; width: number; run: Run; scale: number };
 type Shaped = { d: string; width: number };
 
 /** One word as an outline at baseline 0: glyphs from the font, or the fallback where it lacks one; kerned, tracked. */
-function shape(text: string, font: opentype.Font, fallback: opentype.Font | null, px: number, tracking: number, missing: Set<string>): Shaped {
+function shape(text: string, font: opentype.Font, fallbacks: opentype.Font[], px: number, tracking: number, missing: Set<string>): Shaped {
   let x = 0, d = '';
   let prev: { g: opentype.Glyph; f: opentype.Font } | null = null;
   for (const ch of text) {
-    let f: opentype.Font | null = font.charToGlyphIndex(ch) ? font : fallback?.charToGlyphIndex(ch) ? fallback : null;
+    const f: opentype.Font | null = font.charToGlyphIndex(ch) ? font : fallbacks.find(x => x.charToGlyphIndex(ch)) ?? null;
     if (!f) { if (!/\s/.test(ch)) missing.add(ch); prev = null; continue; }
     if (/\p{Extended_Pictographic}/u.test(ch)) missing.add(EMOJI);
     const g = f.glyphs.get(f.charToGlyphIndex(ch));
@@ -62,19 +90,26 @@ export type Block = { width: number; height: number; under: string; shadow: { sv
  * Lays out and paints runs (each split into words) in a block whose top-left is (0, 0). `missing` collects letters no
  * font has. `id` keeps filter ids unique in a frame.
  */
-export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number, fontFile: string, o: { maxLines?: number; missing: Set<string>; id: string }): Block | null {
+export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number, fontFile: string, o: { maxLines?: number; missing: Set<string>; id: string; language?: string | null; tight?: boolean }): Block | null {
   const font = face(fontFile) ?? face(FALLBACK_FONTS.regular);
   if (!font) return null;
-  const fallback = face(s.weight >= 700 ? FALLBACK_FONTS.bold : FALLBACK_FONTS.regular);
+  const bold = s.weight >= 700, fallbacks: opentype.Font[] = [];
+  const dv = face(bold ? FALLBACK_FONTS.bold : FALLBACK_FONTS.regular);
+  if (dv) fallbacks.push(dv);
+  // CJK letters the member's font lacks: the one Noto face this block needs (loaded only now).
+  const all = runs.map(r => r.text).join('');
+  const ck = [...all].some(ch => !font.charToGlyphIndex(ch)) ? cjkKind(all, o.language) : null;
+  if (ck) { const f = face(cjkFile(ck, bold)) ?? face(cjkFile(ck, !bold)); if (f) fallbacks.push(f); }
   const tracking = (s.letterSpacing ?? 0) * px;
-  const space = ((font.charToGlyph(' ').advanceWidth ?? font.unitsPerEm * 0.25) / font.unitsPerEm) * px + tracking;
+  // Unspaced languages (captions in ja, zh, th): the words touch (a line may still break between them).
+  const space = o.tight ? tracking : ((font.charToGlyph(' ').advanceWidth ?? font.unitsPerEm * 0.25) / font.unitsPerEm) * px + tracking;
   // Words, with forced breaks between paragraphs.
   const paras: Word[][] = [[]];
   for (const r of runs) {
     r.text.split('\n').forEach((part, i) => {
       if (i > 0) paras.push([]);
       for (const w of part.split(/[ \t]+/).filter(Boolean)) {
-        const k = r.scale ?? 1, sh = shape(w, font, fallback, px * k, tracking * k, o.missing);
+        const k = r.scale ?? 1, sh = shape(w, font, fallbacks, px * k, tracking * k, o.missing);
         paras.at(-1)!.push({ d: sh.d, width: sh.width, run: r, scale: k });
       }
     });
@@ -140,7 +175,9 @@ export function drawBlock(runs: Run[], s: M.TextStyle, px: number, maxW: number,
 
 // ------------------------------------------------------------------ what shows at a moment (RenderPlan.textFrame / captionFrame)
 /** One text block on the canvas at a moment. */
-export type Piece = { runs: Run[]; style: M.TextStyle; font: string; maxLines?: number; x: number; y: number; scale: number; rotation: number; flipX: boolean; flipY: boolean; alpha: number };
+export type Piece = { runs: Run[]; style: M.TextStyle; font: string; maxLines?: number; x: number; y: number; scale: number; rotation: number; flipX: boolean; flipY: boolean; alpha: number;
+  /** Captions: the words' language (picks the CJK face) and whether they're drawn touching (ja, zh, th). */
+  language?: string | null; tight?: boolean };
 
 /** A text item at timeline t, or null when it isn't on screen (android RenderPlan.textFrame). */
 export function textPiece(it: M.TextItem, t: number, font: string): Piece | null {
@@ -183,7 +220,9 @@ export function captionPiece(ct: M.CaptionTrack, pages: M.CaptionPage[], t: numb
     }
     return run;
   });
-  return { runs, style: s, font, maxLines: s.maxLines ?? 2, x: 0.5, y: s.y ?? 0.72, scale: 1, rotation: 0, flipX: false, flipY: false, alpha: 1 };
+  // CaptionTrack.language (translated captions, WS8's contract): read loosely until every model copy has the field.
+  const language = (ct as { language?: string }).language ?? null, lang = (language ?? '').toLowerCase().split(/[-_]/)[0]!;
+  return { runs, style: s, font, maxLines: s.maxLines ?? 2, x: 0.5, y: s.y ?? 0.72, scale: 1, rotation: 0, flipX: false, flipY: false, alpha: 1, language, tight: UNSPACED_LANGUAGES.has(lang) };
 }
 
 /** A frame of text and captions: the groups to draw (canvas coordinates) and the canvas box they can paint (x0, y0, x1, y1). */
@@ -200,7 +239,7 @@ export function frameBody(pieces: Piece[], W: number, H: number, missing: Set<st
   const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
   pieces.forEach((pc, i) => {
     const px = Math.max(1, pc.style.sizePct * H), maxW = Math.max(1, (pc.style.maxWidthPct ?? 0.85) * W);
-    const b = drawBlock(pc.runs, pc.style, px, maxW, pc.font, { maxLines: pc.maxLines, missing, id: String(i) });
+    const b = drawBlock(pc.runs, pc.style, px, maxW, pc.font, { maxLines: pc.maxLines, missing, id: String(i), language: pc.language, tight: pc.tight });
     if (!b || pc.alpha <= 0.001 || pc.scale <= 0) return;
     let shadow = b.shadow?.svg ?? '';
     if (b.shadow && b.shadow.sigma > 0) {

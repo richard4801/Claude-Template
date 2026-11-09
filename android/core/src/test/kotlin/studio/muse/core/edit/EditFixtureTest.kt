@@ -276,6 +276,22 @@ class EditFixtureTest {
         assertEquals(srt["srt"]!!.str, toSrt(EditJson.parse(srt["project"]!!)))
     }
 
+    @Test fun lyricCaptions() {
+        val d = fn["lyricCaptions"]!!.obj
+        val p = EditJson.parse(d["project"]!!)
+        validate(p)
+        val got = captionWords(p)
+        val want = d["words"]!!.arr
+        assertEquals(want.size, got.size)
+        want.forEachIndexed { i, w ->
+            assertEquals(w.obj["text"]!!.str, got[i].text); assertEquals(w.obj["index"]!!.num.toInt(), got[i].index)
+            assertEquals(w.obj["startSec"]!!.num, got[i].startSec, 1e-6); assertEquals(w.obj["endSec"]!!.num, got[i].endSec, 1e-6)
+        }
+        val pages = captionPages(p); val wp = d["pages"]!!.arr
+        assertEquals(wp.size, pages.size)
+        wp.forEachIndexed { i, pg -> assertEquals(pg.obj["startSec"]!!.num, pages[i].startSec, 1e-6); assertEquals(pg.obj["endSec"]!!.num, pages[i].endSec, 1e-6) }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

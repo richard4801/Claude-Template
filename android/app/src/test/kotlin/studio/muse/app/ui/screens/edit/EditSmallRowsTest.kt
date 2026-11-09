@@ -513,6 +513,23 @@ class EditSmallRowsTest {
         valid(c.p())
     }
 
+    @Test fun lyricCaptions() = runTest {
+        val c = controller()
+        c.act(EditAction.LyricCaptions); assertEquals("Add a song from your files to the music track first", c.ui.value.message)
+        // A song from the member's files on the music track.
+        val p0 = c.p()
+        val song = studio.muse.core.edit.Asset("song_up", studio.muse.core.edit.AssetKind.AUDIO, upload = "up_song", durationSec = 12.0)
+        val withSong = p0.copy(assets = p0.assets + song, tracks = p0.tracks.filter { it.kind != TrackKind.MUSIC } +
+            studio.muse.core.edit.Track("mus", TrackKind.MUSIC, items = listOf(AudioClip("m1", song.id, 0.0, 0.0, 8.0))))
+        c.load(withSong, "T", "take_1", null, false)
+        assertTrue(c.ui.value.songCaptionable)
+        c.act(EditAction.LyricCaptions); advanceUntilIdle()
+        val ct = c.p().tracks.first { it.kind == TrackKind.CAPTION }.caption!!
+        assertEquals(song.id, ct.asset); assertEquals(studio.muse.core.edit.CaptionPreset.KARAOKE, ct.style.preset)
+        assertTrue(studio.muse.core.edit.captionWords(c.p()).isNotEmpty())
+        valid(c.p())
+    }
+
     @Test fun hslPerHue() = runTest {
         val c = controller()
         val id = c.p().mainClips[0].id

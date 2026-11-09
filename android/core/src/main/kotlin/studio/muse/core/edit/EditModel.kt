@@ -443,6 +443,19 @@ fun captionWords(p: EditProject): List<TimedWord> {
             out += TimedWord(w.text, r6(s.startSec + clipTimeAt(c, a)), r6(s.startSec + clipTimeAt(c, b)), idx)
         }
     }
+    // Lyric captions (2026-11-09): the same through the audio clips (music, voice, sound effects) of the caption asset.
+    for (t in p.tracks) {
+        if (t.kind != TrackKind.MUSIC && t.kind != TrackKind.VOICE && t.kind != TrackKind.SFX) continue
+        for (c in t.items) {
+            if (c !is AudioClip || c.asset != ct.asset) continue
+            ct.words.forEachIndexed { idx, w ->
+                val mid = (w.startSec + w.endSec) / 2
+                if (mid < c.inSec || mid >= c.outSec) return@forEachIndexed
+                val a = max(w.startSec, c.inSec); val b = min(w.endSec, c.outSec)
+                out += TimedWord(w.text, r6(c.startSec + clipTimeAt(c, a)), r6(c.startSec + clipTimeAt(c, b)), idx)
+            }
+        }
+    }
     return out.sortedWith(compareBy<TimedWord> { it.startSec }.thenBy { it.index })
 }
 

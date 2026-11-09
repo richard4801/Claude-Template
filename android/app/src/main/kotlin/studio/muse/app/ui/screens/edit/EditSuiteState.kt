@@ -229,6 +229,10 @@ data class EditSuiteUi(
 
     val captionTrack: Track? get() = project?.tracks?.firstOrNull { it.kind == TrackKind.CAPTION && it.caption != null }
     val captionPreset: CaptionPreset? get() = captionTrack?.caption?.style?.preset
+    /** Lyric captions can run: the music track's song is one of the member's files (an upload or a take). */
+    val songCaptionable: Boolean get() = project?.let { p ->
+        p.tracks.firstOrNull { it.kind == TrackKind.MUSIC }?.items?.firstOrNull()?.let { (it as? studio.muse.core.edit.AudioClip)?.asset }?.let { p.asset(it) }?.let { it.upload != null || it.take != null }
+    } == true
 }
 
 /** One tap on the paused picture: where (0–1 of the frame), when (source seconds of the clip) and whether to keep it. */

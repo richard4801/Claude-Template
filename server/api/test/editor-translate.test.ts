@@ -6,7 +6,7 @@ import { eq, sql } from 'drizzle-orm';
 import { ledger, takes } from '../src/db/schema.js';
 import { editorAi } from '../src/editor/service.js';
 import { TRANSLATE_MODELS, captionLines, timeLine, translateUsd, type TranslateClient } from '../src/editor/translate.js';
-import { exportNotice } from '../src/editor/scripts.js';
+import { cjkReady, exportNotice } from '../src/editor/scripts.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 
 describe('translated captions (unit)', () => {
@@ -26,11 +26,13 @@ describe('translated captions (unit)', () => {
     expect(translateUsd('best', { input: 100_000, output: 100_000 }, 2)).toBeCloseTo((0.2 + 1) * 2, 6);
   });
   it('captions in a script the export can’t draw yet say so; drawable ones don’t', () => {
-    expect(exportNotice('ja')).toMatch(/Japanese show in the app, but exports can't draw them yet/);
-    for (const l of ['zh', 'ko', 'ar', 'he', 'hi', 'th']) expect(exportNotice(l)).not.toBeNull();
+    expect(exportNotice('hi')).toMatch(/Hindi show in the app, but exports can't draw them yet/);
+    for (const l of ['ar', 'he', 'th']) expect(exportNotice(l)).not.toBeNull();
     for (const l of ['en', 'ru', 'el', 'vi', 'fil']) expect(exportNotice(l, [{ text: 'Привет' }, { text: 'Xin chào' }])).toBeNull();
-    expect(exportNotice('en', [{ text: 'hello' }, { text: '東京' }])).toMatch(/Some caption letters/);
     expect(exportNotice(null, [{ text: 'مرحبا' }])).toMatch(/Some caption letters/);
+    // Chinese, Japanese and Korean: drawn once the Noto CJK faces are installed (scripts/cjk-fonts.mjs), else a notice.
+    for (const l of ['ja', 'zh', 'ko']) expect(exportNotice(l) === null).toBe(cjkReady());
+    expect(exportNotice('en', [{ text: 'hello' }, { text: '東京' }]) === null).toBe(cjkReady());
   });
 });
 
@@ -63,17 +65,18 @@ describe('translate job (fake Claude)', () => {
     expect(feat).toMatchObject({ available: true, qualities: ['standard', 'best'] });
     // Only languages the export draws today (scripts.ts): no CJK, Arabic, Hebrew, Hindi or Thai until fonts and shaping land.
     expect(feat.languages).toEqual(expect.arrayContaining(['es', 'ru', 'el', 'vi']));
-    for (const l of ['ja', 'zh', 'ko', 'ar', 'he', 'hi', 'th']) expect(feat.languages).not.toContain(l);
-    expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options: { targetLanguage: 'ja' } })).body.error).toMatch(/targetLanguage: one of/);
+    for (const l of ['ar', 'he', 'hi', 'th']) expect(feat.languages).not.toContain(l);
+    for (const l of ['ja', 'zh', 'ko']) expect(feat.languages.includes(l)).toBe(cjkReady());
+    expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options: { targetLanguage: 'ar' } })).body.error).toMatch(/targetLanguage: one of/);
     const none = await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options: { targetLanguage: 'es' } });
     expect(none.status).toBe(400); expect(none.body.error).toMatch(/captions for this video first/);
     expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options: { targetLanguage: 'xx' } })).status).toBe(400);
     const cap = await done(owner, (await owner.req('POST', '/v1/editor/jobs', { kind: 'captions', source: { takeId: src }, options: { language: 'en' } })).body.id);
     expect(cap.state).toBe('done');
     expect(cap.result.exportNotice).toBeUndefined();
-    // Captions in Japanese: made, with a plain notice that exports can't draw them yet.
-    const jaCap = await done(owner, (await owner.req('POST', '/v1/editor/jobs', { kind: 'captions', source: { takeId: await take() }, options: { language: 'ja' } })).body.id);
-    expect(jaCap.result).toMatchObject({ language: 'ja', exportNotice: expect.stringMatching(/Japanese .* exports can't draw them yet/) });
+    // Captions in Hindi: made, with a plain notice that exports can't draw them yet.
+    const hiCap = await done(owner, (await owner.req('POST', '/v1/editor/jobs', { kind: 'captions', source: { takeId: await take() }, options: { language: 'hi' } })).body.id);
+    expect(hiCap.result).toMatchObject({ language: 'hi', exportNotice: expect.stringMatching(/Hindi .* exports can't draw them yet/) });
     expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options: { targetLanguage: 'en' } })).body.error).toMatch(/already in that language/);
 
     const est = (await owner.req('POST', '/v1/editor/estimate', { kind: 'translate', source: { takeId: src }, options: { targetLanguage: 'es' } })).body;

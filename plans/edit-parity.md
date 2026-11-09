@@ -98,7 +98,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Edit caption text (fix a word) | Has | Has | S | You can cut words but not retype them. Mac: Double-click a word. Android: Captions → Words → Tap to fix text. |
 | Filler and silence removal, edit by transcript | Has | Has | — | |
 | Text-to-speech voice-over | Missing | Missing | L | Needs a TTS vendor decision. Voices are **Content**. |
-| Lyric captions | Missing | Missing | L | |
+| Lyric captions | Has | Missing | L | 2026-11-09: captions of a song on the music track (one of the member's files): `captionWords` maps a caption asset's words through audio clips too (shared fixture `lyricCaptions`). Android: Captions → "Captions from the song" (karaoke style; the captions job). Mac: WS9 |
 
 ## 5. Audio
 
