@@ -74,7 +74,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -194,6 +194,20 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 c.act(EditAction.PickFrame(90, 160, IntArray(90 * 160) { i -> val x = i % 90; val y = i / 90; if ((x - 45) * (x - 45) + (y - 70) * (y - 70) < 500) 0xFFD9A07A.toInt() else 0xFF31C65E.toInt() + ((x + y) % 7) * 0x000100 }))
                 c.act(EditAction.PickAt(.3, .55, done = false))
                 ui = c.ui.value.copy(message = null)
+            }
+            "m_own_font" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 0.0, selectedId = null))
+                c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddText)
+                c.act(EditAction.EditText(c.ui.value.selectedId!!, "Day one in Lisbon"))
+                studio.muse.app.platform.edit.OwnFonts.register("up_font_1", java.io.File("../../server/api/assets/fonts/instrument_serif_400.ttf"))
+                c.act(EditAction.AddFont("up_font_1", "Instrument Serif Regular"))
+                c.act(EditAction.Open(Panel.TEXT))
+                ui = c.ui.value.copy(message = null)
+                host = host.copy(addFont = {})
             }
             "m_adjust_layer" -> {
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))

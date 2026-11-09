@@ -33,12 +33,13 @@ export class EditRenders {
       if (a.take) key = (await this.ctx.db.select({ k: takes.mediaKey }).from(takes).where(and(eq(takes.id, a.take), eq(takes.studioId, studioId))))[0]?.k ?? null;
       else if (a.upload) key = (await this.ctx.db.select({ k: uploads.storageKey }).from(uploads).where(and(eq(uploads.id, a.upload), eq(uploads.studioId, studioId))))[0]?.k ?? null;
       if (!key) continue;
-      out[a.id] = await this.local(key, dir);
+      out[a.id] = await this.local(key, dir, a.kind === 'font');
     }
     return out;
   }
-  async local(key: string, dir: string): Promise<string> {
-    if (this.ctx.storage.kind === 's3') return this.ctx.storage.presignGet(key, 3600);
+  /** A local copy of `key` (on S3 a signed URL, unless [download]: ffmpeg's drawtext needs a font as a file). */
+  async local(key: string, dir: string, download = false): Promise<string> {
+    if (this.ctx.storage.kind === 's3' && !download) return this.ctx.storage.presignGet(key, 3600);
     const obj = await this.ctx.storage.get(key);
     if (!obj) throw new Error(`media missing: ${key}`);
     const file = path.join(dir, `${uid('in')}${path.extname(key) || '.bin'}`);

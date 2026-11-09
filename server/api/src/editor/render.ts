@@ -3,7 +3,7 @@
 // - the main track: trims, speed and speed curves (the same constant-speed pieces the apps use), cover/contain fit,
 //   transform and x/y/scale keyframes (camera moves), transitions (xfade), and the Look's LUT at its strength;
 // - adjustment layers over the joined picture, under the text (runs of one colour matrix; keyed ones sampled);
-// - text items: the apps' fonts, size, colour, stroke, position, timing;
+// - text items: the apps' fonts (or the member's own font file), size, colour, stroke, position, timing;
 // - sound: each clip's own sound (at its speed) plus music/voice/sfx clips, or an external guide track instead.
 // Anything else in the project (masks, chroma, mattes, colour adjustments, overlays, captions, text animations, library
 // music) is left out and listed in `unsupported`, so the apps can say the render is a preview of the cut.
@@ -234,6 +234,12 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if (tr.kind !== 'text') continue;
     for (const it of tr.items as M.TextItem[]) {
       const st = it.style, px = Math.max(6, st.sizePct * H);
+      // An own font draws from its downloaded file; without one (not fetched) the fallback family stands in.
+      const ownFont = (s: M.TextStyle) => {
+        const f = s.fontAsset ? files[s.fontAsset] : undefined;
+        if (s.fontAsset && (!f || /^https?:/.test(f))) unsupported.add('own fonts');
+        return f && !/^https?:/.test(f) ? f : fontFile(s.font, s.weight);
+      };
       if (it.animIn && it.animIn.kind !== 'none' || it.animOut && it.animOut.kind !== 'none' || it.keyframes || it.animLoop) unsupported.add('text animation');
       const lines = wrap(st.uppercase ? it.text.toUpperCase() : it.text, px, (st.maxWidthPct ?? 0.9) * W);
       const lh = px * (st.lineHeight ?? 1.15), cx = (it.transform?.x ?? 0.5) * W, cy = (it.transform?.y ?? 0.5) * H;
@@ -244,7 +250,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         const x = st.align === 'left' ? `${n4(cx - ((st.maxWidthPct ?? 0.9) * W) / 2)}` : st.align === 'right' ? `${n4(cx + ((st.maxWidthPct ?? 0.9) * W) / 2)}-text_w` : `${n4(cx)}-text_w/2`;
         const stroke = st.stroke ? `:borderw=${n4(Math.max(1, st.stroke.widthPct * px))}:bordercolor=${color(st.stroke.color)}` : '';
         const next = `t${ti}_${li}`;
-        g.push(`[${vlast}]drawtext=fontfile='${fontFile(st.font, st.weight).replace(/:/g, '\\:')}':textfile='${file.replace(/:/g, '\\:')}':fontsize=${n4(px)}:fontcolor=${color(st.color, it.opacity ?? 1)}${stroke}:x='${x}':y=${n4(y)}:enable='between(t,${n4(it.startSec)},${n4(it.startSec + it.durationSec)})'[${next}]`);
+        g.push(`[${vlast}]drawtext=fontfile='${ownFont(st).replace(/:/g, '\\:')}':textfile='${file.replace(/:/g, '\\:')}':fontsize=${n4(px)}:fontcolor=${color(st.color, it.opacity ?? 1)}${stroke}:x='${x}':y=${n4(y)}:enable='between(t,${n4(it.startSec)},${n4(it.startSec + it.durationSec)})'[${next}]`);
         vlast = next;
       });
       ti++;
@@ -324,7 +330,7 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
   const sizes: Record<string, { width: number; height: number; hasAudio: boolean }> = {};
   for (const [id, file] of Object.entries(files)) {
     const a = p.assets.find(x => x.id === id);
-    if (!a || a.kind === 'lut') continue;
+    if (!a || a.kind === 'lut' || a.kind === 'font') continue;
     const info = await probe(cfg.ffprobe, file).catch(() => null);
     if (info) sizes[id] = { width: info.width || a.width || 1080, height: info.height || a.height || 1920, hasAudio: !!info.audioCodec };
   }

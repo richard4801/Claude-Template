@@ -74,10 +74,10 @@ object EditJson {
     }
 
     private fun asset(o: Obj) = Asset(
-        id = o.str("id"), kind = o.enum("kind", "must be video, image, audio or lut"),
+        id = o.str("id"), kind = o.enum("kind", "must be video, image, audio, lut or font"),
         take = o.strOrNull("take"), upload = o.strOrNull("upload"), library = o.strOrNull("library"),
         durationSec = o.numOrNull("durationSec"), width = o.intOrNull("width"), height = o.intOrNull("height"),
-        hasAudio = o.boolOrNull("hasAudio"), url = o.strOrNull("url"),
+        hasAudio = o.boolOrNull("hasAudio"), url = o.strOrNull("url"), name = o.strOrNull("name"),
     )
 
     private fun track(o: Obj): Track {
@@ -233,6 +233,7 @@ object EditJson {
         stroke = s.objOrNull("stroke")?.let { Stroke(it.str("color"), it.num("widthPct")) },
         shadow = s.objOrNull("shadow")?.let { Shadow(it.str("color"), it.num("opacity"), it.num("blurPct"), it.num("dyPct")) },
         background = s.objOrNull("background")?.let { TextBackground(it.str("color"), it.num("opacity"), it.num("paddingPct"), it.num("radiusPct")) },
+        fontAsset = s.strOrNull("fontAsset"),
     )
 
     internal fun captionStyle(s: Obj) = CaptionStyle(
@@ -243,7 +244,7 @@ object EditJson {
     // ------------------------------------------------------------------ emitting
     internal fun encodeAsset(a: Asset) = buildJsonObject {
         put("id", a.id); put("kind", a.kind.wire); str("take", a.take); str("upload", a.upload); str("library", a.library)
-        num("durationSec", a.durationSec); int("width", a.width); int("height", a.height); bool("hasAudio", a.hasAudio); str("url", a.url)
+        num("durationSec", a.durationSec); int("width", a.width); int("height", a.height); bool("hasAudio", a.hasAudio); str("url", a.url); str("name", a.name)
     }
 
     internal fun encodeTrack(t: Track) = buildJsonObject {
@@ -372,6 +373,7 @@ object EditJson {
         s.stroke?.let { put("stroke", buildJsonObject { put("color", it.color); num("widthPct", it.widthPct) }) }
         s.shadow?.let { put("shadow", buildJsonObject { put("color", it.color); num("opacity", it.opacity); num("blurPct", it.blurPct); num("dyPct", it.dyPct) }) }
         s.background?.let { put("background", buildJsonObject { put("color", it.color); num("opacity", it.opacity); num("paddingPct", it.paddingPct); num("radiusPct", it.radiusPct) }) }
+        str("fontAsset", s.fontAsset)
     }
 
     fun encodeCaptionStyle(s: CaptionStyle) = buildJsonObject {

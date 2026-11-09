@@ -14,6 +14,12 @@ class KitFixtureTest {
         for ((i, c) in k["kitOf"]!!.arr.withIndex()) Fixtures.assertJson("kitOf ${c.obj["name"]}", c.obj["kit"], encodeKit(kitOf(projects[i])))
     }
 
+    @Test fun ownFontStaysOutOfKits() {
+        val o = k["ownFont"]!!.obj
+        val p = EditJson.parse(o["project"]!!)
+        Fixtures.assertJson("kitOf own font", o["kit"], encodeKit(kitOf(p)))
+    }
+
     @Test fun applyKits() {
         val kits = k["kits"]!!.arr.map { parseKit(it) }
         for (c in k["apply"]!!.arr) {

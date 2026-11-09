@@ -184,6 +184,8 @@ interface MuseApi {
     /** Uploads a voice-over / music file (or with purpose "lut" a .cube) for the editor; returns the upload id. */
     suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =
         throw ApiException("unsupported", "Uploading files needs the studio server")
+    /** Where an editor upload of the studio can be fetched (an own font, on reopening an edit); null when unknown. */
+    suspend fun editorUploadUrl(uploadId: String): String? = null
     /** WS7 (import from link): a phone-fetched video as a clip upload (POST /v1/uploads/presign {kind: "clip"} → PUT, no confirm); returns the upload id. */
     suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit = {}): String =
         throw ApiException("unsupported", "Uploading files needs the studio server")

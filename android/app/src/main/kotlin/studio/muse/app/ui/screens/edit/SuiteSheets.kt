@@ -126,6 +126,8 @@ data class SuiteHost(
     val headphones: Boolean = false,
     /** "Add a photo": the system photo picker, then the upload (null where it isn't offered). */
     val addPhoto: (() -> Unit)? = null,
+    /** "Your font": opens the system file picker for a .ttf/.otf (null: not offered). */
+    val addFont: (() -> Unit)? = null,
     /** Style kits: save this edit's style under a name; delete a saved one. */
     val saveKit: (String) -> Unit = {},
     val deleteKit: (String) -> Unit = {},
@@ -155,7 +157,7 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
             Panel.SPEED -> SpeedBody(ui, act)
             Panel.TRANSFORM -> TransformBody(ui, act)
             Panel.AUDIO -> AudioBody(ui, host, act)
-            Panel.TEXT -> TextBody(ui, act)
+            Panel.TEXT -> TextBody(ui, host, act)
             Panel.CAPTIONS -> CaptionsBody(ui, host, act)
             Panel.EFFECTS -> EffectsBody(ui, host, act)
             Panel.FILTERS -> FiltersBody(ui, host, act)
@@ -566,7 +568,7 @@ private fun r1(v: Double) = Math.round(v * 10) / 10.0
 
 // ======================================================================= Text & hooks (E3)
 @Composable
-private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun TextBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val sel = ui.selection?.second as? TextItem
     SuiteButton("Add text", { act(EditAction.AddText) }, Modifier.fillMaxWidth(), icon = "text-t", primary = sel == null)
@@ -578,7 +580,7 @@ private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             Modifier.fillMaxWidth().background(m.t.surface).border(1.dp, m.t.line).padding(12.dp).semantics { contentDescription = "Text" },
             textStyle = m.type.body.copy(color = m.t.ink), cursorBrush = SolidColor(m.t.accent),
         )
-        TextStyleEditor(sel, act)
+        TextStyleEditor(sel, ui.project?.assets.orEmpty().filter { it.kind == studio.muse.core.edit.AssetKind.FONT }, host.addFont, act)
         AnimPicker(sel.id, sel.animIn, sel.animOut, sel.durationSec, text = true, act = act)
         LoopPicker(sel.id, sel.animLoop, act)
     }
@@ -604,14 +606,24 @@ private val TEXT_COLOURS = listOf("#FFFFFF", "#111111", "#FFE600", "#FF2D87", "#
 
 /** Font, weight, size, colour, alignment, outline, shadow and background of a text item (every field of the contract's TextStyle). */
 @Composable
-private fun TextStyleEditor(t: TextItem, act: (EditAction) -> Unit) {
+private fun TextStyleEditor(t: TextItem, fonts: List<studio.muse.core.edit.Asset>, addFont: (() -> Unit)?, act: (EditAction) -> Unit) {
     val m = muse
     val st = t.style
     fun set(n: studio.muse.core.edit.TextStyle, done: Boolean = true) = act(EditAction.SetTextStyle(t.id, n, done))
     SuiteLabel("Font")
-    SuiteChips(Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, st.font.wire, { w -> set(st.copy(font = Font.entries.first { it.wire == w })) })
+    // The six families, the edit's own fonts by name, then "Your font" (picks a .ttf/.otf). Picking a family clears an own font.
+    val chips = Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) } + fonts.map { "asset:${it.id}" to (it.name ?: "Your font") } +
+        listOfNotNull(addFont?.let { "add-font" to "Your font…" })
+    SuiteChips(chips, st.fontAsset?.let { "asset:$it" } ?: st.font.wire, { k ->
+        when {
+            k == "add-font" -> addFont?.invoke()
+            k.startsWith("asset:") -> set(st.copy(fontAsset = k.removePrefix("asset:")))
+            else -> set(st.copy(font = Font.entries.first { it.wire == k }, fontAsset = null))
+        }
+    })
+    if (st.fontAsset != null) T("Your font draws in its own weight. The ${st.font.wire} family stands in where it isn't available.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        SuiteSeg(listOf("400" to "Regular", "700" to "Bold", "900" to "Black"), st.weight.toString(), { set(st.copy(weight = it.toInt())) }, Modifier.weight(1f), height = 34.dp, fill = true)
+        if (st.fontAsset == null) SuiteSeg(listOf("400" to "Regular", "700" to "Bold", "900" to "Black"), st.weight.toString(), { set(st.copy(weight = it.toInt())) }, Modifier.weight(1f), height = 34.dp, fill = true)
         SuiteSeg(listOf("left" to "Left", "center" to "Centre", "right" to "Right"), st.align.wire, { w -> set(st.copy(align = studio.muse.core.edit.Align.entries.first { it.wire == w })) }, Modifier.weight(1f), height = 34.dp, fill = true)
     }
     SuiteSlider(((st.sizePct - .015) / (.25 - .015)).toFloat(), { f, done -> set(st.copy(sizePct = r3s(.015 + f * (.25 - .015))), done) }, label = "Size", valueText = "${(st.sizePct * 1000).roundToInt() / 10.0}%")

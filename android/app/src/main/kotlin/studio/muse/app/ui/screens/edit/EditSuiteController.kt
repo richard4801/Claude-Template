@@ -261,6 +261,8 @@ sealed interface EditAction {
     data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
+    /** An own font (an editor upload named [name]) added to the edit and set on the selected text. */
+    data class AddFont(val upload: String, val name: String) : EditAction
     /** A new adjustment layer at the playhead (3 s): it grades everything under it. */
     data object AddAdjustLayer : EditAction
     /** The selected adjustment layer's colour [field] (exposure…tint) or "opacity" (its strength). */
@@ -415,7 +417,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -866,6 +868,15 @@ class EditSuiteController(
                 p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animLoop = l); is ImageItem -> it.copy(animLoop = l); is VideoClip -> it.copy(animLoop = l); else -> it } }
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
+            is EditAction.AddFont -> {
+                val text = u.selection?.second as? TextItem
+                if (change(refused = "Couldn't add that font") { p ->
+                    val existing = p.assets.firstOrNull { it.kind == AssetKind.FONT && it.upload == a.upload }
+                    val fid = existing?.id ?: SuiteOps.newAssetId(p, "font")
+                    val q = if (existing != null) p else p.copy(assets = p.assets + Asset(fid, AssetKind.FONT, upload = a.upload, name = a.name.take(80).ifBlank { null }))
+                    if (text == null) q else q.updateItem(text.id) { (it as? TextItem)?.copy(style = it.style.copy(fontAsset = fid)) ?: it }
+                }) say(if (text != null) "${a.name} on this text" else "${a.name} added · pick it under Font on any text")
+            }
             EditAction.AddAdjustLayer -> {
                 var newId: String? = null
                 if (change(refused = "Couldn't add an adjustment layer here") { p -> SuiteOps.addAdjustLayer(p, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {

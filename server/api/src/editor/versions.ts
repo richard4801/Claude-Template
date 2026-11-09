@@ -8,6 +8,7 @@ import { EditProblem, LIMITS, validate, type EditProject } from './model.js';
 import { FILTERS } from './presets.js';
 import { CubeError, parseCube, type Lut } from './look.js';
 import { LOOK_IDS } from './lookpack.js';
+import { fontOfUpload } from './font.js';
 import { paletteIds } from './photo.js';
 import { ApiError } from '../errors.js';
 
@@ -64,9 +65,17 @@ export async function checkProject(ctx: Ctx, studioId: string, project: unknown,
       if (!a.upload) return;
       const ct = found.find(f => f.id === a.upload)!.contentType;
       if (a.kind === 'lut') return; // checked below (parsed)
+      if (a.kind === 'font') return; // checked below (parsed)
       const ok = a.kind === 'image' ? ct.startsWith('image/') : a.kind === 'video' ? ct.startsWith('video/') : /^(audio|video)\//.test(ct);
       if (!ok) throw badRequest(`edits.assets.${i}: the upload is not ${a.kind === 'image' ? 'an image' : `a${a.kind === 'audio' ? 'n audio' : ' video'} file`}`);
     });
+  }
+  for (const [i, a] of p.assets.entries()) {
+    if (a.kind !== 'font') continue;
+    try { await fontOfUpload(ctx, studioId, a.upload!); } catch (e) {
+      if (e instanceof ApiError && e.status === 400) throw badRequest(`edits.assets.${i}: ${e.message === 'uploadId: not a font upload' ? 'the upload is not a font' : e.message}`);
+      throw e;
+    }
   }
   for (const [i, a] of p.assets.entries()) {
     if (a.kind !== 'lut') continue;

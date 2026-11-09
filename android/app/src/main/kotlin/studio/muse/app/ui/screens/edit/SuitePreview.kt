@@ -152,7 +152,7 @@ private fun Overlays(p: EditProject, t: Double, w: Dp, h: Dp) {
                 if (alpha <= 0f || text.isEmpty()) continue
                 Placed(propAt(k, KfProp.X, tr?.x ?: .5, local), propAt(k, KfProp.Y, tr?.y ?: .5, local) + a.dy, w, h,
                     (propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale).toFloat(), propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local).toFloat(), tr?.flipX == true, tr?.flipY == true) {
-                    StyledText(text, item.style, h, alpha, w * (item.style.maxWidthPct ?: .85).toFloat())
+                    StyledText(text, item.style, h, alpha, w * (item.style.maxWidthPct ?: .85).toFloat(), studio.muse.app.platform.edit.OwnFonts.family(studio.muse.app.platform.edit.OwnFonts.uploadOf(p, item.style)))
                 }
             }
             TrackKind.CAPTION -> {
@@ -196,9 +196,9 @@ fun colorOf(hex: String): Color = Color(hexArgb(hex))
 
 /** A text item in its style (fill, stroke, shadow, box) at a canvas [h] tall. */
 @Composable
-fun StyledText(text: String, s: EditTextStyle, h: Dp, alpha: Float = 1f, maxW: Dp) {
+fun StyledText(text: String, s: EditTextStyle, h: Dp, alpha: Float = 1f, maxW: Dp, family: FontFamily? = null) {
     val size: TextUnit = (h.value * s.sizePct).sp
-    val base = TextStyle(fontFamily = fontFamilyOf(s.font), fontWeight = weightOf(s.weight), fontSize = size, lineHeight = size * (s.lineHeight ?: 1.15).toFloat(),
+    val base = TextStyle(fontFamily = family ?: fontFamilyOf(s.font), fontWeight = if (family != null) FontWeight.Normal else weightOf(s.weight), fontSize = size, lineHeight = size * (s.lineHeight ?: 1.15).toFloat(),
         textAlign = when (s.align) { studio.muse.core.edit.Align.LEFT -> TextAlign.Start; studio.muse.core.edit.Align.RIGHT -> TextAlign.End; else -> TextAlign.Center },
         shadow = s.shadow?.let { sh -> Shadow(colorOf(sh.color).copy(alpha = sh.opacity.toFloat()), Offset(0f, (sh.dyPct * h.value * s.sizePct).toFloat()), (sh.blurPct * h.value * s.sizePct * 2).toFloat()) })
     val bg = s.background

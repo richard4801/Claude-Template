@@ -235,10 +235,72 @@ route('POST', '/v1/uploads/clips', async req => {
   db.clips[id] = clip;
   return clip;
 });
+// ---- Editor uploads (plans/api.md "Editor v2"): a presigned PUT to this server, the upload's URL, and the font check.
+const FONT_EXT = { 'font/ttf': 'ttf', 'font/sfnt': 'ttf', 'application/x-font-ttf': 'ttf', 'application/font-sfnt': 'ttf', 'font/otf': 'otf', 'application/vnd.ms-opentype': 'otf', 'application/x-font-otf': 'otf', 'application/octet-stream': 'ttf' };
+const editorUploads = new Map(); // uploadId → { file, contentType }
+route('POST', '/v1/editor/uploads/presign', async req => {
+  const b = await json(req);
+  const ct = String(b.contentType ?? '').toLowerCase();
+  const font = b.purpose === 'font', lut = b.purpose === 'lut';
+  const ext = font ? FONT_EXT[ct] : lut ? (['text/plain', 'application/octet-stream', 'application/x-cube'].includes(ct) ? 'cube' : undefined)
+    : /^audio\//.test(ct) ? 'm4a' : /^video\//.test(ct) ? 'mp4' : /^image\/(png|jpeg|webp)$/.test(ct) ? ct.slice(6).replace('jpeg', 'jpg') : undefined;
+  if (!ext) throw new ApiError(400, 'bad_request', font ? `contentType: one of ${Object.keys(FONT_EXT).join(', ')} for a font` : 'contentType: not accepted');
+  if (font && b.bytes !== undefined && (typeof b.bytes !== 'number' || b.bytes <= 0 || b.bytes > 10 * 1024 * 1024)) throw new ApiError(400, 'bad_request', 'bytes: at most 10 MB');
+  const id = 'up_' + uid(), name = `ed_${id}.${ext}`;
+  editorUploads.set(id, { file: path.join(UPLOAD_DIR, name), contentType: ct });
+  const host = req.headers.host ?? `localhost:${PORT}`;
+  return { uploadId: id, method: 'PUT', url: `http://${host}/v1/mock-put/${id}`, headers: { 'content-type': ct }, expiresAt: Date.now() + 3600_000, fileUrl: `/uploads/${name}` };
+});
+route('PUT', '/v1/mock-put/:id', async (req, p) => {
+  const u = editorUploads.get(p.id) ?? (() => { throw notFound('Upload'); })();
+  fs.writeFileSync(u.file, await readBody(req));
+  return undefined;
+});
+route('GET', '/v1/editor/uploads/:id', (req, p) => {
+  const u = editorUploads.get(p.id) ?? (() => { throw notFound('Upload'); })();
+  return { uploadId: p.id, url: `/uploads/${path.basename(u.file)}`, contentType: u.contentType, bytes: fs.existsSync(u.file) ? fs.statSync(u.file).size : null };
+});
+/** The font's display name (server/api/src/editor/font.ts `fontName`), or null when it isn't a .ttf/.otf. */
+function fontName(b) {
+  if (b.length < 12) return null;
+  const tag = b.readUInt32BE(0);
+  if (tag !== 0x00010000 && tag !== 0x74727565 && tag !== 0x4f54544f) return null;
+  const n = b.readUInt16BE(4);
+  if (12 + n * 16 > b.length) return null;
+  let off = -1, len = 0;
+  for (let i = 0; i < n; i++) { const r = 12 + i * 16; if (b.toString('latin1', r, r + 4) === 'name') { off = b.readUInt32BE(r + 8); len = b.readUInt32BE(r + 12); } }
+  const names = new Map();
+  if (off >= 0 && off + 6 <= b.length && off + len <= b.length) {
+    const count = b.readUInt16BE(off + 2), strings = off + b.readUInt16BE(off + 4);
+    for (let i = 0; i < count; i++) {
+      const r = off + 6 + i * 12;
+      if (r + 12 > b.length) break;
+      const platform = b.readUInt16BE(r), id = b.readUInt16BE(r + 6), l = b.readUInt16BE(r + 8), o = strings + b.readUInt16BE(r + 10);
+      if (![1, 2, 4].includes(id) || o + l > b.length) continue;
+      let s = '';
+      if (platform === 3 || platform === 0) for (let k = o; k + 1 < o + l; k += 2) s += String.fromCharCode(b.readUInt16BE(k));
+      else if (platform === 1) s = b.toString('latin1', o, o + l);
+      s = s.trim();
+      if (s && (!names.has(id) || platform === 3)) names.set(id, s);
+    }
+  }
+  const full = names.get(4) ?? [names.get(1), names.get(2)].filter(Boolean).join(' ');
+  return (full || 'Font').replace(/[\u0000-\u001f]/g, '').slice(0, 80);
+}
+route('POST', '/v1/editor/uploads/font-check', async req => {
+  const { uploadId } = await json(req);
+  if (typeof uploadId !== 'string') throw new ApiError(400, 'bad_request', 'uploadId: Required');
+  const u = editorUploads.get(uploadId) ?? (() => { throw notFound('Upload'); })();
+  if (!/\.(ttf|otf)$/.test(u.file)) throw new ApiError(400, 'bad_request', 'uploadId: not a font upload');
+  if (!fs.existsSync(u.file)) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
+  const name = fontName(fs.readFileSync(u.file));
+  if (!name) throw new ApiError(400, 'bad_request', 'not a TrueType or OpenType font');
+  return { uploadId, name };
+});
 route('GET', '/uploads/:name', (req, p, res) => {
   const f = path.join(UPLOAD_DIR, path.basename(p.name));
   if (!fs.existsSync(f)) throw notFound('Upload');
-  res.writeHead(200, { 'content-type': f.endsWith('.png') ? 'image/png' : f.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg' });
+  res.writeHead(200, { 'content-type': f.endsWith('.png') ? 'image/png' : f.endsWith('.mp4') ? 'video/mp4' : /\.(ttf|otf)$/.test(f) ? 'font/' + f.slice(-3) : 'image/jpeg' });
   fs.createReadStream(f).pipe(res);
   return undefined;
 });

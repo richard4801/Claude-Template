@@ -40,8 +40,10 @@ export type AnimKind = 'none' | 'fade' | 'pop' | 'slideUp' | 'slideDown' | 'zoom
 export type Anim = { kind: AnimKind; durationSec: number };
 export type Fit = 'cover' | 'contain';
 
-export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* an imported .cube (Looks) */; take?: string; upload?: string; library?: string;
-  durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string };
+export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* an imported .cube (Looks) */ | 'font' /* the member's own .ttf/.otf */; take?: string; upload?: string; library?: string;
+  durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string;
+  /** A font asset's family and style, read from the file (display only). */
+  name?: string };
 
 type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
 /** Voice processing on a clip with sound (Edit suite audio panel). */
@@ -64,7 +66,9 @@ export type ImageItem = Visual & { id: string; asset: string; startSec: number; 
 export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
   align: 'left' | 'center' | 'right'; maxWidthPct?: number; lineHeight?: number; letterSpacing?: number; uppercase?: boolean;
   stroke?: { color: string; widthPct: number }; shadow?: { color: string; opacity: number; blurPct: number; dyPct: number };
-  background?: { color: string; opacity: number; paddingPct: number; radiusPct: number } };
+  background?: { color: string; opacity: number; paddingPct: number; radiusPct: number };
+  /** Text items only: a `font` asset to draw with (its own face; `weight` is not synthesised). `font` stays the fallback. */
+  fontAsset?: string };
 export type TextItem = { id: string; startSec: number; durationSec: number; text: string; style: TextStyle; transform?: Transform; opacity?: number;
   keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string; animLoop?: AnimLoop };
 export type AudioClip = Voice & { id: string; asset: string; strongBeats?: number[]; startSec: number; inSec: number; outSec: number; speed?: number; volume?: number; muted?: boolean;
@@ -866,8 +870,13 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     const f = `edits.assets.${i}`;
     id(`${f}.id`, a.id);
     if (assets.has(a.id)) bad(`${f}.id`, 'is used twice');
-    if (!['video', 'image', 'audio', 'lut'].includes(a.kind)) bad(`${f}.kind`, 'must be video, image, audio or lut');
+    if (!['video', 'image', 'audio', 'lut', 'font'].includes(a.kind)) bad(`${f}.kind`, 'must be video, image, audio, lut or font');
     if (a.kind === 'lut' && a.upload === undefined) bad(f, 'a lut asset must be an upload');
+    if (a.kind === 'font') {
+      if (a.upload === undefined) bad(f, 'a font asset must be an upload');
+      for (const k of ['durationSec', 'width', 'height', 'hasAudio'] as const) if (a[k] !== undefined) bad(`${f}.${k}`, 'is not part of a font asset');
+    }
+    if (a.name !== undefined && (typeof a.name !== 'string' || !a.name.trim() || a.name.length > 80)) bad(`${f}.name`, 'must be 1–80 characters');
     const refs = [a.take, a.upload, a.library].filter(x => x !== undefined);
     if (refs.length !== 1 || refs.some(r => typeof r !== 'string' || !r || r.length > 100)) bad(f, 'needs exactly one of take, upload or library');
     num(`${f}.durationSec`, a.durationSec, 0.01, 36_000);
@@ -983,7 +992,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${f}.caption.words.${j}.startSec`, w.startSec, 0, 36_000, false);
         num(`${f}.caption.words.${j}.endSec`, w.endSec, w.startSec, 36_000, false);
       });
-      textStyle(`${f}.caption.style`, c!.style);
+      textStyle(`${f}.caption.style`, c!.style, false);
       if (!CAPTION_PRESETS.includes(c!.style.preset)) bad(`${f}.caption.style.preset`, 'unknown preset');
       color(`${f}.caption.style.highlightColor`, c!.style.highlightColor, false);
       num(`${f}.caption.style.y`, c!.style.y, 0, 1); num(`${f}.caption.style.wordsPerPage`, c!.style.wordsPerPage, 1, 8); num(`${f}.caption.style.maxLines`, c!.style.maxLines, 1, 2);
@@ -1067,7 +1076,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         const tx = it as TextItem;
         if (typeof tx.text !== 'string' || tx.text.length < 1 || tx.text.length > LIMITS.maxText) bad(`${g}.text`, `must be 1–${LIMITS.maxText} characters`);
         num(`${g}.startSec`, tx.startSec, 0, 600, false); num(`${g}.durationSec`, tx.durationSec, LIMITS.minItemSec, 600, false);
-        textStyle(`${g}.style`, tx.style);
+        textStyle(`${g}.style`, tx.style, true);
         if (tx.transform !== undefined) visual(g, { transform: tx.transform }, tx.durationSec);
         num(`${g}.opacity`, tx.opacity, 0, 1);
         kfs(`${g}.keyframes`, tx.keyframes, tx.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
@@ -1096,8 +1105,12 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
       }
     });
   });
-  function textStyle(f: string, s: TextStyle) {
+  function textStyle(f: string, s: TextStyle, ownFont: boolean) {
     if (!s || typeof s !== 'object') bad(f, 'is required');
+    if (s.fontAsset !== undefined) {
+      if (!ownFont) bad(`${f}.fontAsset`, 'captions use the built-in fonts');
+      if (typeof s.fontAsset !== 'string' || assets.get(s.fontAsset)?.kind !== 'font') bad(`${f}.fontAsset`, 'must be a font asset');
+    }
     if (!FONTS.includes(s.font)) bad(`${f}.font`, 'unknown font');
     if (![400, 700, 900].includes(s.weight)) bad(`${f}.weight`, 'must be 400, 700 or 900');
     num(`${f}.sizePct`, s.sizePct, 0.015, 0.25, false);

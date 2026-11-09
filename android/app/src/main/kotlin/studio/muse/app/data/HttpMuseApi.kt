@@ -152,6 +152,7 @@ interface MuseService {
     @DELETE("v1/editor/jobs/{id}") suspend fun cancelEditorJob(@Path("id") id: String): retrofit2.Response<Unit>
     @POST("v1/takes/{id}/versions") suspend fun createVersionV2(@Path("id") id: String, @Body r: TakeVersionV2Request): Take
     @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
+    @GET("v1/editor/uploads/{id}") suspend fun editorUpload(@Path("id") id: String): EditorUploadDto
     // Edit sessions (workstream 3)
     @POST("v1/edit-sessions") suspend fun openEditSession(@Body r: OpenEditSessionRequest): EditSessionDto
     @GET("v1/edit-sessions/{id}") suspend fun editSession(@Path("id") id: String): EditSessionDto
@@ -502,6 +503,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         putToStorage(p, FileProgressBody(file, "video/mp4".toMediaType(), onProgress))
         return p.uploadId
     }
+
+    override suspend fun editorUploadUrl(uploadId: String): String? = call { editorUpload(uploadId) }.url
 
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String {
         val p = call { editorPresign(EditorPresignRequest(contentType, file.length(), purpose)) }
