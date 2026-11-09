@@ -346,7 +346,8 @@ extension HTTPMuseAPI: ProvidersAPI {
 /// Demo mode's provider catalogs (no provider is called; nothing is spent).
 public enum DemoProviders {
     public static let kinds = [ProviderKind(kind: "replicate", label: "Replicate", keyHint: "r8_…", keyUrl: "https://replicate.com/account/api-tokens"),
-                               ProviderKind(kind: "fal", label: "fal", keyHint: "Key ID:Secret", keyUrl: "https://fal.ai/dashboard/keys")]
+                               ProviderKind(kind: "fal", label: "fal", keyHint: "Key ID:Secret", keyUrl: "https://fal.ai/dashboard/keys"),
+                               ProviderKind(kind: "muapi", label: "Muapi", keyHint: "An API key from muapi.ai → Access keys", keyUrl: "https://muapi.ai/access-keys")]
 
     public static func catalog(_ kind: String) -> [ProviderCatalogModel] {
         kind == "fal" ? [
