@@ -114,7 +114,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Voice effects (warm, radio, phone, deep) | Has | Has | — | 4 effects. More character voices: M. |
 | Noise reduction, voice enhance | Has | Has | — | |
 | Vocal / instrumental separation | Missing | Missing | L | Server model |
-| Volume normalisation | Missing | Missing | M | |
+| Volume normalisation | Has | Missing | M | Android: Audio → Even out volume: spoken clips (main and voice) brought to their median level from the decoded sound levels, 0.25×–2×, no clipping; music left to ducking. |
 | Record voice-over | Has | Has | — | In-app recorder (WS8). Mac: Mac microphone |
 | Recording over playback (hear the video while recording) | Missing | Missing | S | Needs headphones handling |
 | **Music library** | Missing | Missing | M (function) | **Content.** Licensing is the real cost. `add_music` refuses `library` today. |
@@ -173,7 +173,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Opacity | Has | Has | S | Model yes; no slider. Android: Transform → Opacity with ◆ (wave 1). |
 | **Blend modes** (multiply, screen, overlay, soft light, …) | Has | Has | M | New compositor mode (GL / Core Image) and a contract field. Android: Transform → Blend on overlays, drawn by MUSE's own compositor program in preview and export (wave 1). Mac: Video → Blend on overlays, a Core Image kernel with the reference formulas (wave 1). |
 | Move an overlay to the main track and back | Has | Missing | S | Android: Edit → Move to main track / Move to an overlay track (app op; no contract change). On the main track the clip fills the frame (overlay placing, opacity, blend, mask and key dropped); off it, it plays at the same time, full frame. |
-| Split-screen layouts | Missing | Missing | M | |
+| Split-screen layouts | Has | Missing | M | Android: Overlay → Split screen: side by side, top and bottom, three rows, grid of four; the clips on screen at the playhead get crop, fit and transform (no contract change). |
 | Motion tracking (text or sticker follows an object) | Missing | Missing | XL | Tracker model |
 
 ## 10. Canvas and ratio
@@ -200,7 +200,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Template library (swap in your media) | Partial | Partial | L | "Recreate an edit" (recipes) is the MUSE take on this. A browsable library is **Content**. Mac: Recreate an edit |
-| Beat-synced auto-cut to a song | Missing | Missing | M | Beats engine exists |
+| Beat-synced auto-cut to a song | Has | Missing | M | Beats engine exists. Android: Audio → Cut clips to the beat: each main clip ends on the beat nearest to its end (the latest its source can reach). |
 | Save your own edit as a template / style kit | Missing | Missing | M | |
 
 ## 13. AI features

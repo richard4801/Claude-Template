@@ -23,6 +23,19 @@ class Peaks(val perSec: Float, val values: FloatArray) {
         return m
     }
 
+    /**
+     * The loudness of source seconds [a, b): the RMS of the slice peaks above the silence gate (−50 dB), and the loudest
+     * peak; null when it's all silence. A relative measure, for evening clips out against each other.
+     */
+    fun level(a: Double, b: Double): Pair<Double, Double>? {
+        val i0 = (a * perSec).toInt().coerceAtLeast(0)
+        val i1 = (b * perSec).toInt().coerceAtMost(values.size)
+        var sum = 0.0; var n = 0; var peak = 0.0
+        for (i in i0 until i1) { val v = values[i].toDouble(); if (v > peak) peak = v; if (v > 0.00316) { sum += v * v; n++ } }
+        if (n == 0) return null
+        return kotlin.math.sqrt(sum / n) to peak
+    }
+
     companion object {
         /**
          * Builds peaks from interleaved 16-bit PCM read in chunks: feed each chunk to [Builder.add], then [Builder.build].

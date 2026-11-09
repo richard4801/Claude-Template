@@ -68,7 +68,9 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // blur fill, and a timeline with a freeze frame and a selected text item.
                 "w1_text", "w1_transform", "w1_ratio", "w1_timeline",
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
-                "export_gif", "export_sound", "overlay_link").map { arrayOf<Any>(t, it) }
+                "export_gif", "export_sound", "overlay_link",
+                // M rows: a top-and-bottom split screen with the overlay panel open.
+                "m_split").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -174,6 +176,16 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                     "w1_ratio" -> { c.act(EditAction.Select(c.project!!.mainClips[0].id)); c.act(EditAction.ClipFit(studio.muse.core.edit.Fit.CONTAIN)); c.act(EditAction.Fill(studio.muse.core.edit.CanvasFill.BLUR)); c.act(EditAction.Open(Panel.RATIO)) }
                     else -> c.act(EditAction.Scrub(2.0, end = true))
                 }
+                ui = c.ui.value.copy(message = null)
+            }
+            "m_split" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 0.0, selectedId = null))
+                c.act(EditAction.Scrub(2.0, end = true)); c.act(EditAction.AddPip(ui.takes.first()))
+                c.act(EditAction.SplitScreen(SuiteOps.SplitLayout.TOP_BOTTOM)); c.act(EditAction.Open(Panel.OVERLAY))
                 ui = c.ui.value.copy(message = null)
             }
             "take_start", "take_split", "take_detached" -> {

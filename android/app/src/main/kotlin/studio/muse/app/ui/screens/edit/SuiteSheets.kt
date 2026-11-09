@@ -433,6 +433,8 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
             EIc(if (vk.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (vk.isNullOrEmpty()) m.t.muted else m.t.accent)
         }
     }
+    // Spoken clips evened out to one level (from the decoded sound levels the timeline draws).
+    SuiteButton("Even out volume", { act(EditAction.EvenVolume(host.waves)) }, Modifier.fillMaxWidth(), icon = "waveform", enabled = host.waves.isNotEmpty())
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         val fi = clip?.fadeInSec ?: 0.0; val fo = clip?.fadeOutSec ?: 0.0
         SuiteSlider((fi / 3).toFloat(), { f, done -> act(EditAction.Fades(r1(f * 3.0), fo, done)) }, Modifier.weight(1f), label = "Fade in", valueText = "${fmt1(fi)} s")
@@ -466,6 +468,7 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
         SuiteSeg(listOf("all" to "All", "strong" to "Strong"), if (ui.beatMarks == BeatMarks.ALL) "all" else "strong", { act(EditAction.Beats(if (it == "all") BeatMarks.ALL else BeatMarks.STRONG)) })
     } else if (music != null) AiButton("Beat markers", ui.ai["beats"], { act(EditAction.DetectBeats) }, icon = "beat")
     if (hasBeats) OptRow("Snap cuts to beats", "Split lands on the nearest beat", ui.snapToBeats, { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
+    if (hasBeats) SuiteButton("Cut clips to the beat", { act(EditAction.CutToBeats) }, Modifier.fillMaxWidth(), icon = "beat")
     if (music != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         SuiteButton("Mark a beat here", { act(EditAction.MarkBeat) }, Modifier.weight(1f), icon = "beat")
         if (hasBeats) SuiteButton("Clear beat marks", { act(EditAction.ClearBeats) }, Modifier.weight(1f))
@@ -900,6 +903,11 @@ private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
             }
         }
     }
+    // Split screen: the clips on screen at the playhead, arranged.
+    val onScreen = ui.project?.let { SuiteOps.clipsAt(it, ui.playheadSec).size } ?: 0
+    SuiteLabel("Split screen")
+    T(if (onScreen < 2) "Add an overlay at the playhead, then pick a layout." else "Arranges the $onScreen clips on screen at the playhead.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    SuiteChips(SuiteOps.SplitLayout.entries.map { it.name to it.label }, null, { n -> act(EditAction.SplitScreen(SuiteOps.SplitLayout.valueOf(n))) }, enabled = onScreen >= 2)
     host.importLink?.let { SuiteButton("Add a video from a link", it, Modifier.fillMaxWidth(), icon = "link") }
     SuiteButton("Music from uploads", host.pickAudio, Modifier.fillMaxWidth(), icon = "music")
 }

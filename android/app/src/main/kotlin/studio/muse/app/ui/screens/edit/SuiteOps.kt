@@ -34,6 +34,9 @@ import studio.muse.core.edit.clipTimeAt
 import studio.muse.core.edit.ids
 import studio.muse.core.edit.itemSpan
 import studio.muse.core.edit.locate
+import studio.muse.core.edit.HOLD_MIN_SEC
+import studio.muse.core.edit.HOLD_MAX_SEC
+import studio.muse.core.edit.trimClip
 import studio.muse.core.edit.removeTrack
 import studio.muse.core.edit.moveMainClip
 import studio.muse.core.edit.newId
@@ -237,6 +240,118 @@ object SuiteOps {
             for (b in marks) if (b >= c.inSec && b <= c.outSec) out += c.startSec + (b - c.inSec)
         }
         return out.sorted()
+    }
+
+    /**
+     * Even out volume (plans/edit-parity.md, M "Volume normalisation"): every unmuted main clip and voice clip with
+     * measurable sound gets the volume that brings its level ([Peaks.level] over the part that plays) to the median
+     * level, between 0.25× and 2×, never past 0.98 of full scale at its loudest. Music is left to ducking; clips with
+     * volume keyframes keep them. The project and how many clips changed, or null.
+     */
+    fun evenVolume(p: EditProject, waves: Map<String, Peaks>): Pair<EditProject, Int>? {
+        data class M(val id: String, val rms: Double, val peak: Double)
+        val ms = ArrayList<M>()
+        for (t in p.tracks) {
+            if (t.muted == true || !(t.kind == TrackKind.MAIN || t.kind == TrackKind.VOICE)) continue
+            for (it in t.items) {
+                val c = it as? MediaClip ?: continue
+                if (c.muted == true || c.keyframes?.containsKey(KfProp.VOLUME) == true) continue
+                if (c is VideoClip && (c.holdSec != null || !hasSound(p, c))) continue
+                val w = waves[(c as? VideoClip)?.audioAsset ?: c.asset] ?: continue
+                val (rms, peak) = w.level(c.inSec, c.outSec) ?: continue
+                ms += M(c.id, rms, peak)
+            }
+        }
+        if (ms.size < 2) return null
+        val target = ms.map { it.rms }.sorted().let { l -> if (l.size % 2 == 1) l[l.size / 2] else (l[l.size / 2 - 1] + l[l.size / 2]) / 2 }
+        var q = p; var changed = 0
+        for (m in ms) {
+            val g = Math.round((target / m.rms).coerceIn(0.25, 2.0).coerceAtMost(0.98 / m.peak).coerceAtLeast(0.0) * 100) / 100.0
+            val vol = g.takeIf { abs(it - 1.0) > 0.005 }
+            val cur = (q.locate(m.id)?.let { (t, i) -> t.items[i] } as? MediaClip)?.volume
+            if (cur == vol) continue
+            q = q.updateItem(m.id) { when (it) { is VideoClip -> it.copy(volume = vol); is AudioClip -> it.copy(volume = vol); else -> it } } ?: continue
+            changed++
+        }
+        return if (changed > 0) q to changed else null
+    }
+
+    /** Split-screen layouts: each cell as (centre x, centre y, width, height), fractions of the canvas. */
+    enum class SplitLayout(val label: String, val cells: List<DoubleArray>) {
+        SIDE_BY_SIDE("Side by side", listOf(doubleArrayOf(.25, .5, .5, 1.0), doubleArrayOf(.75, .5, .5, 1.0))),
+        TOP_BOTTOM("Top and bottom", listOf(doubleArrayOf(.5, .25, 1.0, .5), doubleArrayOf(.5, .75, 1.0, .5))),
+        THREE("Three rows", listOf(doubleArrayOf(.5, 1 / 6.0, 1.0, 1 / 3.0), doubleArrayOf(.5, .5, 1.0, 1 / 3.0), doubleArrayOf(.5, 5 / 6.0, 1.0, 1 / 3.0))),
+        GRID("Grid of four", listOf(doubleArrayOf(.25, .25, .5, .5), doubleArrayOf(.75, .25, .5, .5), doubleArrayOf(.25, .75, .5, .5), doubleArrayOf(.75, .75, .5, .5))),
+    }
+
+    /** The video clips on screen at [t]: the main clip, then overlays from the bottom track up. */
+    fun clipsAt(p: EditProject, t: Double): List<VideoClip> {
+        val out = ArrayList<VideoClip>()
+        timeline(p).indexOfFirst { t >= it.startSec - 1e-9 && t < it.endSec - 1e-9 }.takeIf { it >= 0 }?.let { out += p.mainClips[it] }
+        for (tr in p.tracks) if (tr.kind == TrackKind.VIDEO && tr.hidden != true) for (it in tr.items) {
+            val sp = itemSpan(p, tr, it)
+            if (it is VideoClip && t >= sp.startSec - 1e-9 && t < sp.endSec - 1e-9) out += it
+        }
+        return out
+    }
+
+    /**
+     * Split screen (plans/edit-parity.md, M): clips [ids] (in order) placed into [layout]'s cells, each cropped
+     * (centred) to its cell's shape and fitted into it whole, with no rotation. Built from the contract's crop, fit and
+     * transform, so it stays editable clip by clip. Extra clips beyond the cells are left as they are. Null when a clip
+     * can't be cropped that far (the contract allows 45 % a side) or fewer than two clips are given.
+     */
+    fun splitScreen(p: EditProject, ids: List<String>, layout: SplitLayout): EditProject? {
+        if (ids.size < 2) return null
+        val W = p.canvas.width.toDouble(); val H = p.canvas.height.toDouble()
+        var q = p
+        for ((k, id) in ids.take(layout.cells.size).withIndex()) {
+            val (cx, cy, cwF, chF) = layout.cells[k].let { listOf(it[0], it[1], it[2], it[3]) }
+            val c = q.locate(id)?.let { (t, i) -> t.items[i] } as? VideoClip ?: return null
+            val a = q.asset(c.asset)
+            val sw = (a?.width ?: p.canvas.width).toDouble(); val sh = (a?.height ?: p.canvas.height).toDouble()
+            val cellA = (cwF * W) / (chF * H)
+            // Crop the source (centred) to the cell's shape.
+            var l = 0.0; var t = 0.0
+            if (sw / sh > cellA) l = (1 - (sh * cellA) / sw) / 2 else t = (1 - (sw / cellA) / sh) / 2
+            if (l > 0.45 + 1e-9 || t > 0.45 + 1e-9) return null
+            val crop = if (l > 1e-6 || t > 1e-6) studio.muse.core.edit.Crop(r4(l).takeIf { it > 0 }, r4(t).takeIf { it > 0 }, r4(l).takeIf { it > 0 }, r4(t).takeIf { it > 0 }) else null
+            // Contain-fitted, the cropped picture is min(W, H·a) wide; scaled to the cell's width.
+            val fw = minOf(W, H * cellA)
+            val tr = Transform(r4(cx), r4(cy), r4(cwF * W / fw), null, c.transform?.flipX, c.transform?.flipY)
+            q = q.updateItem(id) { (it as VideoClip).copy(fit = Fit.CONTAIN, crop = crop, transform = tr, keyframes = it.keyframes?.filterKeys { k2 -> k2 != KfProp.X && k2 != KfProp.Y && k2 != KfProp.SCALE && k2 != KfProp.ROTATION }?.takeIf { m -> m.isNotEmpty() }) } ?: return null
+        }
+        return q
+    }
+
+    private fun r4(v: Double) = Math.round(v * 10000) / 10000.0
+
+    /**
+     * Beat-synced cut (plans/edit-parity.md, M): each main clip, in order, ends on the beat nearest to where it ends now
+     * (at least [minSec] long), trimming its out point (a freeze frame: its length). A clip whose source can't reach that
+     * beat ends on the latest beat it can reach; clips with a speed curve and clips past the last beat stay as they are.
+     * The project and how many clips changed, or null when none did.
+     */
+    fun syncToBeats(p: EditProject, beats: List<Double>, minSec: Double = 0.3): Pair<EditProject, Int>? {
+        if (beats.isEmpty()) return null
+        var q = p; var changed = 0
+        for (i in p.mainClips.indices) {
+            val span = timeline(q).getOrNull(i) ?: break
+            val c = q.mainClips[i]
+            if (c.speedCurve != null) continue
+            val cands = beats.filter { it >= span.startSec + minSec - 1e-9 }
+            if (cands.isEmpty()) break
+            val hold = c.holdSec
+            val maxLen = if (hold != null) HOLD_MAX_SEC else ((q.asset(c.asset)?.durationSec ?: c.outSec) - c.inSec) / c.speed
+            val ok = cands.filter { it - span.startSec <= maxLen + 1e-9 }
+            val end = ok.minByOrNull { abs(it - span.endSec) } ?: continue
+            if (abs(end - span.endSec) < 1e-6) continue
+            val len = end - span.startSec
+            val next = if (hold != null) q.updateItem(c.id) { (it as VideoClip).copy(holdSec = (Math.round(len * 1000) / 1000.0).coerceIn(HOLD_MIN_SEC, HOLD_MAX_SEC)) }
+                else q.trimClip(c.id, c.inSec, c.inSec + len * c.speed)
+            if (next != null) { q = next; changed++ }
+        }
+        return if (changed > 0) q to changed else null
     }
 
     /** [t] moved to the nearest beat within [within] seconds (else unchanged). */
