@@ -30,7 +30,7 @@ object SessionSync {
         preset ?: return s
         fun str(k: String) = (preset[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.lowercase()
         val shape = str("ratio")?.let { r -> ExportShape.entries.firstOrNull { it.label == r } } ?: s.shape
-        val res = when (str("resolution")) { "720p" -> ExportResolution.HD; "1080p" -> ExportResolution.FULL_HD; "4k", "2160p" -> ExportResolution.UHD; else -> s.resolution }
+        val res = when (str("resolution")) { "720p" -> ExportResolution.HD; "1080p" -> ExportResolution.FULL_HD; "2k", "1440p" -> ExportResolution.QHD; "4k", "2160p" -> ExportResolution.UHD; else -> s.resolution }
         val fps = (preset["fps"] as? JsonPrimitive)?.doubleOrNull?.toInt()?.takeIf { it in setOf(24, 25, 30, 60) } ?: s.fps
         val codec = when (str("codec")) { "h264" -> ExportCodec.H264; "hevc", "h265" -> ExportCodec.HEVC; else -> s.codec }
         val captions = when (str("captions")) { "burn" -> CaptionExport.BURN_IN; "srt" -> CaptionExport.SRT; else -> s.captions }

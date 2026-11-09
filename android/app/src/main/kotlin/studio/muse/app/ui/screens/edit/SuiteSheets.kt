@@ -182,11 +182,27 @@ private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
         tools.forEach { (icon, label, a) -> ToolTile(icon, label, false, { act(a) }, Modifier.weight(1f)) }
     }
     T("Hold a clip on the timeline to move it; drag the edges of the selected one to trim.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    val main = (sel as? VideoClip)?.takeIf { s -> ui.project?.main?.items?.any { it.id == s.id } == true } ?: clip
+    val dur = main?.let { ui.project?.asset(it.asset)?.durationSec }
+    if (main != null && main.holdSec == null && dur != null && dur - (main.outSec - main.inSec) > 0.05) {
+        val room = dur - (main.outSec - main.inSec)
+        SuiteSlider((main.inSec / room).toFloat(), { f, done -> act(EditAction.Slip(f * room, done)) }, label = "Slip · which part plays", valueText = "${fmt1(main.inSec)}–${fmt1(main.outSec)} s")
+    }
     val hold = (sel as? VideoClip)?.holdSec
     if (hold != null) SuiteSlider(((hold - .1) / 9.9).toFloat(), { f, done -> act(EditAction.HoldLength(.1 + f * 9.9, done)) }, label = "Freeze frame length", valueText = "${fmt1(hold)} s")
     SuiteButton("Freeze frame", { act(EditAction.Freeze()) }, Modifier.fillMaxWidth(), icon = "pause")
     SuiteButton("Save frame as photo", host.saveFrame, Modifier.fillMaxWidth(), icon = "image")
     OptRow("Ripple", "Deleting closes the gap on that track", ui.ripple, { act(EditAction.Ripple(!ui.ripple)) })
+    // Tracks (the tablet has these on its track headers): sound on/off for sound lanes, shown/hidden for picture lanes.
+    ui.project?.let { p ->
+        SuiteLabel("Tracks")
+        lanesOf(p).filter { it.track != null && it.track.kind != TrackKind.CAPTION || it.kind == LaneKind.CLIP_SOUND }.forEach { lane ->
+            val t = lane.track!!
+            val sound = lane.kind == LaneKind.CLIP_SOUND || t.kind.isAudio
+            if (sound) OptRow(laneName(lane), if (t.muted == true) "Silent" else "Plays", t.muted != true, { act(EditAction.ToggleTrackMuted(t.id)) })
+            else OptRow(laneName(lane), if (t.hidden == true) "Hidden" else "Shown", t.hidden != true, { act(EditAction.ToggleTrackHidden(t.id)) })
+        }
+    }
     OptRow("Snap cuts to beats", if (ui.project?.let { SuiteOps.beatTimes(it, false).isNotEmpty() } == true) "Split lands on the nearest beat" else "Detect beats in Audio first", ui.snapToBeats,
         { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
 }
@@ -227,7 +243,12 @@ private fun SpeedBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     } else {
         SuiteSlider(speedToFrac(c.speed), { f, done -> act(EditAction.Speed(fracToSpeed(f), done)) }, label = "Speed", valueText = "${c.speed}×")
         SuiteChips(listOf("0.5", "1", "1.5", "2", "3").map { it to "$it×" }, c.speed.let { if (it == it.toInt().toDouble()) it.toInt().toString() else it.toString() }, { act(EditAction.Speed(it.toDouble())) })
-        T("${fmt1(c.outSec - c.inSec)} s → ${fmt1(clipLength(c))} s · pitch kept", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        // Length: the speed is worked out from the length you want (0.1×–10×).
+        val src = c.outSec - c.inSec
+        val lenFrac = ((log10(clipLength(c) / (src / 10)) / 2)).toFloat()
+        SuiteSlider(lenFrac.coerceIn(0f, 1f), { f, done -> val target = (src / 10) * 10.0.pow(f * 2.0); act(EditAction.Speed(((src / target) * 100).roundToInt() / 100.0, done)) },
+            label = "Length", valueText = "${fmt1(clipLength(c))} s")
+        T("${fmt1(src)} s of video → ${fmt1(clipLength(c))} s · pitch kept", m.type.body.copy(fontSize = 13.sp), m.t.ink)
     }
 }
 
@@ -430,6 +451,11 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
         SuiteSeg(listOf("all" to "All", "strong" to "Strong"), if (ui.beatMarks == BeatMarks.ALL) "all" else "strong", { act(EditAction.Beats(if (it == "all") BeatMarks.ALL else BeatMarks.STRONG)) })
     } else if (music != null) AiButton("Beat markers", ui.ai["beats"], { act(EditAction.DetectBeats) }, icon = "beat")
     if (hasBeats) OptRow("Snap cuts to beats", "Split lands on the nearest beat", ui.snapToBeats, { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
+    if (music != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SuiteButton("Mark a beat here", { act(EditAction.MarkBeat) }, Modifier.weight(1f), icon = "beat")
+        if (hasBeats) SuiteButton("Clear beat marks", { act(EditAction.ClearBeats) }, Modifier.weight(1f))
+    }
+    if (ui.selection?.second is studio.muse.core.edit.AudioClip) SuiteButton("Loop to the end", { act(EditAction.LoopAudio) }, Modifier.fillMaxWidth(), icon = "arrows-clockwise")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         SuiteButton("Music from uploads", host.pickAudio, Modifier.weight(1f), icon = "music")
         SuiteButton(if (ui.recordingAt != null) "Stop recording" else "Record VO", host.recordVo, Modifier.weight(1f), icon = "mic", primary = ui.recordingAt != null)
@@ -616,14 +642,24 @@ private fun Swatch(hex: String, on: Boolean, onClick: () -> Unit) {
 private fun WordsBody(ui: EditSuiteUi, p: EditProject, act: (EditAction) -> Unit) {
     val m = muse
     val words = SuiteOps.words(p)
+    // Tap a word to cut it with the video, or (Fix text) to correct how it's spelled in the captions.
+    var fixing by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Int?>(null) }
+    SuiteSeg(listOf("cut" to "Tap to cut", "fix" to "Tap to fix text"), if (fixing) "fix" else "cut", { fixing = it == "fix"; editing = null }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
     FlowRow(hGap = 6.dp, vGap = 6.dp) {
         words.forEach { w ->
             val color = when { !w.kept -> m.t.muted; w.filler -> m.t.accent; else -> m.t.ink }
-            T(w.text, m.type.body.copy(fontSize = 15.sp, textDecoration = if (!w.kept || w.filler) TextDecoration.LineThrough.takeIf { !w.kept } else null), color,
-                Modifier.press(enabled = w.kept) { act(EditAction.DeleteWord(w.index)) }.padding(vertical = 2.dp))
+            if (editing == w.index) {
+                var text by remember(w.index) { mutableStateOf(w.text) }
+                BasicTextField(text, { text = it }, Modifier.background(m.t.surface).border(1.dp, m.t.accent).padding(horizontal = 6.dp, vertical = 2.dp).semantics { contentDescription = "Word" },
+                    textStyle = m.type.body.copy(color = m.t.ink, fontSize = 15.sp), cursorBrush = SolidColor(m.t.accent), singleLine = true,
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { act(EditAction.CaptionWordText(w.index, text)); editing = null }),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
+            } else T(w.text, m.type.body.copy(fontSize = 15.sp, textDecoration = if (!w.kept || w.filler) TextDecoration.LineThrough.takeIf { !w.kept } else null), color,
+                Modifier.press(enabled = w.kept) { if (fixing) editing = w.index else act(EditAction.DeleteWord(w.index)) }.padding(vertical = 2.dp))
         }
     }
-    T("Red = filler words. Tap a word to cut it with the video (jump cut) · undo brings it back.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    T(if (fixing) "Tap a word, type the fix, then Done on the keyboard." else "Red = filler words. Tap a word to cut it with the video (jump cut) · undo brings it back.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     val fillers = words.count { it.kept && it.filler }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (fillers > 0) SuiteButton("Remove $fillers filler${if (fillers == 1) "" else "s"}", { act(EditAction.RemoveFillers) }, Modifier.weight(1f), icon = "scissors", primary = true)
@@ -677,6 +713,10 @@ private fun MaskBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit
         SuiteSlider(f.toFloat(), { x, done -> act(EditAction.SetMask(mask.copy(feather = r2(x.toDouble())), done)) }, label = "Feather", valueText = "${(f * 100).roundToInt()}")
         val sz = mask.width ?: .5
         SuiteSlider(((sz - .1) / 1.4).toFloat(), { x, done -> val s = r2(.1 + x * 1.4); act(EditAction.SetMask(mask.copy(width = s, height = s * ((mask.height ?: .5) / (mask.width ?: .5))), done)) }, label = "Size", valueText = "${(sz * 100).roundToInt()}%")
+        val mx = mask.x ?: .5; val my = mask.y ?: .5; val mr = mask.rotation ?: 0.0
+        SuiteSlider(((mx + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(x = r2(f * 3.0 - 1)), done)) }, label = "Position x", valueText = "${((mx - .5) * 200).roundToInt()}")
+        SuiteSlider(((my + 1) / 3).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(y = r2(f * 3.0 - 1)), done)) }, label = "Position y", valueText = "${((my - .5) * 200).roundToInt()}")
+        SuiteSlider(((mr + 180) / 360).toFloat(), { f, done -> act(EditAction.SetMask(mask.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()), done)) }, label = "Rotation", valueText = "${mr.roundToInt()}°")
         OptRow("Invert", "Show outside the shape", mask.invert == true, { act(EditAction.SetMask(mask.copy(invert = if (mask.invert == true) null else true))) })
     }
     val clip = v as? VideoClip
@@ -809,8 +849,18 @@ private fun AdjustBody(v: Visual?, act: (EditAction) -> Unit) {
     row("Temperature", "temperature", a?.temperature ?: 0.0)
     row("Highlights", "highlights", a?.highlights ?: 0.0)
     row("Shadows", "shadows", a?.shadows ?: 0.0)
-    val g = v?.look?.grain?.amount ?: 0.0
-    SuiteSlider(g.toFloat(), { f, done -> act(EditAction.AdjustField("grain", f.toDouble(), done)) }, label = "Grain", valueText = "${(g * 100).roundToInt()}", enabled = v != null)
+    // The look's effects (0 = off).
+    val lk = v?.look
+    @Composable
+    fun eff(label: String, field: String, value: Double) =
+        SuiteSlider(value.toFloat(), { f, done -> act(EditAction.AdjustField(field, f.toDouble(), done)) }, label = label, valueText = "${(value * 100).roundToInt()}", enabled = v != null)
+    eff("Grain", "grain", lk?.grain?.amount ?: 0.0)
+    row("Vignette", "vignette", lk?.vignette?.amount ?: 0.0)
+    eff("Sharpen", "sharpen", lk?.sharpen ?: 0.0)
+    eff("Fade", "fade", lk?.lift ?: 0.0)
+    eff("Glow", "halation", lk?.halation?.amount ?: 0.0)
+    eff("Light leak", "leak", lk?.leak?.amount ?: 0.0)
+    eff("Colour fringe", "chromatic", lk?.chromatic ?: 0.0)
 }
 
 // ======================================================================= Overlay (PiP) and clips
@@ -826,6 +876,8 @@ private fun OverlayBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
                 T(t.title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
                 T(listOfNotNull(t.label, t.durationSec?.let { "${fmt1(it)} s" }).joinToString(" · "), m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
             }
+            SuiteButton("Sound", { act(EditAction.AddTakeSound(t)) }, height = 34.dp, enabled = t.hasVideo)
+            SuiteButton("Replace", { act(EditAction.ReplaceClip(t)) }, height = 34.dp, enabled = t.hasVideo)
             SuiteButton("Add to end", { act(EditAction.AppendTake(t)) }, height = 34.dp, enabled = t.hasVideo)
             SuiteButton("Overlay", { act(EditAction.AddPip(t)) }, height = 34.dp, icon = "layers", enabled = t.hasVideo)
         }

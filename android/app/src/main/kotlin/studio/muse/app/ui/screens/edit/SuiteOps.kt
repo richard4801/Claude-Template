@@ -362,6 +362,63 @@ object SuiteOps {
         return p.copy(tracks = p.tracks.map { if (it === t) it.copy(items = it.items.toMutableList().apply { set(i, next) }) else it })
     }
 
+    /**
+     * Replace: main clip [clipId] plays take [takeId] instead, from its start, for the same source length where the
+     * take is long enough (else the whole take); speed, look, transform, sound settings and transition stay.
+     */
+    fun replaceClip(p: EditProject, clipId: String, takeId: String, durationSec: Double): EditProject? {
+        val c = p.mainClips.firstOrNull { it.id == clipId } ?: return null
+        if (durationSec < EditLimits.MIN_CLIP_SOURCE_SEC) return null
+        val assetId = p.assets.firstOrNull { it.take == takeId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "take")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, take = takeId, durationSec = durationSec, hasAudio = true))
+        val len = if (c.holdSec != null) EditLimits.MIN_CLIP_SOURCE_SEC else minOf(c.outSec - c.inSec, durationSec)
+        return withAsset.updateItem(clipId) { (it as VideoClip).copy(asset = assetId, inSec = 0.0, outSec = (len * 1000).roundToInt() / 1000.0, audioAsset = null, alphaMatte = null) }
+    }
+
+    /** The music clip at timeline [t] (or the selected one): its track and clip. */
+    fun musicAt(p: EditProject, t: Double, selectedId: String?): Pair<Track, AudioClip>? {
+        for (tr in p.tracks) if (tr.kind == TrackKind.MUSIC) for (it in tr.items) {
+            val c = it as AudioClip
+            if (c.id == selectedId) return tr to c
+        }
+        for (tr in p.tracks) if (tr.kind == TrackKind.MUSIC) for (it in tr.items) {
+            val sp = itemSpan(p, tr, it)
+            if (t >= sp.startSec && t < sp.endSec) return tr to (it as AudioClip)
+        }
+        return null
+    }
+
+    /** Another take's sound (its video file, sound only) at [atSec] on a sound effects track. */
+    fun addTakeSound(p: EditProject, takeId: String, durationSec: Double, atSec: Double): Pair<EditProject, String>? {
+        val assetId = p.assets.firstOrNull { it.take == takeId && it.kind == AssetKind.VIDEO }?.id ?: newAssetId(p, "take")
+        val withAsset = if (p.assets.any { it.id == assetId }) p else p.copy(assets = p.assets + Asset(assetId, AssetKind.VIDEO, take = takeId, durationSec = durationSec, hasAudio = true))
+        val start = atSec.coerceIn(0.0, maxOf(0.0, studio.muse.core.edit.durationSec(withAsset) - 0.1))
+        val len = minOf(durationSec, maxOf(0.1, studio.muse.core.edit.durationSec(withAsset) - start))
+        val tr = withAsset.tracks.firstOrNull { it.kind == TrackKind.SFX && fitsAt(withAsset, it, start, len) }
+        val base = if (tr != null) withAsset else withAsset.copy(tracks = withAsset.tracks + Track(withAsset.newId("sfx"), TrackKind.SFX, name = "Sound"))
+        val tid = tr?.id ?: base.tracks.last().id
+        val id = base.newId("s")
+        return base.addItem(tid, AudioClip(id, assetId, (start * 1000).roundToInt() / 1000.0, 0.0, (len * 1000).roundToInt() / 1000.0))?.let { it to id }
+    }
+
+    /** Audio clip [id] repeated back to back until the video's end (each copy as long as the original, the last cut short). */
+    fun loopToEnd(p: EditProject, id: String): EditProject? {
+        val (t, i) = p.locate(id) ?: return null
+        val c = t.items[i] as? AudioClip ?: return null
+        val end = studio.muse.core.edit.durationSec(p)
+        val len = clipLength(c)
+        var at = c.startSec + len
+        var cur = p
+        var n = 2
+        while (at < end - 0.1 && n < 200) {
+            val l = minOf(len, end - at)
+            val copy = c.copy(id = cur.newId(c.id, dotted = true), startSec = (at * 1000).roundToInt() / 1000.0, outSec = ((c.inSec + l) * 1000).roundToInt() / 1000.0, fadeInSec = null)
+            cur = cur.addItem(t.id, copy) ?: break
+            at += l; n++
+        }
+        return if (cur === p) null else cur
+    }
+
     /** Sets (null = removes) a look on [ids]. */
     fun setLook(p: EditProject, ids: List<String>, look: Look?): EditProject? {
         var cur = p

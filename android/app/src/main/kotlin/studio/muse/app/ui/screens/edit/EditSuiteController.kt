@@ -25,6 +25,7 @@ import studio.muse.core.edit.AlphaMatte
 import studio.muse.core.edit.Asset
 import studio.muse.core.edit.AssetKind
 import studio.muse.core.edit.AudioClip
+import studio.muse.core.edit.clipSourceAt
 import studio.muse.core.edit.CaptionPreset
 import studio.muse.core.edit.CaptionWord
 import studio.muse.core.edit.Chroma
@@ -137,6 +138,20 @@ sealed interface EditAction {
     data class SetOpacity(val opacity: Double, val done: Boolean = true) : EditAction
     /** Mirror the selected picture or text (null leaves that axis as it is). */
     data class Mirror(val x: Boolean? = null, val y: Boolean? = null) : EditAction
+    /** Slip: the selected main clip plays another part of its source from [inSec], keeping its length. */
+    data class Slip(val inSec: Double, val done: Boolean = true) : EditAction
+    /** Replace the selected (or current) main clip's video with [take], keeping its edits and length where the take allows. */
+    data class ReplaceClip(val take: TakeChoice) : EditAction
+    /** A beat mark at the playhead on the music under it (manual beats; they snap like detected ones). */
+    data object MarkBeat : EditAction
+    /** Removes every beat mark of the music under the playhead (or the selected music). */
+    data object ClearBeats : EditAction
+    /** Another take's sound only, at the playhead, on a sound effects track. */
+    data class AddTakeSound(val take: TakeChoice) : EditAction
+    /** The selected audio clip repeated to the end of the video. */
+    data object LoopAudio : EditAction
+    /** Fixes a caption word's text ([index] into the caption track's words). */
+    data class CaptionWordText(val index: Int, val text: String) : EditAction
     /** The selected overlay's blend mode over what is below it (normal = none). */
     data class SetBlend(val mode: studio.muse.core.edit.BlendMode) : EditAction
     /** Freeze frame: a hold of the frame under the playhead, [durationSec] long, cut into the main track. */
@@ -343,7 +358,7 @@ class EditSuiteController(
         is EditAction.Trim, is EditAction.TrimBy -> "Trim"; is EditAction.MoveBy -> "Move"; is EditAction.Reorder -> "Reorder"; EditAction.DetachAudio -> "Detach audio"; is EditAction.MuteClip -> if (a.muted) "Mute" else "Unmute"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
         is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe, is EditAction.RemoveKeyframes, is EditAction.KeyEase -> "Keyframe"; is EditAction.SetOpacity -> "Opacity"; is EditAction.Background, is EditAction.Fill -> "Background";
-        is EditAction.Mirror -> "Mirror"; is EditAction.SetBlend -> "Blend"; is EditAction.Freeze, is EditAction.HoldLength -> "Freeze frame"; is EditAction.ClipFit -> "Fit"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
+        is EditAction.Mirror -> "Mirror"; EditAction.MarkBeat, EditAction.ClearBeats -> "Beats"; is EditAction.AddTakeSound -> "Sound"; EditAction.LoopAudio -> "Loop"; is EditAction.CaptionWordText -> "Caption word"; is EditAction.Slip -> "Slip"; is EditAction.ReplaceClip -> "Replace"; is EditAction.SetBlend -> "Blend"; is EditAction.Freeze, is EditAction.HoldLength -> "Freeze frame"; is EditAction.ClipFit -> "Fit"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
         EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
@@ -516,6 +531,46 @@ class EditSuiteController(
                     val tr = when (it) { is studio.muse.core.edit.Visual -> it.transform; is TextItem -> it.transform; else -> null } ?: Transform()
                     withTransform(it, tr.copy(flipX = (a.x ?: (tr.flipX == true)).takeIf { v -> v }, flipY = (a.y ?: (tr.flipY == true)).takeIf { v -> v }))
                 } }
+            }
+            EditAction.MarkBeat -> {
+                val p0 = project ?: return
+                val (t, m) = SuiteOps.musicAt(p0, u.playheadSec, u.selectedId) ?: return say("Move the playhead over the music to mark a beat")
+                val sp = itemSpan(p0, t, m)
+                val src = r3(clipSourceAt(m, u.playheadSec - sp.startSec))
+                change { p -> p.updateItem(m.id) { (it as AudioClip).copy(beats = ((it.beats ?: emptyList()).filter { b -> kotlin.math.abs(b - src) > 0.02 } + src).sorted()) } }
+            }
+            EditAction.ClearBeats -> {
+                val (_, m) = SuiteOps.musicAt(project ?: return, u.playheadSec, u.selectedId) ?: return
+                change { p -> p.updateItem(m.id) { (it as AudioClip).copy(beats = null, strongBeats = null) } }
+            }
+            is EditAction.AddTakeSound -> {
+                val dur = a.take.durationSec ?: return
+                var newId: String? = null
+                if (change(refused = "No room for that sound there") { p -> SuiteOps.addTakeSound(p, a.take.id, dur, u.playheadSec)?.let { (np, id) -> newId = id; np } }) {
+                    _ui.update { it.copy(selectedId = newId) }; say("Sound added · on the sound effects lane")
+                }
+            }
+            EditAction.LoopAudio -> {
+                val id = (u.selection?.second as? AudioClip)?.id ?: return say("Select a sound on the timeline to loop it")
+                if (change(refused = "Nothing to loop: it already reaches the end") { p -> SuiteOps.loopToEnd(p, id) }) say("Looped to the end")
+            }
+            is EditAction.CaptionWordText -> {
+                val text = a.text.trim().take(60)
+                if (text.isEmpty()) return
+                change { p -> p.copy(tracks = p.tracks.map { t -> t.caption?.let { cap -> if (a.index !in cap.words.indices) t else t.copy(caption = cap.copy(words = cap.words.toMutableList().apply { set(a.index, get(a.index).copy(text = text)) })) } ?: t }) }
+            }
+            is EditAction.Slip -> {
+                val c = (u.selection?.second as? VideoClip)?.takeIf { s -> project?.main?.items?.any { it.id == s.id } == true } ?: u.activeClip ?: return
+                if (c.holdSec != null) return
+                val len = c.outSec - c.inSec
+                val dur = project?.asset(c.asset)?.durationSec ?: return
+                val i = r3(a.inSec.coerceIn(0.0, maxOf(0.0, dur - len)))
+                change(a.done) { p -> p.updateItem(c.id) { (it as VideoClip).copy(inSec = i, outSec = r3(i + len)) } }
+            }
+            is EditAction.ReplaceClip -> {
+                val c = (u.selection?.second as? VideoClip)?.takeIf { s -> project?.main?.items?.any { it.id == s.id } == true } ?: u.activeClip ?: return
+                val dur = a.take.durationSec ?: return say("That video has no length yet")
+                if (change(refused = "That video is too short to replace this clip") { p -> SuiteOps.replaceClip(p, c.id, a.take.id, dur) }) say("Clip replaced · its edits stay")
             }
             is EditAction.SetBlend -> {
                 val (t, item) = u.selection ?: return say("Pick an overlay to blend")
@@ -980,8 +1035,20 @@ class EditSuiteController(
         change(a.done) { p ->
             p.updateItem(id) { it ->
                 val vis = it as? studio.muse.core.edit.Visual ?: return@updateItem it
-                if (a.field == "grain") {
-                    val look = (vis.look ?: Look()).let { l -> l.copy(grain = if (v <= 0) null else Grain(v.coerceIn(0.0, 1.0), l.grain?.size)) }
+                if (a.field in LOOK_FIELDS) {
+                    // The look's effects (plans/video-editor.md "Looks"): 0 removes the effect.
+                    val l = vis.look ?: Look()
+                    val pos = v.coerceIn(0.0, 1.0).takeIf { n -> n > 0.0 }
+                    val look = when (a.field) {
+                        "grain" -> l.copy(grain = pos?.let { Grain(it, l.grain?.size) })
+                        "vignette" -> l.copy(vignette = v.coerceIn(-1.0, 1.0).takeIf { n -> n != 0.0 }?.let { studio.muse.core.edit.Vignette(it, l.vignette?.size, l.vignette?.softness) })
+                        "sharpen" -> l.copy(sharpen = pos)
+                        "fade" -> l.copy(lift = pos)
+                        "chromatic" -> l.copy(chromatic = pos)
+                        "halation" -> l.copy(halation = pos?.let { studio.muse.core.edit.Halation(it, l.halation?.radius, l.halation?.threshold) })
+                        "leak" -> l.copy(leak = pos?.let { studio.muse.core.edit.Leak(l.leak?.kind ?: studio.muse.core.edit.LeakKind.WARM, it, l.leak?.angle) })
+                        else -> l
+                    }.takeIf { n -> n != Look() }
                     when (it) { is VideoClip -> it.copy(look = look); is ImageItem -> it.copy(look = look); else -> it }
                 } else {
                     val ad = vis.adjust ?: Adjust()
@@ -1106,6 +1173,8 @@ class EditSuiteController(
 
     companion object {
         fun r2(v: Double) = Math.round(v * 100) / 100.0
+        /** Adjust fields that are look effects rather than colour adjustments. */
+        val LOOK_FIELDS = setOf("grain", "vignette", "sharpen", "fade", "chromatic", "halation", "leak")
         fun r3(v: Double) = Math.round(v * 1000) / 1000.0
 
         /** "about $0.02" or "Free" (never a provider or model). */

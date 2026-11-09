@@ -17,7 +17,7 @@ enum class ExportShape(val label: String, val w: Int, val h: Int) {
     }
 }
 
-enum class ExportResolution(val label: String, val shortSide: Int) { HD("720p", 720), FULL_HD("1080p", 1080), UHD("4K", 2160) }
+enum class ExportResolution(val label: String, val shortSide: Int) { HD("720p", 720), FULL_HD("1080p", 1080), QHD("2K", 1440), UHD("4K", 2160) }
 enum class ExportCodec(val label: String) { H264("MP4 · H.264"), HEVC("MP4 · HEVC") }
 enum class CaptionExport { BURN_IN, SRT }
 
