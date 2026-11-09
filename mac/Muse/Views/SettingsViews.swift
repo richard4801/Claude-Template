@@ -144,6 +144,9 @@ struct SettingsView: View {
             SectionTitle("About", top: 0)
             SettingRow("Version") { RowValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
             SettingRow("Fonts", hint: "Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL); Permanent Marker (Apache 2.0)")
+            // The edit content library (WS8 84df583): stickers, sound effects and fonts under their own licences.
+            SectionTitle("Licences")
+            SettingsContentLicences()
             SettingRow("Terms of Service") { RButton("Open", kind: .plain, small: true) { store.showToast("The Terms of Service open on the MUSE website") } }
             SettingRow("Acceptable Use Policy") { RButton("Open", kind: .plain, small: true) { store.showToast("The Acceptable Use Policy opens on the MUSE website") } }
             SettingRow("Account", hint: store.user?.email) { RButton("Sign out", kind: .danger, small: true) { store.signOut() } }

@@ -75,7 +75,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Transitions (cut, fade, dip to black/white, slide, push, zoom, whip, spin, glitch) | Has | Has | — | 9 types, own design |
 | Duration, apply to all | Has | Has | — | |
-| More transition types | Partial | Partial | M each | Functional, but the value is in a curated set: **Content** |
+| More transition types | Partial | Has | M each | Functional, but the value is in a curated set: **Content** Mac: seven more kinds (zoom out, whip right, cover ×4, split fade) and 12 in-house presets as chips (content library, WS9). |
 | Transitions on overlay tracks | Partial | Missing | M | Android: overlay clips fade / slide / zoom in and out through the same `animIn`/`animOut` (no cross-dissolve between overlays). |
 | Clip in/out animations (video) | Has | Has | M | Text and images have them. Android: Transform → Animation in / out on any video clip, main or overlay (`animIn`/`animOut` on VideoClip; fade, pop, slide up/down, zoom). Mac: Animate panel on any video clip, main or overlay (`animIn`/`animOut`), preview and export. |
 
@@ -85,7 +85,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | **Add plain text** | Has | Has | S | Only through hook templates. "Add text" plus a style editor is needed. Mac: Add text at the playhead. Android: Text → Add text at the playhead (wave 1). |
 | **Text styling** (font, colour, stroke, shadow, background, spacing, size) | Has | Has | M | The model has all of it; the UI only edits the text itself. Mac: Font, colour, weight, size, align, outline colour and width, shadow, letter spacing, line height, box, upper case (wave 1). |
-| Fonts library | Partial | Partial | M | Six bundled families. More fonts: **Content** (open licences, e.g. OFL, are an option). Mac: Same six families |
+| Fonts library | Partial | Has | M | Six bundled families. More fonts: **Content** (open licences, e.g. OFL, are an option). Mac: Same six families Mac: the nine content families (OFL) in the Text and caption font menus, loaded when used; the bundled fallback draws until then (WS9). |
 | Import own fonts | Has | Has | M | Android: Text → Font → "Your font…" (system file picker, .ttf/.otf up to 10 MB, checked and named on the phone); each of the edit's fonts is a chip named from the file. Contract: a `font` asset (upload, optional `name`) and `TextStyle.fontAsset` on text items (captions keep the six families; `font` stays the fallback; kits drop it). Server: `purpose: "font"` presign, `/v1/editor/uploads/font-check`, saved edits check the file, the render draws with it. Screenshot: android-edit/m6_own_font.png. Mac: Text → Style → Font menu: the edit's own fonts and "Your font…" (a .ttf / .otf from this Mac, up to 10 MB, checked, named from the file); drawn as its own face (no weight), in the preview and the export. |
 | Text templates / hooks | Has | Has | — | 10 hooks; more is **Content** |
 | In/out text animations | Has | Has | S | The model has 7 kinds; there is no picker. Mac: Animate panel. Android: In / out picker with lengths (wave 1). |
@@ -118,7 +118,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Record voice-over | Has | Has | — | In-app recorder (WS8). Mac: Mac microphone |
 | Recording over playback (hear the video while recording) | Has | Has | S | Needs headphones handling. Android: Audio → Play the video while recording (on with headphones, off on the speaker); the take is moved earlier by the route's typical latency (Bluetooth 200 ms, wired 20 ms); a red bar on the ruler while recording. Mac: Record VO with "Play the video while recording" (on by default for headphones, Bluetooth or USB); the take lands where recording started, shifted by the output delay; a red bar grows on the voice row (design pass, owner-approved). |
 | **Music library** | Missing | Missing | M (function) | **Content.** Licensing is the real cost. `add_music` refuses `library` today. |
-| **Sound effects library** | Missing | Missing | M (function) | **Content** |
+| **Sound effects library** | Missing | Has | M (function) | **Content** Mac: Bin → Music → Sound effects, searchable by category, with a play preview; added at the playhead on the sound effects row (WS9). |
 | AI music / generative SFX | Missing | Missing | XL | Model and vendor decision |
 | Audio loop | Has | Has | S | Android: Audio → Loop to the end. Mac: Audio → Loop to the end. |
 
@@ -126,7 +126,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
-| Looks / filters with intensity | Has | Has | — | 32 original looks. More is **Content**, which MUSE can make itself (`lookpack.ts`). |
+| Looks / filters with intensity | Has | Has | — | 32 original looks. More is **Content**, which MUSE can make itself (`lookpack.ts`). Mac: plus the 12 in-house looks and 10 caption templates of the content library as chips (WS9). |
 | .cube LUT import | Has | Has | — | |
 | Exposure, contrast, saturation, temperature, highlights, shadows, grain | Has | Has | — | |
 | Tint | Has | Has | S | Android: Filters → Adjust → Tint (`adjust.tint`, green ↔ magenta, after temperature in the colour matrix). Mac: Adjust → Tint under Temperature (`adjust.tint`; fixtures pass on the Mac). |
@@ -191,7 +191,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
-| Sticker / GIF / emoji library | Missing | Missing | M (function) | **Content** |
+| Sticker / GIF / emoji library | Missing | Has | M (function) | **Content** Mac: Bin → Stickers, the Twemoji set (CC BY 4.0), searchable by category; a click places one at the playhead. Licences in Settings → About (WS9). |
 | Own image or cut-out as a sticker | Missing | Partial | M | Uses the image items and the matte. Mac: Own pictures (WS9); a cut-out isn't a sticker yet |
 | Sticker animation and keyframes | Partial | Has | — | Comes with image items |
 

@@ -173,6 +173,7 @@ struct CaptionsPanel: View {
             VStack(alignment: .leading, spacing: Space.s3) {
                 SuiteLabel("Style", trailing: style == nil ? nil : "Word-by-word")
                 CaptionStyleGrid(session: session)
+                ContentCaptionChips(session: session)
             }
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
@@ -180,7 +181,12 @@ struct CaptionsPanel: View {
                 VStack(alignment: .leading, spacing: Space.s4) {
                     HStack(spacing: 8) {
                         Menu {
-                            ForEach(EditV2.Font.allCases, id: \.self) { f in
+                            ForEach(EditV2.Font.bundled, id: \.self) { f in
+                                Button(fontName(f)) { session.edit { $0.changeCaptionStyle { $0.font = f } } }
+                            }
+                            // The content library's families (WS8 929bcf2), loaded when chosen.
+                            Divider()
+                            ForEach(EditV2.Font.allCases.filter(\.isContent), id: \.self) { f in
                                 Button(fontName(f)) { session.edit { $0.changeCaptionStyle { $0.font = f } } }
                             }
                         } label: {
@@ -220,16 +226,7 @@ struct CaptionsPanel: View {
         }
     }
 
-    func fontName(_ f: EditV2.Font) -> String {
-        switch f {
-        case .sans: return "Sans"
-        case .serif: return "Serif"
-        case .rounded: return "Rounded"
-        case .condensed: return "Condensed"
-        case .mono: return "Mono"
-        case .marker: return "Marker"
-        }
-    }
+    func fontName(_ f: EditV2.Font) -> String { f.label }
 }
 
 // MARK: - Text
@@ -278,7 +275,10 @@ struct TextPanel: View {
         EditPanel(title: "Style") {
             HStack(spacing: Space.s2) {
                 Menu {
-                    ForEach(EditV2.Font.allCases, id: \.self) { f in Button(f.rawValue.capitalized) { change { $0.style.font = f; $0.style.fontAsset = nil } } }
+                    ForEach(EditV2.Font.bundled, id: \.self) { f in Button(f.label) { change { $0.style.font = f; $0.style.fontAsset = nil } } }
+                    // The content library's families (WS8 929bcf2), loaded when chosen.
+                    Divider()
+                    ForEach(EditV2.Font.allCases.filter(\.isContent), id: \.self) { f in Button(f.label) { change { $0.style.font = f; $0.style.fontAsset = nil } } }
                     // Own fonts (contract, WS8 6ccd9aa): each one in this edit, then a new one from this Mac.
                     let own = session.state.ownFonts
                     if !own.isEmpty {
@@ -288,7 +288,7 @@ struct TextPanel: View {
                     Divider()
                     Button("Your font…") { pickFont() }
                 } label: {
-                    Text(st.fontAsset.flatMap { id in session.project.asset(id)?.name } ?? st.font.rawValue.capitalized)
+                    Text(st.fontAsset.flatMap { id in session.project.asset(id)?.name } ?? st.font.label)
                         .font(t.scale.caption.font).frame(maxWidth: .infinity, alignment: .leading)
                 }
                     .menuStyle(.borderlessButton)

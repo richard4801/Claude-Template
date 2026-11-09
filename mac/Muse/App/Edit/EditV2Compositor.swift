@@ -406,7 +406,7 @@ final class EditV2Scene: @unchecked Sendable {
         var text = tx.text
         if let n = pl.chars { text = String(String.UnicodeScalarView(text.unicodeScalars.prefix(n))) }
         guard !text.isEmpty else { return base }
-        let key = "t|\(tx.id)|\(k)|\(text.hashValue)|\(tx.style.hashValue)"
+        let key = "t|\(tx.id)|\(k)|\(text.hashValue)|\(tx.style.hashValue)|\(EditV2TextRenderer.fontGeneration)"
         let fontSize = CGFloat(tx.style.sizePct) * size.height * CGFloat(k)
         let wrap = CGFloat(tx.style.maxWidthPct ?? 0.85) * size.width * CGFloat(k)
         guard let img = cachedText(key, {
@@ -435,7 +435,7 @@ final class EditV2Scene: @unchecked Sendable {
 
             return run
         }
-        let key = "c|\(at.page)|\(at.word)|\(st.hashValue)"
+        let key = "c|\(at.page)|\(at.word)|\(st.hashValue)|\(EditV2TextRenderer.fontGeneration)"
         let fontSize = CGFloat(st.sizePct) * size.height
         let wrap = CGFloat(st.maxWidthPct ?? 0.85) * size.width
         // Neon draws its glow with the style's own shadow colour (coordinator, 2026-11-09: server, Android and Mac match).

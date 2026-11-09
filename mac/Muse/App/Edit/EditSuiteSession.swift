@@ -179,6 +179,7 @@ final class EditSuiteSession {
             }
             phase = .ready
             Task { [weak self] in await self?.refreshFeatures() }
+            Task { [weak self] in await self?.loadContent() }
             observeTime()
             await ensureFiles()
             rebuild(immediately: true)
@@ -200,11 +201,30 @@ final class EditSuiteSession {
     /// Downloads every asset file the project needs and doesn't have yet (takes by their video, uploads by their url hint).
     private func ensureFiles() async {
         for a in project.assets where files[a.id] == nil {
+            // Content stickers and sound effects (WS8 84df583): the catalog's file, downloaded once per catalog version.
+            if let ref = a.contentRef {
+                if content == nil { await loadContent() }
+                if let path = content?.item(ref: ref)?.item.file, let u = await contentFile(path) { files[a.id] = u }
+                continue
+            }
             var link: String?
             if let t = a.take { link = lookupTake(t)?.videoUrl }
             if link == nil { link = a.url }
             guard let link, let url = URL(string: link) else { continue }
             if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
+        }
+        await ensureContentFonts()
+    }
+
+    /// The content fonts this edit's text and captions use, loaded for the preview (each family draws in its bundled
+    /// fallback until its file is here).
+    private func ensureContentFonts() async {
+        let need = project.contentFonts.filter { !EditV2TextRenderer.hasContentFont($0) }
+        guard !need.isEmpty else { return }
+        if content == nil { await loadContent() }
+        for k in need {
+            guard let path = content?.fontFile(k.font, weight: k.weight), let u = await contentFile(path) else { continue }
+            EditV2TextRenderer.registerContentFont(k, file: u)
         }
     }
 
@@ -1172,6 +1192,72 @@ final class EditSuiteSession {
             notice = nil
             lastError = (error as? ApiError)?.message ?? "Couldn't add that font"
         }
+    }
+
+    // MARK: Content library (WS8 84df583): stickers, sound effects, fonts and the in-house looks, captions and transitions
+
+    /// The content catalog: nil until loaded, or when this server has none.
+    var content: ContentCatalog?
+    /// The sound effect being previewed (its ref).
+    var previewingSound: String?
+    @ObservationIgnored private var contentTask: Task<ContentCatalog?, Never>?
+    @ObservationIgnored private var soundPreview: AVAudioPlayer?
+
+    func loadContent() async {
+        if content != nil { return }
+        let task = contentTask ?? Task { [api] in try? await api.editorContent() }
+        contentTask = task
+        content = await task.value
+        if content == nil { contentTask = nil }   // try again next time
+    }
+
+    /// A content file on this Mac (downloaded once per catalog version), or nil when it can't be had.
+    func contentFile(_ path: String) async -> URL? {
+        guard let c = content else { return nil }
+        return try? await api.editorContentFile(path, version: c.version)
+    }
+
+    /// A sticker at the playhead on the Stickers row (downloaded first, so the preview has it).
+    func addContentSticker(_ pack: ContentPack, _ item: ContentItem) async {
+        guard let path = item.file, let url = await contentFile(path) else { lastError = "Couldn't download that sticker · check the connection"; return }
+        let ref = ContentCatalog.ref(pack: pack.id, item: item.id)
+        if edit({ $0.addContentSticker(pack, item) }) {
+            for a in project.assets where a.library == ref { files[a.id] = url }
+            rebuild(immediately: true)
+            view { $0.tab = .video }
+        }
+    }
+
+    /// A sound effect at the playhead on the sound effects row.
+    func addContentSound(_ pack: ContentPack, _ item: ContentItem) async {
+        guard let path = item.file, let url = await contentFile(path) else { lastError = "Couldn't download that sound · check the connection"; return }
+        let ref = ContentCatalog.ref(pack: pack.id, item: item.id)
+        if edit({ $0.addContentSound(pack, item) }) {
+            for a in project.assets where a.library == ref { files[a.id] = url }
+            rebuild(immediately: true)
+        }
+    }
+
+    /// Plays a sound effect once (again: stops it).
+    func previewSound(_ pack: ContentPack, _ item: ContentItem) async {
+        let ref = ContentCatalog.ref(pack: pack.id, item: item.id)
+        soundPreview?.stop()
+        if previewingSound == ref { previewingSound = nil; return }
+        previewingSound = ref
+        guard let path = item.file, let url = await contentFile(path), previewingSound == ref,
+              let p = try? AVAudioPlayer(contentsOf: url) else { if previewingSound == ref { previewingSound = nil }; return }
+        soundPreview = p
+        p.play()
+        let len = p.duration
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(len + 0.05))
+            if self?.previewingSound == ref { self?.previewingSound = nil }
+        }
+    }
+
+    /// One of the in-house looks on the selected picture (its whole look: LUT, grain, vignette and the rest).
+    func applyContentLook(_ look: E.Look) {
+        edit { s in s.changeVisual { v in v.look = look } }
     }
 
     // MARK: Style kits (parity, shared kit engine)
