@@ -81,7 +81,7 @@ extension AppStore {
 
     /// Extend's prices: the current choice and each tier. No video yet: no price.
     func estimateExtend() async {
-        guard suite.enabled, suite.catalog != nil, let req = suite.composer.extendRequest() else {
+        guard suite.enabled, suite.catalog != nil, let req = suite.composer.extendRequest().map({ self.withExtendPick($0) }) else {
             suite.estimate = nil
             suite.estimateError = nil
             suite.tierEstimates = [:]
@@ -103,7 +103,7 @@ extension AppStore {
             showToast("Wait for the upload to finish")
             return
         }
-        guard let req = suite.composer.extendRequest() else {
+        guard let req = suite.composer.extendRequest().map({ self.withExtendPick($0) }) else {
             showToast(suite.composer.missing(suite.composerSlots.slots) ?? "Pick a take or upload a video to extend")
             return
         }

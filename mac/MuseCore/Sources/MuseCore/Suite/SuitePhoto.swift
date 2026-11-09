@@ -30,6 +30,8 @@ public struct PhotoRequest: Codable, Hashable, Sendable {
     public var title: String?
     /// AI suite (workstream 1): the composer's full draft, stored on every still for "Reuse settings" (left out when nil).
     public var draft: SuiteDraft?
+    /// Owner only: the photo model for this run (a Replicate `owner/name` or a custom `c_…`); nil = the studio's.
+    public var imageModel: String?
 
     public init(modelId: String, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
                 presetId: String? = nil, productImage: ImageRef? = nil, references: [ShootRef]? = nil, seed: Int64? = nil, lockSeed: Bool? = nil,
@@ -173,8 +175,11 @@ public struct PhotoDraft: Hashable, Sendable {
     public var presetId: String?
     /// Up to 3 references (pose, look, scene).
     public var references: [ShootRef]
+    /// Owner only: the photo model picked on the Model pill (nil = Auto, the studio's photo model).
+    public var imageModel: String?
 
-    public init(count: Int = PhotoRequest.maxCount, presetId: String? = nil, references: [ShootRef] = []) {
+    public init(count: Int = PhotoRequest.maxCount, presetId: String? = nil, references: [ShootRef] = [], imageModel: String? = nil) {
+        self.imageModel = imageModel
         self.count = count
         self.presetId = presetId
         self.references = references
@@ -222,6 +227,7 @@ extension ComposerDraft {
         r.references = refs.isEmpty ? nil : Array(refs)
         let words = r.prompt.split(separator: " ").prefix(5).joined(separator: " ")
         r.title = words.isEmpty ? nil : words
+        r.imageModel = photo.imageModel
         return r
     }
 

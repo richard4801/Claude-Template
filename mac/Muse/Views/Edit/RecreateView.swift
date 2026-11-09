@@ -224,6 +224,10 @@ struct RecreateTopBar: View {
                 Spacer(minLength: Space.s2)
                 if rs.mode == .recipe {
                     claudeButton(iconOnly: true)
+                    // The owner's models for the new shots and their background plates (WS6); Build's estimates use them.
+                    // Left of the cost, so the cost stays right beside Build (fit check).
+                    OwnerModelPill(purpose: .fill, compact: true)
+                    OwnerModelPill(purpose: .plate, compact: true)
                     if let f = rs.fill {
                         VStack(alignment: .trailing, spacing: 0) {
                             Text(RecreateText.makingSummary(f, prices: rs.prices, unavailable: rs.unpriceable, swaps: Set(rs.estimateInfo.filter { $0.value.method == "swap" }.keys))).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)

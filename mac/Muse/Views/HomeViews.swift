@@ -83,8 +83,8 @@ struct HomeView: View {
         let r = store.runningJob ?? store.activeJobs.first
         ScreenPage {
             ScreenTitle(greeting, subtitle: dateLine) {
-                RButton("New video", kind: .action) { store.go(.studio) }
-                    .help("New video (⌘N)")
+                RButton("New shot", kind: .action) { store.openTool(.shot) }
+                    .help("New shot in the AI Suite (⌘N)")
             }
             // Four plain facts on the canvas, not four boxed stat cards.
             HStack(alignment: .top, spacing: Space.s7) {

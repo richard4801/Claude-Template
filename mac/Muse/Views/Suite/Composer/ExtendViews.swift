@@ -198,6 +198,7 @@ struct UpscalePicker: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("UPSCALE").font(t.mono(10.5, .medium)).tracking(1.2)
+                OwnerModelPill(purpose: .upscale, compact: true) // the owner's upscale model (WS6)
                 Spacer()
                 Text(take.durationSec.map { "for this \(Take.clock($0)) take" } ?? "sharper, from this take").font(t.body(11.5)).foregroundStyle(t.muted)
             }
