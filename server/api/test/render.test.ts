@@ -180,11 +180,10 @@ describe.skipIf(!hasFfmpeg)('render an edit project (ffmpeg)', () => {
 
   it('a guide track replaces the project\'s sound, padded to a set length; what can\'t be drawn is listed', async () => {
     const p = project();
-    (p.tracks[0]!.items[0] as M.VideoClip).mask = { shape: 'circle' };
-    p.tracks.push({ id: 'ov', kind: 'video', items: [{ id: 'v1', asset: 'a', inSec: 0, outSec: 1, speed: 1, startSec: 0 } as M.VideoClip] });
+    (p.tracks[0]!.items[0] as M.VideoClip).look = { grain: { amount: 0.4 } };
     const out = path.join(dir, 'guide.mp4');
     const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, files, out, { maxSide: 320, audio: { file: files.m! }, durationSec: 5 });
-    expect(r.unsupported.sort()).toEqual(['masks', 'overlays']);
+    expect(r.unsupported).toEqual(['look details (grain, vignette, …)']);
     const info = await probe('ffprobe', out);
     expect(Math.abs(info.duration - 5)).toBeLessThan(0.1);
     expect(info.audioCodec).toBeTruthy();

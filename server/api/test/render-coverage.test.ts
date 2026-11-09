@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { Look } from '../src/editor/look.js';
 import * as M from '../src/editor/model.js';
 import { planRender } from '../src/editor/render.js';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -53,10 +54,12 @@ function plan(p: M.EditProject) {
   // folder's name is not.
   const list = r.temp.map(t => path.join(t, 'text.ffconcat')).find(f => fs.existsSync(f));
   const cubes = r.temp.filter(t => t.endsWith('.cube') && fs.existsSync(t)).map(t => fs.readFileSync(t, 'utf8'));
+  // Masks are grey frames written to files: their pixels are part of the plan.
+  cubes.push(...r.temp.filter(t => t.endsWith('.gray') && fs.existsSync(t)).map(t => createHash('sha1').update(fs.readFileSync(t)).digest('hex')));
   const texts = [list ? fs.readFileSync(list, 'utf8') : '', ...cubes, ...r.stills.map(x => JSON.stringify([x.svg, x.crop])), JSON.stringify(r.sprites)].join('\n');
   for (const t of r.temp) fs.rmSync(t, { force: true, recursive: true });
-  const tmp = (x: string) => x.replace(/muse-text-[^/'"\\]+/g, 'TEMP').replace(/muse-look-[\d-]+\.cube/g, 'LOOK');
-  return { args: tmp(JSON.stringify(r.args)) + tmp(texts), unsupported: new Set(r.unsupported) };
+  const tmp = (x: string) => x.replace(/muse-text-[^/'"\\]+/g, 'TEMP').replace(/muse-look-[\dc-]+\.cube/g, 'LOOK').replace(/muse-(sound|mask)-[^'"\\]+/g, 'TEMP');
+  return { args: tmp(JSON.stringify([r.args, r.soundArgs])) + tmp(texts), unsupported: new Set(r.unsupported) };
 }
 
 // ------------------------------------------------------------------ the model's shapes
@@ -101,8 +104,8 @@ const curveFields: Table<M.SpeedCurve> = { preset: meta('a label: the points are
 const transitionFields: Table<M.Transition> = { kind: sub('transitionIn', { kind: 'fade', durationSec: 0.3 }, 'kind', 'slideLeft'),
   durationSec: sub('transitionIn', { kind: 'fade', durationSec: 0.3 }, 'durationSec', 0.5) };
 
-const visualFields = (kfs: M.KfProp[]) => ({
-  fit: set('fit', 'contain'), opacity: set('opacity', 0.5),
+const visualFields = (kfs: M.KfProp[], fit: M.Fit = 'contain') => ({
+  fit: set('fit', fit), opacity: set('opacity', 0.5),
   ...nest('transform', transformFields), ...nest('crop', cropFields), ...nest('adjust', adjustFields), ...nest('filter', filterFields),
   ...nest('mask', maskFields), ...nest('look', lookFields), ...nest('keyframe', keyframeFields),
   ...Object.fromEntries(kfs.map(k => [`keyframes.${k}`, kfProbe(k)])),
@@ -121,7 +124,7 @@ const clipKeys: Table<M.VideoClip> = {
 };
 const clipFields = (main: boolean) => ({
   ...Object.fromEntries(Object.entries(clipKeys).filter(([, v]) => !('meta' in v && v === nested))),
-  ...visualFields(CLIP_KFS), ...nest('chroma', chromaFields), ...nest('alphaMatte', matteFields), ...nest('speedCurve', curveFields),
+  ...visualFields(CLIP_KFS, main ? 'contain' : 'cover'), ...nest('chroma', chromaFields), ...nest('alphaMatte', matteFields), ...nest('speedCurve', curveFields),
   ...nest('animIn', animFields('animIn')), ...nest('animOut', animFields('animOut')),
   ...(main ? { 'startSec': meta('main clips play back to back (validation refuses startSec)'), 'blend': meta('overlay tracks only (validation refuses it on main)') }
     : { ...nest('animLoop', loopFields) }),
@@ -129,7 +132,7 @@ const clipFields = (main: boolean) => ({
 const imageKeys: Table<M.ImageItem> = { id: meta('an id'), asset: set('asset', 'im'), startSec: set('startSec', 0.4), durationSec: set('durationSec', 0.5), blend: set('blend', 'multiply'),
   animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested };
 const imageFields = { startSec: imageKeys.startSec, durationSec: imageKeys.durationSec, blend: imageKeys.blend,
-  ...visualFields(['x', 'y', 'scale', 'rotation', 'opacity', ...M.COLOR_KF_PROPS, ...M.MASK_KF_PROPS, ...M.LOOK_KF_PROPS]),
+  ...visualFields(['x', 'y', 'scale', 'rotation', 'opacity', ...M.COLOR_KF_PROPS, ...M.MASK_KF_PROPS, ...M.LOOK_KF_PROPS], 'cover'),
   ...nest('animIn', animFields('animIn')), ...nest('animOut', animFields('animOut')), ...nest('animLoop', loopFields) };
 
 const styleKeys = (k: string): Table<M.TextStyle> => {
@@ -187,7 +190,7 @@ const trackKeys = (kind: M.TrackKind): Partial<Table<M.Track>> => {
 };
 const allTrackKeys: Table<M.Track> = { id: meta('an id'), kind: meta('which kind of track (probed per kind)'), name: meta('a label'), muted: nested, hidden: nested, volume: nested,
   items: meta('probed item by item'), caption: meta('probed field by field'), duck: meta('probed field by field') };
-const canvasKeys: Table<M.Canvas> = { width: set('width', 720), height: set('height', 720), fps: set('fps', 24), background: set('background', '#FF0000'),
+const canvasKeys: Table<M.Canvas> = { width: set('width', 720), height: set('height', 720), fps: set('fps', 24), background: { prep: (_o, p) => { (p.tracks[0]!.items[0] as M.VideoClip).fit = 'contain'; }, mut: o => { o.background = '#FF0000'; } }, // shows where a clip leaves the frame empty
   fill: { prep: (_o, p) => { (p.tracks[0]!.items[0] as M.VideoClip).fit = 'contain'; }, mut: o => { o.fill = 'blur'; } } };
 const projectKeys: Table<M.EditProject> = { version: meta('always 2'), sourceTakeId: meta('which take the project edits (a reference)'), canvas: nested, assets: meta('resolved by the caller into files'),
   tracks: nested, mute: { mut: (_o, p) => { p.mute = true; } } };
@@ -201,17 +204,17 @@ type Place = { name: string; get: (p: M.EditProject) => Obj; fields: Record<stri
 const places: Place[] = [
   { name: 'main clip', get: item('c1'), fields: clipFields(true) },
   { name: 'main clip (with a transition in)', get: item('c2'), fields: nest('transitionIn', transitionFields) },
-  { name: 'overlay clip', get: item('o1'), fields: clipFields(false), coveredBy: 'overlays' },
-  { name: 'image', get: item('i1'), fields: imageFields, coveredBy: 'overlays' },
+  { name: 'overlay clip', get: item('o1'), fields: clipFields(false) },
+  { name: 'image', get: item('i1'), fields: imageFields },
   { name: 'text', get: item('t1'), fields: textFields },
-  { name: 'captions', get: caption, fields: captionFields, coveredBy: 'captions' },
+  { name: 'captions', get: caption, fields: captionFields },
   { name: 'music clip', get: item('mu'), fields: audioKeys },
   { name: 'voice clip', get: item('vo'), fields: audioKeys },
   { name: 'sfx clip', get: item('sx'), fields: audioKeys },
   { name: 'adjustment layer', get: item('a1'), fields: adjustItemFields },
   { name: 'music ducking', get: track('mus'), fields: nest('duck', duckKeys) },
   ...['main', 'ov', 'img', 'adj', 'tx', 'cap', 'mus', 'voi', 'sfx'].map(id => ({ name: `track ${id}`, get: track(id), fields: trackKeys(base().tracks.find(t => t.id === id)!.kind) as Record<string, Entry>,
-    coveredBy: ({ ov: 'overlays', img: 'overlays', cap: 'captions' } as Record<string, string>)[id] })),
+    coveredBy: undefined })),
   { name: 'canvas', get: p => p.canvas as unknown as Obj, fields: canvasKeys },
   { name: 'project', get: p => p as unknown as Obj, fields: projectKeys },
   { name: 'asset', get: p => p.assets[0] as unknown as Obj, fields: assetKeys },

@@ -1,14 +1,16 @@
-// A server render of an edit project (workstream 1; Release 1: "Your edit" in Recreate's Compare, and Recreate's
-// export). ffmpeg, CPU, one render at a time. What it draws:
-// - the main track: trims, speed and speed curves (the same constant-speed pieces the apps use), cover/contain fit,
-//   transform and x/y/scale keyframes (camera moves), transitions (xfade), and the Look's LUT at its strength;
-// - adjustment layers over the joined picture, under the text (runs of one colour matrix; keyed ones sampled);
-// - text items: the apps' fonts (or the member's own font file), size, colour, stroke, position, timing;
-// - sound: each clip's own sound (at its speed) plus music/voice/sfx clips, each with its gain over time (model.ts
-//   audioEnvelope: volume and its keys, fades, transition crossfades, ducking) and its voice (audio.ts voiceChain);
-//   project mute; or an external guide track instead.
-// Anything else in the project is left out and listed in `unsupported` (test/render-coverage.test.ts checks every
-// field of the model is drawn or listed), so the apps can say the render is a preview of the cut.
+// A server render of an edit project (workstream 1; render parity, WS16): Recreate's Compare and export, Claude's
+// renders. ffmpeg, CPU, one render at a time; it draws what the phone and Mac editors draw, in their order:
+// - main clips (layer.ts): trims, speed and speed curves, freeze frames, crop, chroma key, colour (adjust, filter,
+//   tone, curves, HSL, LUT, lift as one 3D LUT; colour keyframes in runs), background removal, masks, fit, mirror,
+//   transform and its keyframes, in/out animations, opacity, over the background colour or the blur fill; joined by
+//   cuts and transitions (xfade; the glitch as the apps draw it);
+// - overlays (video and image tracks), in track order: the same steps, plus loops and blend modes (blendPixel);
+// - adjustment layers over the pictures, under the text;
+// - text and captions above everything (textdraw.ts): the fonts' own outlines, styling, animation, caption presets;
+// - sound, in a pass of its own: every clip cut and timed like its picture, its voice (audio.ts voiceChain) and its
+//   gain over time (model.ts audioEnvelope: volume and keys, fades, crossfades, ducking); project mute; or a guide track.
+// What it can't draw is listed in `unsupported` (test/render-coverage.test.ts checks every field of the model is drawn
+// or listed), so the apps can say the render is a preview.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,8 +19,9 @@ import { fileURLToPath } from 'node:url';
 import { LOOK_IDS } from './lookpack.js';
 import { FILTERS } from './presets.js';
 import * as M from './model.js';
-import { curvesFn, hash01, hslFn, lutSample, parseCube, writeCube, type Look, type Lut } from './look.js';
+import { hash01, parseCube, type Look, type Lut } from './look.js';
 import { voiceChain } from './audio.js';
+import * as L from './layer.js';
 import * as TD from './textdraw.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
 
@@ -79,17 +82,6 @@ export function glitchShifts(windows: { start: number; d: number }[], W: number,
   return cmds.join(';');
 }
 
-/** A look's curves (4), HSL (4b) and LUT at its strength (5) as one 33³ cube, the same steps as look.ts applyLook. */
-export function bakeLook(look: Look, lut: Lut | null): string {
-  const curves = curvesFn(look.curves), hsl = hslFn(look.hsl), s = Math.max(0, Math.min(1, look.strength ?? 1));
-  return writeCube(33, 'muse look', (r, g, b) => {
-    let rgb: [number, number, number] = [r, g, b];
-    if (curves) rgb = curves(rgb);
-    if (hsl) rgb = hsl(rgb);
-    if (lut && s > 0) { const t = lutSample(lut, rgb[0], rgb[1], rgb[2]); rgb = [0, 1, 2].map(i => Math.min(1, Math.max(0, rgb[i]! + (t[i]! - rgb[i]!) * s))) as [number, number, number]; }
-    return rgb;
-  });
-}
 
 /** A look's LUT file: a pack look, a palette, or an imported .cube (asset id → file from `files`). */
 function lutFile(ref: string, files: Record<string, string>): string | null {
@@ -100,33 +92,7 @@ function lutFile(ref: string, files: Record<string, string>): string | null {
 
 const n4 = (x: number) => String(Math.round(x * 10000) / 10000);
 const n6 = (x: number) => String(Math.round(x * 1e6) / 1e6);
-/** model.ts `ease` on a 0–1 progress expression `p`, as an ffmpeg expression. */
-export function easeExpr(kind: M.Ease | undefined, p: string): string {
-  switch (kind ?? 'linear') {
-    case 'easeIn': return `pow(${p},2)`;
-    case 'easeOut': return `(1-pow(1-${p},2))`;
-    case 'easeInOut': return `if(lt(${p},0.5),2*pow(${p},2),1-pow(2-2*${p},2)/2)`;
-    case 'hold': return '0';
-    default: return p;
-  }
-}
-/**
- * The value of keyframes at `t` as an ffmpeg expression (model.ts keyframeValue: constant before the first and after the
- * last, each span eased by its first key's ease). `tv` is the time variable (t for most filters, T for geq, …).
- */
-export function kfExpr(keys: M.Keyframe[] | undefined, fallback: number, tv = 't'): string {
-  const k = keys ?? [];
-  if (!k.length) return n4(fallback);
-  if (k.length === 1) return n4(k[0]!.v);
-  let e = n4(k.at(-1)!.v);
-  for (let i = k.length - 2; i >= 0; i--) {
-    const a = k[i]!, b = k[i + 1]!, dt = b.t - a.t;
-    if (dt <= 0) { e = `if(lt(${tv},${n4(b.t)}),${n4(b.v)},${e})`; continue; }
-    const p = `((${tv}-${n4(a.t)})/${n4(dt)})`;
-    e = `if(lt(${tv},${n4(b.t)}),${n4(a.v)}+(${n4(b.v - a.v)})*${easeExpr(a.ease, p)},${e})`;
-  }
-  return `if(lt(${tv},${n4(k[0]!.t)}),${n4(k[0]!.v)},${e})`;
-}
+export { easeExpr, kfExpr } from './layer.js';
 /**
  * A gain envelope (model.ts audioEnvelope: piecewise-linear points on the timeline) as a flat ffmpeg expression in t: a
  * sum of the non-silent spans (no deep nesting, so long ducked beds stay cheap to parse); silent before and after.
@@ -142,6 +108,16 @@ export function envExpr(env: M.GainPoint[]): string {
   const last = env.at(-1);
   if (last && last.gain) parts.push(`eq(t,${n6(last.t)})*${n6(last.gain)}`);
   return parts.join('+') || '0';
+}
+/**
+ * A speed curve's sound (its constant-speed pieces) as one stream: four atempo stages (together 0.0625–10 000×, each
+ * 0.5–100) whose tempo asendcmd sets at each piece's start (source time from `at`). One atempo per piece instead hangs:
+ * a piece shorter than atempo's window never ends.
+ */
+export function curveTempo(pieces: M.Piece[], at: number, tag: string): string {
+  const stages = (sp: number) => { const v: number[] = []; let rem = sp; for (let i = 0; i < 3; i++) { const x = Math.min(100, Math.max(0.5, rem)); v.push(x); rem /= x; } v.push(Math.min(100, Math.max(0.5, rem))); return v; };
+  const cmds = pieces.map(pc => `${n4(Math.max(0, pc.inSec - at))} ${stages(pc.speed).map((v, i) => `atempo@${tag}${i} tempo ${n6(v)}`).join(', ')}`).join(';');
+  return `asendcmd=c='${cmds}',${stages(pieces[0]!.speed).map((v, i) => `atempo@${tag}${i}=tempo=${n6(v)}`).join(',')}`;
 }
 /** atempo stages for a speed (each stage 0.5–2). */
 export function atempo(speed: number): string[] {
@@ -180,7 +156,7 @@ export type RenderOptions = {
   quality?: 'preview' | 'export';
 };
 /** stills: text frames (SVG) and sprites: their shadows, drawn to PNG (renderProject) before ffmpeg runs; temp: files and folders to remove after. */
-export type RenderPlan = { args: string[]; durationSec: number; width: number; height: number; unsupported: string[]; temp: string[]; stills: { file: string; svg: string; crop: TD.Crop }[]; sprites: TD.Sprite[] };
+export type RenderPlan = { args: string[]; soundArgs: string[] | null; durationSec: number; width: number; height: number; unsupported: string[]; temp: string[]; stills: { file: string; svg: string; crop: TD.Crop }[]; sprites: TD.Sprite[] };
 
 /**
  * The ffmpeg arguments for a project. `files` maps asset ids to local files or URLs; `sizes` gives each video asset's
@@ -196,68 +172,240 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   const input = (file: string) => { let i = index.get(file); if (i === undefined) { i = inputs.length; inputs.push(file); index.set(file, i); } return i; };
   const g: string[] = [];
   const main = M.mainTrack(p), clips = main.items as M.VideoClip[], tl = M.timeline(p);
-  if (main.hidden) unsupported.add('a hidden main track');
   if (!clips.length) throw new Error('nothing on the main track');
   const total = o.durationSec ?? (tl.at(-1)?.endSec ?? 0);
   const fr = (t: number) => Math.round(t * FPS);
   /** A clip's frames: from its first frame on the timeline to its last. */
   const frames = (i: number) => Math.max(1, fr(tl[i]!.endSec) - fr(tl[i]!.startSec));
 
+  /**
+   * An input for a clip's source from `at` for `dur` seconds (opened there: a stream never buffers frames a later clip
+   * will need). Main clips going forward through the same file, without transitions, share one.
+   */
+  const openAt = (file: string, at: number, dur: number, threads = 2): number => {
+    const k = inputs.length;
+    inputs.push(file);
+    inputArgs.set(k, ['-threads', String(threads), '-ss', n4(Math.max(0, at)), '-t', n4(dur + 0.5)]);
+    return k;
+  };
+  /** Source frames of a video clip (its speed pieces from input `k` opened at `at`, or one held frame) or a picture, `n` frames. */
+  const sourceFrames = (k: number, at: number, c: { inSec: number; outSec: number; speed?: number; speedCurve?: M.SpeedCurve; holdSec?: number } | null, n: number, tag: string): string => {
+    if (!c || c.holdSec !== undefined) {
+      g.push(`[${k}:v]${c ? `trim=start=${n4(Math.max(0, c.inSec - at))},setpts=PTS-STARTPTS,` : ''}trim=end_frame=1,loop=loop=-1:size=1,setpts=N/${FPS}/TB,trim=end_frame=${n}[${tag}]`);
+      return tag;
+    }
+    const pieces = M.speedPieces(c);
+    pieces.forEach((pc, j) => g.push(`[${k}:v]trim=start=${n4(Math.max(0, pc.inSec - at))}:end=${n4(pc.outSec - at)},setpts=(PTS-STARTPTS)/${n4(pc.speed)},fps=${FPS}[${tag}p${j}]`));
+    g.push(`${pieces.map((_, j) => `[${tag}p${j}]`).join('')}concat=n=${pieces.length}:v=1:a=0,trim=end_frame=${n},setpts=N/${FPS}/TB[${tag}]`);
+    return tag;
+  };
+  let lookN = 0;
+  /** A .cube for an item's colour (layer.ts colourCube), or null. */
+  const colourFile = (adjust: M.Adjust | undefined, filter: M.FilterRef | undefined, look: Look | undefined): string | null => {
+    let lut: Lut | null = null;
+    if (look?.lut) {
+      const f = lutFile(look.lut, files);
+      if (!f) unsupported.add('a look that is not on the server');
+      else try { lut = parseCube(fs.readFileSync(f, 'utf8')); } catch { unsupported.add('a look that is not on the server'); }
+    }
+    const cube = L.colourCube(M.colorMatrix(adjust, filter, FILTERS), adjust, look, lut);
+    if (!cube) return null;
+    let file = baked.get(cube);
+    if (!file) { file = path.join(os.tmpdir(), `muse-look-${process.pid}-${Date.now()}-c${lookN++}.cube`); fs.writeFileSync(file, cube); temp.push(file); baked.set(cube, file); }
+    return file;
+  };
+  const lut3d = (file: string) => `lut3d=file='${file.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '')}'`;
+  const LOOK_DETAILS = ['sharpen', 'chromatic', 'halation', 'leak', 'vignette', 'grain'] as const;
+  type Visual = M.VideoClip | M.ImageItem;
+  /**
+   * A clip or picture drawn as the apps draw it (layer.ts), from the source frames `src` (w × h px, item-local time,
+   * `n` frames, `len` s long): crop → chroma key → colour → matte and mask → placed → opacity. Static and unrotated:
+   * a picture to put at (x, y); else RGBA the size of the canvas (`canvas` forces that, e.g. for blend modes).
+   */
+  type Layer = { s: string; x: number; y: number; opaque: boolean; w: number; h: number } | { s: string; x: null; y: null; opaque: false; w: number; h: number };
+  const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; matte?: () => string | null }): Layer => {
+    const { n, len, tag } = o, vc = o.video ? it as M.VideoClip : null;
+    let s = src;
+    const cr = it.crop ?? {}, l = cr.left ?? 0, t = cr.top ?? 0, r = cr.right ?? 0, b = cr.bottom ?? 0;
+    const cw = w * (1 - l - r), ch = h * (1 - t - b);
+    const kf = (it.fit ?? o.fit) === 'cover' ? Math.max(W / cw, H / ch) : Math.min(W / cw, H / ch);
+    const fw0 = cw * kf, fh0 = ch * kf;
+    const mo = L.motion(it, len, `(in/${FPS})`);
+    const still = [mo.x, mo.y, mo.scale, mo.rotation].map(L.constant);
+    const sprite = !o.canvas && still.every(v => v !== null) && Math.abs(((still[3]! % 360) + 360) % 360) < 1e-9;
+    // Drawn at the size it reaches on the canvas: its own size when still, else its largest scale.
+    const big = sprite ? still[2]! : Math.min(L.maxScale(it), (2 * Math.max(W, H)) / Math.max(fw0, fh0));
+    const iw = even(fw0 * big), ih = even(fh0 * big);
+    const cropF = l || t || r || b ? `crop=w=iw*${n6(1 - l - r)}:h=ih*${n6(1 - t - b)}:x=iw*${n6(l)}:y=ih*${n6(t)},` : '';
+    // Kept in yuv (half the memory of RGB: every clip's buffers stay for the whole render) until a step needs RGB.
+    g.push(`[${s}]${cropF}scale=${iw}:${ih},setsar=1,format=yuv420p[${tag}c]`);
+    s = `${tag}c`;
+    let rgb = false;
+    const toRgb = () => { if (!rgb) { g.push(`[${s}]format=gbrp[${tag}rgb]`); s = `${tag}rgb`; rgb = true; } };
+    const alphas: string[] = [];
+    // Chroma key (model.ts chromaKey): alpha and spill from the pixel's (Cb, Cr), the colour pulled towards its luma.
+    if (vc?.chroma) {
+      toRgb();
+      const e = L.chromaExprs(vc.chroma);
+      g.push(`[${s}]split=3[${tag}k0][${tag}k1][${tag}k2]`,
+        `[${tag}k0]scale=out_color_matrix=bt601:out_range=full,format=yuv444p,extractplanes=u+v[${tag}u][${tag}v]`,
+        `[${tag}u]split[${tag}u1][${tag}u2]`, `[${tag}v]split[${tag}v1][${tag}v2]`,
+        `[${tag}u1][${tag}v1]lut2=c0='${e.alpha}'[${tag}ka]`, `[${tag}u2][${tag}v2]lut2=c0='${e.spill}',format=gbrp[${tag}ks]`,
+        `[${tag}k1]colorchannelmixer=rr=0.2126:rg=0.7152:rb=0.0722:gr=0.2126:gg=0.7152:gb=0.0722:br=0.2126:bg=0.7152:bb=0.0722[${tag}kl]`,
+        `[${tag}kl][${tag}k2][${tag}ks]maskedmerge[${tag}kd]`);
+      s = `${tag}kd`; alphas.push(`${tag}ka`);
+    }
+    // Colour: the matrix (adjust, filter), tone, curves, HSL, LUT and lift as one 3D LUT; colour keyframes in runs.
+    const look = it.look;
+    if (look && LOOK_DETAILS.some(x => look[x] !== undefined)) unsupported.add('look details (grain, vignette, …)');
+    if (M.LOOK_KF_PROPS.some(x => it.keyframes?.[x]?.length)) unsupported.add('look details (grain, vignette, …)');
+    if (!M.COLOR_KF_PROPS.some(x => it.keyframes?.[x]?.length)) { const cf = colourFile(it.adjust, it.filter, look); if (cf) { toRgb(); g.push(`[${s}]${lut3d(cf)}[${tag}g]`); s = `${tag}g`; } }
+    else {
+      const step = Math.max(0.1, len / 60), parts: string[] = [];
+      for (let a = 0; a < len - 1e-9; a += step) {
+        const cf = colourFile(M.adjustAt(it, a + step / 2), it.filter, look);
+        if (cf) parts.push(`${lut3d(cf)}:enable='gte(t,${n4(a)})*lt(t,${n4(a + step)})'`);
+      }
+      if (parts.length) { toRgb(); g.push(`[${s}]${parts.join(',')}[${tag}g]`); s = `${tag}g`; }
+    }
+    // Background removal: the matte's luma (cut and timed like the clip) is the alpha.
+    if (vc?.alphaMatte) {
+      const ms = o.matte?.();
+      if (!ms) unsupported.add('background removal');
+      else { g.push(`[${ms}]${cropF}scale=${iw}:${ih},format=gray${vc.alphaMatte.invert ? ',negate' : ''}[${tag}ma]`); alphas.push(`${tag}ma`); }
+    }
+    // Mask (model.ts maskAlpha, keyed by maskAt), in the picture's own frame: grey frames written here, one, or one a frame while it moves.
+    if (it.mask) {
+      const keyed = M.MASK_KF_PROPS.some(x => it.keyframes?.[x]?.length);
+      const q = keyed ? Math.min(1, Math.sqrt(8e6 / (n * iw * ih))) : 1, mw = Math.max(2, Math.round(iw * q)), mh = Math.max(2, Math.round(ih * q));
+      const raw = path.join(os.tmpdir(), `muse-mask-${process.pid}-${Date.now()}-${tag}.gray`);
+      const fd = fs.openSync(raw, 'w');
+      try { for (let f = 0; f < (keyed ? n : 1); f++) fs.writeSync(fd, L.maskPixels(M.maskAt(it, f / FPS)!, mw, mh)); } finally { fs.closeSync(fd); }
+      temp.push(raw);
+      const mk = inputs.length;
+      inputs.push(raw);
+      inputArgs.set(mk, ['-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${mw}x${mh}`, '-framerate', String(FPS)]);
+      g.push(`[${mk}:v]${keyed ? '' : 'loop=loop=-1:size=1,'}setpts=N/${FPS}/TB,trim=end_frame=${n},scale=${iw}:${ih}[${tag}mk]`);
+      alphas.push(`${tag}mk`);
+    }
+    const ac = L.constant(mo.alpha);
+    // Opaque: no alpha at all (a full-frame main clip is then just cut to the canvas).
+    const opaque = !alphas.length && ac !== null && ac >= 1 && sprite;
+    if (alphas.length) {
+      let a = alphas[0]!;
+      for (let j = 1; j < alphas.length; j++) { g.push(`[${a}][${alphas[j]}]lut2=c0='x*y/255'[${tag}a${j}]`); a = `${tag}a${j}`; }
+      g.push(`[${s}][${a}]alphamerge[${tag}al]`);
+      s = `${tag}al`;
+    } else if (!opaque) { g.push(`[${s}]format=${rgb ? 'gbrap' : 'yuva420p'}[${tag}al]`); s = `${tag}al`; }
+    const flipX = !!it.transform?.flipX, flipY = !!it.transform?.flipY;
+    let x: number | null = null, y: number | null = null, ow = W, oh = H;
+    if (sprite) {
+      // Still: mirrored, then put at its place.
+      if (flipX || flipY) { g.push(`[${s}]${[flipX ? 'hflip' : '', flipY ? 'vflip' : ''].filter(Boolean).join(',')}[${tag}fl]`); s = `${tag}fl`; }
+      x = Math.round(still[0]! * W - iw / 2); y = Math.round(still[1]! * H - ih / 2); ow = iw; oh = ih;
+    } else {
+      // Moving: placed by its corners over time (fit, mirror, scale, rotation, position; keys, animation, loop).
+      // Drawn in the area it sweeps over the canvas (a frame the canvas's size costs ~4 × the memory for a picture-in-picture).
+      const sw = L.sweep(it, len, n, FPS, W, H, fw0, fh0);
+      const bx = Math.max(0, Math.floor((sw[0] - 2) / 2) * 2), by = Math.max(0, Math.floor((sw[1] - 2) / 2) * 2);
+      const bw = Math.max(2, even(Math.min(W, Math.ceil(sw[2] + 2)) - bx)), bh = Math.max(2, even(Math.min(H, Math.ceil(sw[3] + 2)) - by));
+      const fw = Math.max(iw + 2, bw), fh = Math.max(ih + 2, bh);
+      const cs = L.cornerExprs(mo, W, H, fw0, fh0, iw, ih, fw, fh, flipX, flipY, bx, by);
+      const moving = still.some(v => v === null);
+      // (perspective in gbrap: its yuva420p alpha plane comes out wrong.)
+      g.push(`[${s}]format=gbrap,pad=${fw}:${fh}:1:1:color=black@0,perspective=sense=destination:eval=${moving ? 'frame' : 'init'}:${cs.map((e, j) => `${['x', 'y'][j % 2]}${Math.floor(j / 2)}='${e}'`).join(':')},crop=${bw}:${bh}:0:0${o.canvas ? `,pad=${W}:${H}:${bx}:${by}:color=black@0` : ',format=yuva420p'}[${tag}pl]`);
+      s = `${tag}pl`;
+      if (!o.canvas) { x = bx; y = by; ow = bw; oh = bh; }
+    }
+    // Opacity over time (keys, animation, loop): a 2 × 2 grey drawn by expression, stretched and multiplied into the alpha.
+    if (ac === null) {
+      g.push(`color=c=white:s=2x2:r=${FPS}:d=${n4(n / FPS + 1)},format=gray,geq=lum='255*clip(${L.motion(it, len, 'T').alpha},0,1)',scale=${ow}:${oh}:flags=neighbor,trim=end_frame=${n}[${tag}op]`,
+        `[${s}]split[${tag}o1][${tag}o2]`, `[${tag}o1]alphaextract[${tag}oa]`, `[${tag}oa][${tag}op]lut2=c0='x*y/255'[${tag}om]`, `[${tag}o2][${tag}om]alphamerge[${tag}o]`);
+      s = `${tag}o`;
+    } else if (ac < 1) { g.push(`[${s}]lut=c3='val*${n4(Math.max(0, ac))}'[${tag}o]`); s = `${tag}o`; }
+    return x === null || o.canvas ? { s, x: null, y: null, opaque: false, w: W, h: H } : { s, x, y: y!, opaque, w: ow, h: oh };
+  };
+
+  // Main clips: each its own picture of the canvas (the background colour, or the blur fill, under the clip).
+  /**
+   * The input the previous clip read: the next one reads it too when it goes on forward through the same file without
+   * a transition. Any other sharing makes ffmpeg buffer the frames decoded for a clip until its turn (gigabytes).
+   */
+  let shared: { file: string; k: number; at: number; end: number } | null = null;
   clips.forEach((c, i) => {
     const asset = p.assets.find(a => a.id === c.asset);
     const file = asset && files[asset.id], size = asset && sizes[asset.id];
-    const len = M.clipLength(c);
-    if (!asset || !file || !size) { g.push(`color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(len + 1)},trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); return; }
-    const k = input(file);
-    const pieces = M.speedPieces(c);
-    pieces.forEach((pc, j) => g.push(`[${k}:v]trim=start=${n4(pc.inSec)}:end=${n4(pc.outSec)},setpts=(PTS-STARTPTS)/${n4(pc.speed)},fps=${FPS}[p${i}_${j}]`));
-    const src = pieces.length > 1 ? (g.push(`${pieces.map((_, j) => `[p${i}_${j}]`).join('')}concat=n=${pieces.length}:v=1:a=0[s${i}]`), `s${i}`) : `p${i}_0`;
-    // Fit and transform: scaled about its centre onto the canvas (cover by default), the keys over time.
-    const base = (c.fit === 'contain' ? Math.min : Math.max)(W / size.width, H / size.height);
-    const kf = c.keyframes ?? {}, tr = c.transform ?? {};
-    const S = kfExpr(kf.scale, tr.scale ?? 1), X = kfExpr(kf.x, tr.x ?? 0.5), Y = kfExpr(kf.y, tr.y ?? 0.5);
-    const moving = !!(kf.scale?.length || kf.x?.length || kf.y?.length);
-    if (tr.rotation || kf.rotation?.length) unsupported.add('rotation');
-    if ((c.opacity ?? 1) !== 1 || kf.opacity?.length) unsupported.add('opacity');
-    if (c.animIn && c.animIn.kind !== 'none' || c.animOut && c.animOut.kind !== 'none') unsupported.add('clip animation');
-    if (M.COLOR_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('colour keyframes');
-    if (M.LOOK_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('look details (grain, vignette, …)');
-    if (tr.flipX || tr.flipY) unsupported.add('mirror (flip)');
-    if (c.holdSec !== undefined) unsupported.add('freeze frames');
-    if (p.canvas.fill === 'blur' && c.fit === 'contain') unsupported.add('blur fill');
-    for (const [k2, name] of [['crop', 'crop'], ['adjust', 'colour adjustments'], ['filter', 'filters'], ['mask', 'masks'], ['chroma', 'chroma key'], ['alphaMatte', 'background removal']] as const)
-      if ((c as Record<string, unknown>)[k2] !== undefined) unsupported.add(name);
-    const sw = `trunc(${n4(size.width * base)}*(${S})/2)*2`, sh = `trunc(${n4(size.height * base)}*(${S})/2)*2`;
-    g.push(`[${src}]scale=w='${sw}':h='${sh}':eval=${moving ? 'frame' : 'init'},setsar=1[f${i}]`);
-    g.push(`color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(len + 1)}[bg${i}]`);
-    let last = `o${i}`;
-    g.push(`[bg${i}][f${i}]overlay=x='${n4(W)}*(${X})-overlay_w/2':y='${n4(H)}*(${Y})-overlay_h/2':eval=${moving ? 'frame' : 'init'}[${last}]`);
-    // The Look: its LUT at its strength; with curves or HSL, those and the LUT baked into one cube (look steps 4–5).
-    let lut = c.look?.lut ? lutFile(c.look.lut, files) : null;
-    if (c.look?.lut && !lut) unsupported.add('a look that is not on the server');
-    const toned = !!(c.look && (curvesFn(c.look.curves) || hslFn(c.look.hsl)));
-    if (toned && (lut || !c.look!.lut)) {
-      const key = JSON.stringify([c.look!.curves, c.look!.hsl, lut, c.look!.lut ? c.look!.strength ?? 1 : 0]);
-      let file = baked.get(key);
-      if (!file) {
-        file = path.join(os.tmpdir(), `muse-look-${process.pid}-${Date.now()}-${baked.size}.cube`);
-        fs.writeFileSync(file, bakeLook(c.look!, lut ? parseCube(fs.readFileSync(lut, 'utf8')) : null));
-        temp.push(file); baked.set(key, file);
-      }
-      lut = file;
+    const n = frames(i), len = M.clipLength(c);
+    const bg = `color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(n / FPS + 1)},trim=end_frame=${n},format=yuv420p`;
+    if (!asset || !file || !size || !size.width) { g.push(`${bg},format=yuv420p,setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); return; }
+    if (main.hidden) { g.push(`${bg},format=yuv420p,setsar=1,settb=AVTB[v${i}]`); return; } // hidden: only the background
+    const from = c.holdSec !== undefined ? c.inSec : Math.min(...M.speedPieces(c).map(x => x.inSec)), to = c.holdSec !== undefined ? c.inSec + 0.2 : c.outSec;
+    if (!shared || shared.file !== file || from < shared.end - 1e-6 || c.transitionIn || c.holdSec !== undefined || clips[i - 1]?.holdSec !== undefined) shared = { file, k: openAt(file, from, Math.max(0.2, to - from), clips.length > 8 ? 1 : 2), at: from, end: to };
+    else { inputArgs.get(shared.k)!.splice(-1, 1, n4(to - shared.at + 0.5)); shared.end = to; }
+    const src = sourceFrames(shared.k, shared.at, c, n, `m${i}s`);
+    const blur = p.canvas.fill === 'blur' && (c.fit ?? 'cover') === 'contain';
+    let under = `m${i}bg`, layerSrc = src;
+    if (blur) {
+      // Blur fill (model.ts blurFill): the clip cover-fitted with its colour (not its transform), box-blurred, darkened.
+      const rad = Math.max(1, Math.round(M.blurFillRadius(p.canvas) * f));
+      const cf = colourFile(c.adjust, c.filter, c.look);
+      g.push(`[${src}]split[m${i}f][m${i}l]`,
+        `[m${i}f]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=gbrp${cf ? `,${lut3d(cf)}` : ''},boxblur=luma_radius=${rad}:luma_power=1:chroma_radius=${rad}:chroma_power=1,colorchannelmixer=rr=${M.BLUR_FILL_DARKEN}:gg=${M.BLUR_FILL_DARKEN}:bb=${M.BLUR_FILL_DARKEN}[${under}]`);
+      layerSrc = `m${i}l`;
     }
-    if (lut) {
-      const s = Math.max(0, Math.min(1, c.look!.strength ?? 1));
-      const esc = lut.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '');
-      if (s >= 0.999 || toned) g.push(`[${last}]lut3d=file='${esc}'[l${i}]`);
-      else g.push(`[${last}]split[la${i}][lb${i}];[lb${i}]lut3d=file='${esc}'[lc${i}];[la${i}][lc${i}]blend=all_mode=normal:all_opacity=${n4(s)}[l${i}]`);
-      last = `l${i}`;
+    const matte = () => {
+      const mf = c.alphaMatte && files[c.alphaMatte.asset];
+      return mf ? sourceFrames(openAt(mf, from, Math.max(0.2, to - from)), from, c, n, `m${i}mt`) : null;
+    };
+    const lay = visualLayer(c, layerSrc, size.width, size.height, { video: true, n, len, fit: 'cover', tag: `m${i}`, canvas: false, matte });
+    if (!blur && lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
+      // Opaque and covering the canvas: cut to it (no background, no overlay).
+      g.push(`[${lay.s}]crop=${W}:${H}:${-lay.x}:${-lay.y}[m${i}o]`);
+    } else {
+      if (blur) g.push(`[${under}]format=yuv420p[${under}y]`), under = `${under}y`;
+      else g.push(`${bg}[${under}]`);
+      g.push(`[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[m${i}o]`);
     }
-    if (c.look && Object.keys(c.look).some(x => !['lut', 'strength', 'curves', 'hsl'].includes(x))) unsupported.add('look details (grain, vignette, …)');
     // Exactly the clip's frames on the timeline (rounded once from the timeline, so cuts never drift).
-    g.push(`[${last}]trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
+    g.push(`[m${i}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
   });
-  // Join: a cut is a concat, a transition an xfade at the clip's place on the timeline.
+
+  /** Composites every overlay track (in order) over the picture `base`; returns the result (yuv420p). */
+  const overlays = (base: string): string => {
+    let cur = base, oi = 0, any = false;
+    for (const tr of p.tracks) {
+      if ((tr.kind !== 'video' && tr.kind !== 'image') || tr.hidden) continue;
+      for (const it of tr.items as Visual[]) {
+        const video = tr.kind === 'video', vc = video ? it as M.VideoClip : null, start = (it as { startSec: number }).startSec;
+        const len = vc ? M.clipLength(vc) : (it as M.ImageItem).durationSec;
+        const end = Math.min(start + len, total), n = fr(end) - fr(start);
+        if (n < 1) continue;
+        const asset = p.assets.find(a => a.id === it.asset), file = asset && files[asset.id], size = asset && sizes[asset.id];
+        if (!asset || !file || !size || !size.width) { unsupported.add('missing media'); continue; }
+        const tag = `ov${oi++}`;
+        any = true;
+        const from = vc ? (vc.holdSec !== undefined ? vc.inSec : Math.min(...M.speedPieces(vc).map(x => x.inSec))) : 0, to = vc ? (vc.holdSec !== undefined ? vc.inSec + 0.2 : vc.outSec) : 0;
+        const vk = vc ? openAt(file, from, Math.max(0.2, to - from), 1) : -1;
+        const src = vc ? sourceFrames(vk, from, vc, n, `${tag}s`) : sourceFrames(input(file), 0, null, n, `${tag}s`);
+        const mode = it.blend ?? 'normal';
+        const matte = () => { const mf = vc?.alphaMatte && files[vc.alphaMatte.asset]; return mf ? sourceFrames(openAt(mf, from, Math.max(0.2, to - from)), from, vc, n, `${tag}mt`) : null; };
+        const lay = visualLayer(it, src, size.width, size.height, { video, n, len, fit: 'contain', tag, canvas: mode !== 'normal', matte });
+        const t0 = n4(fr(start) / FPS), on = `enable='between(t,${t0},${n4((fr(start) + n - 0.5) / FPS)})'`;
+        // Normal: over the picture as it is (yuv; the mix is linear, as in RGB).
+        if (mode === 'normal') g.push(`[${lay.s}]setpts=PTS+${t0}/TB[${tag}t]`, `[${cur}][${tag}t]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass:${on}[${tag}x]`);
+        else {
+          // blendPixel: the mode's colour (lut2, exact W3C formulas) mixed in by the item's coverage (maskedmerge).
+          const e = L.blendExpr(mode);
+          g.push(`[${lay.s}]tpad=start_duration=${t0}:stop_duration=${n4(total)}:color=black@0,trim=end_frame=${fr(total)},split[${tag}t1][${tag}t2]`,
+            `[${cur}]format=gbrp,split[${tag}b1][${tag}b2]`, `[${tag}t1]format=gbrp[${tag}tc]`, `[${tag}tc][${tag}b1]lut2=c0='${e}':c1='${e}':c2='${e}'[${tag}bl]`,
+            `[${tag}t2]alphaextract,format=gbrp[${tag}ta]`, `[${tag}b2][${tag}bl][${tag}ta]maskedmerge,format=yuv420p[${tag}x]`);
+        }
+        cur = `${tag}x`;
+      }
+    }
+    return any ? cur : base;
+  };
+
   let acc = 'v0';
   const glitches: { start: number; d: number }[] = [];
   for (let i = 1; i < clips.length; i++) {
@@ -274,15 +422,17 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     g.push(`[${acc}]format=gbrp,sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=yuv420p[gfx]`);
     acc = 'gfx';
   }
-  // Adjustment layers: over the joined picture, under the text. Each run of one colour is a channel mix plus its
-  // offsets, on only while the run lasts.
+  // Overlays (video and image tracks), in track order, over the joined main picture (layer.ts).
+  acc = overlays(acc);
+  // Adjustment layers: over the pictures, under the text. Each run of one colour is one affine channel mix, on only
+  // while the run lasts: on RGBA with an opaque alpha, the offsets go in as the alpha's coefficients, so the sum is
+  // clamped once, at the end (model.ts: "not clamped between layers, only at the end").
   const runs = adjustRuns(p);
   if (runs.length) {
-    const st: string[] = ['format=rgb24'];
+    const st: string[] = ['format=rgba'];
     for (const { a, b, m } of runs) {
       const on = `enable='gte(t,${n4(a)})*lt(t,${n4(b)})'`;
-      st.push(`colorchannelmixer=rr=${n6(m[0]!)}:rg=${n6(m[1]!)}:rb=${n6(m[2]!)}:gr=${n6(m[4]!)}:gg=${n6(m[5]!)}:gb=${n6(m[6]!)}:br=${n6(m[8]!)}:bg=${n6(m[9]!)}:bb=${n6(m[10]!)}:${on}`);
-      if (m[3] || m[7] || m[11]) st.push(`lutrgb=r='clip(val+${n4(m[3]! * 255)},0,255)':g='clip(val+${n4(m[7]! * 255)},0,255)':b='clip(val+${n4(m[11]! * 255)},0,255)':${on}`);
+      st.push(`colorchannelmixer=rr=${n6(m[0]!)}:rg=${n6(m[1]!)}:rb=${n6(m[2]!)}:ra=${n6(m[3]!)}:gr=${n6(m[4]!)}:gg=${n6(m[5]!)}:gb=${n6(m[6]!)}:ga=${n6(m[7]!)}:br=${n6(m[8]!)}:bg=${n6(m[9]!)}:bb=${n6(m[10]!)}:ba=${n6(m[11]!)}:${on}`);
     }
     g.push(`[${acc}]${st.join(',')},format=yuv420p[adj]`);
     acc = 'adj';
@@ -294,7 +444,6 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   const pages = M.captionPages(p);
   for (const tr of p.tracks) {
     if (tr.hidden) continue;
-    if (tr.kind === 'video' || tr.kind === 'image') { if (tr.items.length) unsupported.add('overlays'); continue; }
     if (tr.kind === 'caption' && tr.caption) {
       const ct = tr.caption, font = fontFile(ct.style.font, ct.style.weight);
       if (pages.length) pieces.push(t => TD.captionPiece(ct, pages, t, font));
@@ -351,12 +500,14 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   }
   g.push(`[${vlast}]format=yuv420p[vout]`);
 
-  // Sound.
-  const amix: string[] = [];
+  // Sound: a pass of its own before the picture's (renderProject), so reading a clip's sound never pulls its picture
+  // in early (a stream that has to wait for its picture's time buffers every frame meanwhile).
+  const amix: string[] = [], ag: string[] = [], ainputs: string[] = [];
+  const ainput = (file: string) => { let k = ainputs.indexOf(file); if (k < 0) { k = ainputs.length; ainputs.push(file); } return k; };
   const A = 'aformat=sample_rates=48000:channel_layouts=stereo';
   if (o.audio && typeof o.audio === 'object') {
-    const k = input(o.audio.file);
-    g.push(`[${k}:a]atrim=0:${n4(total)},asetpts=PTS-STARTPTS,${A},volume=${n4(o.audio.volume ?? 1)}[ag]`);
+    const k = ainput(o.audio.file);
+    ag.push(`[${k}:a]atrim=end=${n4(total)},asetpts=PTS-STARTPTS,${A},volume=${n4(o.audio.volume ?? 1)}[ag]`);
     amix.push('ag');
   } else if (o.audio !== 'none' && !p.mute) {
     // Each clip's sound: its source cut and timed like its picture, its voice (enhance, effect), placed on the timeline,
@@ -369,18 +520,23 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     const place = (src: string, c: M.VideoClip | M.AudioClip, env: M.GainPoint[], startSec: number, name: string) => {
       const ms = Math.round(startSec * 1000);
       const gain = env.every(x => x.gain === env[0]!.gain) ? n4(env[0]!.gain) : `'${envExpr(env)}':eval=frame`;
-      g.push(`[${src}]${voice(c).replace(/^,/, '') || 'anull'},adelay=${ms}|${ms},volume=${gain}[${name}]`);
+      ag.push(`[${src}]${voice(c).replace(/^,/, '') || 'anull'},adelay=${ms}|${ms},volume=${gain}[${name}]`);
       amix.push(name);
     };
-    clips.forEach((c, i) => {
+    // Video clips (main and overlay tracks): cut and timed like their picture.
+    const clipSound = (c: M.VideoClip, trackId: string, startSec: number, tag: string) => {
       const asset = p.assets.find(a => a.id === (c.audioAsset ?? c.asset)), file = asset && files[asset.id];
-      const env = asset && file && sizes[asset.id]?.hasAudio ? envelope(c, main.id) : null;
+      const env = asset && file && sizes[asset.id]?.hasAudio ? envelope(c, trackId) : null;
       if (!env || !file) return;
-      const k = input(file), pieces = M.speedPieces(c);
-      pieces.forEach((pc, j) => g.push(`[${k}:a]atrim=start=${n4(pc.inSec)}:end=${n4(pc.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(pc.speed).map(x => `,${x}`).join('')}[ap${i}_${j}]`));
-      const s = pieces.length > 1 ? (g.push(`${pieces.map((_, j) => `[ap${i}_${j}]`).join('')}concat=n=${pieces.length}:v=0:a=1[as${i}]`), `as${i}`) : `ap${i}_0`;
-      place(s, c, env, tl[i]!.startSec, `ac${i}`);
-    });
+      const k = ainput(file), pieces = M.speedPieces(c);
+      if (pieces.length === 1) ag.push(`[${k}:a]atrim=start=${n4(c.inSec)}:end=${n4(c.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(pieces[0]!.speed).map(x => `,${x}`).join('')}[${tag}s]`);
+      else ag.push(`[${k}:a]atrim=start=${n4(c.inSec)}:end=${n4(c.outSec)},asetpts=PTS-STARTPTS,${A},${curveTempo(pieces, c.inSec, tag)}[${tag}s]`);
+      const s = `${tag}s`;
+      place(s, c, env, startSec, tag);
+    };
+    clips.forEach((c, i) => clipSound(c, main.id, tl[i]!.startSec, `ac${i}`));
+    let vi = 0;
+    for (const tr of p.tracks) if (tr.kind === 'video') for (const c of tr.items as M.VideoClip[]) clipSound(c, tr.id, c.startSec ?? 0, `av${vi++}`);
     let ai = 0;
     for (const tr of p.tracks.filter(t => (t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') && !t.muted)) {
       for (const it of tr.items as M.AudioClip[]) {
@@ -388,19 +544,26 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         if (!asset || !file || it.muted) { if (asset?.library && !it.muted) unsupported.add('library music'); continue; }
         const env = sizes[asset.id]?.hasAudio ? envelope(it, tr.id) : null;
         if (!env) continue;
-        const k = input(file);
-        g.push(`[${k}:a]atrim=start=${n4(it.inSec)}:end=${n4(it.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(it.speed ?? 1).map(x => `,${x}`).join('')}[ar${ai}]`);
+        const k = ainput(file);
+        ag.push(`[${k}:a]atrim=start=${n4(it.inSec)}:end=${n4(it.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(it.speed ?? 1).map(x => `,${x}`).join('')}[ar${ai}]`);
         place(`ar${ai}`, it, env, it.startSec, `at${ai}`);
         ai++;
       }
     }
   }
-  if (amix.length) g.push(`${amix.map(x => `[${x}]`).join('')}amix=inputs=${amix.length}:normalize=0:duration=longest,apad,atrim=0:${n4(total)}[aout]`);
+  if (amix.length) ag.push(`${amix.map(x => `[${x}]`).join('')}amix=inputs=${amix.length}:normalize=0:duration=longest,apad,atrim=end=${n4(total)}[aout]`);
 
   const q = o.quality === 'export' ? ['-preset', 'veryfast', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
-  const args = ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]', ...(amix.length ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '128k'] : []),
+  let soundArgs: string[] | null = null;
+  if (amix.length) {
+    const wav = path.join(os.tmpdir(), `muse-sound-${process.pid}-${Date.now()}.flac`);
+    temp.push(wav);
+    soundArgs = ['-y', '-v', 'error', ...ainputs.flatMap(x => ['-vn', '-i', x]), '-filter_complex', ag.join(';'), '-map', '[aout]', '-c:a', 'flac', '-t', n4(total), wav];
+    inputs.push(wav);
+  }
+  const args = ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]', ...(soundArgs ? ['-map', `${inputs.length - 1}:a`, '-c:a', 'aac', '-b:a', '128k'] : []),
     '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-movflags', '+faststart', '-threads', '2', '-t', n4(total), out];
-  return { args, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp, stills, sprites };
+  return { args, soundArgs, durationSec: total, width: W, height: H, unsupported: [...unsupported], temp, stills, sprites };
 }
 
 /**
@@ -457,8 +620,10 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
   try {
     const sprites = await TD.drawSprites(plan.sprites);
     for (const st of plan.stills) await TD.rasterize(st.svg, st.crop, st.file, sprites);
-    await new Promise<void>((resolve, reject) => execFile(cfg.ffmpeg, plan.args, { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 },
+    const run = (args: string[]) => new Promise<void>((resolve, reject) => execFile(cfg.ffmpeg, args, { timeout: 15 * 60_000, maxBuffer: 8 * 1024 * 1024 },
       (err, _o, e) => (err ? reject(new Error(`render failed: ${String(e ?? err.message).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`)) : resolve())));
+    if (plan.soundArgs) await run(plan.soundArgs);
+    await run(plan.args);
   } finally { for (const t of plan.temp) fs.rmSync(t, { force: true, recursive: true }); }
   return { durationSec: plan.durationSec, width: plan.width, height: plan.height, unsupported: plan.unsupported };
 }
