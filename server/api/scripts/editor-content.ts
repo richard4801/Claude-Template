@@ -91,7 +91,8 @@ async function stickers(): Promise<Pack> {
 
 // ------------------------------------------------------------------ sound effects
 const UISFX_PACKS = ['cinematic', 'arcade', 'glass', 'dreamy', 'organic'];
-const UISFX_SKIP = new Set(['input', 'system', 'loops', 'commerce']);
+/** Interface-only cues (taps, toggles, navigation) are left out: a video wants moves, alerts, outcomes and rewards. */
+const UISFX_SKIP = new Set(['input', 'system', 'loops', 'commerce', 'selection', 'navigation', 'editing']);
 const m4a = (src: string, dst: string) => execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', src, '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '48000', dst]);
 const durationOf = (f: string) => Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString().trim());
 

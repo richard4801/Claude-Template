@@ -218,6 +218,37 @@ object SuiteOps {
         return base.addItem(tid, AudioClip(base.newId(if (kind == TrackKind.VOICE) "v" else "m"), assetId, atSec, 0.0, len))
     }
 
+    /** A content library asset ([ref] = `content:<pack>/<item>`): the existing one for the ref, else a new one. */
+    private fun contentAsset(p: EditProject, ref: String, make: (String) -> Asset): Pair<EditProject, String> {
+        p.assets.firstOrNull { it.library == ref }?.let { return p to it.id }
+        val id = newAssetId(p, ref.substringBefore('/').removePrefix("content:").take(8))
+        return p.copy(assets = p.assets + make(id)) to id
+    }
+
+    /** A sticker ([ref]) over the edit at [atSec]: 3 s (or to the end), 30 %, centred, on the first image track with room. */
+    fun addSticker(p: EditProject, ref: String, width: Int, height: Int, atSec: Double): Pair<EditProject, String>? {
+        val (withAsset, assetId) = contentAsset(p, ref) { Asset(it, AssetKind.IMAGE, library = ref, width = width, height = height) }
+        val dur = studio.muse.core.edit.durationSec(withAsset)
+        val start = atSec.coerceIn(0.0, maxOf(0.0, dur - EditLimits.MIN_ITEM_SEC))
+        val len = minOf(3.0, maxOf(EditLimits.MIN_ITEM_SEC, dur - start))
+        val base = withAsset.tracks.firstOrNull { t -> t.kind == TrackKind.IMAGE && fitsAt(withAsset, t, start, len) }?.let { withAsset }
+            ?: withAsset.copy(tracks = withAsset.tracks + Track(withAsset.newId("img"), TrackKind.IMAGE, name = "Stickers"))
+        val tid = base.tracks.last { t -> t.kind == TrackKind.IMAGE && fitsAt(base, t, start, len) }.id
+        val id = base.newId("st")
+        return base.addItem(tid, ImageItem(id, assetId, Math.round(start * 1000) / 1000.0, Math.round(len * 1000) / 1000.0, fit = Fit.CONTAIN, transform = Transform(0.5, 0.5, 0.3)))?.let { it to id }
+    }
+
+    /** A sound effect ([ref], [durationSec] long) at [atSec] on the first sound-effects track with room. */
+    fun addSoundEffect(p: EditProject, ref: String, durationSec: Double, atSec: Double): Pair<EditProject, String>? {
+        val (withAsset, assetId) = contentAsset(p, ref) { Asset(it, AssetKind.AUDIO, library = ref, durationSec = durationSec, hasAudio = true) }
+        val start = Math.round(maxOf(0.0, atSec) * 1000) / 1000.0
+        val trackId = withAsset.tracks.firstOrNull { it.kind == TrackKind.SFX && fitsAt(withAsset, it, start, durationSec) }?.id
+        val base = if (trackId != null) withAsset else withAsset.copy(tracks = withAsset.tracks + Track(withAsset.newId("sfx"), TrackKind.SFX))
+        val tid = trackId ?: base.tracks.last().id
+        val id = base.newId("fx")
+        return base.addItem(tid, AudioClip(id, assetId, start, 0.0, durationSec))?.let { it to id }
+    }
+
     /** The name of the track a detached clip sound goes on (a voice track, so music ducks under it). */
     const val CLIP_SOUND_TRACK = "Clip sound"
 

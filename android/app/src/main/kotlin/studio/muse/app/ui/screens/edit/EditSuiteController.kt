@@ -261,6 +261,12 @@ sealed interface EditAction {
     data class SetLoop(val id: String, val loop: studio.muse.core.edit.AnimLoop?, val done: Boolean = true) : EditAction
     /** "Play the video while recording" on or off. */
     data class VoPlayback(val on: Boolean) : EditAction
+    /** A caption template from the content library: the whole caption style. */
+    data class CaptionTemplate(val style: studio.muse.core.edit.CaptionStyle, val name: String) : EditAction
+    /** A sticker from the content library ([ref]) placed at the playhead. */
+    data class AddSticker(val ref: String, val width: Int, val height: Int) : EditAction
+    /** A sound effect from the content library ([ref]) at the playhead. */
+    data class AddSoundEffect(val ref: String, val durationSec: Double, val name: String) : EditAction
     /** The active clip played backwards ([on]) or forwards again: the server's reversed copy the first time, then a swap. */
     data class Reverse(val on: Boolean) : EditAction
     /** HSL per hue on the picture the Adjust panel acts on: [band]'s [field] (hue, sat or light) to [value] (−1…1); a null [band] resets every band. */
@@ -421,7 +427,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -873,6 +879,19 @@ class EditSuiteController(
             }
             is EditAction.VoPlayback -> _ui.update { it.copy(voPlayback = a.on) }
             is EditAction.Reverse -> reverse(u, a.on)
+            is EditAction.CaptionTemplate -> if (change(refused = "Make captions first") { p -> SuiteOps.captionStyle(p) { a.style } }) say("${a.name} captions")
+            is EditAction.AddSticker -> {
+                var newId: String? = null
+                if (change(refused = "Couldn't add that sticker here") { p -> SuiteOps.addSticker(p, a.ref, a.width, a.height, u.playheadSec)?.let { (q, id) -> newId = id; q } })
+                    _ui.update { it.copy(selectedId = newId) }
+            }
+            is EditAction.AddSoundEffect -> {
+                var newId: String? = null
+                if (change(refused = "Couldn't add that sound here") { p -> SuiteOps.addSoundEffect(p, a.ref, a.durationSec, u.playheadSec)?.let { (q, id) -> newId = id; q } }) {
+                    _ui.update { it.copy(selectedId = newId) }
+                    say("${a.name} added at ${"%.1f".format(u.playheadSec)} s")
+                }
+            }
             is EditAction.SetHsl -> {
                 val id = visualId(u) ?: return
                 val v = r2(a.value.coerceIn(-1.0, 1.0)).takeIf { it != 0.0 }
