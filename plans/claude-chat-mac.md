@@ -97,3 +97,31 @@ The shared parts are in `mac/Muse/Views/Claude/`: `ChatTranscriptView` (rows, st
   - same copy: "Jump to latest", "Try again", "Claude is working…", "On your Claude plan", "From your phone", the error sentences in `ChatLeakFilter.errorWords`, and "Frame Claude looked at";
   - same leak rules;
   - same markdown coverage.
+
+## Open issue: the old screen stays drawn after a screen change
+_Seen only in review mode on the CI runner (macOS 15), four times over five runs; not reproduced by hand. For the owner of `RootView` and screen switching._
+
+**What happens.** After `store.go(…)` (or `openEdit`, which calls it), the sidebar shows the new screen as selected, and `store.screen` has the new value, but the main area keeps drawing the old screen. Seen:
+- **Run 42555982098, theme D:** the sidebar is on Edit, Home is still drawn (`mac_d_claude_recreate.png`). Re-running `openEdit` + `openRecreate` on the same screen changed nothing three times. Going to another screen first (`go(.gallery)`) and back drew it.
+- **Runs 42547399430 (theme C) and 42551704028 (themes C and D):** the sidebar is on Edit, and the Suite or the Edit home is still drawn.
+
+**How to reproduce.** This is review mode's order in `SnapshotRunner+Chat.swift` before the workaround (commit 9d304c8):
+1. Theme C or D.
+2. Put up an overlay that holds a live chat (`SnapshotRunner.state.overlay = "chat"`, a `ClaudeChatView` with the sample thread).
+3. In the same tick, close the overlay (`state.overlay = nil`) and change the screen (`store.openEdit(takeId: nil)` and then `store.openRecreate()`).
+4. Wait 2.5 s and capture: the old screen is still there.
+
+By hand, the nearest equivalent is to open a Claude panel, then click a sidebar item while a reply is streaming, in Soft Tactile or Creator Pop.
+
+**Suspected code.**
+- `Shell.screen` in `mac/Muse/Views/RootView.swift` (about line 54) swaps the screen with `.id(store.screen)` plus `.transition(MotionStyle.of(t.id).transition)`.
+- `AppStore.go(_:)` (`AppStore.swift` about line 934) wraps the change in `withAnimation(MotionStyle.of(themeID).animation)`.
+- For themes C and D that animation is a spring (`.spring(response: 0.45/0.42, dampingFraction: 0.72/0.6)`); A and B use timing curves. Every failure was in C or D.
+- **The likely cause:** the outgoing screen's removal transition never finishes. That happens when another animated transaction lands on the same update, such as the overlay's removal or the chat's animated `scrollTo`, while the spring is still settling. SwiftUI then leaves the old `.id` view in the hierarchy until the next screen change.
+
+**Ideas to try.**
+- Give screen changes a fixed-duration curve in every theme. Keep the spring's character with `.timingCurve`.
+- Or remove the old screen without a transition: `removal: .identity`.
+- Or check in a debug build that only one child of the `ZStack` remains 1 s after `go(_:)`.
+
+**Workaround in review mode only.** The chat shots pause 0.8 s after the overlay closes. Recreate and Edit retry through another screen if their chat isn't drawn, up to three times, and log each try.

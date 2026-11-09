@@ -31,7 +31,6 @@ enum SnapshotRunner {
         var recreateFrames: [String: CGRect] = [:]
         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
         var claudeTab: Int?
-<<<<<<< HEAD
         /// Claude chat review (SnapshotRunner+Chat.swift): every chat shows the sample thread (ClaudeChatSample)…
         var chatSample = false
         /// …mid-reply (a tool running, text still arriving)…
@@ -42,10 +41,8 @@ enum SnapshotRunner {
         var chatAttach = false
         /// Bumped to put the caret in the chat's field.
         var chatFocusTick = 0
-=======
         /// Settings shows the proposed redesign's mock in this state (SnapshotRunner+Settings.swift).
         var settingsMock: SettingsMockState?
->>>>>>> origin/claude/ecstatic-rubin-2egjfb
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
@@ -107,16 +104,19 @@ enum SnapshotRunner {
                 ("models", { store.go(.models) }),
                 ("cast", { store.openProfile(SampleData.demo) }),
                 ("lora", { store.go(.lora) }),
-                ("settings", { store.openSettings(.appearance) }),
-                ("settings_prompts", { store.openSettings(.prompts) }),
+                ("settings", { store.openSettings(.account) }),
+                ("settings_prompts", { store.openSettings(.studio); store.settingsPrompts = true }),
                 ("settings_studio", { store.openSettings(.studio) }),
-                ("settings_connections", { store.openSettings(.connections) }),
+                ("settings_spending", { store.openSettings(.spending) }),
+                ("settings_providers", { store.openSettings(.providers) }),
+                ("settings_advanced", { store.openSettings(.advanced) }),
+                ("settings_connections", { store.openSettings(.apps) }),
                 // Before (prod fffebeb): Connections as the sheet it used to be, over Settings.
-                ("settings_connections_before", { store.openSettings(.appearance); state.overlay = "connections_before" }),
-                ("settings_connections_scrolled", { store.openSettings(.connections); Task { @MainActor in
+                ("settings_connections_before", { store.openSettings(.account); state.overlay = "connections_before" }),
+                ("settings_connections_scrolled", { store.openSettings(.apps); Task { @MainActor in
                     try? await Task.sleep(for: .seconds(1)); state.scrollTo = "connections.blender" } }),
                 ("credits", { store.go(.credits) }),
-                ("members", { store.go(.members) }),
+                ("members", { store.openSettings(.members) }),
                 ("chat", { store.go(.home); state.overlay = "chat" }),
                 // The composer as the approved render (Shot with a filled demo draft), the Photo tool, and Camera → Setup.
                 ("composer", { store.openTool(.shot); fillDemoDraft(store) }),
@@ -172,7 +172,7 @@ enum SnapshotRunner {
             store.suite.picker = nil
             state.overlay = nil
             store.themeID = .a
-            await settingsMockShots(store, dir: dir)
+            await settingsShots(store, dir: dir)   // Settings (owner-approved redesign 2026-11-09): every section, four themes
             await outfitShots(store, dir: dir)   // Outfits: the new outfit's angles full size (owner 2026-11-08)
             await linkImportShots(store, dir: dir)   // Import a video from a link (owner 2026-11-08)   // Settings redesign (owner 2026-11-08): before and the proposed mock
             await fitCheck(store, dir: dir)
@@ -916,7 +916,7 @@ enum SnapshotRunner {
             lines.append(await scrollOnce(name))
         }
         let pages: [(String, Screen)] = [("home", .home), ("library", .gallery), ("models", .models), ("queue", .queue), ("credits", .credits),
-                                          ("members", .members), ("posts", .posts), ("templates", .templates), ("lora", .lora),
+                                          ("posts", .posts), ("templates", .templates), ("lora", .lora),
                                           ("suite", .suite), ("edit", .edit)]
         for (name, screen) in pages { await check(name) { store.go(screen) } }
         // The learning editor's two pages (Edit → Playbook, Edit → Recipes).

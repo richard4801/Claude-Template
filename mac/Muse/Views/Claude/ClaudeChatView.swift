@@ -131,7 +131,7 @@ struct ClaudeChatView: View {
         } else if !service.configured {
             centered {
                 EmptyState("Not connected", "Sign in to your MUSE server to chat with Claude. Demo mode has no Claude chat.",
-                           actionTitle: "Open settings") { store.openSettings(.developer) }
+                           actionTitle: "Open settings") { store.openSettings(.advanced) }
             }
         } else if !service.checkedOnce || (service.checking && !service.info.installed) {
             centered {
