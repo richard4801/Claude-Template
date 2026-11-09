@@ -156,6 +156,24 @@ Space (play), ← / → (one frame), S (split), ⌫ (delete), J / K / L (shuttle
 items can't play backwards), ⌘Z / ⇧⌘Z, ⌘E: working. Desktop shortcuts the leading editors also have (I/O marks, ⌘B,
 copy/paste/duplicate, nudge, zoom to fit…) are listed in `plans/edit-parity.md` (section B) and wait for the owner's priorities.
 
+## Parity wave 1 (owner, 2026-11-08: build every functional parity row, in waves)
+
+Green in Mac CI run 42541190202 (MuseCore tests, build, click-through, Edit operations and export check with pixel probes).
+
+| Feature | Where on the Mac | Proven by |
+|---|---|---|
+| Reorder clips, move items, trim handles on every item | Drag on the timeline | EditSuiteControlsTests; ops check (reorder) |
+| Add text, style editor (outline colour and width, shadow, letter spacing, line height), animation picker | Text and Animate panels | EditSuiteControlsTests |
+| Opacity and volume keyframes, easing | Transform panel ◆; Audio ◆ next to Volume | EditSuiteControlsTests; ops check (fade-in by keys, volume keys) |
+| Freeze frame (`holdSec`) | Timeline → Freeze frame; length in Speed or by dragging its edges | Fixtures (wave1.hold) + tests; ops check (held frame, +1 s) |
+| Mirror (`flipX` / `flipY`) | Transform → Mirror / Flip | Fixtures (wave1.corners); ops check |
+| Extract frame | Viewer → Save this frame as a picture | Ops check (PNG of the edit) |
+| ±1 frame | ‹ › in the transport, ← / → | |
+| Blend modes (`blend`) | Video → Blend on overlays (Core Image kernel, reference formulas) | Fixtures (wave1.blend); ops check (multiply, screen) |
+| Background colour / blur fill (`canvas.fill`), Fill / Fit | Video → Background; Transform → Frame | Fixtures (wave1.blurFill); ops check (blur and colour at the corner) |
+
+The contract (server `model.ts`, ops, fixtures) is WS8's 60bff55; the Mac port is byte-identical on the fixtures.
+
 ## Left for the owner
 
 1. **Smooth slow-mo**: pick a frame-interpolation model (paid) or accept a free non-AI "frame blending" mode instead (switch removed until then).
