@@ -107,6 +107,12 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
     });
     for (let i = 0; i < out.data.length; i++) rgb[i] = Math.round(out.data[i]! * 255);
   }
+  // Adjustment layers on screen: their colour over the composed picture (under the text and captions).
+  const layer = M.adjustLayerMatrix(p, t, FILTERS);
+  if (layer) for (let i = 0; i < W * H * 3; i += 3) {
+    const r = rgb[i]! / 255, g = rgb[i + 1]! / 255, b = rgb[i + 2]! / 255;
+    for (let c = 0; c < 3; c++) rgb[i + c] = Math.round(Math.min(1, Math.max(0, layer[c * 4]! * r + layer[c * 4 + 1]! * g + layer[c * 4 + 2]! * b + layer[c * 4 + 3]!)) * 255);
+  }
   let img = sharp(rgb, { raw: { width: W, height: H, channels: 3 } });
   const svg = overlaySvg(p, t, W, H);
   if (svg) img = img.composite([{ input: Buffer.from(svg) }]);

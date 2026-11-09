@@ -107,10 +107,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
                 TrackKind.IMAGE -> imageItem(g, it as? ImageItem ?: bad(g, "must be an image item"))
                 TrackKind.TEXT -> textItem(g, it as? TextItem ?: bad(g, "must be a text item"))
                 TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX -> audioClip(g, it as? AudioClip ?: bad(g, "must be an audio clip"))
+                TrackKind.ADJUST -> adjustItem(g, it as? AdjustItem ?: bad(g, "must be an adjustment layer"))
                 TrackKind.CAPTION -> {}
             }
             if (t.kind != TrackKind.MAIN) {
-                val s = when (it) { is VideoClip -> it.startSec ?: Double.NaN; is AudioClip -> it.startSec; is ImageItem -> it.startSec; is TextItem -> it.startSec }
+                val s = when (it) { is VideoClip -> it.startSec ?: Double.NaN; is AudioClip -> it.startSec; is ImageItem -> it.startSec; is TextItem -> it.startSec; is AdjustItem -> it.startSec }
                 if (s < prevEnd - EditLimits.OVERLAP_SLACK_SEC) bad("$g.startSec", "items on a track must be in order and not overlap")
                 prevEnd = itemSpan(p, t, it).endSec
             }
@@ -197,6 +198,19 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         l.vignette?.let { num("$f.vignette.amount", it.amount, -1.0, 1.0, false); num("$f.vignette.size", it.size, 0.0, 1.0); num("$f.vignette.softness", it.softness, 0.0, 1.0) }
         l.halation?.let { num("$f.halation.amount", it.amount, 0.0, 1.0, false); num("$f.halation.radius", it.radius, 0.05, 1.0); num("$f.halation.threshold", it.threshold, 0.0, 0.99) }
         l.leak?.let { num("$f.leak.amount", it.amount, 0.0, 1.0, false); num("$f.leak.angle", it.angle, -360.0, 360.0) }
+    }
+
+    private fun adjustItem(g: String, ad: AdjustItem) {
+        num("$g.startSec", ad.startSec, 0.0, 600.0, false); num("$g.durationSec", ad.durationSec, EditLimits.MIN_ITEM_SEC, 600.0, false)
+        if (ad.adjust?.highlights != null) bad("$g.adjust.highlights", "is not part of an adjustment layer")
+        if (ad.adjust?.shadows != null) bad("$g.adjust.shadows", "is not part of an adjustment layer")
+        ad.adjust?.let { a ->
+            num("$g.adjust.exposure", a.exposure, -1.0, 1.0); num("$g.adjust.contrast", a.contrast, -1.0, 1.0)
+            num("$g.adjust.saturation", a.saturation, -1.0, 1.0); num("$g.adjust.temperature", a.temperature, -1.0, 1.0); num("$g.adjust.tint", a.tint, -1.0, 1.0)
+        }
+        num("$g.opacity", ad.opacity, 0.0, 1.0)
+        ad.filter?.let { fl -> if (filterIds.isNotEmpty() && fl.id !in filterIds) bad("$g.filter.id", "unknown filter"); num("$g.filter.amount", fl.amount, 0.0, 1.0, false) }
+        keyframes("$g.keyframes", ad.keyframes, ad.durationSec, setOf(KfProp.OPACITY) + KfProp.COLOR)
     }
 
     private fun loop(f: String, l: AnimLoop?) {

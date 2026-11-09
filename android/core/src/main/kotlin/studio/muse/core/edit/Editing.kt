@@ -29,10 +29,10 @@ private fun EditProject.replaceTrack(old: Track, new: Track) = copy(tracks = tra
 
 /** Timeline start of a non-main item. */
 val Item.startSecOrNull: Double?
-    get() = when (this) { is VideoClip -> startSec; is AudioClip -> startSec; is ImageItem -> startSec; is TextItem -> startSec }
+    get() = when (this) { is VideoClip -> startSec; is AudioClip -> startSec; is ImageItem -> startSec; is TextItem -> startSec; is AdjustItem -> startSec }
 
 private fun Item.withStart(s: Double): Item = when (this) {
-    is VideoClip -> copy(startSec = s); is AudioClip -> copy(startSec = s); is ImageItem -> copy(startSec = s); is TextItem -> copy(startSec = s)
+    is VideoClip -> copy(startSec = s); is AudioClip -> copy(startSec = s); is ImageItem -> copy(startSec = s); is TextItem -> copy(startSec = s); is AdjustItem -> copy(startSec = s)
 }
 
 /** True when the non-main [items] are in order and don't overlap (the validation rule). */
@@ -80,6 +80,7 @@ fun EditProject.addItem(trackId: String, item: Item, mainIndex: Int? = null): Ed
         TrackKind.IMAGE -> item is ImageItem
         TrackKind.TEXT -> item is TextItem
         TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX -> item is AudioClip
+        TrackKind.ADJUST -> item is AdjustItem
         TrackKind.CAPTION -> false
     }
     if (!okType || t.items.size >= EditLimits.MAX_ITEMS_PER_TRACK) return null
