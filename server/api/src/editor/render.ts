@@ -4,9 +4,11 @@
 //   transform and x/y/scale keyframes (camera moves), transitions (xfade), and the Look's LUT at its strength;
 // - adjustment layers over the joined picture, under the text (runs of one colour matrix; keyed ones sampled);
 // - text items: the apps' fonts (or the member's own font file), size, colour, stroke, position, timing;
-// - sound: each clip's own sound (at its speed) plus music/voice/sfx clips, or an external guide track instead.
-// Anything else in the project (masks, chroma, mattes, colour adjustments, overlays, captions, text animations, library
-// music) is left out and listed in `unsupported`, so the apps can say the render is a preview of the cut.
+// - sound: each clip's own sound (at its speed) plus music/voice/sfx clips, each with its gain over time (model.ts
+//   audioEnvelope: volume and its keys, fades, transition crossfades, ducking) and its voice (audio.ts voiceChain);
+//   project mute; or an external guide track instead.
+// Anything else in the project is left out and listed in `unsupported` (test/render-coverage.test.ts checks every
+// field of the model is drawn or listed), so the apps can say the render is a preview of the cut.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,8 +18,8 @@ import { LOOK_IDS } from './lookpack.js';
 import { FILTERS } from './presets.js';
 import * as M from './model.js';
 import { hash01 } from './look.js';
+import { voiceChain } from './audio.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
-import { probe } from '../replicate/media.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const FONT_DIR = path.resolve(here, '../../assets/fonts');
@@ -85,17 +87,48 @@ function lutFile(ref: string, files: Record<string, string>): string | null {
 
 const n4 = (x: number) => String(Math.round(x * 10000) / 10000);
 const n6 = (x: number) => String(Math.round(x * 1e6) / 1e6);
-/** Piecewise-linear value of keyframes at `t` as an ffmpeg expression (constant before the first and after the last). */
-export function kfExpr(keys: M.Keyframe[] | undefined, fallback: number): string {
-  const k = [...(keys ?? [])].sort((a, b) => a.t - b.t);
+/** model.ts `ease` on a 0–1 progress expression `p`, as an ffmpeg expression. */
+export function easeExpr(kind: M.Ease | undefined, p: string): string {
+  switch (kind ?? 'linear') {
+    case 'easeIn': return `pow(${p},2)`;
+    case 'easeOut': return `(1-pow(1-${p},2))`;
+    case 'easeInOut': return `if(lt(${p},0.5),2*pow(${p},2),1-pow(2-2*${p},2)/2)`;
+    case 'hold': return '0';
+    default: return p;
+  }
+}
+/**
+ * The value of keyframes at `t` as an ffmpeg expression (model.ts keyframeValue: constant before the first and after the
+ * last, each span eased by its first key's ease). `tv` is the time variable (t for most filters, T for geq, …).
+ */
+export function kfExpr(keys: M.Keyframe[] | undefined, fallback: number, tv = 't'): string {
+  const k = keys ?? [];
   if (!k.length) return n4(fallback);
   if (k.length === 1) return n4(k[0]!.v);
   let e = n4(k.at(-1)!.v);
   for (let i = k.length - 2; i >= 0; i--) {
-    const a = k[i]!, b = k[i + 1]!, dt = Math.max(1e-6, b.t - a.t);
-    e = `if(lt(t,${n4(b.t)}),${n4(a.v)}+(${n4(b.v - a.v)})*(t-${n4(a.t)})/${n4(dt)},${e})`;
+    const a = k[i]!, b = k[i + 1]!, dt = b.t - a.t;
+    if (dt <= 0) { e = `if(lt(${tv},${n4(b.t)}),${n4(b.v)},${e})`; continue; }
+    const p = `((${tv}-${n4(a.t)})/${n4(dt)})`;
+    e = `if(lt(${tv},${n4(b.t)}),${n4(a.v)}+(${n4(b.v - a.v)})*${easeExpr(a.ease, p)},${e})`;
   }
-  return `if(lt(t,${n4(k[0]!.t)}),${n4(k[0]!.v)},${e})`;
+  return `if(lt(${tv},${n4(k[0]!.t)}),${n4(k[0]!.v)},${e})`;
+}
+/**
+ * A gain envelope (model.ts audioEnvelope: piecewise-linear points on the timeline) as a flat ffmpeg expression in t: a
+ * sum of the non-silent spans (no deep nesting, so long ducked beds stay cheap to parse); silent before and after.
+ */
+export function envExpr(env: M.GainPoint[]): string {
+  const parts: string[] = [];
+  for (let i = 0; i + 1 < env.length; i++) {
+    const a = env[i]!, b = env[i + 1]!, dt = b.t - a.t;
+    if (dt <= 0 || (a.gain === 0 && b.gain === 0)) continue;
+    const lin = a.gain === b.gain ? n6(a.gain) : `(${n6(a.gain)}+(${n6(b.gain - a.gain)})*(t-${n6(a.t)})/${n6(dt)})`;
+    parts.push(`between(t,${n6(a.t)},${n6(b.t)})*lt(t,${n6(b.t)})*${lin}`);
+  }
+  const last = env.at(-1);
+  if (last && last.gain) parts.push(`eq(t,${n6(last.t)})*${n6(last.gain)}`);
+  return parts.join('+') || '0';
 }
 /** atempo stages for a speed (each stage 0.5–2). */
 export function atempo(speed: number): string[] {
@@ -148,6 +181,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   const input = (file: string) => { let i = index.get(file); if (i === undefined) { i = inputs.length; inputs.push(file); index.set(file, i); } return i; };
   const g: string[] = [];
   const main = M.mainTrack(p), clips = main.items as M.VideoClip[], tl = M.timeline(p);
+  if (main.hidden) unsupported.add('a hidden main track');
   if (!clips.length) throw new Error('nothing on the main track');
   const total = o.durationSec ?? (tl.at(-1)?.endSec ?? 0);
   const fr = (t: number) => Math.round(t * FPS);
@@ -172,6 +206,10 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if ((c.opacity ?? 1) !== 1 || kf.opacity?.length) unsupported.add('opacity');
     if (c.animIn && c.animIn.kind !== 'none' || c.animOut && c.animOut.kind !== 'none') unsupported.add('clip animation');
     if (M.COLOR_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('colour keyframes');
+    if (M.LOOK_KF_PROPS.some(p => kf[p]?.length)) unsupported.add('look details (curves, grain, …)');
+    if (tr.flipX || tr.flipY) unsupported.add('mirror (flip)');
+    if (c.holdSec !== undefined) unsupported.add('freeze frames');
+    if (p.canvas.fill === 'blur' && c.fit === 'contain') unsupported.add('blur fill');
     for (const [k2, name] of [['crop', 'crop'], ['adjust', 'colour adjustments'], ['filter', 'filters'], ['mask', 'masks'], ['chroma', 'chroma key'], ['alphaMatte', 'background removal']] as const)
       if ((c as Record<string, unknown>)[k2] !== undefined) unsupported.add(name);
     const sw = `trunc(${n4(size.width * base)}*(${S})/2)*2`, sh = `trunc(${n4(size.height * base)}*(${S})/2)*2`;
@@ -188,9 +226,8 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       if (s >= 0.999) g.push(`[${last}]lut3d=file='${esc}'[l${i}]`);
       else g.push(`[${last}]split[la${i}][lb${i}];[lb${i}]lut3d=file='${esc}'[lc${i}];[la${i}][lc${i}]blend=all_mode=normal:all_opacity=${n4(s)}[l${i}]`);
       last = `l${i}`;
-      const extra = Object.keys(c.look!).filter(x => !['lut', 'strength'].includes(x));
-      if (extra.length) unsupported.add('look details (curves, grain, …)');
     }
+    if (c.look && Object.keys(c.look).some(x => !['lut', 'strength'].includes(x))) unsupported.add('look details (curves, grain, …)');
     // Exactly the clip's frames on the timeline (rounded once from the timeline, so cuts never drift).
     g.push(`[${last}]trim=end_frame=${frames(i)},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
   });
@@ -241,6 +278,8 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         return f && !/^https?:/.test(f) ? f : fontFile(s.font, s.weight);
       };
       if (it.animIn && it.animIn.kind !== 'none' || it.animOut && it.animOut.kind !== 'none' || it.keyframes || it.animLoop) unsupported.add('text animation');
+      if (st.shadow || st.background || st.letterSpacing) unsupported.add('text styling (shadow, box, letter spacing)');
+      if ((it.transform?.scale ?? 1) !== 1 || it.transform?.rotation || it.transform?.flipX || it.transform?.flipY) unsupported.add('text scale and rotation');
       const lines = wrap(st.uppercase ? it.text.toUpperCase() : it.text, px, (st.maxWidthPct ?? 0.9) * W);
       const lh = px * (st.lineHeight ?? 1.15), cx = (it.transform?.x ?? 0.5) * W, cy = (it.transform?.y ?? 0.5) * H;
       lines.forEach((line, li) => {
@@ -265,28 +304,41 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     const k = input(o.audio.file);
     g.push(`[${k}:a]atrim=0:${n4(total)},asetpts=PTS-STARTPTS,${A},volume=${n4(o.audio.volume ?? 1)}[ag]`);
     amix.push('ag');
-  } else if (o.audio !== 'none') {
+  } else if (o.audio !== 'none' && !p.mute) {
+    // Each clip's sound: its source cut and timed like its picture, its voice (enhance, effect), placed on the timeline,
+    // then its gain over time (model.ts audioEnvelope: volume and its keys, fades, transition crossfades, ducking).
+    const voice = (c: M.VideoClip | M.AudioClip) => voiceChain(c, 48000).map(q => `,biquad=b0=${q.b0}:b1=${q.b1}:b2=${q.b2}:a0=1:a1=${q.a1}:a2=${q.a2}`).join('');
+    const envelope = (c: M.VideoClip | M.AudioClip, trackId: string) => {
+      const env = M.audioEnvelope(p, trackId, c.id);
+      return env.some(x => x.gain > 0) ? env : null; // silent throughout: left out
+    };
+    const place = (src: string, c: M.VideoClip | M.AudioClip, env: M.GainPoint[], startSec: number, name: string) => {
+      const ms = Math.round(startSec * 1000);
+      const gain = env.every(x => x.gain === env[0]!.gain) ? n4(env[0]!.gain) : `'${envExpr(env)}':eval=frame`;
+      g.push(`[${src}]${voice(c).replace(/^,/, '') || 'anull'},adelay=${ms}|${ms},volume=${gain}[${name}]`);
+      amix.push(name);
+    };
     clips.forEach((c, i) => {
       const asset = p.assets.find(a => a.id === (c.audioAsset ?? c.asset)), file = asset && files[asset.id];
-      if (!asset || !file || c.muted || main.muted || !sizes[asset.id]?.hasAudio) return;
+      const env = asset && file && sizes[asset.id]?.hasAudio ? envelope(c, main.id) : null;
+      if (!env || !file) return;
       const k = input(file), pieces = M.speedPieces(c);
       pieces.forEach((pc, j) => g.push(`[${k}:a]atrim=start=${n4(pc.inSec)}:end=${n4(pc.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(pc.speed).map(x => `,${x}`).join('')}[ap${i}_${j}]`));
       const s = pieces.length > 1 ? (g.push(`${pieces.map((_, j) => `[ap${i}_${j}]`).join('')}concat=n=${pieces.length}:v=0:a=1[as${i}]`), `as${i}`) : `ap${i}_0`;
-      const ms = Math.round(tl[i]!.startSec * 1000);
-      g.push(`[${s}]volume=${n4((c.volume ?? 1) * (main.volume ?? 1))},adelay=${ms}|${ms}[ac${i}]`);
-      amix.push(`ac${i}`);
+      place(s, c, env, tl[i]!.startSec, `ac${i}`);
     });
     let ai = 0;
     for (const tr of p.tracks.filter(t => (t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') && !t.muted)) {
       for (const it of tr.items as M.AudioClip[]) {
         const asset = p.assets.find(a => a.id === it.asset), file = asset && files[asset.id];
-        if (!asset || !file || it.muted) { if (asset?.library) unsupported.add('library music'); continue; }
-        if (!sizes[asset.id]?.hasAudio) continue;
-        const k = input(file), ms = Math.round(it.startSec * 1000);
-        g.push(`[${k}:a]atrim=start=${n4(it.inSec)}:end=${n4(it.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(it.speed ?? 1).map(x => `,${x}`).join('')},volume=${n4((it.volume ?? 1) * (tr.volume ?? 1))},adelay=${ms}|${ms}[at${ai}]`);
-        amix.push(`at${ai++}`);
+        if (!asset || !file || it.muted) { if (asset?.library && !it.muted) unsupported.add('library music'); continue; }
+        const env = sizes[asset.id]?.hasAudio ? envelope(it, tr.id) : null;
+        if (!env) continue;
+        const k = input(file);
+        g.push(`[${k}:a]atrim=start=${n4(it.inSec)}:end=${n4(it.outSec)},asetpts=PTS-STARTPTS,${A}${atempo(it.speed ?? 1).map(x => `,${x}`).join('')}[ar${ai}]`);
+        place(`ar${ai}`, it, env, it.startSec, `at${ai}`);
+        ai++;
       }
-      if (tr.duck) unsupported.add('ducking');
     }
   }
   if (amix.length) g.push(`${amix.map(x => `[${x}]`).join('')}amix=inputs=${amix.length}:normalize=0:duration=longest,apad,atrim=0:${n4(total)}[aout]`);
@@ -325,14 +377,27 @@ export function adjustRuns(p: M.EditProject, stepSec = 0.1, maxRuns = 600): { a:
   return out;
 }
 
+/** A file's picture size and whether it has sound; audio-only files too (media.ts probe wants a picture). Null if unreadable. */
+async function probeStreams(ffprobe: string, file: string): Promise<{ width: number; height: number; hasAudio: boolean } | null> {
+  const out = await new Promise<string | null>(resolve => execFile(ffprobe, ['-v', 'error', '-print_format', 'json', '-show_streams', file], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+    (err, o) => resolve(err ? null : o)));
+  if (!out) return null;
+  try {
+    const st = (JSON.parse(out) as { streams?: { codec_type?: string; width?: number; height?: number }[] }).streams ?? [];
+    const v = st.find(x => x.codec_type === 'video');
+    if (!v && !st.some(x => x.codec_type === 'audio')) return null;
+    return { width: v?.width ?? 0, height: v?.height ?? 0, hasAudio: st.some(x => x.codec_type === 'audio') };
+  } catch { return null; }
+}
+
 /** Probes each asset file (size, sound), plans and runs the render. */
 export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p: M.EditProject, files: Record<string, string>, out: string, o: RenderOptions = {}) {
   const sizes: Record<string, { width: number; height: number; hasAudio: boolean }> = {};
   for (const [id, file] of Object.entries(files)) {
     const a = p.assets.find(x => x.id === id);
     if (!a || a.kind === 'lut' || a.kind === 'font') continue;
-    const info = await probe(cfg.ffprobe, file).catch(() => null);
-    if (info) sizes[id] = { width: info.width || a.width || 1080, height: info.height || a.height || 1920, hasAudio: !!info.audioCodec };
+    const info = await probeStreams(cfg.ffprobe, file);
+    if (info) sizes[id] = { width: info.width || a.width || 1080, height: info.height || a.height || 1920, hasAudio: info.hasAudio };
   }
   const plan = planRender(p, files, sizes, out, o);
   try {

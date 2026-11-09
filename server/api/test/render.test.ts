@@ -16,7 +16,8 @@ describe('render helpers (unit)', () => {
     expect(kfExpr(undefined, 1)).toBe('1');
     expect(kfExpr([{ t: 0, v: 1 }], 2)).toBe('1');
     const e = kfExpr([{ t: 0, v: 1 }, { t: 2, v: 1.5 }], 1);
-    expect(e).toBe('if(lt(t,0),1,if(lt(t,2),1+(0.5)*(t-0)/2,1.5))');
+    expect(e).toBe('if(lt(t,0),1,if(lt(t,2),1+(0.5)*((t-0)/2),1.5))');
+    expect(kfExpr([{ t: 0, v: 0, ease: 'easeIn' }, { t: 1, v: 1 }], 0, 'T')).toBe('if(lt(T,0),0,if(lt(T,1),0+(1)*pow(((T-0)/1),2),1))');
     expect(atempo(1)).toEqual([]);
     expect(atempo(4)).toEqual(['atempo=2', 'atempo=2']);
     expect(atempo(0.25)).toEqual(['atempo=0.5', 'atempo=0.5']);
