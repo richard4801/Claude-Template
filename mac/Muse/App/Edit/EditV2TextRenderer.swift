@@ -32,10 +32,57 @@ enum EditV2TextRenderer {
         case .condensed: return "Barlow Condensed"
         case .mono: return "DM Mono"
         case .marker: return "Permanent Marker"
+        default: return family(f.fallback)
         }
     }
 
+    // MARK: Own fonts (WS8 6ccd9aa): font assets loaded from their files, by asset id
+
+    private static let ownLock = NSLock()
+    nonisolated(unsafe) private static var own: [String: CGFont] = [:]
+
+    /// Loads a font asset's .ttf / .otf (once per asset id); false when the file isn't a font Core Text can draw.
+    @discardableResult
+    static func registerOwnFont(_ assetId: String, file: URL) -> Bool {
+        ownLock.lock(); let known = own[assetId] != nil; ownLock.unlock()
+        if known { return true }
+        guard let data = try? Data(contentsOf: file), let provider = CGDataProvider(data: data as CFData), let cg = CGFont(provider) else { return false }
+        ownLock.lock(); own[assetId] = cg; ownLock.unlock()
+        return true
+    }
+
+    /// The style's font: its own font file when it names one that's loaded (drawn as is: no synthesised weight), else
+    /// the built-in family.
+    static func font(_ style: EditV2.TextStyle, size: CGFloat) -> NSFont {
+        if let id = style.fontAsset {
+            ownLock.lock(); let cg = own[id]; ownLock.unlock()
+            if let cg { return CTFontCreateWithGraphicsFont(cg, size, nil, nil) as NSFont }
+        }
+        return font(style.font, weight: style.weight, size: size)
+    }
+
+    // MARK: Content fonts (WS8 929bcf2): the catalog's families, by family and weight file, loaded when an edit uses them
+
+    nonisolated(unsafe) private static var content: [EditV2.ContentFontKey: CGFont] = [:]
+    nonisolated(unsafe) private static var generation = 0
+    /// Goes up each time a content font loads, so text drawn in its fallback is drawn again (part of the text cache keys).
+    static var fontGeneration: Int { ownLock.lock(); defer { ownLock.unlock() }; return generation }
+
+    static func hasContentFont(_ k: EditV2.ContentFontKey) -> Bool { ownLock.lock(); defer { ownLock.unlock() }; return content[k] != nil }
+
+    @discardableResult
+    static func registerContentFont(_ k: EditV2.ContentFontKey, file: URL) -> Bool {
+        guard let data = try? Data(contentsOf: file), let provider = CGDataProvider(data: data as CFData), let cg = CGFont(provider) else { return false }
+        ownLock.lock(); content[k] = cg; generation += 1; ownLock.unlock()
+        return true
+    }
+
     static func font(_ f: EditV2.Font, weight: Int, size: CGFloat) -> NSFont {
+        if f.isContent {
+            ownLock.lock(); let cg = content[.init(font: f, weight: ContentCatalog.fontWeight(weight))]; ownLock.unlock()
+            if let cg { return CTFontCreateWithGraphicsFont(cg, size, nil, nil) as NSFont }
+            return font(f.fallback, weight: weight, size: size)
+        }
         let w: NSFont.Weight = weight >= 900 ? .black : weight >= 700 ? .bold : .regular
         if let family = family(f) {
             let d = NSFontDescriptor(fontAttributes: [.family: family, .traits: [NSFontDescriptor.TraitKey.weight: w.rawValue]])
@@ -70,7 +117,7 @@ enum EditV2TextRenderer {
         para.lineBreakMode = .byWordWrapping
         func attrs(_ scale: Double, _ color: String) -> [NSAttributedString.Key: Any] {
             let size = fontSize * CGFloat(scale)
-            return [fontKey: font(style.font, weight: style.weight, size: size), colorKey: cgColor(color),
+            return [fontKey: font(style, size: size), colorKey: cgColor(color),
                     kernKey: NSNumber(value: Double(size) * (style.letterSpacing ?? 0)), paragraphKey: para]
         }
         let fill = NSMutableAttributedString()

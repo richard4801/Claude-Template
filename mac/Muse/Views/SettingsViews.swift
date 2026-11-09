@@ -1,152 +1,244 @@
 import MuseCore
 import SwiftUI
 
+/// Settings (owner-approved redesign 2026-11-09, plans/settings-redesign.md): six sections and a hidden Advanced, each
+/// opening with one plain line. Members see Account, Studio and AI & spending; owner-only parts are hidden from them.
+/// Every control that existed before is here: caps, AI editing helpers, models, providers, Claude tokens, Blender,
+/// notifications, the server and the test tools.
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
-    /// The camera drums' soft click per stop (RigDrum.swift), off by default.
-    @AppStorage("rigDrumClick") private var rigDrumClick = false
+    /// Advanced shows in the list only while this is on (Account → "Show advanced settings").
+    @AppStorage("showAdvancedSettings") private var showAdvanced = false
+
+    private var sections: [SettingsSection] {
+        SettingsSection.allCases.filter { s in
+            if s == .advanced { return store.isOwner && showAdvanced }
+            return !s.ownerOnly || store.isOwner
+        }
+    }
 
     var body: some View {
-        @Bindable var store = store
         ScrollViewReader { proxy in
         ScreenPage {
-            ScreenTitle("Settings")
+            ScreenTitle("Settings").id("settings.top")
             HStack(alignment: .top, spacing: Space.s6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(SettingsSection.allCases.filter { !$0.ownerOnly || store.isOwner }, id: \.self) { s in
-                        SettingsNavRow(title: s.title, on: store.settingsSection == s) { store.settingsSection = s }
+                    ForEach(sections.filter { $0 != .advanced }, id: \.self) { s in
+                        SettingsNavRow(title: s.title, on: store.settingsSection == s) { store.openSettings(s) }
+                    }
+                    if sections.contains(.advanced) {
+                        SettingsNavRow(title: SettingsSection.advanced.title, on: store.settingsSection == .advanced) { store.openSettings(.advanced) }
+                            .padding(.top, Space.s5)
                     }
                 }
                 .frame(width: 200)
-                VStack(alignment: .leading, spacing: Space.s2) { section }
-                    .frame(maxWidth: 760, alignment: .leading)
+                VStack(alignment: .leading, spacing: 0) {
+                    if !(store.settingsSection == .studio && store.settingsPrompts) {
+                        Text(current.intro).scaled(t.scale.body, t.roles.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, Space.s5)
+                    }
+                    section
+                }
+                .frame(maxWidth: 760, alignment: .leading)
             }
         }
         // Review screenshots only (SnapshotRunner): scroll a section to an anchor.
         .onChange(of: SnapshotRunner.state.scrollTo) { _, id in if let id { proxy.scrollTo(id, anchor: .top) } }
+        // Each section (and the Prompts subpage) opens at the top, not where the last one was scrolled to.
+        .onChange(of: store.settingsSection) { _, _ in proxy.scrollTo("settings.top", anchor: .top) }
+        .onChange(of: store.settingsPrompts) { _, _ in proxy.scrollTo("settings.top", anchor: .top) }
+        }
+        // A member (or Advanced switched off) never stays on a section they can't see.
+        .onAppear { if !sections.contains(store.settingsSection) { store.settingsSection = .account } }
+        .onChange(of: showAdvanced) { _, on in if !on && store.settingsSection == .advanced { store.settingsSection = .account } }
+    }
+
+    private var current: SettingsSection { sections.contains(store.settingsSection) ? store.settingsSection : .account }
+
+    @ViewBuilder private var section: some View {
+        switch current {
+        case .account: AccountSettings(showAdvanced: $showAdvanced)
+        case .studio: StudioPreferences()
+        case .members: MembersView()
+        case .spending: SpendingSettings()
+        case .providers: ProvidersSettings()
+        case .apps: ConnectionsView()
+        case .advanced: AdvancedSettings()
+        }
+    }
+}
+
+// MARK: Account
+
+private struct AccountSettings: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @Binding var showAdvanced: Bool
+    @State private var fontsOpen = false
+
+    var body: some View {
+        Group { who; appearance }
+        Group { notifications }
+        Group { about }
+    }
+
+    @ViewBuilder private var who: some View {
+        let u = store.user
+        SettingRow(store.isOwner ? (u?.studioName ?? "Your studio") : (u?.email ?? "You"),
+                   hint: store.isOwner ? "\(u?.email ?? ""), owner" : "Member of \(u?.studioName ?? "the studio")") {
+            RButton("Sign out", kind: .danger, small: true) { store.signOut() }
         }
     }
 
-    @ViewBuilder private var section: some View {
-        @Bindable var store = store
-        switch store.settingsSection {
-        case .appearance:
-            SectionTitle("Theme", top: 0)
-            HStack(alignment: .top, spacing: Space.s5) {
-                ForEach(ThemeID.allCases) { id in
-                    let on = id == store.themeID
-                    let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
-                    Button { store.setTheme(id) } label: {
-                        VStack(alignment: .leading, spacing: Space.s2) {
-                            ThemePreview(theme: Theme.get(id)).aspectRatio(16 / 10, contentMode: .fit)
-                                .clipShape(shape)
-                                .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
-                                .overlay(shape.strokeBorder(t.roles.selection, lineWidth: on ? 2 : 0).padding(-4))
-                            Text(id.name).scaled(t.scale.label, on ? t.roles.ink : t.roles.ink2)
-                        }
-                        .contentShape(Rectangle())
+    @ViewBuilder private var appearance: some View {
+        SectionTitle("Appearance")
+        HStack(alignment: .top, spacing: Space.s4) {
+            ForEach(ThemeID.allCases) { id in
+                let on = id == store.themeID
+                let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+                Button { store.setTheme(id) } label: {
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        ThemePreview(theme: Theme.get(id)).aspectRatio(16 / 10, contentMode: .fit)
+                            .clipShape(shape)
+                            .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
+                            .overlay(shape.strokeBorder(t.roles.selection, lineWidth: on ? 2 : 0).padding(-4))
+                        Text(id.name).scaled(t.scale.label, on ? t.roles.ink : t.roles.ink2)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Theme: \(id.name)")
-                    .accessibilityAddTraits(on ? .isSelected : [])
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Theme: \(id.name)")
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
-            SectionTitle("Prompts")
-            SettingRow("Pro mode", hint: "Show and edit the prompts behind every render") { RSwitch(label: "Pro mode", isOn: $store.pro) }
-            SettingRow("Click on each camera stop", hint: "A soft tick as the camera drums turn") { RSwitch(label: "Click on each camera stop", isOn: $rigDrumClick) }
-        case .defaults:
-            SectionTitle("Render defaults", top: 0)
-            SettingRow("Default render", hint: "Add-ons (Edit, Fast, in beta) are picked per video") {
-                RSeg(VideoQuality.renders.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 300)
-            }
-            SettingRow("Export size", hint: "Export saves the render as it was made") { RowValue("9:16, as rendered") }
-            SettingRow("Keep test renders for") { RowValue("30 days") }
-            if store.isOwner {
-                SectionTitle("House style")
-                SettingRow("House style and never-add lists", hint: "The house style added to every photo prompt is under Prompts. Never-add lists are set per model.") {
-                    RButton("Open Prompts", kind: .plain, small: true) { store.settingsSection = .prompts }
-                }
-            }
-        case .costs:
-            SectionTitle("Costs and limits", top: 0)
-            HStack(alignment: .top, spacing: Space.s7) {
-                fact("Balance", Pricing.money(store.creditUsd))
-                fact("This month", Pricing.money(store.balance.month))
-                fact("Draft video (10 s)", "About \(Pricing.money(Pricing.typicalVideo))")
-                Spacer(minLength: 0)
-            }
-            .padding(.bottom, Space.s4)
-            SettingRow("Spend cap per job", hint: store.isOwner ? "Change it under Studio" : "Set by the studio owner") { RowValue(Pricing.money(store.balance.perJobLimit)) }
-            SettingRow(store.isMember ? "My cap per day" : "Spend cap per day") { RowValue(Pricing.money(store.balance.perDayLimit)) }
-            SettingRow("Warn before a job goes over budget") { RSwitch(label: "Warn before a job goes over budget", isOn: $store.warnOverBudget) }
-            RButton("Open credit", kind: .action) { store.go(.credits) }.padding(.top, Space.s4)
-        case .studio:
-            StudioSettingsSection()
-        case .engines:
-            EnginesSettingsSection()
-            if store.isOwner { SuiteEnginesPanel(estimate: nil).frame(maxWidth: 560) } // AI suite (workstream 1): D9, the Video suite's engines
-        case .prompts:
-            PromptsSettingsSection()
-        case .archived:
-            ArchivedModelsSection()
-        case .notif:
-            SectionTitle("Notifications", top: 0)
-            SettingRow("Alerts and sound", hint: "Follow your Mac's notification settings") {
-                RButton("Open System Settings", small: true) { Notifier.openSystemSettings() }
-            }
-            SettingRow("Render finished") { RSwitch(label: "Render finished", isOn: $store.notifyDone) }
-            SettingRow("Render failed") { RSwitch(label: "Render failed", isOn: $store.notifyFailed) }
-            SettingRow("Balance below $5") { RSwitch(label: "Balance below $5", isOn: $store.notifyLowBalance) }
-            SettingRow("Also notify my Android phone", hint: "Sent by the server to the MUSE Android app") { RSwitch(label: "Also notify my Android phone", isOn: $store.notifyPhone) }
+        }
+    }
+
+    @ViewBuilder private var notifications: some View {
+        @Bindable var store = store
+        SectionTitle("Notifications")
+        SettingRow("Render finished") { RSwitch(label: "Render finished", isOn: $store.notifyDone) }
+        SettingRow("Render failed") { RSwitch(label: "Render failed", isOn: $store.notifyFailed) }
+        SettingRow("Balance below $5") { RSwitch(label: "Balance below $5", isOn: $store.notifyLowBalance) }
+        SettingRow("Also notify my Android phone", hint: "Sent by the server to the MUSE Android app") {
+            RSwitch(label: "Also notify my Android phone", isOn: $store.notifyPhone)
+        }
+        HStack(spacing: Space.s3) {
             RButton("Send a test notification", small: true) {
                 Notifier.shared.post(title: "MUSE test", body: "Notifications are working. Renders will tell you when they finish or fail.")
                 store.showToast("Test notification sent. If nothing appears, allow MUSE in System Settings › Notifications.")
             }
-            .padding(.top, Space.s3)
-        case .developer:
-            SectionTitle("Data source", top: 0)
-            Text("MUSE talks to the MUSE server by default (\(defaultServerURL)). Demo mode runs everything inside the app with sample data and no account. You can also point MUSE at another server, such as a local server/api or server/mock. Each server keeps its own sign-in.")
-                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, Space.s2)
-            RSeg(DataSource.allCases.map { ($0, $0.label) }, selection: $store.dataSource) { _ in store.applyDataSource() }.frame(maxWidth: 460)
-            RField("Server base URL", hint: "Remote servers need HTTPS. Plain HTTP works for this Mac and the local network only.") {
-                HStack(spacing: Space.s2) {
-                    RTextField(placeholder: defaultServerURL, text: $store.baseURL) { store.applyDataSource() }
-                    RButton("Reconnect") { store.applyDataSource() }
-                    RButton("Test connection") { store.testConnection() }
-                    if store.baseURL != defaultServerURL {
-                        RButton("Use the MUSE server", kind: .plain) {
-                            store.baseURL = defaultServerURL
-                            store.applyDataSource()
-                        }
+            RButton("Sound and banners in System Settings", kind: .plain, small: true) { Notifier.openSystemSettings() }
+        }
+        .padding(.top, Space.s2)
+    }
+
+    @ViewBuilder private var about: some View {
+        SectionTitle("About")
+        SettingRow("Version") { RowValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
+        SettingRow("Terms and policies") {
+            HStack(spacing: Space.s3) {
+                RButton("Terms of Service", kind: .plain, small: true) { store.showToast("The Terms of Service open on the MUSE website") }
+                RButton("Acceptable Use", kind: .plain, small: true) { store.showToast("The Acceptable Use Policy opens on the MUSE website") }
+            }
+        }
+        DisclosureRow(title: "Font licences", summary: "SIL OFL and Apache 2.0", open: $fontsOpen)
+        if fontsOpen {
+            Text("Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL); Permanent Marker (Apache 2.0)")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true).padding(.leading, Space.s5)
+        }
+        // The edit content library (WS8 84df583): stickers, sound effects and fonts under their own licences.
+        SectionTitle("Licences")
+        SettingsContentLicences()
+        if store.isOwner {
+            SettingRow("Show advanced settings", hint: "Server, testing and performance tools") {
+                RSwitch(label: "Show advanced settings", isOn: $showAdvanced)
+            }
+            .padding(.top, Space.s4)
+        }
+    }
+}
+
+// MARK: Studio
+
+private struct StudioPreferences: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    /// The camera drums' soft click per stop (RigDrum.swift), off by default.
+    @AppStorage("rigDrumClick") private var rigDrumClick = false
+    @State private var archivedOpen = false
+
+    var body: some View {
+        @Bindable var store = store
+        if store.settingsPrompts && store.isOwner {
+            Crumb(parent: "Studio", title: "Prompts") { store.settingsPrompts = false }
+            PromptsSettingsSection()
+        } else {
+            SectionTitle("New videos and photos", top: 0)
+            SettingRow("Start at", hint: "The quality new videos use. Change it per shot in the AI Suite.") {
+                RSeg(VideoQuality.renders.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 300)
+            }
+            SettingRow("Show the prompt behind each render", hint: "Read and edit what the AI is asked to make") {
+                RSwitch(label: "Show the prompt behind each render", isOn: $store.pro)
+            }
+            SettingRow("Click on each camera stop", hint: "A soft tick as the camera wheels turn") {
+                RSwitch(label: "Click on each camera stop", isOn: $rigDrumClick)
+            }
+            SettingRow("Test renders are kept for") { RowValue("30 days") }
+            if store.isOwner {
+                SectionTitle("Prompts and house style")
+                SettingRow("Prompt library", hint: "The house style added to every photo, and each prompt MUSE writes") {
+                    RButton("Open prompts", small: true) {
+                        store.settingsPrompts = true
+                        Task { await store.loadPrompts() }
                     }
                 }
+                SectionTitle("Archived models")
+                SettingRow(ScreenCopy.count(store.archivedModels.count, "archived model"), hint: "Hidden from every list. Their photos, renders and posts are kept.") {
+                    RButton(archivedOpen ? "Hide" : "Show", small: true, off: store.archivedModels.isEmpty) { archivedOpen.toggle() }
+                }
+                if archivedOpen { ArchivedModelsSection() }
             }
-            .padding(.top, Space.s3)
-            .opacity(store.dataSource == .http ? 1 : 0.5)
-            if let msg = store.offlineMessage {
-                InlineNotice("\(msg) Check the address, then Test connection.", tone: .caution).padding(.top, Space.s2)
+        }
+    }
+}
+
+// MARK: AI & spending
+
+private struct SpendingSettings: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var enginesOpen = false
+
+    var body: some View {
+        @Bindable var store = store
+        HStack(alignment: .top, spacing: Space.s7) {
+            fact("Balance", Pricing.money(store.creditUsd))
+            fact("This month", Pricing.money(store.balance.month))
+            fact("A 10 s Draft video", "About \(Pricing.money(Pricing.typicalVideo))")
+            Spacer(minLength: 0)
+            RButton(store.isOwner ? "Add credit" : "Open credit", kind: .action) { store.go(.credits) }
+        }
+        if store.isOwner {
+            // Spend caps (editable) and AI editing helpers, as before.
+            StudioSettingsSection().padding(.top, Space.s5)
+        } else {
+            SectionTitle("Spend caps")
+            SettingRow("Per job", hint: "Set by the studio owner") { RowValue(Pricing.money(store.balance.perJobLimit)) }
+            SettingRow("My cap per day", hint: "Set by the studio owner") { RowValue(Pricing.money(store.balance.perDayLimit)) }
+        }
+        SettingRow("Warn me before a job goes over budget") { RSwitch(label: "Warn me before a job goes over budget", isOn: $store.warnOverBudget) }
+            .padding(.top, Space.s2)
+        if store.isOwner {
+            DefaultModelsSettings()
+                .task { await store.loadEngines() }
+            DisclosureRow(title: "Models and our own GPUs", summary: "Status, GPU limits, the photo service and price corrections", open: $enginesOpen)
+                .padding(.top, Space.s4)
+            if enginesOpen {
+                EnginesSettingsSection()
+                SuiteEnginesPanel(estimate: nil).frame(maxWidth: 560)
             }
-            SectionTitle("Testing")
-            SettingRow("Fail the next render", hint: "It stops partway and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock and dev servers only.") {
-                RButton("Fail next render", small: true) { store.setFailNext() }
-            }
-            SettingRow("Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.") {
-                RButton("Reload", small: true) { Task { await store.forceReload() } }
-            }
-            SectionTitle("Performance")
-            PerfReadout()
-        case .connections:
-            // A normal detail pane in the same column as the other sections (it used to be a sheet over Settings).
-            ConnectionsView()
-        case .about:
-            SectionTitle("About", top: 0)
-            SettingRow("Version") { RowValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
-            SettingRow("Fonts", hint: "Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL); Permanent Marker (Apache 2.0)")
-            SettingRow("Terms of Service") { RButton("Open", kind: .plain, small: true) { store.showToast("The Terms of Service open on the MUSE website") } }
-            SettingRow("Acceptable Use Policy") { RButton("Open", kind: .plain, small: true) { store.showToast("The Acceptable Use Policy opens on the MUSE website") } }
-            SettingRow("Account", hint: store.user?.email) { RButton("Sign out", kind: .danger, small: true) { store.signOut() } }
         }
     }
 
@@ -155,6 +247,73 @@ struct SettingsView: View {
             Text(label).scaled(t.scale.caption, t.roles.ink2)
             Text(value).monospacedDigit().scaled(t.scale.title, t.roles.ink)
         }
+    }
+}
+
+// MARK: Advanced
+
+private struct AdvancedSettings: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        @Bindable var store = store
+        SectionTitle("Server", top: 0)
+        Text("MUSE talks to the MUSE server by default (\(defaultServerURL)). Demo mode runs everything inside the app with sample data and no account. You can also point MUSE at another server, such as a local server/api or server/mock. Each server keeps its own sign-in.")
+            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, Space.s2)
+        RSeg(DataSource.allCases.map { ($0, $0.label) }, selection: $store.dataSource) { _ in store.applyDataSource() }.frame(maxWidth: 460)
+        RField("Server address", hint: "Remote servers need HTTPS. Plain HTTP works for this Mac and the local network only.") {
+            HStack(spacing: Space.s2) {
+                RTextField(placeholder: defaultServerURL, text: $store.baseURL) { store.applyDataSource() }
+                RButton("Reconnect") { store.applyDataSource() }
+                RButton("Test connection") { store.testConnection() }
+                if store.baseURL != defaultServerURL {
+                    RButton("Use the MUSE server", kind: .plain) {
+                        store.baseURL = defaultServerURL
+                        store.applyDataSource()
+                    }
+                }
+            }
+        }
+        .padding(.top, Space.s3)
+        .opacity(store.dataSource == .http ? 1 : 0.5)
+        if let msg = store.offlineMessage {
+            InlineNotice("\(msg) Check the address, then Test connection.", tone: .caution).padding(.top, Space.s2)
+        }
+        SectionTitle("Testing")
+        SettingRow("Fail the next render", hint: "It stops partway and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock and dev servers only.") {
+            RButton("Fail next render", small: true) { store.setFailNext() }
+        }
+        SettingRow("Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.") {
+            RButton("Reload", small: true) { Task { await store.forceReload() } }
+        }
+        SectionTitle("Performance")
+        PerfReadout()
+    }
+}
+
+/// A row that opens and closes a group of rarely used settings (progressive disclosure): a chevron, the title and a
+/// one-line summary of what's inside.
+struct DisclosureRow: View {
+    @Environment(\.theme) private var t
+    var title: String
+    var summary: String
+    @Binding var open: Bool
+
+    var body: some View {
+        Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
+            HStack(spacing: Space.s2) {
+                Ph(open ? "chevron.down" : "chevron.right", 12).foregroundStyle(t.roles.ink2).frame(width: 14)
+                Text(title).scaled(t.scale.body, t.roles.ink)
+                Text(summary).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(open ? "hide" : "show")")
     }
 }
 

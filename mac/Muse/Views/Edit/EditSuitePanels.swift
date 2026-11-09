@@ -23,7 +23,9 @@ struct VideoPanels: View {
     @Bindable var session: EditSuiteSession
 
     var body: some View {
-        if let v = session.state.selectedVisual {
+        if session.state.selectedAdjust != nil {
+            AdjustLayerPanel(session: session)
+        } else if let v = session.state.selectedVisual {
             TransformPanel(session: session, visual: v)
             if session.state.selectedBlend != nil { BlendPanel(session: session) }
             if session.state.selectedIsMain, let c = session.state.selectedVideo, c.holdSec == nil,
@@ -40,6 +42,11 @@ struct VideoPanels: View {
             if session.state.selectedIsMain { TransitionsPanel(session: session) }
         } else {
             InspectorEmpty(text: "Select a clip, an overlay or a sticker on the timeline.")
+        }
+        // Adjustment layers (contract, WS8 3e20288): colour over the whole picture for a stretch of time.
+        EditPanel(title: "Adjustment layer") {
+            SuiteToolButton(title: "Add adjustment layer", icon: "sliders-horizontal", plain: true) { session.edit { $0.addAdjustLayer() } }
+                .help("Colour everything under the text for 3 s from the playhead")
         }
         // The whole edit's style (parity): shown whatever is selected.
         StyleKitsPanel(session: session)
@@ -292,6 +299,7 @@ struct LooksPanel: View {
                     tile(id: e.id, name: e.name, image: session.lookThumbs[e.id], on: current == e.id)
                 }
             }
+            ContentLookChips(session: session, visual: visual)
             if let pid = visual.look?.paletteId { suiteLookCard(name: EditV2LookLibrary.shared.palettes.name(of: pid)) }
             if pack == nil { Note(warn: true, "The look pack is missing from this build.") }
             if let look = visual.look, look.lut != nil {
@@ -392,6 +400,8 @@ struct AdjustPanel: View {
                 SuiteRule()
                 SuiteLabel("Curves")
                 CurvesEditor(session: session)
+                SuiteRule()
+                HslEditor(session: session)
             }
         }
     }
@@ -461,6 +471,88 @@ struct KeyedRow: View {
                     let values = props.map { session.state.visualValue($0) ?? 0 }
                     session.edit { st in zip(props, values).reduce(false) { ok, pv in st.addKeyframe(pv.0, value: pv.1) || ok } }
                 }
+            }
+        }
+    }
+}
+
+/// The selected adjustment layer: a filter preset with its amount, the five colour controls and Strength, each with a ◆
+/// (layers carry no look, mask or transform; highlights and shadows are tone, not part of a layer).
+struct AdjustLayerPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+
+    var body: some View {
+        let f = session.state.selectedAdjust?.filter
+        EditPanel(title: "Adjustment layer") {
+            Text("Colours everything under the text while it's on the timeline.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            SuiteLabel("Filter")
+            FlowLayout(spacing: 6) {
+                Chip("None", on: f == nil) { session.edit { $0.setLayerFilter(nil) } }
+                ForEach(EditV2.filters) { p in
+                    Chip(p.label, on: f?.id == p.id) { session.edit { $0.setLayerFilter(p.id, amount: f?.amount ?? 1) } }
+                }
+            }
+            if let f {
+                SuiteSlider("Amount", value: f.amount, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                    session.edit { $0.setLayerFilter(f.id, amount: (v * 100).rounded() / 100) }
+                }
+            }
+            SuiteRule()
+            KeyedRow(session: session, label: "Strength", props: [.opacity], range: 0...1, format: { "\(Int(($0 * 100).rounded()))%" },
+                     store: { v, _ in (v * 100).rounded() / 100 })
+            ForEach([("Exposure", EditV2.KfProp.exposure), ("Contrast", .contrast), ("Saturation", .saturation), ("Temperature", .temperature), ("Tint", .tint)],
+                    id: \.1) { label, p in
+                KeyedRow(session: session, label: label, props: [p], range: -1...1, format: signed100, store: { v, _ in (v * 100).rounded() / 100 })
+            }
+        }
+    }
+}
+
+/// HSL per hue (contract, WS8 9afb6aa): a band picker of eight colour dots, then Hue, Saturation and Luminance for the
+/// picked band, and Reset HSL. Part of the look (after the curves, before the LUT).
+struct HslEditor: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    @State private var band = "red"
+
+    private static let dots: [String: Color] = ["red": Color(hex: 0xE5484D), "orange": Color(hex: 0xF0883E), "yellow": Color(hex: 0xE9C46A),
+                                                 "green": Color(hex: 0x46A758), "aqua": Color(hex: 0x3DB9CF), "blue": Color(hex: 0x3E63DD),
+                                                 "purple": Color(hex: 0x8E4EC6), "magenta": Color(hex: 0xD6409F)]
+
+    var body: some View {
+        let s = session.state
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack {
+                SuiteLabel("HSL")
+                Spacer()
+                SuiteToolButton(title: "Reset HSL", disabled: s.selectedVisual?.look?.hsl == nil, plain: true) { session.edit { $0.resetHsl() } }
+            }
+            HStack(spacing: 6) {
+                ForEach(EditV2.hueBands, id: \.0) { b, _ in
+                    let set = ["hue", "sat", "light"].contains { s.hslValue(b, $0) != 0 }
+                    Button { band = b } label: {
+                        Circle().fill(Self.dots[b] ?? .gray).frame(width: 18, height: 18)
+                            .overlay(Circle().strokeBorder(band == b ? t.roles.ink : .clear, lineWidth: 2).padding(-3))
+                            .overlay(alignment: .bottomTrailing) { if set { Circle().fill(t.roles.ink).frame(width: 5, height: 5) } }
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(b.capitalized)
+                    .accessibilityLabel("\(b.capitalized) hues")
+                    .accessibilityAddTraits(band == b ? .isSelected : [])
+                }
+            }
+            SuiteSlider("Hue", value: s.hslValue(band, "hue"), range: -1...1, format: { "\(Int(($0 * 30).rounded()))°" }) { v in
+                session.edit { $0.setHsl(band, "hue", (v * 100).rounded() / 100) }
+            }
+            SuiteSlider("Saturation", value: s.hslValue(band, "sat"), range: -1...1, format: signed100) { v in
+                session.edit { $0.setHsl(band, "sat", (v * 100).rounded() / 100) }
+            }
+            SuiteSlider("Luminance", value: s.hslValue(band, "light"), range: -1...1, format: signed100) { v in
+                session.edit { $0.setHsl(band, "light", (v * 100).rounded() / 100) }
             }
         }
     }
@@ -728,6 +820,8 @@ struct TransitionsPanel: View {
                 }
             }
             Chip("Dip to black", on: current == "black") { set("black") }.disabled(isFirst)
+            // Content library (WS8 929bcf2): seven more kinds, and the in-house presets.
+            ContentTransitionChips(session: session, disabled: isFirst, duration: duration)
             SuiteSlider("Duration", value: clip?.transitionIn?.durationSec ?? duration, range: 0.1...2, format: { String(format: "%.1f s", $0) }) { v in
                 duration = (v * 10).rounded() / 10
                 if let k = clip?.transitionIn?.kind { session.edit { $0.setTransition(k, duration: duration) } }
@@ -742,7 +836,7 @@ struct TransitionsPanel: View {
         }
     }
 
-    private func label(_ key: String) -> String { EditV2.transitionLabels.first { $0.0 == key }?.1 ?? key }
+    private func label(_ key: String) -> String { EditV2.transitionLabel(EditV2.TransitionKind(rawValue: key)) }
 
     private func set(_ key: String) {
         let kind = EditV2.TransitionKind(rawValue: key)
@@ -900,6 +994,18 @@ struct SpeedPanel: View {
                 Text("Holds this frame, silent. Drag its edges on the timeline to change the length.")
                     .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }
+        } else if let sp = session.state.selectedAudioSpeed {
+            // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept; no curves for sound.
+            EditPanel(title: "Speed") {
+                SuiteSlider("Speed", value: sp, range: 0.5...2, format: { String(format: "%.2f×", $0) }) { v in session.edit { $0.setAudioSpeed(v) } }
+                FlowLayout(spacing: 6) {
+                    ForEach([0.5, 1, 1.5, 2], id: \.self) { v in
+                        Chip(v == 1 ? "1×" : String(format: "%g×", v), on: abs(sp - v) < 0.001) { session.edit { $0.setAudioSpeed(v) } }
+                    }
+                }
+                Text("The pitch stays the same. Its length on the timeline follows the speed.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
         } else if let c = session.state.selectedVideo {
             EditPanel(title: "Speed") {
                 EditSeg(options: [(false, "Constant"), (true, "Curve")], selection: c.speedCurve != nil) { curve in
@@ -931,6 +1037,11 @@ struct SpeedPanel: View {
                     Text(session.state.speedSummary ?? "").font(t.scale.caption.font).foregroundStyle(t.roles.ink)
                     Text("Keeps the pitch. Drag points; double-click to add one.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                // Reverse (contract, WS8 cb5413e): the clip plays a reversed copy of its source (made once, up to 60 s).
+                SuiteRule()
+                SuiteToggleRow(title: "Reverse", hint: "Plays backwards", isOn: session.state.reversedFrom != nil, busy: session.isRunning(.reverse)) { _ in
+                    Task { await session.toggleReverse() }
                 }
             }
         } else {

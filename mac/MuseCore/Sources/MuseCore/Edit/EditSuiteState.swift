@@ -483,6 +483,7 @@ public struct EditSuiteState: Sendable {
         case .music: return "Music"
         case .voice: return "Voice"
         case .sfx: return "SFX"
+        case .adjust: return "Adjustment"
         }
     }
 
@@ -496,11 +497,12 @@ public struct EditSuiteState: Sendable {
         case .music: return "music.note"
         case .voice: return "mic"
         case .sfx: return "speaker.wave.2"
+        case .adjust: return "sliders-horizontal"
         }
     }
 
     public var rows: [EditSuite.Row] {
-        let order: [E.TrackKind] = [.text, .caption, .video, .image, .main, .voice, .music, .sfx]
+        let order: [E.TrackKind] = [.text, .caption, .adjust, .video, .image, .main, .voice, .music, .sfx]
         var out: [EditSuite.Row] = []
         for k in order {
             // Later tracks draw on top: show them higher (the Hook row always first).
@@ -534,6 +536,7 @@ public struct EditSuiteState: Sendable {
                 case .video(let c): l = label(c.asset)
                 case .image(let c): l = label(c.asset)
                 case .audio(let c): l = label(c.asset)
+                case .adjust: l = "Adjustment"
                 }
                 return EditSuite.Block(id: it.id, itemId: it.id, startSec: span.startSec, endSec: span.endSec, label: l, transition: nil)
             }
@@ -702,6 +705,12 @@ public struct EditSuiteState: Sendable {
                     c.durationSec = E.r6(span.endSec - s); c.startSec = E.r6(s)
                 } else { c.durationSec = E.r6(max(E.minItemSec, t - span.startSec)) }
                 it = .text(c)
+            case .adjust(var c):
+                if edge == .start {
+                    let s = min(max(0, t), span.endSec - E.minItemSec)
+                    c.durationSec = E.r6(span.endSec - s); c.startSec = E.r6(s)
+                } else { c.durationSec = E.r6(max(E.minItemSec, t - span.startSec)) }
+                it = .adjust(c)
             }
         }.flatMap { q in q.overlapFree(trackIndex: loc.track) ? q : nil }
     }
@@ -784,6 +793,12 @@ public struct EditSuiteState: Sendable {
                 change(&v)
                 c.transform = v.transform; c.opacity = v.opacity; c.keyframes = v.keyframes
                 it = .text(c)
+            case .adjust(var c):
+                // An adjustment layer: its colour, strength (opacity) and keyframes.
+                var v = EditSuite.Visual(adjust: c.adjust, look: nil, mask: nil, chroma: nil, transform: nil, opacity: c.opacity, keyframes: c.keyframes)
+                change(&v)
+                c.adjust = v.adjust; c.opacity = v.opacity; c.keyframes = v.keyframes
+                it = .adjust(c)
             case .audio:
                 break
             }
@@ -796,6 +811,7 @@ public struct EditSuiteState: Sendable {
         case .video(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
         case .image(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
         case .text(let c): return EditSuite.Visual(adjust: nil, look: nil, mask: nil, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+        case .adjust(let c): return EditSuite.Visual(adjust: c.adjust, look: nil, mask: nil, chroma: nil, transform: nil, opacity: c.opacity, keyframes: c.keyframes)
         default: return nil
         }
     }
@@ -1384,6 +1400,12 @@ extension EditV2.Project {
             d.id = nid; d.startSec = EditV2.r6(t); d.durationSec = EditV2.r6(len - local); d.animIn = nil
             c.keyframes = nil; d.keyframes = nil
             a = .image(c); b = .image(d)
+        case .adjust(var c):
+            var d = c
+            c.durationSec = EditV2.r6(local)
+            d.id = nid; d.startSec = EditV2.r6(t); d.durationSec = EditV2.r6(len - local)
+            c.keyframes = nil; d.keyframes = nil
+            a = .adjust(c); b = .adjust(d)
         }
         var p = self
         p.tracks[ti].items.replaceSubrange(ii...ii, with: [a, b])

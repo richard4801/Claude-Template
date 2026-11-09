@@ -384,6 +384,53 @@ extension SnapshotRunner {
             check("kit deleted", s.kits?.contains { $0.id == k.id } == false)
         }
 
+        step("HSL per hue (red hues toward orange)")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.setHsl("red", "hue", 1) }
+        check("project: an HSL setting", s.state.hslValue("red", "hue") == 1 && E.problem(s.project) == nil)
+        let hq = await previewPixel(s, at: 1)
+        check("preview: the red take turns orange", hq.map { $0.r > 150 && $0.g > 70 && $0.b < 70 } ?? false, describe(hq))
+        s.undo()
+
+        step("Own font on a text")
+        let sysFont = ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Georgia.ttf"]
+            .map(URL.init(fileURLWithPath:)).first { FileManager.default.fileExists(atPath: $0.path) }
+        if let sysFont {
+            s.edit { $0.addText("Own font") }
+            await s.importFont(sysFont)
+            let fa = s.state.selectedItem?.textItem?.style.fontAsset
+            check("project: the text uses the font asset", fa != nil && s.project.asset(fa ?? "")?.kind == .font && E.problem(s.project) == nil,
+                  "\(fa ?? "none") · \(s.lastError ?? s.notice ?? "")")
+            for _ in 0..<(fa == nil ? 1 : 2) { s.undo() }
+        } else {
+            log.note("SKIP no system .ttf on this runner")
+        }
+
+        step("Adjustment layer (exposure down over the whole picture)")
+        s.seek(0.5)
+        let before = await previewPixel(s, at: 1)
+        s.edit { $0.addAdjustLayer() }
+        s.edit { $0.setVisualValue(.exposure, -1) }
+        check("project: an adjustment layer", s.project.tracks.contains { $0.kind == .adjust } && E.problem(s.project) == nil)
+        let after = await previewPixel(s, at: 1)
+        check("preview: darker under the layer", (after?.r ?? 255) + 40 < (before?.r ?? 0), "\(describe(before)) then \(describe(after))")
+        let outside = await previewPixel(s, at: 3.8)
+        check("preview: as before after the layer ends", isRed(outside), describe(outside))
+        for _ in 0..<2 { s.undo() }
+
+        step("Loop animation (blink on an overlay)")
+        s.seek(0.5)
+        s.addTake(blue, overlay: true)
+        s.edit { $0.setFit(.cover) }
+        s.edit { $0.setVisualValue(.scale, 1) }
+        s.edit { $0.setVisualValue(.x, 0.5) }
+        s.edit { $0.setVisualValue(.y, 0.5) }
+        s.edit { $0.setLoop(E.AnimLoop(kind: .blink, periodSec: 1, amount: 1)) }
+        check("project: a blink loop on the overlay", s.state.selectedLoop?.kind == .blink && E.problem(s.project) == nil)
+        let lb = await previewPixel(s, at: 0.5), lr = await previewPixel(s, at: 1.0)
+        check("preview: the overlay at rest, then gone half a cycle in", isBlue(lb) && isRed(lr), "\(describe(lb)) then \(describe(lr))")
+        for _ in 0..<6 { s.undo() }
+
         step("Look keyframes (vignette 0 → 1)")
         s.view { $0.selection = s.project.mainClips.first?.id }
         s.seek(0.5); s.edit { $0.addKeyframe(.vignette, value: 0) }
@@ -418,6 +465,29 @@ extension SnapshotRunner {
         let resized = try? EditSuiteSession.pictureForUpload(big, ext: "png")
         check("2048 × 683, still a PNG", resized.map { $0.2 == 2048 && abs($0.3 - 683) <= 1 && $0.1 == "image/png" } ?? false,
               resized.map { "\($0.2) × \($0.3) \($0.1)" } ?? "failed")
+
+        step("Content library: a sticker, a sound effect, a transition preset")
+        await s.loadContent()
+        if let c = s.content, let sp = c.packs(.stickers).first, let st = sp.items.first, let fp = c.packs(.sfx).first, let fx = fp.items.first {
+            s.view { $0.selection = nil }
+            s.seek(1)
+            await s.addContentSticker(sp, st)
+            let ref = ContentCatalog.ref(pack: sp.id, item: st.id)
+            check("project: the sticker is a library picture", s.project.assets.contains { $0.library == ref && $0.kind == .image } && E.problem(s.project) == nil)
+            let px = await previewPixel(s, at: 2, 0.5, 0.4)
+            check("preview: the sticker over the clip", px.map { $0.r > 150 && $0.g > 120 && $0.b < 90 } ?? false, describe(px))
+            await s.addContentSound(fp, fx)
+            check("project: the sound effect on its row", s.project.tracks.contains { $0.kind == .sfx && !$0.items.isEmpty } && E.problem(s.project) == nil)
+            s.view { $0.selection = s.project.mainClips.dropFirst().first?.id }
+            if let tr = c.packs(.transitions).flatMap(\.items).compactMap(\.transitionValue).first(where: { $0.kind == .zoomOut }), s.project.mainClips.count > 1 {
+                s.edit { $0.setTransition(tr.kind, duration: tr.durationSec) }
+                check("project: the zoom out preset", s.project.mainClips[1].transitionIn?.kind == .zoomOut && E.problem(s.project) == nil)
+                s.undo()
+            }
+            for _ in 0..<2 { s.undo() }
+        } else {
+            check("the content catalog loads", false, "no stickers or sounds in it")
+        }
 
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")

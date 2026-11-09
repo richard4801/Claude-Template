@@ -83,7 +83,7 @@ paid model or a vendor), taken out until it is built (owner, 2026-11-08).
 | Control | Status | Notes |
 |---|---|---|
 | Make captions | working | |
-| 8 style tiles | working | Neon's glow now follows the highlight colour. |
+| 8 style tiles | working | Neon's glow uses the style's own shadow colour; pop is the active word at 1.15×; single pops in 0.6 → 1 over 0.15 s (coordinator 2026-11-09: the server, Android and the Mac draw them alike). |
 | Font, Text / Highlight / Outline colour, Size, Position, Word-by-word, Upper case | working | Test: every one reaches the caption track. |
 | Edit the words | working | Opens Captions & hooks. |
 
@@ -195,6 +195,12 @@ Mac CI run 42552492893 (4946284): build, click-through and every Edit operation 
 | The owner's model pick on the AI helpers (WS6 pill) | Beside Remove background, Pick what to keep, Auto-captions, Noise reduction | EditorHelperModelTests |
 | Style kits (save, apply, delete) | Video → Style kits | Shared fixtures (kits: kitOf, applyKit, validateKit); fake API test; ops check (save, apply, delete) |
 | Mask and look keyframes (mask x, y, size, rotation, feather; vignette, grain, light leak) | Mask: ◆ beside each slider; Adjust: ◆ beside Vignette, Grain, Light leak | Shared fixtures (motionKeys, validation); ops check (the corner darkens) |
+| Loop animations (pulse, sway, float, spin, blink) | Animate → Loop: chips, Speed, Amount (overlays, pictures, text) | Shared fixtures (loops, validation); EditV2ColorKeysTests (moving to main drops it); ops check (blink) |
+| Speed on music, voice and effect clips (0.5–2×, pitch kept) | Speed tab with a sound selected: slider and 0.5× / 1× / 1.5× / 2× | Shared fixtures (audioSpeed, validation); EditV2ColorKeysTests |
+| Adjustment layers | Video → Add adjustment layer; the layer's own panel (filter, colour, Strength, ◆) | Shared fixtures (adjustLayers, projects, validation); EditV2ColorKeysTests; ops check (darker under the layer, unchanged after it) |
+| Own fonts (.ttf / .otf) on text | Text → Style → Font → "Your font…" and the edit's own fonts | Shared fixtures (validation, kits); EditV2ColorKeysTests (name table, setting it); ops check (a system .ttf) |
+| HSL per hue | Adjust → HSL (band dots, Hue / Saturation / Luminance, Reset) | Shared fixtures (looks.json hsl, hueWeights, the 12th render; validation); ops check (red to orange) |
+| Reverse | Speed → Reverse (main clips and overlays) | Shared fixtures (functions.json reverse, validation); EditV2ColorKeysTests (switch and back); the job runs on the server |
 | Chroma key colour from the picture (design pass) | Mask → Chroma key → Pick from video, then click the preview | EditSuiteKeysTests (sourcePoint inverts fit, flip, crop); ops check (the red take's colour) |
 | Hear the video while recording a voice-over (design pass) | Bin → Record VO, "Play the video while recording" | EditSuiteParityTests (lands at its start, delay trimmed); the microphone itself can't run in CI |
 | Overlay photos at 2048 px at most (design pass) | Bin → Import picture | Ops check (3000 px PNG → 2048 × 683 PNG) |

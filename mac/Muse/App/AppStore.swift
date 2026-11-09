@@ -5,7 +5,7 @@ import SwiftUI
 
 enum Screen: String, CaseIterable {
     // Photoshoot is gone: it is the AI suite's Photo tool (workstream 3); `openPhoto()` is the route to it.
-    case home, models, profile, create, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
+    case home, models, profile, create, queue, gallery, result, settings, credits, lora, posts, templates, template, editor
     // AI suite (workstream 1): the Video suite (hub and modes) and the top-level Edit.
     case suite, edit
 
@@ -48,26 +48,36 @@ let defaultServerURL = "https://angelic-elegance-production-c42b.up.railway.app"
 
 enum ShootState { case idle, busy, done }
 enum GalleryTab { case tests, final }
+/// Settings (owner-approved redesign 2026-11-09, plans/settings-redesign.md): six sections and a hidden Advanced.
 enum SettingsSection: String, CaseIterable {
-    case appearance, defaults, costs, studio, engines, prompts, archived, notif, developer, about, connections
+    case account, studio, members, spending, providers, apps, advanced
     var title: String {
         switch self {
-        case .appearance: return "Appearance"
-        case .defaults: return "Render defaults"
-        case .costs: return "Costs & limits"
+        case .account: return "Account"
         case .studio: return "Studio"
-        case .engines: return "Engines"
-        case .prompts: return "Prompts"
-        case .archived: return "Archived models"
-        case .notif: return "Notifications"
-        case .developer: return "Developer"
-        case .about: return "About"
-        case .connections: return "Connections"
+        case .members: return "Members"
+        case .spending: return "AI & spending"
+        case .providers: return "Providers"
+        case .apps: return "Apps & devices"
+        case .advanced: return "Advanced"
         }
     }
 
-    /// Studio, Engines, Prompts, Archived models and Connections are the owner's.
-    var ownerOnly: Bool { self == .studio || self == .engines || self == .prompts || self == .archived || self == .connections }
+    /// The line under the section's title.
+    var intro: String {
+        switch self {
+        case .account: return "You, how MUSE looks, and when it tells you things."
+        case .studio: return "How new videos and photos start, the studio's prompts, and archived models."
+        case .members: return "Who works in the studio, what each person can spend, and invitations."
+        case .spending: return "Your balance, spend caps and the models behind each quality."
+        case .providers: return "Your own accounts with AI providers. Their models join the AI Suite's model picker."
+        case .apps: return "Claude, Blender and your phone working with MUSE."
+        case .advanced: return "Server, testing and performance tools. Hidden unless turned on under Account."
+        }
+    }
+
+    /// Members see Account, Studio and AI & spending.
+    var ownerOnly: Bool { self == .members || self == .providers || self == .apps || self == .advanced }
 }
 
 enum PostTab: Hashable { case scheduled, posted }
@@ -200,7 +210,9 @@ final class AppStore {
     var paletteOpen = false
     var paletteQuery = ""
     var paletteIndex = 0
-    var settingsSection: SettingsSection = .appearance
+    var settingsSection: SettingsSection = .account
+    /// Settings → Studio → Prompts (the prompt library, a page inside Studio).
+    var settingsPrompts = false
 
     // MARK: Data
 
@@ -245,6 +257,8 @@ final class AppStore {
     let linkImport = LinkImportState()
     /// The owner's model picks per purpose and the engine catalog (WS6, AppStore+EngineChoice.swift).
     let engineChoice = EngineChoiceState()
+    /// Settings → Providers (WS6, AppStore+Providers.swift).
+    let providersState = ProvidersState()
     /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
     let learn = LearnState()
     /// Library collections (AppStore+LibraryQueue.swift).
@@ -627,7 +641,7 @@ final class AppStore {
         imageEngine = e
         stepModels = s ?? []
         archivedModels = a ?? []
-        if settingsSection == .prompts { await loadPrompts() }
+        if settingsPrompts { await loadPrompts() }
     }
 
     /// A screen appeared (Credit, Settings): the studio data the live stream keeps current, unless it's over a minute old.
@@ -788,7 +802,7 @@ final class AppStore {
     private func studioNotice(_ n: EventNotice) {
         guard isOwner, n.code == "provider_out_of_credit" else { return }
         let msg = n.message.isEmpty ? "An engine is out of credit · see Settings → Engines" : n.message
-        showToast(msg, action: "Engines") { [weak self] in self?.openSettings(.engines) }
+        showToast(msg, action: "Models") { [weak self] in self?.openSettings(.spending) }
         Notifier.shared.post(title: "An engine is out of credit", body: msg)
         Task { [weak self] in await self?.loadStudio() }
     }
@@ -910,6 +924,9 @@ final class AppStore {
     // MARK: Navigation
 
     func openSettings(_ section: SettingsSection) {
+        // Advanced is hidden until switched on under Account: going there (offline notice, palette) switches it on.
+        if section == .advanced { UserDefaults.standard.set(true, forKey: "showAdvancedSettings") }
+        if section != .studio { settingsPrompts = false }
         settingsSection = section
         go(.settings)
     }

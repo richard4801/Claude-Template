@@ -89,6 +89,19 @@ private struct Validator {
             try id("\(f).id", a.id)
             if assets[a.id] != nil { throw bad("\(f).id", "is used twice") }
             if a.kind == .lut && a.upload == nil { throw bad(f, "a lut asset must be an upload") }
+            if a.kind == .font {
+                if a.upload == nil { throw bad(f, "a font asset must be an upload") }
+                if a.durationSec != nil { throw bad("\(f).durationSec", "is not part of a font asset") }
+                if a.width != nil { throw bad("\(f).width", "is not part of a font asset") }
+                if a.height != nil { throw bad("\(f).height", "is not part of a font asset") }
+                if a.hasAudio != nil { throw bad("\(f).hasAudio", "is not part of a font asset") }
+            }
+            if let n = a.name, n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || n.utf16.count > 80 { throw bad("\(f).name", "must be 1–80 characters") }
+            // The content library (WS8 929bcf2): `content:<pack>/<item>`, for stickers (image) and sound effects (audio).
+            if let lib = a.library, lib.hasPrefix("content:"),
+               lib.range(of: #"^content:[a-z0-9-]+/[a-z0-9_.-]+$"#, options: .regularExpression) == nil || (a.kind != .image && a.kind != .audio) {
+                throw bad("\(f).library", "unknown content")
+            }
             let refs = [a.take, a.upload, a.library].compactMap { $0 }
             if refs.count != 1 || refs.contains(where: { $0.isEmpty || $0.utf16.count > 100 }) { throw bad(f, "needs exactly one of take, upload or library") }
             try num("\(f).durationSec", a.durationSec, 0.01, 36_000)
@@ -97,6 +110,12 @@ private struct Validator {
             assets[a.id] = a
         }
         assetKinds = assets.mapValues(\.kind)
+        for (i, a) in p.assets.enumerated() where a.reverseOf != nil {
+            let o = assets[a.reverseOf!]
+            if a.kind != .video || o == nil || o!.kind != .video || o!.reverseOf != nil || o!.id == a.id {
+                throw bad("edits.assets.\(i).reverseOf", "must be a video asset")
+            }
+        }
         if p.tracks.isEmpty || p.tracks.count > E.maxTracks { throw bad("edits.tracks", "must have 1–\(E.maxTracks) tracks") }
         if p.tracks[0].kind != .main { throw bad("edits.tracks.0.kind", "the first track must be the main track") }
         if p.tracks.filter({ $0.kind == .main }).count != 1 { throw bad("edits.tracks", "needs exactly one main track") }
@@ -125,7 +144,7 @@ private struct Validator {
                     try num("\(f).caption.words.\(j).startSec", w.startSec, 0, 36_000, optional: false)
                     try num("\(f).caption.words.\(j).endSec", w.endSec, w.startSec, 36_000, optional: false)
                 }
-                try textStyle("\(f).caption.style", c.style.textStyle)
+                try textStyle("\(f).caption.style", c.style.textStyle, ownFont: false)
                 try color("\(f).caption.style.highlightColor", c.style.highlightColor, optional: false)
                 try num("\(f).caption.style.y", c.style.y, 0, 1)
                 try num("\(f).caption.style.wordsPerPage", c.style.wordsPerPage, 1, 8)
@@ -178,6 +197,8 @@ private struct Validator {
                     }
                     try anim("\(g).animIn", c.animIn, text: false)
                     try anim("\(g).animOut", c.animOut, text: false)
+                    if c.animLoop != nil && t.kind == .main { throw bad("\(g).animLoop", "loop animations are for overlays, images and text") }
+                    try loop("\(g).animLoop", c.animLoop)
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
                         try num("\(g).chroma.similarity", ck.similarity, 0, 1)
@@ -208,25 +229,37 @@ private struct Validator {
                     try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity] + E.KfProp.color + E.KfProp.mask + E.KfProp.look, hasMask: im.mask != nil)
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
+                    try loop("\(g).animLoop", im.animLoop)
                 case (.text, .text(let tx)):
                     let n = tx.text.utf16.count
                     if n < 1 || n > E.maxText { throw bad("\(g).text", "must be 1–\(E.maxText) characters") }
                     try num("\(g).startSec", tx.startSec, 0, 600, optional: false)
                     try num("\(g).durationSec", tx.durationSec, E.minItemSec, 600, optional: false)
-                    try textStyle("\(g).style", tx.style)
+                    try textStyle("\(g).style", tx.style, ownFont: true)
                     if tx.transform != nil { try visual(g, fit: nil, transform: tx.transform, crop: nil, opacity: nil, adjust: nil, filter: nil, look: nil) }
                     try num("\(g).opacity", tx.opacity, 0, 1)
                     try kfs("\(g).keyframes", tx.keyframes, tx.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
                     try anim("\(g).animIn", tx.animIn, text: true)
                     try anim("\(g).animOut", tx.animOut, text: true)
+                    try loop("\(g).animLoop", tx.animLoop)
                 case (.music, .audio(let c)), (.voice, .audio(let c)), (.sfx, .audio(let c)):
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video],
                                  voice: c.voiceEffect)
                     try num("\(g).startSec", c.startSec, 0, 600, optional: false)
-                    if let s = c.speed, s != 1 { throw bad("\(g).speed", "audio clips play at 1×") }
+                    // Audio speed (contract, WS8 dacb556): 0.5–2×, pitch kept.
+                    try num("\(g).speed", c.speed, 0.5, 2)
                     try kfs("\(g).keyframes", c.keyframes, E.clipLength(c), allowed: [.volume])
                     if let b = c.beats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).beats", "must be up to 2000 times") }
                     if let b = c.strongBeats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).strongBeats", "must be up to 2000 times") }
+                case (.adjust, .adjust(let ad)):
+                    // Adjustment layers (contract, WS8 3e20288): colour and strength only.
+                    if let k = ad.strayKeys.first { throw bad("\(g).\(k)", "is not part of an adjustment layer") }
+                    try num("\(g).startSec", ad.startSec, 0, 600, optional: false)
+                    try num("\(g).durationSec", ad.durationSec, E.minItemSec, 600, optional: false)
+                    if ad.adjust?.highlights != nil { throw bad("\(g).adjust.highlights", "is not part of an adjustment layer") }
+                    if ad.adjust?.shadows != nil { throw bad("\(g).adjust.shadows", "is not part of an adjustment layer") }
+                    try visual(g, fit: nil, transform: nil, crop: nil, opacity: ad.opacity, adjust: ad.adjust, filter: ad.filter, look: nil)
+                    try kfs("\(g).keyframes", ad.keyframes, ad.durationSec, allowed: [.opacity] + E.KfProp.color)
                 default:
                     break
                 }
@@ -329,13 +362,24 @@ private struct Validator {
         }
     }
 
+    func loop(_ f: String, _ l: EditV2.AnimLoop?) throws {
+        guard let l else { return }
+        if !EditV2.LoopKind.all.contains(l.kind) { throw bad("\(f).kind", "unknown loop animation") }
+        try num("\(f).periodSec", l.periodSec, 0.2, 5, optional: false)
+        if let a = l.amount { try num("\(f).amount", a, 0, 1, optional: false) }
+    }
+
     func anim(_ f: String, _ a: EditV2.Anim?, text: Bool) throws {
         guard let a else { return }
         if a.kind == .typewriter && !text { throw bad("\(f).kind", "unknown animation") }
         try num("\(f).durationSec", a.durationSec, 0.1, 2, optional: false)
     }
 
-    func textStyle(_ f: String, _ s: EditV2.TextStyle) throws {
+    func textStyle(_ f: String, _ s: EditV2.TextStyle, ownFont: Bool) throws {
+        if let fa = s.fontAsset {
+            if !ownFont { throw bad("\(f).fontAsset", "captions use the built-in fonts") }
+            if assets[fa]?.kind != .font { throw bad("\(f).fontAsset", "must be a font asset") }
+        }
         if ![400, 700, 900].contains(s.weight) { throw bad("\(f).weight", "must be 400, 700 or 900") }
         try num("\(f).sizePct", s.sizePct, 0.015, 0.25, optional: false)
         try color("\(f).color", s.color, optional: false)

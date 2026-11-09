@@ -1,6 +1,7 @@
 import AppKit
 import MuseCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The inspector (E1 right, E2 panels; plans/edit-layout.md): "Inspector" with "Hide inspector", its sections as a 3 × 2
 /// grid of labelled buttons (Captions, Text, Video, Audio, Speed, Animate), then the section's settings scrolling inside.
@@ -172,6 +173,7 @@ struct CaptionsPanel: View {
             VStack(alignment: .leading, spacing: Space.s3) {
                 SuiteLabel("Style", trailing: style == nil ? nil : "Word-by-word")
                 CaptionStyleGrid(session: session)
+                ContentCaptionChips(session: session)
             }
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
@@ -179,7 +181,12 @@ struct CaptionsPanel: View {
                 VStack(alignment: .leading, spacing: Space.s4) {
                     HStack(spacing: 8) {
                         Menu {
-                            ForEach(EditV2.Font.allCases, id: \.self) { f in
+                            ForEach(EditV2.Font.bundled, id: \.self) { f in
+                                Button(fontName(f)) { session.edit { $0.changeCaptionStyle { $0.font = f } } }
+                            }
+                            // The content library's families (WS8 929bcf2), loaded when chosen.
+                            Divider()
+                            ForEach(EditV2.Font.allCases.filter(\.isContent), id: \.self) { f in
                                 Button(fontName(f)) { session.edit { $0.changeCaptionStyle { $0.font = f } } }
                             }
                         } label: {
@@ -219,16 +226,7 @@ struct CaptionsPanel: View {
         }
     }
 
-    func fontName(_ f: EditV2.Font) -> String {
-        switch f {
-        case .sans: return "Sans"
-        case .serif: return "Serif"
-        case .rounded: return "Rounded"
-        case .condensed: return "Condensed"
-        case .mono: return "Mono"
-        case .marker: return "Marker"
-        }
-    }
+    func fontName(_ f: EditV2.Font) -> String { f.label }
 }
 
 // MARK: - Text
@@ -277,8 +275,22 @@ struct TextPanel: View {
         EditPanel(title: "Style") {
             HStack(spacing: Space.s2) {
                 Menu {
-                    ForEach(EditV2.Font.allCases, id: \.self) { f in Button(f.rawValue.capitalized) { change { $0.style.font = f } } }
-                } label: { Text(st.font.rawValue.capitalized).font(t.scale.caption.font).frame(maxWidth: .infinity, alignment: .leading) }
+                    ForEach(EditV2.Font.bundled, id: \.self) { f in Button(f.label) { change { $0.style.font = f; $0.style.fontAsset = nil } } }
+                    // The content library's families (WS8 929bcf2), loaded when chosen.
+                    Divider()
+                    ForEach(EditV2.Font.allCases.filter(\.isContent), id: \.self) { f in Button(f.label) { change { $0.style.font = f; $0.style.fontAsset = nil } } }
+                    // Own fonts (contract, WS8 6ccd9aa): each one in this edit, then a new one from this Mac.
+                    let own = session.state.ownFonts
+                    if !own.isEmpty {
+                        Divider()
+                        ForEach(own) { a in Button(a.name ?? "Your font") { session.edit { $0.setTextFont(a) } } }
+                    }
+                    Divider()
+                    Button("Your font…") { pickFont() }
+                } label: {
+                    Text(st.fontAsset.flatMap { id in session.project.asset(id)?.name } ?? st.font.label)
+                        .font(t.scale.caption.font).frame(maxWidth: .infinity, alignment: .leading)
+                }
                     .menuStyle(.borderlessButton)
                     .padding(.horizontal, Space.s3)
                     .frame(height: 32)
@@ -286,7 +298,10 @@ struct TextPanel: View {
                     .accessibilityLabel("Font")
                 SuiteSwatch(hex: st.color, label: "Text colour") { c in change { $0.style.color = c } }
             }
-            EditSeg(options: [(400, "Regular"), (700, "Bold"), (900, "Black")], selection: st.weight) { w in change { $0.style.weight = w } }
+            // An own font is drawn as its own face: no weight to pick.
+            if st.fontAsset == nil {
+                EditSeg(options: [(400, "Regular"), (700, "Bold"), (900, "Black")], selection: st.weight) { w in change { $0.style.weight = w } }
+            }
             SuiteSlider("Size", value: st.sizePct, range: 0.015...0.15, format: { "\(Int(($0 * 1000).rounded()) / 10) %" }) { v in
                 change { $0.style.sizePct = (v * 1000).rounded() / 1000 }
             }
@@ -337,6 +352,16 @@ struct TextPanel: View {
             SuiteSlider("Duration", value: tx.durationSec, range: 0.3...max(0.4, min(30, session.duration - tx.startSec)),
                         format: { String(format: "%.1f s", $0) }) { v in change { $0.durationSec = (v * 10).rounded() / 10 } }
         }
+    }
+
+    /// "Your font…": a .ttf / .otf from this Mac, uploaded, checked and set on this text.
+    private func pickFont() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = ["ttf", "otf"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a font (.ttf or .otf, up to 10 MB)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await session.importFont(url) }
     }
 
     private func commitText(_ tx: EditV2.TextItem) {
@@ -394,6 +419,30 @@ struct AnimPanel: View {
                 if let a {
                     SuiteSlider("Duration", value: a.durationSec, range: 0.1...2, format: { String(format: "%.1f s", $0) }) { v in
                         set(isIn, EditV2.Anim(kind: a.kind, durationSec: (v * 10).rounded() / 10))
+                    }
+                }
+            }
+        }
+        // Loop animations (contract, WS8 57fe40c): overlays, pictures and text; not the main track.
+        if session.state.canLoop {
+            let l = session.state.selectedLoop
+            EditPanel(title: "Loop") {
+                FlowLayout(spacing: 6) {
+                    Chip("None", on: l == nil) { session.edit { $0.setLoop(nil) } }
+                    ForEach(EditV2.LoopKind.all, id: \.self) { k in
+                        Chip(k.label, on: l?.kind == k) {
+                            session.edit { $0.setLoop(EditV2.AnimLoop(kind: k, periodSec: l?.periodSec ?? (k == .spin ? 4 : 1.5), amount: l?.amount)) }
+                        }
+                    }
+                }
+                if let l {
+                    SuiteSlider("Speed", value: l.periodSec, range: 0.2...5, format: { String(format: "%.1f s a cycle", $0) }) { v in
+                        session.edit { $0.setLoop(EditV2.AnimLoop(kind: l.kind, periodSec: (v * 10).rounded() / 10, amount: l.amount)) }
+                    }
+                    if l.kind != .spin {
+                        SuiteSlider("Amount", value: l.amount ?? 0.5, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                            session.edit { $0.setLoop(EditV2.AnimLoop(kind: l.kind, periodSec: l.periodSec, amount: (v * 100).rounded() / 100)) }
+                        }
                     }
                 }
             }

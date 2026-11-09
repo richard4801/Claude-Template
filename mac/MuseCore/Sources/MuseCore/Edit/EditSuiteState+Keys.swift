@@ -67,6 +67,7 @@ extension EditSuiteState {
         case .image(let c): return c.keyframes
         case .text(let c): return c.keyframes
         case .audio(let c): return c.keyframes
+        case .adjust(let c): return c.keyframes
         }
     }
 
@@ -76,6 +77,7 @@ extension EditSuiteState {
         case .image(var c): c.keyframes = k; it = .image(c)
         case .text(var c): c.keyframes = k; it = .text(c)
         case .audio(var c): c.keyframes = k; it = .audio(c)
+        case .adjust(var c): c.keyframes = k; it = .adjust(c)
         }
     }
 
@@ -202,5 +204,189 @@ extension EditSuiteState {
     public mutating func setKeyColour(_ hex: String) -> Bool {
         guard selectedVideo?.chroma != nil else { return false }
         return changeChroma { $0.color = hex.uppercased() }
+    }
+
+    // MARK: Loop animations (contract, WS8 57fe40c)
+
+    /// The selected item's loop (overlay clips, pictures and text), or nil.
+    public var selectedLoop: E.AnimLoop? {
+        switch selectedItem {
+        case .video(let c): return c.animLoop
+        case .image(let c): return c.animLoop
+        case .text(let c): return c.animLoop
+        default: return nil
+        }
+    }
+
+    /// Whether the selected item can loop (an overlay clip, a picture or text; not a main clip or a sound).
+    public var canLoop: Bool {
+        switch selectedItem {
+        case .video: return !selectedIsMain
+        case .image, .text: return true
+        default: return false
+        }
+    }
+
+    /// Sets the selected item's loop (nil removes it): period 0.2–5 s, amount 0–1 (left out at the default 0.5).
+    @discardableResult
+    public mutating func setLoop(_ loop: E.AnimLoop?) -> Bool {
+        guard canLoop else { return false }
+        var l = loop
+        if var x = l {
+            x.periodSec = E.r3(min(5, max(0.2, x.periodSec)))
+            x.amount = x.amount.map { E.r3(min(1, max(0, $0))) }.flatMap { abs($0 - 0.5) < 1e-9 ? nil : $0 }
+            l = x
+        }
+        return changeSelected { it in
+            switch it {
+            case .video(var c): c.animLoop = l; it = .video(c)
+            case .image(var c): c.animLoop = l; it = .image(c)
+            case .text(var c): c.animLoop = l; it = .text(c)
+            case .audio, .adjust: break
+            }
+        }
+    }
+
+    // MARK: Audio speed (contract, WS8 dacb556)
+
+    /// The selected music, voice or effect clip's speed (pitch kept), or nil when no sound is selected.
+    public var selectedAudioSpeed: Double? {
+        guard case .audio(let c)? = selectedItem else { return nil }
+        return c.speed ?? 1
+    }
+
+    /// Sets the selected sound's speed, 0.5–2× (1 is left out); its length on the timeline follows.
+    @discardableResult
+    public mutating func setAudioSpeed(_ s: Double) -> Bool {
+        guard case .audio? = selectedItem else { return false }
+        let v = min(2, max(0.5, (s * 100).rounded() / 100))
+        return changeSelected { it in
+            guard case .audio(var c) = it else { return }
+            c.speed = abs(v - 1) < 1e-9 ? nil : v
+            it = .audio(c)
+        }
+    }
+
+    // MARK: Adjustment layers (contract, WS8 3e20288)
+
+    /// The selected adjustment layer item, or nil.
+    public var selectedAdjust: E.AdjustItem? { selectedItem?.adjustItem }
+
+    /// Adds an adjustment layer at the playhead (3 s, or to the end), on the first adjustment track it fits, else a new one;
+    /// selected.
+    @discardableResult
+    public mutating func addAdjustLayer(durationSec: Double = 3) -> Bool {
+        let at = E.r6(min(max(0, playhead), max(0, duration - E.minItemSec)))
+        var newId: String?
+        let ok = apply { p in
+            let d = E.r6(min(durationSec, max(E.minItemSec, E.durationSec(p) - at)))
+            let id = p.newId("adj")
+            let item = E.AdjustItem(id: id, startSec: at, durationSec: d)
+            for t in p.tracks where t.kind == .adjust {
+                if let r = p.adding(.adjust(item), toTrack: t.id) { newId = id; return r }
+            }
+            guard let r = p.addingTrack(.adjust, name: "Adjustment") else { return nil }
+            newId = id
+            return r.project.adding(.adjust(item), toTrack: r.trackId)
+        }
+        if ok { selection = newId; tab = .video }
+        return ok
+    }
+
+    /// The selected layer's filter preset (nil removes it), amount 0–1.
+    @discardableResult
+    public mutating func setLayerFilter(_ id: String?, amount: Double = 1) -> Bool {
+        guard selectedAdjust != nil else { return false }
+        let f = id.map { E.FilterRef(id: $0, amount: E.r3(min(1, max(0, amount)))) }
+        return changeSelected { it in
+            guard case .adjust(var c) = it else { return }
+            c.filter = f
+            it = .adjust(c)
+        }
+    }
+
+    // MARK: Own fonts (contract, WS8 6ccd9aa)
+
+    /// The project's own fonts (font assets), in the order they were added.
+    public var ownFonts: [E.Asset] { project.assets.filter { $0.kind == .font } }
+
+    /// Adds a checked font upload as a font asset (if new) and sets it on the selected text; nil `asset` puts the built-in
+    /// family back.
+    @discardableResult
+    public mutating func setTextFont(_ asset: E.Asset?) -> Bool {
+        guard selectedItem?.textItem != nil else { return false }
+        if let a = asset, a.kind != .font { return false }
+        let sel = selection
+        return apply { p in
+            var q = asset.map { p.addingAsset($0) } ?? p
+            guard let id = sel, let r = q.updating(id, { it in
+                guard case .text(var tx) = it else { return }
+                tx.style.fontAsset = asset?.id
+                it = .text(tx)
+            }) else { return nil }
+            q = r
+            return q
+        }
+    }
+
+    // MARK: HSL per hue (contract, WS8 9afb6aa)
+
+    /// The selected picture's HSL value for a band ("red" …) and key ("hue", "sat", "light"), 0 when unset.
+    public func hslValue(_ band: String, _ key: String) -> Double { selectedVisual?.look?.hsl?[band]?[key] ?? 0 }
+
+    /// Sets one band's hue / sat / light (−1…1; 0 removes it, and empty bands and an empty HSL go too).
+    @discardableResult
+    public mutating func setHsl(_ band: String, _ key: String, _ value: Double) -> Bool {
+        guard E.hueBands.contains(where: { $0.0 == band }), ["hue", "sat", "light"].contains(key), selectedItem?.textItem == nil,
+              selectedAdjust == nil, selectedVisual != nil else { return false }
+        let v = E.r3(min(1, max(-1, value)))
+        return changeVisual { vis in
+            var l = vis.look ?? E.Look()
+            var h = l.hsl ?? [:]
+            var b = h[band] ?? [:]
+            b[key] = abs(v) < 0.0005 ? nil : v
+            h[band] = b.isEmpty ? nil : b
+            l.hsl = h.isEmpty ? nil : h
+            vis.look = l == E.Look() ? nil : l
+        }
+    }
+
+    /// Removes every HSL setting of the selected picture.
+    @discardableResult
+    public mutating func resetHsl() -> Bool {
+        guard selectedVisual?.look?.hsl != nil else { return false }
+        return changeVisual { vis in
+            var l = vis.look ?? E.Look()
+            l.hsl = nil
+            vis.look = l == E.Look() ? nil : l
+        }
+    }
+
+    // MARK: Reverse (contract, WS8 cb5413e)
+
+    /// The selected clip's original asset when it plays a reversed copy, else nil.
+    public var reversedFrom: String? {
+        guard let c = selectedVideo else { return nil }
+        return project.asset(c.asset)?.reverseOf
+    }
+
+    /// The reversed copy already in the project for an asset, if any.
+    public func reversedCopy(of assetId: String) -> E.Asset? { project.assets.first { $0.reverseOf == assetId } }
+
+    /// Switches the selected clip to `target` (the reversed copy, or the original when it's reversed), adding `target` to
+    /// the assets if new; one undo step. Returns the parts dropped on the way (background removal, separate sound), or nil
+    /// when refused (a freeze frame, nothing selected).
+    @discardableResult
+    public mutating func reverseSelected(to target: E.Asset) -> [String]? {
+        guard let c = selectedVideo else { return nil }
+        guard c.holdSec == nil else { refuse("A freeze frame has nothing to reverse"); return nil }
+        // D is the original source's length, whichever way round.
+        let original = target.reverseOf ?? project.asset(c.asset)?.reverseOf ?? c.asset
+        guard let d = project.asset(original)?.durationSec ?? target.durationSec, let next = E.reverseClip(c, reversed: target.id, durationSec: d) else { return nil }
+        var dropped: [String] = []
+        if c.alphaMatte != nil { dropped.append("background removal") }
+        if c.audioAsset != nil { dropped.append("the separate sound") }
+        let ok = apply { p in p.addingAsset(target).updating(c.id) { $0 = .video(next) } }
+        return ok ? dropped : nil
     }
 }

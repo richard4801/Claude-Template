@@ -214,6 +214,8 @@ extension EditV2 {
         case fade, black, white, slideLeft, slideRight, slideUp, slideDown, zoom
         /// Edit suite additions.
         case whip, spin, glitch
+        /// Content pack (WS8 929bcf2): made of the same layer values.
+        case zoomOut, whipRight, coverLeft, coverRight, coverUp, coverDown, splitFade
     }
 
     /// Speed-curve preset (`custom` = edited points). Decodes any string so validate() can name an unknown one.
@@ -290,10 +292,31 @@ extension EditV2 {
         public init(kind: AnimKind, durationSec: Double) { self.kind = kind; self.durationSec = durationSec }
     }
 
+    /// Loop animation kinds; kept as a string so an unknown kind reaches validation ("unknown loop animation").
+    public struct LoopKind: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+        public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+        public var description: String { rawValue }
+        public static let pulse = LoopKind(rawValue: "pulse"), sway = LoopKind(rawValue: "sway"), float = LoopKind(rawValue: "float")
+        public static let spin = LoopKind(rawValue: "spin"), blink = LoopKind(rawValue: "blink")
+        public static let all: [LoopKind] = [.pulse, .sway, .float, .spin, .blink]
+        public var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    }
+
+    /// A repeating move: period 0.2–5 s, amount 0–1 (default 0.5; spin ignores it).
+    public struct AnimLoop: Codable, Hashable, Sendable {
+        public var kind: LoopKind
+        public var periodSec: Double
+        public var amount: Double?
+        public init(kind: LoopKind, periodSec: Double, amount: Double? = nil) { self.kind = kind; self.periodSec = periodSec; self.amount = amount }
+    }
+
     public enum Fit: String, Codable, Hashable, Sendable { case cover, contain }
 
     /// `lut` = an imported .cube (Looks); it must be an `upload`.
-    public enum AssetKind: String, Codable, Hashable, Sendable { case video, image, audio, lut }
+    public enum AssetKind: String, Codable, Hashable, Sendable { case video, image, audio, lut, font /* own fonts (WS8 6ccd9aa): a .ttf / .otf upload */ }
 
     public struct Asset: Codable, Hashable, Sendable, Identifiable {
         public var id: String
@@ -308,10 +331,14 @@ extension EditV2 {
         public var hasAudio: Bool?
         /// A hint, never trusted.
         public var url: String?
+        /// A font asset's family and style, read from the file (display only), 1–80 characters.
+        public var name: String?
+        /// Reverse (WS8 cb5413e): this video asset is that video asset played backwards.
+        public var reverseOf: String?
         public init(id: String, kind: AssetKind, take: String? = nil, upload: String? = nil, library: String? = nil, durationSec: Double? = nil,
-                    width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil) {
+                    width: Int? = nil, height: Int? = nil, hasAudio: Bool? = nil, url: String? = nil, name: String? = nil) {
             self.id = id; self.kind = kind; self.take = take; self.upload = upload; self.library = library; self.durationSec = durationSec
-            self.width = width; self.height = height; self.hasAudio = hasAudio; self.url = url
+            self.width = width; self.height = height; self.hasAudio = hasAudio; self.url = url; self.name = name
         }
     }
 
@@ -353,6 +380,8 @@ extension EditV2 {
         /// In / out animation (as pictures: fade, pop, slideUp, slideDown, zoom), main or overlay; animState over clipLength.
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,
@@ -382,6 +411,8 @@ extension EditV2 {
         public var look: Look?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         /// Edit suite.
         public var mask: Mask?
         /// Wave 1.
@@ -396,7 +427,33 @@ extension EditV2 {
         }
     }
 
-    public enum Font: String, Codable, Hashable, Sendable, CaseIterable { case sans, serif, rounded, condensed, mono, marker }
+    public enum Font: String, Codable, Hashable, Sendable, CaseIterable {
+        case sans, serif, rounded, condensed, mono, marker
+        /// The content library's families (catalog `fonts` pack; Cyrillic and Latin Extended), WS8 929bcf2.
+        case inter, montserrat, robotoCondensed, playfair, unbounded, rubik, jetbrainsMono, caveat, oswald
+        /// The six bundled families.
+        public static let bundled: [Font] = [.sans, .serif, .rounded, .condensed, .mono, .marker]
+        public var isContent: Bool { !Font.bundled.contains(self) }
+        /// The bundled family a content font draws in until its file is on this Mac (model.ts FONT_FALLBACK).
+        public var fallback: Font {
+            switch self {
+            case .inter, .montserrat, .unbounded: return .sans
+            case .robotoCondensed, .oswald: return .condensed
+            case .playfair: return .serif
+            case .rubik: return .rounded
+            case .jetbrainsMono: return .mono
+            case .caveat: return .marker
+            default: return self
+            }
+        }
+        public var label: String {
+            switch self {
+            case .robotoCondensed: return "Roboto Condensed"
+            case .jetbrainsMono: return "JetBrains Mono"
+            default: return rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+            }
+        }
+    }
     public enum Align: String, Codable, Hashable, Sendable { case left, center, right }
 
     public struct Stroke: Codable, Hashable, Sendable {
@@ -427,6 +484,8 @@ extension EditV2 {
     }
 
     public struct TextStyle: Codable, Hashable, Sendable {
+        /// A copy with `fontAsset` set.
+        public func with(fontAsset f: String?) -> TextStyle { var c = self; c.fontAsset = f; return c }
         public var font: Font
         /// 400, 700 or 900.
         public var weight: Int
@@ -441,6 +500,8 @@ extension EditV2 {
         public var stroke: Stroke?
         public var shadow: Shadow?
         public var background: TextBackground?
+        /// Text items only: a `font` asset drawn as is (its own face; `weight` isn't synthesised); `font` stays the fallback.
+        public var fontAsset: String?
         public init(font: Font = .sans, weight: Int = 900, sizePct: Double = 0.045, color: String = "#FFFFFF", align: Align = .center,
                     maxWidthPct: Double? = nil, lineHeight: Double? = nil, letterSpacing: Double? = nil, uppercase: Bool? = nil,
                     stroke: Stroke? = nil, shadow: Shadow? = nil, background: TextBackground? = nil) {
@@ -462,6 +523,8 @@ extension EditV2 {
         public var keyframes: Keyframes?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Loop animation (contract, WS8 57fe40c): a repeating move while it's on screen (overlays, images, text; not main).
+        public var animLoop: AnimLoop?
         /// The hook template it was made from.
         public var template: String?
         public init(id: String, startSec: Double, durationSec: Double, text: String, style: TextStyle, transform: Transform? = nil,
@@ -517,6 +580,8 @@ extension EditV2 {
         public var stroke: Stroke?
         public var shadow: Shadow?
         public var background: TextBackground?
+        /// Refused on captions (they use the built-in fonts); decoded so validation can say so.
+        public var fontAsset: String?
         public var preset: CaptionPreset
         public var highlightColor: String
         /// Centre, 0–1 (default 0.72).
@@ -527,7 +592,7 @@ extension EditV2 {
         public init(_ s: TextStyle, preset: CaptionPreset, highlightColor: String, y: Double? = nil, wordsPerPage: Double? = nil, maxLines: Double? = nil) {
             font = s.font; weight = s.weight; sizePct = s.sizePct; color = s.color; align = s.align; maxWidthPct = s.maxWidthPct
             lineHeight = s.lineHeight; letterSpacing = s.letterSpacing; uppercase = s.uppercase; stroke = s.stroke; shadow = s.shadow
-            background = s.background
+            background = s.background; fontAsset = s.fontAsset
             self.preset = preset; self.highlightColor = highlightColor; self.y = y; self.wordsPerPage = wordsPerPage; self.maxLines = maxLines
         }
 
@@ -535,6 +600,7 @@ extension EditV2 {
         public var textStyle: TextStyle {
             TextStyle(font: font, weight: weight, sizePct: sizePct, color: color, align: align, maxWidthPct: maxWidthPct, lineHeight: lineHeight,
                       letterSpacing: letterSpacing, uppercase: uppercase, stroke: stroke, shadow: shadow, background: background)
+                .with(fontAsset: fontAsset)
         }
     }
 
@@ -572,8 +638,67 @@ extension EditV2 {
 
     public enum TrackKind: String, Codable, Hashable, Sendable, CaseIterable {
         case main, video, image, text, caption, music, voice, sfx
+        /// Adjustment layers (contract, WS8 3e20288): their colour applies to the whole picture under text and captions.
+        case adjust
         public var isAudio: Bool { self == .music || self == .voice || self == .sfx }
         public var isVideo: Bool { self == .main || self == .video }
+    }
+
+    /// An adjustment layer's item: colour (adjust, filter) and strength (opacity 0–1), keyframes on opacity and the colour
+    /// properties. `strayKeys` names picture fields it was given (look, mask, …) so validation can refuse them.
+    public struct AdjustItem: Codable, Hashable, Sendable, Identifiable {
+        public var id: String
+        public var startSec: Double
+        public var durationSec: Double
+        public var adjust: Adjust?
+        public var filter: FilterRef?
+        public var keyframes: Keyframes?
+        public var opacity: Double?
+        public var strayKeys: [String] = []
+
+        public init(id: String, startSec: Double, durationSec: Double, adjust: Adjust? = nil, filter: FilterRef? = nil, keyframes: Keyframes? = nil,
+                    opacity: Double? = nil) {
+            self.id = id; self.startSec = startSec; self.durationSec = durationSec; self.adjust = adjust; self.filter = filter
+            self.keyframes = keyframes; self.opacity = opacity
+        }
+
+        enum CodingKeys: String, CodingKey { case id, startSec, durationSec, adjust, filter, keyframes, opacity }
+        static let refused = ["look", "mask", "transform", "crop", "fit", "asset"]
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            startSec = try c.decode(Double.self, forKey: .startSec)
+            durationSec = try c.decode(Double.self, forKey: .durationSec)
+            adjust = try c.decodeIfPresent(Adjust.self, forKey: .adjust)
+            filter = try c.decodeIfPresent(FilterRef.self, forKey: .filter)
+            keyframes = try c.decodeIfPresent(Keyframes.self, forKey: .keyframes)
+            opacity = try c.decodeIfPresent(Double.self, forKey: .opacity)
+            let any = try decoder.container(keyedBy: AnyKey.self)
+            strayKeys = Self.refused.filter { k in any.allKeys.contains { $0.stringValue == k } }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(startSec, forKey: .startSec)
+            try c.encode(durationSec, forKey: .durationSec)
+            try c.encodeIfPresent(adjust, forKey: .adjust)
+            try c.encodeIfPresent(filter, forKey: .filter)
+            try c.encodeIfPresent(keyframes, forKey: .keyframes)
+            try c.encodeIfPresent(opacity, forKey: .opacity)
+        }
+
+        struct AnyKey: CodingKey {
+            var stringValue: String; var intValue: Int?
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { stringValue = String(intValue); self.intValue = intValue }
+        }
+
+        public static func == (a: AdjustItem, b: AdjustItem) -> Bool {
+            a.id == b.id && a.startSec == b.startSec && a.durationSec == b.durationSec && a.adjust == b.adjust && a.filter == b.filter
+                && a.keyframes == b.keyframes && a.opacity == b.opacity && a.strayKeys == b.strayKeys
+        }
     }
 
     /// An item of a track; which kind a track holds follows from the track's kind.
@@ -582,6 +707,7 @@ extension EditV2 {
         case image(ImageItem)
         case text(TextItem)
         case audio(AudioClip)
+        case adjust(AdjustItem)
 
         public var id: String {
             get {
@@ -590,6 +716,7 @@ extension EditV2 {
                 case .image(let c): return c.id
                 case .text(let c): return c.id
                 case .audio(let c): return c.id
+                case .adjust(let c): return c.id
                 }
             }
             set {
@@ -598,6 +725,7 @@ extension EditV2 {
                 case .image(var c): c.id = newValue; self = .image(c)
                 case .text(var c): c.id = newValue; self = .text(c)
                 case .audio(var c): c.id = newValue; self = .audio(c)
+                case .adjust(var c): c.id = newValue; self = .adjust(c)
                 }
             }
         }
@@ -610,6 +738,7 @@ extension EditV2 {
                 case .image(let c): return c.startSec
                 case .text(let c): return c.startSec
                 case .audio(let c): return c.startSec
+                case .adjust(let c): return c.startSec
                 }
             }
             set {
@@ -618,6 +747,7 @@ extension EditV2 {
                 case .image(var c): c.startSec = newValue; self = .image(c)
                 case .text(var c): c.startSec = newValue; self = .text(c)
                 case .audio(var c): c.startSec = newValue; self = .audio(c)
+                case .adjust(var c): c.startSec = newValue; self = .adjust(c)
                 }
             }
         }
@@ -629,6 +759,7 @@ extension EditV2 {
             case .image(let c): return c.durationSec
             case .text(let c): return c.durationSec
             case .audio(let c): return EditV2.clipLength(c)
+            case .adjust(let c): return c.durationSec
             }
         }
 
@@ -636,12 +767,14 @@ extension EditV2 {
         public var imageItem: ImageItem? { if case .image(let c) = self { return c }; return nil }
         public var textItem: TextItem? { if case .text(let c) = self { return c }; return nil }
         public var audioClip: AudioClip? { if case .audio(let c) = self { return c }; return nil }
+        public var adjustItem: AdjustItem? { if case .adjust(let c) = self { return c }; return nil }
         public var keyframes: Keyframes? {
             switch self {
             case .video(let c): return c.keyframes
             case .image(let c): return c.keyframes
             case .text(let c): return c.keyframes
             case .audio(let c): return c.keyframes
+            case .adjust(let c): return c.keyframes
             }
         }
 
@@ -660,6 +793,7 @@ extension EditV2 {
             case .image(let c): try c.encode(to: encoder)
             case .text(let c): try c.encode(to: encoder)
             case .audio(let c): try c.encode(to: encoder)
+            case .adjust(let c): try c.encode(to: encoder)
             }
         }
     }
@@ -705,6 +839,7 @@ extension EditV2 {
                 case .text: list.append(.text(try u.decode(TextItem.self)))
                 case .music, .voice, .sfx: list.append(.audio(try u.decode(AudioClip.self)))
                 case .caption: list.append(try u.decode(Item.self))
+                case .adjust: list.append(.adjust(try u.decode(AdjustItem.self)))
                 }
             }
             items = list

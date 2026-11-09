@@ -55,6 +55,8 @@ extension SnapshotRunner {
                          isOpen: { store.outfitSheet != nil },
                          note: note)
         store.outfitSheet = nil
+        if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
+        try? await Task.sleep(for: .seconds(1))
         // The owner's model picker: Auto and every model's resolutions pin without spending (Generate isn't in the list).
         await walkScreen("model_picker", ax: ax, minimum: 8, deny: ["Generate"],
                          only: { $0.hasPrefix("Use ") },
@@ -83,6 +85,25 @@ extension SnapshotRunner {
              : "FAIL engine_list_swap: picked a model the swap list doesn't have (\(swapPick ?? ""))")
         state.overlay = nil
         store.setEnginePick(.swap, nil)
+        // Settings (owner-approved redesign 2026-11-09): every section's controls, minus anything that signs out, removes,
+        // opens another app or a web page, changes the server, starts Blender, or hides Advanced / changes the theme.
+        UserDefaults.standard.set(true, forKey: "showAdvancedSettings")
+        let settingsDeny = ["Sign out", "Remove", "Revoke", "Fail next render", "Reload", "Test connection", "Reconnect", "Use the MUSE server",
+                            "Sound and banners", "Open System Settings", "Setup guide", "Where to find", "How to install", "Run Blender", "New token",
+                            "Theme:", "Show advanced settings", "Send a test notification", "Invite someone", "Add credit", "Open credit", "Copy",
+                            "Install Claude Code", "Open claude.ai", "Sign in", "Use this engine"]
+        let sectionTitles = Set(SettingsSection.allCases.map(\.title))
+        for section in SettingsSection.allCases {
+            // Advanced: every control changes the server or the data (all skipped), so the walk checks it opens.
+            await walkScreen("settings_\(section.rawValue)", ax: ax, minimum: section == .advanced ? 0 : 1, deny: settingsDeny, denyExact: sectionTitles.union(["MUSE server", "Demo mode (no server)"]),
+                             base: { store.go(.home) },
+                             open: { store.openSettings(section) },
+                             isOpen: { store.screen == .settings && store.settingsSection == section },
+                             note: note)
+            store.closeProviderForm()
+            store.settingsPrompts = false
+        }
+        UserDefaults.standard.set(false, forKey: "showAdvancedSettings")
         // Import a video from a link (demo mode imports at once, nothing is downloaded or spent). "Choose a file instead"
         // opens a modal file panel, so it's skipped.
         // Only the sheet's own buttons: after an import the clip tile's label changes, and it opens a file panel.
@@ -144,6 +165,11 @@ extension SnapshotRunner {
         let chrome = Set(before.map(\.key))
         open()
         try? await Task.sleep(for: .seconds(1.5))
+        // A slow runner can take longer to show a popover or sheet: wait up to 6 s more for new controls.
+        for _ in 0..<12 {
+            if await ax.controls().controls.contains(where: { !chrome.contains($0.key) }) { break }
+            try? await Task.sleep(for: .seconds(0.5))
+        }
         var used = Set<String>(), skipped = Set<String>(), pressedLabels = Set<String>()
         var presses = 0
         for _ in 0..<300 {
@@ -180,7 +206,12 @@ extension SnapshotRunner {
         if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
         let missing = required.filter { !pressedLabels.contains($0) }
         if !missing.isEmpty { note("FAIL walk_\(name): never pressed \(missing.joined(separator: ", "))") }
-        if presses < minimum { note("FAIL walk_\(name): only \(presses) controls found (expected \(minimum) or more)") }
+        if presses < minimum {
+            note("FAIL walk_\(name): only \(presses) controls found (expected \(minimum) or more)")
+            // Why: what the window showed (new controls, the open state, a sheet still attached).
+            let now = await ax.controls().controls
+            note("  open=\(isOpen()) sheet=\(mainWindow?.attachedSheet != nil) new=\(now.filter { !chrome.contains($0.key) }.prefix(8).map(\.label)) all=\(now.count)")
+        }
         note("DONE walk_\(name) (\(presses) pressed, \(skipped.count) skipped)")
     }
 }

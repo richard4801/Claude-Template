@@ -61,17 +61,17 @@ const isUriArray = (p: Json, root: Json) => p.type === 'array' && isUri(resolve(
 const NAMES: Record<Exclude<Role, 'referenceImages'>, string[]> = {
   prompt: ['prompt', 'text', 'text_prompt', 'caption'],
   negativePrompt: ['negative_prompt', 'negative', 'negative_text'],
-  startImage: ['start_image', 'first_frame_image', 'first_frame', 'image', 'image_url', 'input_image', 'start_image_url', 'init_image', 'first_frame_url'],
-  endImage: ['end_image', 'last_frame_image', 'last_frame', 'end_image_url', 'tail_image_url', 'last_frame_url', 'end_frame'],
+  startImage: ['start_image', 'first_frame_image', 'first_frame', 'image', 'image_url', 'input_image', 'start_image_url', 'init_image', 'first_frame_url', 'images_list'],
+  endImage: ['end_image', 'last_frame_image', 'last_frame', 'end_image_url', 'tail_image_url', 'last_frame_url', 'end_frame', 'last_image'],
   duration: ['duration', 'seconds', 'duration_seconds', 'video_length', 'length'],
   aspectRatio: ['aspect_ratio', 'ratio'],
   resolution: ['resolution', 'video_resolution'],
   seed: ['seed'],
-  audio: ['generate_audio', 'audio', 'with_audio', 'enable_audio'],
+  audio: ['generate_audio', 'audio', 'with_audio', 'enable_audio', 'sound', 'generate_audio_switch'],
   width: ['width'],
   height: ['height'],
 };
-const REF_NAMES = ['reference_images', 'reference_image_urls', 'image_urls', 'input_images', 'images', 'image_input', 'ref_images', 'reference_image', 'ref_image', 'subject_reference'];
+const REF_NAMES = ['reference_images', 'reference_image_urls', 'image_urls', 'input_images', 'images', 'image_input', 'ref_images', 'reference_image', 'ref_image', 'subject_reference', 'images_list'];
 
 const numList = (vals: unknown[]) => vals.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
 

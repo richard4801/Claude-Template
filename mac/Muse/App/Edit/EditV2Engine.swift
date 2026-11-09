@@ -61,6 +61,9 @@ enum EditV2Engine {
                 do { out.luts[a.id] = try EditV2LookLibrary.readCube(url) } catch {
                     throw ApiError("edit_bad_media", "Couldn't read a LUT of this edit (\(error.localizedDescription))")
                 }
+            case .font:
+                // Own fonts: text that names it draws with this file; if it can't be read, the fallback family is used.
+                EditV2TextRenderer.registerOwnFont(a.id, file: url)
             }
         }
         return out

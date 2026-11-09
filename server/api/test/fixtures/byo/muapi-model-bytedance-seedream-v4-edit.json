@@ -1,0 +1,215 @@
+{
+ "name": "bytedance-seedream-v4-edit",
+ "description": "Seedream v4 Edit refines or transforms existing images based on a new prompt and a reference. Instead of masking, you provide a source image and describe how it should be altered — adjusting style, details, or replacing elements while keeping the subject consistent.",
+ "category": "Image to Image",
+ "family": "seedream",
+ "group_of": "image",
+ "domain": "ai",
+ "cost": 0.04,
+ "cost_currency": "USD",
+ "cost_strategy": "seedream-v4",
+ "dynamic_pricing": true,
+ "endpoint": "/api/v1/bytedance-seedream-v4-edit",
+ "endpoint_url": "bytedance-seedream-edit-v4",
+ "is_enabled": 1,
+ "is_coming_soon": false,
+ "input_fields": [
+  "prompt",
+  "images_list",
+  "aspect_ratio",
+  "resolution",
+  "num_images"
+ ],
+ "required_fields": [
+  "prompt",
+  "images_list"
+ ],
+ "estimate_endpoint": "/api/v1/models/bytedance-seedream-v4-edit/estimate-cost",
+ "input_schema": {
+  "schemas": {
+   "input_data": {
+    "x-order-properties": [
+     "prompt",
+     "images_list",
+     "aspect_ratio"
+    ],
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "examples": [
+       "A tranquil shoreline at dawn where waves turn into glowing ribbons of light, painting the sky with dreamlike hues of violet and gold. A figure walks along the edge, leaving footsteps that bloom into luminous flowers, symbolizing imagination flowing seamlessly into reality."
+      ],
+      "description": "Text prompt describing the image.",
+      "type": "string",
+      "title": "Prompt",
+      "name": "prompt"
+     },
+     "images_list": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/seedream-v4-edit-input.jpg"
+      ],
+      "description": "Upload or provide reference images. Used for image-to-image generation.",
+      "field": "images_list",
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "title": "Image URLs",
+      "name": "images_list",
+      "maxItems": 10
+     },
+     "aspect_ratio": {
+      "enum": [
+       "1:1",
+       "16:9",
+       "9:16",
+       "3:4",
+       "4:3",
+       "2:3",
+       "3:2",
+       "21:9"
+      ],
+      "title": "Aspect Ratio",
+      "name": "aspect_ratio",
+      "type": "string",
+      "description": "Aspect ratio of the output image.",
+      "default": "1:1"
+     },
+     "resolution": {
+      "enum": [
+       "1K",
+       "2K",
+       "4K"
+      ],
+      "title": "Resolution",
+      "name": "resolution",
+      "type": "string",
+      "description": "Resolution of the output image.",
+      "default": "4K"
+     },
+     "num_images": {
+      "title": "Number of images",
+      "name": "num_images",
+      "type": "int",
+      "description": "Number of images generated in single request. Each number will charge separately",
+      "default": 1,
+      "minValue": 1,
+      "maxValue": 4,
+      "step": 1
+     }
+    },
+    "title": "BaseInput",
+    "required": [
+     "prompt",
+     "images_list"
+    ],
+    "endpoint_url": "bytedance-seedream-edit-v4"
+   },
+   "output_data": {
+    "x-fal-order-properties": [
+     "image"
+    ],
+    "type": "object",
+    "properties": {
+     "video": {
+      "examples": [
+       "https://d3adwkbyhxyrtq.cloudfront.net/webassets/videomodels/seedream-v4-edit.jpeg"
+      ],
+      "description": "The generated image",
+      "title": "Image",
+      "comparison": false
+     }
+    },
+    "title": "SeeddreamV4Image",
+    "required": [
+     "image"
+    ]
+   }
+  }
+ },
+ "output_schema": {
+  "schemas": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "title": "request_id",
+     "type": "string",
+     "description": "prediction request_id"
+    },
+    "status": {
+     "title": "status",
+     "type": "string",
+     "description": "prediction status"
+    },
+    "output": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "title": "id",
+       "type": "string",
+       "description": "prediction request_id"
+      },
+      "urls": {
+       "title": "urls",
+       "type": "object",
+       "get": {
+        "title": "get",
+        "type": "string",
+        "format": "uri",
+        "description": "URL to retrieve the prediction result"
+       }
+      },
+      "error": {
+       "title": "error",
+       "type": "string",
+       "description": "Error message if the prediction failed"
+      },
+      "status": {
+       "title": "status",
+       "type": "string",
+       "description": "Status of the prediction (e.g., completed, failed)"
+      },
+      "outputs": {
+       "title": "outputs",
+       "type": "array",
+       "description": "List of output URLs",
+       "items": {
+        "title": "items",
+        "type": "string",
+        "format": "uri"
+       }
+      },
+      "timings": {
+       "title": "timings",
+       "type": "object",
+       "inference": {
+        "title": "inference",
+        "type": "number",
+        "description": "Inference time in seconds"
+       }
+      },
+      "created_at": {
+       "title": "created_at",
+       "type": "string",
+       "format": "date-time",
+       "description": "Timestamp when the prediction was created"
+      },
+      "has_nsfw_contents": {
+       "title": "has_nsfw_contents",
+       "type": "array",
+       "description": "List indicating NSFW content presence per output",
+       "items": {
+        "title": "items",
+        "type": "boolean"
+       }
+      }
+     },
+     "title": "output",
+     "required": [
+      "prompt"
+     ]
+    }
+   }
+  }
+ }
+}
