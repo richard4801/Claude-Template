@@ -326,6 +326,30 @@ class EditFixtureTest {
         if (p1First) assertEquals(aOut * (1 - aIn), a1, 1e-6) else assertEquals(aIn, a2, 1e-6)
     }
 
+    @Test fun separation() {
+        val d = fn["separation"]!!.obj
+        val p = EditJson.parse(d["project"]!!)
+        for (c in d["cases"]!!.arr) {
+            val keep = SeparationKeep.valueOf(c.obj["keep"]!!.str.uppercase())
+            val r = applySeparation(p, c.obj["clip"]!!.str, "voc", "ins", keep)
+            val want = c.obj["result"]
+            if (want == null || want is JsonNull) { assertEquals("${c.obj["clip"]} $keep", null, r); continue }
+            assertEquals(want.obj["ids"]!!.arr.map { it.str }, r!!.second)
+            assertJson("separation ${c.obj["clip"]} $keep", want.obj["project"], EditJson.encode(r.first))
+            validate(r.first)
+        }
+    }
+
+    @Test fun cutouts() {
+        for (c in fn["cutouts"]!!.arr) {
+            val p = EditJson.parse(c.obj["project"]!!)
+            val b = c.obj["box"]!!.obj
+            val r = applyCutout(p, "i1", "cut", listOf(b["x"]!!.num, b["y"]!!.num, b["w"]!!.num, b["h"]!!.num), c.obj["sourceWidth"]!!.num, c.obj["sourceHeight"]!!.num)
+            assertJson("cutout ${c.obj["name"]!!.str}", c.obj["result"], EditJson.encode(r!!))
+            validate(r)
+        }
+    }
+
     @Test fun audioSpeedTiming() {
         for (c in fn["audioSpeed"]!!.arr) {
             val o = c.obj["clip"]!!.obj

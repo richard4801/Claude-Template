@@ -333,7 +333,7 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
         fun note(o: kotlinx.serialization.json.JsonObject?, k: String) = (o?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
         val paid = obj("paid")
         val paidOff = if (off(paid)) note(paid, "reason") ?: "Turned off by the studio owner" else null
-        return listOf("captions", "matte", "denoise", "translate", "slowmo").mapNotNull { k ->
+        return listOf("captions", "matte", "denoise", "translate", "slowmo", "separate", "cutout").mapNotNull { k ->
             val o = obj(k)
             (paidOff ?: if (off(o)) (note(o, "note") ?: "Coming soon") else null)?.let { k to it }
         }.toMap()

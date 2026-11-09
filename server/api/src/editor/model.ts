@@ -444,6 +444,70 @@ export function overlayFade(p: EditProject, track: Track, item: Item, t: number)
   return r6(a);
 }
 
+/**
+ * Split voice and music (the `separate` helper, 2026-11-09): clip [clipId] (main or overlay video) is muted and the kept
+ * part(s) go on audio tracks in sync with it: vocals on a voice track, instrumental on a music track (the first of that
+ * kind free over the clip's span, else a new one), each with the clip's inSec/outSec and speed, starting where the clip
+ * starts on the timeline. The assets (kind audio) must already be in the project. Null for a freeze frame, a speed
+ * curve, a speed outside 0.5–2 (audio's range), or when a new track would pass the track limit.
+ */
+export function applySeparation(p: EditProject, clipId: string, vocals: string, instrumental: string, keep: 'vocals' | 'instrumental' | 'both'): { project: EditProject; ids: string[] } | null {
+  const track = p.tracks.find(t => (t.kind === 'main' || t.kind === 'video') && t.items.some(i => i.id === clipId));
+  const c = track?.items.find(i => i.id === clipId) as VideoClip | undefined;
+  if (!track || !c || c.holdSec !== undefined || c.speedCurve || (c.speed ?? 1) < 0.5 - 1e-9 || (c.speed ?? 1) > 2 + 1e-9) return null;
+  const span = itemSpan(p, track, c);
+  let tracks = p.tracks.map(t => (t === track ? { ...t, items: t.items.map(i => (i.id === clipId ? { ...i, muted: true } : i)) } : t));
+  const ids: string[] = [];
+  const taken = new Set(p.tracks.flatMap(t => [t.id, ...t.items.map(i => i.id)]));
+  const fresh = (base: string) => { let n = 1; while (taken.has(`${base}${n}`)) n++; const id = `${base}${n}`; taken.add(id); return id; };
+  const parts: ['voice' | 'music', string][] = [];
+  if (keep !== 'instrumental') parts.push(['voice', vocals]);
+  if (keep !== 'vocals') parts.push(['music', instrumental]);
+  for (const [kind, asset] of parts) {
+    const clip: AudioClip = { id: fresh(kind === 'voice' ? 'vocals' : 'instr'), asset, startSec: r6(span.startSec), inSec: c.inSec, outSec: c.outSec, ...((c.speed ?? 1) !== 1 ? { speed: c.speed } : {}) };
+    const free = (t: Track) => t.items.every(i => { const sp = itemSpan({ ...p, tracks }, t, i); return sp.endSec <= span.startSec + LIMITS.overlapSlackSec || sp.startSec >= span.endSec - LIMITS.overlapSlackSec; });
+    const at = tracks.findIndex(t => t.kind === kind && free(t));
+    if (at >= 0) {
+      tracks = tracks.map((t, k) => (k === at ? { ...t, items: [...t.items, clip].sort((a, b) => (a as AudioClip).startSec - (b as AudioClip).startSec) } : t));
+    } else {
+      if (tracks.length >= LIMITS.maxTracks) return null;
+      tracks = [...tracks, { id: fresh(kind), kind, items: [clip] }];
+    }
+    ids.push(clip.id);
+  }
+  return { project: { ...p, tracks }, ids };
+}
+
+/**
+ * Cut out a picture (the `cutout` helper, 2026-11-09): image item [itemId] switches to the cut-out [assetId] (a PNG of
+ * the subject, [box] {x, y, w, h} in the source picture's [sourceWidth]×[sourceHeight] pixels) and stays exactly where
+ * the subject sat: scale and x/y move so the cut-out covers the box's place. The crop is dropped (the cut-out is
+ * already trimmed); mask, look, blend and animations stay. Scale keys are multiplied by the same ratio and x/y keys
+ * get the same offset (worked out at the base scale, so it's exact without scale keys). Null if it isn't an image item.
+ */
+export function applyCutout(p: EditProject, itemId: string, assetId: string, box: { x: number; y: number; w: number; h: number }, sourceWidth: number, sourceHeight: number): EditProject | null {
+  const track = p.tracks.find(t => t.kind === 'image' && t.items.some(i => i.id === itemId));
+  const im = track?.items.find(i => i.id === itemId) as ImageItem | undefined;
+  if (!track || !im || sourceWidth <= 0 || sourceHeight <= 0 || box.w <= 0 || box.h <= 0) return null;
+  const cv = p.canvas.width / p.canvas.height;
+  const fw = (w: number, h: number) => (im.fit === 'cover' ? Math.max(1, (w / h) / cv) : Math.min(1, (w / h) / cv));
+  const tr = im.transform ?? {};
+  const scale = tr.scale ?? 1, rot = (tr.rotation ?? 0) * Math.PI / 180;
+  const k = fw(sourceWidth, sourceHeight) * scale / sourceWidth; // canvas widths per source pixel
+  const scale2 = box.w * k / fw(box.w, box.h);
+  let dx = (box.x + box.w / 2 - sourceWidth / 2) * k, dy = (box.y + box.h / 2 - sourceHeight / 2) * k * cv;
+  if (tr.flipX) dx = -dx; if (tr.flipY) dy = -dy;
+  // Rotate the offset (clockwise degrees) in pixels, then back to canvas fractions.
+  const px = dx * p.canvas.width, py = dy * p.canvas.height;
+  const ox = (px * Math.cos(rot) - py * Math.sin(rot)) / p.canvas.width, oy = (px * Math.sin(rot) + py * Math.cos(rot)) / p.canvas.height;
+  const ratio = scale2 / scale;
+  const keys = im.keyframes ? Object.fromEntries(Object.entries(im.keyframes).map(([prop, ks]) => [prop, (ks as Keyframe[]).map(kf =>
+    prop === 'scale' ? { ...kf, v: r6(kf.v * ratio) } : prop === 'x' ? { ...kf, v: r6(kf.v + ox) } : prop === 'y' ? { ...kf, v: r6(kf.v + oy) } : kf)])) as Keyframes : undefined;
+  const { crop: _c, ...rest } = im;
+  const next: ImageItem = { ...rest, asset: assetId, transform: { ...tr, x: r6((tr.x ?? 0.5) + ox), y: r6((tr.y ?? 0.5) + oy), scale: r6(scale2) }, ...(keys ? { keyframes: keys } : {}) };
+  return { ...p, tracks: p.tracks.map(t => (t === track ? { ...t, items: t.items.map(i => (i.id === itemId ? next : i)) } : t)) };
+}
+
 /** A hold (freeze frame) lasts holdSec whatever its source range. */
 export const clipLength = (c: Timed) => c.holdSec !== undefined ? c.holdSec :
   c.speedCurve ? speedPieces(c).reduce((s, p) => s + (p.outSec - p.inSec) / p.speed, 0) : (c.outSec - c.inSec) / (c.speed ?? 1);

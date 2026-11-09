@@ -518,6 +518,7 @@ private fun TransformBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) ->
     }
     // Cross-dissolve from the previous item on this overlay track (it must touch it, or already dissolve from it).
     if (item is VideoClip && overlayTrack || item is studio.muse.core.edit.ImageItem) ui.project?.let { p -> DissolveRow(p, item, act) }
+    if (item is studio.muse.core.edit.ImageItem) CutoutRow(ui, item, act)
     T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     if (!keys.isNullOrEmpty()) {
         SuiteLabel("Easing")
@@ -607,6 +608,8 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
         when { denoise?.running == true -> "Cleaning the voice · ${denoise.progress} %"; cleaned -> "Background noise removed"; else -> "Removes background noise · ${denoise?.price ?: "AI"}" },
         cleaned, { act(EditAction.NoiseReduction(!cleaned)) },
     )
+    // Split voice and music (paid): the clip's sound apart, the kept part(s) on their own tracks.
+    if (clip is VideoClip) SeparateRow(ui, clip, act)
     val enh = (clip as? VideoClip)?.enhance ?: (clip as? studio.muse.core.edit.AudioClip)?.enhance ?: false
     OptRow("Voice enhance", "Clearer speech", enh == true, { act(EditAction.Enhance(enh != true)) })
     SuiteLabel("Voice effect")
@@ -908,6 +911,41 @@ private fun LanguageBody(ui: EditSuiteUi, ct: studio.muse.core.edit.CaptionTrack
         else -> {
             job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
             SuiteButton(job?.price?.let { "Translate · $it" } ?: "Translate", { act(EditAction.Translate(target, best)) }, Modifier.fillMaxWidth(), enabled = job?.price != null, primary = true)
+        }
+    }
+}
+
+/** Split voice and music: keep the voice, the music or both (each on its own track); the price is on the button. */
+@Composable
+private fun SeparateRow(ui: EditSuiteUi, clip: VideoClip, act: (EditAction) -> Unit) {
+    val m = muse
+    ui.helpersOff["separate"]?.let { return ComingSoon("Split voice and music", it) }
+    val job = ui.ai["separate"]
+    var keep by rememberSaveable(clip.id) { mutableStateOf(studio.muse.core.edit.SeparationKeep.BOTH) }
+    LaunchedEffect(clip.id) { act(EditAction.SeparatePrice) }
+    SuiteLabel("Split voice and music")
+    SuiteChips(listOf("BOTH" to "Both, on two tracks", "VOCALS" to "Voice only", "INSTRUMENTAL" to "Music only"), keep.name, { keep = studio.muse.core.edit.SeparationKeep.valueOf(it) }, enabled = job?.running != true)
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Splitting" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Split · $it" } ?: "Split", { act(EditAction.Separate(keep)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+        }
+    }
+}
+
+/** Cut out a picture: the photo becomes its subject (trimmed, with transparency), where it sat; the price is on the button. */
+@Composable
+private fun CutoutRow(ui: EditSuiteUi, im: studio.muse.core.edit.ImageItem, act: (EditAction) -> Unit) {
+    val m = muse
+    ui.helpersOff["cutout"]?.let { return ComingSoon("Cut out the subject", it) }
+    val job = ui.ai["cutout"]
+    LaunchedEffect(im.id) { act(EditAction.CutoutPrice) }
+    when {
+        job?.running == true -> T("${job.phase.ifEmpty { "Cutting out" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+        else -> {
+            job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+            SuiteButton(job?.price?.let { "Cut out the subject · $it" } ?: "Cut out the subject", { act(EditAction.Cutout) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
         }
     }
 }

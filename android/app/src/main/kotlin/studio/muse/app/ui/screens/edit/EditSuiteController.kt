@@ -285,6 +285,12 @@ sealed interface EditAction {
     data class Translate(val language: String, val best: Boolean) : EditAction
     /** Lyric captions (2026-11-09): captions from the song on the music track (an upload), timed through its clips. */
     data object LyricCaptions : EditAction
+    /** Split voice and music (2026-11-09, paid): the selected clip's sound into voice and music, [keep] going on audio tracks. */
+    data object SeparatePrice : EditAction
+    data class Separate(val keep: studio.muse.core.edit.SeparationKeep) : EditAction
+    /** Cut out a picture (2026-11-09, paid): the selected photo becomes its subject, staying where it sat. */
+    data object CutoutPrice : EditAction
+    data object Cutout : EditAction
     /** Cross-dissolve between overlays (2026-11-09): [sec] on (its length), null off; [done] = one undo step at the end of a drag. */
     data class OverlayDissolve(val itemId: String, val sec: Double?, val done: Boolean = true) : EditAction
     /** Translated captions: show the words in [language] (the translation's or the original's; null: the original's if it had none). */
@@ -448,7 +454,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; is EditAction.OverlayDissolve -> "Dissolve"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.SetCurve -> "Curves"; is EditAction.AutoAdjust -> "Auto adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake, is EditAction.AppendUpload -> "Add clip"; EditAction.SwapTrack -> "Move clip"; is EditAction.ApplyKit -> "Style kit"; is EditAction.AddImage -> "Photo"; EditAction.AddAdjustLayer, is EditAction.LayerField, is EditAction.LayerFilter -> "Adjustment layer"; is EditAction.AddFont -> "Font"; is EditAction.SetHsl -> "HSL"; is EditAction.Reverse -> "Reverse"; is EditAction.Stabilize -> "Stabilise"; is EditAction.SlowmoPrice, is EditAction.Slowmo -> "Smooth slow motion"; is EditAction.TranslatePrice, is EditAction.Translate -> "Translate captions"; is EditAction.CaptionOriginal -> "Captions language"; EditAction.LyricCaptions -> "Captions"; EditAction.SeparatePrice, is EditAction.Separate -> "Split voice and music"; EditAction.CutoutPrice, EditAction.Cutout -> "Cut out"; is EditAction.OverlayDissolve -> "Dissolve"; is EditAction.AddSticker -> "Sticker"; is EditAction.CaptionTemplate -> "Caption template"; is EditAction.ApplyReframe -> "Follow faces"; is EditAction.AddSoundEffect -> "Sound effect"; EditAction.CutToBeats -> "Cut to beats"; is EditAction.SplitScreen -> "Split screen"; is EditAction.EvenVolume -> "Even out volume"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -906,6 +912,10 @@ class EditSuiteController(
             is EditAction.Slowmo -> slowmo(u, a.factor, a.lengthSec)
             is EditAction.TranslatePrice -> captionSource()?.let { estimate("translate", translateOptions(a.language, a.best), it) }
             is EditAction.Translate -> translate(a.language, a.best)
+            EditAction.SeparatePrice -> (soundClip(u) as? VideoClip)?.let { c -> estimate("separate", null, sourceOf(project?.asset(c.asset))) }
+            is EditAction.Separate -> u.helpersOff["separate"]?.let { say(it) } ?: separate(u, a.keep)
+            EditAction.CutoutPrice -> (u.selection?.second as? studio.muse.core.edit.ImageItem)?.let { im -> estimate("cutout", null, sourceOf(project?.asset(im.asset))) }
+            EditAction.Cutout -> u.helpersOff["cutout"]?.let { say(it) } ?: cutout(u)
             is EditAction.OverlayDissolve -> change(a.done, refused = "A dissolve needs a clip right before this one on its track") { p -> SuiteOps.overlayDissolve(p, a.itemId, a.sec) }
             // Two languages, either shown: switching swaps the words with the kept ones.
             is EditAction.CaptionOriginal -> change { p ->
@@ -1113,7 +1123,7 @@ class EditSuiteController(
             val (result, err) = if (model == null) backend.run(kind, src, options, progress) else backend.run(kind, src, options, model, progress)
             setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
             if (result != null) {
-                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; "stabilize" -> "Stabilise"; "slowmo" -> "Smooth slow motion"; "translate" -> "Translate captions"; else -> "Edit" }
+                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; "stabilize" -> "Stabilise"; "slowmo" -> "Smooth slow motion"; "translate" -> "Translate captions"; "separate" -> "Split voice and music"; "cutout" -> "Cut out"; else -> "Edit" }
                 apply(result)
             } else if (err != null) say(err)
         }
@@ -1208,6 +1218,51 @@ class EditSuiteController(
                 withAsset.mainClips.filter { it.asset == clip.asset }.fold(withAsset) { acc, c -> acc.updateItem(c.id) { (it as VideoClip).copy(audioAsset = id) } ?: acc }
             }
             say("Noise reduced · the voice is clean")
+        }
+    }
+
+    /**
+     * Split voice and music (paid): the server splits the clip's sound; the clip is muted and the kept part(s) land on a
+     * voice and/or music track in sync with it ([applySeparation]).
+     */
+    private fun separate(u: EditSuiteUi, keep: studio.muse.core.edit.SeparationKeep) {
+        val p = project ?: return
+        val clip = soundClip(u) as? VideoClip ?: return say("Pick a video clip to split its sound")
+        if (clip.holdSec != null || clip.speedCurve != null || clip.speed < 0.5 || clip.speed > 2) return say("Split works on clips at 0.5×–2× without a speed curve")
+        runAi("separate", null, sourceOf(p.asset(clip.asset))) { r ->
+            fun part(k: String) = (r[k] as? JsonObject)?.let { o -> (o["upload"] as? JsonPrimitive)?.content?.let { it to (o["durationSec"] as? JsonPrimitive)?.doubleOrNull } }
+            val voc = part("vocals"); val ins = part("instrumental")
+            if (voc == null || ins == null) return@runAi say("Couldn't split this clip's sound")
+            var ids: List<String> = emptyList()
+            if (change(refused = "Couldn't split this clip's sound") { pp ->
+                    val vId = SuiteOps.newAssetId(pp, "vocals"); val p1 = pp.copy(assets = pp.assets + Asset(vId, AssetKind.AUDIO, upload = voc.first, durationSec = voc.second, hasAudio = true))
+                    val iId = SuiteOps.newAssetId(p1, "music"); val p2 = p1.copy(assets = p1.assets + Asset(iId, AssetKind.AUDIO, upload = ins.first, durationSec = ins.second, hasAudio = true))
+                    studio.muse.core.edit.applySeparation(p2, clip.id, vId, iId, keep)?.let { (np, added) -> ids = added; np }
+                }) say(when (keep) { studio.muse.core.edit.SeparationKeep.VOCALS -> "Voice only · the music is gone"; studio.muse.core.edit.SeparationKeep.INSTRUMENTAL -> "Music only · the voice is gone"; else -> "Voice and music on their own tracks" })
+        }
+    }
+
+    /** Cut out a picture (paid): the selected photo switches to its subject, trimmed, staying where it sat ([applyCutout]). */
+    private fun cutout(u: EditSuiteUi) {
+        val p = project ?: return
+        val im = u.selection?.second as? studio.muse.core.edit.ImageItem ?: return say("Pick a photo to cut out")
+        runAi("cutout", null, sourceOf(p.asset(im.asset))) { r ->
+            val a = r["asset"] as? JsonObject ?: return@runAi say("Couldn't find a subject in this photo")
+            val upload = (a["upload"] as? JsonPrimitive)?.content ?: return@runAi
+            val url = (a["url"] as? JsonPrimitive)?.content
+            fun n(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.doubleOrNull
+            val box = r["box"] as? JsonObject
+            val bx = listOf(n(box, "x"), n(box, "y"), n(box, "w"), n(box, "h"))
+            val sw = n(r, "sourceWidth"); val sh = n(r, "sourceHeight")
+            if (bx.any { it == null } || sw == null || sh == null) return@runAi say("Couldn't find a subject in this photo")
+            var newId: String? = null
+            if (change(refused = "Couldn't place the cut-out") { pp ->
+                    val id = SuiteOps.newAssetId(pp, "cutout").also { newId = it }
+                    val withAsset = pp.copy(assets = pp.assets + Asset(id, AssetKind.IMAGE, upload = upload, width = n(a, "width")?.toInt(), height = n(a, "height")?.toInt()))
+                    studio.muse.core.edit.applyCutout(withAsset, im.id, id, bx.map { it!! }, sw, sh)
+                }) say("Cut out · the subject stays where it was")
+            val id = newId
+            if (id != null && url != null) backend.assetArrived(id, url)
         }
     }
 

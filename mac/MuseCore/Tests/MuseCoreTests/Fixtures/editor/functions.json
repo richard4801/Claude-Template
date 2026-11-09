@@ -2265,6 +2265,1434 @@
    }
   ]
  },
+ "separation": {
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "pip",
+     "kind": "video",
+     "take": "take_pip",
+     "durationSec": 6,
+     "width": 720,
+     "height": 1280,
+     "hasAudio": true
+    },
+    {
+     "id": "song",
+     "kind": "audio",
+     "library": "music_upbeat_01",
+     "durationSec": 30
+    },
+    {
+     "id": "voc",
+     "kind": "audio",
+     "upload": "up_voc",
+     "durationSec": 10
+    },
+    {
+     "id": "ins",
+     "kind": "audio",
+     "upload": "up_ins",
+     "durationSec": 10
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 3,
+       "speed": 1
+      },
+      {
+       "id": "c2",
+       "asset": "src",
+       "inSec": 3,
+       "outSec": 9,
+       "speed": 1.5,
+       "transitionIn": {
+        "kind": "fade",
+        "durationSec": 0.5
+       }
+      },
+      {
+       "id": "c3",
+       "asset": "src",
+       "inSec": 1,
+       "outSec": 1.1,
+       "speed": 1,
+       "holdSec": 1
+      },
+      {
+       "id": "c4",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 4,
+       "speed": 1,
+       "speedCurve": {
+        "preset": "custom",
+        "points": [
+         [
+          0,
+          1
+         ],
+         [
+          1,
+          2
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "id": "pipt",
+     "kind": "video",
+     "items": [
+      {
+       "id": "p1",
+       "asset": "pip",
+       "startSec": 6,
+       "inSec": 0,
+       "outSec": 3,
+       "speed": 1
+      }
+     ]
+    },
+    {
+     "id": "mus",
+     "kind": "music",
+     "items": [
+      {
+       "id": "m1",
+       "asset": "song",
+       "startSec": 4,
+       "inSec": 0,
+       "outSec": 4
+      }
+     ]
+    }
+   ]
+  },
+  "cases": [
+   {
+    "clip": "c1",
+    "keep": "both",
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "pip",
+        "kind": "video",
+        "take": "take_pip",
+        "durationSec": 6,
+        "width": 720,
+        "height": 1280,
+        "hasAudio": true
+       },
+       {
+        "id": "song",
+        "kind": "audio",
+        "library": "music_upbeat_01",
+        "durationSec": 30
+       },
+       {
+        "id": "voc",
+        "kind": "audio",
+        "upload": "up_voc",
+        "durationSec": 10
+       },
+       {
+        "id": "ins",
+        "kind": "audio",
+        "upload": "up_ins",
+        "durationSec": 10
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1,
+          "muted": true
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5,
+          "transitionIn": {
+           "kind": "fade",
+           "durationSec": 0.5
+          }
+         },
+         {
+          "id": "c3",
+          "asset": "src",
+          "inSec": 1,
+          "outSec": 1.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1,
+          "speedCurve": {
+           "preset": "custom",
+           "points": [
+            [
+             0,
+             1
+            ],
+            [
+             1,
+             2
+            ]
+           ]
+          }
+         }
+        ]
+       },
+       {
+        "id": "pipt",
+        "kind": "video",
+        "items": [
+         {
+          "id": "p1",
+          "asset": "pip",
+          "startSec": 6,
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "instr1",
+          "asset": "ins",
+          "startSec": 0,
+          "inSec": 0,
+          "outSec": 3
+         },
+         {
+          "id": "m1",
+          "asset": "song",
+          "startSec": 4,
+          "inSec": 0,
+          "outSec": 4
+         }
+        ]
+       },
+       {
+        "id": "voice1",
+        "kind": "voice",
+        "items": [
+         {
+          "id": "vocals1",
+          "asset": "voc",
+          "startSec": 0,
+          "inSec": 0,
+          "outSec": 3
+         }
+        ]
+       }
+      ]
+     },
+     "ids": [
+      "vocals1",
+      "instr1"
+     ]
+    }
+   },
+   {
+    "clip": "c2",
+    "keep": "both",
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "pip",
+        "kind": "video",
+        "take": "take_pip",
+        "durationSec": 6,
+        "width": 720,
+        "height": 1280,
+        "hasAudio": true
+       },
+       {
+        "id": "song",
+        "kind": "audio",
+        "library": "music_upbeat_01",
+        "durationSec": 30
+       },
+       {
+        "id": "voc",
+        "kind": "audio",
+        "upload": "up_voc",
+        "durationSec": 10
+       },
+       {
+        "id": "ins",
+        "kind": "audio",
+        "upload": "up_ins",
+        "durationSec": 10
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5,
+          "transitionIn": {
+           "kind": "fade",
+           "durationSec": 0.5
+          },
+          "muted": true
+         },
+         {
+          "id": "c3",
+          "asset": "src",
+          "inSec": 1,
+          "outSec": 1.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1,
+          "speedCurve": {
+           "preset": "custom",
+           "points": [
+            [
+             0,
+             1
+            ],
+            [
+             1,
+             2
+            ]
+           ]
+          }
+         }
+        ]
+       },
+       {
+        "id": "pipt",
+        "kind": "video",
+        "items": [
+         {
+          "id": "p1",
+          "asset": "pip",
+          "startSec": 6,
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song",
+          "startSec": 4,
+          "inSec": 0,
+          "outSec": 4
+         }
+        ]
+       },
+       {
+        "id": "voice1",
+        "kind": "voice",
+        "items": [
+         {
+          "id": "vocals1",
+          "asset": "voc",
+          "startSec": 2.5,
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5
+         }
+        ]
+       },
+       {
+        "id": "music1",
+        "kind": "music",
+        "items": [
+         {
+          "id": "instr1",
+          "asset": "ins",
+          "startSec": 2.5,
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5
+         }
+        ]
+       }
+      ]
+     },
+     "ids": [
+      "vocals1",
+      "instr1"
+     ]
+    }
+   },
+   {
+    "clip": "c2",
+    "keep": "vocals",
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "pip",
+        "kind": "video",
+        "take": "take_pip",
+        "durationSec": 6,
+        "width": 720,
+        "height": 1280,
+        "hasAudio": true
+       },
+       {
+        "id": "song",
+        "kind": "audio",
+        "library": "music_upbeat_01",
+        "durationSec": 30
+       },
+       {
+        "id": "voc",
+        "kind": "audio",
+        "upload": "up_voc",
+        "durationSec": 10
+       },
+       {
+        "id": "ins",
+        "kind": "audio",
+        "upload": "up_ins",
+        "durationSec": 10
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5,
+          "transitionIn": {
+           "kind": "fade",
+           "durationSec": 0.5
+          },
+          "muted": true
+         },
+         {
+          "id": "c3",
+          "asset": "src",
+          "inSec": 1,
+          "outSec": 1.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1,
+          "speedCurve": {
+           "preset": "custom",
+           "points": [
+            [
+             0,
+             1
+            ],
+            [
+             1,
+             2
+            ]
+           ]
+          }
+         }
+        ]
+       },
+       {
+        "id": "pipt",
+        "kind": "video",
+        "items": [
+         {
+          "id": "p1",
+          "asset": "pip",
+          "startSec": 6,
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song",
+          "startSec": 4,
+          "inSec": 0,
+          "outSec": 4
+         }
+        ]
+       },
+       {
+        "id": "voice1",
+        "kind": "voice",
+        "items": [
+         {
+          "id": "vocals1",
+          "asset": "voc",
+          "startSec": 2.5,
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5
+         }
+        ]
+       }
+      ]
+     },
+     "ids": [
+      "vocals1"
+     ]
+    }
+   },
+   {
+    "clip": "p1",
+    "keep": "instrumental",
+    "result": {
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "pip",
+        "kind": "video",
+        "take": "take_pip",
+        "durationSec": 6,
+        "width": 720,
+        "height": 1280,
+        "hasAudio": true
+       },
+       {
+        "id": "song",
+        "kind": "audio",
+        "library": "music_upbeat_01",
+        "durationSec": 30
+       },
+       {
+        "id": "voc",
+        "kind": "audio",
+        "upload": "up_voc",
+        "durationSec": 10
+       },
+       {
+        "id": "ins",
+        "kind": "audio",
+        "upload": "up_ins",
+        "durationSec": 10
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 3,
+          "outSec": 9,
+          "speed": 1.5,
+          "transitionIn": {
+           "kind": "fade",
+           "durationSec": 0.5
+          }
+         },
+         {
+          "id": "c3",
+          "asset": "src",
+          "inSec": 1,
+          "outSec": 1.1,
+          "speed": 1,
+          "holdSec": 1
+         },
+         {
+          "id": "c4",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1,
+          "speedCurve": {
+           "preset": "custom",
+           "points": [
+            [
+             0,
+             1
+            ],
+            [
+             1,
+             2
+            ]
+           ]
+          }
+         }
+        ]
+       },
+       {
+        "id": "pipt",
+        "kind": "video",
+        "items": [
+         {
+          "id": "p1",
+          "asset": "pip",
+          "startSec": 6,
+          "inSec": 0,
+          "outSec": 3,
+          "speed": 1,
+          "muted": true
+         }
+        ]
+       },
+       {
+        "id": "mus",
+        "kind": "music",
+        "items": [
+         {
+          "id": "m1",
+          "asset": "song",
+          "startSec": 4,
+          "inSec": 0,
+          "outSec": 4
+         }
+        ]
+       },
+       {
+        "id": "music1",
+        "kind": "music",
+        "items": [
+         {
+          "id": "instr1",
+          "asset": "ins",
+          "startSec": 6,
+          "inSec": 0,
+          "outSec": 3
+         }
+        ]
+       }
+      ]
+     },
+     "ids": [
+      "instr1"
+     ]
+    }
+   },
+   {
+    "clip": "c3",
+    "keep": "both",
+    "result": null
+   },
+   {
+    "clip": "c4",
+    "keep": "both",
+    "result": null
+   }
+  ]
+ },
+ "cutouts": [
+  {
+   "name": "contain",
+   "project": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "logo",
+        "startSec": 0,
+        "durationSec": 3,
+        "transform": {
+         "x": 0.5,
+         "y": 0.4,
+         "scale": 0.8
+        },
+        "crop": {
+         "left": 0.1,
+         "right": 0.1,
+         "top": 0,
+         "bottom": 0
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "box": {
+    "x": 700,
+    "y": 150,
+    "w": 300,
+    "h": 500
+   },
+   "sourceWidth": 1200,
+   "sourceHeight": 800,
+   "result": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "cut",
+        "startSec": 0,
+        "durationSec": 3,
+        "transform": {
+         "x": 0.666667,
+         "y": 0.4,
+         "scale": 0.2
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "rotated and flipped",
+   "project": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "logo",
+        "startSec": 0,
+        "durationSec": 3,
+        "transform": {
+         "x": 0.3,
+         "y": 0.6,
+         "scale": 1.2,
+         "rotation": 30,
+         "flipX": true
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "box": {
+    "x": 700,
+    "y": 150,
+    "w": 300,
+    "h": 500
+   },
+   "sourceWidth": 1200,
+   "sourceHeight": 800,
+   "result": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "cut",
+        "startSec": 0,
+        "durationSec": 3,
+        "transform": {
+         "x": 0.083494,
+         "y": 0.529688,
+         "scale": 0.3,
+         "rotation": 30,
+         "flipX": true
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "cover",
+   "project": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "logo",
+        "startSec": 0,
+        "durationSec": 3,
+        "fit": "cover",
+        "transform": {
+         "x": 0.5,
+         "y": 0.5,
+         "scale": 1
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "box": {
+    "x": 700,
+    "y": 150,
+    "w": 300,
+    "h": 500
+   },
+   "sourceWidth": 1200,
+   "sourceHeight": 800,
+   "result": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "cut",
+        "startSec": 0,
+        "durationSec": 3,
+        "fit": "cover",
+        "transform": {
+         "x": 1.055556,
+         "y": 0.5,
+         "scale": 0.625
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "keyframes",
+   "project": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "logo",
+        "startSec": 0,
+        "durationSec": 3,
+        "transform": {
+         "x": 0.5,
+         "y": 0.5,
+         "scale": 0.6
+        },
+        "keyframes": {
+         "scale": [
+          {
+           "t": 0,
+           "v": 0.6
+          },
+          {
+           "t": 2,
+           "v": 0.9,
+           "ease": "easeOut"
+          }
+         ],
+         "x": [
+          {
+           "t": 0,
+           "v": 0.4
+          },
+          {
+           "t": 2,
+           "v": 0.6
+          }
+         ],
+         "opacity": [
+          {
+           "t": 0,
+           "v": 1
+          }
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "box": {
+    "x": 700,
+    "y": 150,
+    "w": 300,
+    "h": 500
+   },
+   "sourceWidth": 1200,
+   "sourceHeight": 800,
+   "result": {
+    "version": 2,
+    "sourceTakeId": "take_src",
+    "canvas": {
+     "width": 1080,
+     "height": 1920,
+     "fps": 30,
+     "background": "#000000"
+    },
+    "assets": [
+     {
+      "id": "src",
+      "kind": "video",
+      "take": "take_src",
+      "durationSec": 10,
+      "width": 1080,
+      "height": 1920,
+      "hasAudio": true
+     },
+     {
+      "id": "logo",
+      "kind": "image",
+      "upload": "up_logo",
+      "width": 1200,
+      "height": 800
+     },
+     {
+      "id": "cut",
+      "kind": "image",
+      "upload": "up_cut",
+      "width": 300,
+      "height": 500
+     }
+    ],
+    "tracks": [
+     {
+      "id": "main",
+      "kind": "main",
+      "items": [
+       {
+        "id": "c1",
+        "asset": "src",
+        "inSec": 0,
+        "outSec": 10,
+        "speed": 1
+       }
+      ]
+     },
+     {
+      "id": "imgs",
+      "kind": "image",
+      "items": [
+       {
+        "id": "i1",
+        "asset": "cut",
+        "startSec": 0,
+        "durationSec": 3,
+        "transform": {
+         "x": 0.625,
+         "y": 0.5,
+         "scale": 0.15
+        },
+        "keyframes": {
+         "scale": [
+          {
+           "t": 0,
+           "v": 0.15
+          },
+          {
+           "t": 2,
+           "v": 0.225,
+           "ease": "easeOut"
+          }
+         ],
+         "x": [
+          {
+           "t": 0,
+           "v": 0.525
+          },
+          {
+           "t": 2,
+           "v": 0.725
+          }
+         ],
+         "opacity": [
+          {
+           "t": 0,
+           "v": 1
+          }
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
  "adjustLayers": {
   "project": {
    "version": 2,

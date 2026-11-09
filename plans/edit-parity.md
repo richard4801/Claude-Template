@@ -113,7 +113,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Manual beat marks (tap) | Has | Has | S | Android: Audio → Mark a beat here, Clear beat marks. Mac: Audio → Mark a beat here, Clear beat marks. |
 | Voice effects (warm, radio, phone, deep) | Has | Has | — | 4 effects. More character voices: M. |
 | Noise reduction, voice enhance | Has | Has | — | |
-| Vocal / instrumental separation | Missing | Missing | L | Server model |
+| Vocal / instrumental separation | Has | Missing | L | 2026-11-09: server job `separate` (paid, price on the button); `applySeparation` mutes the clip and puts the voice and/or the music on their own tracks in sync (shared fixture `separation`). Android: Audio → Split voice and music (Both / Voice only / Music only). Mac: WS9 |
 | Volume normalisation | Has | Has | M | Android: Audio → Even out volume: spoken clips (main and voice) brought to their median level from the decoded sound levels, 0.25×–2×, no clipping; music left to ducking. Mac: Audio → Even out volume, from the measured clip levels (same rules). |
 | Record voice-over | Has | Has | — | In-app recorder (WS8). Mac: Mac microphone |
 | Recording over playback (hear the video while recording) | Has | Has | S | Needs headphones handling. Android: Audio → Play the video while recording (on with headphones, off on the speaker); the take is moved earlier by the route's typical latency (Bluetooth 200 ms, wired 20 ms); a red bar on the ruler while recording. Mac: Record VO with "Play the video while recording" (on by default for headphones, Bluetooth or USB); the take lands where recording started, shifted by the output delay; a red bar grows on the voice row (design pass, owner-approved). |
@@ -192,7 +192,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Sticker / GIF / emoji library | Has | Has | M (function) | **Content**, built: 1,899 Twemoji stickers (CC BY 4.0, attributed) as 160 px PNG. Android: Overlay → Stickers: search (names and CLDR words), category chips, a tap places it at the playhead (3 s, 30 %) like a photo, so it keyframes, animates and blends. No GIFs. Screenshot: android-edit/c_stickers.png. Mac: Bin → Stickers, the Twemoji set (CC BY 4.0), searchable by category; a click places one at the playhead. Licences in Settings → About (WS9). |
-| Own image or cut-out as a sticker | Partial | Partial | M | Uses the image items and the matte. Android: own pictures through Overlay → Add a photo (an image item: transform, keyframes, animations, blend); a cut-out isn't a sticker yet (background removal runs on videos). Mac: Own pictures (WS9); a cut-out isn't a sticker yet |
+| Own image or cut-out as a sticker | Has | Partial | M | Android: own pictures through Overlay → Add a photo, and (2026-11-09) Transform → "Cut out the subject" on a photo (server job `cutout`, paid): `applyCutout` switches the item to the trimmed subject where it sat (shared fixture `cutouts`). Mac: WS9 |
 | Sticker animation and keyframes | Has | Has | — | Comes with image items. Android: animation in / out / loop and transform keyframes on image items (wave 1, M) |
 
 ## 12. Templates
