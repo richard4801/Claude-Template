@@ -25,6 +25,7 @@ struct DirectChatPanel: View {
             if fallbackOn { modePicker }
             if fallbackOn && useApiKey {
                 transcript
+                if let e = model.chatError { errorNote(e).padding(.horizontal, Space.s4).padding(.vertical, Space.s2) }
                 if let turn = model.turn, !turn.finished { working(turn) }
                 composer
             } else {
@@ -91,68 +92,33 @@ struct DirectChatPanel: View {
 
     // MARK: Transcript
 
+    /// The studio API key chat in the shared chat rows (ChatTranscriptView): bubbles, markdown, tool steps.
     private var transcript: some View {
         let items = CameraTranscript.items(session.messages ?? [], devices: model.sentHere)
-        return ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if items.isEmpty {
-                        Text("Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves. Claude blocks it in Blender on your Mac and renders the guides.")
-                            .font(t.body(13)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(items) { item in
-                        switch item {
-                        case .user(_, let label, let text): userBubble(label, text)
-                        case .claude(_, let label, let text, let chips): claudeBlock(label, text, chips)
-                        }
-                    }
-                    if let card = CameraGuides.card(session) { guidesCard(card) }
-                    if let e = model.chatError { errorNote(e) }
-                    Color.clear.frame(height: 1).id("end")
+        var rows: [ChatRow] = []
+        for item in items {
+            switch item {
+            case .user(let id, let label, let text):
+                let shown = ChatLeakFilter.userText(text)
+                if !shown.isEmpty { rows.append(ChatRow(id: id, kind: .user(text: shown, images: [], phone: label.lowercased().contains("phone")))) }
+            case .claude(let id, _, let text, let chips):
+                if !chips.isEmpty {
+                    rows.append(ChatRow(id: "tools_" + id, kind: .tools(chips.enumerated().map { pair -> ChatToolLine in
+                        let (i, c) = (pair.offset, pair.element)
+                        let words = ClaudeChipText.words(c.name.lowercased())
+                        return ChatToolLine(id: "\(id)_\(i)", name: c.name.lowercased(), summary: c.count > 1 ? "\(words) ×\(c.count)" : words,
+                                            status: c.ok ? .done : .error)
+                    })))
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-            }
-            .onChange(of: items.count) { _, _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
-        }
-        .frame(maxHeight: .infinity)
-    }
-
-    private func userBubble(_ label: String, _ text: String) -> some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Lbl(label)
-            Text(text).font(t.body(13)).foregroundStyle(t.bg).lineSpacing(3)
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: t.isA ? 0 : t.r).fill(t.ink))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: 300, alignment: .trailing)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-    }
-
-    private func claudeBlock(_ label: String, _ text: String, _ chips: [ToolChip]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Lbl(label)
-            if !text.isEmpty {
-                Text(text).font(t.body(13)).foregroundStyle(t.ink).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            }
-            if !chips.isEmpty {
-                FlowLayout(spacing: 4) { ForEach(Array(chips.enumerated()), id: \.offset) { _, c in toolChip(c) } }
+                let shown = ChatLeakFilter.reply(text)
+                if !shown.isEmpty { rows.append(ChatRow(id: id, kind: .assistant(text: shown, streaming: false))) }
             }
         }
-    }
-
-    private func toolChip(_ c: ToolChip) -> some View {
-        HStack(spacing: 5) {
-            Ph("cube", 9.5)
-            Text(c.text).font(t.body(9.5, .medium).monospacedDigit())
-        }
-        .foregroundStyle(c.ok ? t.muted : t.rec)
-        .padding(.horizontal, 7).frame(height: 20)
-        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).strokeBorder(c.ok ? t.line : t.rec, lineWidth: 1))
-        .help(c.ok ? c.text : "\(c.text) · failed")
+        return ChatTranscriptView(
+            rows: rows,
+            state: ChatTranscriptState(busy: model.busy,
+                                       emptyHint: "Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves. Claude blocks it in Blender on your Mac and renders the guides."),
+            accessory: CameraGuides.card(session).map { AnyView(guidesCard($0)) })
     }
 
     private func guidesCard(_ items: [GuideItem]) -> some View {
@@ -219,27 +185,15 @@ struct DirectChatPanel: View {
 
     private var composer: some View {
         let blocked = model.busy || session.claude?.chatBusy == true
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                TextField(CameraText.composerPlaceholder, text: $model.composer, axis: .vertical)
-                    .lineLimit(1...4)
-                    .onSubmit { model.send() }
-                    .fieldChrome()
-                Button { model.send() } label: {
-                    Ph("paperplane.fill", 14)
-                }
-                .accessibilityLabel("Send to Claude")
-                .buttonStyle(MuseButtonStyle(kind: .primary, off: blocked || model.composer.trimmingCharacters(in: .whitespaces).isEmpty))
-                .frame(width: 44)
-                .disabled(blocked)
-                .help(blocked ? CameraText.chatBusy : "Send to Claude")
-                .keyboardShortcut(.return, modifiers: .command)
-            }
-            if blocked { Text(CameraText.chatBusy).font(t.body(12)).foregroundStyle(t.muted) }
-            Text(CameraText.footer(session.shotDraft)).font(t.body(12)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 14)
-        .overlay(alignment: .top) { Rectangle().fill(t.line).frame(height: 1) }
+        return ChatComposerBar(
+            text: $model.composer,
+            placeholder: CameraText.composerPlaceholder,
+            busy: false,
+            held: blocked,
+            footer: (blocked ? [CameraText.chatBusy] : []) + [CameraText.footer(session.shotDraft)],
+            onSend: { model.send() },
+            onStop: {},
+            onSuggestion: { model.send($0) })
     }
 }
 

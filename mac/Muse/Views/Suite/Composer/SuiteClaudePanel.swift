@@ -65,8 +65,10 @@ struct SuiteClaudePanel: View {
                            emptyHint: SuiteClaudeWords.emptyHint,
                            wrapOutgoing: { [store] text in store.suiteClaudeOutgoing(text) },
                            unwrapShown: SuiteAssistClaude.stripContext, sendShortcut: false)
-                .attachments(top: AnyView(SuiteClaudeAttachRow()), sendBlocked: c.uploading, userImages: SuiteClaudeAttachments.images(in:),
-                             takeFiles: { [store] tid in store.suiteClaudeTakeFiles(threadId: tid) })
+                .attachments(top: AnyView(SuiteClaudeAttachRow(inComposer: true)), sendBlocked: c.uploading, userImages: SuiteClaudeAttachments.images(in:),
+                             takeFiles: { [store] tid in store.suiteClaudeTakeFiles(threadId: tid) },
+                             attach: { [store] in SuiteClaudeAttachRow.pick(store) },
+                             images: { [store] urls, data in SuiteClaudeAttachRow.take(store, urls: urls, data: data) })
         } else {
             VStack(alignment: .leading, spacing: Space.s2) {
                 Text("Sharing the composer with Claude…").scaled(t.scale.caption, t.roles.ink2)
@@ -162,8 +164,8 @@ struct SuiteClaudeGenerateSheet: View {
     }
 }
 
-/// Demo mode's chat: the same chips and composer field; the replies are stand-ins that fill the composer through the same
-/// shared draft and checks.
+/// Demo mode's chat: the shared chat rows and composer (the same as ClaudeChatView); the replies are stand-ins that fill
+/// the composer through the same shared draft and checks.
 struct SuiteClaudeDemoChat: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -172,98 +174,48 @@ struct SuiteClaudeDemoChat: View {
     var body: some View {
         let c = store.suite.claude
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        if c.demoLines.isEmpty {
-                            Text(SuiteClaudeWords.emptyHint)
-                                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-                        }
-                        ForEach(c.demoLines) { line in
-                            if line.fromClaude { claude(line.text) } else { owner(line.text, images: line.images) }
-                        }
-                        if c.demoBusy {
-                            VStack(alignment: .leading, spacing: Space.s2) {
-                                SkeletonBlock(width: 200, height: 10)
-                                SkeletonBlock(width: 140, height: 10)
-                            }
-                        }
-                        Color.clear.frame(height: 1).id("end")
-                    }
-                    .padding(.horizontal, Space.s4)
-                    .padding(.vertical, Space.s3)
-                }
-                .onChange(of: c.demoLines.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
-            }
-            .frame(maxHeight: .infinity)
-            composer(c)
+            ChatTranscriptView(rows: rows(c), state: ChatTranscriptState(busy: c.demoBusy, emptyHint: SuiteClaudeWords.emptyHint))
+            ChatComposerBar(
+                text: $draft,
+                placeholder: "Describe the shot…",
+                busy: false,
+                held: c.demoBusy || c.uploading,
+                suggestions: SuiteAssistClaude.suggestions,
+                top: AnyView(SuiteClaudeAttachRow(inComposer: true)),
+                footer: ["Demo: Claude's replies here are stand-ins"],
+                commandReturnSends: false,   // ⌘Return is Generate's in the composer
+                onSend: send,
+                onStop: {},
+                onSuggestion: { store.sendSuiteClaudeDemo($0) },
+                onAttach: { SuiteClaudeAttachRow.pick(store) },
+                onImages: { urls, data in SuiteClaudeAttachRow.take(store, urls: urls, data: data) })
         }
+        .onAppear { if SnapshotRunner.probing, let text = SnapshotRunner.state.chatComposerText { draft = text } }
+        .onChange(of: SnapshotRunner.state.chatComposerText) { _, v in if SnapshotRunner.probing { draft = v ?? "" } }
     }
 
-    private func owner(_ text: String, images: [ImageRef]) -> some View {
-        VStack(alignment: .trailing, spacing: Space.s1) {
-            Text("You").scaled(t.scale.micro, t.roles.ink2)
-            if !images.isEmpty {
-                HStack(spacing: Space.s1) {
-                    ForEach(Array(images.enumerated()), id: \.offset) { _, ref in
-                        MuseImage(ref: ref, symbol: "photo")
-                            .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
-                            .accessibilityLabel("Attached image")
-                    }
-                }
-            }
-            Text(text).scaled(t.scale.body, t.roles.ink)
-                .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
-                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
-                .fixedSize(horizontal: false, vertical: true)
+    private func rows(_ c: SuiteClaudeBridge) -> [ChatRow] {
+        var out: [ChatRow] = []
+        // Review mode: the sample thread first, so the Suite's shots show every kind of row.
+        if SnapshotRunner.probing, SnapshotRunner.state.chatSample {
+            var tr = ClaudeTranscript()
+            tr.load(ClaudeChatSample.messages(threadId: "suite_demo", kind: "suite"))
+            out = ChatRow.build(tr.items, audience: .owner, unwrap: SuiteAssistClaude.stripContext) { _ in [] }
         }
-        .frame(maxWidth: 320, alignment: .trailing)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-    }
-
-    private func claude(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            Text("Claude").scaled(t.scale.micro, t.roles.ink2)
-            Text(text).scaled(t.scale.body, t.roles.ink).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func composer(_ c: SuiteClaudeBridge) -> some View {
-        let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return VStack(alignment: .leading, spacing: Space.s2) {
-            FlowLayout(spacing: Space.s1) {
-                ForEach(SuiteAssistClaude.suggestions) { s in
-                    Button { store.sendSuiteClaudeDemo(s.prompt) } label: { Text(s.label).fixedSize() }
-                        .buttonStyle(RButtonStyle(kind: .quiet, small: true, off: c.demoBusy))
-                        .disabled(c.demoBusy)
-                        .help(s.prompt)
-                        .accessibilityLabel(s.label)
-                }
+        for line in c.demoLines {
+            let id = line.id.uuidString
+            if line.fromClaude {
+                out.append(ChatRow(id: id, kind: .assistant(text: ChatLeakFilter.reply(line.text), streaming: false)))
+            } else {
+                out.append(ChatRow(id: id, kind: .user(text: ChatLeakFilter.userText(line.text), images: line.images.map { ChatImage(ref: $0) }, phone: false)))
             }
-            SuiteClaudeAttachRow()
-            HStack(alignment: .bottom, spacing: Space.s2) {
-                TextField("Describe the shot…", text: $draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .onSubmit(send)
-                    .roleField(multiline: true)
-                Button(action: send) { Ph("paperplane.fill", 14) }
-                    .buttonStyle(RButtonStyle(kind: .action, off: empty || c.demoBusy || c.uploading))
-                    .frame(width: 40)
-                    .disabled(empty || c.demoBusy || c.uploading)
-                    .help("Send to Claude")
-                    .accessibilityLabel("Send to Claude")
-                    // No ⌘Return here: in the composer that is Generate's.
-            }
-            Text("Demo: Claude's replies here are stand-ins").scaled(t.scale.micro, t.roles.ink2).lineLimit(1)
         }
-        .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s4)
-        .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
+        return out
     }
 
     private func send() {
-        let text = draft
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
         draft = ""
         store.sendSuiteClaudeDemo(text)
     }
@@ -275,13 +227,25 @@ struct SuiteClaudeDemoChat: View {
 struct SuiteClaudeAttachRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// Inside the shared chat composer: its "+" attaches and its field takes pasted images, so this row only shows the
+    /// images waiting to go (and nothing when there are none).
+    var inComposer = false
 
     var body: some View {
         let c = store.suite.claude
         let full = c.attachments.count >= SuiteClaudeAttachments.maxCount
+        if inComposer && c.attachments.isEmpty && c.attachNote == nil {
+            EmptyView()
+        } else {
+            rowBody(c, full: full)
+        }
+    }
+
+    @ViewBuilder private func rowBody(_ c: SuiteClaudeBridge, full: Bool) -> some View {
         VStack(alignment: .leading, spacing: Space.s1) {
             HStack(spacing: Space.s2) {
-                Button(action: pick) {
+                if !inComposer {
+                Button(action: { SuiteClaudeAttachRow.pick(store) }) {
                     Ph("plus", 15).frame(width: 32, height: 32).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -289,6 +253,7 @@ struct SuiteClaudeAttachRow: View {
                 .disabled(full)
                 .help("Attach images: up to 4, JPEG, PNG, WebP or HEIC. You can also drop or paste them.")
                 .accessibilityLabel("Attach images")
+                }
                 ForEach(c.attachments) { a in thumb(a) }
                 Spacer(minLength: 0)
             }
@@ -307,11 +272,14 @@ struct SuiteClaudeAttachRow: View {
                 }
             }
             // ⌘V: an image on the pasteboard attaches; anything else is passed on to the field as a normal paste.
-            Button("Paste") { paste() }
-                .keyboardShortcut("v", modifiers: .command)
-                .opacity(0)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
+            // (In the shared composer its own field does this.)
+            if !inComposer {
+                Button("Paste") { paste() }
+                    .keyboardShortcut("v", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
@@ -325,7 +293,7 @@ struct SuiteClaudeAttachRow: View {
                 }
             }
             .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous))   // an image, never a pill
             .overlay {
                 if a.uploading { ProgressView().controlSize(.small) }
                 if a.error != nil { Ph("warning", 14).foregroundStyle(t.roles.danger) }
@@ -345,7 +313,9 @@ struct SuiteClaudeAttachRow: View {
         .help(a.error ?? a.name)
     }
 
-    private func pick() {
+    static func pick(_ store: AppStore) {
+        // Review mode never opens a modal panel (it would stop the run).
+        if SnapshotRunner.probing { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
@@ -353,6 +323,12 @@ struct SuiteClaudeAttachRow: View {
         panel.message = SuiteClaudeAttachments.refusal
         guard panel.runModal() == .OK else { return }
         store.attachSuiteClaudeImages(urls: panel.urls)
+    }
+
+    /// Pasted or dropped on the shared composer: files by their links, image data as it is.
+    static func take(_ store: AppStore, urls: [URL], data: [(name: String, data: Data, mime: String)]) {
+        if !urls.isEmpty { store.attachSuiteClaudeImages(urls: urls) }
+        if !data.isEmpty { store.attachSuiteClaudeImages(data.map { (name: $0.name, data: $0.data, mime: Optional($0.mime)) }) }
     }
 
     private func paste() {

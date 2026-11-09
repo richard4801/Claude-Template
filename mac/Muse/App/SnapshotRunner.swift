@@ -31,6 +31,16 @@ enum SnapshotRunner {
         var recreateFrames: [String: CGRect] = [:]
         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
         var claudeTab: Int?
+        /// Claude chat review (SnapshotRunner+Chat.swift): every chat shows the sample thread (ClaudeChatSample)…
+        var chatSample = false
+        /// …mid-reply (a tool running, text still arriving)…
+        var chatStreaming = false
+        /// …with this typed in the composer (the growing-field fit check)…
+        var chatComposerText: String?
+        /// …and two images waiting to go.
+        var chatAttach = false
+        /// Bumped to put the caret in the chat's field.
+        var chatFocusTick = 0
     }
 
     /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
@@ -169,6 +179,7 @@ enum SnapshotRunner {
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
+            await chatShots(store, dir: dir)   // Claude chat on every surface, four themes, and the composer's fit (SnapshotRunner+Chat.swift)
             await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
