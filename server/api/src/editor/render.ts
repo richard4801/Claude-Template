@@ -196,7 +196,6 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     return file;
   };
   const lut3d = (file: string) => `lut3d=file='${file.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '')}'`;
-  const LOOK_DETAILS = ['sharpen', 'chromatic', 'halation', 'leak', 'vignette', 'grain'] as const;
   type Visual = M.VideoClip | M.ImageItem;
   type Src = { inSec: number; outSec: number; speed?: number; speedCurve?: M.SpeedCurve; holdSec?: number };
 
@@ -334,8 +333,8 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
      * (w × h px): crop → chroma key → colour → matte and mask → placed → opacity. Static and unrotated: a picture to put
      * at (x, y); moving: drawn in the area it sweeps; `canvas`: RGBA the size of the canvas (blend modes).
      */
-    const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; skip: number; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; matte?: () => string | null }): Layer => {
-      const { skip, n, len, tag } = o, vc = o.video ? it as M.VideoClip : null, t0 = skip / FPS;
+    const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; skip: number; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; at: number; matte?: () => string | null }): Layer => {
+      const { skip, n, len, tag } = o, vc = o.video ? it as M.VideoClip : null, t0 = skip / FPS, clockAt = o.at / FPS;
       let s = src;
       const cr = it.crop ?? {}, l = cr.left ?? 0, t = cr.top ?? 0, r = cr.right ?? 0, b = cr.bottom ?? 0;
       const cw = w * (1 - l - r), ch = h * (1 - t - b);
@@ -366,10 +365,21 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
           `[${tag}kl][${tag}k2][${tag}ks]maskedmerge[${tag}kd]`);
         s = `${tag}kd`; alphas.push(`${tag}ka`);
       }
-      // Colour: the matrix (adjust, filter), tone, curves, HSL, LUT and lift as one 3D LUT; colour keyframes in runs.
-      const look = it.look;
-      if (look && LOOK_DETAILS.some(x => look[x] !== undefined)) unsupported.add('look details (grain, vignette, …)');
-      if (M.LOOK_KF_PROPS.some(x => it.keyframes?.[x]?.length)) unsupported.add('look details (grain, vignette, …)');
+      // The look's first steps (look.ts renderLook 1–2): sharpen, chromatic aberration.
+      const look = it.look, short = Math.min(iw, ih);
+      const shp = L.sharpen(look, short);
+      if (shp) { toRgb(); g.push(`[${s}]split[${tag}h0][${tag}h1]`, `[${tag}h1]boxblur=luma_radius=${shp.radius}:luma_power=1:chroma_radius=${shp.radius}:chroma_power=1[${tag}hb]`, `[${tag}h0][${tag}hb]lut2=c0='${shp.expr}':c1='${shp.expr}':c2='${shp.expr}'[${tag}sh]`); s = `${tag}sh`; }
+      const cab = L.chromatic(look, iw, ih);
+      if (cab) {
+        toRgb();
+        const [rw, rh] = cab.r, [bw, bh] = cab.b, px = Math.ceil((iw - rw) / 2), py = Math.ceil((ih - rh) / 2);
+        g.push(`[${s}]extractplanes=g+b+r[${tag}cg][${tag}cb][${tag}cr]`,
+          `[${tag}cr]scale=${rw}:${rh}:flags=bilinear,pad=${iw}:${ih}:${(iw - rw) / 2}:${(ih - rh) / 2},fillborders=left=${px}:right=${px}:top=${py}:bottom=${py}:mode=smear,setsar=1[${tag}cr2]`,
+          `[${tag}cb]scale=${bw}:${bh}:flags=bilinear,crop=${iw}:${ih},setsar=1[${tag}cb2]`,
+          `[${tag}cg][${tag}cb2][${tag}cr2]mergeplanes=0x001020:gbrp[${tag}ca]`);
+        s = `${tag}ca`;
+      }
+      // Colour (3–6): the matrix (adjust, filter), tone, curves, HSL, LUT and lift as one 3D LUT; colour keyframes in runs.
       if (!M.COLOR_KF_PROPS.some(x => it.keyframes?.[x]?.length)) { const cf = colourFile(it.adjust, it.filter, look); if (cf) { toRgb(); g.push(`[${s}]${lut3d(cf)}[${tag}g]`); s = `${tag}g`; } }
       else {
         const step = Math.max(0.1, len / 60), parts: string[] = [];
@@ -379,6 +389,49 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
           if (cf) parts.push(`${lut3d(cf)}:enable='gte(t,${n4(a - t0)})*lt(t,${n4(a + step - t0)})'`);
         }
         if (parts.length) { toRgb(); g.push(`[${s}]${parts.join(',')}[${tag}g]`); s = `${tag}g`; }
+      }
+      // The look's last steps (7–10): halation; light leak, vignette and grain (their amounts at their keyframes).
+      const hal = L.halation(look, short);
+      if (hal) {
+        toRgb();
+        g.push(`[${s}]split[${tag}x0][${tag}x1]`, `[${tag}x1]boxblur=luma_radius=${hal.radius}:luma_power=1:chroma_radius=${hal.radius}:chroma_power=1,colorchannelmixer=rr=0.2126:rg=0.7152:rb=0.0722:gr=0.2126:gg=0.7152:gb=0.0722:br=0.2126:bg=0.7152:bb=0.0722,${hal.lut}[${tag}xh]`,
+          `[${tag}x0][${tag}xh]blend=all_mode=screen[${tag}ha]`);
+        s = `${tag}ha`;
+      }
+      const fin = L.finish(it, short, fi => (skip + fi) / FPS, fi => clockAt + fi / FPS, `(T+${n6(t0)})`);
+      if (fin) {
+        toRgb();
+        // A field (leak, vignette) written at 1/8 size, one frame or one a frame, read as raw video and scaled up.
+        const field = (draw: (fi: number, w: number, h: number) => Buffer, fmt: 'rgb24' | 'gray', name: string) => {
+          const fw = Math.max(2, Math.round(iw / 8)), fh = Math.max(2, Math.round(ih / 8)), count = fin.moving ? n : 1;
+          const raw = tmpName(name, fmt === 'gray' ? 'gray' : 'rgb');
+          const fd = fs.openSync(raw, 'w');
+          try { for (let fi = 0; fi < count; fi++) fs.writeSync(fd, draw(fi, fw, fh)); } finally { fs.closeSync(fd); }
+          temp.push(raw);
+          const k = inputs.length;
+          inputs.push(raw);
+          inputArgs.set(k, ['-f', 'rawvideo', '-pix_fmt', fmt, '-s', `${fw}x${fh}`, '-framerate', String(FPS)]);
+          g.push(`[${k}:v]${count === 1 ? 'loop=loop=-1:size=1,' : ''}setpts=N/${FPS}/TB,trim=end_frame=${n},scale=${iw}:${ih}:flags=bilinear,format=gbrp[${tag}${name}]`);
+          return `${tag}${name}`;
+        };
+        if (fin.leak) { const lf = field(fin.leak, 'rgb24', 'lk'); g.push(`[${s}][${lf}]blend=all_mode=screen[${tag}lk2]`); s = `${tag}lk2`; }
+        if (fin.vignette) { const vf = field(fin.vignette, 'gray', 'vg'); g.push(`[${s}][${vf}]lut2=c0='${L.VIGNETTE_LUT2}':c1='${L.VIGNETTE_LUT2}':c2='${L.VIGNETTE_LUT2}'[${tag}vg2]`); s = `${tag}vg2`; }
+        if (fin.grain) {
+          // Mono uniform noise (±0.09 × amount), strongest in the mid-tones: n × (1 − |2·luma − 1| / 2), added to every channel.
+          const gw = Math.max(2, Math.round(iw / fin.grain.cell)), gh = Math.max(2, Math.round(ih / fin.grain.cell));
+          const amt = L.constant(fin.grain.amount);
+          g.push(`color=c=0x808080:s=${gw}x${gh}:r=${FPS}:d=${n4(n / FPS + 1)},format=gray,noise=alls=${amt !== null ? n4(Math.min(100, 46 * Math.max(0, amt))) : 46}:allf=t+u,trim=end_frame=${n},scale=${iw}:${ih}:flags=neighbor[${tag}gn]`);
+          let noise = `${tag}gn`;
+          if (amt === null) {
+            g.push(`color=c=white:s=2x2:r=${FPS}:d=${n4(n / FPS + 1)},format=gray,geq=lum='255*clip(${fin.grain.amount},0,1)',scale=${iw}:${ih}:flags=neighbor,trim=end_frame=${n}[${tag}ga]`,
+              `[${noise}][${tag}ga]lut2=c0='128+(x-128)*y/255'[${tag}gn2]`);
+            noise = `${tag}gn2`;
+          }
+          g.push(`[${s}]split[${tag}g0][${tag}g1]`, `[${tag}g1]colorchannelmixer=rr=0.2126:rg=0.7152:rb=0.0722,extractplanes=r[${tag}gl]`,
+            `[${noise}][${tag}gl]lut2=c0='128+(x-128)*(1-abs(2*y/255-1)*0.5)',format=gbrp[${tag}gw]`,
+            `[${tag}g0][${tag}gw]lut2=c0='clip(x+y-128,0,255)':c1='clip(x+y-128,0,255)':c2='clip(x+y-128,0,255)'[${tag}gr]`);
+          s = `${tag}gr`;
+        }
       }
       // Background removal: the matte's luma (cut and timed like the clip) is the alpha.
       if (vc?.alphaMatte) {
@@ -445,39 +498,48 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
 
     // Main clips in the window: each its own picture of the canvas (the background colour, or the blur fill, under it).
     const mine = clips.map((c, i) => ({ c, i, S: fr(tl[i]!.startSec), n: frames(i) })).filter(x => x.S < F1 && x.S + x.n > F0);
-    const shown = new Map<number, string>(); // clip index → its frames in this window
     const many = mine.length > MAX_INPUTS;
+    // Blur fill (model.ts blurFill / blurFillClip): one picture behind all the main clips, each clip's own frames
+    // cover-fitted with its colour (not its transform), box-blurred and darkened, switching to the incoming clip half-way
+    // through a transition. The clips are then drawn over transparency and joined with their alpha.
+    const fillOn = p.canvas.fill === 'blur' && !main.hidden;
+    const fills: string[] = [];
+    const rad = Math.max(1, Math.round(M.blurFillRadius(p.canvas) * f));
     for (const { c, i, S, n: whole } of mine) {
       const skip = Math.max(0, F0 - S), n = Math.min(S + whole, F1) - Math.max(S, F0), tag = `m${i}`;
       const asset = p.assets.find(a => a.id === c.asset);
       const file = asset && files[asset.id], size = asset && sizes[asset.id];
       const len = M.clipLength(c);
-      const bg = `color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(n / FPS + 1)},trim=end_frame=${n},format=yuv420p`;
-      shown.set(i, `v${i}`);
-      if (!asset || !file || !size || !size.width) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); continue; }
+      const bg = fillOn ? `color=c=black@0:s=${W}x${H}:r=${FPS}:d=${n4(n / FPS + 1)},trim=end_frame=${n},format=rgba,format=yuva420p`
+        : `color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4(n / FPS + 1)},trim=end_frame=${n},format=yuv420p`;
+      const pix = fillOn ? 'yuva420p' : 'yuv420p';
+      const fillPart = (src: string | null) => {
+        // This clip's stretch of the fill: from half-way through its transition in to half-way through the next one.
+        if (!fillOn) return;
+        const nx = clips[i + 1] && tl[i + 1]!.transitionSec > 0 ? fr(tl[i + 1]!.startSec + tl[i + 1]!.transitionSec / 2) : S + whole;
+        const a = Math.max(F0, tl[i]!.transitionSec > 0 ? fr(tl[i]!.startSec + tl[i]!.transitionSec / 2) : S), b = Math.min(F1, nx);
+        if (b <= a) return;
+        const ft = `${tag}fill`;
+        if (!src) g.push(`color=c=${color(p.canvas.background)}:s=${W}x${H}:r=${FPS}:d=${n4((b - a) / FPS + 1)},trim=end_frame=${b - a},format=yuv420p[${ft}]`);
+        else {
+          const cf = colourFile(c.adjust, c.filter, c.look);
+          g.push(`[${src}]trim=start_frame=${a - Math.max(S, F0)}:end_frame=${b - Math.max(S, F0)},setpts=N/${FPS}/TB,scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=gbrp${cf ? `,${lut3d(cf)}` : ''},boxblur=luma_radius=${rad}:luma_power=1:chroma_radius=${rad}:chroma_power=1,colorchannelmixer=rr=${M.BLUR_FILL_DARKEN}:gg=${M.BLUR_FILL_DARKEN}:bb=${M.BLUR_FILL_DARKEN},format=yuv420p,settb=AVTB[${ft}]`);
+        }
+        fills.push(ft);
+      };
+      if (!asset || !file || !size || !size.width) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); fillPart(null); continue; }
       if (main.hidden) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); continue; } // hidden: only the background
-      const src = source(file, c, skip, n, `${tag}s`, many ? 1 : 2);
-      const blur = p.canvas.fill === 'blur' && (c.fit ?? 'cover') === 'contain';
-      let under = `${tag}bg`, layerSrc = src;
-      if (blur) {
-        // Blur fill (model.ts blurFill): the clip cover-fitted with its colour (not its transform), box-blurred, darkened.
-        const rad = Math.max(1, Math.round(M.blurFillRadius(p.canvas) * f));
-        const cf = colourFile(c.adjust, c.filter, c.look);
-        g.push(`[${src}]split[${tag}f][${tag}l]`,
-          `[${tag}f]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=gbrp${cf ? `,${lut3d(cf)}` : ''},boxblur=luma_radius=${rad}:luma_power=1:chroma_radius=${rad}:chroma_power=1,colorchannelmixer=rr=${M.BLUR_FILL_DARKEN}:gg=${M.BLUR_FILL_DARKEN}:bb=${M.BLUR_FILL_DARKEN},format=yuv420p[${under}]`);
-        layerSrc = `${tag}l`;
-      }
+      let layerSrc = source(file, c, skip, n, `${tag}s`, many ? 1 : 2);
+      if (fillOn) { g.push(`[${layerSrc}]split[${tag}l][${tag}f]`); layerSrc = `${tag}l`; fillPart(`${tag}f`); }
+      const under = `${tag}bg`;
       const matte = () => { const mf = c.alphaMatte && files[c.alphaMatte.asset]; return mf ? source(mf, c, skip, n, `${tag}mt`, 1) : null; };
-      const lay = visualLayer(c, layerSrc, size.width, size.height, { video: true, skip, n, len, fit: 'cover', tag, canvas: false, matte });
-      if (!blur && lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
+      const lay = visualLayer(c, layerSrc, size.width, size.height, { video: true, skip, n, len, fit: 'cover', tag, canvas: false, matte, at: Math.max(S, F0) });
+      if (lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
         // Opaque and covering the canvas: cut to it (no background, no overlay).
         g.push(`[${lay.s}]crop=${W}:${H}:${-lay.x}:${-lay.y}[${tag}o]`);
-      } else {
-        if (!blur) g.push(`${bg}[${under}]`);
-        g.push(`[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[${tag}o]`);
-      }
+      } else g.push(`${bg}[${under}]`, `[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[${tag}o]`);
       // Exactly the clip's frames in the window (rounded once from the timeline, so cuts never drift).
-      g.push(`[${tag}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=yuv420p,setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
+      g.push(`[${tag}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=${pix},setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
     }
     // Joined: a cut is a concat, a transition an xfade at the clip's place (transitions never straddle windows).
     let acc = `v${mine[0]!.i}`;
@@ -493,12 +555,17 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     }
     // The glitches' jitter and colour split, on the joined picture.
     if (glitches.length) {
-      g.push(`[${acc}]format=gbrp,sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=yuv420p[gfx]`);
+      g.push(`[${acc}]format=${fillOn ? 'gbrap' : 'gbrp'},sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=${fillOn ? 'yuva420p' : 'yuv420p'}[gfx]`);
       acc = 'gfx';
     }
     // Held on its last frame to the window's end (a set render length past the timeline's end).
     g.push(`[${acc}]tpad=stop_mode=clone:stop_duration=${n4(N / FPS)},trim=end_frame=${N},setpts=N/${FPS}/TB[base]`);
     acc = 'base';
+    if (fills.length) {
+      g.push(`${fills.map(x => `[${x}]`).join('')}concat=n=${fills.length}:v=1:a=0,tpad=stop_mode=clone:stop_duration=${n4(N / FPS)},trim=end_frame=${N},setpts=N/${FPS}/TB[fill]`,
+        `[fill][base]overlay=0:0:format=yuv420:eof_action=pass,format=yuv420p[filled]`);
+      acc = 'filled';
+    }
     // Overlays (video and image tracks), in track order (layer.ts).
     overlayItems.filter(x => x.start < F1 && x.start + x.n > F0).forEach((x, oi) => {
       const { it, video } = x, vc = video ? it as M.VideoClip : null, tag = `ov${oi}`;
@@ -506,7 +573,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       const src = source(x.file, vc, skip, n, `${tag}s`, 1);
       const mode = it.blend ?? 'normal';
       const matte = () => { const mf = vc?.alphaMatte && files[vc.alphaMatte.asset]; return mf ? source(mf, vc, skip, n, `${tag}mt`, 1) : null; };
-      const lay = visualLayer(it, src, x.size.width, x.size.height, { video, skip, n, len: x.len, fit: 'contain', tag, canvas: mode !== 'normal', matte });
+      const lay = visualLayer(it, src, x.size.width, x.size.height, { video, skip, n, len: x.len, fit: 'contain', tag, canvas: mode !== 'normal', matte, at: Math.max(x.start, F0) });
       const t0 = n4(at / FPS), on = `enable='between(t,${t0},${n4((at + n - 0.5) / FPS)})'`;
       // Normal: over the picture as it is (yuv; the mix is linear, as in RGB).
       if (mode === 'normal') g.push(`[${lay.s}]setpts=PTS+${t0}/TB[${tag}t]`, `[${acc}][${tag}t]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass:${on}[${tag}x]`);

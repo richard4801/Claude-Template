@@ -180,10 +180,10 @@ describe.skipIf(!hasFfmpeg)('render an edit project (ffmpeg)', () => {
 
   it('a guide track replaces the project\'s sound, padded to a set length; what can\'t be drawn is listed', async () => {
     const p = project();
-    (p.tracks[0]!.items[0] as M.VideoClip).look = { grain: { amount: 0.4 } };
+    (p.tracks[0]!.items[0] as M.VideoClip).look = { lut: 'pack:not-on-this-server' };
     const out = path.join(dir, 'guide.mp4');
     const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, files, out, { maxSide: 320, audio: { file: files.m! }, durationSec: 5 });
-    expect(r.unsupported).toEqual(['look details (grain, vignette, …)']);
+    expect(r.unsupported).toEqual(['a look that is not on the server']);
     const info = await probe('ffprobe', out);
     expect(Math.abs(info.duration - 5)).toBeLessThan(0.1);
     expect(info.audioCodec).toBeTruthy();

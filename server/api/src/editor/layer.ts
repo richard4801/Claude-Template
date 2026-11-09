@@ -3,7 +3,7 @@
 // LUT, lift: one baked 3D LUT) → alpha matte and mask → placed by its corners (model.ts itemCorners: fit, mirror, scale,
 // rotation, position; keyframes, in/out animation and loop over time) → opacity → blended over what is below
 // (model.ts blendPixel). Pure: builds strings, cube text and mask pixels.
-import { curvesFn, hslFn, lutSample, writeCube, type Look, type Lut } from './look.js';
+import { curvesFn, grainCell, halationRadius, hslFn, leakColor, lutSample, sharpenRadius, vignetteMask, writeCube, type Look, type Lut } from './look.js';
 import * as M from './model.js';
 
 const n4 = (x: number) => String(Math.round(x * 10000) / 10000);
@@ -153,6 +153,76 @@ export function colourCube(matrix: number[] | null, adjust: M.Adjust | undefined
     return rgb;
   });
 }
+
+// ------------------------------------------------------------------ look details (look.ts renderLook steps 1, 2, 7–10)
+const ss = (a: string, b: string, x: string) => `(pow(clip((${x}-(${a}))/((${b})-(${a})),0,1),2)*(3-2*clip((${x}-(${a}))/((${b})-(${a})),0,1)))`;
+/** Step 1, sharpen: box radius (from the picture's short side) and the lut2 expression (x = pixel, y = its blur), or null. */
+export function sharpen(look: Look | undefined, short: number): { radius: number; expr: string } | null {
+  const sh = clamp(look?.sharpen ?? 0, 0, 1);
+  return sh > 0 ? { radius: sharpenRadius(short), expr: `clip(x+${n6(1.5 * sh)}*(x-y),0,255)` } : null;
+}
+/**
+ * Step 2, chromatic aberration: red sampled outwards and blue inwards from the centre by `ca` of the picture, i.e. the
+ * red plane shrunk by 1 / (1 + ca) and the blue one grown by 1 / (1 − ca) about the centre (edges smeared). Null if none.
+ */
+export function chromatic(look: Look | undefined, w: number, h: number): { r: [number, number]; b: [number, number] } | null {
+  const ca = clamp(look?.chromatic ?? 0, 0, 1) * 0.006;
+  if (!(ca > 0)) return null;
+  const ev = (x: number) => Math.max(2, Math.round(x / 2) * 2);
+  return { r: [ev(w / (1 + ca)), ev(h / (1 + ca))], b: [ev(w / (1 - ca)), ev(h / (1 - ca))] };
+}
+/** Step 7, halation: box radius and the highlights' tinted screen layer (lutrgb on the blurred picture's luma), or null. */
+export function halation(look: Look | undefined, short: number): { radius: number; lut: string } | null {
+  const ha = look?.halation;
+  if (!ha || !(ha.amount > 0)) return null;
+  const thr = clamp(ha.threshold ?? 0.7, 0, 0.99), k = clamp(ha.amount, 0, 1);
+  const hl = `clip((val/255-${n6(thr)})/${n6(1 - thr)},0,1)*${n6(k)}*255`;
+  return { radius: halationRadius(short, ha), lut: `lutrgb=r='${hl}':g='${hl}*0.35':b='${hl}*0.2'` };
+}
+/** What steps 8–10 (light leak, vignette, grain) draw on an item, with their amounts at their keyframes (lookAt). */
+export type Finish = {
+  /** The leak's colour (to screen on) at frame f of the item, `w` × `h` RGB 0–255; null without a leak. */
+  leak: ((f: number, w: number, h: number) => Buffer) | null;
+  /** The vignette at frame f, grey: 128 + 127 × amount × mask (above 128 darkens, below lifts); null without one. */
+  vignette: ((f: number, w: number, h: number) => Buffer) | null;
+  /** Whether either moves (then one picture a frame, else one for all). */
+  moving: boolean;
+  /** Grain: its strength over time as an expression of `local` (0–1 × amount), and its cell size in pixels; or null. */
+  grain: { amount: string; cell: number } | null;
+};
+/**
+ * Steps 8–10 for an item (look.ts renderLook): the leak (drifting with the timeline clock) and the vignette as smooth
+ * fields drawn here (they are scaled up from 1/8 size), the grain's amount. `local(f)` / `clock(f)`: the item's own
+ * time and the timeline's at frame f. Grain's pattern is ffmpeg's own noise (look.ts hash01's bit mixing has no ffmpeg
+ * form); its amount, cell size and mid-tone weighting are the reference's.
+ */
+export function finish(item: { look?: Look; keyframes?: M.Keyframes }, short: number, local: (f: number) => number, clock: (f: number) => number, tv: string): Finish | null {
+  const look = item.look ?? {}, k = item.keyframes ?? {};
+  const has = (x: unknown, keys?: M.Keyframe[]) => !!x || !!keys?.length;
+  const lk = has(look.leak, k.leak), vg = has(look.vignette, k.vignette), gr = has(look.grain, k.grain);
+  if (!lk && !vg && !gr) return null;
+  const at = (f: number) => M.lookAt(item, local(f)) ?? {};
+  const grain = gr ? { amount: kfExpr(k.grain, look.grain?.amount ?? 0, tv), cell: grainCell(short, look.grain ?? { amount: 0 }) } : null;
+  return {
+    leak: lk ? (f, w, h) => {
+      const l = at(f).leak, out = Buffer.alloc(w * h * 3);
+      if (l && l.amount > 0) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const c = leakColor(l, (x + 0.5) / w, (y + 0.5) / h, clock(f));
+        for (let i = 0; i < 3; i++) out[(y * w + x) * 3 + i] = Math.round(255 * clamp(c[i]!, 0, 1));
+      }
+      return out;
+    } : null,
+    vignette: vg ? (f, w, h) => {
+      const v = at(f).vignette, out = Buffer.alloc(w * h, 128);
+      if (v && v.amount !== 0) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y * w + x] = Math.round(128 + 127 * clamp(v.amount, -1, 1) * vignetteMask(v, (x + 0.5) / w, (y + 0.5) / h));
+      return out;
+    } : null,
+    moving: lk || !!k.vignette?.length,
+    grain: grain && constant(grain.amount) !== 0 ? grain : null,
+  };
+}
+/** The vignette field (grey, see Finish) on a channel, as a lut2 expression: x = the channel, y = the field. */
+export const VIGNETTE_LUT2 = `clip(if(gte(y,128),x*(1-(y-128)/127),x+((128-y)/127)*(255-x)),0,255)`;
 
 // ------------------------------------------------------------------ alpha: chroma key, mask
 /** model.ts chromaKey's alpha and spill amount as lut2 expressions of 8-bit full-range BT.601 U (x) and V (y), 0–255. */

@@ -178,6 +178,44 @@ describe.skipIf(!hasFfmpeg)('render overlays (ffmpeg)', () => {
     expect(grey(await px(moved.out, 1.9, 0.25, 0.5))).toBe(true);
   }, 120_000);
 
+  it('a freeze frame holds one source frame for holdSec, silently; the next clip follows on time', async () => {
+    files.rb = path.join(dir, 'rb.mp4'); // red for 1 s, then blue, with a tone
+    if (!fs.existsSync(files.rb)) ff('-f', 'lavfi', '-i', 'color=c=red:s=180x320:r=30:d=1', '-f', 'lavfi', '-i', 'color=c=blue:s=180x320:r=30:d=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+      '-filter_complex', '[0][1]concat=n=2:v=1:a=0[v]', '-map', '[v]', '-map', '2:a', ...ENC, '-c:a', 'aac', files.rb);
+    const p = project();
+    p.assets.push({ id: 'rb', kind: 'video', upload: 'u_rb', durationSec: 2 });
+    p.tracks[0]!.items = [{ id: 'c1', asset: 'rb', inSec: 1.5, outSec: 1.6, speed: 1, holdSec: 1.2 } as M.VideoClip,
+      { id: 'c2', asset: 'rb', inSec: 0, outSec: 0.8, speed: 1 } as M.VideoClip];
+    const { out, r } = await render(p, 'freeze', 'project');
+    expect(r.unsupported).toEqual([]);
+    for (const t of [0.05, 0.6, 1.1]) { const [rr, , bb] = await px(out, t, 0.5, 0.5); expect(bb!).toBeGreaterThan(180); expect(rr!).toBeLessThan(60); } // the blue frame, held
+    const [r2, , b2] = await px(out, 1.5, 0.5, 0.5); expect(r2!).toBeGreaterThan(180); expect(b2!).toBeLessThan(60); // then the red clip, at 1.2 s
+    expect(rms(out, 0.1, 1.1)).toBeLessThan(0.01); // a hold is silent
+    expect(rms(out, 1.3, 1.9)).toBeGreaterThan(0.05);
+    expect(Math.abs((await (await import('../src/replicate/media.js')).probe('ffprobe', out)).duration - 2)).toBeLessThan(0.1);
+  }, 60_000);
+
+  it('blur fill: the clip blurred and darkened where it leaves the frame; through a fade it switches half-way, not mixed', async () => {
+    for (const [id, c] of [['wr', 'red'], ['wb', 'blue']] as const) {
+      files[id] = path.join(dir, `${id}.mp4`);
+      if (!fs.existsSync(files[id]!)) ff('-f', 'lavfi', '-i', `color=c=${c}:s=320x180:r=30:d=3`, ...ENC, files[id]!); // landscape: contain leaves the top and bottom
+    }
+    const p = project();
+    p.assets.push({ id: 'wr', kind: 'video', upload: 'u_wr', durationSec: 3 }, { id: 'wb', kind: 'video', upload: 'u_wb', durationSec: 3 });
+    p.canvas.fill = 'blur';
+    p.tracks[0]!.items = [{ id: 'c1', asset: 'wr', inSec: 0, outSec: 2, speed: 1, fit: 'contain' } as M.VideoClip,
+      { id: 'c2', asset: 'wb', inSec: 0, outSec: 2, speed: 1, fit: 'contain', transitionIn: { kind: 'fade', durationSec: 1 } } as M.VideoClip];
+    const { out, r } = await render(p, 'blurfill');
+    expect(r.unsupported).toEqual([]);
+    const [r0, g0, b0] = await px(out, 0.5, 0.5, 0.1); // the fill: red, darkened (× 0.85)
+    expect(Math.abs(r0! - 217)).toBeLessThan(20); expect(g0!).toBeLessThan(30); expect(b0!).toBeLessThan(30);
+    const before = await px(out, 1.35, 0.5, 0.1), after = await px(out, 1.65, 0.5, 0.1); // the fade runs 1–2 s
+    expect(before[0]!).toBeGreaterThan(180); expect(before[2]!).toBeLessThan(40); // still the red clip's fill
+    expect(after[2]!).toBeGreaterThan(180); expect(after[0]!).toBeLessThan(40); // already the blue one's
+    const mid = await px(out, 1.5, 0.5, 0.5); // the pictures themselves do mix
+    expect(mid[0]!).toBeGreaterThan(60); expect(mid[2]!).toBeGreaterThan(60);
+  }, 60_000);
+
   it('an overlay\'s colour (adjust); adjustment layers apply over the overlays, clamped only at the end', async () => {
     const mono = await render(project(vid({ startSec: 0, adjust: { saturation: -1 } })), 'ov-mono');
     const [r, g, b] = await px(mono.out, 1, 0.5, 0.5);
