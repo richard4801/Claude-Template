@@ -19,9 +19,22 @@ Never fight the rig in the prompt. If the rig says Golden hour, don't write "ove
 |---|---|---|
 | **Shot** (video) | A new clip of a model | Full skeleton (§3) |
 | **Photo** | A still or a photoshoot set | SUBJECT, POSE, LOCATION, WARDROBE, CONSTRAINTS. No ACTION timeline, no move. |
-| **Swap / Edit (H3)** | Put a model into an existing clip; keep the motion | Who replaces whom, what to keep (setting, audio), and what to remove (captions, watermarks). No camera words: the source clip has the camera. |
+| **Swap / Edit (H3)** | Put a model into an existing clip; keep the motion | Who replaces whom, what to keep from the clip (motion, expressions, camera, setting, light, audio), and what to remove (captions, watermarks). Her figure always comes from her own images, never from the performer in the clip (see Figure lock). No camera words: the source clip has the camera. |
 | **Storyboard** | Several connected shots | One §3 prompt per scene, sharing the Style Prefix and the @tags |
 | **Recreate fill** | A missing shot of a reference edit | The slot brief is the ACTION. Keep it to that shot's length and framing. |
+
+## Figure lock (owner rule, every mode)
+
+Her figure never changes: not with the outfit, not with a reference image or reference video, not between shots.
+- Her body shape and proportions (legs, thighs, hips, waist, bust, arms) always come from her own images. With an
+  outfit chosen, the outfit set's four angles (front, ¾, side, back) show her true figure in those clothes; MUSE sends
+  them as her body references.
+- From a reference video (Swap, Recreate) or a pose/style reference image, take only the motion, pose, expressions,
+  camera, setting and light. Never the body shape, height or proportions of the person in it. Say so in the prompt:
+  "her exact figure and proportions from her images, unchanged; only the motion from <Video 1>".
+- Never describe her body as smaller, slimmer, taller or different from her references, and never copy a body
+  description from a reference. Her character's description (her look) carries any body notes; repeat them, don't
+  invent new ones.
 
 ## 2. Style Prefix (optional, owner-editable)
 
@@ -38,7 +51,7 @@ Style: Photorealistic, cinematic. No 3D render, no game-engine look, no CGI shee
 Skin: Pore-level realism. Natural texture, vellus hair, real catch-lights in wet, living eyes. No plastic smoothing.
 Acting: Specific and human. Micro-pauses before reactions, precise eye-line, visible breath.
 Physics: Real weight and inertia, correct contact shadows, nothing floating.
-Continuity: The person, wardrobe, props and setting stay identical across every cut. No identity drift.
+Continuity: The person, her figure, wardrobe, props and setting stay identical across every cut. No identity or body drift.
 Audio: Environmental sound only. No music, no subtitles, no on-screen text.
 ```
 
@@ -52,7 +65,7 @@ The owner's Seedance prefix lines are kept as options:
 ```
 [STYLE PREFIX]
 
-SUBJECT — @ModelName (matches her references 100%: face, body, skin, hair). <one line: the goal + the emotional beat>. WARDROBE: <exact outfit, or "her saved outfit @OutfitName">. MULTISHOT if more than one shot.
+SUBJECT — @ModelName (matches her references 100%: face, figure and body proportions, skin, hair). <one line: the goal + the emotional beat>. WARDROBE: <exact outfit, or "her saved outfit @OutfitName">. MULTISHOT if more than one shot.
 
 LOCATION — <place, materials, time of day, weather>. Style reference only, not a fixed keyframe. She moves through the space; don't reproduce any reference 1:1. (Or @LocationName for a saved studio location.)
 
