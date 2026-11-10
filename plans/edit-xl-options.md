@@ -196,6 +196,9 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
    Look's vignette drawn inverted (the centre darkened) in the Mac compositor (WS9's cached vignette map / maskAt/lookAt).
    The owner can't select or remove it. Reproduce with a B&W-look take, fix, add a pixel probe (centre bright, corners
    darker), and check Android and the server render the same.
+   CLUE (2026-11-10): Edit's background cut-out returns a grey matte video (white = keep) that the APP applies to the clip
+   (alphaMatte; editor/providers.ts). An oval-shaped see-through subject fits the Mac applying a matte inverted, or a
+   placeholder/low-res matte stretched over the clip. Check the Mac alphaMatte path first.
 2. Mac Export only saves a version to the Library; it must also save the file to the Mac (Save panel, default
    ~/Downloads or Movies/MUSE) with "Show in Finder".
 3. Direct manipulation (owner 2026-11-09, both apps): on-preview handles for text, captions, stickers and overlays (drag,
@@ -209,7 +212,7 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
 
 ## Custom (Muapi/fal/Replicate own-key) video models in every video picker (owner, Nov 10)
 Done: image models in every image picker; video list now loads custom models itself (shows at once after add/rename/switch-on).
-To build (needs owner go): custom video models that take a VIDEO input (video_url etc.) for Character swap, Recast, Extend and
+To build AFTER THE TOKEN RESET (owner go, 2026-11-10): custom video models that take a VIDEO input (video_url etc.) for Character swap, Recast, Extend and
 Recreate swap fills. Classifier (byo/classify.ts) must detect video inputs (reference video / source video), the run must pass
 the source clip and character sheet, and each model shows only where its inputs fit. Text/image-only models stay in Shot,
 Storyboard, UGC, Recreate fills.
