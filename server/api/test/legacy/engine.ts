@@ -315,7 +315,10 @@ export function replicateSwap(v: ReplicateSwapSpec, t: PromptTexts = DEFAULT_TEX
     outfit = `wearing ${trimEndChars(o.description!.trim(), '.')}${body.length ? `, not the clothes in ${imageRange(body)}` : ''}`;
   else outfit = body.length ? `the outfit from ${imageRange(body)}` : 'an everyday outfit';
   const parts = [faces.length ? `face and identity from ${imageRange(faces)}` : 'face and identity as described',
-    ...(body.length ? [`body shape from ${imageRange(body)}`] : []), outfit, `no ${never.join(', no ')}`];
+    // Owner 2026-11-10 (figure lock): her figure from her body and outfit images; changed here with the live builder.
+    ...((() => { const figure = [...body, ...outfitRefs].sort((a, b) => a - b);
+      return figure.length ? [`her exact figure, body shape and proportions (legs, thighs, hips, waist, bust, arms) from ${imageRange(figure)}, unchanged in every frame`] : []; })()),
+    outfit, `no ${never.join(', no ')}`];
   const retention = fill(t['video.replicate.retention']!, { reference: parts.join('; ') });
   let detailed = fill(t['video.replicate.detailed']!, { faceRef: faces.length ? `<Image ${faces[0]}>` : 'the description' });
   if (dir) detailed += ` ${dir}`;

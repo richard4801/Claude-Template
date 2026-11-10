@@ -97,7 +97,13 @@ async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'capt
     await new Promise(res => setTimeout(res, 250));
   }
 }
-const brief = (kind: string, r: Record<string, unknown>) => kind === 'cuts' ? { cuts: r.cuts, savedSec: r.savedSec } : kind === 'beats' ? { bpm: r.bpm, beats: (r.beats as unknown[])?.length, strong: (r.strong as unknown[])?.length }
+/** Beats for Claude: the tempo, the counts, and the beat times themselves (the clip's own seconds), so a cut can land on one. */
+const beatsBrief = (r: Record<string, unknown>) => {
+  const t = (v: unknown) => (Array.isArray(v) ? v : []).filter((x): x is number => typeof x === 'number').slice(0, 600).map(x => Math.round(x * 1000) / 1000);
+  const beats = t(r.beats), strong = t(r.strong);
+  return { bpm: r.bpm, beats: beats.length, strong: strong.length, beatTimes: beats, strongTimes: strong };
+};
+const brief = (kind: string, r: Record<string, unknown>) => kind === 'cuts' ? { cuts: r.cuts, savedSec: r.savedSec } : kind === 'beats' ? beatsBrief(r)
   : kind === 'captions' ? { language: r.language, words: (r.words as unknown[])?.length } : { done: true };
 
 const TOOLS: EditTool[] = [
@@ -202,7 +208,7 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'detect_beats', title: 'Detect beats (free)', scope: 'edit:write',
-    description: 'Finds the tempo and beats of a music clip and marks them on the timeline (for cutting to the beat).',
+    description: 'Finds the tempo and beats of a music clip and marks them on the timeline (for cutting to the beat). Returns bpm, beatTimes and strongTimes (the downbeats) in the clip\'s own seconds: add the clip\'s start on the timeline (minus its trim-in) for timeline seconds.',
     inputSchema: obj({ sessionId: SID, itemId: str('The music clip') }, ['sessionId', 'itemId']),
     run: (env, a) => helper(env, a, { kind: 'beats', label: 'Detect beats' }),
   },
