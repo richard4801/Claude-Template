@@ -84,6 +84,8 @@ export class ModelChoice {
 
   private async videoEngines(studioId: string): Promise<Engine[]> {
     const suite = this.ctx.suite;
+    // The studio's custom video models, freshly loaded (an added, renamed or switched-on model shows straight away).
+    await suite.byo.ensure(studioId).catch(() => {});
     const p = await suite.prefs(studioId);
     const avail = suite.mode === 'off' ? new Set() : suite.available();
     const ladderRes = (id: string) => { for (const t of ['draft', 'standard', 'hd', 'cinema'] as const) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };

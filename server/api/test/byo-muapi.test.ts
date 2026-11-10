@@ -286,6 +286,8 @@ describe('Bring your own provider · Muapi against a FAKE Muapi (recorded fixtur
       expect(JSON.stringify(mc.custom)).not.toMatch(PROVIDER_WORDS);
       const engines = (await member!.req('GET', '/v1/engines')).body;
       expect(JSON.stringify(engines)).not.toMatch(PROVIDER_WORDS);
+      // A custom video model is in the video pickers (the list loads the studio's custom models itself).
+      expect((await owner.req('GET', '/v1/engines?purpose=shot')).body.engines.find((e: any) => e.model === vm.id)).toMatchObject({ name: 'House Motion', custom: true });
       // A custom image model serves every image purpose, and can be the studio's default for each.
       for (const purpose of ['photo', 'outfit', 'character', 'plate']) {
         expect((await owner.req('GET', `/v1/engines?purpose=${purpose}`)).body.engines.map((e: any) => e.model), purpose).toContain(im.id);

@@ -201,3 +201,10 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
 3. Direct manipulation (owner 2026-11-09, both apps): on-preview handles for text, captions, stickers and overlays (drag,
    corner/pinch resize, rotate; snap to centre and the platform safe-area guides), and free timeline dragging on the Mac
    (move/reorder clips, cross-track drags, snapping to the playhead, edges and beats; Android has move/reorder).
+
+## Custom (Muapi/fal/Replicate own-key) video models in every video picker (owner, Nov 10)
+Done: image models in every image picker; video list now loads custom models itself (shows at once after add/rename/switch-on).
+To build (needs owner go): custom video models that take a VIDEO input (video_url etc.) for Character swap, Recast, Extend and
+Recreate swap fills. Classifier (byo/classify.ts) must detect video inputs (reference video / source video), the run must pass
+the source clip and character sheet, and each model shows only where its inputs fit. Text/image-only models stay in Shot,
+Storyboard, UGC, Recreate fills.
