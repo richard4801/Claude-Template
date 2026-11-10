@@ -286,6 +286,12 @@ describe('Bring your own provider · Muapi against a FAKE Muapi (recorded fixtur
       expect(JSON.stringify(mc.custom)).not.toMatch(PROVIDER_WORDS);
       const engines = (await member!.req('GET', '/v1/engines')).body;
       expect(JSON.stringify(engines)).not.toMatch(PROVIDER_WORDS);
+      // A custom image model serves every image purpose, and can be the studio's default for each.
+      for (const purpose of ['photo', 'outfit', 'character', 'plate']) {
+        expect((await owner.req('GET', `/v1/engines?purpose=${purpose}`)).body.engines.map((e: any) => e.model), purpose).toContain(im.id);
+      }
+      expect((await owner.req('PATCH', '/v1/engines/defaults', { outfit: im.id })).status).toBeLessThan(300);
+      expect((await owner.req('GET', '/v1/engines?purpose=outfit')).body.default).toBe(im.id);
       // The start frame is required: a member's text-only shot is refused before anything is spent.
       const shot = { prompt: 'She walks along the pier at dusk.', duration: 5, quality: 'draft', aspectRatio: '9:16', engineModel: vm.id };
       const est = await member!.req('POST', '/v1/suite/shots/estimate', shot);

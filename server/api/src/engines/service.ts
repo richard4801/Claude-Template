@@ -147,10 +147,10 @@ export class ModelChoice {
       out.push({ model: id, name: nm !== id ? nm : names.get(id) ? `${names.get(id)} (${id.split('/')[0]})` : id, kind: 'image', purposes: [...IMAGE_PURPOSES], custom: false, provider: 'replicate', notice: null,
         limits: noLimits, resolution: null, price: usd == null ? null : { basis: 'per_run', usd: r4(usd) }, inputs });
     }
-    // WS5: the studio's custom image models (Photo runs them; the other image paths use the image engine's step models).
+    // WS5: the studio's custom image models, for every image purpose (Photo, Outfits, Character photos, Background plates).
     for (const c of await this.ctx.suite.byo.catalog({ ...u, studioId, role: 'owner' } as AuthUser)) if (c.kind === 'image') {
       const cc = c as typeof c & { members?: boolean; provider?: string };
-      out.push({ model: c.id, name: c.name, kind: 'image', purposes: ['photo'], custom: true, provider: cc.provider, members: !!cc.members, notice: null,
+      out.push({ model: c.id, name: c.name, kind: 'image', purposes: [...IMAGE_PURPOSES], custom: true, provider: cc.provider, members: !!cc.members, notice: null,
         limits: { ...noLimits, aspectRatios: c.aspectRatios }, resolution: null, price: c.price as Price, inputs: c.inputs });
     }
     return out;
@@ -320,7 +320,7 @@ export class ModelChoice {
     const im = body.imageModel;
     if (im !== undefined && im !== null && (typeof im !== 'string' || im.length > 170)) throw badRequest('imageModel: owner/name');
     const c = await this.choose(u, purpose, (im as string | null | undefined) || undefined);
-    if (!c || c.model.startsWith('c_')) return base;
+    if (!c) return base; // a custom "c_…" model runs on the byo engine (ImageService.selection)
     return { ...(base ?? {}), shot: c.model };
   }
 

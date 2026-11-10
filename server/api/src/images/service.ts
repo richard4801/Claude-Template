@@ -166,6 +166,8 @@ export class ImageService {
     const stored = s?.e as EngineSelection | null;
     // The owner's image models (plans/api.md "Model tools" §2) win over the older single image-engine model.
     const im = (s?.m ?? {}) as Record<string, { model: string }>;
+    // A custom image model chosen for this run (Outfits, Character photos, Background plates) runs on the byo engine.
+    if (!override?.provider && models?.shot?.startsWith('c_')) return { provider: 'byo', model: models.shot };
     const shot = models?.shot ?? im.shot?.model, edit = models?.edit ?? im.edit?.model;
     const base = stored ? (stored.provider === 'replicate' ? this.replicateSelection(shot ?? stored.model, edit) : stored)
       : this.ctx.config.IMAGE_PROVIDER === 'replicate' ? this.replicateSelection(shot, edit) : this.defaultSelection();

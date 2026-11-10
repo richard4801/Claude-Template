@@ -276,7 +276,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // Planned like a shoot's images: within the shot model's limit, the face front never dropped.
     const outfitPlan = mode === 'own' ? null : await ctx.images.shotPlan(req.user.studioId, outfitIds, [], 1, b.imageEngine, stepModels);
     const outfitRefs = outfitPlan?.images ?? [], outfitPanels = outfitPlan?.panels ?? [];
-    const cost = !outfitPlan ? 0 : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
+    // A custom model makes all four angles as new shots (no edits); else a front shot and three edits of it.
+    const byoRun = !b.imageEngine?.provider && !!stepModels?.shot?.startsWith('c_');
+    const cost = !outfitPlan ? 0 : byoRun ? 4 * outfitPlan.perShot : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m, outfitPlan ? sentOf(outfitIds, outfitPlan) : personCount(outfitIds));
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };

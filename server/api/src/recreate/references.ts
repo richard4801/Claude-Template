@@ -695,8 +695,11 @@ export class RecreateReferences {
     const plate = r.fill?.plates?.[slot.id];
     if (plate && plate.setting === setting) return { source: 'generated', setting, usd: 0, reused: plate.image };
     const pc = await modelChoice(this.ctx).choose(u, 'plate', b.imageModel);
-    const base = pc && !this.ctx.imageModels.isRecipe('shot', pc.model) ? await this.ctx.imageModels.estimate(pc.model, { outMp: 1, inMp: 0 }) : P.newShotEstimateImages(this.ctx.images.photoPrices(), 1, 0);
-    const usd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(base * this.ctx.config.EDITOR_MARKUP * 100) / 100);
+    // A custom model's price already carries the studio's own scale (byo/service.ts), so no editor markup on top.
+    const custom = !!pc?.model.startsWith('c_');
+    const base = custom ? await this.ctx.suite.byo.photoPerShot(u.studioId, pc!.model)
+      : pc && !this.ctx.imageModels.isRecipe('shot', pc.model) ? await this.ctx.imageModels.estimate(pc.model, { outMp: 1, inMp: 0 }) : P.newShotEstimateImages(this.ctx.images.photoPrices(), 1, 0);
+    const usd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(base * (custom ? 1 : this.ctx.config.EDITOR_MARKUP) * 100) / 100);
     return { source: 'generated', setting, usd, ...(pc ? { model: pc.model } : {}) };
   }
   /** The background image itself: the location's photo, a plate already made, or a new plate (held, made, settled). */
@@ -711,7 +714,7 @@ export class RecreateReferences {
         req: { prompt: platePrompt(bg.setting), width: w, height: h, count: 1 }, ...(bg.model ? { models: { shot: bg.model } } : {}) });
       const image = out.images[0];
       if (!image) throw new Error('no image');
-      const actual = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(out.costUsd * this.ctx.config.EDITOR_MARKUP * 10000) / 10000);
+      const actual = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(out.costUsd * (bg.model?.startsWith('c_') ? 1 : this.ctx.config.EDITOR_MARKUP) * 10000) / 10000);
       await this.ctx.money.settle(u.studioId, u.id, id, hold, actual, 'Background for your own setting');
       settled = true;
       const fresh = await this.row(u, r.id);
