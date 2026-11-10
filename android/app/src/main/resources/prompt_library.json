@@ -915,8 +915,8 @@
    "title": "Draft/Standard/HD · retention",
    "description": "retention_analysis of the short prompt.",
    "kind": "text",
-   "default": "<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery or clothes.\n<Subject 2>: reference - {reference}.",
-   "current": "<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery or clothes.\n<Subject 2>: reference - {reference}.",
+   "default": "<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery, clothes, body shape or proportions.\n<Subject 2>: reference - {reference}.",
+   "current": "<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery, clothes, body shape or proportions.\n<Subject 2>: reference - {reference}.",
    "overridden": false,
    "allowEmpty": false,
    "placeholders": [

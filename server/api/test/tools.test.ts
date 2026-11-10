@@ -245,7 +245,7 @@ describe('model tools on a fake Replicate', () => {
     expect((await owner.req('GET', '/v1/models')).body.find((m: any) => m.id === modelId).slots.find((s: any) => s.key === 'front').image).toEqual({ asset: 'g_front' });
     const [m] = await a.ctx.db.query.models.findMany({ where: (t, { eq: e }) => e(t.id, modelId) });
     const [o] = await a.ctx.db.query.outfits.findMany({ where: (t, { eq: e }) => e(t.id, applied.outfit.id) });
-    expect(replicateReferencesFor(m!, o!).map(x => x.label)).toEqual(['face, front', 'face, profile', 'face, ¾', 'outfit, front', 'outfit, ¾', 'outfit, back', 'outfit, side']);
+    expect(replicateReferencesFor(m!, o!).map(x => x.label)).toEqual(['face, front', 'face, profile', 'face, ¾', 'outfit, front', 'outfit, ¾', 'outfit, side', 'outfit, back']);
     expect(referencesFor(m!, o!)[0]!.image).toEqual(applied.outfit.faces[0]);
   }, 60_000);
 

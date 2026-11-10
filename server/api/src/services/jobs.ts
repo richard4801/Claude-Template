@@ -534,18 +534,18 @@ export function replicateReferencesFor(m: typeof models.$inferSelect, o?: typeof
   const faces = o?.faces ?? [];
   const angles = o?.angles ?? [];
   if (faces.some(Boolean)) {
-    // A Dress up outfit: its own face close-ups (accessories), then its body angles (the model's own body shots wear other clothes).
+    // A Dress up outfit: its own face close-ups (accessories).
     push('face, front', faces[0] ?? slot('face'));
     push('face, profile', faces[2] ?? slot('profile'));
     push('face, ¾', faces[1]);
   } else {
     push('face, front', slot('face'));
     push('face, profile', slot('profile'));
-    push('body, front', slot('front'));
-    push('body, ¾', slot('tq'));
-    push('body, back', slot('back'));
   }
-  push('outfit, front', angles[0]); push('outfit, ¾', angles[1]); push('outfit, back', angles[3]); push('outfit, side', angles[2]);
+  // Owner 2026-11-10: the outfit set shows her true figure in the clothes, so with an outfit its four angles are her body
+  // and the outfit (the base body shots wear other clothes and are left out); without one, the base body shots.
+  if (angles.some(Boolean)) { push('outfit, front', angles[0]); push('outfit, ¾', angles[1]); push('outfit, side', angles[2]); push('outfit, back', angles[3]); }
+  else { push('body, front', slot('front')); push('body, ¾', slot('tq')); push('body, back', slot('back')); }
   return out;
 }
 

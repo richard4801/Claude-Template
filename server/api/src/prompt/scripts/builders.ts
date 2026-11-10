@@ -149,8 +149,11 @@ export function replicateSwap(v: ReplicateSwapSpec & { speaking?: boolean }, t: 
   else if (o && (o.source === 'described' || o.source === 'product-photo') && (o.description ?? '').trim())
     outfit = `wearing ${trimEndChars(o.description!.trim(), '.')}${body.length ? `, not the clothes in ${imageRange(body)}` : ''}`;
   else outfit = body.length ? `the outfit from ${imageRange(body)}` : 'an everyday outfit';
+  // Her figure comes from her own images (the outfit set shows it in the clothes), never from the person in the video.
+  const figure = [...body, ...outfitRefs].sort((a, b) => a - b);
   const parts = [faces.length ? `face and identity from ${imageRange(faces)}` : 'face and identity as described',
-    ...(body.length ? [`body shape from ${imageRange(body)}`] : []), outfit, `no ${never.join(', no ')}`];
+    ...(figure.length ? [`her exact figure, body shape and proportions (legs, thighs, hips, waist, bust, arms) from ${imageRange(figure)}, unchanged in every frame`] : []),
+    outfit, `no ${never.join(', no ')}`];
   const speaking = v.speaking ?? true;
   const r = run('video.replicate', t, {
     inputs: { speaking, audioSent: speaking },

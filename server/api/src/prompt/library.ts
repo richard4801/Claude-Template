@@ -104,7 +104,7 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('video.replicate.summary', 'video', 'Draft/Standard/HD · summary', 'summary of the short prompt.', REPLICATE_SUMMARY, [], { allowEmpty: false }),
   d('video.replicate.retention', 'video', 'Draft/Standard/HD · retention', 'retention_analysis of the short prompt.',
     '<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n'
-    + '<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery or clothes.\n'
+    + '<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery, clothes, body shape or proportions.\n'
     + '<Subject 2>: reference - {reference}.', [['reference', 'face, body and outfit image ranges and the never-add list', true]], { allowEmpty: false }),
   d('video.replicate.detailed', 'video', 'Draft/Standard/HD · details', 'detailed_description of the short prompt (the user’s direction is added after it).',
     'Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact '

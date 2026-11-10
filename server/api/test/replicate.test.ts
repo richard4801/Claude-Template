@@ -162,7 +162,8 @@ describe('pricing and prompt (Replicate)', () => {
       outfit: { name: 'Green crop tee', source: 'reference-set' }, referenceLabels: labels });
     for (const s of ['subject_definitions:', 'summary:', 'retention_analysis:', 'detailed_description:']) expect(text).toContain(s);
     expect(text).toContain('<Subject 2> is the person in <Image 1> to <Image 8>: shoulder-length dark brown hair');
-    expect(text).toContain('face and identity from <Image 1> and <Image 2>; body shape from <Image 3> to <Image 5>; the green crop tee outfit from <Image 6> to <Image 8>');
+    expect(text).toContain('face and identity from <Image 1> and <Image 2>; her exact figure, body shape and proportions (legs, thighs, hips, waist, bust, arms) from <Image 3> to <Image 8>, unchanged in every frame; the green crop tee outfit from <Image 6> to <Image 8>');
+    expect(text).toContain('not the face, hair, tattoos, jewellery, clothes, body shape or proportions');
     expect(text).toContain('no tattoos, no rings, no logos');
     expect(text).toContain('keep the exact framing and crop of <Video 1>');
     expect(text).toMatch(/caption or on-screen text is removed/);
@@ -255,9 +256,9 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     expect(p.model).toBe('minimax/h3');
     expect(p.input).toMatchObject({ duration: 7, resolution: '768P', ratio: '9:16' });
     expect(p.input.reference_video_urls).toHaveLength(1);
-    expect(p.input.reference_image_urls).toHaveLength(9);         // 5 locked shots + 4 outfit angles
+    expect(p.input.reference_image_urls).toHaveLength(6);         // 2 face shots + the outfit's 4 angles (her figure in the clothes; owner 2026-11-10)
     expect(p.input.prompt).toContain('keep the exact framing and crop of <Video 1>');
-    expect(p.input.prompt).toContain('<Image 1> to <Image 9>');
+    expect(p.input.prompt).toContain('<Image 1> to <Image 6>');
     expect(p.input).not.toHaveProperty('seed');
     expect(fake.state.unauthorized).toBe(0);
     // The padded source is exactly D seconds; the take is Replicate's file as delivered (whole seconds, its own audio, no trim).
