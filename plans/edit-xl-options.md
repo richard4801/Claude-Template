@@ -201,6 +201,11 @@ Each job's API is agreed with WS16, and each contract change with WS9, before it
 3. Direct manipulation (owner 2026-11-09, both apps): on-preview handles for text, captions, stickers and overlays (drag,
    corner/pinch resize, rotate; snap to centre and the platform safe-area guides), and free timeline dragging on the Mac
    (move/reorder clips, cross-track drags, snapping to the playhead, edges and beats; Android has move/reorder).
+4. FLAW (owner 2026-11-10, server): Claude in the Suite can't SEE outfits (or the @model's own images). Its tools give the
+   outfit's name and id only, so it can't say what the clothes or background look like, and two outfits with the same name
+   ("Product look") are told apart by id only. Fix: when an outfit or model is in the draft (and on request), send Claude
+   the outfit's angle images and her reference images (small, cached), plus each outfit's date/thumbnail so same-named ones
+   can be told apart. Server-only (suite/mcpTools.ts + the assist context); no app update.
 
 ## Custom (Muapi/fal/Replicate own-key) video models in every video picker (owner, Nov 10)
 Done: image models in every image picker; video list now loads custom models itself (shows at once after add/rename/switch-on).
