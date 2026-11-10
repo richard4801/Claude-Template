@@ -15,6 +15,9 @@ Goal: Claude must not miss fast actions when studying a video in Edit (and gener
    timestamped action timeline once per clip at import; stored and given to Claude as notes.
    Claude's own frames stay the final word. Provider name never shown to members.
 
+## Video uploads in Claude chat (owner, Nov 10)
+Today the chat attach button takes images only (Mac ClaudeChatModel image-only picker; Android same). Stage 1 adds video: apps accept video files, upload to the server, server builds the motion-picked frames + contact sheets (+ the speech transcript) and hands them to Claude; the look-closer tool works on uploaded videos too.
+
 ## Why not every frame of the whole video
 30 fps x 60 s = 1,800 images: per-request image limits, very high token cost, and neighbouring
 frames are near-identical, which dilutes attention. Full frame rate is used only on windows.
