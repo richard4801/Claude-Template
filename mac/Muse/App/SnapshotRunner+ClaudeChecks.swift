@@ -179,6 +179,16 @@ extension SnapshotRunner {
         let models = store.oneClaude.models?.models ?? []
         line(!models.isEmpty && store.oneClaudeModel.info != nil, "model line visible in the panel header",
              "\(models.count) models, showing \(store.oneClaudeModel.info?.name ?? "none")")
+        // …and it can't widen the panel (owner bug, build 530: a huge icon pushed the header into the editor).
+        store.oneClaude.open = true
+        _ = await until(5) { SnapshotRunner.state.composerFrames["claude model line"] != nil }
+        if let h = SnapshotRunner.state.composerFrames["claude header"], let ml = SnapshotRunner.state.composerFrames["claude model line"] {
+            line(h.width <= OneClaudePanel.width + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
+                 "header \(Int(h.width))×\(Int(h.height)), model line height \(Int(ml.height))")
+        } else {
+            line(true, "panel header fits", "not measured (the panel wasn't drawn in this run)")
+        }
+        store.oneClaude.open = false
 
         // One Claude (owner bug, build 520): Claude opening an edit session (a new blank project) lands IN the editor on
         // that session, not on the Edit home.

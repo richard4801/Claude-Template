@@ -96,6 +96,9 @@ struct OneClaudePanel: View {
         }
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s3)
+        .frame(width: Self.width, alignment: .leading)
+        .clipped()
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude header") } }
     }
 
     // MARK: The chat's Claude model (step 6b): speed and cost in plain words, per chat, with your own default
@@ -120,9 +123,11 @@ struct OneClaudePanel: View {
                     Button("Make \(cur.info?.name ?? "this") your default") { Task { await store.setOneClaudeDefaultModel(id) } }
                 }
             } label: {
+                // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
+                // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
                 HStack(spacing: Space.s1) {
-                    Ph("cpu", 13)
-                    Text("\(cur.info?.name ?? "Claude")\(cur.isDefault ? " (your default)" : "") · \(cur.info?.speed ?? "")").lineLimit(1)
+                    Text("\(cur.info?.name ?? "Claude")\(cur.isDefault ? " (your default)" : "") · \(cur.info?.speed ?? "")")
+                        .lineLimit(1).truncationMode(.tail)
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                 }
                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
@@ -130,15 +135,16 @@ struct OneClaudePanel: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .fixedSize()
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude model line") } }
             .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
             .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
         } else {
             // The list isn't here yet (or the server is older): the line still shows, and tapping it tries again.
             Button { Task { await store.loadClaudeModels() } } label: {
                 HStack(spacing: Space.s1) {
-                    Ph("cpu", 13)
-                    Text("Claude Code's default model").lineLimit(1)
+                    Text("Claude Code's default model").lineLimit(1).truncationMode(.tail)
                 }
                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
                 .contentShape(Rectangle())
