@@ -20,7 +20,7 @@ import { LOOK_IDS } from './lookpack.js';
 import { contentFont } from './content.js';
 import { FILTERS } from './presets.js';
 import * as M from './model.js';
-import { hash01, parseCube, type Look, type Lut } from './look.js';
+import { hash01, parseCube, writeCube, type Look, type Lut } from './look.js';
 import { voiceChain } from './audio.js';
 import * as L from './layer.js';
 import * as TD from './textdraw.js';
@@ -192,6 +192,13 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     if (!file) { file = path.join(os.tmpdir(), `muse-look-${process.pid}-${Date.now()}-c${lookN++}.cube`); fs.writeFileSync(file, cube); temp.push(file); baked.set(cube, file); }
     return file;
   };
+  /** A .cube for a layer's recolour (model.ts recolorPixel). */
+  const recolorFile = (rc: M.Recolor): string => {
+    const cube = writeCube(33, 'muse recolour', (r, g, b) => M.recolorPixel([r, g, b], rc));
+    let file = baked.get(cube);
+    if (!file) { file = path.join(os.tmpdir(), `muse-look-${process.pid}-${Date.now()}-c${lookN++}.cube`); fs.writeFileSync(file, cube); temp.push(file); baked.set(cube, file); }
+    return file;
+  };
   const lut3d = (file: string) => `lut3d=file='${file.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, '')}'`;
   type Visual = M.VideoClip | M.ImageItem;
   type Src = { inSec: number; outSec: number; speed?: number; speedCurve?: M.SpeedCurve; holdSec?: number };
@@ -212,7 +219,9 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       overlayItems.push({ it, video, start: s0, n, len, file, size, track: ti });
     }
   });
-  const cost = (it: Visual, video: boolean) => 1 + (it.mask ? 1 : 0) + (video && (it as M.VideoClip).alphaMatte ? 1 : 0);
+  const maxLayers = Math.max(0, Math.min(M.LAYER_LIMITS.maxLayers, Number(process.env.RENDER_MAX_LAYERS ?? 3) || 0));
+  const cost = (it: Visual, video: boolean) => 1 + (it.mask ? 1 : 0) + (video && (it as M.VideoClip).alphaMatte ? 1 : 0)
+    + (video ? Math.min(maxLayers, ((it as M.VideoClip).layers ?? []).filter(l => !l.hidden).length) + ((it as M.VideoClip).layerBase?.asset ? 1 : 0) : 0);
 
   // ---------------------------------------------------------------- the stretches (windows) rendered one at a time
   // A window never cuts a transition; it ends where reading more would take more than MAX_INPUTS inputs at once
@@ -254,7 +263,14 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       const own = it.style.fontAsset ? files[it.style.fontAsset] : undefined;
       if (it.style.fontAsset && (!own || /^https?:/.test(own) || !TD.face(own))) unsupported.add('own fonts');
       const font = own && !/^https?:/.test(own) && TD.face(own) ? own : fontFile(it.style.font, it.style.weight);
-      pieces.push(t => TD.textPiece(it, t, font));
+      // Layers: a pinned text's centre follows its layer (model.ts pinPoint) while the layer is seen.
+      const pinned = (t: number): M.TextItem => {
+        const pt = it.pin && M.pinPoint(p, it.pin, t, id => sizes[id]);
+        if (!pt) return it;
+        const { x: _x, y: _y, ...keys } = it.keyframes ?? {};
+        return { ...it, transform: { ...(it.transform ?? {}), x: pt.x, y: pt.y }, keyframes: keys };
+      };
+      pieces.push(t => TD.textPiece(pinned(t), t, font));
     }
   }
   const stills: RenderPlan['stills'] = [], sprites: TD.Sprite[] = [];
@@ -333,7 +349,9 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
      * (w × h px): crop → chroma key → colour → matte and mask → placed → opacity. Static and unrotated: a picture to put
      * at (x, y); moving: drawn in the area it sweeps; `canvas`: RGBA the size of the canvas (blend modes).
      */
-    const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; skip: number; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; at: number; matte?: () => string | null }): Layer => {
+    const visualLayer = (it: Visual, src: string, w: number, h: number, o: { video: boolean; skip: number; n: number; len: number; fit: M.Fit; tag: string; canvas: boolean; at: number; matte?: () => string | null;
+      /** Layers: a recolour after the colour; the picture blurred and the matte's edge softened (Gaussian sigma, canvas px). */
+      recolor?: M.Recolor; blurPx?: number; featherPx?: number }): Layer => {
       const { skip, n, len, tag } = o, vc = o.video ? it as M.VideoClip : null, t0 = skip / FPS, clockAt = o.at / FPS;
       let s = src;
       const cr = it.crop ?? {}, l = cr.left ?? 0, t = cr.top ?? 0, r = cr.right ?? 0, b = cr.bottom ?? 0;
@@ -390,6 +408,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         }
         if (parts.length) { toRgb(); g.push(`[${s}]${parts.join(',')}[${tag}g]`); s = `${tag}g`; }
       }
+      if (o.recolor && o.recolor.amount > 0) { toRgb(); g.push(`[${s}]${lut3d(recolorFile(o.recolor))}[${tag}rc]`); s = `${tag}rc`; }
       // The look's last steps (7–10): halation; light leak, vignette and grain (their amounts at their keyframes).
       const hal = L.halation(look, short);
       if (hal) {
@@ -433,11 +452,13 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
           s = `${tag}gr`;
         }
       }
+      if (o.blurPx && o.blurPx * f >= 0.3) { toRgb(); g.push(`[${s}]gblur=sigma=${n4(o.blurPx * f)}[${tag}lb]`); s = `${tag}lb`; }
       // Background removal: the matte's luma (cut and timed like the clip) is the alpha.
       if (vc?.alphaMatte) {
         const ms = o.matte?.();
+        const fe = o.featherPx && o.featherPx * f >= 0.3 ? `,gblur=sigma=${n4(o.featherPx * f)}` : '';
         if (!ms) unsupported.add('background removal');
-        else { g.push(`[${ms}]${cropF}scale=${iw}:${ih},format=gray${vc.alphaMatte.invert ? ',negate' : ''}[${tag}ma]`); alphas.push(`${tag}ma`); }
+        else { g.push(`[${ms}]${cropF}scale=${iw}:${ih},format=gray${vc.alphaMatte.invert ? ',negate' : ''}${fe}[${tag}ma]`); alphas.push(`${tag}ma`); }
       }
       // Mask (model.ts maskAlpha, keyed by maskAt), in the picture's own frame: grey frames written here, one, or one a frame while it moves.
       if (it.mask) {
@@ -496,6 +517,8 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       return x === null || o.canvas ? { s, x: null, y: null, opaque: false, w: W, h: H } : { s, x, y: y!, opaque, w: ow, h: oh };
     };
 
+    /** Layers drawn above the text (aboveText): each with its first output frame and its steady frames (clip-local). */
+    const aboveText: { layer: Layer; at: number; steady: readonly [number, number] }[] = [];
     // Main clips in the window: each its own picture of the canvas (the background colour, or the blur fill, under it).
     const mine = clips.map((c, i) => ({ c, i, S: fr(tl[i]!.startSec), n: frames(i) })).filter(x => x.S < F1 && x.S + x.n > F0);
     const many = mine.length > MAX_INPUTS;
@@ -529,17 +552,54 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       };
       if (!asset || !file || !size || !size.width) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); unsupported.add('missing media'); fillPart(null); continue; }
       if (main.hidden) { g.push(`${bg},setsar=1,settb=AVTB[v${i}]`); continue; } // hidden: only the background
-      let layerSrc = source(file, c, skip, n, `${tag}s`, many ? 1 : 2);
-      if (fillOn) { g.push(`[${layerSrc}]split[${tag}l][${tag}f]`); layerSrc = `${tag}l`; fillPart(`${tag}f`); }
+      // Layers (model.ts ClipLayer): the clip's frames drawn again per layer with its matte; aboveText ones go above the
+      // text (later in this graph) while the clip is steady, and here only during its transitions.
+      // Memory (measured 2026-11-11, 1080 × 1920 export): no layers 197 MB, 2 layers 309, 3 layers 366, 5 layers 447 (feather, recolour, blur):
+      // the 512 MB box draws at most RENDER_MAX_LAYERS (default 3) per clip and lists the rest (the Mac draws all five itself).
+      const visible = (c.layers ?? []).filter(l => !l.hidden), ls = visible.slice(0, maxLayers);
+      if (visible.length > ls.length) unsupported.add(`more than ${maxLayers} layers on one clip (the rest are left out here)`);
+      for (const l of ls) if (!files[l.matte]) unsupported.add('missing media');
+      const drawn = ls.filter(l => files[l.matte]);
+      const sr = M.clipSteadyRange(p, i)!, a0 = Math.max(fr(sr.startSec), S + skip) - (S + skip), a1 = Math.min(fr(sr.endSec), S + skip + n) - (S + skip);
+      const steady = a1 > a0 ? [a0, a1] as const : null; // the clip's own output frames where aboveText layers are above the text
+      const here = drawn.filter(l => !l.aboveText || !steady || steady[0] > 0 || steady[1] < n);
+      const later = steady ? drawn.filter(l => l.aboveText) : [];
+      const lb = c.layerBase, swap = lb?.asset ? files[lb.asset] : undefined;
+      if (lb?.asset && !swap) unsupported.add('missing media');
+      const copies = (fillOn ? 1 : 0) + (lb?.hidden || swap ? 0 : 1) + here.length + later.length;
+      let srcs: string[] = [];
+      const one = source(file, c, skip, n, `${tag}s`, many ? 1 : 2);
+      if (copies <= 1) srcs = [one];
+      else { srcs = Array.from({ length: copies }, (_, k) => `${tag}sp${k}`); g.push(`[${one}]split=${copies}${srcs.map(x => `[${x}]`).join('')}`); }
+      if (fillOn) fillPart(srcs.shift()!);
       const under = `${tag}bg`;
       const matte = () => { const mf = c.alphaMatte && files[c.alphaMatte.asset]; return mf ? source(mf, c, skip, n, `${tag}mt`, 1) : null; };
-      const lay = visualLayer(c, layerSrc, size.width, size.height, { video: true, skip, n, len, fit: 'cover', tag, canvas: false, matte, at: Math.max(S, F0) });
-      if (lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
+      const baseOpt = { video: true, skip, n, len, fit: 'cover' as const, canvas: false, at: Math.max(S, F0), blurPx: M.layerBlurPx(p.canvas, lb?.blur) };
+      let baseSrc: string | null = lb?.hidden ? null : swap ? `${tag}sw` : srcs.shift()!;
+      if (swap && !lb?.hidden) {
+        // Background swap: the picture cover-fitted to the clip's source frame, from its own start at 1×, held on its last frame.
+        const k = /\.(png|jpe?g|webp|heic|gif)$/i.test(swap) || p.assets.find(a => a.id === lb!.asset)?.kind === 'image' ? input(swap) : openAt(swap, skip / FPS, n / FPS);
+        g.push(`[${k}:v]fps=${FPS},scale=${size.width}:${size.height}:force_original_aspect_ratio=increase,crop=${size.width}:${size.height},setsar=1,tpad=stop_mode=clone:stop_duration=${n4(n / FPS + 1)},trim=end_frame=${n},setpts=N/${FPS}/TB[${tag}sw]`);
+      } else if (lb?.hidden) baseSrc = null;
+      const lay = baseSrc ? visualLayer(M.baseClip(c), baseSrc, size.width, size.height, { ...baseOpt, tag, matte }) : null;
+      if (lay && lay.opaque && lay.x !== null && lay.x <= 0 && lay.y <= 0 && lay.x + lay.w >= W && lay.y + lay.h >= H) {
         // Opaque and covering the canvas: cut to it (no background, no overlay).
         g.push(`[${lay.s}]crop=${W}:${H}:${-lay.x}:${-lay.y}[${tag}o]`);
-      } else g.push(`${bg}[${under}]`, `[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[${tag}o]`);
+      } else if (lay) g.push(`${bg}[${under}]`, `[${under}][${lay.s}]overlay=${lay.x ?? 0}:${lay.y ?? 0}:format=yuv420:eof_action=pass[${tag}o]`);
+      else g.push(`${bg}[${tag}o]`);
+      const layerOf = (l: M.ClipLayer, j: number, src: string, ltag: string) => visualLayer(M.layerClip(c, l), src, size.width, size.height, {
+        ...baseOpt, tag: ltag, recolor: l.recolor, blurPx: M.layerBlurPx(p.canvas, l.blur), featherPx: M.layerFeatherPx(p.canvas, l.feather),
+        matte: () => source(files[l.matte]!, c, skip, n, `${ltag}mt`, 1) });
+      let cur = `${tag}o`;
+      here.forEach((l, j) => {
+        const ll = layerOf(l, j, srcs.shift()!, `${tag}L${j}`);
+        const on = l.aboveText && steady ? `:enable='not(between(n,${steady[0]},${steady[1] - 1}))'` : '';
+        g.push(`[${cur}][${ll.s}]overlay=${ll.x ?? 0}:${ll.y ?? 0}:format=yuv420:eof_action=pass${on}[${tag}o${j}]`);
+        cur = `${tag}o${j}`;
+      });
+      later.forEach((l, j) => aboveText.push({ layer: layerOf(l, j, srcs.shift()!, `${tag}A${j}`), at: Math.max(S, F0) - F0, steady: steady! }));
       // Exactly the clip's frames in the window (rounded once from the timeline, so cuts never drift).
-      g.push(`[${tag}o]trim=end_frame=${n},setpts=N/${FPS}/TB,format=${pix},setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
+      g.push(`[${cur}]trim=end_frame=${n},setpts=N/${FPS}/TB,format=${pix},setsar=1,fps=${FPS},settb=AVTB[v${i}]`);
     }
     // Joined: a cut is a concat; a transition is drawn as model.ts transitionState says (transitions never straddle windows).
     const pix = fillOn ? 'yuva420p' : 'yuv420p';
@@ -664,6 +724,13 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       g.push(`[${k}:v]format=rgba[txt]`, `[${acc}][txt]overlay=${textCrop[0]}:${textCrop[1]}:format=auto:eof_action=repeat[vtxt]`);
       acc = 'vtxt';
     }
+    // Layers above the text ("text behind her"), while their clip is steady (model.ts aboveTextLayersAt).
+    aboveText.forEach((x, k) => {
+      const a = x.at + x.steady[0], b = x.at + x.steady[1] - 1;
+      g.push(`[${x.layer.s}]setpts=PTS+${n4(x.at / FPS)}/TB[at${k}]`,
+        `[${acc}][at${k}]overlay=${x.layer.x ?? 0}:${x.layer.y ?? 0}:format=yuv420:eof_action=pass:enable='between(n,${a},${b})'[atx${k}]`);
+      acc = `atx${k}`;
+    });
     g.push(`[${acc}]format=yuv420p[vout]`);
     return ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]',
       '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-threads', '2', '-frames:v', String(N), outFile];

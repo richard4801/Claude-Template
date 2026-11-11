@@ -345,7 +345,7 @@ export class EditSessions {
     if (!s) return;
     if (state !== 'done' || !result) { await this.log(s, `${w.label} didn't finish`); return; }
     try {
-      const next = this.applyResult(s.project as M.EditProject, w, result);
+      const next = this.applyResult(s.project as M.EditProject, { ...w, jobId }, result);
       if (!next) { await this.log(s, `${w.label}: nothing to change`); return; }
       this.check(next, s.takeId);
       await this.commit(s, next, { author: 'claude', kind: 'edit', label: w.label });
@@ -364,7 +364,7 @@ export class EditSessions {
     if (!first && !p.assets.some(a => a.take === takeId && a.kind === 'video')) throw badRequest('The edit has no clip yet · add a video first');
     return p.assets.find(a => a.take === takeId && a.kind === 'video') ?? p.assets.find(a => a.id === first!.asset)!;
   }
-  applyResult(p0: M.EditProject, w: { kind: string; itemId?: string; reasons?: string[] }, result: Record<string, unknown>): M.EditProject | null {
+  applyResult(p0: M.EditProject, w: { kind: string; itemId?: string; reasons?: string[]; jobId?: string }, result: Record<string, unknown>): M.EditProject | null {
     const p: M.EditProject = JSON.parse(JSON.stringify(p0));
     const asset = this.sourceAsset(p, p.sourceTakeId, w.itemId);
     switch (w.kind) {
@@ -399,6 +399,24 @@ export class EditSessions {
           if (result.alpha) { it.alphaMatte = { asset: id }; delete it.chroma; }
           else { it.asset = id; it.audioAsset ??= asset.id; it.chroma = result.chroma as M.Chroma; }
         }
+        return p;
+      }
+      case 'layers': {
+        // Find layers (plans/layers-edit.md): one matte per object, as the layers of the clip (replacing earlier ones).
+        const found = (result.layers as { name: string; asset: { upload?: string; take?: string; durationSec?: number; url?: string }; track?: M.LayerTrack }[] | undefined) ?? [];
+        if (!found.length) return null;
+        const main = M.mainTrack(p), clips = (main.items as M.VideoClip[]).filter(c => (w.itemId ? c.id === w.itemId : c.asset === asset.id));
+        if (!clips.length) return null;
+        const layers: M.ClipLayer[] = found.slice(0, M.LAYER_LIMITS.maxLayers).map((f, k) => {
+          let n = p.assets.length + 1;
+          while (p.assets.some(a => a.id === `ly${n}`)) n++;
+          const id = `ly${n}`;
+          p.assets.push({ id, kind: 'video', ...(f.asset.upload ? { upload: f.asset.upload } : { take: f.asset.take! }), durationSec: f.asset.durationSec, ...(f.asset.url ? { url: f.asset.url } : {}) });
+          return { id: `l${k + 1}`, name: f.name.slice(0, M.LAYER_LIMITS.maxName), matte: id, ...(f.track ? { track: f.track } : {}) };
+        });
+        for (const c of clips) { c.layers = layers.map(l => ({ ...l })); if (w.jobId) c.layerSource = { job: w.jobId }; }
+        // Pins to layers that are gone come off.
+        for (const t of p.tracks) for (const it of t.items as M.TextItem[]) if (it.pin && clips.some(c => c.id === it.pin!.clip) && !layers.some(l => l.id === it.pin!.layer)) delete it.pin;
         return p;
       }
       case 'denoise': {

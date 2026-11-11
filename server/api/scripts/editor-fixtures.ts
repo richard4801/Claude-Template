@@ -668,6 +668,64 @@ const wave1Fns = {
     clipAt: [0, 3.5, 3.79, 3.8, 3.81, 4.2, 5.3, 5.5, 8].map(t => ({ t, at: M.blurFillClip(wave1, t) })) },
 };
 
+// Layers (plans/layers-edit.md, Phase 1): the project shape, its validation, and the functions every engine shares.
+const layersFx = (() => {
+  const mt = (id: string): M.Asset => ({ id, kind: 'video', upload: `up_${id}`, durationSec: 10 });
+  const boxes = Array.from({ length: 51 }, (_, i) => (i >= 20 && i < 24 ? null : [M.LAYERS_ROUND(0.1 + i * 0.01), 0.3, 0.3, 0.5]));
+  const l1: M.ClipLayer = { id: 'l1', name: 'Her', matte: 'm1', recolor: { color: '#1B2A6B', amount: 0.8 }, adjust: { saturation: 0.2 }, opacity: 0.9, feather: 0.4, aboveText: true, track: { fps: 5, boxes } };
+  const l2: M.ClipLayer = { id: 'l2', name: 'Dog', matte: 'm2', hidden: true, look: { lut: 'pack:bw-classic' }, blur: 0.3 };
+  const c1 = clip('c1', 0, 6, { adjust: { contrast: 0.2, saturation: -0.1 }, filter: { id: 'warm', amount: 0.5 }, opacity: 0.8, keyframes: { opacity: [{ t: 0, v: 1 }, { t: 2, v: 0.5 }] },
+    transform: { x: 0.55, scale: 1.2, flipX: true }, crop: { left: 0.1, top: 0.05 }, layers: [l1, l2], layerBase: { blur: 0.5, adjust: { exposure: -0.3 }, asset: 'logo' }, layerSource: { job: 'edj_1' } });
+  const c2 = clip('c2', 6, 10, { transitionIn: { kind: 'fade', durationSec: 0.5 }, layers: [{ id: 'l1', name: 'Her', matte: 'm1', aboveText: true }] });
+  const text: M.TextItem = { id: 't1', startSec: 0.5, durationSec: 5, text: 'Hello', style: { font: 'sans', weight: 700, sizePct: 0.06, color: '#FFFFFF', align: 'center' }, pin: { clip: 'c1', layer: 'l1', anchor: 'top', offset: { x: 0, y: -0.05 } } };
+  const project = proj([main([c1, c2]), { id: 'tx', kind: 'text', items: [text] }], [src, img, mt('m1'), mt('m2')]);
+  M.validate(project, FILTERS, LOOK_IDS);
+  const m = (f: (p: any) => void) => { const q = JSON.parse(JSON.stringify(project)); f(q); return q; };
+  const L = (p: any, i = 0) => p.tracks[0].items[0].layers[i];
+  const bad = (name: string, f: (p: any) => void, field: string) => ({ name, project: m(f), ok: false, field });
+  const validation = [
+    { name: 'layers, background and a pin', project, ok: true },
+    { name: 'no layers (unchanged)', project: m(p => { for (const c of p.tracks[0].items) { delete c.layers; delete c.layerBase; delete c.layerSource; } delete p.tracks[1].items[0].pin; }), ok: true },
+    bad('six layers', p => { p.tracks[0].items[0].layers = Array.from({ length: 6 }, (_, i) => ({ id: `x${i}`, name: 'x', matte: 'm1' })); }, 'edits.tracks.0.items.0.layers'),
+    bad('layer id twice', p => { L(p, 1).id = 'l1'; }, 'edits.tracks.0.items.0.layers.1.id'),
+    bad('empty name', p => { L(p).name = ' '; }, 'edits.tracks.0.items.0.layers.0.name'),
+    bad('matte not a video', p => { L(p).matte = 'logo'; }, 'edits.tracks.0.items.0.layers.0.matte'),
+    bad('blur too big', p => { L(p).blur = 2; }, 'edits.tracks.0.items.0.layers.0.blur'),
+    bad('feather negative', p => { L(p).feather = -0.1; }, 'edits.tracks.0.items.0.layers.0.feather'),
+    bad('aboveText not a boolean', p => { L(p).aboveText = 'yes'; }, 'edits.tracks.0.items.0.layers.0.aboveText'),
+    bad('recolor colour', p => { L(p).recolor.color = 'navy'; }, 'edits.tracks.0.items.0.layers.0.recolor.color'),
+    bad('recolor amount', p => { L(p).recolor.amount = 1.5; }, 'edits.tracks.0.items.0.layers.0.recolor.amount'),
+    bad('layer adjust out of range', p => { L(p).adjust = { exposure: 3 }; }, 'edits.tracks.0.items.0.layers.0.adjust.exposure'),
+    bad('layer opacity', p => { L(p).opacity = 1.2; }, 'edits.tracks.0.items.0.layers.0.opacity'),
+    bad('track fps', p => { L(p).track.fps = 0; }, 'edits.tracks.0.items.0.layers.0.track.fps'),
+    bad('track box', p => { L(p).track.boxes[3] = [0.1, 0.2, 1.5, 0.1]; }, 'edits.tracks.0.items.0.layers.0.track.boxes.3'),
+    bad('background asset is audio', p => { p.assets.push({ id: 'snd', kind: 'audio', upload: 'up_snd', durationSec: 3 }); p.tracks[0].items[0].layerBase.asset = 'snd'; }, 'edits.tracks.0.items.0.layerBase.asset'),
+    bad('background blur', p => { p.tracks[0].items[0].layerBase.blur = 1.1; }, 'edits.tracks.0.items.0.layerBase.blur'),
+    bad('layers on an overlay clip', p => { p.tracks.push({ id: 'ov', kind: 'video', items: [{ id: 'o1', asset: 'src', inSec: 0, outSec: 2, speed: 1, startSec: 0, layers: [] }] }); }, 'edits.tracks.2.items.0.layers'),
+    bad('pin to a missing layer', p => { p.tracks[1].items[0].pin.layer = 'l9'; }, 'edits.tracks.1.items.0.pin.layer'),
+    bad('pin to a missing clip', p => { p.tracks[1].items[0].pin.clip = 'zz'; }, 'edits.tracks.1.items.0.pin.clip'),
+    bad('pin anchor', p => { p.tracks[1].items[0].pin.anchor = 'left'; }, 'edits.tracks.1.items.0.pin.anchor'),
+    bad('pin offset', p => { p.tracks[1].items[0].pin.offset.y = 2; }, 'edits.tracks.1.items.0.pin.offset.y'),
+  ];
+  for (const v of validation) { let ok = true, field: string | undefined; try { M.validate(v.project as M.EditProject, FILTERS, LOOK_IDS); } catch (e) { ok = false; field = (e as M.EditProblem).field; }
+    if (ok !== v.ok || (!ok && field !== (v as { field?: string }).field)) throw new Error(`layers fixture ${v.name}: got ${ok} ${field}`); }
+  const reversed = M.reverseClip(c1, 'rev', 10)!, steadied = M.deriveClip(c1, 'st', 'stabilize');
+  const canvases = [{ width: 1080, height: 1920 }, { width: 720, height: 1280 }];
+  return {
+    project, validation,
+    layerClip: [l1, l2, { id: 'l3', name: 'Plain', matte: 'm1' }].map(l => ({ clip: c1, layer: l, out: M.layerClip(c1, l) })),
+    baseClip: [c1, c2].map(c => ({ clip: c, out: M.baseClip(c) })),
+    dropped: { reverse: { layers: reversed.layers ?? null, layerBase: reversed.layerBase ?? null }, stabilize: { layers: steadied.layers ?? null }, slowmo: (() => { const q: M.EditProject = { ...project, assets: [...project.assets, { id: 'sm', kind: 'video', upload: 'up_sm', durationSec: 2, derivedFrom: { asset: 'src', op: 'slowmo', startSec: 2, endSec: 3, factor: 2 } }] }; const r = M.applySlowmo(q, 'c1', 'sm')!; return r.project.tracks[0]!.items.map(c => ({ id: c.id, layers: (c as M.VideoClip).layers?.length ?? 0 })); })() },
+    recolor: [[0.5, 0.5, 0.5], [0.9, 0.2, 0.1], [0.05, 0.05, 0.05], [1, 1, 1], [0.2, 0.6, 0.9]].flatMap(rgb => [{ color: '#1B2A6B', amount: 1 }, { color: '#FF0000', amount: 0.5 }, { color: '#FFFFFF', amount: 1 }, { color: '#808080', amount: 0.7 }]
+      .map(rc => ({ rgb, recolor: rc, out: M.recolorPixel(rgb as [number, number, number], rc) }))),
+    boxAt: [0, 0.1, 1, 2.3, 3.9, 4.05, 4.5, 4.9, 5, 9.9, 10, 30].map(t => ({ t, box: M.layerBoxAt(l1, t) })),
+    steady: [0, 1].map(i => ({ index: i, range: M.clipSteadyRange(project, i) })),
+    aboveTextAt: [0, 3, 5.6, 5.8, 6.2, 8, 9.99].map(t => ({ t, layers: M.aboveTextLayersAt(project, t) })),
+    pinPoint: [0, 0.6, 2, 4.2, 4.5, 5.4, 6.5].flatMap(t => (['center', 'top', 'bottom'] as const).map(anchor => ({ t, pin: { ...text.pin!, anchor }, point: M.pinPoint(project, { ...text.pin!, anchor }, t) }))),
+    blurPx: canvases.flatMap(c => [0, 0.25, 1].map(v => ({ canvas: c, v, blur: M.layerBlurPx(c, v), feather: M.layerFeatherPx(c, v) }))),
+  };
+})();
+
 const files: Record<string, unknown> = {
   'jsonpatch.json': jsonpatch,
   'ops.json': opsFixture,
@@ -675,6 +733,7 @@ const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
+  'layers.json': layersFx,
   'functions.json': { effects, reverse, derived, slowmo, captionTranslate, captionScripts, lyricCaptions, overlayFades, separation: { project: sepProject, cases: separation }, cutouts, adjustLayers, audioSpeed, loops, motionKeys, kits, colorKeys, autoAdjust: autoAdjustCases, keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, wave1: wave1Fns, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {

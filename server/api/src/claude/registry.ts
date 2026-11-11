@@ -16,7 +16,7 @@ export type ChatTool = EditTool & { pages: (PageName | 'any')[]; gate: Gate; mem
 
 /** Every tool that spends money (the price is shown on the person's button). Delete/post/settings: none yet. */
 export const GATES: Record<string, Gate> = {
-  suite_request_shot: 'spend', fill_slot: 'spend', auto_captions: 'spend', cut_fillers: 'spend', remove_background: 'spend', denoise: 'spend',
+  suite_request_shot: 'spend', fill_slot: 'spend', auto_captions: 'spend', cut_fillers: 'spend', remove_background: 'spend', denoise: 'spend', find_layers: 'spend',
 };
 /** Recreate tools a member can't use: they act on edit sessions or the editing playbook, which are the owner's. */
 const OWNER_ONLY = new Set(['apply_recipe', 'replace_slot', 'playbook_read', 'playbook_add', 'report_gap']);

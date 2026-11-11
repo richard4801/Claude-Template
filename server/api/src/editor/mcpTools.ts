@@ -10,7 +10,7 @@ import { approximateFrame, contactSheet } from './frame.js';
 import { energyCurve, findCuts, findPeaks, measureMotion } from './motion.js';
 import { LOOKS } from './lookpack.js';
 import * as M from './model.js';
-import { OP_NAMES } from './ops.js';
+import { LAYER_OP_NAMES, OP_NAMES } from './ops.js';
 import { paletteFiles } from './photo.js';
 import { CAPTION_STYLE_LABELS, CAPTION_STYLES, HOOKS, TRANSITION_LABELS } from './presets.js';
 import { editorAi } from './service.js';
@@ -50,12 +50,15 @@ export function summary(p: M.EditProject) {
       ...(t.caption ? { captions: { words: t.caption.words.length, style: t.caption.style.preset, text: t.caption.words.slice(0, 40).map(w => w.text).join(' ') } } : {}),
       items: t.items.map((it, i) => {
         const span = M.itemSpan(p, t, it), base = { id: it.id, at: `${t2(span.startSec)}–${t2(span.endSec)}` };
-        if (t.kind === 'text') return { ...base, text: (it as M.TextItem).text, template: (it as M.TextItem).template };
+        if (t.kind === 'text') return { ...base, text: (it as M.TextItem).text, template: (it as M.TextItem).template, ...((it as M.TextItem).pin ? { pinnedTo: (it as M.TextItem).pin } : {}) };
         const c = it as M.VideoClip;
         return { ...base, ...(c.asset ? { source: name(p.assets.find(a => a.id === c.asset)) } : {}), ...(c.inSec !== undefined ? { sourceRange: `${t2(c.inSec)}–${t2(c.outSec)}` } : {}),
           ...(c.speed !== undefined && c.speed !== 1 ? { speed: c.speed } : {}), ...(c.speedCurve ? { speedCurve: c.speedCurve.preset } : {}),
           ...(c.transitionIn ? { transitionIn: `${c.transitionIn.kind} ${c.transitionIn.durationSec}s` } : {}), ...(c.look ? { look: c.look } : {}),
           ...(c.adjust ? { adjust: c.adjust } : {}), ...(c.mask ? { mask: c.mask.shape } : {}), ...(c.volume !== undefined ? { volume: c.volume } : {}),
+          ...(c.layers?.length ? { layers: c.layers.map(l => ({ id: l.id, name: l.name, ...(l.hidden ? { hidden: true } : {}), ...(l.aboveText ? { textBehind: true } : {}), ...(l.recolor ? { recolor: l.recolor } : {}),
+            ...(l.look ? { look: l.look } : {}), ...(l.adjust ? { adjust: l.adjust } : {}), ...(l.blur ? { blur: l.blur } : {}), ...(l.opacity !== undefined ? { opacity: l.opacity } : {}), pinnable: !!l.track })) } : {}),
+          ...(c.layerBase ? { background: c.layerBase } : {}),
           ...(t.kind === 'main' ? { position: i + 1, startsAt: t2(spans[i]!.startSec) } : {}) };
       }),
     })),
@@ -63,7 +66,7 @@ export function summary(p: M.EditProject) {
 }
 
 /** Runs (free) or proposes (paid) an editor AI job for a session. */
-async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats'; label: string; options?: Record<string, unknown>; reasons?: string[]; itemKey?: string }) {
+async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats' | 'layers'; label: string; options?: Record<string, unknown>; reasons?: string[]; itemKey?: string }) {
   const svc = editSessionsOf(env.ctx), ai = editorAi(env.ctx);
   const s = await svc.row(env.user, sessionId(env, a));
   const p = s.project as M.EditProject;
@@ -78,7 +81,8 @@ async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'capt
       await svc.log(s, `Priced ${o.label}: about $${est.usd.toFixed(2)}`);
       return { needsConfirmation: true, estimateUsd: est.usd, message: `${o.label} costs about $${est.usd.toFixed(2)}. Call again with confirm: true to ask the owner; it runs only after they approve it in the MUSE app.` };
     }
-    const pend = await svc.askOwner(s, { kind: o.kind, label: o.label, estimateUsd: est.usd, args: { ...body, ...(itemId ? { itemId } : {}), ...(o.reasons ? { reasons: o.reasons } : {}) } });
+    // The owner's yes on the price shown is the go-ahead (layers above $1 per clip need it said: acceptUsd).
+    const pend = await svc.askOwner(s, { kind: o.kind, label: o.label, estimateUsd: est.usd, args: { ...body, ...(o.kind === 'layers' ? { acceptUsd: est.usd } : {}), ...(itemId ? { itemId } : {}), ...(o.reasons ? { reasons: o.reasons } : {}) } });
     return { waitingForOwner: true, pendingId: pend.id, estimateUsd: est.usd, message: 'The owner has been asked in the MUSE app. The result is applied to the edit when the job finishes (see get_edit history).' };
   }
   const job = await ai.start(env.user, body);
@@ -96,6 +100,13 @@ async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'capt
     if (Date.now() - t0 > 60_000) return { state: 'running', jobId: job.id, message: 'Still running; the result is applied to the edit when it finishes.' };
     await new Promise(res => setTimeout(res, 250));
   }
+}
+/** One free edit op as its own tool (layers), on the session's current revision. */
+async function oneOp(env: ToolEnv, a: Record<string, unknown>, op: string, keys: string[]) {
+  const svc = editSessionsOf(env.ctx), id = sessionId(env, a), s = await svc.row(env.user, id);
+  const o: Record<string, unknown> = { op };
+  for (const k of keys) if (a[k] !== undefined) o[k] = a[k];
+  return svc.applyClaude(env.user, id, { baseRevision: s.revision, ops: [o] });
 }
 /** Beats for Claude: the tempo, the counts, and the beat times themselves (the clip's own seconds), so a cut can land on one. */
 const beatsBrief = (r: Record<string, unknown>) => {
@@ -146,7 +157,7 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'apply_edit_ops', title: 'Change the edit', scope: 'edit:write',
-    description: `Applies changes to the edit as one undoable step. Send the revision you last read as baseRevision (a stale one is refused with the current revision: get_edit and try again). Ops (see plans/video-editor.md "Edit ops"): ${OP_NAMES.join(', ')}. Examples: {"op":"trim","clipId":"c1","inSec":0.5,"outSec":6}, {"op":"split","at":3.2}, {"op":"delete","itemId":"c2"}, {"op":"speed","clipId":"c1","curve":"hero"}, {"op":"add_hook","template":"hook-bold","text":"Wait for it…"}, {"op":"caption_style","preset":"pop"}, {"op":"look","itemId":"all","look":"film-gold","strength":0.7}, {"op":"transition","clipId":"all","kind":"fade","durationSec":0.3}, {"op":"duck","levelDb":-12}, {"op":"ratio","ratio":"9:16"}. Times are seconds; timeline times for split/startSec, source times for trim.`,
+    description: `Applies changes to the edit as one undoable step. Send the revision you last read as baseRevision (a stale one is refused with the current revision: get_edit and try again). Ops (see plans/video-editor.md "Edit ops"): ${OP_NAMES.join(', ')}; layers: ${LAYER_OP_NAMES.join(', ')}. Examples: {"op":"trim","clipId":"c1","inSec":0.5,"outSec":6}, {"op":"split","at":3.2}, {"op":"delete","itemId":"c2"}, {"op":"speed","clipId":"c1","curve":"hero"}, {"op":"add_hook","template":"hook-bold","text":"Wait for it…"}, {"op":"caption_style","preset":"pop"}, {"op":"look","itemId":"all","look":"film-gold","strength":0.7}, {"op":"transition","clipId":"all","kind":"fade","durationSec":0.3}, {"op":"duck","levelDb":-12}, {"op":"ratio","ratio":"9:16"}. Times are seconds; timeline times for split/startSec, source times for trim.`,
     inputSchema: obj({ sessionId: SID, baseRevision: num('The revision your change is based on'), ops: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object' }, description: 'Operations, applied in order' } }, ['sessionId', 'baseRevision', 'ops']),
     run: async (env, a) => editSessionsOf(env.ctx).applyClaude(env.user, sessionId(env, a), a),
   },
@@ -205,6 +216,47 @@ const TOOLS: EditTool[] = [
       points: { type: 'array', maxItems: 10, items: { type: 'object' }, description: 'Tap to keep: [{x, y, t?, keep?}] (0–1 of the frame; t seconds into the source)' },
       confirm: bool('Ask the owner to approve the cost') }, ['sessionId']),
     run: (env, a) => helper(env, a, { kind: 'matte', label: Array.isArray(a.points) ? 'Keep what you tapped' : 'Remove background', ...(Array.isArray(a.points) ? { options: { points: a.points } } : {}) }),
+  },
+  {
+    name: 'find_layers', title: 'Find layers', scope: 'edit:write',
+    description: 'Layers (one paid run per clip, then everything is free): finds up to 5 things in a main clip (her, the dog, the car…) and follows each through the clip, so each becomes a layer you can recolour, re-look, blur, hide, put text behind, or pin text to (set_layer, layer_base, text_behind, pin_text). Mark each thing with points [{x, y} 0–1 of the frame, t seconds into the clip, keep false for what to leave out] and/or a box {x, y, w, h, t}; use get_frame to find where things are. Clips up to 60 s. Paid: estimate first, then confirm: true; it runs after the owner approves the price in the app. Replaces the clip\'s earlier layers.',
+    inputSchema: obj({ sessionId: SID, itemId: str('The main clip (default: the first)'),
+      objects: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'object', properties: { name: str('What it is ("Her", "Dog")', 40), points: { type: 'array', items: { type: 'object' } }, box: { type: 'object' } }, required: ['name'] }, description: 'What to find: [{name, points?, box?}]' },
+      confirm: bool('Ask the owner to approve the cost') }, ['sessionId', 'objects']),
+    run: async (env, a) => {
+      const svc = editSessionsOf(env.ctx), s = await svc.row(env.user, sessionId(env, a));
+      const main = M.mainTrack(s.project as M.EditProject).items;
+      const clip = typeof a.itemId === 'string' ? main.find(c => c.id === a.itemId) : main[0];
+      if (!clip) throw badRequest('itemId: a clip on the main track (layers are on main clips)');
+      return helper(env, { ...a, itemId: clip.id }, { kind: 'layers', label: 'Find layers', options: { objects: a.objects } });
+    },
+  },
+  {
+    name: 'set_layer', title: 'Change a layer (free)', scope: 'edit:write',
+    description: 'Changes one layer of a clip (after find_layers). layer: its id or name. Any of: name; hidden; look (a look id from list_looks, a look object, or null); adjust {exposure, contrast, saturation, temperature, tint, highlights, shadows} −1…1 (merged; null clears); filter {id, amount} or null; recolor {color "#RRGGBB", amount 0–1} (keeps light and shade: "make her coat navy") or null; opacity, blur, feather 0–1; aboveText (text behind this layer). One undoable step.',
+    inputSchema: obj({ sessionId: SID, itemId: str('The clip'), layer: str('Layer id or name'), name: str('New name', 40), hidden: bool('Hide the layer'), look: {}, adjust: { type: ['object', 'null'] }, filter: { type: ['object', 'null'] },
+      recolor: { type: ['object', 'null'] }, opacity: num('0–1', 0, 1), blur: num('0–1', 0, 1), feather: num('Soften the edge, 0–1', 0, 1), aboveText: bool('Draw the layer over text and captions') }, ['sessionId', 'itemId', 'layer']),
+    run: (env, a) => oneOp(env, a, 'set_layer', ['itemId', 'layer', 'name', 'hidden', 'look', 'adjust', 'filter', 'recolor', 'opacity', 'blur', 'feather', 'aboveText']),
+  },
+  {
+    name: 'layer_base', title: 'Change the background layer (free)', scope: 'edit:write',
+    description: 'The "Background" of a clip with layers (everything not in a layer): hidden; blur 0–1 ("blur everything but the dog"); look / adjust / filter for the background only; asset: an image or video asset id to show behind the layers instead (null puts the clip back).',
+    inputSchema: obj({ sessionId: SID, itemId: str('The clip'), hidden: bool('Hide the background'), blur: num('0–1', 0, 1), look: {}, adjust: { type: ['object', 'null'] }, filter: { type: ['object', 'null'] },
+      asset: { type: ['string', 'null'], description: 'An image or video asset of the project' } }, ['sessionId', 'itemId']),
+    run: (env, a) => oneOp(env, a, 'layer_base', ['itemId', 'hidden', 'blur', 'look', 'adjust', 'filter', 'asset']),
+  },
+  {
+    name: 'text_behind', title: 'Put text behind a layer (free)', scope: 'edit:write',
+    description: 'Text and captions go behind a layer (she walks in front of the words) while its clip is on screen; behind: false puts them back in front.',
+    inputSchema: obj({ sessionId: SID, itemId: str('The clip'), layer: str('Layer id or name'), behind: bool('true (default): text behind the layer') }, ['sessionId', 'itemId', 'layer']),
+    run: (env, a) => oneOp(env, a, 'text_behind', ['itemId', 'layer', 'behind']),
+  },
+  {
+    name: 'pin_text', title: 'Pin text to a layer (free)', scope: 'edit:write',
+    description: 'A text item follows a layer around (its centre on the layer\'s centre, top or bottom, plus offset in canvas fractions). layer: null unpins.',
+    inputSchema: obj({ sessionId: SID, textId: str('The text item'), itemId: str('The clip'), layer: { type: ['string', 'null'], description: 'Layer id or name, or null to unpin' },
+      anchor: { type: 'string', enum: ['center', 'top', 'bottom'] }, offset: { type: 'object', description: '{x, y} canvas fractions, −1…1' } }, ['sessionId', 'textId']),
+    run: (env, a) => oneOp(env, a, 'pin_text', ['textId', 'itemId', 'layer', 'anchor', 'offset']),
   },
   {
     name: 'detect_beats', title: 'Detect beats (free)', scope: 'edit:write',
