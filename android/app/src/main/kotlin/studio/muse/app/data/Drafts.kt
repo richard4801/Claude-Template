@@ -109,9 +109,15 @@ data class OutfitDraft(
     val images: List<ImageRef> = emptyList(),
     /** The picked photo's file name (the name suggestion, §5). */
     val photoName: String? = null,
+    /** §6: start from her base photos, keeping the ticked pieces. */
+    val fromBase: Boolean = false,
+    val keep: OutfitKeep = OutfitKeep(),
+    val keepNote: String = "",
     /** WS7/WS13: the owner's model for the set (null = the studio's default). */
     val imageModel: String? = null,
-)
+) {
+    val base: OutfitBase? get() = if (fromBase && mode != "own") OutfitBase(keep = keep, note = keepNote.trim().ifEmpty { null }) else null
+}
 
 /** Cross-screen selections and drafts (the prototype's global `S`), shared by the screen ViewModels. */
 class Drafts {

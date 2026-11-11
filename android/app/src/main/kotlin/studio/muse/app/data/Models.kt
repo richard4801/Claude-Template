@@ -127,7 +127,34 @@ data class CreateOutfitRequest(
     val images: List<ImageRef> = emptyList(),
     /** WS13 (owner): the image model for the set; null = the studio's default. */
     val imageModel: String? = null,
+    /** §6: start from her base photos, keeping the ticked pieces (null = a new outfit as before). */
+    val base: OutfitBase? = null,
 )
+
+/** Which pieces of her base photos an outfit keeps (plans/outfit-head-looks.md §6). */
+@Serializable
+data class OutfitKeep(val top: Boolean = false, val bottom: Boolean = false, val shoes: Boolean = false, val accessories: Boolean = false) {
+    val flags get() = listOf(top, bottom, shoes, accessories)
+}
+
+/** POST /v1/outfits `base`: start from her base photos, keeping the ticked pieces and the note. */
+@Serializable
+data class OutfitBase(val source: String = "base", val keep: OutfitKeep = OutfitKeep(), val note: String? = null) {
+    /** Anything kept: a tick or a note (else the outfit is made as before). */
+    val keeping get() = keep.flags.any { it } || !note.isNullOrBlank()
+
+    /** "Keeps the top (the black lace bra). Changes the bottom, the shoes and the accessories." */
+    val summary: String get() {
+        val names = listOf("top", "bottom", "shoes", "accessories")
+        fun and(xs: List<String>) = if (xs.size <= 1) xs.joinToString("") else xs.dropLast(1).joinToString(", ") + " and " + xs.last()
+        val kept = names.filterIndexed { i, _ -> keep.flags[i] }.map { "the $it" }
+        val rest = names.filterIndexed { i, _ -> !keep.flags[i] }.map { "the $it" }
+        val n = note?.trim().orEmpty()
+        val k = if (n.isEmpty()) and(kept) else if (kept.isEmpty()) n else "${and(kept)} ($n)"
+        if (k.isEmpty()) return "Tick what to keep from her base photos."
+        return "Keeps $k. Changes ${if (rest.isEmpty()) "the rest" else and(rest)}."
+    }
+}
 
 /** status: good | bad | info */
 @Serializable

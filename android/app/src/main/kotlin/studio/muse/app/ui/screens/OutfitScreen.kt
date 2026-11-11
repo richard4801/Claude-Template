@@ -45,6 +45,7 @@ import studio.muse.app.data.ImageRef
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.OutfitDraft
+import androidx.compose.foundation.layout.heightIn
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
@@ -97,7 +98,7 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
             OutfitNaming.suggestion(if (s.draft.mode == "describe") s.draft.description else "", s.draft.photoName.takeIf { s.draft.mode == "photo" }, outfitDay(System.currentTimeMillis()))
         }
         edit { it.copy(name = name) }
-        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, name.take(OutfitNaming.MAX), s.draft.mode, s.draft.description, s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" })) ?: return@launch
+        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, name.take(OutfitNaming.MAX), s.draft.mode, s.draft.description, s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" }, s.draft.base?.takeIf { it.keeping })) ?: return@launch
         edit { it.copy(previewId = o.id) }
     }
 
@@ -146,8 +147,9 @@ fun OutfitScreen() {
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                     Segmented(listOf("describe" to "Describe", "photo" to "From a photo", "own" to "My own set"), s.draft.mode, vm::mode)
+                    if (s.draft.mode != "own") BaseKeep(s.draft, vm)
                     when (s.draft.mode) {
-                        "describe" -> Labeled("Describe the outfit") { Input(s.draft.description, { v -> vm.edit { it.copy(description = v) } }, area = true, calm = true) }
+                        "describe" -> Labeled(if (s.draft.fromBase) "What to change" else "Describe the outfit") { Input(s.draft.description, { v -> vm.edit { it.copy(description = v) } }, area = true, calm = true) }
                         "photo" -> {
                             SecondaryButton(if (s.draft.images.isEmpty()) "Upload an outfit photo" else "Replace the photo", { pickOne.launch(img) }, Modifier.fillMaxWidth(), icon = "upload")
                             Caption(if (s.draft.images.isEmpty()) "A flat-lay, mannequin or model photo. We'll dress $name in it." else "Photo added.")
@@ -197,10 +199,38 @@ fun OutfitScreen() {
                 PrimaryButton("Add to her outfits", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
             } else {
                 PrimaryButton(
-                    if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.outfitSet(photoPrices()))}",
+                    if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(photoPrices().let { p -> if (s.draft.base?.keeping == true) 4 * p.perEdit else studio.muse.core.PhotoPricing.outfitSet(p) })}",
                     { if (!s.busy) vm.generate() }, Modifier.weight(1f), busy = s.busy,
                 )
             }
+        }
+    }
+}
+
+/** §6: start from her base photos and tick what to keep; the rest is replaced by the description or the photo. */
+@Composable
+private fun BaseKeep(d: OutfitDraft, vm: OutfitViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Check("Start from her base photos", d.fromBase, { vm.edit { it.copy(fromBase = !it.fromBase) } }, Modifier.heightIn(min = 48.dp))
+        if (d.fromBase) {
+            val k = d.keep
+            listOf(listOf("Top" to k.top, "Bottom" to k.bottom), listOf("Shoes" to k.shoes, "Accessories" to k.accessories)).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                    row.forEach { (label, on) ->
+                        Check(label, on, {
+                            vm.edit { dr ->
+                                val kk = dr.keep
+                                dr.copy(keep = when (label) {
+                                    "Top" -> kk.copy(top = !kk.top); "Bottom" -> kk.copy(bottom = !kk.bottom)
+                                    "Shoes" -> kk.copy(shoes = !kk.shoes); else -> kk.copy(accessories = !kk.accessories)
+                                })
+                            }
+                        }, Modifier.weight(1f).heightIn(min = 48.dp))
+                    }
+                }
+            }
+            Input(d.keepNote, { v -> vm.edit { it.copy(keepNote = v.take(200)) } }, placeholder = "Note, e.g. the black lace bra", calm = true)
+            Caption(d.base?.summary.orEmpty())
         }
     }
 }
