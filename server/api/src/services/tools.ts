@@ -10,6 +10,7 @@ import { whoOf } from '../money/money.js';
 import { PhotoBill } from '../images/bill.js';
 import { PhotoError, PHOTO_FAILED } from '../images/service.js';
 import { modelName, type StepOverrides } from '../images/steps.js';
+import { applySent, sentImagesOf, type SentImage } from '../images/sent.js';
 import type { ImageStep } from '../replicate/mapping.js';
 import { PHOTO_REF_MP, money } from '../pricing.js';
 import { randomImageSeed } from '../templates/prompt.js';
@@ -130,12 +131,22 @@ export class ToolService {
     if (v === 'a' || v === 'b') return [v];
     throw badRequest('engine: a, b or both');
   }
-  private async dressPerEngine(studioId: string, eng: 'a' | 'b', n: number, ov?: StepOverrides) {
+  private async dressPerEngine(studioId: string, eng: 'a' | 'b', n: number, ov?: StepOverrides, refs = 1) {
     const model = (await this.ctx.imageModels.resolve(studioId, stepOf(eng), ov)).model;
-    // The front sends 2 images (sheet + outfit), every other image 3 (+ the new front).
+    // The front sends 1 + refs images (sheet + outfit), every other image one more (+ the new front).
     let v = 0;
-    for (let i = 0; i < n; i++) v += await this.ctx.imageModels.estimate(model, { outMp: 1, inMp: PHOTO_REF_MP * (i === 0 ? 2 : 3) });
+    for (let i = 0; i < n; i++) v += await this.ctx.imageModels.estimate(model, { outMp: 1, inMp: PHOTO_REF_MP * (i === 0 ? 1 + refs : 2 + refs) });
     return v;
+  }
+  /**
+   * Dress up's images besides the photo being dressed (and the new front for the other angles): the outfit photo, or
+   * the choice (images/sent.ts: the body's, else Claude's for this character's Dress up).
+   */
+  private async dressSent(u: AuthUser, modelId: string, b: Record<string, unknown>) {
+    const outfitImage = b.outfitImage as ImageRef | undefined;
+    const auto: SentImage[] = outfitImage && (outfitImage.url || outfitImage.asset) ? [{ image: outfitImage, role: 'outfit', label: 'outfit photo', why: 'the clothes to dress her in' }] : [];
+    const max = Math.max(1, this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS - 2);
+    return applySent(auto, await sentImagesOf(this.ctx).forRequest(u, b, `dressup:${modelId}`), max, { what: 'besides her photo and the new front' });
   }
   async dressEstimate(u: AuthUser, modelId: string, body: unknown) {
     const m = await this.modelFor(u, modelId);
@@ -143,9 +154,10 @@ export class ToolService {
     const ov = this.ctx.imageModels.overridesFrom(u.role, b);
     const engines = this.dressEngines(b.engine);
     const n = this.filled(m).length;
+    const sentImages = await this.dressSent(u, m.id, b);
     let est = 0;
-    for (const e of engines) est += await this.dressPerEngine(u.studioId, e, n, ov);
-    return { images: n, estimate: est, label: this.label(n, est, engines.length) };
+    for (const e of engines) est += await this.dressPerEngine(u.studioId, e, n, ov, Math.max(1, sentImages.images.length));
+    return { images: n, estimate: est, label: this.label(n, est, engines.length), sentImages };
   }
 
   // ------------------------------------------------------------------ start
@@ -177,12 +189,13 @@ export class ToolService {
     const ov = this.ctx.imageModels.overridesFrom(u.role, b);
     const engines = this.dressEngines(b.engine);
     const outfitImage = b.outfitImage as ImageRef | undefined;
-    if (!outfitImage || (!outfitImage.url && !outfitImage.asset)) throw badRequest('Add the outfit photo');
+    const sent = await this.dressSent(u, m.id, b);
+    if (!sent.images.length) throw badRequest('Add the outfit photo');
     if (typeof b.name === 'string' && b.name.length > 80) throw badRequest('name: at most 80 characters');
     const slots = this.filled(m);
     if (!slots.length) throw badRequest('Add photos to the character sheet first');
     let est = 0;
-    for (const e of engines) est += await this.dressPerEngine(u.studioId, e, slots.length, ov);
+    for (const e of engines) est += await this.dressPerEngine(u.studioId, e, slots.length, ov, sent.images.length);
     const all = await this.ctx.imageModels.resolveAll(u.studioId, ov);
     const id = uid('tool');
     const bill = await new PhotoBill(this.ctx, whoOf(u), id, est, `Dress up · ${slots.length} image${slots.length === 1 ? '' : 's'}${engines.length > 1 ? ' · 2 options' : ''}`).start();
@@ -192,7 +205,8 @@ export class ToolService {
     for (const e of engines) usedModels[stepOf(e)] = all[stepOf(e)].model;
     const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : null;
     const [r] = await this.ctx.db.insert(toolRuns).values({ id, studioId: u.studioId, modelId: m.id, kind: 'dressup', state: 'running',
-      options: { engine: engines.length > 1 ? 'both' : engines[0], name, outfitImage, seed: randomImageSeed() }, engines, models: usedModels, items, estimate: est,
+      options: { engine: engines.length > 1 ? 'both' : engines[0], name, outfitImage: outfitImage ?? sent.images[0]!.image, seed: randomImageSeed(),
+        ...(sent.changed ? { sentImages: sent.images.map(x => x.image) } : {}) }, engines, models: usedModels, items, estimate: est,
       phase: `Dressing up · 1 of ${items.length * engines.length}`, createdBy: u.id, createdAt: Date.now() }).returning();
     this.emitRun(r!);
     void this.run(r!, u, bill).catch(e => this.ctx.log.error({ err: (e as Error).message }, 'dress up failed'));
@@ -228,7 +242,7 @@ export class ToolService {
     const ch = await im.resolve(u.studioId, step, { [step]: run.models[step] });
     const useAnchor = !!anchor && item.slot !== 'front';
     const r = await imgs.runModel({ studioId: u.studioId, userId: u.id, purpose: 'dressup', refId: run.id, step, model: ch.model, extra: ch.extra,
-      prompt: dressPrompt(item.slot, useAnchor, texts), refs: [item.before, o.outfitImage as ImageRef, ...(useAnchor ? [anchor] : [])], matchInput: true, seed, outMp: 1,
+      prompt: dressPrompt(item.slot, useAnchor, texts), refs: [item.before, ...((o.sentImages as ImageRef[] | undefined) ?? [o.outfitImage as ImageRef]), ...(useAnchor ? [anchor] : [])], matchInput: true, seed, outMp: 1,
       simulate: item.before, cancelled });
     return { image: r.image, cost: r.cost };
   }

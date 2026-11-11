@@ -13,6 +13,7 @@ import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
 import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
 import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, type IdentityRef } from '../images/identity.js';
+import { applySent, sentImagesOf, sentOfBody, whyOf, type SentView } from '../images/sent.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
@@ -99,7 +100,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     identityRefs(m, o, { count: await ctx.images.identityCount(studioId), ...opts });
   const personCount = (ids: IdentityRef[]) => ids.filter(i => i.role === 'person').length;
   /** "Identity from N locked reference images": the ones a plan really sends (identity images come first). */
-  const sentOf = (ids: IdentityRef[], plan: { images: ImageRef[]; sent: unknown[] }) => personCount(ids.slice(0, plan.images.length - plan.sent.length));
+  const sentOf = (ids: IdentityRef[], plan: { images: ImageRef[]; sent: unknown[]; persons?: number }) => plan.persons ?? personCount(ids.slice(0, plan.images.length - plan.sent.length));
+  /** Images sent (images/sent.ts): the body's choice, else what Claude set for this page. */
+  const sentFor = (u: AuthUser, body: unknown, scope?: string) => sentImagesOf(ctx).forRequest(u, body, scope);
 
   // ------------------------------------------------------------------ health
   // The host's health check (Koyeb, Railway) calls this every few seconds. It must not touch the database: a query every
@@ -220,15 +223,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     emitModel(u!);
     return modelView(u!);
   });
-  app.post<{ Params: { id: string } }>('/v1/models/:id/fill-angles', async req => {
+  const fillAngles = async (req: { user: AuthUser; body: unknown; params: { id: string } }) => {
     const m0 = await model(req.user, req.params.id, true);
     const m = { ...m0, slots: SLOT_KEYS.map(k => m0.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false }) };
     const missing = m.slots.filter(s => !s.image && !s.busy);
     // Her identity images within the shot model's limit (plans/api.md "Identity images"); one sheet image each.
     const fillIds = await idRefs(req.user.studioId, m);
     const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'character', (req.body ?? {}) as Record<string, unknown>); // WS13: `imageModel`, else the Character photos default
-    const fillPlan = await ctx.images.shotPlan(req.user.studioId, fillIds, [], 1, undefined, stepModels);
+    const fillPlan = await ctx.images.shotPlan(req.user.studioId, fillIds, [], 1, undefined, stepModels, await sentFor(req.user, req.body, `sheet:${m.id}`));
     const cost = missing.length ? missing.length * fillPlan.perShot : 0;
+    // Estimate only: the price and the images each angle would send (nothing held or made).
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, angles: missing.map(s => s.key), cost, perShot: fillPlan.perShot, sentImages: fillPlan.sentImages };
     const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('f')}`, cost, `Character sheet · ${missing.length} angle${missing.length === 1 ? '' : 's'}`).start();
     const slots = m.slots.map(s => (missing.includes(s) ? { ...s, busy: true } : s));
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
@@ -256,8 +261,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       const [v] = await db.update(models).set({ slots: next }).where(eq(models.id, m.id)).returning();
       emitModel(v!);
     })().catch(e => ctx.log.error({ err: (e as Error).message }, 'fill angles failed'));
-    return { model: modelView(u!), cost };
-  });
+    return { model: modelView(u!), cost, sentImages: fillPlan.sentImages };
+  };
+  app.post<{ Params: { id: string } }>('/v1/models/:id/fill-angles', async req => fillAngles(req));
 
   // ------------------------------------------------------------------ outfits
   app.get('/v1/outfits', async req => {
@@ -265,7 +271,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const hidden = new Set((await db.select({ id: models.id }).from(models).where(and(eq(models.studioId, req.user.studioId), isNotNull(models.archivedAt)))).map(x => x.id));
     return (await db.select().from(outfits).where(eq(outfits.studioId, req.user.studioId)).orderBy(outfits.createdAt)).filter(o => !hidden.has(o.modelId)).map(outfitView);
   });
-  app.post('/v1/outfits', async req => {
+  const createOutfit = async (req: { user: AuthUser; body: unknown }) => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
       description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional(),
       /* §6: start from her base photos, keeping the ticked pieces */
@@ -288,7 +294,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const angleIds = await Promise.all(BODY_SLOTS.map(slot => idRefs(req.user.studioId, { ...m, identityBodySlot: slot }, null, { extra: productIds })));
     const outfitIds = angleIds[0]!;
     // Planned like a shoot's images: within the shot model's limit, the face front never dropped.
-    const anglePlans = mode === 'own' ? null : await Promise.all(angleIds.map(ids => ctx.images.shotPlan(req.user.studioId, ids, [], 1, b.imageEngine, stepModels)));
+    // Images sent (images/sent.ts): the body's choice, else Claude's for this character's outfit sheet. Keeping pieces from
+    // her base, it replaces the references of the front edit (the base photo itself is chosen with the base picker).
+    const sent = mode === 'own' ? null : await sentFor(req.user, req.body, `outfit:${m.id}`);
+    const keepingAsked = mode !== 'own' && !!b.base && outfitKeepParts({ keep: b.base.keep, note: b.base.note }).keeping;
+    const anglePlans = mode === 'own' ? null : await Promise.all(angleIds.map(ids => ctx.images.shotPlan(req.user.studioId, ids, [], 1, b.imageEngine, stepModels, keepingAsked ? null : sent)));
     const outfitPlan = anglePlans?.[0] ?? null;
     const outfitRefs = outfitPlan?.images ?? [], outfitPanels = outfitPlan?.panels ?? [];
     // A custom model makes all four angles as new shots (no edits); else a front shot and three edits of it.
@@ -308,6 +318,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (keeping && !baseFront) throw badRequest('Choose a front base photo first');
     const cost = !outfitPlan ? 0 : keeping ? 4 * await ctx.images.editCost(req.user.studioId, stepModels)
       : byoRun ? 4 * outfitPlan.perShot : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
+    const faceRef = slotOf('face');
+    const keepSent = keeping ? applySent([...(faceRef ? [{ image: faceRef, role: 'person' as const, label: 'face', why: whyOf('face', 'person') }] : []),
+      ...productIds.map(x => ({ image: x.image, role: 'product' as const, label: x.label, why: whyOf(x.label, 'product') }))], sent, ctx.config.REPLICATE_IMAGE_MAX_INPUTS - 1, { what: 'besides the photo it edits' }) : null;
+    const sentImages = keepSent ?? outfitPlan?.sentImages ?? null;
+    // Estimate only: the price and the images the outfit's front would send (nothing held or made).
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, cost, sentImages };
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m, outfitPlan ? sentOf(outfitIds, outfitPlan) : personCount(outfitIds));
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
@@ -331,7 +347,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             // as references), then each angle edits that front with her base photo of that angle.
             const k = keep!, what = b.description?.trim() || (productIds.length ? 'the clothes in the product photo' : spec.name);
             const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
-              editOf: baseFront!, refs: [slot('face'), ...productIds.map(x => x.image)].filter((r): r is ImageRef => !!r),
+              editOf: baseFront!, refs: keepSent!.images.map(x => x.image),
               req: { prompt: outfitKeepFront(k, what, texts), width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null;
             if (!front) throw new Error('no front');
             angles = [front];
@@ -376,7 +392,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (u) emitOutfit(u);
     }, mode === 'own' ? 300 : 0);
     return outfitView(o!);
-  });
+  };
+  app.post('/v1/outfits', async req => createOutfit(req));
   // Outfit page (plans/outfit-head-looks.md §4/§5): rename, delete, make the missing angles. Changing an outfit is for the
   // studio owner or whoever made it; another studio's outfit is a 404.
   const OutfitName = z.string().trim().min(1, 'Give the outfit a name').max(80, 'At most 80 characters');
@@ -426,9 +443,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const byoRun = !b.imageEngine?.provider && !!stepModels?.shot?.startsWith('c_');
     // A custom model: new shots of the missing angles with her body photo of each and the outfit's front as a reference.
     const frontRef = [{ image: front, label: 'outfit photo', role: 'product' as const }];
+    const fillSent = await sentFor(user, req.body); // images/sent.ts: the body's choice (new shots only)
     const plans = byoRun ? await Promise.all(missing.map(async i => {
       const ids = await idRefs(user.studioId, { ...m, identityBodySlot: BODY_SLOTS[i]! }, null, { extra: frontRef });
-      return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels) };
+      return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels, fillSent) };
     })) : [];
     const cost = byoRun ? plans.reduce((a, p) => a + p.plan.perShot, 0) : missing.length * await ctx.images.editCost(user.studioId, stepModels);
     const bill = await new PhotoBill(ctx, whoOf(user), uid('of'), cost, 'Outfit angles').start();
@@ -678,12 +696,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const stepModels = models ?? ctx.imageModels.overridesFrom(u.role, b as { models?: unknown }); // WS13: `models` = already checked
     const texts = await ctx.prompts.texts(u.studioId);
     const refsIn = (b.refs ?? []) as ShootRefIn[];
+    const sent = await sentFor(u, body); // images/sent.ts (the composer's draft carries Claude's choice)
     // Photo without a character (owner 2026-11-11): the image(s) alone, or an image and words (suite/photo.ts freePhotoPrompt).
     if (!b.modelId) {
       if (b.templateId) throw badRequest('Presets need a character · pick one with @');
       if (b.outfitId) throw badRequest('An outfit needs a character · pick one with @');
       if (!refsIn.length && !(b.prompt ?? still?.scene ?? '').trim()) throw badRequest('Describe the photo or add an image');
-      const plan = await ctx.images.shotPlan(u.studioId, [], refsIn, 2, b.imageEngine, stepModels);
+      const plan = await ctx.images.shotPlan(u.studioId, [], refsIn, 2, b.imageEngine, stepModels, sent);
       const text = freePhotoPrompt({ prompt: b.prompt ?? still?.scene ?? '', still: still ?? { notes: [] }, refs: plan.sent, texts });
       return { kind: 'free' as const, b, m: null, o: undefined, count, stepModels, texts, refsIn, plan, text };
     }
@@ -693,7 +712,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       const t = await ctx.templates.visible(u, b.templateId);
       const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage as ImageRef : null;
       const ids = await shootRefs(u, m, o, product);
-      const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels);
+      const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels, sent);
       const identity = await identityOf(m, sentOf(ids, plan));
       return { kind: 'template' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, t, product };
     }
@@ -702,7 +721,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const cap = (await ctx.images.shotInputs(u.studioId, b.imageEngine, stepModels)).capacity;
     const wide = (b.imageEngine as { provider?: string } | undefined)?.provider === 'byo' && cap >= 6 ? Math.min(7, Math.max(await ctx.images.identityCount(u.studioId), cap - refsIn.length)) : undefined;
     const ids = wide ? await idRefs(u.studioId, m, o, { outfit: !!o, count: wide }) : await shootRefs(u, m, o);
-    const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels);
+    const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels, sent);
     const identity = await identityOf(m, sentOf(ids, plan));
     const spec = { identity, outfit: outfitSpec(o) ?? { name: 'outfit' }, scene: b.scene, light: b.light, grade: b.grade, direction: b.direction, lockSeed: b.lockSeed,
       presets: b.presets, refs: plan.sent, camera: b.camera ? { shot: b.camera.shot, lensMm: b.camera.lens, aperture: b.camera.aperture } : undefined,
@@ -712,7 +731,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const custom = b.prompt?.trim() || null;
     return { kind: 'plain' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, spec, built, custom };
   }
-  const previewRefs = (plan: { images: ImageRef[]; refs: unknown[]; sheet: boolean }) => ({ images: plan.images.length, refs: plan.refs, referenceSheet: plan.sheet });
+  const previewRefs = (plan: { images: ImageRef[]; refs: unknown[]; sheet: boolean; sentImages?: unknown }) => ({ images: plan.images.length, refs: plan.refs, referenceSheet: plan.sheet, sentImages: plan.sentImages });
   /** On a one-image model the prompt starts with the reference-sheet line (as runModel sends it). */
   const withSheet = (s: { plan: { sheet: boolean; panels: Parameters<typeof collageLine>[0] }; texts: Parameters<typeof collageLine>[1] }, text: string) =>
     s.plan.sheet ? [collageLine(s.plan.panels, s.texts), text].filter(x => x.trim()).join('\n') : text;
@@ -833,7 +852,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const fromDraft = referencesOf((draftOf(body) ?? {}) as Draft).map(r => ({ image: { url: r.url }, guides: [r.use === 'pose' ? 'pose' : r.use === 'location' ? 'scene' : 'look'] as ('pose' | 'look' | 'scene')[] }));
     const refsAll = [...(p.references ?? []), ...fromDraft.filter(d => !(p.references ?? []).some(x => x.image?.url === d.image.url))].slice(0, 3);
     const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refsAll.length ? refsAll : undefined, templateId: p.presetId,
-      shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true };
+      shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true,
+      ...(sentOfBody(p) ? { sentImages: p.sentImages, addImages: p.addImages, excludeImages: p.excludeImages, sentImagesBy: p.sentImagesBy } : p.draft ? { draft: p.draft } : {}) };
     // WS5: a custom image model the user may use replaces the studio's image engine for this run.
     // `imageModel` picks the image model for this run (a Replicate "owner/name" or a custom "c_…"): the owner any; 4c: a
     // member any model shown to members (checked, 403 otherwise).
@@ -849,11 +869,19 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
     return { p, s, notes, graded };
   };
+  // Images sent (images/sent.ts): what each page's generation would send, for Claude's get_sent_images / set_sent_images.
+  const dry = (b: unknown) => ({ ...((b ?? {}) as object), dryRun: true });
+  sentImagesOf(ctx).estimators = {
+    photo: async (u, body) => (await photoPlan(u, body)).s.plan.sentImages,
+    outfit: async (u, body) => ((await createOutfit({ user: u, body: dry(body) })) as { sentImages?: SentView | null }).sentImages ?? null,
+    fill_angles: async (u, body) => ((await fillAngles({ user: u, body: dry(body), params: { id: String((body as { modelId?: unknown }).modelId ?? '') } })) as { sentImages?: SentView }).sentImages ?? null,
+    dress_up: async (u, body) => (await ctx.tools.dressEstimate(u, String((body as { modelId?: unknown }).modelId ?? ''), body)).sentImages,
+  };
   app.post('/v1/suite/photos/estimate', async req => {
     const { p, s, notes, graded } = await photoPlan(req.user, req.body);
     const estimate = s.count * s.plan.perShot, money = P.aboutMoney(estimate);
     return { tool: 'photo', count: s.count, perPhoto: s.plan.perShot, estimate, priceLine: `${money} · ${s.count} photo${s.count === 1 ? '' : 's'}`,
-      buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null,
+      buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null, sentImages: s.plan.sentImages,
       ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.kind === 'free' ? s.text : s.custom ?? s.built.text }) };
   });
   // Every photo run is a job (WS19): a `render` row with request.engine 'photo', so the Queue, the hub and the Suite's

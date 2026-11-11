@@ -5,6 +5,7 @@
 // Claude's changes reach the app as `suiteAssist` events and the owner's own edits come back with PATCH.
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { sentOfBody, type SentInput } from '../images/sent.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { jobs, models } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -94,10 +95,16 @@ export function requestOf(d: Draft) {
     ...(d.sound !== undefined ? { audio: !!d.sound } : {}), ...(typeof extra.speaking === 'boolean' ? { speaking: extra.speaking } : {}),
     ...(camera ? { camera } : {}), ...(rig.gradeLook === false && (rig.palette || rig.stock) ? { gradeLook: false } : {}),
     ...(referencesOf(d).length ? { references: { images: referencesOf(d).map(r => ({ image: { url: r.url }, role: r.use, label: r.label ?? r.use })) } } : {}),
+    // Images sent (images/sent.ts): Claude's or the person's choice, kept in the draft (set_sent_images).
+    ...sentOfDraft(d),
     draft: d,
   };
 }
 
+/** The draft's images-sent choice as request fields (images/sent.ts), or nothing. */
+export function sentOfDraft(d: Draft): Partial<SentInput> {
+  try { return sentOfBody((d as { sent?: unknown }).sent ?? null) ?? {}; } catch { return {}; }
+}
 /** The draft's chat references (workstream 1), only well-formed ones. */
 export function referencesOf(d: Draft): DraftReference[] {
   const raw = (d as { references?: unknown }).references;
@@ -164,7 +171,12 @@ export class SuiteAssist {
     if (!b.success) throw badRequest(b.error.issues[0]?.message ?? 'Invalid body');
     const r = await this.row(u, id);
     if (b.data.baseRevision !== undefined && b.data.baseRevision !== r.revision) throw new ApiError(409, 'stale', 'Claude changed the shot meanwhile · reload it');
-    return this.view(await this.save(r, { draft: parseDraft(b.data.draft), revision: r.revision + 1 }));
+    // Images sent (images/sent.ts): an app that doesn't know `sent` keeps Claude's choice; `sent: null` clears it (Reset).
+    const incoming = { ...((b.data.draft ?? {}) as Record<string, unknown>) };
+    const had = (r.draft as Record<string, unknown>).sent;
+    if (!('sent' in incoming) && had) incoming.sent = had;
+    if (incoming.sent === null) delete incoming.sent;
+    return this.view(await this.save(r, { draft: parseDraft(incoming), revision: r.revision + 1 }));
   }
 
   /** suite_set_draft: Claude's changes, checked against the composer's visible options. */
@@ -240,6 +252,13 @@ export class SuiteAssist {
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
 
+  /** set_sent_images on the Suite: the images Generate sends, kept in the draft (null: back to MUSE's pick). */
+  async setSent(u: AuthUser, id: string, sent: SentInput | null) {
+    const r = await this.row(u, id);
+    const d = { ...(r.draft as Draft) } as Draft & Record<string, unknown>;
+    if (sent) d.sent = sent; else delete d.sent;
+    return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
+  }
   /** suite_estimate: the price, caps and warnings of what Generate would send (nothing held). */
   async estimate(u: AuthUser, id: string) {
     const v = this.view(await this.row(u, id));

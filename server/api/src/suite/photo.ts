@@ -3,6 +3,7 @@
 // composer's rig compiled for a still. Movement, tempo, frame rate and shutter don't exist in a photo, so they are dropped
 // with a note. A Photo preset is a photo template: it carries its own camera and light, so the rig isn't added on top.
 import { z } from 'zod';
+import { SENT_FIELDS } from '../images/sent.js';
 import { ImageRefSchema } from './plan.js';
 import { APERTURES, BODIES, CameraSpecSchema, ERAS, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, canonicalSpec, resolvePreset, type CameraSpec, type Option } from './camera.js';
 import { rigCheck, type RigWarning } from './rigcheck.js';
@@ -40,6 +41,8 @@ export const PhotoRequestSchema = z.object({
   engineModel: z.string().max(40).optional(),
   /** WS5: the image model for this run, a Replicate image model ("owner/name") or a custom one ("c_…"); 4c: members, a shown one. */
   imageModel: z.string().max(170).optional(),
+  /** Images sent (images/sent.ts): replace, add to or drop from what MUSE picks. */
+  ...SENT_FIELDS,
 }).strict();
 export type PhotoRequest = z.infer<typeof PhotoRequestSchema>;
 

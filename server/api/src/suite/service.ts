@@ -13,6 +13,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { dayStart, round2 } from '../lib/util.js';
 import * as P from '../pricing.js';
 import { replicateReferencesFor } from '../services/jobs.js';
+import { sentImagesOf, sentOfBody } from '../images/sent.js';
 import { cameraCatalog, CameraSpecSchema, resolvePreset } from './camera.js';
 import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
@@ -292,7 +293,7 @@ export class SuiteService {
     const texts = await this.ctx.prompts.texts(u.studioId);
     const talk = await this.resolveSpeaking(u.studioId, r);
     const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
-      separationUsd: SEPARATION_ESTIMATE_USD });
+      separationUsd: SEPARATION_ESTIMATE_USD, sent: await sentImagesOf(this.ctx).forRequest(u, r) });
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
   }
@@ -366,7 +367,8 @@ export class SuiteService {
       (e as any).tried = pick.tried;
       throw e;
     }
-    const plan = buildRecastPlan(r, members, pick, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    const plan = buildRecastPlan(r, members, pick, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale,
+      sent: await sentImagesOf(this.ctx).forRequest(u, r) });
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     const talk = { speaking: plan.speaking, source: (r.cast.some(c => typeof c.speaking === 'boolean') ? 'switch' : clipTalk?.source ?? 'default') as 'switch' | 'upload' | 'detected' | 'default' };
     return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk };
@@ -441,6 +443,8 @@ export class SuiteService {
       look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
       // Rig check (workstream 3): clashes between the choices and with the prompt; never blocks Generate.
       rig: plan.mode === 'recast' ? [] : rigCheck({ prompt: r.prompt, camera: r.camera, speaking: plan.speaking }),
+      // Images sent (images/sent.ts): what goes to the model, automatic or changed, each with why.
+      sentImages: plan.sentImages ?? { images: [], changed: false },
     };
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
@@ -452,7 +456,8 @@ export class SuiteService {
   private swapRequest(r: ShotRequest) {
     if (!r.modelId || !r.clipId) throw badRequest('Swap needs modelId and clipId');
     const quality = r.quality === 'cinema' ? 'hd' : r.quality;
-    return { title: r.title, modelId: r.modelId, outfitId: r.outfitId ?? '', clipId: r.clipId, engine: 'replicate', quality, takes: r.takes, keepAudio: r.keepAudio ?? true, direction: r.direction };
+    return { title: r.title, modelId: r.modelId, outfitId: r.outfitId ?? '', clipId: r.clipId, engine: 'replicate', quality, takes: r.takes, keepAudio: r.keepAudio ?? true, direction: r.direction,
+      ...(sentOfBody(r) ? { sentImages: r.sentImages, addImages: r.addImages, excludeImages: r.excludeImages, sentImagesBy: r.sentImagesBy } : {}) };
   }
   /**
    * WS13: swap runs on the chosen swap engine (`engineModel`, else the studio's Swap default): the hosted H3 family, or
@@ -470,8 +475,9 @@ export class SuiteService {
       : (await modelChoice(this.ctx).swapQuote(u.studioId, choice.model, req.quality, clip.durationSec, req.takes)).rr;
     const est = P.totalCost(rr);
     const seconds = hosted ? P.replicateSeconds(rr.clipSeconds) : Math.round(P.lengthSec(rr) * 10) / 10;
+    const sentImages = (await this.ctx.jobs.swapReferences(u, { ...req, draft: r.draft }, hosted)).view;
     const view = { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds, takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
-      buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' && hosted ? ['Swap tops out at HD'] : [], rig: [], test: false };
+      buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' && hosted ? ['Swap tops out at HD'] : [], rig: [], test: false, sentImages };
     if (u.role === 'owner' && choice) Object.assign(view, { engine: { model: choice.model, name: choice.engine.name, provider: choice.engine.provider, source: choice.source, perSec: (rr as { pricePerSec?: number }).pricePerSec ?? null } });
     return { req, choice, view };
   }

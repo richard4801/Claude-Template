@@ -17,6 +17,7 @@ import { buildInput, imageCapacity, mapModel, safetyTolerance, takesReferenceShe
 import { collageLine, refPanelLabel, SHOOT_GUIDES, type SentRef, type SheetPanel, type ShootGuide } from '../prompt/engine.js';
 import { buildCollage, collageMp } from './collage.js';
 import { clampIdentityRefs, IDENTITY_REFS_DEFAULT, type IdentityRef } from './identity.js';
+import { applySent, guidesOf, roleOfGuides, whyOf, type Resolved, type SentImage, type SentRole } from './sent.js';
 import { exactOne } from '../replicate/prices.js';
 import type { StepOverrides } from './steps.js';
 
@@ -133,16 +134,30 @@ export class ImageService {
    * fronts, LoRA sets), their reference-sheet panels and the estimate of one still (the tested default: the config
    * formula, "App clean-up" §3; any other model: its own price with the input megapixels it gets).
    */
-  async shotPlan(studioId: string, identity: IdentityRef[], refs: ShootRefIn[], outMp: number, override?: Partial<EngineSelection> | null, models?: StepOverrides | null) {
+  async shotPlan(studioId: string, identity: IdentityRef[], refs: ShootRefIn[], outMp: number, override?: Partial<EngineSelection> | null, models?: StepOverrides | null, sent?: Resolved | null) {
     const inputs = await this.shotInputs(studioId, override, models);
-    const plan = planShotImages(identity.map(i => i.image), refs, identity.length, inputs.capacity);
+    const auto = planShotImages(identity.map(i => i.image), refs, identity.length, inputs.capacity);
+    const nId = auto.images.length - auto.sent.length;
+    // What MUSE picks (images/sent.ts): her images first, then the reference images, each with why.
+    const autoSent: SentImage[] = [...identity.slice(0, nId).map(i => ({ image: i.image, role: i.role as SentRole, label: i.label, why: whyOf(i.label, i.role) })),
+      ...refs.filter((_, k) => auto.refs[k]?.index != null).map(r => ({ image: r.image, role: roleOfGuides(r.guides), label: refPanelLabel(r.guides).slice(5), why: `your reference (${refPanelLabel(r.guides).slice(5)})`, guides: r.guides }))];
+    const view = applySent(autoSent, sent, inputs.capacity);
+    let plan: ShotPlan = auto, panels = planPanels(identity, auto), persons = identity.slice(0, nId).filter(i => i.role === 'person').length;
+    if (view.changed || (sent && !sent.reset)) {
+      // The choice, in its order: "Image n" in the prompt and the sheet's panels follow it.
+      const L = view.images, sentRefs: SentRef[] = [];
+      L.forEach((x, i) => { const g = guidesOf(x); if (g) sentRefs.push({ index: i + 1, guides: g }); });
+      plan = { images: L.map(x => x.image), sent: sentRefs, refs: sentRefs.map(r => ({ index: r.index, guides: r.guides })) };
+      panels = L.map(x => { const g = guidesOf(x); return g ? { label: refPanelLabel(g), role: 'ref' as const, guides: g } : { label: x.label, role: (x.role === 'person' || x.role === 'outfit' ? x.role : 'product') as SheetPanel['role'] }; });
+      persons = L.filter(x => x.role === 'person').length;
+    }
     const sel = await this.selection(studioId, override, models);
     const n = plan.images.length;
     const sheet = inputs.sheet && n > 1;
     const perShot = sel.provider === 'byo' ? await this.ctx.suite.byo.photoPerShot(studioId, sel.model) // WS5: its per-run price × markup
       : sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) ? P.newShotEstimateImages(this.photoPrices(), outMp, n)
       : await this.ctx.imageModels.estimate(sel.model, { outMp, inMp: this.inputMp(n, sheet) });
-    return { ...plan, perShot, sheet, panels: planPanels(identity, plan) };
+    return { ...plan, perShot, sheet, panels, persons, sentImages: view };
   }
   /** Estimate of one edit on the studio's edit model. */
   async editCost(studioId: string, models?: StepOverrides | null) {

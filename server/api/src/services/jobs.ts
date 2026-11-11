@@ -20,6 +20,8 @@ import { pods } from '../db/schema.js';
 import { shotPromptFor } from '../templates/service.js';
 import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
 import { draftOf } from '../suite/drafts.js';
+import { applySent, sentImagesOf } from '../images/sent.js';
+import { planRefSent, sentPlanRef } from '../suite/plan.js';
 import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
 
 export const JobRequestSchema = z.object({
@@ -152,7 +154,7 @@ export class JobService {
     // GPU: references in the order the H3 setup was tested with (≤ 6): face front, face profile, then the outfit set's
     // front, ¾ and back if it has them, otherwise the body slots. Replicate: the five locked shots, then the outfit (≤ 9).
     // <Image n> in the prompt follows this order.
-    const references = replicate ? replicateReferencesFor(m, o) : referencesFor(m, o);
+    const { references } = await this.swapReferences(user, r, replicate, { m, o }); // images/sent.ts: the choice, else MUSE's pick
     if (!replicate && r.background === 'photo' && r.backgroundImage && (r.backgroundImage.asset || r.backgroundImage.url))
       references.splice(5, references.length, { label: 'background', image: r.backgroundImage });
     const texts = await this.ctx.prompts.texts(user.studioId);
@@ -184,6 +186,24 @@ export class JobService {
       return this.view(ins!);
     }
     return this.view(await this.startNew(user, row));
+  }
+
+  /**
+   * The images a character swap sends: MUSE's pick (replicateReferencesFor / referencesFor), or the request's choice
+   * (images/sent.ts) within the engine's limit (hosted 9; GPU 6, 5 with a new background photo). Labels feed "<Image n>".
+   */
+  async swapReferences(user: AuthUser, r: Record<string, any>, replicate: boolean, mo?: { m: typeof models.$inferSelect; o?: typeof outfits.$inferSelect }) {
+    let m = mo?.m, o = mo?.o;
+    if (!m) {
+      [m] = await this.ctx.db.select().from(models).where(and(eq(models.id, String(r.modelId)), eq(models.studioId, user.studioId)));
+      if (!m) throw notFound('Model');
+      [o] = r.outfitId ? await this.ctx.db.select().from(outfits).where(and(eq(outfits.id, String(r.outfitId)), eq(outfits.studioId, user.studioId))) : [];
+    }
+    const auto = replicate ? replicateReferencesFor(m, o) : referencesFor(m, o);
+    const max = replicate ? 9 : r.background === 'photo' && r.backgroundImage ? 5 : 6;
+    const view = applySent(auto.map(x => planRefSent({ ...x, role: 'character' })), await sentImagesOf(this.ctx).forRequest(user, r), max, { min: 1 });
+    const references = view.changed ? view.images.map(x => { const p = sentPlanRef(x, auto); return { label: p.label, image: p.image }; }) : auto;
+    return { references, view };
   }
 
   /** $ per output second for a Replicate quality (config). */

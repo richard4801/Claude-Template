@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import type { ImageRef } from '../db/schema.js';
 import { DEFAULT_TEXTS, listOf, type PromptTexts } from '../prompt/library.js';
+import { applySent, roleOfLabel, sameImage, SENT_FIELDS, whyOf, type Resolved, type SentImage, type SentRole, type SentView } from '../images/sent.js';
 import { sanitizeDirection } from '../prompt/engine.js';
 import { run } from '../prompt/scripts/builders.js';
 import { CameraSpecSchema, stripMoveTokens, VideoRefSchema, type VideoRef } from './camera.js';
@@ -73,6 +74,8 @@ export const ShotRequestSchema = z.object({
   dryRun: z.boolean().optional(),
   /** AI suite (workstream 1): the composer's draft, checked by suite/drafts.ts and stored with the job. */
   draft: z.unknown().optional(),
+  /** Images sent (images/sent.ts): replace, add to or drop from what MUSE picks. */
+  ...SENT_FIELDS,
 }).strict();
 export type ShotRequest = z.infer<typeof ShotRequestSchema>;
 
@@ -181,6 +184,8 @@ export type ShotPlan = {
   extend?: { direction: 'after' | 'before'; method: 'clip' | 'reference' | 'frame'; source: { key: string; seconds: number }; join: boolean;
     /** Send only this many seconds from the source's end (after) or start (before). */ useSeconds: number };
   recast?: { keepAudio: boolean; restoreAudio: boolean; people: { characterId: string; outfitId?: string; who: string; speaking: 'yes' | 'no' | 'unknown' }[] };
+  /** The reference images sent (images/sent.ts), automatic or chosen, for the estimate. */
+  sentImages?: SentView;
 };
 type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
 
@@ -196,7 +201,7 @@ const ROLE_WORDS: Record<string, [string, string]> = {
 };
 
 /** Builds the whole plan for a picked model. */
-export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character | null, o: { texts?: PromptTexts; priceScale?: number; speaking?: boolean; separationUsd?: number }): ShotPlan {
+export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character | null, o: { texts?: PromptTexts; priceScale?: number; speaking?: boolean; separationUsd?: number; sent?: Resolved | null }): ShotPlan {
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, notes: string[] = [];
   const kind = kindOf(m, n);
@@ -232,6 +237,9 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const charSent = charImgs.filter(x => chosen.includes(x));
   images.refs = [...charSent.map(x => ({ label: x.label, role: 'character', image: x.image })), ...extraFit];
   if (charImgs.length > charSent.length && charRoom > 0) notes.push(`${charImgs.length - charSent.length} character image(s) left out (limit ${m.refs.images})`);
+  // Images sent (images/sent.ts): the choice replaces or adjusts MUSE's pick, within the model's room; "Image n" follows it.
+  const sentImages = applySent(images.refs.map(planRefSent), o.sent, room);
+  if (sentImages.changed) images.refs = sentImages.images.map(x => sentPlanRef(x, charImgs));
 
   // ---- videos: the guide clip first, then extra reference videos
   const videos: ShotPlan['videos'] = [];
@@ -300,8 +308,24 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
     tier: r.quality, mode: n.mode, modelId: m.id, provider: m.provider, ref: refFor(m, kind), kind, resolution: p.resolution.id, seconds: p.seconds, aspect: r.aspectRatio,
     audio: r.audio && m.audio !== 'none', takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, negative: m.negativePrompt ? negList.join(', ') : undefined, params: cam.params,
     images, videos, audioRef: audioPlan, promptNoAudio, speaking, separationUsd: separation, perSec, billedPerTake: billed, extraPerTake: extraCost, estimate,
-    camera: { moves: cam.moves, notes: cam.notes, usesGuide: cam.usesGuide }, notes,
+    camera: { moves: cam.moves, notes: cam.notes, usesGuide: cam.usesGuide }, notes, sentImages,
   };
+}
+
+const PLAN_ROLES: Record<string, SentRole> = { product: 'product', location: 'location', style: 'style', pose: 'pose', outfit: 'outfit', person: 'other', prop: 'other', crop: 'other' };
+/** A plan's reference as the estimate shows it. */
+export function planRefSent(x: { label: string; role: string; image: ImageRef }): SentImage {
+  if (x.role === 'character') { const role = roleOfLabel(x.label, 'person'); return { image: x.image, role, label: x.label.replace(/^person \d+ · /, ''), why: whyOf(x.label.replace(/^person \d+ · /, ''), role) }; }
+  return { image: x.image, role: PLAN_ROLES[x.role] ?? 'other', label: x.label, why: x.role === 'crop' ? 'the face to recast in the clip' : `your ${x.role} reference${x.label && !x.label.startsWith(x.role) ? ` (${x.label})` : ''}` };
+}
+/** A chosen image as a plan reference: one of her own images keeps its sheet label (the prompt names her images and the
+ * outfit's apart); a person or outfit image of hers otherwise is labelled by its role; the rest are extra references. */
+export function sentPlanRef(x: SentImage, own: { label: string; image: ImageRef }[]): { label: string; role: string; image: ImageRef } {
+  const mine = own.find(c => sameImage(c.image, x.image));
+  if (mine) return { label: mine.label, role: 'character', image: x.image };
+  if (x.role === 'person') return { label: /^(face|body)/.test(x.label) ? x.label : `body, ${x.label}`, role: 'character', image: x.image };
+  if (x.role === 'outfit') return { label: x.label.startsWith('outfit') ? x.label : `outfit, ${x.label}`, role: own.length ? 'character' : 'outfit', image: x.image };
+  return { label: x.label, role: x.role === 'other' ? 'prop' : x.role, image: x.image };
 }
 
 /** "Video · Shot · HD 1080p · 5 s" (ledger) / "Shot · HD · 1080p" (job label). Never names a model. */

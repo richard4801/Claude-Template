@@ -6,7 +6,9 @@ import { sanitizeDirection } from '../prompt/engine.js';
 import { stripMoveTokens } from './camera.js';
 import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { run } from '../prompt/scripts/builders.js';
-import { billedSeconds, joinTokens, perSecond, token, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
+import { applySent, type Resolved } from '../images/sent.js';
+import { badRequest } from '../errors.js';
+import { billedSeconds, joinTokens, perSecond, planRefSent, sentPlanRef, token, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { modelById, RECAST_LADDER, refFor, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type Tier } from './registry.js';
 
 export type CastIn = NonNullable<ShotRequest['cast']>[number];
@@ -76,7 +78,7 @@ function personImages(c: Character, n: number) {
 }
 
 export function buildRecastPlan(r: ShotRequest, members: CastMember[], p: RecastPick, clip: { key: string; seconds: number },
-  o: { texts?: PromptTexts; priceScale?: number }): ShotPlan {
+  o: { texts?: PromptTexts; priceScale?: number; sent?: Resolved | null }): ShotPlan {
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, rc = m.recast!, notes: string[] = [];
   const style = m.camera.refStyle;
@@ -86,8 +88,15 @@ export function buildRecastPlan(r: ShotRequest, members: CastMember[], p: Recast
   if (!rc.faceCrops && ordered.some(x => x.cast.faceCrop)) notes.push('face crops are not sent on this quality: who-is-who goes by position and order');
   const per = Math.max(1, Math.min(rc.refsPerPerson, Math.floor((rc.totalImages - crops) / ordered.length)));
   const refs: { label: string; role: string; image: ImageRef }[] = [];
+  // Images sent (images/sent.ts): changeable when one person is recast (her images, within the model's budget).
+  let chosen: { label: string; image: ImageRef }[] | null = null;
+  if (ordered.length === 1) {
+    const c = ordered[0]!.character;
+    const view = applySent(personImages(c, per).map(img => planRefSent({ ...img, role: 'character' })), o.sent, Math.max(1, rc.totalImages - crops), { min: 1 });
+    if (view.changed) chosen = view.images.map(x => sentPlanRef(x, [...(c.outfit?.images ?? []), ...c.images]));
+  } else if (o.sent && !o.sent.reset) throw badRequest('The images sent can be changed when one person is recast');
   const people = ordered.map((x, i) => {
-    const imgs = personImages(x.character, per);
+    const imgs = i === 0 && chosen ? chosen : personImages(x.character, per);
     const start = refs.length;
     imgs.forEach(img => refs.push({ label: `person ${i + 1} · ${img.label}`, role: 'character', image: img.image }));
     const tokens = imgs.map((_, k) => token(style, 'image', start + k + 1));
@@ -127,6 +136,7 @@ export function buildRecastPlan(r: ShotRequest, members: CastMember[], p: Recast
     audio: keepAudio, takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, params: {},
     images: { middle: [], refs }, videos: [{ video: { key: clip.key, seconds }, use: 'source' }], speaking: ordered.some(x => x.speaking === 'yes'), separationUsd: 0,
     perSec, billedPerTake: billed, extraPerTake: 0, estimate, camera: { moves: [], notes: [], usesGuide: false }, notes,
+    sentImages: { images: refs.map(planRefSent), changed: !!chosen, ...(chosen ? { changedBy: o.sent!.by } : {}), max: Math.max(1, rc.totalImages - crops) },
     recast: { keepAudio, restoreAudio: keepAudio && !rc.keepsAudio, people: ordered.map((x, i) => ({ characterId: x.cast.characterId, outfitId: x.cast.outfitId, who: people[i]!.who, speaking: x.speaking })) },
   };
 }

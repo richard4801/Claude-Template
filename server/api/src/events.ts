@@ -9,6 +9,7 @@ export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfi
   | 'recreate' // Recreate this edit: references and their recipes (workstream 1)
   | 'collection' | 'queue' // Library collections and the Suite queue (workstream 1)
   | 'suiteAssist' // Claude in the AI Suite: the shared composer draft (workstream 1)
+  | 'sentImages' // the images a page's generation sends, as Claude set them (images/sent.ts)
   ;
 export type ApiEvent = { type: EventType; [k: string]: unknown };
 export type Viewer = { userId: string; studioId: string; role: 'owner' | 'member' };
