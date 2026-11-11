@@ -8,6 +8,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import type { BlenderRelayHub } from './relay.js';
 import { cameraAssets, cameraMessages, cameraSessions, mcpTokens, type Blocking, type CameraAssetKind, type CameraPath, type CastMember } from './schema.js';
+import { blenderToolByName } from './blenderTools.js';
 import { createShotDraft, DEFAULT_TARGET } from './shots.js';
 import { z } from 'zod';
 import { ASSET_RULES, CreateSession, extOf, NewAsset, parse, PatchSession, SetPath, ShotDraftIn } from './validate.js';
@@ -301,6 +302,30 @@ export class CameraService {
     const message = messageView(row!);
     void this.ctx.hub.emitTo(u.id, { type: 'camera', op: 'message', sessionId, message });
     return message;
+  }
+
+  /**
+   * Renders the session's guides on the owner's Mac through the Blender relay, the same job the Camera page's own chat and
+   * Re-render use: the MUSE Mac app renders the open Blender scene with the add-on and uploads the files to this session
+   * (greybox, keyframes, camera.json, characters.json). Free (a local render). wait: false starts it and returns at once.
+   */
+  async renderGuides(u: AuthUser, sessionId: string, body: unknown, opts: { wait?: boolean } = {}) {
+    const s = await this.row(u, sessionId);
+    if (s.ownerId !== u.id) throw notFound('Camera session');
+    const b = (body ?? {}) as Record<string, unknown>;
+    const args = parse(blenderToolByName.get('blender_render_guides')!.args, compact({ passes: b.passes ?? ['greybox', 'keyframes', 'camera_json', 'characters_json'], resolutionShort: b.resolutionShort }));
+    const relay = this.relay.status(u.id);
+    if (!relay.online) return { ok: false, error: 'The MUSE Mac app is not connected: open MUSE on the Mac and switch on the Blender relay, then try again.' };
+    if (!relay.blender) return { ok: false, error: 'The Blender relay is on but Blender is not connected: open Blender with the MUSE add-on, then try again.' };
+    if (this.relay.running(u.id, s.id, 'blender_render_guides')) return { ok: false, busy: true, error: 'A guide render for this session is already running. Check get_camera_session for its files.' };
+    const call = this.relay.call(u, s.id, 'blender_render_guides', args);
+    if (opts.wait === false) {
+      void call.catch(() => undefined);
+      return { ok: true, started: true, passes: args.passes, note: 'Rendering on the Mac. The files appear in get_camera_session (assets, newest of each kind) when the upload finishes.' };
+    }
+    const r = await call;
+    const after = await this.row(u, s.id);
+    return compact({ ok: r.ok, error: r.error, assetIds: r.assetIds, revision: after.revision, status: after.status, result: r.ok ? r.result : undefined });
   }
 
   async note(u: AuthUser, sessionId: string, body: unknown, source: 'app' | 'mcp') {

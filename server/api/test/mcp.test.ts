@@ -178,3 +178,29 @@ describe('registerMcpTools', () => {
     expect(img.structuredContent.label).toBe('Looked at 0:01.5');
   });
 });
+
+describe('render_camera_guides (Claude Code renders guides through the Mac relay)', () => {
+  it('needs the relay and Blender, sends the same relay render the Camera page uses, one at a time', async () => {
+    const s = (await call('create_camera_session', { title: 'Clip 8', characters: [{ modelId }], durationSec: 6 })).structuredContent;
+    expect((await call('render_camera_guides', { sessionId: s.id })).structuredContent).toMatchObject({ ok: false, error: expect.stringMatching(/not connected/) });
+    await owner.req('POST', '/v1/blender/relay', { online: true, blender: { connected: false } });
+    expect((await call('render_camera_guides', { sessionId: s.id })).structuredContent.error).toMatch(/Blender is not connected/);
+    await owner.req('POST', '/v1/blender/relay', { online: true, blender: { connected: true } });
+    const started = (await call('render_camera_guides', { sessionId: s.id, wait: false })).structuredContent;
+    expect(started).toMatchObject({ ok: true, started: true, passes: ['greybox', 'keyframes', 'camera_json', 'characters_json'] });
+    const [c] = (await owner.req('GET', '/v1/blender/calls')).body;
+    expect(c).toMatchObject({ sessionId: s.id, tool: 'blender_render_guides', args: { passes: ['greybox', 'keyframes', 'camera_json', 'characters_json'] } });
+    expect((await call('render_camera_guides', { sessionId: s.id })).structuredContent).toMatchObject({ ok: false, busy: true });
+    await owner.req('POST', `/v1/blender/calls/${c.id}/claim`);
+    await owner.req('POST', `/v1/blender/calls/${c.id}/result`, { ok: true, result: { frames: 144 } });
+    // wait (default): returns when the Mac posts the result.
+    const done = call('render_camera_guides', { sessionId: s.id, passes: ['greybox'] });
+    let c2: any;
+    for (let i = 0; i < 50 && !c2; i++) { c2 = (await owner.req('GET', '/v1/blender/calls')).body[0]; if (!c2) await new Promise(r => setTimeout(r, 20)); }
+    expect(c2.args).toEqual({ passes: ['greybox'] });
+    await owner.req('POST', `/v1/blender/calls/${c2.id}/claim`);
+    await owner.req('POST', `/v1/blender/calls/${c2.id}/result`, { ok: true, result: { frames: 144 } });
+    expect((await done).structuredContent).toMatchObject({ ok: true, revision: expect.any(Number) });
+    await owner.req('POST', '/v1/blender/relay', { online: false });
+  });
+});

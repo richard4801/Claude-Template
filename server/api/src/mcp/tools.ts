@@ -109,8 +109,15 @@ export const MUSE_TOOLS: MuseTool[] = [
     run: async (env, a) => env.camera.setPath(env.user, sid(env, a), without(a, 'sessionId')),
   },
   {
+    name: 'render_camera_guides', scope: 'camera:write', title: 'Render the guides (on the owner\'s Mac)', session: true,
+    description: 'Renders this session\'s guides from the Blender scene open on the owner\'s Mac and uploads them to the session, the same job as the Camera page\'s Re-render: greybox (flat-grey video), keyframes (start/mid/end stills), camera_json, characters_json. Use this for guides, never a render through the Blender MCP (its files stay on the Mac and do not reach MUSE). Free (a local render), takes up to a few minutes. Needs the MUSE Mac app\'s Blender relay on and Blender connected. wait: false starts it and returns at once (for several sessions in a row, build each scene, then render it, before moving to the next: one Blender scene at a time).',
+    inputSchema: obj({ sessionId: SESSION_ID, passes: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string', enum: ['greybox', 'keyframes', 'camera_json', 'characters_json'] }, description: 'Default: all four' },
+      resolutionShort: { type: 'integer', minimum: 480, maximum: 1080 }, wait: { type: 'boolean', description: 'Wait for the render and upload (default true)' } }, ['sessionId']),
+    run: async (env, a) => env.camera.renderGuides(env.user, sid(env, a), without(a, 'sessionId', 'wait'), { wait: a.wait !== false }),
+  },
+  {
     name: 'attach_guide_media', scope: 'assets:write', title: 'Attach guide media (upload URL)', session: true,
-    description: 'Returns a presigned PUT URL (1 h) for a guide file of this session: greybox/depth/pose/tracks video, keyframe stills, camera.json, characters.json or the .blend. Upload with e.g. `curl -T greybox.mp4 -H "content-type: video/mp4" "<url>"`, then call confirm_guide_media. The URL carries no MUSE credentials. When the MUSE Mac app\'s Blender relay is on, files rendered into ~/MUSE/CameraSessions/<sessionId>/out/ are uploaded for you.',
+    description: 'Returns a presigned PUT URL (1 h) for a guide file of this session: greybox/depth/pose/tracks video, keyframe stills, camera.json, characters.json or the .blend. Upload with e.g. `curl -T greybox.mp4 -H "content-type: video/mp4" "<url>"`, then call confirm_guide_media. The URL carries no MUSE credentials. For guides rendered from Blender use render_camera_guides instead: it renders and uploads them for you.',
     inputSchema: obj({ sessionId: SESSION_ID, kind: { type: 'string', enum: [...ASSET_KINDS] },
       contentType: { type: 'string', enum: ['video/mp4', 'video/quicktime', 'image/png', 'image/jpeg', 'image/webp', 'application/json', 'application/x-blender', 'application/octet-stream'] },
       bytes: { type: 'integer', minimum: 1 }, label: str(undefined, 120) }, ['sessionId', 'kind', 'contentType']),

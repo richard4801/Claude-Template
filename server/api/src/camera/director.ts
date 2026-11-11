@@ -24,7 +24,8 @@ export type ChatEvent =
 type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
 
 /** Session-scoped MUSE tools the chat offers (the session id is filled in, so Claude never sees or changes it). */
-const CHAT_MUSE_TOOLS = MUSE_TOOLS.filter(t => t.session || t.name === 'list_characters' || t.name === 'list_presets');
+// render_camera_guides is blender_render_guides for Claude Code over MCP; the in-app director has the Blender tool itself.
+const CHAT_MUSE_TOOLS = MUSE_TOOLS.filter(t => (t.session && t.name !== 'render_camera_guides') || t.name === 'list_characters' || t.name === 'list_presets');
 
 // Frozen: anything that changes per request goes into the messages, so this prefix stays cached.
 export const SYSTEM_PROMPT = `You are the MUSE director: you block shots for AI video in Blender, working for the studio owner inside the MUSE app.

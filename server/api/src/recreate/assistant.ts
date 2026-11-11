@@ -284,7 +284,11 @@ ${EDIT_PROMPT}
 
 # Recreate
 
-${RECREATE_PROMPT}`;
+${RECREATE_PROMPT}
+
+# Camera (blocking a shot in Blender)
+
+On the Camera page the open camera session is cameraSessionId on the page line: pass it as sessionId to the camera tools (get_camera_session, update_camera_session, set_camera_path, render_camera_guides, attach_guide_media, confirm_guide_media, post_camera_message, create_shot_draft). The Blender tools (the Blender MCP server's, or blender_* in the app) work on the owner's Mac while its Blender relay is on: use the Blender MCP to build and block the scene only. Render the guides with render_camera_guides over MCP (blender_render_guides in the app): it renders on the Mac and uploads the files to the session. Never render guides through the Blender MCP: those files stay on the Mac and never reach MUSE. Several clips: one camera session per clip (create_camera_session), then for each in turn build its scene, set_camera_path, render_camera_guides, before moving to the next (Blender holds one scene at a time).`;
   return ONE;
 }
 

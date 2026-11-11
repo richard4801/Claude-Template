@@ -11,7 +11,7 @@ export const SERVER_INFO = { name: 'muse', title: 'MUSE', version: '0.1.0' };
 const INSTRUCTIONS = 'MUSE is an AI UGC studio. Use these tools to read and update the owner\'s camera sessions (Directed camera mode): '
   + 'the cast (MUSE characters), where each character stands and moves over time, how the camera moves, and the guide renders from Blender. '
   + 'Typical flow: get_camera_session → list_characters/list_presets → block the scene in Blender (with the separate Blender MCP) → '
-  + 'set_camera_path → render guides into ~/MUSE/CameraSessions/<sessionId>/out/ (the MUSE Mac app uploads them) or attach_guide_media + confirm_guide_media → '
+  + 'set_camera_path → render_camera_guides (renders on the Mac and uploads; never render guides through the Blender MCP) → '
   + 'post_camera_message → create_shot_draft. You can never start a paid generation: the owner presses Generate in the MUSE app. '
   + 'Editing (Edit suite): list_takes → open_edit → get_edit → apply_edit_ops with the baseRevision you read → get_frame to check your edit → save_version; '
   + 'every edit can be undone, and paid AI helpers only return an estimate until the owner confirms in the app. '

@@ -37,6 +37,11 @@ export class BlenderRelayHub {
     return [...this.calls.values()].filter(p => p.userId === u.id && p.state === 'pending' && p.call.expiresAt > Date.now()).map(p => p.call);
   }
 
+  /** A call of this tool for this session is waiting or running on the Mac. */
+  running(userId: string, sessionId: string, tool: string) {
+    return [...this.calls.values()].some(p => p.userId === userId && p.call.sessionId === sessionId && p.call.tool === tool);
+  }
+
   /** Sends a call to the owner's Mac and waits for its result (or the timeout). */
   call(u: AuthUser, sessionId: string, tool: string, args: Record<string, unknown>): Promise<BlenderResult> {
     if (!this.status(u.id).online) {
