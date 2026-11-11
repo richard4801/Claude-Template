@@ -53,11 +53,12 @@ object PhotoComposer {
      * POST /v1/suite/photos[/estimate] from the composer: the character and outfit (an @character in the prompt wins),
      * the prompt's words (tokens' labels, no #moves), the rig for a still, the count, the product and the references.
      * With a preset, the camera isn't sent: the preset carries its own camera and light. Without a character (owner
-     * 2026-11-11) only with a reference image and no preset: the image is the photo to work from. Null otherwise.
+     * 2026-11-11) only with a reference image or words, and no preset: an image is the photo to work from; words alone
+     * make a text-to-image still. Null otherwise.
      */
     fun request(d: ComposerDraft, p: PhotoDraft): PhotoRequest? {
         val who = d.characterId
-        if (who == null && (p.presetId != null || p.refs.isEmpty())) return null
+        if (who == null && (p.presetId != null || (p.refs.isEmpty() && !hasWords(d)))) return null
         val s = d.settings
         return PhotoRequest(
             modelId = who, outfitId = who?.let { d.characterOutfit }, prompt = d.tokens.promptText().take(2000),
@@ -71,11 +72,14 @@ object PhotoComposer {
         )
     }
 
+    /** The prompt has words: enough for a Photo without a character (owner 2026-11-11). */
+    fun hasWords(d: ComposerDraft): Boolean = d.tokens.promptText().isNotBlank()
+
     /** What stops Generate on Photo (null = ready). */
     fun problem(d: ComposerDraft, p: PhotoDraft, busy: Boolean = false): String? = when {
         busy -> "Making the photos…"
         d.characterId == null && p.presetId != null -> "Presets need a character · pick one with @"
-        d.characterId == null && p.refs.isEmpty() && p.uploading == null -> "Pick a character or add an image"
+        d.characterId == null && p.refs.isEmpty() && !hasWords(d) && p.uploading == null -> "Describe the photo or add an image"
         p.uploading != null -> "Waiting for the upload"
         else -> null
     }

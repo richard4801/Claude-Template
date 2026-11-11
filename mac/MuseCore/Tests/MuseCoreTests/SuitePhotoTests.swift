@@ -113,7 +113,13 @@ final class SuitePhotoTests: XCTestCase {
         let first = try XCTUnwrap((j["references"] as? [[String: Any]])?.first)
         XCTAssertEqual(first["guides"] as? [String], ["pose"])
         XCTAssertNil(ComposerDraft(tool: .photo).photoRequest(PhotoDraft()), "no character and no image, no request")
-        XCTAssertEqual(ComposerDraft(tool: .photo).photoMissing(PhotoDraft()), "Pick a character or add an image")
+        XCTAssertEqual(ComposerDraft(tool: .photo).photoMissing(PhotoDraft()), "Describe the photo or add an image")
+        // Words alone (owner 2026-11-11): text-to-image, no character, no image.
+        let wordsOnly = ComposerDraft(tool: .photo, tokens: .text("A quiet beach at dawn"))
+        XCTAssertNil(wordsOnly.photoMissing(PhotoDraft()))
+        let w = try XCTUnwrap(wordsOnly.photoRequest(PhotoDraft()))
+        XCTAssertNil(w.modelId)
+        XCTAssertNil(w.references)
         // No character but an image (owner 2026-11-11): the request goes without modelId, outfit or product.
         let free = try XCTUnwrap(ComposerDraft(tool: .photo).photoRequest(PhotoDraft(references: [ref(.look)]), product: ImageRef(url: "https://x/p.jpg")))
         XCTAssertNil(free.modelId)

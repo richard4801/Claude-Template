@@ -1593,7 +1593,7 @@ class FakeMuseApi(
         ShootRef.problem(req.references)?.let { throw ApiException("bad_request", it) }
         // No character (owner 2026-11-11): an image is needed and no preset; the demo renders on the sample model.
         if (req.modelId == null && req.presetId != null) throw ApiException("bad_request", "Presets need a character · pick one with @")
-        if (req.modelId == null && req.references.isNullOrEmpty()) throw ApiException("bad_request", "Pick a character or add an image")
+        if (req.modelId == null && req.references.isNullOrEmpty() && req.prompt.isBlank()) throw ApiException("bad_request", "Describe the photo or add an image")
         return ShootRequest(req.modelId ?: SampleData.DEMO, req.outfitId.orEmpty(), scene = req.prompt.trim().ifBlank { null }?.take(200), seed = req.seed, count = count,
             templateId = req.presetId, shuffleSeed = req.shuffleSeed, lockSeed = req.lockSeed, productImage = req.productImage, refs = req.references?.ifEmpty { null })
     }

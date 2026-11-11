@@ -102,7 +102,8 @@ final class ComposerModelPickerTests: XCTestCase {
         XCTAssertEqual(ComposerModelPicker.imageLabel(photo, catalog: c), flux.name)
         var d = ComposerDraft(tool: .photo)
         d.tokens = PromptTokens.text("on a rooftop at dusk")
-        XCTAssertNil(d.photoRequest(photo), "no character yet")
+        XCTAssertNil(d.photoRequest(photo)?.modelId, "no character yet: words alone make a text-to-image request (owner 2026-11-11)")
+        XCTAssertEqual(d.photoRequest(photo)?.imageModel, flux.model)
         // An image model the list no longer has is dropped.
         var gone = c
         gone.engines?.removeAll { $0.kind == "image" }
