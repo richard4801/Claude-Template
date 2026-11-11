@@ -18,6 +18,7 @@ import { learningOf, touched } from './learn.js';
 import { CAPTION_STYLES } from './presets.js';
 import type { Word } from './cuts.js';
 import { sourceMatteCandidates, stripSourceMattes } from './repair.js';
+import { maskNotices } from './maskNotice.js';
 
 type Session = typeof editSessions.$inferSelect;
 type OpRow = typeof editOps.$inferSelect;
@@ -53,7 +54,9 @@ export class EditSessions {
     return [...(this.presence.get(id)?.values() ?? [])].filter(p => now - p.at < SESSION_LIMITS.presenceSec * 1000);
   }
   entryView = (o: OpRow) => ({ id: o.id, revision: o.revision, author: o.author, byClaude: o.author === 'claude', kind: o.kind, label: o.label,
-    undoes: o.undoes ?? undefined, undone: !!o.undone, createdAt: o.createdAt });
+    undoes: o.undoes ?? undefined, undone: !!o.undone, createdAt: o.createdAt,
+    // A mask / Invert / green-screen key / cut-out Claude changed (maskNotice.ts): the apps show it with Undo.
+    ...(typeof (o.meta as { notice?: unknown } | null)?.notice === 'string' ? { notice: (o.meta as { notice: string }).notice } : {}) });
   async view(s: Session, o: { history?: boolean } = {}) {
     const hist = o.history === false ? undefined : (await this.ctx.db.select().from(editOps).where(eq(editOps.sessionId, s.id)).orderBy(desc(editOps.id)).limit(SESSION_LIMITS.historyShown)).map(this.entryView);
     return { id: s.id, takeId: s.takeId, baseVersionId: s.baseVersionId ?? undefined, revision: s.revision, project: s.project as M.EditProject,
@@ -130,6 +133,8 @@ export class EditSessions {
     const patch = diff(s.project, next), inverse = diff(next, s.project);
     if (!patch.length && o.kind !== 'tool') return { session: s, entry: null as OpRow | null, patch };
     const now = Date.now(), rev = s.revision + (patch.length ? 1 : 0);
+    const notices = o.author === 'claude' && o.kind === 'edit' && patch.length ? maskNotices(s.project as M.EditProject, next) : [];
+    if (notices.length) o = { ...o, meta: { ...(o.meta ?? {}), notice: notices.join(' · ') } };
     const [u] = await this.ctx.db.update(editSessions).set({ project: next as unknown as Record<string, unknown>, revision: rev, updatedBy: o.author, updatedAt: now })
       .where(and(eq(editSessions.id, s.id), eq(editSessions.revision, s.revision))).returning();
     if (!u) throw await this.stale(s.id, s.revision); // someone else committed in between
@@ -200,7 +205,9 @@ export class EditSessions {
     // workstream 1: the owner's pinned playbook rules (no ramps, cuts only, …) hold for every change of Claude's.
     await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, project);
     const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · '), ...(b.meta ? { meta: b.meta } : {}) }); // label: a tool's own name for the change (workstream 1)
-    return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project) };
+    const notice = (r.entry?.meta as { notice?: string } | null | undefined)?.notice;
+    return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project),
+      ...(notice && r.entry ? { notice, undoEntryId: r.entry.id, tell: 'Say this to the person in one plain line (their app shows it with Undo; undo_edit with this entryId reverts exactly it).' } : {}) };
   }
   private limit(id: string) {
     const now = Date.now(), list = (this.rate.get(id) ?? []).filter(t => now - t < 60_000);
