@@ -135,6 +135,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - Owner (16:25): when a generation started with Claude finishes, Claude continues the chat at once (auto follow-up
   turn: watches/sees the result, reports, suggests next; failures explained, no auto-spend). Setting to turn it into
   notify-only. → one-Claude session (held branch).
+- LIVE 16:31: Claude issue reports (e6c9ba3e, migration 0031). Hourly scheduled task trig_01SBLrpvZNVs4VewaQtkUHie
+  (fresh session at :31) polls MCP tool claude_issues {status:new} with the proxy-injected owner token, messages the
+  coordinator session, marks them triaged. A new coordinator must update that task's target session id (update_trigger).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
