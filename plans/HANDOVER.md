@@ -80,6 +80,11 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   memory when asked, and ASKS first when it thinks something is important (no silent saves, no "save with Undo").
 - Delegated: Edit "New blank project" (no source video; shape from Edit's top picker; saves to the Library as a new
   video with its project; server + Mac, Android later) → session on branch claude/edit-blank.
+- 5A.1 oval RESULT (session archived): the Mac renderer is NOT the cause (pixel probe, CI run 514: B&W looks, stand-in
+  matte, vignette all render correctly; Android/server apply mattes the same way). Most likely an inverted mask (default
+  soft circle + Invert) or a chroma key on the owner's clip(s). Owner asked to check "Mask & green screen" on each clip.
+  If not that, get the edit's project JSON through the app/API. Probe check lives on branch claude/mac-edit-oval
+  (d2c2c162, test-only; merge only if useful later). Blender timeout fix MERGED to prod (fc2b53e6).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
