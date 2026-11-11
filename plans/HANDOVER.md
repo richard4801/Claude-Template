@@ -70,8 +70,9 @@ provider, it should be seen by all, and users can select which one they need. It
 - Defaults: a newly added model is available to members at once (the `members` flag defaults on, or goes away).
 - Still owner only: adding providers and keys, prices/markup, switching a model off, studio defaults.
 - Keys never leave the server (unchanged).
-- ASK the owner: (1) do members see the provider company name (e.g. "Muapi") or only the model's name? (2) keep a
-  per-model "hide from members" switch for the owner? (3) members' runs are charged as today (confirm).
+- ANSWERED (owner, 2026-11-11, "Yes on all three"): (1) members see the provider company name with the model's name
+  (question 1 was either/or; read as "show it" — confirm in one line at the start of the build); (2) keep a per-model
+  "hide from members" switch for the owner (default: shown); (3) members' runs are charged as today.
 - Update the member-safety tests to the new rule instead of deleting them (keys and prices-at-cost stay hidden).
 
 ## 5. The queue, in order (owner-approved unless marked ASK)
