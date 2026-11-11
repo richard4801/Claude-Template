@@ -275,6 +275,13 @@ export const ACTION_TOOLS: GatedTool[] = [
       const e = await appCall(env.ctx, env.user, 'POST', '/v1/editor/estimate', body);
       return { summary: `Run ${String(a.kind)} on ${String(body.takeId ?? body.uploadId ?? 'the clip')}`, method: 'POST', url: '/v1/editor/jobs', body, priceUsd: priceOf(e) };
     } }),
+  gated({ name: 'recreate_delete', title: 'Delete a Recreate reference', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes a Recreate reference and its analysis (recreate_list for ids). Needs the person\'s go-ahead.',
+    props: { referenceId: str('The reference', 80) }, required: ['referenceId'],
+    plan: async (env, a) => {
+      const r = await appCall(env.ctx, env.user, 'GET', `/v1/recreate/references/${enc(id(a.referenceId, 'referenceId'))}`);
+      return { summary: `Delete the Recreate reference “${r?.title ?? r?.name ?? a.referenceId}”`, method: 'DELETE', url: `/v1/recreate/references/${enc(a.referenceId as string)}` };
+    } }),
 ];
 
 /** Studio settings Claude may read and (with the owner's go-ahead) change. Never keys, providers or prices. */

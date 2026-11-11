@@ -4,6 +4,7 @@
 import type { EditTool } from '../editor/mcpTools.js';
 import { badRequest } from '../errors.js';
 import { appCall, slim } from './appCall.js';
+import { assistOf } from '../suite/assist.js';
 
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const int = (d: string, min: number, max: number) => ({ type: 'integer', description: d, minimum: min, maximum: max });
@@ -192,5 +193,51 @@ export const APP_TOOLS: EditTool[] = [
     description: 'Archives a character (hidden from every list and picker, nothing deleted) or restores one (archived: false), as Archive on her page. Owner only. Free.',
     inputSchema: obj({ modelId: str('The character', 80), archived: { type: 'boolean' } }, ['modelId', 'archived']),
     run: async (env, a) => slim(await appCall(env.ctx, env.user, 'POST', `/v1/models/${enc(id(a.modelId, 'modelId'))}/${a.archived === false ? 'unarchive' : 'archive'}`, {})),
+  },
+  // B3c
+  {
+    name: 'character_create', title: 'Start a new character', scope: 'edit:write',
+    description: 'Starts a new character (a draft on the Cast screen) with a name and, optionally, niche, personality, look and notes. Free. Her sheet pictures come from uploads on her page, or from character_fill_angles once she has a face picture.',
+    inputSchema: obj({ name: str('Her name', 80), niche: str('Niche', 80), personality: str('Personality', 2000), look: str('Her look in words', 1000), notes: str('Notes', 4000) }, ['name']),
+    run: async (env, a) => {
+      const m = await appCall(env.ctx, env.user, 'POST', '/v1/models', { name: a.name });
+      const rest = Object.fromEntries(['niche', 'personality', 'look', 'notes'].filter(k => typeof a[k] === 'string' && a[k]).map(k => [k, a[k]]));
+      return slim(Object.keys(rest).length ? await appCall(env.ctx, env.user, 'PATCH', `/v1/models/${enc(m.id)}`, rest) : m);
+    },
+  },
+  {
+    name: 'character_update', title: 'Change a character\'s details', scope: 'edit:write',
+    description: 'Changes a character\'s details as on her page: name, niche, personality, look, notes, and her "never add" list (neverAdd: the whole list as it should be: read it first with characters_list). Free; only the fields you send change.',
+    inputSchema: obj({ modelId: str('The character', 80), name: str('Name', 80), niche: str('Niche', 80), personality: str('Personality', 2000), look: str('Look', 1000), notes: str('Notes', 4000),
+      neverAdd: { type: 'array', items: { type: 'string', maxLength: 80 }, maxItems: 50, description: 'The whole "never add" list' } }, ['modelId']),
+    run: async (env, a) => {
+      const patch = Object.fromEntries(['name', 'niche', 'personality', 'look', 'notes', 'neverAdd'].filter(k => a[k] !== undefined).map(k => [k, a[k]]));
+      if (!Object.keys(patch).length) throw badRequest('Send at least one field to change');
+      return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/models/${enc(id(a.modelId, 'modelId'))}`, patch));
+    },
+  },
+  {
+    name: 'suite_queue_add', title: 'Queue the shot for later', scope: 'edit:write',
+    description: 'Puts the AI Suite shot being set up (the open draft) in the run-later queue, as Add to queue does. Free: nothing runs until it is run from the queue (suite_queue_run, with the person\'s go-ahead).',
+    inputSchema: obj({ assistId: str('The Suite draft (filled in when the Suite is open)', 80), title: str('A title for it', 80) }, ['assistId']),
+    run: async (env, a) => {
+      const v = await assistOf(env.ctx).get(env.user, id(a.assistId, 'assistId'));
+      return slim(await appCall(env.ctx, env.user, 'POST', '/v1/suite/queue', { ...v.request, ...(typeof a.title === 'string' && a.title ? { title: a.title } : {}) }));
+    },
+  },
+  {
+    name: 'tool_run', title: 'Review a Dress up / Enhance run', scope: 'edit:write',
+    description: 'A Dress up or Enhance run\'s results (get; list without runId), and the review as on the screen: decide one picture (slot, decision keep|reject, pick a|b), pick a or b for all, then apply the kept pictures to her sheet (apply; her old sheet stays in her sheet versions). Free. Watch the pictures before deciding.',
+    inputSchema: obj({ action: { type: 'string', enum: ['list', 'get', 'decide', 'pick', 'apply'] }, runId: str('The run', 80), slot: str('The picture (decide)', 40),
+      decision: { type: 'string', enum: ['keep', 'reject'] }, pick: { type: 'string', enum: ['a', 'b'] } }, ['action']),
+    run: async (env, a) => {
+      if (a.action === 'list') return slim(await appCall(env.ctx, env.user, 'GET', '/v1/tool-runs'), 20);
+      const r = enc(id(a.runId, 'runId'));
+      if (a.action === 'get') return slim(await appCall(env.ctx, env.user, 'GET', `/v1/tool-runs/${r}`), 40);
+      if (a.action === 'decide') return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/tool-runs/${r}/items/${enc(id(a.slot, 'slot'))}`, { decision: a.decision, ...(a.pick ? { pick: a.pick } : {}) }), 40);
+      if (a.action === 'pick') return slim(await appCall(env.ctx, env.user, 'POST', `/v1/tool-runs/${r}/pick`, { pick: a.pick }), 40);
+      if (a.action === 'apply') return slim(await appCall(env.ctx, env.user, 'POST', `/v1/tool-runs/${r}/apply`, {}), 40);
+      throw badRequest('action: list, get, decide, pick or apply');
+    },
   },
 ];

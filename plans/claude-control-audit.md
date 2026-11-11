@@ -111,6 +111,8 @@ tool also says "Approve it in …" with the page to open, and the existing scree
   Suite models, default models, models members see; never keys/providers/prices; settings gate).
 - B3b: templates_manage, recipes, import_link, edit_jobs, character_archive (owner); template_delete, recipe_delete,
   import_delete, camera_session_delete (owner), edit_helper (any Edit AI helper, priced by /v1/editor/estimate).
-- Left (B3c): Suite add-to-queue, saved rigs/locations, style kits, queue retry (photo retry reopens the composer),
-  character create/slots/duplicate/"never" list, Dress up/Enhance run keep/apply/retry, Recreate retry/export/delete,
-  LoRA (build/train: spend), Warm GPU (spend). Playbook pin/delete stay the owner's by design.
+- B3c: character_create, character_update (incl. "never add"), suite_queue_add (from the open draft), tool_run (Dress
+  up/Enhance review: get, keep/reject, pick, apply); recreate_delete (gated).
+- Left, by choice: LoRA build/train and Warm GPU (spend: ask the owner first), saved rigs/locations, style kits, queue
+  retry (photo retry reopens the composer; a video job retry needs its original request), Dress up/Enhance item retry
+  (no estimate route), Recreate export (Edit's export_video covers applied edits). Playbook pin/delete stay the owner's.

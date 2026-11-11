@@ -63,4 +63,11 @@ describe('B1 tools', () => {
     const ask = await run(ownerU, 'template_delete', { templateId: 'tpl_nothere' }).catch(e => e);
     expect(ask.status).toBe(404);
   });
+  it('B3c: a member starts a character and sets her never-add list; tool runs list', async () => {
+    const m = await run(memberU, 'character_create', { name: 'Lea', niche: 'fitness' });
+    expect(m).toMatchObject({ name: 'Lea' });
+    const u = await run(memberU, 'character_update', { modelId: m.id, neverAdd: ['hats'] });
+    expect(u.neverAdd).toEqual(['hats']);
+    await expect(run(memberU, 'tool_run', { action: 'list' })).resolves.toBeTruthy();
+  });
 });
