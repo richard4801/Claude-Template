@@ -620,7 +620,7 @@ public actor FakeMuseAPI: MuseAPI {
         return o
     }
 
-    private func finishOutfit(_ id: String, own: Bool, images: [ImageRef]) {
+    private func finishOutfit(_ id: String, own: Bool, images: [ImageRef?]) {
         guard let i = outfits.firstIndex(where: { $0.id == id }) else { return }
         if own && !images.isEmpty {
             outfits[i].angles = (0..<4).map { $0 < images.count ? images[$0] : nil }

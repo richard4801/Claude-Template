@@ -107,11 +107,22 @@ data class OutfitDraft(
     val name: String = "",
     val previewId: String? = null,
     val images: List<ImageRef> = emptyList(),
+    /** "My own set": one uploaded photo per angle box (front, ¾, side, back); null = skipped. */
+    val own: List<ImageRef?> = listOf(null, null, null, null),
     /** The picked photo's file name (the name suggestion, §5). */
     val photoName: String? = null,
+    /** §6: start from her base photos, keeping the ticked pieces. */
+    val fromBase: Boolean = false,
+    val keep: OutfitKeep = OutfitKeep(),
+    val keepNote: String = "",
+    /** The base set: null = her profile photos, else one of her outfits; plus single angles swapped by choice. */
+    val baseOutfitId: String? = null,
+    val baseAngles: OutfitBaseAngles = OutfitBaseAngles(),
     /** WS7/WS13: the owner's model for the set (null = the studio's default). */
     val imageModel: String? = null,
-)
+) {
+    val base: OutfitBase? get() = if (fromBase && mode != "own") OutfitBase(if (baseOutfitId == null) "base" else "outfit", keep, keepNote.trim().ifEmpty { null }, baseOutfitId, baseAngles.takeIf { !it.isEmpty }) else null
+}
 
 /** Cross-screen selections and drafts (the prototype's global `S`), shared by the screen ViewModels. */
 class Drafts {

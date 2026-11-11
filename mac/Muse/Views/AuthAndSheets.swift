@@ -161,6 +161,7 @@ struct OutfitSheetView: View {
     @Environment(\.theme) private var t
     @State private var targeted = false
     @FocusState private var nameFocused: Bool
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         if let d = store.outfitSheet {
@@ -182,14 +183,20 @@ struct OutfitSheetView: View {
                         store.outfitSheet?.state = .idle
                         store.outfitSheet?.outfitId = nil
                         store.outfitSheet?.images = []
+                        store.outfitSheet?.own = [nil, nil, nil, nil]
                     }))
                     .frame(maxWidth: 420)
+                    if d.mode != .own { baseRow(d) }
                     switch d.mode {
                     case .describe:
-                        RTextBox(placeholder: "e.g. sheer crystal mini dress, silver strappy heels",
+                        if d.fromBase { Text("What to change").scaled(t.scale.label, t.roles.ink) }
+                        RTextBox(placeholder: d.fromBase ? "e.g. a pleated white tennis skirt" : "e.g. sheer crystal mini dress, silver strappy heels",
                                  text: Binding(get: { store.outfitSheet?.description ?? "" }, set: { store.outfitSheet?.description = $0 }), lines: 2)
-                    case .photo, .own:
+                    case .photo:
                         dropZone(d)
+                    case .own:
+                        Text("Click a box to add that view, or drop a photo on it. Any you skip can be made later from the front.")
+                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     HStack(alignment: .top, spacing: Space.s4) {
                         ForEach(0..<4, id: \.self) { i in
@@ -204,8 +211,8 @@ struct OutfitSheetView: View {
                                         }
                                     }
                                 case .idle:
-                                    if d.mode == .own && d.images.indices.contains(i) {
-                                        viewable(d, i) { MediaFrame(ref: ImageRef(url: d.images[i].absoluteString), ratio: 0.75) }
+                                    if d.mode == .own {
+                                        OwnAngleBox(index: i, label: label, url: d.own[i])
                                     } else {
                                         Color.clear.aspectRatio(0.75, contentMode: .fit)
                                             .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
@@ -238,7 +245,7 @@ struct OutfitSheetView: View {
                                 .keyboardShortcut(d.viewing == nil ? .defaultAction : nil)
                         } else {
                             if d.mode != .own { OwnerModelPill(purpose: .outfit) } // the owner's outfit model (WS6)
-                            RButton(d.mode == .own ? "Use my images" : "Make 4 angles · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy) {
+                            RButton(d.mode == .own ? "Use my images" : "Make 4 angles · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy || (d.mode == .own && d.own[0] == nil)) {
                                 store.outfitGenerate()
                             }
                         }
@@ -261,8 +268,8 @@ struct OutfitSheetView: View {
             let ref: ImageRef?
             if d.state == .done {
                 ref = d.angles.indices.contains(i) ? d.angles[i] : nil
-            } else if d.state == .idle, d.mode == .own, d.images.indices.contains(i) {
-                ref = ImageRef(url: d.images[i].absoluteString)
+            } else if d.state == .idle, d.mode == .own, let u = d.own[i] {
+                ref = ImageRef(url: u.absoluteString)
             } else {
                 ref = nil
             }
@@ -282,6 +289,92 @@ struct OutfitSheetView: View {
         } else {
             tile()
         }
+    }
+
+    /// §6: start from her base photos and tick what to keep (the rest is replaced by the description or the photo).
+    @ViewBuilder private func baseRow(_ d: OutfitDraft) -> some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Toggle(isOn: Binding(get: { store.outfitSheet?.fromBase ?? false }, set: { store.outfitSheet?.fromBase = $0 })) {
+                Text("Start from her base photos").scaled(t.scale.label, t.roles.ink)
+            }
+            .toggleStyle(.checkbox)
+            if d.fromBase {
+                baseSetRow(d)
+                HStack(spacing: Space.s4) {
+                    Text("Keep").scaled(t.scale.caption, t.roles.ink2)
+                    keepBox("Top", \.top)
+                    keepBox("Bottom", \.bottom)
+                    keepBox("Shoes", \.shoes)
+                    keepBox("Accessories", \.accessories)
+                }
+                TextField("Note, e.g. the black lace bra", text: Binding(get: { store.outfitSheet?.keepNote ?? "" },
+                                                                        set: { store.outfitSheet?.keepNote = String($0.prefix(200)) }))
+                    .textFieldStyle(.plain)
+                    .focused($noteFocused)
+                    .roleField(focused: noteFocused)
+                    .frame(maxWidth: 420)
+                Text(d.base?.summary ?? "").scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    static let baseLabels = ["Front", "¾", "Side", "Back"]
+
+    /// Which base set (her profile photos or one of her outfits) and the four images it sends; click one to swap it.
+    @ViewBuilder private func baseSetRow(_ d: OutfitDraft) -> some View {
+        let model = store.models.first { $0.id == d.modelId }
+        let fits = model.map { store.outfitFolders(for: $0) } ?? []
+        let set = store.baseSet(d)
+        HStack(spacing: Space.s3) {
+            Text("Start from").scaled(t.scale.caption, t.roles.ink2)
+            Menu(fits.first { $0.id == d.baseOutfitId }?.name ?? "Her profile photos") {
+                Button("Her profile photos") { store.setBaseSource(nil) }
+                if !fits.isEmpty { Divider() }
+                ForEach(fits) { o in Button(o.name) { store.setBaseSource(o.id) } }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        HStack(alignment: .top, spacing: Space.s3) {
+            ForEach(0..<4, id: \.self) { i in
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Menu {
+                        if let m = model {
+                            Section("Her body shots") {
+                                ForEach(0..<4, id: \.self) { k in
+                                    if let r = m.slot(OutfitBaseAngles.keys[k])?.image { Button(Self.baseLabels[k]) { store.swapBaseAngle(i, to: r) } }
+                                }
+                            }
+                        }
+                        ForEach(fits) { o in
+                            Menu(o.name) {
+                                ForEach(0..<4, id: \.self) { k in
+                                    if o.angles.indices.contains(k), let r = o.angles[k] { Button(Self.baseLabels[k]) { store.swapBaseAngle(i, to: r) } }
+                                }
+                            }
+                        }
+                        Divider()
+                        Button("Upload a photo of her…") { store.uploadBaseAngle(i) }
+                        if d.baseAngles[i] != nil { Button("Use the set's own") { store.swapBaseAngle(i, to: nil) } }
+                    } label: {
+                        MediaFrame(ref: set[i], ratio: 0.75).frame(width: 64)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Swap the \(Self.baseLabels[i] == "¾" ? "three-quarter" : Self.baseLabels[i].lowercased()) base photo")
+                    .accessibilityLabel("\(Self.baseLabels[i]) base photo, swap")
+                    Text(set[i] == nil && i > 0 ? "Uses the front" : Self.baseLabels[i]).scaled(t.scale.caption, t.roles.ink2)
+                }
+            }
+        }
+    }
+
+    private func keepBox(_ label: String, _ key: WritableKeyPath<OutfitKeep, Bool>) -> some View {
+        Toggle(isOn: Binding(get: { store.outfitSheet?.keep[keyPath: key] ?? false }, set: { store.outfitSheet?.keep[keyPath: key] = $0 })) {
+            Text(label).scaled(t.scale.caption, t.roles.ink)
+        }
+        .toggleStyle(.checkbox)
     }
 
     private func dropZone(_ d: OutfitDraft) -> some View {
@@ -342,5 +435,62 @@ struct PasswordField: View {
             .accessibilityLabel(shown ? "Hide password" : "Show password")
         }
         .roleField(focused: focused)
+    }
+}
+
+/// "My own set": one angle's box. Click picks that view's file, a photo dropped on it sets it; × clears it, hover shows
+/// Replace. Each box maps to its own angle, never by file order (owner 2026-11-11).
+struct OwnAngleBox: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var index: Int
+    var label: String
+    var url: URL?
+    @State private var hover = false
+    @State private var targeted = false
+
+    var body: some View {
+        let name = label == "¾" ? "three-quarter" : label.lowercased()
+        let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+        Button(action: pick) {
+            ZStack {
+                if let url {
+                    MediaFrame(ref: ImageRef(url: url.absoluteString), ratio: 0.75)
+                    if hover { Text("Replace").scaled(t.scale.label, .white).padding(.horizontal, Space.s2).padding(.vertical, Space.s1)
+                        .background(Capsule().fill(.black.opacity(0.55))) }
+                } else {
+                    Color.clear.aspectRatio(0.75, contentMode: .fit)
+                        .background(shape.fill(t.roles.field))
+                        .overlay(Ph("plus", 16).foregroundStyle(t.roles.ink2))
+                }
+            }
+            .overlay(shape.strokeBorder(t.roles.selection, lineWidth: targeted ? 2 : 0))
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(url == nil ? "Choose the \(name) photo" : "Replace the \(name) photo")
+        .accessibilityLabel(url == nil ? "Choose the \(name) photo" : "Replace the \(name) photo")
+        .overlay(alignment: .topTrailing) {
+            if url != nil {
+                Button { store.outfitSheet?.own[index] = nil } label: {
+                    Ph("xmark", 10).foregroundStyle(.white).frame(width: 20, height: 20).background(Circle().fill(.black.opacity(0.6)))
+                }
+                .buttonStyle(.plain)
+                .padding(Space.s1)
+                .help("Clear the \(name) photo")
+                .accessibilityLabel("Clear the \(name) photo")
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let u = urls.first(where: MediaImport.isImage) else { return false }
+            store.outfitSheet?.own[index] = u
+            return true
+        } isTargeted: { targeted = $0 }
+    }
+
+    private func pick() {
+        guard let u = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use").first else { return }
+        store.outfitSheet?.own[index] = u
     }
 }

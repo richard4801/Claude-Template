@@ -105,3 +105,34 @@ extension AppStore {
     /// The outfit's missing-angle estimate (edits of its front).
     func outfitFillEstimate(_ o: Outfit) -> Double { Double(4 - o.madeAngles) * photoPricing.perEdit }
 }
+
+/// Keep-from-base (plans/outfit-head-looks.md §6): the base set the new outfit starts from, and swapping one angle.
+extension AppStore {
+    /// The four base images that will be sent (Front, ¾, Side, Back): the set's own, or the angle chosen instead.
+    func baseSet(_ d: OutfitDraft) -> [ImageRef?] {
+        let m = models.first { $0.id == d.modelId }
+        let own: [ImageRef?]
+        if let oid = d.baseOutfitId, let o = outfits.first(where: { $0.id == oid }) {
+            own = (0..<4).map { o.angles.indices.contains($0) ? o.angles[$0] : nil }
+        } else {
+            own = OutfitBaseAngles.keys.map { m?.slot($0)?.image }
+        }
+        return (0..<4).map { d.baseAngles[$0] ?? own[$0] }
+    }
+
+    func setBaseSource(_ outfitId: String?) {
+        outfitSheet?.baseOutfitId = outfitId
+        outfitSheet?.baseAngles = OutfitBaseAngles()
+    }
+
+    func swapBaseAngle(_ i: Int, to ref: ImageRef?) { outfitSheet?.baseAngles[i] = ref }
+
+    /// Swap one angle for a photo of her picked from disk.
+    func uploadBaseAngle(_ i: Int) {
+        guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use").first else { return }
+        perform { [self] in
+            let ref = try await uploadImage(url)
+            outfitSheet?.baseAngles[i] = ref
+        }
+    }
+}
