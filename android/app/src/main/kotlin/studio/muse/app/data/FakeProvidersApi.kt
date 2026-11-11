@@ -12,6 +12,7 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 
         ProviderKind("replicate", "Replicate", "Starts with r8_", "https://replicate.com/account/api-tokens"),
         ProviderKind("fal", "fal", "A key id and secret, joined with a colon", "https://fal.ai/dashboard/keys"),
         ProviderKind("muapi", "Muapi", "Your Muapi API key", "https://muapi.ai/dashboard"),
+        ProviderKind("higgsfield", "Higgsfield", "An API key from console.higgsfield.ai, as KEY_ID:KEY_SECRET", "https://console.higgsfield.ai", serverKey = true),
     )
     private val list = mutableListOf(
         Provider("p_demo", "replicate", "Studio Replicate", "7Q2k", "ok", 1_762_600_000_000, 1_762_000_000_000),
@@ -47,7 +48,7 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 
     private fun view(p: Provider) = p.copy(models = counts(p.id))
     private fun provider(id: String) = list.firstOrNull { it.id == id } ?: throw ApiException("not_found", "That provider isn't connected any more")
     private fun check(kind: String, key: String) {
-        val ok = when (kind) { "replicate" -> key.startsWith("r8_") && key.length >= 12; "fal" -> ':' in key && key.length >= 12; "muapi" -> key.length >= 12; else -> false }
+        val ok = when (kind) { "replicate" -> key.startsWith("r8_") && key.length >= 12; "fal", "higgsfield" -> ':' in key && key.length >= 12; "muapi" -> key.length >= 12; else -> false }
         if (!ok) throw ApiException("invalid_key", "That key didn't work with ${kindList.firstOrNull { it.kind == kind }?.label ?: kind}. Nothing was saved.")
     }
 
@@ -55,9 +56,16 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 
     override suspend fun providers(): Providers { pause(); return Providers(list.map(::view), keysReady) }
     override suspend fun add(req: NewProvider): Provider {
         pause()
+        val kind = kindList.firstOrNull { it.kind == req.kind } ?: throw ApiException("bad_request", "Unknown provider")
+        val key = req.apiKey?.trim().orEmpty()
+        if (key.isEmpty() && kind.serverKey) {
+            val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: "${kind.label} (studio account)", "server key", serverKey = true, status = "ok", checkedAt = now(), createdAt = now())
+            list += p
+            return view(p)
+        }
         if (!keysReady) throw ApiException("provider_keys_unavailable", "Provider keys aren't set up on the server yet")
-        check(req.kind, req.apiKey.trim())
-        val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: kindList.first { it.kind == req.kind }.label, req.apiKey.trim().takeLast(4), "ok", now(), now())
+        check(req.kind, key)
+        val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: kind.label, key.takeLast(4), status = "ok", checkedAt = now(), createdAt = now())
         list += p
         return view(p)
     }

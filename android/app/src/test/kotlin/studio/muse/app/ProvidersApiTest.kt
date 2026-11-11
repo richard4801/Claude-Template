@@ -13,6 +13,7 @@ import studio.muse.app.data.AddProviderModel
 import studio.muse.app.data.CustomModelPatch
 import studio.muse.app.data.FakeProvidersApi
 import studio.muse.app.data.NewProvider
+import studio.muse.app.ui.screens.line
 import studio.muse.app.data.ProviderCatalogPage
 import studio.muse.app.data.ProviderPatch
 import studio.muse.app.data.Providers
@@ -33,6 +34,16 @@ class ProvidersApiTest {
         assertFalse(p.toString().contains("abcdefgh"))
         val rotated = api.patch(p.id, ProviderPatch(apiKey = "r8_zzzzzzzz1234"))
         assertEquals("1234", rotated.keyLast4)
+    }
+
+    /** Higgsfield (2026-11-11): the server already has its account, so it connects with no key pasted. */
+    @Test fun serverKeyProviderConnectsWithoutAKey() = runBlocking {
+        val hf = api.kinds().first { it.kind == "higgsfield" }
+        assertTrue(hf.serverKey)
+        val p = api.add(NewProvider("higgsfield"))
+        assertTrue(p.serverKey)
+        assertTrue(p.line().startsWith("The studio's account"))
+        expectCode("invalid_key") { runBlocking { api.add(NewProvider("muapi")) } }
     }
 
     @Test fun badKeyIsRefusedAndNothingStored() = runBlocking {
