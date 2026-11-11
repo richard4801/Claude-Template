@@ -21,10 +21,6 @@
    "label": "Enhance"
   },
   {
-   "id": "dressup",
-   "label": "Dress up"
-  },
-  {
    "id": "templates",
    "label": "Templates"
   },
@@ -658,6 +654,26 @@
    "updatedBy": null
   },
   {
+   "key": "outfit.face",
+   "group": "outfits",
+   "title": "Face close-ups",
+   "description": "The outfit's three face close-ups: each edits her base face photo of that angle, the outfit's front picture sent last.",
+   "kind": "text",
+   "default": "Make this {angle} match the person in the last image: the same hairstyle, hair colour and length, make-up, and every head and face accessory it shows (earrings, glasses, hat, hair pieces, piercings), with the neckline of the top where it shows. Keep her face, features, skin, expression, camera angle and framing exactly as in the first image, plain studio background. Realistic close-up photo, natural skin texture.",
+   "current": "Make this {angle} match the person in the last image: the same hairstyle, hair colour and length, make-up, and every head and face accessory it shows (earrings, glasses, hat, hair pieces, piercings), with the neckline of the top where it shows. Keep her face, features, skin, expression, camera angle and framing exactly as in the first image, plain studio background. Realistic close-up photo, natural skin texture.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "angle",
+     "description": "face close-up from the front / three-quarter / side",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "enhance.prompt",
    "group": "enhance",
    "title": "Realism prompt",
@@ -667,60 +683,6 @@
    "current": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
    "overridden": false,
    "allowEmpty": false,
-   "placeholders": [],
-   "updatedAt": null,
-   "updatedBy": null
-  },
-  {
-   "key": "dress.body",
-   "group": "dressup",
-   "title": "Full-body images",
-   "description": "Dress up for the four full-body sheet images.",
-   "kind": "text",
-   "default": "Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.",
-   "current": "Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.",
-   "overridden": false,
-   "allowEmpty": false,
-   "placeholders": [
-    {
-     "name": "anchor",
-     "description": "a space and the anchor sentence when the new front is sent too, else empty",
-     "required": false
-    }
-   ],
-   "updatedAt": null,
-   "updatedBy": null
-  },
-  {
-   "key": "dress.closeup",
-   "group": "dressup",
-   "title": "Face close-ups",
-   "description": "Dress up for the three face close-ups: only what shows at that distance.",
-   "kind": "text",
-   "default": "Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.",
-   "current": "Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.",
-   "overridden": false,
-   "allowEmpty": false,
-   "placeholders": [
-    {
-     "name": "anchor",
-     "description": "a space and the anchor sentence when the new front is sent too, else empty",
-     "required": false
-    }
-   ],
-   "updatedAt": null,
-   "updatedBy": null
-  },
-  {
-   "key": "dress.anchor",
-   "group": "dressup",
-   "title": "Anchor sentence",
-   "description": "Added when the newly dressed front is sent as a third image.",
-   "kind": "text",
-   "default": "The last image shows the same outfit already worn: match its colours, prints and details exactly.",
-   "current": "The last image shows the same outfit already worn: match its colours, prints and details exactly.",
-   "overridden": false,
-   "allowEmpty": true,
    "placeholders": [],
    "updatedAt": null,
    "updatedBy": null
