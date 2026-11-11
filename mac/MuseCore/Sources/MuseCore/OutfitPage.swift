@@ -146,3 +146,28 @@ public struct OutfitBase: Codable, Hashable, Sendable {
         xs.count <= 1 ? xs.joined() : xs.dropLast().joined(separator: ", ") + " and " + xs.last!
     }
 }
+
+/// An outfit's 7 pictures in viewer order (plans/outfit-faces.md): the body angles Front, ¾, Side, Back, then its face
+/// close-ups Face front, Face ¾, Face side. `keys` are what Redo sends.
+public enum OutfitPictures {
+    public static let keys = ["front", "tq", "side", "back", "face", "faceTq", "profile"]
+    /// Under each tile.
+    public static let captions = ["Front", "¾", "Side", "Back", "Face front", "Face ¾", "Face side"]
+    /// In the full-size viewer ("Face side · 7 of 7").
+    public static let viewerLabels = ["Front", "Three-quarter", "Side", "Back", "Face front", "Face three-quarter", "Face side"]
+
+    /// The 7 pictures (nil where missing): the 4 angles, then the 3 faces.
+    public static func refs(_ o: Outfit) -> [ImageRef?] {
+        let angles = (0..<4).map { o.angles.indices.contains($0) ? o.angles[$0] : nil }
+        let faces = (0..<3).map { i -> ImageRef? in
+            guard let f = o.faces, f.indices.contains(i) else { return nil }
+            return f[i]
+        }
+        return angles + faces
+    }
+
+    /// The ones with a picture, in order, with their index (0–6) and viewer label.
+    public static func shown(_ o: Outfit) -> [(index: Int, label: String, ref: ImageRef)] {
+        refs(o).enumerated().compactMap { i, r in r.map { (i, viewerLabels[i], $0) } }
+    }
+}

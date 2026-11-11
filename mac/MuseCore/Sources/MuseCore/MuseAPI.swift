@@ -75,6 +75,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     func deleteOutfit(id: String) async throws
     /// Makes an outfit's missing ¾/side/back from its front; an outfit event with the filled angles follows.
     func fillOutfit(id: String, imageModel: String?) async throws -> OutfitFill
+    /// "Add face close-ups": an older outfit's missing face close-ups, from her base faces and its front (paid).
+    func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill
+    /// Redo one of its 7 pictures (`OutfitPictures.keys`: front, tq, side, back, face, faceTq, profile; paid).
+    func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill
 
     // Uploads (HTTP: presign → PUT → confirm, falling back to a multipart upload). `progress` reports 0…1.
     func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef

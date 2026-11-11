@@ -599,7 +599,7 @@ extension AppStore {
             showToast("Add the front photo first")
             return
         }
-        if d.mode != .own && outfitSetEstimate > balance.balance {
+        if outfitSetEstimate > balance.balance { // My own set pays for its face close-ups too
             notEnough("")
             return
         }
@@ -625,7 +625,7 @@ extension AppStore {
                 if outfitSheet?.modelId == draft.modelId { outfitSheet?.name = name }
                 var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(OutfitNaming.maxLength)), mode: draft.mode.rawValue,
                                               description: draft.description, images: refs)
-                if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
+                req.imageModel = enginePick(.outfit)?.model // the owner's model (WS6); My own set uses it for the face close-ups
                 if let base = draft.base, base.keeping { req.base = base } // §6: keep pieces from her base photos
                 if draft.sentReset { req.sentImages = .null } // images sent: the person reset Claude's choice
                 let o = try await api.createOutfit(req)
@@ -633,6 +633,7 @@ extension AppStore {
                 outfitSheet?.outfitId = o.id
                 if o.state == "preview" || o.state == "ready" {
                     outfitSheet?.angles = o.angles
+                    outfitSheet?.faces = OutfitPictures.refs(o).suffix(3).map { $0 }
                     outfitSheet?.state = .done
                 }
                 balance = try await api.balance()

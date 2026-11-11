@@ -277,6 +277,13 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     }
     private struct OutfitName: Encodable { var name: String? }
     private struct OutfitFillBody: Encodable { var imageModel: String? }
+    public func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill {
+        try await call("POST", "v1/outfits/\(Self.pathKey(id))/faces", OutfitFillBody(imageModel: imageModel))
+    }
+    public func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill {
+        try await call("POST", "v1/outfits/\(Self.pathKey(id))/redo", OutfitRedoBody(angle: picture, imageModel: imageModel))
+    }
+    private struct OutfitRedoBody: Encodable { var angle: String; var imageModel: String? }
 
     /// Images: presign → PUT → confirm. A server without presigned uploads (server/mock), or a PUT that can't reach storage, falls back to multipart.
     public func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef {

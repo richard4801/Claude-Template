@@ -239,7 +239,8 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     public var angles: [ImageRef?]
     public var state: String
     public var prompt: String
-    /// Dress up outfits: face, face ¾ and profile close-ups with the accessories (nil where rejected or missing).
+    /// Its face close-ups: front, ¾ and side, with the outfit's own hair, make-up and face accessories (every outfit since
+    /// 2026-11-11; an older one has none until "Add face close-ups"; nil where one failed).
     public var faces: [ImageRef?]?
     /// When it was made (ms; the folder's date on the outfit page) and who made it (they or the owner may rename/delete it).
     public var createdAt: Int64?
@@ -279,8 +280,12 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     public var front: ImageRef? { angles.first ?? nil }
     /// How many of the four angles have a picture (a set can come back with some empty).
     public var madeAngles: Int { (0..<4).filter { angles.indices.contains($0) && angles[$0] != nil }.count }
-    /// Made with Dress up (plans/api.md "Model tools" §6).
+    /// Made with Dress up (removed 2026-11-11; its outfits keep working).
     public var isDressUp: Bool { mode == "dressup" }
+    /// How many of its three face close-ups have a picture.
+    public var madeFaces: Int { (0..<3).filter { i in (faces ?? []).indices.contains(i) && faces?[i] != nil }.count }
+    /// Whether it has its own face close-ups (shots then send only the outfit's images; without them, her base face front).
+    public var hasFaces: Bool { madeFaces > 0 }
 }
 
 public struct CreateOutfitRequest: Codable, Sendable {

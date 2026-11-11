@@ -161,7 +161,6 @@ struct ProfileView: View {
                     Button("Identity LoRA") { store.openLora(m.id) }
                     Button("Add outfit") { store.openOutfitSheet(for: m.id) }
                     Button("Enhance character sheet") { store.openEnhance(m) }
-                    Button("Dress up") { store.openDressUp(m) }
                     Button("Previous sheet versions") { store.openVersions(m.id) }
                     Button("Duplicate model") { store.duplicate(m) }
                     Button("Share profile card") { store.shareProfileCard(m) }
@@ -196,9 +195,6 @@ struct ProfileView: View {
                 RButton("Upload images", small: true) { store.uploadSheet(m) }
                 if store.toolsFeatures?.enhance.available ?? false {
                     RButton("Enhance", small: true) { store.openEnhance(m) }
-                }
-                if store.toolsFeatures?.dressUp.available ?? false {
-                    RButton("Dress up", small: true) { store.openDressUp(m) }
                 }
             }
             .padding(.bottom, Space.s4)
