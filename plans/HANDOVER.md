@@ -71,7 +71,8 @@ provider, it should be seen by all, and users can select which one they need. It
 - Still owner only: adding providers and keys, prices/markup, switching a model off, studio defaults.
 - Keys never leave the server (unchanged).
 - ANSWERED (owner, 2026-11-11, "Yes on all three"): (1) members see the provider company name with the model's name
-  (question 1 was either/or; read as "show it" — confirm in one line at the start of the build); (2) keep a per-model
+  (confirmed). The owner: "just for this first phase till the studio has finally settled on a provider" — so build
+  it as ONE studio setting ("Show provider names to members", on for now) that can be switched off later; (2) keep a per-model
   "hide from members" switch for the owner (default: shown); (3) members' runs are charged as today.
 - Update the member-safety tests to the new rule instead of deleting them (keys and prices-at-cost stay hidden).
 
