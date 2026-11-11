@@ -233,6 +233,10 @@ const Env = z.object({
   SUITE_MAX_CONCURRENT: num(2),
   SUITE_POLL_MS: num(5000),
   SUITE_PREDICTION_TIMEOUT_SEC: num(1800),
+  /** A running suite job whose runner (another server instance) hasn't checked in for this long is taken over. */
+  SUITE_LEASE_SEC: num(90),
+  /** Shutdown: how long a deploy waits for suite runs to step back before the process exits (they resume on the next instance). */
+  SUITE_STOP_WAIT_SEC: num(20),
   /** The suite's own caps (studio owner can change them in suite settings), on top of the wallet caps. */
   SUITE_CAP_PER_JOB_USD: num(5),
   SUITE_CAP_PER_DAY_USD: num(25),
