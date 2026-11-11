@@ -5,7 +5,7 @@ import { and, desc, eq, lte, min } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { accounts, models, posts, takes } from '../db/schema.js';
-import { badRequest, notFound } from '../errors.js';
+import { badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 
 export const PLATFORMS = ['tiktok', 'instagram', 'facebook', 'youtube', 'x'] as const;
@@ -73,6 +73,8 @@ export class PostScheduler {
   }
 
   async remove(user: AuthUser, id: string) {
+    const [p] = await this.ctx.db.select({ userId: posts.userId }).from(posts).where(and(eq(posts.id, id), eq(posts.studioId, user.studioId)));
+    if (p) ownerOrCreator(user, p.userId, 'post');
     const r = await this.ctx.db.delete(posts).where(and(eq(posts.id, id), eq(posts.studioId, user.studioId))).returning();
     if (!r.length) throw notFound('Post');
     this.ctx.hub.emit(user.studioId, { type: 'post', op: 'delete', id });

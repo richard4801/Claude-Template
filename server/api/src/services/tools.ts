@@ -4,7 +4,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { models, outfits, toolRuns, type ImageRef, type SheetSlot, type SheetVersion, type ToolItem } from '../db/schema.js';
-import { ApiError, badRequest, notFound } from '../errors.js';
+import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import { PhotoBill } from '../images/bill.js';
@@ -402,6 +402,7 @@ export class ToolService {
 
   async discard(u: AuthUser, id: string) {
     const r = await this.row(u, id);
+    ownerOrCreator(u, r.createdBy, 'run');
     if (r.state === 'running') { this.stopping.add(r.id); return; }
     if (r.state === 'review') await this.save(r.id, { state: 'discarded', phase: 'Discarded' });
   }

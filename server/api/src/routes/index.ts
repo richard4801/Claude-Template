@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { accounts, clips, invites, jobs, ledger, loras, models, outfits, posts, sessions, studioSettings, takes, uploads, users, wallets, type ImageRef, type SheetSlot } from '../db/schema.js';
-import { ApiError, badRequest, notFound } from '../errors.js';
+import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
@@ -202,6 +202,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   app.delete<{ Params: { id: string } }>('/v1/models/:id', async (req, reply) => {
     const m = await model(req.user, req.params.id);
+    ownerOrCreator(req.user, m.createdBy, 'character');
     // Her outfits, LoRAs and training set, linked accounts and posts that haven't gone out go with her.
     const running = await db.select().from(jobs).where(and(eq(jobs.modelId, m.id), eq(jobs.state, 'running')));
     for (const j of running) await ctx.jobs.cancel(j, 'Model deleted');
@@ -660,6 +661,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return ctx.jobs.view(job);
   });
   app.delete<{ Params: { id: string } }>('/v1/takes/:id', async (req, reply) => {
+    const [t] = await db.select({ userId: takes.userId }).from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
+    if (t) ownerOrCreator(req.user, t.userId, 'take');
     const gone = await db.delete(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId))).returning({ id: takes.id });
     if (gone.length) ctx.hub.emit(req.user.studioId, { type: 'take', op: 'delete', id: req.params.id });
     return reply.status(204).send();

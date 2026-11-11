@@ -8,7 +8,7 @@ import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, loras, models, outfits, takes, type ImageRef } from '../db/schema.js';
-import { ApiError, badRequest, notFound } from '../errors.js';
+import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
@@ -263,6 +263,7 @@ export class JobService {
   async remove(user: AuthUser, id: string) {
     const j = await this.get(id);
     if (!j || j.studioId !== user.studioId || j.hiddenAt) throw notFound('Job');
+    ownerOrCreator(user, j.userId, 'job');
     await this.ctx.db.update(jobs).set({ hiddenAt: Date.now() }).where(eq(jobs.id, id));
     if (j.state === 'running') await this.cancel(j, 'Removed');
   }
