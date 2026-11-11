@@ -21,7 +21,8 @@ import { PhotoBill } from '../images/bill.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
 import type { EngineSelection } from '../images/engines.js'; // WS5
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
-import { objectInfo, putObject } from '../storage/objects.js';
+import { cleanUploadedPhoto, objectInfo, putObject } from '../storage/objects.js';
+import { cleanMemberPhoto } from '../storage/clean.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
 import { analyzeClip, audioView } from '../audio/service.js';
@@ -473,8 +474,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const buf = await f.toBuffer();
     if (!(f.mimetype ?? '').startsWith('image/') && !/\.(jpe?g|png|webp)$/i.test(f.filename)) throw badRequest('Upload an image');
     const key = `u/${uid('img')}.${extFor(f.mimetype, f.filename)}`;
-    // A member's own upload (source material) is stored as sent; only what MUSE makes is cleaned (storage/clean.ts).
-    await putObject(ctx, { key, body: buf, studioId: req.user.studioId, kind: 'image', userId: req.user.id, keepMetadata: true });
+    // A member's photo loses EXIF/GPS (owner, 2026-11-11; HEIC becomes JPEG); one that can't be read is stored as sent.
+    const sent = /hei[cf]/i.test(f.mimetype ?? '') || /\.hei[cf]$/i.test(f.filename) ? 'image/heic' : contentTypeFor(key);
+    const c = await cleanMemberPhoto(buf, sent);
+    await putObject(ctx, { key, body: c?.body ?? buf, studioId: req.user.studioId, kind: 'image', userId: req.user.id, keepMetadata: true });
     return { url: uploadUrl(key) };
   });
   app.post('/v1/uploads/clips', async req => {
@@ -509,9 +512,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!up) throw notFound('Upload');
     const head = await ctx.storage.head(up.storageKey);
     if (!head) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
+    if (up.kind === 'image') {
+      // Without EXIF/GPS before the link exists (and the row is ready), so nothing ever sends the original.
+      if (up.state !== 'ready') await cleanUploadedPhoto(ctx, up);
+      return { url: uploadUrl(up.storageKey) };
+    }
     await db.update(uploads).set({ state: 'ready', bytes: head.size, sha256: null }).where(eq(uploads.id, up.id));
     await objectInfo(ctx, up.storageKey); // records bytes + sha256 for the GPU worker
-    if (up.kind === 'image') return { url: uploadUrl(up.storageKey) };
     return makeClip(req.user, (req.body as any)?.meta ?? req.body, up.storageKey);
   });
 

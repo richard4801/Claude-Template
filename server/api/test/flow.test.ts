@@ -161,4 +161,19 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
     expect(got.status).toBe(200);
     expect(new Uint8Array(await got.arrayBuffer())).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
   });
+
+  it("a member's photo loses its GPS EXIF and comes back upright (owner, 2026-11-11)", async () => {
+    const sharp = (await import('sharp')).default;
+    // 600 × 400 stored sideways (orientation 6: shown 400 × 600), with a GPS position.
+    const raw = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 200, g: 40, b: 40 } } }).jpeg()
+      .withMetadata({ orientation: 6, exif: { IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '48/1 51/1 24/1', GPSLongitudeRef: 'E', GPSLongitude: '2/1 21/1 3/1' } } }).toBuffer();
+    expect(await sharp(raw).metadata()).toMatchObject({ orientation: 6, exif: expect.any(Buffer) });
+    const fd = new FormData();
+    fd.append('file', new Blob([new Uint8Array(raw)], { type: 'image/jpeg' }), 'IMG_0001.jpg');
+    const img = await (await fetch(`${base}/v1/uploads/images`, { method: 'POST', body: fd, headers: { authorization: `Bearer ${token}` } })).json();
+    const m = await sharp(Buffer.from(await (await fetch(base + img.url)).arrayBuffer())).metadata();
+    expect(m).toMatchObject({ format: 'jpeg', width: 400, height: 600 });
+    expect(m.exif).toBeUndefined();
+    expect(m.orientation).toBeUndefined();
+  });
 });

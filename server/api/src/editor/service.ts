@@ -12,7 +12,7 @@ import { studioSettings, takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
-import { putFile } from '../storage/objects.js';
+import { cleanUploadedPhoto, putFile } from '../storage/objects.js';
 import { ReplicateError } from '../replicate/client.js';
 import { CUT_DEFAULTS, suggestCuts, type CutOptions, type Word } from './cuts.js';
 import { makeProvider, rmQuiet, type EditorProvider, type Hooks, type TrackPoint } from './providers.js';
@@ -182,6 +182,7 @@ export class EditorAiService {
       if (!/^(video|audio)\//.test(up.contentType)) throw badRequest('source.uploadId: must be a video or audio upload');
       if (typeof s.durationSec !== 'number' || !(s.durationSec > 0)) throw badRequest('source.durationSec: required for an upload');
       if (!(await this.ctx.storage.head(up.storageKey))) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
+      if (up.state !== 'ready') await cleanUploadedPhoto(this.ctx, up); // no EXIF/GPS reaches a provider
       return { source: { uploadId: up.id, durationSec: s.durationSec }, key: up.storageKey, contentType: up.contentType };
     }
     throw badRequest('source: {takeId} or {uploadId, durationSec}');
@@ -368,6 +369,7 @@ export class EditorAiService {
       if (!up) throw notFound('Upload');
       if (!/^image\/(png|jpeg|webp)$/.test(up.contentType)) throw badRequest('source.uploadId: must be a photo (PNG, JPEG or WebP)');
       if (!(await this.ctx.storage.head(up.storageKey))) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
+      if (up.state !== 'ready') await cleanUploadedPhoto(this.ctx, up); // no EXIF/GPS reaches a provider
       return { source: { uploadId: up.id, durationSec: 0 }, key: up.storageKey, contentType: up.contentType };
     }
     throw badRequest('source: {takeId} or {uploadId} of a photo');

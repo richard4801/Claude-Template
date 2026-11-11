@@ -80,6 +80,39 @@ export async function cleanImageBuffer(buf: Buffer, contentType: string): Promis
   } catch { return null; }
 }
 
+const HEIC = new Set(['image/heic', 'image/heif']);
+
+/** HEIC → PNG pixels with heif-convert (libheif-examples, in the Docker image). Null when it's missing or can't read it. */
+async function heicDecode(buf: Buffer): Promise<Buffer | null> {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'muse-heic-'));
+  try {
+    const src = path.join(dir, 'in.heic'), out = path.join(dir, 'out.png');
+    await fs.promises.writeFile(src, buf);
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn('heif-convert', [src, out], { stdio: 'ignore' });
+      const t = setTimeout(() => p.kill('SIGKILL'), 60_000);
+      p.on('error', e => { clearTimeout(t); reject(e); });
+      p.on('close', code => { clearTimeout(t); code === 0 ? resolve() : reject(new Error(`heif-convert ${code}`)); });
+    });
+    return await fs.promises.readFile(out);
+  } catch { return null; } finally { await fs.promises.rm(dir, { recursive: true, force: true }); }
+}
+
+/**
+ * A photo a MEMBER uploaded, without EXIF/GPS/XMP/IPTC (owner, 2026-11-11: no location is stored or sent to providers):
+ * the same re-save as cleanImageBuffer; HEIC becomes JPEG. Null when it can't be read (the caller keeps it as sent).
+ */
+export async function cleanMemberPhoto(buf: Buffer, contentType: string): Promise<{ body: Buffer; contentType: string } | null> {
+  const ct = contentType.toLowerCase() === 'image/jpg' ? 'image/jpeg' : contentType.toLowerCase();
+  if (HEIC.has(ct)) {
+    const px = await heicDecode(buf);
+    const body = px && await cleanImageBuffer(px, 'image/jpeg');
+    return body ? { body, contentType: 'image/jpeg' } : null;
+  }
+  const body = await cleanImageBuffer(buf, ct);
+  return body ? { body, contentType: ct } : null;
+}
+
 /** A buffer cleaned (photo or video); the original when it can't be cleaned. */
 export async function cleanBuffer(bin: string, buf: Buffer, contentType: string, o: { label?: boolean } = {}): Promise<Buffer> {
   if (IMAGE.has(contentType)) return (await cleanImageBuffer(buf, contentType)) ?? buf;

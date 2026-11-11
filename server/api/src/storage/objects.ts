@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import type { Ctx } from '../ctx.js';
 import { uploads } from '../db/schema.js';
 import { uid } from '../lib/util.js';
-import { cleanBuffer, cleanFile, isCleanableImage, isCleanableVideo } from './clean.js';
+import { cleanBuffer, cleanFile, cleanMemberPhoto, isCleanableImage, isCleanableVideo } from './clean.js';
 import { contentTypeFor } from './index.js';
 
 /** Storage context; [config] gives the ffmpeg to clean videos with (else `ffmpeg` on the PATH). */
@@ -92,4 +92,20 @@ export async function cleanStored(ctx: StoreCtx, key: string, contentType: strin
     await fs.promises.rm(src, { force: true });
     if (clean) await fs.promises.rm(clean, { force: true });
   }
+}
+
+/**
+ * A member's photo that arrived through a presigned PUT, re-saved in place without EXIF/GPS (HEIC becomes JPEG) and
+ * recorded ready. Awaited before the photo is first handed out or used, so no provider ever gets the original. A photo
+ * that can't be read stays as sent.
+ */
+export async function cleanUploadedPhoto(ctx: Pick<Ctx, 'db' | 'storage'>, up: typeof uploads.$inferSelect): Promise<void> {
+  const obj = await ctx.storage.get(up.storageKey);
+  if (!obj) return;
+  const parts: Buffer[] = [];
+  for await (const ch of obj.body) parts.push(ch as Buffer);
+  const raw = Buffer.concat(parts), c = await cleanMemberPhoto(raw, up.contentType);
+  if (c) await ctx.storage.put(up.storageKey, c.body, c.contentType);
+  const body = c?.body ?? raw;
+  await ctx.db.update(uploads).set({ state: 'ready', bytes: body.length, sha256: sha256Of(body), contentType: c?.contentType ?? up.contentType }).where(eq(uploads.id, up.id));
 }
