@@ -1,0 +1,298 @@
+From 0ab7cf216362ae948b25307a482003bdbf3ea56a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 07:39:49 +0000
+Subject: [PATCH] Mac Edit: mask badge on timeline clips; Claude's mask notice
+ line with Undo in the chat
+
+A clip with a mask (Invert noted), green-screen key or cut-out shows a small icon on its
+timeline block; clicking selects it and scrolls to Mask & green screen. Claude's mask changes
+show one line with Undo (the session's own undo) in the Edit Claude panel and the one-Claude panel.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxp441ZE7pNP2JWiF57
+---
+ mac/Muse/App/Edit/EditSuiteLive.swift         |  6 ++-
+ mac/Muse/App/Edit/EditSuiteSession.swift      |  2 +
+ mac/Muse/Views/Claude/OneClaudePanel.swift    |  1 +
+ mac/Muse/Views/Edit/EditSuiteClaude.swift     | 42 ++++++++++++++++++
+ mac/Muse/Views/Edit/EditSuiteInspector.swift  | 29 +++++++-----
+ mac/Muse/Views/Edit/EditSuitePanels.swift     |  2 +-
+ mac/Muse/Views/Edit/EditSuiteTimeline.swift   | 44 ++++++++++++++++++-
+ .../MuseCore/Edit/EditSessionAPI.swift        | 10 +++--
+ 8 files changed, 119 insertions(+), 17 deletions(-)
+
+diff --git a/mac/Muse/App/Edit/EditSuiteLive.swift b/mac/Muse/App/Edit/EditSuiteLive.swift
+index dc87987..e0e2a1b 100644
+--- a/mac/Muse/App/Edit/EditSuiteLive.swift
++++ b/mac/Muse/App/Edit/EditSuiteLive.swift
+@@ -45,6 +45,7 @@ extension EditSuiteSession {
+         liveTasks = []
+         flushTask?.cancel()
+         flushTask = nil
++        ClaudeEditNotice.shared.clear(if: self)
+         guard let sync = live else { return }
+         live = nil
+         liveConnected = false
+@@ -159,7 +160,10 @@ extension EditSuiteSession {
+         switch u {
+         case .project(let p, let entry):
+             showRemote(p)
+-            if let e = entry, e.byClaude { claudeToast = e.claudeToast }
++            if let e = entry, e.byClaude {
++                claudeToast = e.notice.map { "Claude · \($0)" } ?? e.claudeToast
++                if e.notice != nil { ClaudeEditNotice.shared.post(e, from: self) }
++            }
+         case .history:
+             break
+         case .pending(let p):
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index efbd236..eb8fe5b 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -34,6 +34,8 @@ final class EditSuiteSession {
+     /// The editor state. Change it through `edit` so the preview follows.
+     private(set) var state: EditSuiteState
+     var mode: Mode = .timeline
++    /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
++    var reveal: String?
+     var binTab: EditSuite.BinTab = .takes
+     /// The playhead while playing (timeline seconds); `state.playhead` follows it when playback stops or an edit needs it.
+     private(set) var playhead: Double = 0
+diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
+index a3f327a..0a6365d 100644
+--- a/mac/Muse/Views/Claude/OneClaudePanel.swift
++++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
+@@ -141,6 +141,7 @@ struct OneClaudePanel: View {
+             .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
+             .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+         }
++        ClaudeEditNoticeLine()
+         if let m = o.remembered, let text = m.text {
+             HStack(alignment: .top, spacing: Space.s1) {
+                 Ph("push-pin", 13)
+diff --git a/mac/Muse/Views/Edit/EditSuiteClaude.swift b/mac/Muse/Views/Edit/EditSuiteClaude.swift
+index 2f768c2..b2bbf54 100644
+--- a/mac/Muse/Views/Edit/EditSuiteClaude.swift
++++ b/mac/Muse/Views/Edit/EditSuiteClaude.swift
+@@ -1,4 +1,5 @@
+ import MuseCore
++import Observation
+ import SwiftUI
+ 
+ // Claude in the Edit suite (workstream 3, plans/claude-editing.md A and E), owner only: the "Claude" badge, the shared
+@@ -99,6 +100,46 @@ struct EditSuiteClaudeToast: View {
+     }
+ }
+ 
++/// The last mask, Invert, green-screen key or cut-out Claude changed in the open edit ("Added an inverted oval mask to
++/// clip 2 · Undo"), shown as one line in the chat (the Edit Claude panel and the one-Claude panel). Undo reverts exactly
++/// that change through the session's history.
++@MainActor
++@Observable
++final class ClaudeEditNotice {
++    static let shared = ClaudeEditNotice()
++    private(set) var entry: EditHistoryEntry? = nil
++    @ObservationIgnored private weak var session: EditSuiteSession? = nil
++
++    func post(_ e: EditHistoryEntry, from s: EditSuiteSession) { entry = e; session = s }
++    func clear(if s: EditSuiteSession? = nil) { if s == nil || s === session { entry = nil; session = nil } }
++    func undo() async {
++        guard let e = entry, let s = session else { return }
++        clear()
++        await s.undoLive(e)
++    }
++}
++
++/// "Added an inverted oval mask to clip 2 · Undo".
++struct ClaudeEditNoticeLine: View {
++    @Environment(\.theme) private var t
++    private var notice: ClaudeEditNotice { .shared }
++
++    var body: some View {
++        if let e = notice.entry, let text = e.notice {
++            HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
++                Text(text).fixedSize(horizontal: false, vertical: true)
++                Button("Undo") { Task { await notice.undo() } }
++                    .buttonStyle(.link)
++                    .help("Undo this change of Claude's")
++                Spacer(minLength: 0)
++                SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 22) { notice.clear() }
++            }
++            .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++            .padding(.horizontal, Space.s4).padding(.top, Space.s2)
++        }
++    }
++}
++
+ /// "Claude wants to run <label> · about $X": the owner's yes starts the paid helper (its cost held as usual).
+ struct EditSuiteClaudeAsk: View {
+     @Environment(\.theme) private var t
+@@ -175,6 +216,7 @@ struct EditSuiteClaudePanel: View {
+                 if let id = session.live?.sessionId ?? (SnapshotRunner.probing && SnapshotRunner.state.chatSample ? "es_review" : nil) {
+                     // Workstream 2's chat on the owner's Claude Code, about this edit session.
+                     // No second header: this panel already has one (badge, sharing state, close).
++                    ClaudeEditNoticeLine()
+                     ClaudeChatView(contextKind: "edit", contextId: id, title: session.title, showsHeader: false)
+                 } else {
+                     noSession
+diff --git a/mac/Muse/Views/Edit/EditSuiteInspector.swift b/mac/Muse/Views/Edit/EditSuiteInspector.swift
+index f00ccfc..8a0d857 100644
+--- a/mac/Muse/Views/Edit/EditSuiteInspector.swift
++++ b/mac/Muse/Views/Edit/EditSuiteInspector.swift
+@@ -43,19 +43,26 @@ struct EditSuiteInspector: View {
+             .padding(.horizontal, Space.s4)
+             .padding(.bottom, Space.s3)
+             SuiteRule().padding(.horizontal, Space.s4)
+-            ScrollView {
+-                VStack(alignment: .leading, spacing: 0) {
+-                    switch session.state.tab {
+-                    case .captions: CaptionsPanel(session: session)
+-                    case .text: TextPanel(session: session)
+-                    case .video: VideoPanels(session: session)
+-                    case .audio: AudioPanels(session: session)
+-                    case .speed: SpeedPanel(session: session)
+-                    case .anim: AnimPanel(session: session)
++            ScrollViewReader { proxy in
++                ScrollView {
++                    VStack(alignment: .leading, spacing: 0) {
++                        switch session.state.tab {
++                        case .captions: CaptionsPanel(session: session)
++                        case .text: TextPanel(session: session)
++                        case .video: VideoPanels(session: session)
++                        case .audio: AudioPanels(session: session)
++                        case .speed: SpeedPanel(session: session)
++                        case .anim: AnimPanel(session: session)
++                        }
+                     }
++                    .padding(.vertical, Space.s1)
++                    .frame(maxWidth: .infinity, alignment: .leading)
++                }
++                // The timeline's mask badge: scroll "Mask & green screen" (or Cut out) into view.
++                .onChange(of: session.reveal) { _, id in
++                    guard let id else { return }
++                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top); session.reveal = nil }
+                 }
+-                .padding(.vertical, Space.s1)
+-                .frame(maxWidth: .infinity, alignment: .leading)
+             }
+         }
+         .background(t.roles.canvas)
+diff --git a/mac/Muse/Views/Edit/EditSuitePanels.swift b/mac/Muse/Views/Edit/EditSuitePanels.swift
+index 06d6e70..68553bc 100644
+--- a/mac/Muse/Views/Edit/EditSuitePanels.swift
++++ b/mac/Muse/Views/Edit/EditSuitePanels.swift
+@@ -37,7 +37,7 @@ struct VideoPanels: View {
+             if session.state.selectedItem?.textItem == nil {
+                 LooksPanel(session: session, visual: v)
+                 AdjustPanel(session: session, visual: v)
+-                MaskPanel(session: session, visual: v)
++                MaskPanel(session: session, visual: v).id(MaskBadge.panelId)
+             }
+             // The effects library (WS8 f7226f2) on clips and pictures.
+             if session.state.canHaveEffect { EffectsPanel(session: session) }
+diff --git a/mac/Muse/Views/Edit/EditSuiteTimeline.swift b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+index 05f19de..53f281c 100644
+--- a/mac/Muse/Views/Edit/EditSuiteTimeline.swift
++++ b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+@@ -445,6 +445,11 @@ struct TimelineCanvas: View {
+             if !locked { session.view { $0.selection = id } }
+         }
+         .gesture(moveGesture(b, row: row, locked: locked))
++        .overlay(alignment: .topTrailing) {
++            if let id = b.itemId, let badge = MaskBadge(session.project.track(row.trackId)?.item(id)), w >= 36 {
++                maskBadge(badge, itemId: id, locked: locked).offset(x: x, y: 6)
++            }
++        }
+         .overlay(alignment: .topLeading) {
+             if row.kind == .main, let tr = b.transition {
+                 Ph("diamond.fill", 13).foregroundStyle(t.roles.accent)
+@@ -459,11 +464,29 @@ struct TimelineCanvas: View {
+             }
+         }
+         .accessibilityElement(children: .ignore)
+-        .accessibilityLabel("\(row.label): \(b.label)")
++        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")")
+         .accessibilityValue("\(EditSuite.clockTenths(b.startSec)) to \(EditSuite.clockTenths(b.endSec))")
+         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+     }
+ 
++    /// A clip's mask, Invert, green-screen key or cut-out, which can hide most of the picture without showing on the
++    /// timeline (the owner's "oval", 2026-11-11). Click: select the clip and open "Mask & green screen".
++    private func maskBadge(_ badge: MaskBadge, itemId: String, locked: Bool) -> some View {
++        Button {
++            guard !locked else { return }
++            session.view { $0.selection = itemId; $0.tab = .video }
++            session.reveal = MaskBadge.panelId
++        } label: {
++            Ph(badge.icon, 12).foregroundStyle(.white).shadow(color: .black, radius: 1)
++                .frame(width: 20, height: 20).contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .padding(.trailing, Space.s1)
++        .help("\(badge.text). Click to open Mask & green screen")
++        .accessibilityLabel(badge.text)
++        .accessibilityHint("Opens Mask & green screen")
++    }
++
+     @ViewBuilder private func blockContent(_ b: EditSuite.Block, row: EditSuite.Row, width: CGFloat, height: CGFloat) -> some View {
+         switch row.kind {
+         case .main, .video:
+@@ -613,3 +636,22 @@ struct TimelineCanvas: View {
+             }
+     }
+ }
++
++/// What a clip's badge says is on: a mask (Invert noted), a green-screen key, a cut-out. Nil when none.
++struct MaskBadge {
++    static let panelId = "edit.mask"
++    let text: String
++    let icon: String
++
++    init?(_ item: EditV2.Item?) {
++        let mask = item?.videoClip?.mask ?? item?.imageItem?.mask
++        let c = item?.videoClip
++        var on: [String] = []
++        if let mask { on.append(mask.invert == true ? "Inverted mask" : "Mask") }
++        if c?.chroma != nil { on.append("Green screen") }
++        if let m = c?.alphaMatte { on.append(m.invert == true ? "Inverted cut-out" : "Cut-out") }
++        guard let first = on.first else { return nil }
++        text = ListFormatter.localizedString(byJoining: on)
++        icon = mask?.invert == true ? "selection-background" : mask != nil ? "selection" : first == "Green screen" ? "drop" : "scissors"
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
+index b2ec179..8ee7187 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
+@@ -18,14 +18,17 @@ public struct EditHistoryEntry: Codable, Hashable, Sendable, Identifiable {
+     public var undoes: Int?
+     public var undone: Bool
+     public var createdAt: Double
++    /// Claude added, changed or removed a mask, Invert, green-screen key or cut-out: one plain line ("Added an inverted
++    /// oval mask to clip 2"), shown in the chat with Undo (server editor/maskNotice.ts).
++    public var notice: String?
+ 
+     public init(id: Int, revision: Int, author: String, byClaude: Bool? = nil, kind: String = "edit", label: String, undoes: Int? = nil,
+-                undone: Bool = false, createdAt: Double = 0) {
++                undone: Bool = false, createdAt: Double = 0, notice: String? = nil) {
+         self.id = id; self.revision = revision; self.author = author; self.byClaude = byClaude ?? (author == "claude"); self.kind = kind
+-        self.label = label; self.undoes = undoes; self.undone = undone; self.createdAt = createdAt
++        self.label = label; self.undoes = undoes; self.undone = undone; self.createdAt = createdAt; self.notice = notice
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case id, revision, author, byClaude, kind, label, undoes, undone, createdAt }
++    enum CodingKeys: String, CodingKey { case id, revision, author, byClaude, kind, label, undoes, undone, createdAt, notice }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         if let n = try? c.decode(Int.self, forKey: .id) { id = n } else { id = Int(try c.decode(String.self, forKey: .id)) ?? 0 }
+@@ -37,6 +40,7 @@ public struct EditHistoryEntry: Codable, Hashable, Sendable, Identifiable {
+         undoes = try? c.decodeIfPresent(Int.self, forKey: .undoes)
+         undone = (try? c.decode(Bool.self, forKey: .undone)) ?? false
+         createdAt = (try? c.decode(Double.self, forKey: .createdAt)) ?? 0
++        notice = try? c.decodeIfPresent(String.self, forKey: .notice)
+     }
+ 
+     /// A change that can still be undone (not a note, not undone yet).
+-- 
+2.43.0
+
