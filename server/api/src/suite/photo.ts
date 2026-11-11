@@ -128,7 +128,7 @@ export function freePhotoPrompt(o: { prompt: string; still: StillRig; refs: { in
   if (base) lines.push(words
     ? `Edit image ${base.index}: ${words}. Keep everything else in image ${base.index} as it is (the same people, faces, bodies, hair and clothes, place and light) unless a line below changes it.`
     : `A new photograph made from image ${base.index}: the same people, faces, bodies, hair and clothes, in the same place and light, at a fresh natural moment.`);
-  else if (words) lines.push(`${words}.`);
+  else if (words) lines.push(`A photograph: ${words}.`); // words only: plain text-to-image (owner 2026-11-11)
   for (const r of rest) lines.push(`Copy ${andWords(r.guides.map(g => GUIDE_WORDS[g]))} from image ${r.index}. Do not take the people or clothes from image ${r.index}.`);
   const s = o.still; // its scene is the prompt itself (stillRig), used above
   if (s.camera) {

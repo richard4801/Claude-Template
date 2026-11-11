@@ -682,7 +682,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!b.modelId) {
       if (b.templateId) throw badRequest('Presets need a character · pick one with @');
       if (b.outfitId) throw badRequest('An outfit needs a character · pick one with @');
-      if (!refsIn.length) throw badRequest('Pick a character or add an image');
+      if (!refsIn.length && !(b.prompt ?? still?.scene ?? '').trim()) throw badRequest('Describe the photo or add an image');
       const plan = await ctx.images.shotPlan(u.studioId, [], refsIn, 2, b.imageEngine, stepModels);
       const text = freePhotoPrompt({ prompt: b.prompt ?? still?.scene ?? '', still: still ?? { notes: [] }, refs: plan.sent, texts });
       return { kind: 'free' as const, b, m: null, o: undefined, count, stepModels, texts, refsIn, plan, text };

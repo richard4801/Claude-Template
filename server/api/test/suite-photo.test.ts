@@ -144,8 +144,15 @@ describe('Photo tool · routes (fake image engine)', () => {
     const made = (await member.req('POST', '/v1/suite/photos', { references: [img], count: 1 })).body;
     expect(made.takes).toHaveLength(1);
     expect(made.takes[0]).toMatchObject({ kind: 'shot', title: expect.stringMatching(/^Photo · /) });
-    // Nothing to go on, or a preset / outfit without her, is still refused.
-    expect((await member.req('POST', '/v1/suite/photos/estimate', { prompt: 'A beach.' })).body.error).toBe('Pick a character or add an image');
-    expect((await member.req('POST', '/v1/suite/photos/estimate', {})).status).toBe(400);
+    // Words alone (owner 2026-11-11): plain text-to-image, no images sent.
+    const words = await member.req('POST', '/v1/suite/photos/estimate', { prompt: 'A quiet beach at dawn.', count: 1 });
+    expect(words.status, JSON.stringify(words.body)).toBe(200);
+    expect(words.body.prompt).toMatch(/^A photograph: A quiet beach at dawn\.\n/);
+    expect(words.body.prompt).not.toMatch(/Identity from|Wearing|figure|image 1|Seed:|rooftop/);
+    const wm = (await member.req('POST', '/v1/suite/photos', { prompt: 'A quiet beach at dawn.', count: 1 })).body;
+    expect(wm.takes, JSON.stringify(wm)).toHaveLength(1);
+    // Nothing to go on, or a preset without her, is still refused.
+    expect((await member.req('POST', '/v1/suite/photos/estimate', { count: 1 })).body.error).toBe('Describe the photo or add an image');
+    expect((await member.req('POST', '/v1/suite/photos/estimate', { prompt: 'x', presetId: 'tpl_x' })).body.error).toBe('Presets need a character · pick one with @');
   });
 });
