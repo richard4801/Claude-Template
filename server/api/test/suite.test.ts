@@ -381,6 +381,26 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(g).toMatchObject({ state: 'failed', errorCode: 'provider_refused' });
   });
 
+  it('an image alone is enough (owner 2026-11-11): a start frame → image-to-video, a reference image → reference; no character words', async () => {
+    const img = { asset: 'face' };
+    const fr = await member.req('POST', '/v1/suite/shots/estimate', { frames: { start: img }, duration: 5 });
+    expect(fr.status, JSON.stringify(fr.body)).toBe(200);
+    expect(fr.body.mode).toBe('image');
+    const rf = await member.req('POST', '/v1/suite/shots/estimate', { references: { images: [{ image: img, role: 'style' }] }, duration: 5 });
+    expect(rf.status, JSON.stringify(rf.body)).toBe(200);
+    expect(rf.body.mode).toBe('reference');
+    for (const body of [{ frames: { start: img } }, { references: { images: [{ image: img, role: 'style' }] } }]) {
+      const d = (await owner.req('POST', '/v1/suite/shots', { ...body, dryRun: true })).body;
+      expect(d.dryRun).toBe(true);
+      const prompt: string = d.plan?.prompt ?? d.estimate?.prompt ?? JSON.stringify(d);
+      expect(prompt).not.toMatch(/Identity from|her images|figure|\{name\}|@/i);
+      const j = await done((await member.req('POST', '/v1/suite/shots', { ...body, duration: 5 })).body.id);
+      expect(j.state, JSON.stringify(j)).toBe('done');
+    }
+    // Nothing at all is still refused.
+    expect((await member.req('POST', '/v1/suite/shots/estimate', {})).body.code).toBe('bad_request');
+  });
+
   it('cancel: deleting a running shot stops it and returns the hold', async () => {
     a.ctx.suite.mock.pollsToFinish = 10_000;
     try {
