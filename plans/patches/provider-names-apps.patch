@@ -1,0 +1,279 @@
+From f8399ac40cebdd3d06e49e94603c648004156f92 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 21:38:09 +0000
+Subject: [PATCH] =?UTF-8?q?Apps:=20show=20the=20server's=20model=20label?=
+ =?UTF-8?q?=20("MiniMax=20H3=20=C2=B7=20Higgsfield")=20in=20pickers,=20the?=
+ =?UTF-8?q?=20composer=20chip=20and=20member=20settings?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Held: Mac and Android parts of claude/provider-names wait for the coordinator.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxp6BkunZjbrhiUTxHV
+---
+ .../kotlin/studio/muse/app/data/ModelsApi.kt    |  4 +++-
+ .../main/kotlin/studio/muse/app/data/Suite.kt   |  9 ++++++++-
+ .../ui/screens/suite/composer/ModelPicker.kt    |  4 ++--
+ mac/Muse/Views/ModelPicker/OwnerModelPill.swift |  8 ++++----
+ mac/Muse/Views/Settings/ProvidersSettings.swift |  4 ++--
+ .../Views/Suite/Composer/ModelPickerViews.swift |  4 ++--
+ .../Sources/MuseCore/Engines/EngineChoice.swift | 17 ++++++++++++-----
+ .../MuseCore/Suite/ComposerModelPicker.swift    | 14 +++++++++-----
+ 8 files changed, 42 insertions(+), 22 deletions(-)
+
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/ModelsApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/ModelsApi.kt
+index 7d93c076..d5eba85d 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/ModelsApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/ModelsApi.kt
+@@ -78,13 +78,15 @@ data class EngineEntry(
+     val resolution: String? = null,
+     val price: EnginePrice? = null,
+     val inputs: SuiteInputs? = null,
++    /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
++    val label: String = "",
+ ) {
+     /** The picker's shape: one price, per second or per run. */
+     fun asCatalogEngine(): SuiteCatalogEngine {
+         val perSec = price?.takeIf { it.basis != "per_run" }?.usd
+         return SuiteCatalogEngine(model, name.ifBlank { model }, if (kind == "image") "image" else "video", custom, null, emptyList(), resolution,
+             limits.resolutions.map { SuiteResolution(it.id, it.label.ifBlank { it.id }, perSec = perSec ?: 0.0) }, perSec,
+-            price?.takeIf { it.basis == "per_run" }?.usd, limits.minSeconds, limits.maxSeconds, limits.allowedSeconds, limits.aspectRatios, inputs, purposes)
++            price?.takeIf { it.basis == "per_run" }?.usd, limits.minSeconds, limits.maxSeconds, limits.allowedSeconds, limits.aspectRatios, inputs, purposes, label)
+     }
+ }
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+index 2a701974..3245de6a 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+@@ -216,13 +216,20 @@ data class SuiteCatalogEngine(
+     val inputs: SuiteInputs? = null,
+     /** WS13: the purposes it serves (shot, talking, ugc…); empty = an older server (any). */
+     val purposes: List<String> = emptyList(),
+-)
++    /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
++    val label: String = "",
++) {
++    /** What to show for the model: the server's label, else its name. */
++    val shownName: String get() = label.ifBlank { name }
++}
+ 
+ /** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */
+ @Serializable
+ data class SuiteCustomEngine(
+     val id: String,
+     val name: String = "",
++    /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
++    val label: String = "",
+     /** image | video */
+     val kind: String = "video",
+     /** The composer's input slots (the server maps the model's schema). */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
+index 2f5af5ed..68c32b85 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
+@@ -127,7 +127,7 @@ object ModelPicker {
+         fun ladderRes(id: String) = cat.tiers.mapNotNull { t -> t.models?.firstOrNull { it.model == id }?.resolution?.ifBlank { null }?.let { t.id to it } }.toMap()
+         cat.engines?.let { list ->
+             return list.filter { it.kind == kind }.map { e ->
+-                PickerEngine(e.model, e.name.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
++                PickerEngine(e.model, e.shownName.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
+                     e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes)
+             }
+         }
+@@ -142,7 +142,7 @@ object ModelPicker {
+         return core + cat.custom.orEmpty().filter { it.kind == "video" }.map(::customEngine)
+     }
+ 
+-    private fun customEngine(c: SuiteCustomEngine) = PickerEngine(c.id, c.name.ifBlank { c.id }, emptyList(), null, emptyList(), c.minSeconds, c.maxSeconds, null,
++    private fun customEngine(c: SuiteCustomEngine) = PickerEngine(c.id, c.label.ifBlank { c.name }.ifBlank { c.id }, emptyList(), null, emptyList(), c.minSeconds, c.maxSeconds, null,
+         c.aspectRatios, c.price?.takeIf { it.basis == "per_second" }?.usd, c.inputs, custom = true, perRun = c.price?.takeIf { it.basis != "per_second" }?.usd, kind = c.kind)
+ 
+     /** The picker's groups for a shot on [quality]: the engines on that quality's ladder first, then the rest, then "Your providers". */
+diff --git a/mac/Muse/Views/ModelPicker/OwnerModelPill.swift b/mac/Muse/Views/ModelPicker/OwnerModelPill.swift
+index 00a7488d..d36e8502 100644
+--- a/mac/Muse/Views/ModelPicker/OwnerModelPill.swift
++++ b/mac/Muse/Views/ModelPicker/OwnerModelPill.swift
+@@ -88,7 +88,7 @@ struct EngineList: View {
+         let catalog = store.engineChoice.catalog
+         let all = catalog?.engines(for: purpose) ?? []
+         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+-        let shown = q.isEmpty ? all : all.filter { "\($0.name) \($0.model)".lowercased().contains(q) }
++        let shown = q.isEmpty ? all : all.filter { "\($0.shownName) \($0.model)".lowercased().contains(q) }
+         let label = catalog?.purpose(purpose)?.label ?? purpose.fallbackLabel
+         VStack(alignment: .leading, spacing: 0) {
+             HStack(alignment: .firstTextBaseline) {
+@@ -132,7 +132,7 @@ struct EngineList: View {
+     private func autoRow(_ catalog: EngineCatalog?, label: String) -> some View {
+         let on = selected == nil
+         let info = catalog?.purpose(purpose)
+-        let defName = info?.default.flatMap { id in catalog?.engines.first { $0.model == id }?.name }
++        let defName = info?.default.flatMap { id in catalog?.engines.first { $0.model == id }?.shownName }
+         let line = info?.studioDefault != nil && defName != nil ? "The studio's default: \(defName!)" : "MUSE picks the model for \(label.lowercased())"
+         return Button { onPick(nil, nil) } label: {
+             HStack(alignment: .top, spacing: Space.s2) {
+@@ -164,14 +164,14 @@ struct EngineList: View {
+                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
+                 if o.resolutions.count < 2 {
+                     let price = ComposerModelPicker.price(o, resolution: o.resolution)
+-                    chip(price.isEmpty ? "Use" : price, picked: on, label: "Use \(e.name)") { onPick(e.model, o.resolution) }
++                    chip(price.isEmpty ? "Use" : price, picked: on, label: "Use \(e.shownName)") { onPick(e.model, o.resolution) }
+                 } else {
+                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: Space.s1, alignment: .leading)], alignment: .leading, spacing: Space.s1) {
+                         ForEach(o.resolutions, id: \.id) { r in
+                             let res = ComposerModelPicker.resLabel(r.label)
+                             let price = r.perSec > 0 ? ComposerModelPicker.price(o, resolution: r.id) : ""
+                             chip(price.isEmpty ? res : "\(res)  \(price)", picked: on && (selectedResolution ?? o.resolution) == r.id,
+-                                 label: "Use \(e.name) at \(res)") { onPick(e.model, r.id) }
++                                 label: "Use \(e.shownName) at \(res)") { onPick(e.model, r.id) }
+                         }
+                     }
+                 }
+diff --git a/mac/Muse/Views/Settings/ProvidersSettings.swift b/mac/Muse/Views/Settings/ProvidersSettings.swift
+index cbcd5147..9597cfa4 100644
+--- a/mac/Muse/Views/Settings/ProvidersSettings.swift
++++ b/mac/Muse/Views/Settings/ProvidersSettings.swift
+@@ -248,8 +248,8 @@ struct MemberModelsSettings: View {
+                 RSwitch(label: "Show provider names to members", isOn: Binding(get: { v.showProviderNames }, set: { on in save(showProviderNames: on, hidden: [:]) }))
+             }
+             ForEach(v.models) { m in
+-                SettingRow(m.name, hint: [m.kind == "image" ? "Image" : "Video", v.showProviderNames ? m.provider?.capitalized : nil].compactMap { $0 }.joined(separator: " · ")) {
+-                    RSwitch(label: "Hide \(m.name) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
++                SettingRow(m.shownName, hint: m.kind == "image" ? "Image" : "Video") {
++                    RSwitch(label: "Hide \(m.shownName) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
+                 }
+             }
+             Text("The switch hides a model from members. You always see every model.")
+diff --git a/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift b/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift
+index 985a05e4..17bd6aaa 100644
+--- a/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift
++++ b/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift
+@@ -96,7 +96,7 @@ struct ModelPickerList: View {
+                 if m.resolutions.isEmpty {
+                     // A photo model, or a per-run model: one choice, one price.
+                     chip(ComposerModelPicker.price(m).isEmpty ? "Use" : ComposerModelPicker.price(m), picked: on,
+-                         help: "Use \(m.name)", label: "Use \(m.name)") { store.pinComposerModel(m) }
++                         help: "Use \(m.shownName)", label: "Use \(m.shownName)") { store.pinComposerModel(m) }
+                 } else {
+                     // Wraps: Seedance 2.0 has four resolutions, more than one line holds with their prices whole.
+                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: Space.s1, alignment: .leading)], alignment: .leading, spacing: Space.s1) {
+@@ -104,7 +104,7 @@ struct ModelPickerList: View {
+                             let res = ComposerModelPicker.resLabel(r.label)
+                             let price = ComposerModelPicker.price(m, resolution: r.id)
+                             chip("\(res)  \(price)", picked: on && (d.resolution ?? m.resolution) == r.id,
+-                                 help: "Use \(m.name) at \(res), \(price)", label: "Use \(m.name) at \(res)") { store.pinComposerModel(m, resolution: r.id) }
++                                 help: "Use \(m.shownName) at \(res), \(price)", label: "Use \(m.shownName) at \(res)") { store.pinComposerModel(m, resolution: r.id) }
+                         }
+                     }
+                 }
+diff --git a/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift b/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift
+index 0b548b67..4e70015c 100644
+--- a/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift
++++ b/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift
+@@ -146,10 +146,13 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
+ 
+     /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
+     public var providerName: String?
+-    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
+-    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
++    /// The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts: one format everywhere;
++    /// for members while the studio hides providers, the bare name or "· Option n").
++    public var label: String?
++    /// What to show for the model: the server's label; older servers: the name with its provider.
++    public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
+ 
+-    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName }
++    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName, label }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         model = try c.decode(String.self, forKey: .model)
+@@ -160,6 +163,7 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
+         isDefault = c.v(.default, false)
+         notice = c.o(.notice)
+         providerName = c.o(.providerName)
++        label = c.o(.label)
+         limits = c.v(.limits, Limits())
+         resolution = c.o(.resolution)
+         price = c.o(.price)
+@@ -210,11 +214,11 @@ public struct EngineCatalog: Decodable, Sendable {
+     public func label(_ p: EnginePurpose, model: String?, resolution: String? = nil) -> String {
+         guard let model else {
+             let d = purpose(p)?.default
+-            let name = d.flatMap { id in engines.first { $0.model == id }?.name }
++            let name = d.flatMap { id in engines.first { $0.model == id }?.shownName }
+             return name.map { "Auto (\($0))" } ?? "Auto"
+         }
+         let e = engines.first { $0.model == model }
+-        let name = e?.name ?? model
++        let name = e?.shownName ?? model
+         let res = resolution.flatMap { r in e?.limits.resolutions.first { $0.id == r }?.label }
+         return res.map { "\(name), \(ComposerModelPicker.resLabel($0))" } ?? name
+     }
+@@ -271,7 +275,10 @@ public struct EngineMembers: Codable, Hashable, Sendable {
+         public var provider: String?
+         /// Shown to members (not hidden).
+         public var members: Bool
++        /// "MiniMax H3 · Higgsfield" (the owner always sees the provider; server/api/src/engines/labels.ts).
++        public var label: String?
+         public var id: String { model }
++        public var shownName: String { label ?? name }
+     }
+     public var showProviderNames: Bool
+     public var models: [Model]
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift b/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
+index 7cb7935f..8b382563 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
+@@ -149,8 +149,11 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
+     /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
+     public var providerName: String?
+     public var id: String { model }
+-    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
+-    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
++    /// The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts: one format everywhere;
++    /// for members while the studio hides providers, the bare name or "· Option n").
++    public var label: String?
++    /// What to show for the model: the server's label; older servers: the name with its provider.
++    public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
+ 
+     public init(model: String, name: String, kind: String = "video", custom: Bool = false, tier: String? = nil, tiers: [String] = [], resolution: String? = nil,
+                 resolutions: [SuiteResolution] = [], perSec: Double? = nil, perRun: Double? = nil, minSeconds: Double? = nil, maxSeconds: Double? = nil,
+@@ -174,7 +177,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
+     }
+ 
+     enum CodingKeys: String, CodingKey {
+-        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName
++        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName, label
+     }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+@@ -183,6 +186,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
+         kind = c.v(.kind, "video")
+         custom = c.v(.custom, false)
+         providerName = c.o(.providerName)
++        label = c.o(.label)
+         tier = c.o(.tier)
+         tiers = c.v(.tiers, [])
+         resolution = c.o(.resolution)
+@@ -353,14 +357,14 @@ public enum ComposerModelPicker {
+     public static func label(_ d: ComposerDraft, catalog: SuiteCatalog?, settings: SuiteSettings?) -> String {
+         guard let id = d.engineModel else { return "Auto" }
+         let e = pinned(d, catalog, settings)
+-        let name = e?.name ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
++        let name = e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
+         let res = e?.resolutions.first { $0.id == d.resolution }?.label ?? d.resolution
+         return res.map { "\(name), \(resLabel($0))" } ?? name
+     }
+ 
+     public static func imageLabel(_ photo: PhotoDraft, catalog: SuiteCatalog?) -> String {
+         guard let id = photo.imageModel else { return "Auto" }
+-        return pinnedImage(photo, catalog)?.name ?? id
++        return pinnedImage(photo, catalog)?.shownName ?? id
+     }
+ 
+     /// "720p · standard" → "720p": the first word of the provider's label.
+-- 
+2.43.0
+
