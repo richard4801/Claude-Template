@@ -269,7 +269,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
       description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional(),
       /* §6: start from her base photos, keeping the ticked pieces */
-      base: z.object({ source: z.literal('base'), keep: z.object({ top: z.boolean().optional(), bottom: z.boolean().optional(), shoes: z.boolean().optional(), accessories: z.boolean().optional() }).partial().default({}),
+      base: z.object({ source: z.enum(['base', 'outfit']), outfitId: z.string().max(80).optional(),
+        /* chosen per angle (another body shot, an outfit's angle, an upload); a missing one uses the front */
+        angles: z.object({ front: ImageRefSchema.optional(), tq: ImageRefSchema.optional(), side: ImageRefSchema.optional(), back: ImageRefSchema.optional() }).partial().optional(),
+        keep: z.object({ top: z.boolean().optional(), bottom: z.boolean().optional(), shoes: z.boolean().optional(), accessories: z.boolean().optional() }).partial().default({}),
         note: z.string().max(200).optional() }).optional() }).passthrough(), req.body);
     const m = await model(req.user, b.modelId, true);
     const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'outfit', b); // WS13: `imageModel`, else the Outfits default
@@ -293,8 +296,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // §6: pieces kept from her base photos → the front is an edit of her base front photo, the others edits of that front.
     const keep = mode !== 'own' && b.base ? { keep: b.base.keep, note: b.base.note } : null;
     const keeping = !!keep && outfitKeepParts(keep).keeping;
-    const baseFront = slotOf('front');
-    if (keeping && !baseFront) throw badRequest('Add her front body photo to the character sheet first');
+    // Her base set: her profile photos, or one of her outfits (an underwear or swimwear set); any angle swapped by choice.
+    let baseSet: (ImageRef | null)[] = BODY_SLOTS.map(k => slotOf(k) ?? null);
+    if (keeping && b.base?.source === 'outfit') {
+      const [bo] = b.base.outfitId ? await db.select().from(outfits).where(and(eq(outfits.id, b.base.outfitId), eq(outfits.studioId, req.user.studioId), eq(outfits.modelId, m.id))) : [];
+      if (!bo) throw notFound('Outfit');
+      baseSet = [0, 1, 2, 3].map(i => bo.angles[i] ?? null);
+    }
+    if (keeping && b.base?.angles) baseSet = BODY_SLOTS.map((k, i) => (b.base!.angles![k] as ImageRef | undefined) ?? baseSet[i] ?? null);
+    const baseFront = baseSet[0];
+    if (keeping && !baseFront) throw badRequest('Choose a front base photo first');
     const cost = !outfitPlan ? 0 : keeping ? 4 * await ctx.images.editCost(req.user.studioId, stepModels)
       : byoRun ? 4 * outfitPlan.perShot : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
@@ -325,7 +336,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             if (!front) throw new Error('no front');
             angles = [front];
             for (const [i, a] of OUTFIT_ANGLES.slice(1).entries()) {
-              const body = slot(BODY_SLOTS[i + 1]!) ?? null;
+              const body = baseSet[i + 1] ?? null; // a missing angle uses the front (the edit starts from it)
               const prompt = outfitEditPrompt(a, texts) + (body ? ' ' + outfitKeepAngle(k, texts) : '');
               angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
                 editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null);

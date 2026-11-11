@@ -1,6 +1,6 @@
 // Outfit page (plans/outfit-head-looks.md §4/§5): rename (PATCH), name on save, delete (DELETE) and making the missing
 // angles (POST fill): who may, studio scope, name length, refused while the outfit is still being made.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { outfits, users } from '../src/db/schema.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
@@ -95,6 +95,27 @@ describe('outfit from her base photos, keeping pieces', () => {
       expect(imgs.some(i => i.prompt.includes('Keep exactly: the top'))).toBe(true);
       expect(imgs.filter(i => i.prompt.includes('in her base clothes'))).toHaveLength(3);
       expect(done.cost).toBeCloseTo(4 * 0.03, 6);
+    } finally { await a.close(); }
+  });
+
+  it('the chosen base set is what is sent: an outfit as the base, one angle swapped; another studio\'s outfit is a 404', async () => {
+    const a = await makeApp({ BALANCE_MODE: 'simulated' });
+    try {
+      const { owner } = await people(a, 0);
+      const m = await demoModel(owner);
+      const studioId = (await a.ctx.db.select().from(users).where(eq(users.id, owner.id)))[0]!.studioId;
+      await a.ctx.db.insert(outfits).values({ id: 'o_swim', studioId, modelId: m.id, name: 'Swim', mode: 'own', description: '', state: 'ready', createdAt: Date.now(),
+        angles: [{ asset: 'c_front' }, { asset: 'c_tq' }, null, { asset: 'c_face' }] });
+      await a.ctx.db.insert(outfits).values({ id: 'o_far2', studioId: 'st_other', modelId: m.id, name: 'Far', mode: 'own', description: '', state: 'ready', createdAt: Date.now(), angles: [{ asset: 'c_front' }, null, null, null] });
+      const keep = { keep: { top: true }, note: 'the bikini top' };
+      expect((await owner.req('POST', '/v1/outfits', { modelId: m.id, mode: 'describe', description: 'a skirt', base: { source: 'outfit', outfitId: 'o_far2', ...keep } })).status).toBe(404);
+      const spy = vi.spyOn(a.ctx.images, 'generate');
+      const o = (await owner.req('POST', '/v1/outfits', { modelId: m.id, mode: 'describe', description: 'a skirt',
+        base: { source: 'outfit', outfitId: 'o_swim', angles: { side: { asset: 'g_side' } }, ...keep } })).body;
+      await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id && x.state === 'preview'));
+      const calls = spy.mock.calls.map(c => c[0]).filter(c => c.refId === o.id);
+      expect(calls[0]!.editOf).toEqual({ asset: 'c_front' }); // the front edits the chosen set's front
+      expect(calls.slice(1).map(c => c.refs?.[1] ?? null)).toEqual([{ asset: 'c_tq' }, { asset: 'g_side' }, { asset: 'c_face' }]); // ¾, swapped side, back
     } finally { await a.close(); }
   });
 });
