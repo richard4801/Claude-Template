@@ -266,7 +266,7 @@ public enum BlenderArgs {
     }
 
     static let aspects: [String: (Int, Int)] = ["9:16": (9, 16), "16:9": (16, 9), "1:1": (1, 1), "4:5": (4, 5), "21:9": (21, 9)]
-    static let passes: Set<String> = ["greybox", "keyframes", "camera_json", "characters_json"]
+    static let passes: Set<String> = ["greybox", "keyframes", "camera_json", "characters_json", "set_json"]
     static let eases: Set<String> = ["linear", "in", "out", "in_out"]
     static let shapes: Set<String> = ["box", "cylinder", "sphere", "plane"]
     /// Blender object names are ≤ 63 bytes; "MUSE_char_" / "MUSE_prop_" take 10.
@@ -346,12 +346,14 @@ public enum BlenderArgs {
             return try cameraPath(args)
         case .renderGuides:
             let o = try object(args, allowed: ["passes", "resolutionShort"])
-            let list = try array(o, "passes", 1...4)
+            let list = try array(o, "passes", 1...5)
             var ps: [String] = []
             for p in list {
-                guard case .string(let s) = p, passes.contains(s) else { throw Invalid("passes are greybox, keyframes, camera_json, characters_json") }
+                guard case .string(let s) = p, passes.contains(s) else { throw Invalid("passes are greybox, keyframes, camera_json, characters_json, set_json") }
                 if !ps.contains(s) { ps.append(s) }
             }
+            // The set blocks for the app's 3D preview ride along with every greybox (tiny, no extra render).
+            if ps.contains("greybox"), !ps.contains("set_json") { ps.append("set_json") }
             return ["passes": .array(ps.map { .string($0) }), "resolutionShort": .number(Double(try int(o, "resolutionShort", 480...1080, default: 0))),
                     "outDir": .string(outDir)]
         case .status, .sceneInfo, .screenshot:

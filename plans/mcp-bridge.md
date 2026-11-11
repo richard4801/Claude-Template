@@ -156,6 +156,23 @@ _Spec: `design/screens/ai-suite-desktop__D6.jpg` (Mac) and `ai-suite-mobile__M5.
 - **Plan** (top-down, metres, X right, Y up on screen = +Y away from camera): grid (0.5 m), 1 m scale bar; each cast member's path from `blocking` as a dashed line with time ticks (`0.0s`, `1.2s`…) at keyframes, a round token with initials at the position at the playhead time, a small facing arrow, and the action label of the active key ("turns to camera"); the camera path from `cameraPath` (dotted), a camera glyph at the playhead and its **view cone** (horizontal FOV from focal mm and sensor 36 mm: `2·atan(18/f)`, toward `target`), label `CAM A · 35 mm · 1.5 m`. Fit the drawing to the bounds of every point (+1 m margin). Empty state: "No blocking yet · ask Claude in the chat, or block it in Blender from your Claude app."
 - **Drag** a character token or the camera at the playhead → moves that keyframe (or inserts one at the playhead) → `PUT …/path` (debounced 400 ms); note "Drag a token or the camera to adjust · Claude sees your edits".
 - **Camera view**: the newest `preview`/`keyframe_*` still nearest the playhead; **Side**: the same plan projected on X/Z (heights).
+- **Viewer (owner, 2026-11-11; `CameraStagePlayer.swift`, `CameraOrbitView.swift`, MuseCore `CameraStage.swift`)**: view switch
+  **Plan · Camera view · Side · 3D**. Transport under the view: Play/Pause, `1.2 / 6.0 s`, Loop, Paths (Camera view).
+  The newest ready greybox streams in **Camera view** (AVPlayer on its signed URL, keyed by asset id so session reloads don't
+  restart it; never a download), the START/MID/END still shows at once while it buffers; the playhead and the video stay in
+  step (player time → playhead while playing; a scrub seeks when > ½ frame away, chase-seeking). Without a greybox, Play runs
+  the blocking on a clock. **Paths** over the video: each character's floor path and a dot where she is now, and the camera's
+  path ahead, projected through the shot camera at the playhead (pinhole, sensor across the frame's longer side, like
+  Blender's AUTO fit; roll ignored). Plan, Side and 3D play along, with the video in a corner inset while playing.
+  **3D**: SceneKit — floor + 1 m grid, the set blocks from `set.json`, a capsule per character (nose = facing), her path,
+  the camera path and the camera as a frustum; drag orbits, scroll zooms, double-click or "Reset view" resets, "Shot camera"
+  looks through the camera. `set.json` (asset kind `set_json`) is written by `blender_render_guides` whenever the greybox
+  pass runs (the Mac relay adds the pass itself; Claude's tool list is unchanged so older Mac builds never see it): MUSE
+  props with their shape, other visible meshes as world bounding boxes, ≤ 400. Free, local, no extra render.
+  Guides tab **Play** opens the video in an in-app player sheet (it used to open the browser, which downloaded it).
+  The hang: the Blocking body lived inside DirectedBody, so each playhead change re-ran the whole page incl. the Claude
+  transcript; now only the leaves that draw the playhead read it. `Host.current()` (synchronous network-name lookups on the
+  main thread at first draw) is replaced by `SCDynamicStoreCopyComputerName`.
 - Legend row: one line style per character name, "Camera path & view".
 - **Timeline** (bottom): ruler 0…duration s, tracks CAMERA, one per character (upper-case name), CUTS; keyframes as red diamonds with their label (camera: derived "push 0.4 m · ease in-out" from consecutive keys' distance + ease, or "orbit 90°" from angle change; characters: `action`); the span between keys as a bar; red playhead with a time chip (`2.4 s`) — drag to scrub; END chip with the duration.
 - **Guides** tab: ready assets by kind (greybox, depth, pose, tracks, keyframes START/MID/END, camera.json, characters.json, .blend) with thumbnails/play for video, size, source (Mac app / your Claude / chat), time.

@@ -480,6 +480,35 @@ except Exception as e:
                 with open(fresh("characters.json"), "w") as fh:
                     json.dump(doc, fh)
                 files.append("characters.json")
+        if "set_json" in passes:
+            # The set as boxes for the app's 3D preview: MUSE props with their shape, every other visible mesh (not the
+            # characters, the floor or the camera) as its world-aligned bounding box. Frame 1, at most 400 objects.
+            sc.frame_set(fs)
+            objs = []
+            for o in sorted(sc.objects, key=lambda o: o.name):
+                if len(objs) >= 400:
+                    break
+                if o.type != 'MESH' or o.name.startswith("MUSE_char_") or o.name == "MUSE_floor" or o.hide_render:
+                    continue
+                mw = o.matrix_world
+                if o.name.startswith("MUSE_prop_"):
+                    shape = str(o.get("muse_shape", "box"))
+                    d = o.dimensions
+                    p = mw.translation
+                    rot = [muse_r6(math.degrees(v)) for v in mw.to_euler('XYZ')]
+                    objs.append({"name": o.name, "shape": shape, "size": [muse_r6(d.x), muse_r6(d.y), muse_r6(d.z)],
+                                 "position": [muse_r6(p.x), muse_r6(p.y), muse_r6(p.z)],
+                                 "rotationDeg": rot})
+                else:
+                    ws = [mw @ Vector(c) for c in o.bound_box]
+                    lo = [min(v[i] for v in ws) for i in range(3)]
+                    hi = [max(v[i] for v in ws) for i in range(3)]
+                    objs.append({"name": o.name[:63], "shape": "box", "size": [muse_r6(hi[i] - lo[i]) for i in range(3)],
+                                 "position": [muse_r6((lo[0] + hi[0]) / 2.0), muse_r6((lo[1] + hi[1]) / 2.0), muse_r6(lo[2])],
+                                 "rotationDeg": [0.0, 0.0, 0.0]})
+            with open(fresh("set.json"), "w") as fh:
+                json.dump({"version": 1, "convention": "Blender world, metres, Z up; position = bottom centre (a plane's centre)", "objects": objs}, fh)
+            files.append("set.json")
         muse_done({"files": files, "width": W, "height": H, "fps": fps, "frameStart": fs, "frameEnd": fe})
     finally:
         for obj, a, v in saved:

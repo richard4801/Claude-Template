@@ -459,7 +459,7 @@ public struct GuideItem: Hashable, Sendable, Identifiable {
 }
 
 public enum CameraGuides {
-    public static let order = ["greybox", "depth", "pose", "tracks", "keyframe_start", "keyframe_mid", "keyframe_end", "camera_json", "characters_json", "blend", "preview", "still"]
+    public static let order = ["greybox", "depth", "pose", "tracks", "keyframe_start", "keyframe_mid", "keyframe_end", "camera_json", "characters_json", "set_json", "blend", "preview", "still"]
 
     public static func label(_ kind: String) -> String {
         switch kind {
@@ -468,6 +468,7 @@ public enum CameraGuides {
         case "keyframe_end": return "END"
         case "camera_json": return "camera.json"
         case "characters_json": return "characters.json"
+        case "set_json": return "set.json"
         case "blend": return ".blend"
         default: return kind.uppercased()
         }

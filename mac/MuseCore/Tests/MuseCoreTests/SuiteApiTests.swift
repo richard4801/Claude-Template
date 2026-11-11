@@ -89,12 +89,18 @@ final class SuiteApiTests: XCTestCase {
         XCTAssertNil(me.engine)
         XCTAssertTrue(SuiteText.isMemberSafe(me.label + me.buttonLabel + me.priceLine))
 
+        // "Adapt, don't block" (server suite/plan.ts pickAdapted): too long is made at the nearest length, said in the warnings.
+        let long = try await boss.suiteEstimate(ShotRequest(prompt: "x", duration: 30, quality: "draft"))
+        XCTAssertLessThan(long.seconds, 30)
+        XCTAssertTrue(long.warnings.contains { $0.range(of: #"made \d+ s, .* max"#, options: .regularExpression) != nil }, "\(long.warnings)")
+        // An audio reference with nothing to ride on still can't be made: nothing_fits, with the reasons.
         do {
-            _ = try await boss.suiteEstimate(ShotRequest(prompt: "x", duration: 30, quality: "draft"))
+            _ = try await boss.suiteEstimate(ShotRequest(prompt: "x", references: SuiteReferences(audio: SuiteRefAudio(audio: SuiteVideoRef(url: "https://example.com/a.mp3"))),
+                                                         quality: "draft"))
             XCTFail("expected nothing_fits")
         } catch let e as ApiError {
             XCTAssertEqual(e.code, "nothing_fits")
-            XCTAssertTrue(e.message.hasPrefix("Draft can't make this shot"), e.message)
+            XCTAssertTrue(e.message.hasPrefix("Can't make this shot"), e.message)
         }
     }
 
