@@ -93,6 +93,12 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   session_01Py2rxnr69VxPZkmkFkWCpB; 5A.3 metadata cleanup + AI-label switch → session_01Py2rxpXcxkJ4h5H23LKfbg.
   Mac queue (one at a time): blank project (claude/edit-blank, mac.yml timeout 60→75 with it) → model picker
   (claude/one-claude, migration 0030) → outfit page §4/§5 → app parts of 4c and 5A.3.
+- DONE 4c server (d71fcd0d, live): members see/pick every enabled video+image model unless hidden; provider names
+  behind studio setting showProviderNames; owner API GET/PATCH /v1/engines/members {showProviderNames, hidden}.
+  Old custom-model members=false no longer read (those models are now SHOWN; owner told to re-hide). APP WORK (Mac queue):
+  Settings toggle + per-model "Hide from members" on all models; model pickers for members in Shot/Swap/Photo/Outfits/
+  Character photos/Plate ("Name · providerName"); don't treat catalog engines[] as owner-only. Android after.
+- MERGED blank project (44cf00f2; mac.yml timeout 75).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
