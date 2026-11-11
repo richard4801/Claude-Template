@@ -3,7 +3,10 @@
 // role and why); set_sent_images replaces the list, adds to it, drops from it, or resets it to automatic. The Suite keeps
 // the choice in the composer's draft (the app shows "Images sent · Changed by Claude"); the outfit sheet, Fill angles and
 // Dress up keep it per person and character until reset. Free: nothing is generated; Generate still needs the go-ahead.
+import { and, desc, eq } from 'drizzle-orm';
 import { badRequest } from '../errors.js';
+import { claudeThreads } from '../camera/schema.js';
+import { ownChat, pageOf } from './chatTools.js';
 import type { EditTool, ToolEnv } from '../editor/mcpTools.js';
 import { ImageInSchema, SentImageInSchema, sentImagesOf, type SentInput, type SentPage, type SentView } from '../images/sent.js';
 import { assistOf, sentOfDraft } from '../suite/assist.js';
@@ -14,11 +17,25 @@ const SCOPE: Record<Exclude<SentPage, 'photo'>, string> = { outfit: 'outfit', fi
 const IMG = { description: 'An image of this studio: {url} or {asset} as MUSE gives it, an upload id (an attached image), or a take\'s frame {takeId, at (seconds)}' };
 const ITEM = { type: 'object', properties: { image: IMG, role: { type: 'string', enum: ['person', 'outfit', 'product', 'location', 'style', 'pose', 'other'] }, label: { type: 'string', maxLength: 60 } }, required: ['image', 'role'] };
 const TARGET = {
+  chatId: { type: 'string', description: 'This chat (filled in for you in the app; Claude Code passes it): its page gives the draft or the character' },
   page: { type: 'string', enum: [...PAGES_], description: 'suite (the open composer: Shot, Photo, Talking, UGC, Swap, Recast; default when a shot is open), outfit (the new-outfit sheet), fill_angles (Fill the character sheet), dress_up' },
   assistId: { type: 'string', description: 'Suite: the shared draft (filled in for you)' },
   modelId: { type: 'string', description: 'outfit / fill_angles / dress_up: the character (filled in on her page)' },
   request: { type: 'object', description: 'outfit / dress_up: what the sheet is set to, as its request takes it (description, images, base, outfitImage, imageModel …), so the pick matches' },
 };
+
+/** The ids the person's page has open (the chat's page, else their latest chat's), for calls without them (MCP). */
+async function withPage(env: ToolEnv, a: Record<string, unknown>) {
+  if ((typeof a.assistId === 'string' && a.assistId) || (typeof a.modelId === 'string' && a.modelId)) return a;
+  const [t] = typeof a.chatId === 'string' && a.chatId
+    ? [await ownChat(env.ctx, env.user, a.chatId).catch(() => null)]
+    : await env.ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.ownerId, env.user.id), eq(claudeThreads.studioId, env.user.studioId))).orderBy(desc(claudeThreads.updatedAt)).limit(1);
+  const ids = (t ? pageOf(t)?.ids : undefined) ?? {};
+  const page = typeof a.page === 'string' ? a.page : undefined;
+  if ((!page || page === 'suite') && ids.assistId) return { ...a, assistId: ids.assistId };
+  if (ids.modelId) return { ...a, modelId: ids.modelId };
+  return a;
+}
 
 /** Where the call points: the Suite's draft, or a page with a character. */
 function target(a: Record<string, unknown>) {
@@ -61,14 +78,15 @@ export const SENT_TOOLS: EditTool[] = [
     name: 'get_sent_images', title: 'The images a generation sends', scope: 'edit:read', readOnly: true, idempotent: true,
     description: 'What the generation being set up would send to the model, in order: each image with its role (person, outfit, product, location, style, pose, other), label and why MUSE picked it; whether it was changed (and by whom) and the model\'s limit. On the Suite (the open composer) by default; page outfit / fill_angles / dress_up with the character for the others. Free.',
     inputSchema: { type: 'object', properties: TARGET, additionalProperties: false },
-    run: async (env, a) => current(env, a),
+    run: async (env, a) => current(env, await withPage(env, a)),
   },
   {
     name: 'set_sent_images', title: 'Change the images sent', scope: 'edit:write',
     description: 'Changes the images the generation sends. list replaces MUSE\'s pick (in that order: "Image n" in the prompt follows it); add puts images after MUSE\'s pick; exclude drops images from it; reset: true goes back to automatic. Only this studio\'s images (an upload id, a take\'s frame {takeId, at}, or {url}/{asset} as MUSE gives them). Over the model\'s limit is refused. Tell the person what you changed. Returns what will now be sent. Free.',
     inputSchema: { type: 'object', properties: { ...TARGET, list: { type: 'array', items: ITEM, maxItems: 16 }, add: { type: 'array', items: ITEM, maxItems: 8 },
       exclude: { type: 'array', items: IMG, maxItems: 16 }, reset: { type: 'boolean' } }, additionalProperties: false },
-    run: async (env, a) => {
+    run: async (env, a0) => {
+      const a = await withPage(env, a0);
       const t = target(a), svc = sentImagesOf(env.ctx);
       let input: SentInput | null = null;
       if (a.reset !== true) {
