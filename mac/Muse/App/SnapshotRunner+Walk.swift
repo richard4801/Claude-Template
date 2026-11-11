@@ -45,7 +45,7 @@ extension SnapshotRunner {
         await walkScreen("outfit_lightbox", ax: ax, minimum: 6,
                          // Spending, the file panel (the drop zone's label ends "Choose files"), and the sheet's own controls that
                          // would close it or clear the angles (Close, the mode switch): the walk is about the full view.
-                         deny: ["Make 4 angles", "Retake", "Choose files", "Use my images", "Save outfit", "Add to her outfits", "Drop "],
+                         deny: ["Make 4 angles", "Retake", "Choose files", "Use my images", "Save outfit", "Add to her outfits", "Start from her base photos", "Drop "],
                          denyExact: ["Close", "Describe it", "From a photo", "My own set"],
                          // The viewer's own Close goes last, after its arrows and zoom (the top bar comes first in tree order).
                          last: ["Close (Esc)"],
