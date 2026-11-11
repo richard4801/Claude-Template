@@ -2,7 +2,7 @@
 // anything no dedicated tool covers. Never the whole Mac: the MUSE app describes its own visible controls (SwiftUI
 // accessibility ids and labels) and acts on them itself, so it needs no macOS Accessibility or Screen Recording
 // permission. Fulfilled by the person's own Mac like upload_local_file: the call goes out as a live event
-// ({type:'claude', op:'ui', call}), one of their Macs claims it, does it and posts the result back. Only their own app:
+// ({type:'claude', op:'uiCall', call}), one of their Macs claims it, does it and posts the result back. Only their own app:
 // events go to that person's devices only. Settings keys/providers/prices, sign-out, account deletion, payment and
 // delete confirmations are never pressed by Claude (refused here and again on the Mac): those stay the person's, through
 // the go-ahead cards. In memory, like the permission relay (one API instance).
@@ -74,7 +74,7 @@ export class UiHub {
     return new Promise(resolve => {
       const timer = setTimeout(() => this.end(call.id, { error: 'MUSE on your Mac did not answer (is the app open and awake?). Nothing was done.' }), waitMs);
       this.calls.set(call.id, { call, userId: u.id, resolve, timer });
-      void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'ui', call });
+      void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'uiCall', call });
     });
   }
 
@@ -102,7 +102,7 @@ export class UiHub {
     if (!p) return;
     clearTimeout(p.timer);
     this.calls.delete(id);
-    void this.ctx.hub.emitTo(p.userId, { type: 'claude', op: 'ui_end', id });
+    void this.ctx.hub.emitTo(p.userId, { type: 'claude', op: 'uiCallEnd', id });
     p.resolve(out);
   }
 
