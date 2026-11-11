@@ -1,0 +1,269 @@
+From 2fefe24f4713820421b6f60b7d897381dd1eeb45 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 21:06:35 +0000
+Subject: [PATCH] Mac: Dismiss and "Clear all failed" stick (server hiddenAt);
+ copy fixes on the Queue and Suite
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Queue Dismiss called nothing on the server (an in-memory set), so every failure came back on
+  the next launch. It now calls DELETE /v1/jobs/:id; "Clear all failed" calls
+  POST /v1/jobs/clear-failed.
+- "you weren't charged · you weren't charged": ScreenCopy.failure says it once.
+- Retry price is the server's price for the job (cost), not a local estimate; Suite "Retry free"
+  -> "Retry · $price", hub badge "Not charged".
+- Templates: starters say "by MUSE" and "Starter", not "by You" / "Public".
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxp4Ymtv7wd2xgwL5P1
+---
+ mac/Muse/App/AppStore+Actions.swift           | 29 +++++++++++++++++++
+ mac/Muse/App/AppStore+Templates.swift         |  8 +++--
+ mac/Muse/Views/QueueGalleryViews.swift        | 10 ++++++-
+ mac/Muse/Views/Suite/SuiteComponents.swift    |  3 +-
+ mac/Muse/Views/Suite/SuiteHubView.swift       |  2 +-
+ mac/Muse/Views/TemplateViews.swift            |  4 +--
+ .../Sources/MuseCore/FakeMuseAPI.swift        |  6 ++++
+ .../Sources/MuseCore/HTTPMuseAPI.swift        |  5 ++++
+ mac/MuseCore/Sources/MuseCore/MuseAPI.swift   |  2 ++
+ .../Sources/MuseCore/ScreenCopy.swift         | 13 +++++++--
+ .../Tests/MuseCoreTests/ScreenCopyTests.swift | 14 +++++++++
+ 11 files changed, 87 insertions(+), 9 deletions(-)
+
+diff --git a/mac/Muse/App/AppStore+Actions.swift b/mac/Muse/App/AppStore+Actions.swift
+index 47f442b5..ae884bd1 100644
+--- a/mac/Muse/App/AppStore+Actions.swift
++++ b/mac/Muse/App/AppStore+Actions.swift
+@@ -174,8 +174,37 @@ extension AppStore {
+         }
+     }
+ 
++    /// Dismiss is stored on the server (the job's hiddenAt), so it holds after a relaunch or a deploy. It used to hide the
++    /// row in memory only, and every failure came back on the next launch (owner bug 2026-11-11).
+     func dismissFailure(_ j: Job) {
+         withAnimation { _ = hiddenFailures.insert(j.id) }
++        Task { [self] in
++            do {
++                try await api.removeJob(id: j.id)
++                withAnimation { jobs.removeAll { $0.id == j.id } }
++            } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
++                withAnimation { jobs.removeAll { $0.id == j.id } } // already gone on the server
++            } catch {
++                withAnimation { _ = hiddenFailures.remove(j.id) }
++                showToast("Couldn't dismiss it · try again")
++            }
++        }
++    }
++
++    /// "Clear all failed": every failed job off the Queue for good, in one call.
++    func clearFailures() {
++        let ids = Set(visibleFailures.map(\.id))
++        guard !ids.isEmpty else { return }
++        withAnimation { hiddenFailures.formUnion(ids) }
++        perform { [self] in
++            do {
++                let cleared = Set(try await api.clearFailedJobs())
++                withAnimation { jobs.removeAll { cleared.contains($0.id) } } // a member's view of others' failures stays hidden here only
++            } catch {
++                withAnimation { hiddenFailures.subtract(ids) }
++                throw error
++            }
++        }
+     }
+ 
+     func runAgain(_ j: Job) {
+diff --git a/mac/Muse/App/AppStore+Templates.swift b/mac/Muse/App/AppStore+Templates.swift
+index 6cc79234..f30f2aae 100644
+--- a/mac/Muse/App/AppStore+Templates.swift
++++ b/mac/Muse/App/AppStore+Templates.swift
+@@ -37,8 +37,12 @@ extension AppStore {
+ 
+     func isMine(_ t: MuseTemplate) -> Bool { t.isOwner }
+ 
+-    /// "You" for my own templates, else the owner's name.
+-    func ownerLabel(_ t: MuseTemplate) -> String { t.isOwner ? "You" : (t.ownerName.isEmpty ? "Studio" : t.ownerName) }
++    /// "You" for my own templates, else the owner's name. Built-in starters say "MUSE": the owner holds them, but she didn't
++    /// make them (owner bug 2026-11-11: they read "by You · Public").
++    func ownerLabel(_ t: MuseTemplate) -> String {
++        if t.starter != nil { return "MUSE" }
++        return t.isOwner ? "You" : (t.ownerName.isEmpty ? "Studio" : t.ownerName)
++    }
+ 
+     private func replaceTemplate(_ t: MuseTemplate) {
+         if let i = templates.firstIndex(where: { $0.id == t.id }) { templates[i] = t } else { templates.insert(t, at: 0) }
+diff --git a/mac/Muse/Views/QueueGalleryViews.swift b/mac/Muse/Views/QueueGalleryViews.swift
+index aabca76e..fa8998ec 100644
+--- a/mac/Muse/Views/QueueGalleryViews.swift
++++ b/mac/Muse/Views/QueueGalleryViews.swift
+@@ -36,6 +36,14 @@ struct QueueView: View {
+             }
+             .padding(.bottom, Space.s5)
+ 
++            if store.visibleFailures.count > 1 {
++                HStack {
++                    Text(ScreenCopy.count(store.visibleFailures.count, "failed job")).scaled(t.scale.caption, t.roles.ink2)
++                    Spacer(minLength: 0)
++                    RButton("Clear all failed", kind: .plain, small: true) { store.clearFailures() }
++                }
++                .padding(.bottom, Space.s2)
++            }
+             ForEach(store.visibleFailures) { f in
+                 HStack(alignment: .center, spacing: Space.s3) {
+                     VStack(alignment: .leading, spacing: 2) {
+@@ -43,7 +51,7 @@ struct QueueView: View {
+                         Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                     }
+                     Spacer(minLength: Space.s3)
+-                    RButton(f.isPhoto ? "Make again" : "Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", small: true) { store.retry(f) }
++                    RButton(f.isPhoto ? "Make again" : ScreenCopy.retryLabel(cost: f.cost, estimate: Pricing.totalCost(f.request.spec)), small: true) { store.retry(f) }
+                     RButton("Dismiss", kind: .plain, small: true) { store.dismissFailure(f) }
+                 }
+                 .padding(.horizontal, Space.s4)
+diff --git a/mac/Muse/Views/Suite/SuiteComponents.swift b/mac/Muse/Views/Suite/SuiteComponents.swift
+index 00e70d77..6bc0fb40 100644
+--- a/mac/Muse/Views/Suite/SuiteComponents.swift
++++ b/mac/Muse/Views/Suite/SuiteComponents.swift
+@@ -309,7 +309,8 @@ struct SuiteResultPane: View {
+                 Text(message).font(t.body(12)).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                 if let j = job {
+                     Button { store.retakeShot(j) } label: {
+-                        Text("Retry free").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
++                        // Not free: the failed run was refunded and the retry is a new run (owner bug 2026-11-11).
++                        Text(j.isPhoto ? "Make again" : j.cost > 0 ? ScreenCopy.retryLabel(cost: j.cost, estimate: 0) : "Retry").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
+                     }
+                     .buttonStyle(.plain)
+                     if let lower, !j.isPhoto {
+diff --git a/mac/Muse/Views/Suite/SuiteHubView.swift b/mac/Muse/Views/Suite/SuiteHubView.swift
+index c4941fab..2e30b1fa 100644
+--- a/mac/Muse/Views/Suite/SuiteHubView.swift
++++ b/mac/Muse/Views/Suite/SuiteHubView.swift
+@@ -181,7 +181,7 @@ struct SuiteHubView: View {
+         case .ready: Ph("play.circle.fill", 30).foregroundStyle(.white.opacity(0.9))
+         case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(24)).foregroundStyle(.white)
+         case .queued: Text(s.queueLine).font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
+-        case .failed: Text("Retry free").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
++        case .failed: Text("Not charged").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
+         case .empty: EmptyView()
+         }
+     }
+diff --git a/mac/Muse/Views/TemplateViews.swift b/mac/Muse/Views/TemplateViews.swift
+index 79c08663..187aafd4 100644
+--- a/mac/Muse/Views/TemplateViews.swift
++++ b/mac/Muse/Views/TemplateViews.swift
+@@ -101,7 +101,7 @@ struct TemplateCard: View {
+         VStack(alignment: .leading, spacing: 8) {
+             Button { store.openTemplate(tpl) } label: {
+                 Media(ref: tpl.cover, ratio: 0.75, radius: t.imageRadius, symbol: "square.on.square.dashed") {
+-                    Pill(tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
++                    Pill(tpl.starter != nil && tpl.isPublic ? "Starter" : tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
+                 }
+             }
+             .buttonStyle(.plain)
+@@ -194,7 +194,7 @@ struct TemplateDetailView: View {
+                             }
+                             // Wraps: a template with several tags overflowed the 460 px column in one row.
+                             FlowLayout(spacing: 8) {
+-                                Pill(tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
++                                Pill(tpl.starter != nil && tpl.isPublic ? "Starter" : tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
+                                 Pill(tpl.usesLabel)
+                                 if tpl.acceptsProduct { Pill("Takes a product photo", .acc) }
+                                 ForEach(tpl.tags, id: \.self) { Pill($0) }
+diff --git a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+index c71ffaee..f5d02ee1 100644
+--- a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+@@ -771,6 +771,12 @@ public actor FakeMuseAPI: MuseAPI {
+         pump()
+     }
+ 
++    public func clearFailedJobs() -> [String] {
++        let ids = jobs.filter(\.isFailed).map(\.id)
++        jobs.removeAll { $0.isFailed }
++        return ids
++    }
++
+     public func removeJob(id: String) {
+         if runningId == id {
+             runner?.cancel()
+diff --git a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+index 5675d749..7e32141a 100644
+--- a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+@@ -559,6 +559,11 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
+     public func createJob(_ req: JobRequest) async throws -> Job { absolutize(try await call("POST", "v1/jobs", req)) }
+     public func removeJob(id: String) async throws { _ = try await send(request("DELETE", "v1/jobs/\(id)")) }
+ 
++    public func clearFailedJobs() async throws -> [String] {
++        struct Cleared: Decodable { let ids: [String] }
++        return try decoder.decode(Cleared.self, from: try await send(request("POST", "v1/jobs/clear-failed", body: try encoder.encode(Empty())))).ids
++    }
++
+     public func runQueue() async throws {
+         // In plans/api.md since 2026-11-04. Older servers start jobs on their own and answer 404, which is ignored.
+         do { _ = try await send(request("POST", "v1/queue/run", body: try encoder.encode(Empty()))) } catch let e as ApiError where e.code == "http_404" || e.code == "not_found" {}
+diff --git a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+index bfb6b952..015444ae 100644
+--- a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+@@ -83,6 +83,8 @@ public protocol MuseAPI: AnyObject, Sendable {
+     func listJobs() async throws -> [Job]
+     func createJob(_ req: JobRequest) async throws -> Job
+     func removeJob(id: String) async throws
++    /// POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own).
++    func clearFailedJobs() async throws -> [String]
+     /// POST /v1/queue/run: starts the GPU on queued jobs ("Run queue"). Servers that start jobs on their own treat it as a no-op.
+     func runQueue() async throws
+     func listTakes() async throws -> [Take]
+diff --git a/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift b/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift
+index fafc1413..79b45477 100644
+--- a/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift
++++ b/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift
+@@ -21,10 +21,19 @@ public enum ScreenCopy {
+         return (title, "\(verb) \(n == 1 ? noun : many)")
+     }
+ 
+-    /// The last-resort error line, with "you weren't charged" when that's true.
++    /// The last-resort error line, with "you weren't charged" when that's true, said once: the server's own failure
++    /// lines often already say it ("… · you weren't charged"), and the Queue showed it twice (owner bug 2026-11-11).
+     public static func failure(_ what: String, charged: Bool) -> String {
+         let base = what.trimmingCharacters(in: .whitespacesAndNewlines)
+         let line = base.isEmpty ? "Something went wrong" : base
+-        return charged ? line : "\(line) · you weren't charged"
++        if charged || line.lowercased().contains("charged") { return line }
++        return "\(line) · you weren't charged"
++    }
++
++    /// The price on a failed job's Retry: what the server held for this same request (`cost`; the refund doesn't change
++    /// it), so the button says what the retry will charge. Retrying is never free: the failed run was refunded, and the
++    /// retry is a new run at the same price. Falls back to the local estimate for jobs without a server price.
++    public static func retryLabel(cost: Double, estimate: Double) -> String {
++        "Retry · \(Pricing.money(cost > 0 ? cost : estimate))"
+     }
+ }
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift
+index d3c25033..5d6ab98c 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift
+@@ -29,4 +29,18 @@ final class ScreenCopyTests: XCTestCase {
+         XCTAssertEqual(ScreenCopy.failure("The render stopped", charged: false), "The render stopped · you weren't charged")
+         XCTAssertEqual(ScreenCopy.failure("", charged: true), "Something went wrong")
+     }
++
++    /// Owner bug 2026-11-11: the Queue said "you weren't charged · you weren't charged".
++    func testFailureSaysNotChargedOnce() {
++        let server = "This clip was refused by the content filter · you weren't charged"
++        XCTAssertEqual(ScreenCopy.failure(server, charged: false), server)
++        XCTAssertEqual(ScreenCopy.failure("Busy right now · you weren't charged. Try again in a minute.", charged: false),
++                       "Busy right now · you weren't charged. Try again in a minute.")
++    }
++
++    /// Retry shows what the server held for the same request, not a local estimate, and is never "free".
++    func testRetryLabelUsesTheServerPrice() {
++        XCTAssertEqual(ScreenCopy.retryLabel(cost: 0.91, estimate: 0.67), "Retry · $0.91")
++        XCTAssertEqual(ScreenCopy.retryLabel(cost: 0, estimate: 0.67), "Retry · $0.67")
++    }
+ }
+-- 
+2.43.0
+
