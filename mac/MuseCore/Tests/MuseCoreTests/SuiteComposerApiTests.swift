@@ -169,6 +169,8 @@ final class SuiteComposerApiTests: XCTestCase {
         let c = try await m.suiteCatalog()
         XCTAssertTrue(c.tiers.allSatisfy { $0.models == nil })
         XCTAssertTrue(ComposerEngines.options(c.tier("draft")).isEmpty, "members get no engines to pin")
+        // 4c: members get the engines to pick (catalog.engines, member-safe: no `members` rules, no costs or keys).
+        XCTAssertFalse((c.engines ?? []).isEmpty, "4c: members see the models they may pick")
         let d = ComposerDraft(tokens: PromptTokens.text(" waves").addMention(kind: "character", id: ch.id, label: ch.shortName, at: Caret(0, 0)).0, duration: 6)
         let e = try await m.suiteEstimate(d.request(InputSlots(), d.inputs(c)))
         XCTAssertNil(e.engine)

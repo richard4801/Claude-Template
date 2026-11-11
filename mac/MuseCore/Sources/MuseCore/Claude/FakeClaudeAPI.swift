@@ -265,6 +265,17 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
         for m in stored { emit(.message(threadId: threadId, m)) }
     }
 
+    /// Step 6b: the demo's model list (the server's, in short), so the panel shows its model line in demo mode too.
+    public func claudeModels() async throws -> ClaudeModelList {
+        ClaudeModelList(models: [
+            ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "Steady", cost: "Standard cost", good: "Most work"),
+            ClaudeModelInfo(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", speed: "Fast", cost: "About half of Opus", good: "Everyday questions"),
+            ClaudeModelInfo(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", speed: "Fastest", cost: "Lowest cost", good: "Short answers"),
+        ], default: nil, studioDefault: "claude-opus-5-5")
+    }
+    public func setChatModel(_ id: String, model: String?) async throws {}
+    public func setDefaultModel(_ model: String?) async throws {}
+
     public func apiTurn(threadId: String, text: String) -> AsyncThrowingStream<ChatEvent, Error> {
         let on = locked { fallback.usable }
         return AsyncThrowingStream { cont in
