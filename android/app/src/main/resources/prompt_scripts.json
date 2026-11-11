@@ -195,7 +195,7 @@
       {
        "panel": 5,
        "role": "ref",
-       "guides": "pose & framing"
+       "guides": "pose & framing and the look & colour and the scene"
       }
      ]
     }
@@ -239,6 +239,7 @@
     "refs.collage.ref",
     "refs.collage"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "panel.outfit",
@@ -343,6 +344,108 @@
    "updatedBy": null
   },
   {
+   "id": "style.house",
+   "group": "photoshoot",
+   "title": "House style",
+   "description": "The {style} of shoots, template shoots, sheet fills and outfit sets: Camera feel, unless a rig or preset sets its own camera body, lens, grade or look, then Realism. Video Suite shots don’t use it.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "ownCamera",
+     "label": "Has its own camera",
+     "description": "A rig or preset sets a camera body, lens, grade or look. Then the camera feel and the default grade are left out and its own words stand.",
+     "type": "bool",
+     "sample": false
+    }
+   ],
+   "sections": [
+    {
+     "id": "camera",
+     "label": "Camera feel",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "realism",
+     "label": "Realism",
+     "kind": "system",
+     "pick": "first"
+    }
+   ],
+   "values": [],
+   "targets": [
+    {
+     "id": "camera",
+     "label": "Camera feel"
+    },
+    {
+     "id": "realism",
+     "label": "Realism"
+    }
+   ],
+   "vars": [],
+   "blocks": [
+    "style.camera",
+    "style.realism"
+   ],
+   "variants": [
+    {
+     "id": "cinematic",
+     "label": "With a cinematic rig"
+    }
+   ],
+   "rules": [
+    {
+     "id": "camera.feel",
+     "label": "Camera feel (the shot has no camera of its own)",
+     "target": "camera",
+     "when": [
+      {
+       "input": "ownCamera",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "style.camera"
+    },
+    {
+     "id": "realism",
+     "label": "Realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "style.realism",
+     "locked": true
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "camera.feel",
+     "label": "Camera feel (the shot has no camera of its own)",
+     "target": "camera",
+     "when": [
+      {
+       "input": "ownCamera",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "style.camera"
+    },
+    {
+     "id": "realism",
+     "label": "Realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "style.realism",
+     "locked": true
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "id": "photoshoot",
    "group": "photoshoot",
    "title": "Photo",
@@ -402,7 +505,7 @@
        "label": "Image number",
        "description": "Its 1-based number among the images sent.",
        "type": "number",
-       "sample": 8
+       "sample": 5
       },
       {
        "name": "guides",
@@ -432,7 +535,7 @@
      ],
      "sample": [
       {
-       "refIndex": 8,
+       "refIndex": 5,
        "guides": [
         "pose",
         "look",
@@ -440,6 +543,20 @@
        ]
       }
      ]
+    },
+    {
+     "name": "ownCamera",
+     "label": "Has its own camera",
+     "description": "A rig or preset sets a camera body, lens, grade or look. Then the camera feel and the default grade are left out and its own words stand.",
+     "type": "bool",
+     "sample": false
+    },
+    {
+     "name": "noGrade",
+     "label": "No grade",
+     "description": "No grade was picked and the shot has its own camera, lens or look: the default grade is left out.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -567,12 +684,12 @@
     {
      "name": "look",
      "description": "her written look",
-     "sample": "young woman, shoulder-length dark brown hair"
+     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
     },
     {
      "name": "refCount",
-     "description": "how many sheet images she has",
-     "sample": "7"
+     "description": "how many images of her are sent",
+     "sample": "3"
     },
     {
      "name": "lora",
@@ -586,13 +703,13 @@
     },
     {
      "name": "style",
-     "description": "the house style",
-     "sample": "realistic smartphone photo"
+     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
+     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
     },
     {
      "name": "never",
      "description": "her never-add list plus the base list",
-     "sample": "tattoos, rings, logos"
+     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
     },
     {
      "name": "scene",
@@ -616,7 +733,7 @@
     },
     {
      "name": "grade",
-     "description": "the grade, lower case",
+     "description": "the grade, lower case (the default grade unless the shot has its own camera)",
      "sample": "phone-natural"
     }
    ],
@@ -629,6 +746,7 @@
     "shoot.camera",
     "shoot.camera.wide",
     "shoot.camera.tele",
+    "shoot.light.only",
     "shoot.light",
     "shoot.direction",
     "refs.pose",
@@ -639,6 +757,12 @@
     "shoot.never",
     "shoot.seed.locked",
     "shoot.seed.new"
+   ],
+   "variants": [
+    {
+     "id": "cinematic",
+     "label": "With a cinematic rig"
+    }
    ],
    "rules": [
     {
@@ -723,6 +847,20 @@
       }
      ],
      "block": "shoot.camera.tele"
+    },
+    {
+     "id": "light.only",
+     "label": "Light without a grade (its own camera sets the colour)",
+     "target": "light",
+     "when": [
+      {
+       "input": "noGrade",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.light.only",
+     "optional": true
     },
     {
      "id": "light",
@@ -908,6 +1046,20 @@
       }
      ],
      "block": "shoot.camera.tele"
+    },
+    {
+     "id": "light.only",
+     "label": "Light without a grade (its own camera sets the colour)",
+     "target": "light",
+     "when": [
+      {
+       "input": "noGrade",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.light.only",
+     "optional": true
     },
     {
      "id": "light",
@@ -1141,7 +1293,7 @@
        "label": "Image number",
        "description": "Its 1-based number among the images sent.",
        "type": "number",
-       "sample": 8
+       "sample": 5
       },
       {
        "name": "guides",
@@ -1171,7 +1323,7 @@
      ],
      "sample": [
       {
-       "refIndex": 8,
+       "refIndex": 5,
        "guides": [
         "pose",
         "look",
@@ -1179,6 +1331,13 @@
        ]
       }
      ]
+    },
+    {
+     "name": "ownCamera",
+     "label": "Has its own camera",
+     "description": "The template’s camera words name a camera that is not a phone, or its style is cinematic: the camera feel is left out of the house style.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -1327,12 +1486,12 @@
     {
      "name": "look",
      "description": "her written look",
-     "sample": "young woman, shoulder-length dark brown hair"
+     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
     },
     {
      "name": "refCount",
-     "description": "how many sheet images she has",
-     "sample": "7"
+     "description": "how many images of her are sent",
+     "sample": "3"
     },
     {
      "name": "lora",
@@ -1346,13 +1505,13 @@
     },
     {
      "name": "style",
-     "description": "the house style",
-     "sample": "realistic smartphone photo"
+     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
+     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
     },
     {
      "name": "never",
      "description": "her never-add list plus the base list",
-     "sample": "tattoos, rings, logos"
+     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
     },
     {
      "name": "scene",
@@ -1401,6 +1560,12 @@
     "template.seed.locked",
     "template.seed.new",
     "shoot.seed.new"
+   ],
+   "variants": [
+    {
+     "id": "cinematic",
+     "label": "With a cinematic rig"
+    }
    ],
    "rules": [
     {
@@ -2040,12 +2205,12 @@
     {
      "name": "look",
      "description": "her written look",
-     "sample": "young woman, shoulder-length dark brown hair"
+     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
     },
     {
      "name": "refCount",
-     "description": "how many sheet images she has",
-     "sample": "7"
+     "description": "how many images of her are sent",
+     "sample": "3"
     },
     {
      "name": "lora",
@@ -2059,13 +2224,13 @@
     },
     {
      "name": "style",
-     "description": "the house style",
-     "sample": "realistic smartphone photo"
+     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
+     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
     },
     {
      "name": "never",
      "description": "her never-add list plus the base list",
-     "sample": "tattoos, rings, logos"
+     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
     },
     {
      "name": "angle",
@@ -2084,6 +2249,7 @@
     "shoot.style",
     "shoot.never"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "identity",
@@ -2281,12 +2447,12 @@
     {
      "name": "look",
      "description": "her written look",
-     "sample": "young woman, shoulder-length dark brown hair"
+     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
     },
     {
      "name": "refCount",
-     "description": "how many sheet images she has",
-     "sample": "7"
+     "description": "how many images of her are sent",
+     "sample": "3"
     },
     {
      "name": "lora",
@@ -2300,13 +2466,13 @@
     },
     {
      "name": "style",
-     "description": "the house style",
-     "sample": "realistic smartphone photo"
+     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
+     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
     },
     {
      "name": "never",
      "description": "her never-add list plus the base list",
-     "sample": "tattoos, rings, logos"
+     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
     },
     {
      "name": "angle",
@@ -2329,6 +2495,7 @@
     "shoot.never",
     "outfit.seed"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "identity",
@@ -2504,6 +2671,7 @@
    "blocks": [
     "outfit.edit"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "prompt",
@@ -2553,6 +2721,7 @@
    "blocks": [
     "enhance.prompt"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "prompt",
@@ -2685,12 +2854,12 @@
     {
      "name": "look",
      "description": "her written look",
-     "sample": "young woman, shoulder-length dark brown hair"
+     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
     },
     {
      "name": "refCount",
-     "description": "how many sheet images she has",
-     "sample": "7"
+     "description": "how many images of her are sent",
+     "sample": "3"
     },
     {
      "name": "lora",
@@ -2704,13 +2873,13 @@
     },
     {
      "name": "style",
-     "description": "the house style",
-     "sample": "realistic smartphone photo"
+     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
+     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
     },
     {
      "name": "never",
      "description": "her never-add list plus the base list",
-     "sample": "tattoos, rings, logos"
+     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
     },
     {
      "name": "angle",
@@ -2735,6 +2904,7 @@
     "shoot.never",
     "lora.variation"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "identity",
@@ -2838,6 +3008,13 @@
      "description": "The clip is sent with its audio (only when the performer speaks).",
      "type": "bool",
      "sample": true
+    },
+    {
+     "name": "newBackground",
+     "label": "Background: Describe it",
+     "description": "The user’s direction describes a new place; the clip’s moves and timing are kept, not its background.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -2919,15 +3096,20 @@
    ],
    "blocks": [
     "video.replicate.subjects",
+    "video.replicate.summary.describe.silent",
+    "video.replicate.summary.describe",
     "video.replicate.summary.silent",
     "video.replicate.summary",
+    "video.replicate.retention.describe",
     "video.replicate.retention",
+    "video.replicate.detailed.describe",
     "video.replicate.detailed.silent",
     "video.replicate.detailed",
     "video.mouth.speaking",
     "video.mouth.silent",
     "video.user.direction"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "subjects",
@@ -2936,6 +3118,37 @@
      "when": [],
      "block": "video.replicate.subjects",
      "locked": true
+    },
+    {
+     "id": "summary.describe.silent",
+     "label": "New background, not speaking",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "video.replicate.summary.describe.silent"
+    },
+    {
+     "id": "summary.describe",
+     "label": "New background from the direction",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.summary.describe"
     },
     {
      "id": "summary.silent",
@@ -2958,6 +3171,20 @@
      "block": "video.replicate.summary"
     },
     {
+     "id": "retention.describe",
+     "label": "What is kept (new background)",
+     "target": "retention",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.retention.describe",
+     "locked": true
+    },
+    {
      "id": "retention",
      "label": "What is kept",
      "target": "retention",
@@ -2966,12 +3193,30 @@
      "locked": true
     },
     {
+     "id": "detailed.describe",
+     "label": "Details (new background)",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.detailed.describe"
+    },
+    {
      "id": "detailed.silent",
      "label": "Not speaking: no mouthed words",
      "target": "detailed",
      "when": [
       {
        "input": "speaking",
+       "op": "is",
+       "value": false
+      },
+      {
+       "input": "newBackground",
        "op": "is",
        "value": false
       }
@@ -2987,6 +3232,11 @@
        "input": "speaking",
        "op": "is",
        "value": true
+      },
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": false
       }
      ],
      "block": "video.replicate.detailed"
@@ -3036,6 +3286,37 @@
      "locked": true
     },
     {
+     "id": "summary.describe.silent",
+     "label": "New background, not speaking",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "video.replicate.summary.describe.silent"
+    },
+    {
+     "id": "summary.describe",
+     "label": "New background from the direction",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.summary.describe"
+    },
+    {
      "id": "summary.silent",
      "label": "Not speaking: no lip-sync",
      "target": "summary",
@@ -3056,6 +3337,20 @@
      "block": "video.replicate.summary"
     },
     {
+     "id": "retention.describe",
+     "label": "What is kept (new background)",
+     "target": "retention",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.retention.describe",
+     "locked": true
+    },
+    {
      "id": "retention",
      "label": "What is kept",
      "target": "retention",
@@ -3064,12 +3359,30 @@
      "locked": true
     },
     {
+     "id": "detailed.describe",
+     "label": "Details (new background)",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.detailed.describe"
+    },
+    {
      "id": "detailed.silent",
      "label": "Not speaking: no mouthed words",
      "target": "detailed",
      "when": [
       {
        "input": "speaking",
+       "op": "is",
+       "value": false
+      },
+      {
+       "input": "newBackground",
        "op": "is",
        "value": false
       }
@@ -3085,6 +3398,11 @@
        "input": "speaking",
        "op": "is",
        "value": true
+      },
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": false
       }
      ],
      "block": "video.replicate.detailed"
@@ -3156,6 +3474,13 @@
      "description": "The background of the clip is kept (else a background photo replaces it).",
      "type": "bool",
      "sample": true
+    },
+    {
+     "name": "describeBackground",
+     "label": "Background: Describe it",
+     "description": "The user’s direction describes the new place (no photo).",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -3323,8 +3648,10 @@
     "video.edit.audio.kept",
     "video.edit.audio.replaced",
     "video.edit.background.keep",
+    "video.edit.background.describe",
     "video.edit.background.photo",
     "video.edit.video.keep",
+    "video.edit.video.describe",
     "video.edit.video.photo",
     "video.edit.subjects",
     "video.edit.summary",
@@ -3334,6 +3661,7 @@
     "video.mouth.silent",
     "video.user.direction"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "audio.subjects",
@@ -3408,6 +3736,19 @@
      "block": "video.edit.background.keep"
     },
     {
+     "id": "background.describe",
+     "label": "Background described",
+     "target": "@background",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.background.describe"
+    },
+    {
      "id": "background.photo",
      "label": "Background photo",
      "target": "@background",
@@ -3426,6 +3767,19 @@
       }
      ],
      "block": "video.edit.video.keep"
+    },
+    {
+     "id": "video.describe",
+     "label": "Source, background described",
+     "target": "@video",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.video.describe"
     },
     {
      "id": "video.photo",
@@ -3573,6 +3927,19 @@
      "block": "video.edit.background.keep"
     },
     {
+     "id": "background.describe",
+     "label": "Background described",
+     "target": "@background",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.background.describe"
+    },
+    {
      "id": "background.photo",
      "label": "Background photo",
      "target": "@background",
@@ -3591,6 +3958,19 @@
       }
      ],
      "block": "video.edit.video.keep"
+    },
+    {
+     "id": "video.describe",
+     "label": "Source, background described",
+     "target": "@video",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.video.describe"
     },
     {
      "id": "video.photo",
@@ -3737,6 +4117,7 @@
     "audio.beat",
     "audio.silent"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "lipsync",
@@ -3940,6 +4321,7 @@
     "suite.camera.format.veo",
     "suite.camera.format.generic"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "kling",
@@ -4484,6 +4866,7 @@
     "suite.shot.avoid",
     "suite.shot.footer"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "character.images",
@@ -5106,6 +5489,7 @@
     "suite.recast.direction",
     "suite.shot.footer"
    ],
+   "variants": [],
    "rules": [
     {
      "id": "task",

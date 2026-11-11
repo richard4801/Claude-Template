@@ -43,6 +43,11 @@ describe('house style split (unit)', () => {
     expect(E.photoshoot({ identity: id, outfit: { name: 'Green set' }, grade: 'Warm film' }).text).toContain(`Style: ${E.HOUSE_STYLE}.`);
   });
 
+  it('a scene typed as a sentence gets one full stop, not two', () => {
+    expect(E.photoshoot({ identity: id, outfit: { name: 'Green set' }, scene: 'She leans on a rooftop rail at dusk. ' }).text).toContain('\nScene: she leans on a rooftop rail at dusk.\n');
+    expect(E.photoshoot({ identity: id, outfit: { name: 'Green set' }, scene: '...' }).text).toContain('\nScene: rooftop · golden hour.\n');
+  });
+
   it('sheet fills, LoRA sets and outfit sets keep the clean reference look (Realism + Camera feel)', () => {
     expect(E.characterSheetShot(id, E.SHEET_ANGLES[0]).text).toContain(`Style: ${E.HOUSE_STYLE}.`);
     expect(E.outfitSet(id, { name: 'Green set' })[0]!.text).toContain(`Style: ${E.HOUSE_STYLE}.`);

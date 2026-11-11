@@ -171,7 +171,9 @@ export const seedFor = (key: string) => (javaHash(key) & 0x7fffffff) % 1_000_000
  * camera, lens or look: then `grade` is empty and the light line goes without one.
  */
 export function shootChoices(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS) {
-  const scene = s.scene && s.scene.trim() ? s.scene.trim() : t['shoot.default.scene']!;
+  // The scene line adds its own full stop: a scene typed as a sentence ("… at dusk.") loses its own, so it can't end "dusk..".
+  const typed = trimEndChars((s.scene ?? '').trim(), '.,;: ').trim();
+  const scene = typed ? typed : t['shoot.default.scene']!;
   const light = s.light && s.light.trim() ? s.light.trim() : t['shoot.default.light']!;
   const grade = s.grade && s.grade.trim() ? s.grade.trim() : s.ownCamera ? '' : t['shoot.default.grade']!;
   return { scene, light, grade, camera: s.camera ?? DEFAULT_CAMERA, ownCamera: !!s.ownCamera };
