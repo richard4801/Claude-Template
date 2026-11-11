@@ -153,6 +153,14 @@ struct EditSuiteEditor: View {
     static let mediaFits: CGFloat = 1108
     static let inspectorFits: CGFloat = 880
 
+    /// Runs an editor shortcut unless the person is typing (then the key goes to the text box).
+    private func shortcut(_ key: EditShortcuts.Key, plain: Bool = true) -> KeyPress.Result {
+        guard let action = EditShortcuts.action(for: key, typing: TextInputFocus.isTyping, timeline: session.mode == .timeline,
+                                                plainModifiers: plain) else { return .ignored }
+        EditShortcutRunner.run(action, session)
+        return .handled
+    }
+
     var body: some View {
         Group {
             switch session.phase {
@@ -249,21 +257,15 @@ struct EditSuiteEditor: View {
             // Review mode (SnapshotRunner.learnShots): the Claude panel up on its Playbook tab.
             if SnapshotRunner.state.claudeTab != nil { showClaude = true }
         }
-        .onKeyPress(.space) { session.togglePlay(); return .handled }
-        .onKeyPress(.leftArrow) { session.step(-1); return .handled }
-        .onKeyPress(.rightArrow) { session.step(1); return .handled }
-        .onKeyPress(.delete) { guard session.mode == .timeline else { return .ignored }; session.edit { $0.deleteSelected() }; return .handled }
-        .onKeyPress(.deleteForward) { guard session.mode == .timeline else { return .ignored }; session.edit { $0.deleteSelected() }; return .handled }
+        // Shortcuts are off while a text box has the cursor (owner bug 2026-11-11: typing in Claude chat played,
+        // split or deleted clips). The table lives in MuseCore (EditShortcuts) with its tests.
+        .onKeyPress(.space) { shortcut(.space) }
+        .onKeyPress(.leftArrow) { shortcut(.left) }
+        .onKeyPress(.rightArrow) { shortcut(.right) }
+        .onKeyPress(.delete) { shortcut(.delete) }
+        .onKeyPress(.deleteForward) { shortcut(.deleteForward) }
         .onKeyPress(characters: CharacterSet(charactersIn: "sSjJkKlL")) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            switch press.characters.lowercased() {
-            case "s": session.edit { $0.split() }
-            case "j": session.shuttleStep(-1)
-            case "k": session.shuttleStep(0)
-            case "l": session.shuttleStep(1)
-            default: return .ignored
-            }
-            return .handled
+            shortcut(.character(press.characters), plain: press.modifiers.isDisjoint(with: [.command, .control, .option]))
         }
         .overlay(alignment: .bottom) { messages.padding(.bottom, 16) }
         .overlay(alignment: .top) {

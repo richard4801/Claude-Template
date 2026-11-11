@@ -24,7 +24,7 @@ struct EditSuiteCaptionsMode: View {
         }
         .sheet(isPresented: $showTranslate) { EditSuiteTranslateSheet(session: session) }
         .onKeyPress(.delete) {
-            guard !picked.isEmpty, editing == nil else { return .ignored }
+            guard !picked.isEmpty, editing == nil, !TextInputFocus.isTyping else { return .ignored }
             deletePicked()
             return .handled
         }

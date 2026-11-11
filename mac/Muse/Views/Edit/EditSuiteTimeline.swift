@@ -59,9 +59,9 @@ struct EditSuiteTimeline: View {
             }
             tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil || s.selectedItem?.textItem != nil) { session.view { $0.tab = .video } }
             divider
-            SuiteIconButton(systemName: "arrow-counter-clockwise", label: "Undo (⌘Z)", disabled: !s.canUndo) { session.undo() }
+            SuiteIconButton(systemName: "arrow-counter-clockwise", label: "Undo (⌘Z)", disabled: !s.canUndo) { EditShortcutRunner.undoRedo(false, session) }
                 .keyboardShortcut("z", modifiers: .command)
-            SuiteIconButton(systemName: "arrow-clockwise", label: "Redo (⇧⌘Z)", disabled: !s.canRedo) { session.redo() }
+            SuiteIconButton(systemName: "arrow-clockwise", label: "Redo (⇧⌘Z)", disabled: !s.canRedo) { EditShortcutRunner.undoRedo(true, session) }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
             divider
             SuiteToolButton(title: "Ripple", icon: "magnet", filled: s.ripple, plain: !s.ripple, iconOnly: narrow) { session.view { $0.ripple.toggle() } }
