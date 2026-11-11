@@ -85,6 +85,10 @@ struct ComposerView: View {
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; store.suiteClaudeToolChanged() }
         // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.
         .onChange(of: s.composer) { _, _ in store.suiteComposerChanged() }
+        // …and what else is on screen: Swap/Recast's panel and clip, the input slots (Claude watches and sees them).
+        .onChange(of: s.swap) { _, _ in store.suiteComposerChanged() }
+        .onChange(of: store.clip?.id) { _, _ in store.suiteComposerChanged() }
+        .onChange(of: s.composerSlots.slots) { _, _ in store.suiteComposerChanged() }
         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
         .task(id: store.serverKey) { await store.loadSavedRigs() }
         .onChange(of: s.composer.tokens.characterId) { _, new in

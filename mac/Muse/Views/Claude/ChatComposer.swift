@@ -11,6 +11,9 @@ struct ChatPendingImage: Identifiable, Equatable {
     var data: Data
     var mime: String
     var video: ChatPendingVideo? = nil
+    /// An image's upload on the MUSE server (started when it is attached), so Claude can use it in a shot by its id
+    /// (suite_add_reference, set_sent_images). nil until it lands; the image still goes to Claude as a file without it.
+    var uploadId: String? = nil
 }
 
 /// A video waiting to go: uploaded to the MUSE server as soon as it is picked (Claude watches it there, by its upload id).
