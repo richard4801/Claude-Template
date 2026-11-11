@@ -119,7 +119,8 @@ export function onScreen(d: Draft) {
 
 // ------------------------------------------------------------------------------------------------ which draft
 
-type Env = { ctx: Ctx; user: AuthUser };
+/** `page`: the page the app shows now (the in-app chat passes it); it wins over the chat's stored page. */
+type Env = { ctx: Ctx; user: AuthUser; page?: PageRef };
 
 /** A camera session of this owner (camera sessions are the owner's own). */
 async function ownSession(ctx: Ctx, u: AuthUser, where: ReturnType<typeof eq>) {
@@ -185,6 +186,11 @@ export async function resolveAssist(env: Env, a: Record<string, unknown>): Promi
     return id;
   }
   if (typeof a.cameraSessionId === 'string' && a.cameraSessionId) return resolveAssist(env, { assistId: a.cameraSessionId });
+  if (env.page) {
+    const now = await fromIds(ctx, u, env.page.ids);
+    if (now) return now;
+    throw new ApiError(400, 'nothing_open', 'No composer is open on this page: open the AI Suite (open_page {page:"suite"}) or pass the draft id (sa_…, a camera Shot draft sd_… or a camera session cs_…)');
+  }
   const [t] = typeof a.chatId === 'string' && a.chatId
     ? await ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.id, a.chatId), eq(claudeThreads.ownerId, u.id), eq(claudeThreads.studioId, u.studioId)))
     : await ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.ownerId, u.id), eq(claudeThreads.studioId, u.studioId))).orderBy(desc(claudeThreads.updatedAt)).limit(1);

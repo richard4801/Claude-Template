@@ -230,7 +230,8 @@ export class EditAssistant {
     if (!tool || !(u.role === 'owner' || tool.members)) throw new ApiError(403, 'not_allowed', `${name} isn't available in your chats`);
     const args = bindArgs(tool, input, chatId, page);
     if ('missing' in args) throw new ApiError(400, 'nothing_open', missingHint(name, args.missing as string));
-    return tool.run({ ctx: this.ctx, user: u, source: 'chat' }, args);
+    // The page as the app sees it now: tools that look up the open item use it before the chat's stored page.
+    return tool.run({ ctx: this.ctx, user: u, source: 'chat', ...(page ? { page } : {}) } as Parameters<typeof tool.run>[0], args);
   }
 
   private async runTool(u: AuthUser, kind: AssistantContext, contextId: string, tu: { id: string; name: string; input: unknown }, emit: (e: ChatEvent) => void, page?: PageRef): Promise<BetaToolResultBlockParam> {

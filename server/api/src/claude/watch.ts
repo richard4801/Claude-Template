@@ -323,7 +323,7 @@ async function otherPhoto(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: string): 
   const [up] = key
     ? await ctx.db.select().from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, u.studioId)))
     : await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
-  if (!up) throw new ApiError(404, 'not_found', `Photo ${id} isn't in this studio (deleted, or not a take or upload id) · suite_feed or library lists the ids`);
+  if (!up) throw new ApiError(404, 'not_found', `Photo ${id} not found in this studio (deleted, or not a take or upload id) · suite_feed or library lists the ids`);
   if (!/^image\//i.test(up.contentType)) throw badRequest(`${id} is not a picture (${up.contentType})${/^video\//i.test(up.contentType) ? ': watch it instead' : ''}`);
   const obj = await ctx.storage.get(up.storageKey);
   if (!obj) throw new ApiError(409, 'not_ready', `${id}: the image hasn't arrived yet`);
