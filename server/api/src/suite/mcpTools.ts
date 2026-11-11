@@ -105,7 +105,7 @@ export const SUITE_TOOLS: EditTool[] = [
   },
   {
     name: 'suite_estimate', title: 'Price the shot', scope: 'edit:read', readOnly: true,
-    description: 'The price, the caps and the warnings for the shot as set up now. Nothing is held or run.',
+    description: 'The price, the caps and the warnings for the shot as set up now. Nothing is held or run. `adapted` lists what MUSE changed so the picked model can make it (frames sent as reference images, nearest length or aspect, references left out); the warnings say it in words: tell the person. If nothing can make it, the error lists each model\'s reasons and `fixes` ({fix: "model:<id>" | "quality:<tier>" | "drop_audio" | "drop_guide", label}): explain them and apply the one the person picks with suite_set_draft.',
     inputSchema: obj({ assistId: AID }, ['assistId']),
     run: async (env, a) => assistOf(env.ctx).estimate(env.user, need(a, 'assistId')),
   },

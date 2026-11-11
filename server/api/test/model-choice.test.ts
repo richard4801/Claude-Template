@@ -230,8 +230,9 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
   });
 
   it('shot default that can’t make a shot falls back to the ladder with a member-safe warning', async () => {
-    await owner.req('PATCH', '/v1/engines/defaults', { shot: 'ltx-2.3' }); // LTX: 6–10 s, no 1:1
-    const e = (await member.req('POST', '/v1/suite/shots/estimate', { prompt: 'A cat.', duration: 5, aspectRatio: '1:1', quality: 'draft' })).body;
+    await owner.req('PATCH', '/v1/engines/defaults', { shot: 'ltx-2.3' }); // LTX: no reference images (can't be adapted)
+    const e = (await member.req('POST', '/v1/suite/shots/estimate', { prompt: 'A cat.', duration: 5, aspectRatio: '1:1', quality: 'draft',
+      references: { images: [{ image: { url: 'https://example.com/p.png' }, role: 'product' }] } })).body;
     expect(e.warnings).toContain('The studio’s chosen engine can’t make this shot · the quality’s usual engine is used');
     expect(JSON.stringify(e)).not.toMatch(PROVIDER_WORDS);
     const fits = (await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'A cat.', duration: 8, aspectRatio: '9:16', quality: 'draft' })).body;

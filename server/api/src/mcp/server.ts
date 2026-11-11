@@ -78,7 +78,8 @@ export async function handleRpc(ctx: Ctx, camera: CameraService, user: AuthUser,
       } catch (e) {
         // Tool errors go back to the model so it can correct itself; unexpected ones are logged without detail to the client.
         captureToolError(ctx, user, name, e, 'mcp'); // Claude's issues: every failed tool call is logged (deduped, rate-limited)
-        if (e instanceof ApiError) return ok(id, { content: [{ type: 'text', text: `${e.code}: ${e.message}` }], isError: true });
+        // The error's extra (already sent to app clients: e.g. nothing_fits reasons and one-click fixes) goes to Claude too.
+        if (e instanceof ApiError) { const x = (e as ApiError & { extra?: unknown }).extra; return ok(id, { content: [{ type: 'text', text: `${e.code}: ${e.message}${x ? ` ${JSON.stringify(x)}` : ''}` }], isError: true }); }
         ctx.log.error({ err: (e as Error).message, tool: name }, 'mcp tool failed');
         return ok(id, { content: [{ type: 'text', text: 'server_error: something went wrong on the MUSE server' }], isError: true });
       }

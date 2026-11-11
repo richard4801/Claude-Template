@@ -56,7 +56,8 @@ export async function createShotDraft(ctx: Ctx, user: AuthUser, d: DraftInput): 
       if (!(e instanceof ApiError) || e.code !== 'nothing_fits' || !request.engineModel) throw e;
       const { engineModel: _m, resolution: _r, ...rest } = request;
       request = rest;
-      fallback = `${d.targetModel} can't make this shot right now · priced on the best available model`;
+      const why = ((e as ApiError & { extra?: { reasons?: { name: string; reasons: string[] }[] } }).extra?.reasons ?? []).map(x => x.reasons.join('; ')).join('; ');
+      fallback = `${d.targetModel} can't make this shot${why ? ` (${why})` : ' right now'} · priced on the best available model`;
       r = await suite.estimate(user, request);
     }
     const usd = round2(Number(r.estimate ?? 0));

@@ -76,8 +76,8 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.updateSettings(req.user, req.body));
 }
 
-/** nothing_fits carries the ladder steps that were tried (owner only: they name models). */
+/** nothing_fits carries per-model reasons and one-click fixes (member-safe), and the ladder steps tried (owner only). */
 function nothingFits(e: unknown, owner: boolean, reply: any) {
-  if (e instanceof ApiError && e.code === 'nothing_fits') return reply.status(400).send({ error: e.message, code: e.code, ...(owner ? { tried: (e as any).tried } : {}) });
+  if (e instanceof ApiError && e.code === 'nothing_fits') return reply.status(400).send({ error: e.message, code: e.code, ...((e as any).extra ?? {}), ...(owner ? { tried: (e as any).tried } : {}) });
   throw e;
 }

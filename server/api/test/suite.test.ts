@@ -322,12 +322,21 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     const mk = await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' });
     expect(mk.status).toBe(200);
     expect(mk.body.engine).toBeUndefined();
-    const none = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', duration: 30, quality: 'draft' });
+    // Too long is adapted (the nearest length, said in the warnings); an audio reference with nothing to ride on can't be.
+    const long = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', duration: 30, quality: 'draft' });
+    expect(long.status).toBe(200);
+    expect(long.body.warnings.join(' ')).toMatch(/made \d+ s, .* max/);
+    const AUDIO_ONLY = { prompt: 'x', quality: 'draft', references: { audio: { audio: { url: 'https://example.com/a.mp3' } } } };
+    const none = await owner.req('POST', '/v1/suite/shots/estimate', AUDIO_ONLY);
     expect(none.status).toBe(400);
     expect(none.body.code).toBe('nothing_fits');
     expect(none.body.tried.length).toBe(5);
-    const nm = await member.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', duration: 30, quality: 'draft' });
+    expect(none.body.error).not.toMatch(/try another quality/);
+    expect(none.body.reasons.length).toBeGreaterThan(0);
+    const nm = await member.req('POST', '/v1/suite/shots/estimate', AUDIO_ONLY);
     expect(nm.body.tried).toBeUndefined();
+    expect(nm.body.reasons[0].reasons.join(' ')).toMatch(/audio/);
+    expect(JSON.stringify(nm.body.fixes)).toMatch(/drop_audio/);
     // Look grading: the estimate names the take's Look (off with gradeLook: false).
     const lk = (await member.req('POST', '/v1/suite/shots/estimate', { ...body, camera: { preset: 'cinematic' } })).body;
     expect(lk.look).toEqual({ id: 'teal_orange', kind: 'palette', label: 'Teal & orange', lut: 'pack:cine-teal-orange' });

@@ -138,6 +138,12 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - LIVE 16:31: Claude issue reports (e6c9ba3e, migration 0031). Hourly scheduled task trig_01SBLrpvZNVs4VewaQtkUHie
   (fresh session at :31) polls MCP tool claude_issues {status:new} with the proxy-injected owner token, messages the
   coordinator session, marks them triaged. A new coordinator must update that task's target session id (update_trigger).
+- DONE shot fit (server, branch claude/shot-fit): Camera-stage guide keyframes are HINTS (never keyframe mode; sent as
+  frames only where the model takes frames with refs on one endpoint, else as reference images after hers, else dropped
+  with a note). "Adapt, don't block" (plan.ts adaptRequest/pickAdapted): own frames → reference images with "Open on /
+  End like image n", length clamped, nearest aspect/resolution, refs/videos trimmed, each said in warnings + `adapted`.
+  Refusals: "Can't make this shot · <Model>: <plain reasons>" + `reasons` + `fixes` [{fix: model:<id>|quality:<t>|
+  drop_audio|drop_guide, label}] (HTTP and Claude's MCP errors). APP WORK (queue): a "Fix" chip per `fixes` entry.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)

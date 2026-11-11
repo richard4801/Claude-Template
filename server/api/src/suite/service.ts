@@ -19,7 +19,7 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
-import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
+import { buildPlan, modelName as specName, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
@@ -282,20 +282,60 @@ export class SuiteService {
     if (need.mode === 'reference' && !character?.images.length && !need.extraImages) throw badRequest('Reference shots need a character with a sheet, or reference images');
     if (need.mode === 'text' && !r.prompt.trim()) throw badRequest('Describe the shot');
     const o = { prefs, providers: this.available(), studioId: u.studioId };
-    let pick = pickModel(r.quality, need, { ...o, engineModel: choice?.model, resolution: choice?.source === 'request' ? r.resolution : undefined });
-    const skipped = 'error' in pick && choice?.source === 'studio';
-    if (skipped) pick = pickModel(r.quality, need, o);
-    if ('error' in pick) {
-      const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't make this shot · try another quality, a shorter length or fewer references`);
-      (e as any).tried = pick.tried;
-      throw e;
+    // Strict first; then "adapt, don't block" (plan.ts adaptRequest): frames as references, the nearest length/aspect, …
+    const pickWith = (opts: typeof o & { engineModel?: string; resolution?: string }) => {
+      const strict = pickModel(r.quality, need, opts);
+      if (!('error' in strict)) return { pick: strict, request: r, need, notes: [] as string[], adapted: [] as string[] };
+      const a = pickAdapted(r.quality, r, character, opts);
+      return 'error' in a ? { error: a } : { pick: a.pick, request: a.adapted.request, need: a.adapted.need, notes: a.adapted.notes, adapted: a.adapted.adapted };
+    };
+    let got = pickWith({ ...o, engineModel: choice?.model, resolution: choice?.source === 'request' ? r.resolution : undefined });
+    const first = 'error' in got ? got.error : null;
+    const skipped = !!first && choice?.source === 'studio';
+    if (skipped) got = pickWith(o);
+    if ('error' in got) {
+      const last = got.error!;
+      const fail = first && skipped ? { tried: [...first.tried, ...last.tried], refusals: [...first.refusals, ...last.refusals] } : last;
+      throw await this.nothingFits(u, r, character, need, fail, choice?.source === 'request');
     }
+    const pick = got.pick;
     const texts = await this.ctx.prompts.texts(u.studioId);
-    const talk = await this.resolveSpeaking(u.studioId, r);
-    const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
+    const talk = await this.resolveSpeaking(u.studioId, got.request);
+    const plan = buildPlan(got.request, got.need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
       separationUsd: SEPARATION_ESTIMATE_USD, sent: await sentImagesOf(this.ctx).forRequest(u, r) });
+    if (got.notes.length) { plan.notes.unshift(...got.notes); plan.adapted = got.adapted; }
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
+  }
+
+  /**
+   * The refusal when nothing can make the shot even adapted: per-model reasons in plain words, and one-click fixes the
+   * app (or Claude) can apply — another model that can make it as asked, another quality, or dropping what blocks it.
+   */
+  private async nothingFits(u: AuthUser, r: ShotRequest, character: Character | null, need: Need, fail: { tried: ModelPick['tried']; refusals: Refusal[] }, picked: boolean) {
+    const prefs = await this.prefs(u.studioId);
+    const o = { prefs, providers: this.available(), studioId: u.studioId };
+    const fixes: { fix: string; label: string }[] = [];
+    const reasons = fail.refusals.slice(0, picked ? 1 : 3);
+    const blockers = new Set(fail.tried.map(t => t.why));
+    if (need.audioRef && [...blockers].some(w => /audio/.test(w))) fixes.push({ fix: 'drop_audio', label: 'Leave out the audio reference' });
+    if (need.directed && blockers.has('no guide clip')) fixes.push({ fix: 'drop_guide', label: 'Describe the camera in words instead of the guide clip' });
+    // Another model the person may pick that makes it (adapted is fine).
+    const cands = await modelChoice(this.ctx).candidates(u, purposeOfShot(r)).catch(() => []);
+    for (const c of cands) {
+      if (fixes.filter(f => f.fix.startsWith('model:')).length >= 3) break;
+      if (fail.tried.some(t => t.model === c.model) || !modelById(c.model)) continue;
+      const a = pickAdapted(r.quality, r, character, { ...o, engineModel: c.model });
+      if (!('error' in a)) fixes.push({ fix: `model:${c.model}`, label: `Use ${specName(a.pick.model)}` });
+    }
+    if (!picked) for (const t of TIERS) {
+      if (t === r.quality) continue;
+      if (!('error' in pickAdapted(t, r, character, o))) fixes.push({ fix: `quality:${t}`, label: `Use ${TIER_INFO[t].label}` });
+    }
+    const why = reasons.length ? reasons.map(refusalLine).join(' · ') : `${TIER_INFO[r.quality].label} has no model set up for this shot`;
+    const e = new ApiError(400, 'nothing_fits', `Can't make this shot · ${why}`);
+    Object.assign(e, { tried: fail.tried, extra: { reasons, fixes } });
+    return e;
   }
 
   /**
@@ -437,7 +477,7 @@ export class SuiteService {
       quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
       estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       buttonLabel: `Generate · ${Math.round(plan.seconds * 10) / 10} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
-      caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
+      caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], ...(plan.adapted?.length ? { adapted: plan.adapted } : {}), camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
       look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
