@@ -173,6 +173,8 @@ struct ClaudeChatView: View {
             }
             transcript
             if model.answeringPhone { phoneStrip }
+            // Files on this Mac: Claude's questions before a file or command call wait here.
+            if let tid = model.thread?.id { ClaudeFileApprovals(threadId: tid, chatTitle: model.thread?.title) }
             composer
         }
     }

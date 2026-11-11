@@ -16,6 +16,9 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
     case status(ClaudeStatus)
     /// One Claude: a line Claude left for the app (open a page, "Remembered … Undo").
     case ui(threadId: String, name: String, ClaudeUI)
+    /// Files on this Mac: Claude Code asks before a file or command call (the approval card), and the question ended.
+    case permission(ClaudePermissionAsk)
+    case permissionEnd(id: String)
 }
 
 /// SSE lines → `claude` live events; everything else on the stream is ignored.
@@ -41,8 +44,10 @@ public struct ClaudeLiveEventFilter: Sendable {
         var event: ClaudeEvent?
         var name: String?
         var ui: ClaudeUI?
+        var ask: ClaudePermissionAsk?
+        var id: String?
 
-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui }
+        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: K.self)
             type = try c.decode(String.self, forKey: .type)
@@ -56,6 +61,8 @@ public struct ClaudeLiveEventFilter: Sendable {
             event = try? c.decodeIfPresent(ClaudeEvent.self, forKey: .event)
             name = try? c.decodeIfPresent(String.self, forKey: .name)
             ui = try? c.decodeIfPresent(ClaudeUI.self, forKey: .ui)
+            ask = try? c.decodeIfPresent(ClaudePermissionAsk.self, forKey: .ask)
+            id = try? c.decodeIfPresent(String.self, forKey: .id)
         }
     }
 
@@ -77,6 +84,8 @@ public struct ClaudeLiveEventFilter: Sendable {
         case "ui":
             guard let tid = e.threadId, let name = e.name, let ui = e.ui else { return nil }
             return .ui(threadId: tid, name: name, ui)
+        case "permission": return e.ask.map { .permission($0) }
+        case "permission_end": return e.id.map { .permissionEnd(id: $0) }
         default: return nil
         }
     }

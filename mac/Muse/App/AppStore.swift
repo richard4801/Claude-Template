@@ -535,6 +535,7 @@ final class AppStore {
         await reload()
         // Workstream 2: the Blender relay (owner only, off until switched on in its debug view).
         BlenderRelayService.shared.configure(baseURL: (api as? HTTPMuseAPI)?.baseURL, isOwner: isOwner) { [http = api as? HTTPMuseAPI] in http?.sessionToken }
+        ClaudeCodeService.shared.setPerson(user?.id) // Files on this Mac: this person's own settings
     }
 
     private func startEvents() {

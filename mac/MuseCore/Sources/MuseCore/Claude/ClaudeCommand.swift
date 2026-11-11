@@ -1,8 +1,10 @@
 import Foundation
 
 /// The headless Claude Code command MUSE runs for one turn, and its `--mcp-config` file.
-/// One process per turn; `--resume` carries the conversation on. Tools are MUSE's MCP (plus Blender's when the relay is on);
-/// Bash, file edits and the web are off, and nothing asks for permission (anything not allowed is refused).
+/// One process per turn; `--resume` carries the conversation on. Tools are MUSE's MCP (plus Blender's when the relay is on).
+/// Files off: Bash, file edits and the web are off, and nothing asks for permission (anything not allowed is refused).
+/// Files on (the person's "Files on this Mac: Ask every time"): Read, Glob, Grep, Write, Edit and Bash are there, and every
+/// call of them asks through MUSE's `permission_prompt` tool, which puts an approval card in the chat. The web stays off.
 public struct ClaudeCommand: Hashable, Sendable {
     /// Where Blender's MCP server (`uvx mcp-for-blender`) is, when the Blender relay is on.
     public struct Blender: Hashable, Sendable {
@@ -19,6 +21,8 @@ public struct ClaudeCommand: Hashable, Sendable {
     /// Claude Code waits this long (ms) for an MCP server to start. Its default, 30 s, is shorter than uvx's first
     /// download of mcp-for-blender (or any start with a cold uv cache), so Blender's tools silently went missing.
     public static let mcpStartTimeoutMs = "120000"
+    /// How long a MUSE tool call may wait silently (an approval card, a guide render).
+    public static let mcpWaitTimeoutMs = "3700000"
 
     public var mcpURL: String
     public var token: String
@@ -30,6 +34,8 @@ public struct ClaudeCommand: Hashable, Sendable {
     public var readDirectory: String?
     /// Step 6b: the Claude model for this chat (`--model`); nil = Claude Code's own default.
     public var model: String?
+    /// Files on this Mac, asking every time (see above).
+    public var files = false
 
     public init(mcpURL: String, token: String, blender: Blender? = nil, resume: String? = nil, appendSystemPrompt: String? = nil) {
         self.mcpURL = mcpURL
@@ -40,6 +46,10 @@ public struct ClaudeCommand: Hashable, Sendable {
     }
 
     public static let disallowed = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+    /// With files on: the web and notebooks stay off; keys and tokens are denied by rule as well as by the card.
+    public static let disallowedWithFiles = ["NotebookEdit", "WebFetch", "WebSearch"] + ClaudeFilePolicy.denyRules
+    /// The tool every file or command call asks through (MUSE's MCP server; the app shows the card).
+    public static let permissionPromptTool = "mcp__muse__permission_prompt"
 
     /// A model id as the server lists them (`claude-opus-5-5`): letters, digits and dashes only.
     public static func validModel(_ m: String) -> Bool {
@@ -54,8 +64,13 @@ public struct ClaudeCommand: Hashable, Sendable {
         if blender != nil { a.append("mcp__blender") }
         if let d = readDirectory, d.hasPrefix("/") { a.append("Read(/\(d)/**)") }
         a.append("--disallowedTools")
-        a += Self.disallowed
-        a += ["--permission-mode", "dontAsk", "--setting-sources", "user"]
+        if files {
+            a += Self.disallowedWithFiles
+            a += ["--permission-mode", "default", "--permission-prompt-tool", Self.permissionPromptTool, "--setting-sources", "user"]
+        } else {
+            a += Self.disallowed
+            a += ["--permission-mode", "dontAsk", "--setting-sources", "user"]
+        }
         if let p = appendSystemPrompt, !p.isEmpty { a += ["--append-system-prompt", p] }
         if let resume, !resume.isEmpty { a += ["--resume", resume] }
         if let m = model, Self.validModel(m) { a += ["--model", m] }
@@ -98,6 +113,9 @@ public struct ClaudeCommand: Hashable, Sendable {
         env["PATH"] = path.joined(separator: ":")
         env["HOME"] = env["HOME"] ?? home
         env["MCP_TIMEOUT"] = env["MCP_TIMEOUT"] ?? mcpStartTimeoutMs
+        // A MUSE tool call that waits on a person (an approval card) or on the Mac (render_camera_guides) sends nothing
+        // while it waits; Claude Code's 5-minute idle limit for HTTP MCP servers would cut it off. One hour, as the server's.
+        env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] = env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] ?? mcpWaitTimeoutMs
         return env
     }
 }

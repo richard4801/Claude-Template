@@ -56,6 +56,9 @@ public protocol ClaudeAPI: Sendable {
     func claudeModels() async throws -> ClaudeModelList
     func setChatModel(_ id: String, model: String?) async throws
     func setDefaultModel(_ model: String?) async throws
+    /// Files on this Mac: Claude Code's questions waiting for this person, and their answer.
+    func pendingPermissions() async throws -> [ClaudePermissionAsk]
+    func answerPermission(_ id: String, allow: Bool, message: String?) async throws
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -75,6 +78,8 @@ public extension ClaudeAPI {
     func claudeModels() async throws -> ClaudeModelList { throw ApiError("not_found", "This server has no model choice yet") }
     func setChatModel(_ id: String, model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
     func setDefaultModel(_ model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
+    func pendingPermissions() async throws -> [ClaudePermissionAsk] { [] }
+    func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
 }
 
 enum ClaudeIds {
@@ -202,6 +207,14 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func claudeModels() async throws -> ClaudeModelList { try await call("GET", "v1/claude/models") }
     public func setChatModel(_ id: String, model: String?) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(ModelPatch(model: model))))
+    }
+    public func pendingPermissions() async throws -> [ClaudePermissionAsk] {
+        let list: ClaudePermissionList = try await call("GET", "v1/claude/permissions")
+        return list.asks
+    }
+    private struct PermissionAnswer: Encodable { var allow: Bool; var message: String? }
+    public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
+        _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))
     }
     public func setDefaultModel(_ model: String?) async throws {
         _ = try await send(request("PUT", "v1/claude/prefs", body: try encoder.encode(PrefsPut(defaultModel: model))))

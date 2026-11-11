@@ -97,6 +97,8 @@ public actor ClaudeRelay {
     private let blender: @Sendable () async -> ClaudeCommand.Blender?
     private let onEvent: @Sendable (String, String?, ClaudeEvent) -> Void
     private let onState: @Sendable (ClaudeRelayState) -> Void
+    /// The person's "Files on this Mac" (true = ask every time).
+    private let files: @Sendable () async -> Bool
 
     private var queue = ClaudeTurnQueue()
     /// Where a relative image link (`/uploads/…`) is resolved.
@@ -112,7 +114,9 @@ public actor ClaudeRelay {
     private var stopPending: Set<String> = []
 
     public init(api: any ClaudeAPI, makeRunner: @escaping RunnerFactory, blender: @escaping @Sendable () async -> ClaudeCommand.Blender? = { nil },
-                onEvent: @escaping @Sendable (String, String?, ClaudeEvent) -> Void, onState: @escaping @Sendable (ClaudeRelayState) -> Void = { _ in }) {
+                onEvent: @escaping @Sendable (String, String?, ClaudeEvent) -> Void, onState: @escaping @Sendable (ClaudeRelayState) -> Void = { _ in },
+                files: @escaping @Sendable () async -> Bool = { false }) {
+        self.files = files
         self.api = api
         self.makeRunner = makeRunner
         self.blender = blender
@@ -245,6 +249,7 @@ public actor ClaudeRelay {
                                    blender: await blender(), systemPrompt: systemPrompt(threadId: tid))
         req.shownText = job.text
         req.model = model(threadId: tid)
+        req.files = job.turnId == nil ? await files() : false
         req.uploadIds = job.files.map(\.uploadId).filter { !$0.isEmpty }
         if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }
         let onEvent = self.onEvent
