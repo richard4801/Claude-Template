@@ -106,6 +106,10 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   Member source uploads left as sent (ASKED owner whether to strip GPS EXIF from member photo uploads).
   APP WORK (Mac/Android queue): strip metadata on device exports (Mac AVAssetExportSession/Writer metadata = [], label
   only when on; Android Transformer same; photos without EXIF); update the label hint text in both apps.
+- Owner approved (after the oval): timeline badge on clips with mask/invert/green screen/cut-out (click opens the
+  setting) + Claude announces mask changes with Undo → branch claude/edit-mask-badge (Mac queue; Android later).
+  Mac queue now: model picker (+ header, composer, open-item fixes) → outfit page → mask badge → 4c app switches
+  + 5A.3 device-export strip → layers.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
