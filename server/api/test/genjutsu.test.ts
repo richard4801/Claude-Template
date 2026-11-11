@@ -22,7 +22,7 @@ const PRESET = 'c2143317-f28d-4c3c-a0b8-39bd547e08a7';
 describe('Genjutsu · registry, pricing and inputs', () => {
   it('motion transfer and Light are Higgsfield swap engines with their real ids, limits and per-second prices', () => {
     const gj = SWAP_ENGINES.find(e => e.id === 'genjutsu')!, light = SWAP_ENGINES.find(e => e.id === 'genjutsu-light')!;
-    expect(gj).toMatchObject({ name: 'Genjutsu (Higgsfield)', runs: 'higgsfield', ref: 'higgsfield/genjutsu/motion-transfer/v1.0', genjutsu: { minSec: 4, maxSec: 30, maxImages: 8 } });
+    expect(gj).toMatchObject({ name: 'Genjutsu', runs: 'higgsfield', ref: 'higgsfield/genjutsu/motion-transfer/v1.0', genjutsu: { minSec: 4, maxSec: 30, maxImages: 8 } });
     expect(light).toMatchObject({ runs: 'higgsfield', ref: 'higgsfield/genjutsu-light/motion-transfer/v1.0', genjutsu: { maxSec: 15 } });
     expect(SWAP_ENGINES.some(e => e.ref?.startsWith('higgsfiled'))).toBe(false); // never the legacy misspelled id
     expect(modelById('genjutsu')!.resolutions.map(r => [r.id, r.perSec])).toEqual([['480p', 0.154], ['720p', 0.3446], ['1080p', 0.8346]]);
@@ -127,20 +127,20 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
     return { req: r.body.request, j };
   };
 
-  it('offered for Swap (and Recreate fills) to the owner and members, 4–30 s, 720p price; member name without the provider', async () => {
+  it('offered for Swap (and Recreate fills) to the owner and members, 4–30 s, 720p price; members see "Genjutsu · Higgsfield" while provider names are shown', async () => {
     const a = await makeApp(env());
     const { owner, members: [member] } = await people(a, 1, { topUp: 100 });
     try {
       const list = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
       const row = (list.engines ?? list).find((e: any) => e.model === 'genjutsu');
-      expect(row).toMatchObject({ name: 'Genjutsu (Higgsfield)', provider: 'higgsfield', price: { basis: 'per_second', usd: 0.3446 } });
+      expect(row).toMatchObject({ name: 'Genjutsu', label: 'Genjutsu · Higgsfield', provider: 'higgsfield', price: { basis: 'per_second', usd: 0.3446 } });
       expect(row.purposes).toEqual(expect.arrayContaining(['swap', 'fill']));
       expect(row.limits).toMatchObject({ minSeconds: 4, maxInputSeconds: 30 });
       expect((list.engines ?? list).some((e: any) => e.model === 'genjutsu-light')).toBe(true);
       const ml = (await member!.req('GET', '/v1/engines?purpose=swap')).body;
       const mrow = (ml.engines ?? ml).find((e: any) => e.model === 'genjutsu');
       expect(mrow).toBeTruthy();
-      expect(mrow.name).toBe('Genjutsu');
+      expect(mrow).toMatchObject({ name: 'Genjutsu', label: 'Genjutsu · Higgsfield', providerName: 'Higgsfield' });
     } finally { await a.close(); }
   });
 

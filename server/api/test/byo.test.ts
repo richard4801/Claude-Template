@@ -280,13 +280,14 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       await owner.req('PATCH', `/v1/providers/models/${vm.id}`, { members: true });
       mc = (await member!.req('GET', '/v1/suite/catalog')).body.custom;
       expect(mc.map((c: any) => c.name)).toEqual(['House Motion', 'House Still']);
-      expect(Object.keys(mc[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'maxSeconds', 'minSeconds', 'name', 'price', 'provider', 'providerName']);
+      expect(Object.keys(mc[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'label', 'maxSeconds', 'minSeconds', 'name', 'price', 'provider', 'providerName']);
+      expect(mc[0].label).toBe('House Motion · Replicate');
       expect(mc[0].providerName).toBe('Replicate');
       expect(JSON.stringify(mc)).not.toMatch(MODEL_REFS);
       expect(JSON.stringify(mc)).not.toMatch(/costUsd|priceScale|r8_/);
       await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false });
       const plain = (await member!.req('GET', '/v1/suite/catalog')).body.custom;
-      expect(Object.keys(plain[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'maxSeconds', 'minSeconds', 'name', 'price']);
+      expect(Object.keys(plain[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'label', 'maxSeconds', 'minSeconds', 'name', 'price']);
       expect(JSON.stringify(plain)).not.toMatch(PROVIDER_WORDS);
       await owner.req('PATCH', '/v1/engines/members', { showProviderNames: true });
       expect(mc[0]).toMatchObject({ minSeconds: 5, maxSeconds: 10, aspectRatios: ['16:9', '9:16', '1:1'], inputs: { start: true, images: 0 } });
