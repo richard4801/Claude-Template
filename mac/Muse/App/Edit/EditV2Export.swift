@@ -40,8 +40,20 @@ extension EditV2Engine {
     /// Writes `built` through AVAssetReader → AVAssetWriter: video at `bitrate` bits/s (H.264 or HEVC) with AAC sound, or
     /// with `audioOnly` just the mix as AAC 192 kbit/s in an .m4a. Progress 0…1; cancelling stops it and deletes the file.
     /// `hdr`: HEVC Main 10, BT.2020 / HLG (built with `hdr`).
+    /// 5A.3: what a file saved on this Mac carries: nothing (no device, place, software or source details), and with the
+    /// "Label as AI-generated" switch on only MUSE's label, as the server writes it on stored files.
+    static let aiLabelText = "AI-generated · made with MUSE"
+    static func fileMetadata(aiLabel: Bool) -> [AVMetadataItem] {
+        guard aiLabel else { return [] }
+        let item = AVMutableMetadataItem()
+        item.identifier = .iTunesMetadataUserComment
+        item.value = aiLabelText as NSString
+        item.extendedLanguageTag = "und"
+        return [item]
+    }
+
     static func write(_ built: Built, to url: URL, audioOnly: Bool = false, hevc: Bool = false, bitrate: Double = 16e6, hdr: Bool = false,
-                      progress: @escaping @MainActor (Double) -> Void) async throws {
+                      aiLabel: Bool = false, progress: @escaping @MainActor (Double) -> Void) async throws {
         try? FileManager.default.removeItem(at: url)
         let asset = built.composition
         let total = max(0.1, built.plan.durationSec)
@@ -98,6 +110,7 @@ extension EditV2Engine {
         }
         guard !pumps.isEmpty else { throw ApiError("edit_export_failed", "Nothing to export") }
         guard reader.startReading() else { throw reader.error ?? ApiError("edit_export_failed", "Couldn't read this edit") }
+        writer.metadata = fileMetadata(aiLabel: aiLabel)
         guard writer.startWriting() else { throw writer.error ?? ApiError("edit_export_failed", "Couldn't write the file") }
         writer.startSession(atSourceTime: .zero)
         do {

@@ -24,7 +24,7 @@ extension AppStore {
 
     /// The catalog for every purpose (owner only), once per session or when asked again.
     func loadEngines(force: Bool = false) async {
-        guard isOwner, let api = engineChoiceAPI, !engineChoice.loading, force || engineChoice.catalog == nil else { return }
+        guard let api = engineChoiceAPI, !engineChoice.loading, force || engineChoice.catalog == nil else { return }
         engineChoice.loading = true
         defer { engineChoice.loading = false }
         do {
@@ -41,10 +41,9 @@ extension AppStore {
     }
 
     /// The owner's pick for this purpose (nil = Auto). Members never have one.
-    func enginePick(_ p: EnginePurpose) -> EnginePick? { isOwner ? engineChoice.picks[p] : nil }
+    func enginePick(_ p: EnginePurpose) -> EnginePick? { engineChoice.picks[p] } // 4c: members pick too
 
     func setEnginePick(_ p: EnginePurpose, _ pick: EnginePick?) {
-        guard isOwner else { return }
         engineChoice.picks[p] = pick
     }
 

@@ -233,6 +233,9 @@ private struct SpendingSettings: View {
         if store.isOwner {
             DefaultModelsSettings()
                 .task { await store.loadEngines() }
+            // 4c: model choice for everyone: the provider-name switch and "Hide from members" per model.
+            MemberModelsSettings()
+                .padding(.top, Space.s4)
             DisclosureRow(title: "Models and our own GPUs", summary: "Status, GPU limits, the photo service and price corrections", open: $enginesOpen)
                 .padding(.top, Space.s4)
             if enginesOpen {

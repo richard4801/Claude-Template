@@ -181,7 +181,7 @@ struct EditSuiteExportSheet: View {
                 Spacer()
                 Text("Your choice, per export").font(t.body(12)).foregroundStyle(t.muted)
             }
-            SuiteToggleRow(title: "Label as AI-generated", hint: "Adds the platform’s AI label when you post from MUSE", isOn: settings.labelAI) { settings.labelAI = $0 }
+            SuiteToggleRow(title: "Label as AI-generated", hint: "Adds “AI-generated · made with MUSE” to the file, and the platform’s AI label when you post. Off: the file carries no label or other details", isOn: settings.labelAI) { settings.labelAI = $0 }
             Text("Ads with realistic AI people may need a label in some places (EU, New York). We remind you when posting an ad.")
                 .font(t.body(12)).foregroundStyle(t.muted)
         }

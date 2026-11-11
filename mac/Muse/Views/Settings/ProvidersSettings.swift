@@ -25,7 +25,7 @@ struct ProvidersSettings: View {
             } else if s.adding {
                 ProviderKeyForm()
             } else if s.accounts.isEmpty {
-                EmptyState("No providers yet", "Add an API key for an AI provider you use. Its image and video models can then be picked per shot. Members never see them.",
+                EmptyState("No providers yet", "Add an API key for an AI provider you use. Its image and video models can then be picked per shot, by you and your members (hide any in What members see).",
                            actionTitle: "Add a provider", actionKind: .action) { store.openProviderForm() }
                     .frame(maxWidth: .infinity)
                     .padding(.top, Space.s5)
@@ -192,7 +192,7 @@ struct DefaultModelsSettings: View {
     var body: some View {
         let catalog = store.engineChoice.catalog
         SectionTitle("Default models").id("settings.models")
-        Text("What \u{201C}Auto\u{201D} uses for each kind of work. You can still pick another model each time. Only you see models.")
+        Text("What \u{201C}Auto\u{201D} uses for each kind of work. Anyone in the studio can still pick another model each time.")
             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true).padding(.bottom, Space.s2)
         if let catalog {
             ForEach(EnginePurpose.allCases) { p in
@@ -220,6 +220,62 @@ struct DefaultModelsSettings: View {
             InlineNotice(e, tone: .caution)
         } else {
             SkeletonRows(count: 4, thumb: false)
+        }
+    }
+}
+
+/// 4c (owner, 2026-11-11): what members see of the studio's models. "Show provider names to members" (on for now, while
+/// the studio settles on a provider) and a "Hide from members" switch on every video and image model. Members see every
+/// model that isn't hidden and pick it themselves; keys, costs and the switches stay the owner's.
+struct MemberModelsSettings: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var view: EngineMembers?
+    @State private var error: String?
+    @State private var saving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { rows }
+            .task { await load() }
+    }
+
+    @ViewBuilder private var rows: some View {
+        SectionTitle("What members see").id("settings.members.models")
+        Text("Members can pick any model below that isn't hidden. Keys, costs and these switches stay yours.")
+            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true).padding(.bottom, Space.s2)
+        if let v = view {
+            SettingRow("Show provider names to members", hint: "Members see \u{201C}Kling 4.0 · Replicate\u{201D} instead of just the model") {
+                RSwitch(label: "Show provider names to members", isOn: Binding(get: { v.showProviderNames }, set: { on in save(showProviderNames: on, hidden: [:]) }))
+            }
+            ForEach(v.models) { m in
+                SettingRow(m.name, hint: [m.kind == "image" ? "Image" : "Video", v.showProviderNames ? m.provider?.capitalized : nil].compactMap { $0 }.joined(separator: " · ")) {
+                    RSwitch(label: "Hide \(m.name) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
+                }
+            }
+            Text("The switch hides a model from members. You always see every model.")
+                .scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s1)
+        } else if let error {
+            Text(error).scaled(t.scale.caption, t.roles.ink2)
+        } else {
+            SkeletonBlock(width: 220, height: 10)
+        }
+    }
+
+    private func load() async {
+        guard let api = store.engineChoiceAPI else { error = "Sign in to your MUSE server first."; return }
+        do { view = try await api.engineMembers(); error = nil } catch {
+            self.error = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+        }
+    }
+
+    private func save(showProviderNames: Bool?, hidden: [String: Bool]) {
+        guard let api = store.engineChoiceAPI, !saving else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            do { view = try await api.setEngineMembers(showProviderNames: showProviderNames, hidden: hidden) } catch {
+                store.showToast("Couldn't save that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+            }
         }
     }
 }

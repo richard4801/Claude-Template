@@ -144,7 +144,12 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
         self.inputs = inputs
     }
 
-    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs }
+    /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
+    public var providerName: String?
+    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
+    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
+
+    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         model = try c.decode(String.self, forKey: .model)
@@ -154,6 +159,7 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
         custom = c.v(.custom, false)
         isDefault = c.v(.default, false)
         notice = c.o(.notice)
+        providerName = c.o(.providerName)
         limits = c.v(.limits, Limits())
         resolution = c.o(.resolution)
         price = c.o(.price)
@@ -242,6 +248,33 @@ public protocol EngineChoiceAPI: Sendable {
     func engineDefaults() async throws -> EngineDefaults
     /// Sets (a model) or clears (nil: back to MUSE's own) one purpose's default.
     func setEngineDefault(_ purpose: EnginePurpose, model: String?) async throws -> EngineDefaults
+    /// 4c (owner): "Show provider names to members" and each video/image model's shown/hidden state.
+    func engineMembers() async throws -> EngineMembers
+    /// PATCH {showProviderNames?, hidden?: {model: true|false}}.
+    func setEngineMembers(showProviderNames: Bool?, hidden: [String: Bool]) async throws -> EngineMembers
+}
+
+public extension EngineChoiceAPI {
+    func engineMembers() async throws -> EngineMembers { throw ApiError("not_found", "This server doesn't have model choice for members yet") }
+    func setEngineMembers(showProviderNames: Bool?, hidden: [String: Bool]) async throws -> EngineMembers {
+        throw ApiError("not_found", "This server doesn't have model choice for members yet")
+    }
+}
+
+/// 4c: GET /v1/engines/members (owner): what members see of the studio's models.
+public struct EngineMembers: Codable, Hashable, Sendable {
+    public struct Model: Codable, Hashable, Sendable, Identifiable {
+        public var model: String
+        public var name: String
+        public var kind: String
+        public var custom: Bool?
+        public var provider: String?
+        /// Shown to members (not hidden).
+        public var members: Bool
+        public var id: String { model }
+    }
+    public var showProviderNames: Bool
+    public var models: [Model]
 }
 
 // MARK: HTTP
@@ -257,6 +290,14 @@ extension HTTPMuseAPI: EngineChoiceAPI {
         // {purpose: model|null}: an explicit null clears it.
         let body = "{\"\(purpose.rawValue)\":\(model.map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"" } ?? "null")}"
         return try await suiteCall("PATCH", "v1/engines/defaults", body: Data(body.utf8))
+    }
+
+    public func engineMembers() async throws -> EngineMembers { try await suiteCall("GET", "v1/engines/members") }
+
+    public func setEngineMembers(showProviderNames: Bool?, hidden: [String: Bool]) async throws -> EngineMembers {
+        struct Patch: Encodable { var showProviderNames: Bool?; var hidden: [String: Bool]? }
+        let body = try JSONEncoder().encode(Patch(showProviderNames: showProviderNames, hidden: hidden.isEmpty ? nil : hidden))
+        return try await suiteCall("PATCH", "v1/engines/members", body: body)
     }
 }
 
@@ -325,7 +366,7 @@ public enum DemoEngines {
 
 extension FakeMuseAPI: EngineChoiceAPI {
     public func engines(purpose: EnginePurpose?) async throws -> EngineCatalog {
-        guard suiteIsOwner else { throw ApiError("owner_only", "Only the studio owner can see models") }
+        // 4c: members see the models too (the demo hides none).
         var c = DemoEngines.catalog(defaults: engineDefaultsBox)
         if let p = purpose {
             let d = c.purpose(p)?.default

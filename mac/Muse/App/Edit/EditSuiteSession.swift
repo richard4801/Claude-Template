@@ -1676,11 +1676,11 @@ final class EditSuiteSession {
                     if case .rendering = self?.exportPhase { self?.exportPhase = .rendering(v) }
                 }
                 if settings.bitrate == .recommended, !settings.hdr {
-                    try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc, progress: onProgress)
+                    try await EditV2Engine.export(built, to: file, hevc: settings.codec == .hevc, aiLabel: settings.labelAI, progress: onProgress)
                 } else {
                     // A chosen bitrate (parity), or HDR (HEVC Main 10, HLG): reader → writer at the size estimate's rate.
                     try await EditV2Engine.write(built, to: file, hevc: settings.effectiveCodec == .hevc, bitrate: settings.videoBitrate,
-                                                 hdr: settings.hdr, progress: onProgress)
+                                                 hdr: settings.hdr, aiLabel: settings.labelAI, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)
@@ -1766,7 +1766,7 @@ final class EditSuiteSession {
                 if settings.format == .gif {
                     try await EditV2Engine.writeGif(built, to: dest, progress: onProgress)
                 } else {
-                    try await EditV2Engine.write(built, to: dest, audioOnly: true, progress: onProgress)
+                    try await EditV2Engine.write(built, to: dest, audioOnly: true, aiLabel: settings.labelAI, progress: onProgress)
                 }
                 guard let self else { return }
                 self.exportPhase = .idle

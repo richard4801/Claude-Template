@@ -146,7 +146,11 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
     public var aspectRatios: [String]
     public var inputs: SuiteInputs?
     public var price: Price?
+    /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
+    public var providerName: String?
     public var id: String { model }
+    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
+    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
 
     public init(model: String, name: String, kind: String = "video", custom: Bool = false, tier: String? = nil, tiers: [String] = [], resolution: String? = nil,
                 resolutions: [SuiteResolution] = [], perSec: Double? = nil, perRun: Double? = nil, minSeconds: Double? = nil, maxSeconds: Double? = nil,
@@ -170,7 +174,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price
+        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -178,6 +182,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
         name = c.v(.name, model)
         kind = c.v(.kind, "video")
         custom = c.v(.custom, false)
+        providerName = c.o(.providerName)
         tier = c.o(.tier)
         tiers = c.v(.tiers, [])
         resolution = c.o(.resolution)

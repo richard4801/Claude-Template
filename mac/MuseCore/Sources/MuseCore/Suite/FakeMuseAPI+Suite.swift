@@ -106,7 +106,7 @@ extension FakeMuseAPI {
     func suitePlan(_ r: ShotRequest) throws -> ShotEstimate {
         let tier = SuiteText.tierIds.contains(r.quality) ? r.quality : "draft"
         if r.takes < 1 || r.takes > 4 { throw ApiError("bad_request", "Invalid shot: takes must be 1–4") }
-        if r.engineModel != nil || r.resolution != nil, !suiteIsOwner { throw ApiError("owner_only", "Only the studio owner can pick the engine") }
+        // 4c: members pick the model and resolution too (as the server).
         let mode = r.mode ?? (r.extend != nil ? "extend" : nil) ?? (r.frames?.start != nil || r.frames?.end != nil ? "image" : r.modelId != nil ? "reference" : "text")
         var warnings: [String] = []
         let kind: String

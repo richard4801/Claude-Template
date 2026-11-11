@@ -20,7 +20,7 @@ struct ModelPickerList: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Model").scaled(t.scale.label, t.roles.ink)
                 Spacer(minLength: Space.s3)
-                Text("Only you see models").scaled(t.scale.caption, t.roles.ink2)
+                Text(store.isOwner ? "Members see these too, unless you hide them in Settings" : "Models the studio offers").scaled(t.scale.caption, t.roles.ink2)
             }
             .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s2)
             if all.count > 6 {
@@ -91,7 +91,7 @@ struct ModelPickerList: View {
         return HStack(alignment: .top, spacing: Space.s2) {
             check(on)
             VStack(alignment: .leading, spacing: Space.s1) {
-                Text(m.name).scaled(t.scale.body, t.roles.ink).lineLimit(1)
+                Text(m.shownName).scaled(t.scale.body, t.roles.ink).lineLimit(1)
                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
                 if m.resolutions.isEmpty {
                     // A photo model, or a per-run model: one choice, one price.
