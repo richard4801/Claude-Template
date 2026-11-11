@@ -92,7 +92,7 @@ jobs:
           if-no-files-found: error
 
       # Review screenshots of the key screens in the four themes (SnapshotRunner, demo mode, no server). Never fails the build.
-      # The app gets up to 1800 s; it prints its own log even when it had to be stopped.
+      # The app gets up to 2100 s; it prints its own log even when it had to be stopped.
       - name: Review screenshots
         continue-on-error: true
         working-directory: mac
@@ -102,8 +102,8 @@ jobs:
           mkdir -p snapshots
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
-          for i in $(seq 1 1800); do kill -0 $pid 2>/dev/null || break; sleep 1; done
-          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1800 s: stopping it"; kill $pid 2>/dev/null || true; fi
+          for i in $(seq 1 2100); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 2100 s: stopping it"; kill $pid 2>/dev/null || true; fi
           status=0; wait $pid || status=$?; echo "review mode exit status: $status (128+n = killed by signal n)"
           ls -la snapshots | head -100
           tail -n 60 snapshots.log || true
