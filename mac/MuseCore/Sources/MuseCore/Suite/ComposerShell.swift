@@ -92,7 +92,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .ugc: return [.character, .product]
         case .storyboard: return [.scenes]
         case .extend: return [.video]
-        case .photo: return [.character]
+        case .photo: return [] // a character OR an image (owner 2026-11-11): SuitePhoto photoMissing
         }
     }
 
@@ -101,7 +101,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .shot: return [.character, .startFrame, .endFrame]
         case .talking: return [.location]
         case .ugc: return [.referenceAd]
-        case .photo: return [.product, .references]
+        case .photo: return [.character, .product, .references]
         default: return []
         }
     }

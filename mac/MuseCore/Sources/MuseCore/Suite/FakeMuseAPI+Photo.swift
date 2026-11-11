@@ -10,7 +10,10 @@ extension FakeMuseAPI {
         if let p = r.problem { throw ApiError("bad_request", p) }
         // The owner's photo model (server suite/photo.ts): owners only.
         if r.imageModel != nil, !suiteIsOwner { throw ApiError("owner_only", "Only the studio owner can pick the photo model") }
-        let m = try activeModel(r.modelId)
+        // No character (owner 2026-11-11): a reference image is needed and no preset; the demo renders on the sample model.
+        if r.modelId == nil && r.presetId != nil { throw ApiError("bad_request", "Presets need a character · pick one with @") }
+        if r.modelId == nil && (r.references ?? []).isEmpty { throw ApiError("bad_request", "Pick a character or add an image") }
+        let m = try activeModel(r.modelId ?? SampleData.demo)
         let outfit = r.outfitId ?? m.outfitIds.first ?? ""
         if let pid = r.presetId {
             return .template(pid, modelId: m.id, outfitId: outfit, shuffleSeed: r.shuffleSeed, lockSeed: r.lockSeed ?? false, productImage: r.productImage,
@@ -70,7 +73,7 @@ extension FakeMuseAPI {
         let shoot = try photoShoot(req)
         let cost = try shootPreviewNow(shoot).estimate
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
-        let m = try activeModel(req.modelId)
+        let m = try activeModel(req.modelId ?? SampleData.demo)
         let count = max(1, min(PhotoRequest.maxCount, req.count))
         var jr = JobRequest(title: "", modelId: m.id, outfitId: req.outfitId ?? "", clipId: "", engine: "photo", takes: count)
         jr.title = "Photo · \(PhotoEstimate.photos(count))"

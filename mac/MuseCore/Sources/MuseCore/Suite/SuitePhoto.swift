@@ -9,7 +9,8 @@ import Foundation
 public struct PhotoRequest: Codable, Hashable, Sendable {
     public static let maxCount = 4
 
-    public var modelId: String
+    /// The character; nil = none (owner 2026-11-11): a reference image is then the photo to work from (server suite/photo.ts).
+    public var modelId: String?
     public var outfitId: String?
     /// The scene and what she does (the composer's prompt without #move chips).
     public var prompt: String
@@ -33,7 +34,7 @@ public struct PhotoRequest: Codable, Hashable, Sendable {
     /// Owner only: the photo model for this run (a Replicate `owner/name` or a custom `c_…`); nil = the studio's.
     public var imageModel: String?
 
-    public init(modelId: String, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
+    public init(modelId: String?, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
                 presetId: String? = nil, productImage: ImageRef? = nil, references: [ShootRef]? = nil, seed: Int64? = nil, lockSeed: Bool? = nil,
                 shuffleSeed: Int64? = nil, title: String? = nil) {
         self.modelId = modelId
@@ -217,15 +218,17 @@ extension PromptTokens {
 
 extension ComposerDraft {
     /// The Photo request for this draft: the character and outfit, the prompt (no #moves), the chips as a still's camera
-    /// (no movement, no tempo), the photo count, the preset and the slots. nil without a character.
+    /// (no movement, no tempo), the photo count, the preset and the slots. Without a character (owner 2026-11-11) only
+    /// with a reference image and no preset (the image is the photo to work from); nil otherwise.
     public func photoRequest(_ photo: PhotoDraft, product: ImageRef? = nil) -> PhotoRequest? {
-        guard let model = tokens.characterId else { return nil }
+        let model = tokens.characterId
+        if model == nil && (photo.presetId != nil || !photo.references.contains(where: \.isValid)) { return nil }
         let preset = photo.presetId
         let s = settings
         // With a preset only the Look rides along; otherwise the owner's Directed camera (as a still) or the chips.
         let camera = preset != nil ? s.photoCameraSpec(preset: true) : (directed.map(PhotoRequest.still) ?? s.photoCameraSpec())
-        var r = PhotoRequest(modelId: model, outfitId: tokens.outfitId ?? outfitId, prompt: tokens.withoutMoves.promptText(), camera: camera,
-                             count: min(max(photo.count, 1), PhotoRequest.maxCount), presetId: preset, productImage: product)
+        var r = PhotoRequest(modelId: model, outfitId: model == nil ? nil : tokens.outfitId ?? outfitId, prompt: tokens.withoutMoves.promptText(), camera: camera,
+                             count: min(max(photo.count, 1), PhotoRequest.maxCount), presetId: preset, productImage: model == nil ? nil : product)
         if !s.gradeLook && (s.palette != nil || s.stock != nil) { r.gradeLook = false }
         let refs = photo.references.filter(\.isValid).prefix(ShootRef.max)
         r.references = refs.isEmpty ? nil : Array(refs)
@@ -237,7 +240,10 @@ extension ComposerDraft {
 
     /// What the Photo tool still needs before Generate, as a line to show; nil when it can go.
     public func photoMissing(_ photo: PhotoDraft, uploading: Bool = false) -> String? {
-        if tokens.characterId == nil { return "Pick a character first" }
+        if tokens.characterId == nil {
+            if photo.presetId != nil { return "Presets need a character · pick one with @" }
+            if !photo.references.contains(where: \.isValid) && !uploading { return "Pick a character or add an image" }
+        }
         if uploading { return "Wait for the upload to finish" }
         return nil
     }
