@@ -21,8 +21,13 @@ extension EditSuiteSession {
     func startLive() async {
         guard isOwner, live == nil else { return }
         do {
-            let sync = try await EditSessionSync.open(api: api, takeId: sourceTakeId, project: project, device: device,
+            let sync: EditSessionSync
+            if let id = attachSessionId {
+                sync = try await EditSessionSync.attach(api: api, sessionId: id, device: device, paletteIds: EditV2LookLibrary.shared.paletteIds)
+            } else {
+                sync = try await EditSessionSync.open(api: api, takeId: sourceTakeId, project: project, device: device,
                                                       paletteIds: EditV2LookLibrary.shared.paletteIds)
+            }
             live = sync
             liveConnected = true
             // The session is the live copy: when it already holds other changes (Claude's, the phone's), they show here.

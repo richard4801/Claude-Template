@@ -39,6 +39,11 @@ struct EditSuiteView: View {
             }
         }
         .task(id: openId) { await open(openId) }
+        // One Claude: Claude opened an edit session: the editor opens on it (even when its take is already open).
+        .task(id: store.suite.editAttach?.id) {
+            guard let a = store.suite.editAttach else { return }
+            if openId == a.takeId { await open(a.takeId) } else { openId = a.takeId }
+        }
         .onChange(of: takeId) { _, new in openId = new }
         .onDisappear { session?.close() }
     }
@@ -47,7 +52,9 @@ struct EditSuiteView: View {
         session?.close()
         session = nil
         guard let id else { return }
-        guard let s = store.makeEditSuiteSession(takeId: id) else {
+        let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
+        if attach != nil { store.suite.editAttach = nil }
+        guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
             store.showToast("Only video takes can be edited")
             openId = nil
             return

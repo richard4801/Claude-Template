@@ -208,7 +208,9 @@ extension AppStore {
         case "character": if let id = ui.id { openProfile(id) } else { go(.models) }
         case "suite":
             if let t = ui.tool, let tool = ComposerTool(rawValue: t) { openTool(tool) } else { openSuite() }
-        case "edit": openEdit(takeId: ui.id)
+        case "edit":
+            // An edit session (es_…, a blank project included) opens the editor on it; a take id opens that take.
+            if let id = ui.id, id.hasPrefix("es_") { Task { await openEditSession(id) } } else { openEdit(takeId: ui.id) }
         case "take": if let id = ui.id { openTake(id) } else { go(.gallery) }
         case "library": go(.gallery)
         case "queue": go(.queue)
@@ -230,7 +232,7 @@ extension AppStore {
         guard let b = oneClaude.back else { return }
         oneClaude.back = nil
         oneClaude.opened = nil
-        let id = b.ids?["takeId"] ?? b.ids?["modelId"] ?? b.ids?["referenceId"]
+        let id = b.name == "edit" ? (b.ids?["sessionId"] ?? b.ids?["takeId"]) : (b.ids?["takeId"] ?? b.ids?["modelId"] ?? b.ids?["referenceId"])
         performOneClaudeOpen(ClaudeUI(page: b.name, id: id, tool: b.tool, label: b.label), keepBack: true)
     }
 

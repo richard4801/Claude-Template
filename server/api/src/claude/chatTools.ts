@@ -42,7 +42,7 @@ export const CHAT_TOOLS: EditTool[] = [
   },
   {
     name: 'open_page', title: 'Open a page in MUSE', scope: 'edit:write',
-    description: `Opens a page in the person's MUSE app: ${PAGES.join(', ')}, with the item's id when it has one (a take, an edit session, a reference, a character, a Suite draft) and for the AI Suite its tool (shot, photo, talking, ugc, storyboard, swap, extend). The app opens it and shows "Opened … · Back". When the person is in the middle of something (typing, playing, a dialog) or you set ask: true, the app asks them first with an Open button. Opening a page never spends, deletes or changes anything.`,
+    description: `Opens a page in the person's MUSE app: ${PAGES.join(', ')}, with the item's id when it has one: for edit, the edit session id (es_…) open_edit gave you (a new blank project included) so the app opens the editor on exactly that session, or a take id; for take a take id; for recreate a reference id; for character a character id and for the AI Suite its tool (shot, photo, talking, ugc, storyboard, swap, extend). The app opens it and shows "Opened … · Back". When the person is in the middle of something (typing, playing, a dialog) or you set ask: true, the app asks them first with an Open button. Opening a page never spends, deletes or changes anything.`,
     inputSchema: obj({ chatId: CHAT_ID, page: { type: 'string', enum: [...PAGES] }, id: str('The item to open (take, edit session, reference, character or draft id)', 80),
       tool: str('AI Suite tool', 20), label: str('Its name as the person knows it ("Sunset walk 3")', 120), ask: { type: 'boolean', description: 'Ask before opening' } }, ['chatId', 'page']),
     run: async (env, a) => {

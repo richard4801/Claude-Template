@@ -72,6 +72,13 @@ public final class EditSessionSync {
         return try EditSessionSync(api: api, device: device, session: s, paletteIds: paletteIds)
     }
 
+    /// One Claude: joins a session that already exists (Claude opened it, e.g. a new blank project) instead of opening a
+    /// take's: a blank take always makes a new session, so opening by take would miss Claude's.
+    public static func attach(api: any MuseAPI, sessionId: String, device: String, paletteIds: Set<String> = []) async throws -> EditSessionSync {
+        let s = try await api.editSession(id: sessionId)
+        return try EditSessionSync(api: api, device: device, session: s, paletteIds: paletteIds)
+    }
+
     /// The project the editor should show: the unsent change, else the server's.
     public var current: Project { local ?? synced }
     public var hasUnsent: Bool { local != nil }
