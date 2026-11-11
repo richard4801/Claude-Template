@@ -50,6 +50,8 @@ export const newShotEstimate = (p: PhotoPrices, outMp: number, refs: number) => 
 export const newShotEstimateImages = (p: PhotoPrices, outMp: number, images: number) => p.perRun + p.perOutputMp * outMp + p.perInputMp * p.refMp * Math.max(0, images);
 export const shootEstimate = (p: PhotoPrices, count: number, refs: number) => count * newShotEstimate(p, 2, refs);
 export const outfitSetEstimate = (p: PhotoPrices, refs: number) => newShotEstimate(p, 1, refs) + 3 * p.perEdit;
+/** An outfit's three face close-ups (front, ¾, side): three edits of her base face photos with the outfit's front. */
+export const outfitFacesEstimate = (p: PhotoPrices) => 3 * p.perEdit;
 export const sheetAnglesEstimate = (p: PhotoPrices, missing: number, refs: number) => missing * newShotEstimate(p, 1, refs);
 export const loraSetEstimate = (p: PhotoPrices, refs: number) => LORA_CANDIDATES * newShotEstimate(p, 1, refs);
 export const aboutMoney = (v: number) => `about ${money(v)}`;

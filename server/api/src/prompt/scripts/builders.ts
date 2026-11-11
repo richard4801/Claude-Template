@@ -75,9 +75,6 @@ export function outfitAngle(id: Identity, outfit: OutfitSpec, angle: { label: st
 }
 export const outfitEditPrompt = (angle: { words: string }, t: PromptTexts = DEFAULT_TEXTS) => run('outfit.edit', t, { inputs: {}, vars: { angle: angle.words } }).text;
 export const enhancePrompt = (t: PromptTexts = DEFAULT_TEXTS) => run('enhance', t, { inputs: {} }).text;
-export function dressPrompt(slot: string, withAnchor: boolean, t: PromptTexts = DEFAULT_TEXTS) {
-  return run('dressup', t, { inputs: { closeup: ['face', 'faceTq', 'profile'].includes(slot), anchor: withAnchor } }).text;
-}
 
 // ---------------------------------------------------------------- template shoots
 export type TemplateParts = {

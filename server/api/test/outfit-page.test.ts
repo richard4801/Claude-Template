@@ -88,7 +88,7 @@ describe('outfit from her base photos, keeping pieces', () => {
     expect(E.outfitKeepParts({ keep: {} }).keeping).toBe(false);
   });
 
-  it('kept pieces: four edits (front from her base front photo), priced as edits', async () => {
+  it('kept pieces: four edits (front from her base front photo) and its 3 face close-ups, priced as edits', async () => {
     const a = await makeApp({ BALANCE_MODE: 'simulated' });
     try {
       const { owner } = await people(a, 0);
@@ -98,10 +98,12 @@ describe('outfit from her base photos, keeping pieces', () => {
       const done = await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id && x.state === 'preview'));
       expect(done.angles.filter(Boolean)).toHaveLength(4);
       const imgs = (await a.ctx.db.query.generatedImages.findMany()).filter(i => i.purpose === 'outfit');
-      expect(imgs).toHaveLength(4);
+      expect(imgs).toHaveLength(7);
       expect(imgs.some(i => i.prompt.includes('Keep exactly: the top'))).toBe(true);
       expect(imgs.filter(i => i.prompt.includes('in her base clothes'))).toHaveLength(3);
-      expect(done.cost).toBeCloseTo(4 * 0.03, 6);
+      expect(imgs.filter(i => i.prompt.includes('face close-up'))).toHaveLength(3);
+      expect(done.faces.filter(Boolean)).toHaveLength(3);
+      expect(done.cost).toBeCloseTo(7 * 0.03, 6);
     } finally { await a.close(); }
   });
 
@@ -122,7 +124,11 @@ describe('outfit from her base photos, keeping pieces', () => {
       await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id && x.state === 'preview'));
       const calls = spy.mock.calls.map(c => c[0]).filter(c => c.refId === o.id);
       expect(calls[0]!.editOf).toEqual({ asset: 'c_front' }); // the front edits the chosen set's front
-      expect(calls.slice(1).map(c => c.refs?.[1] ?? null)).toEqual([{ asset: 'c_tq' }, { asset: 'g_side' }, { asset: 'c_face' }]); // ¾, swapped side, back
+      expect(calls.slice(1, 4).map(c => c.refs?.[1] ?? null)).toEqual([{ asset: 'c_tq' }, { asset: 'g_side' }, { asset: 'c_face' }]); // ¾, swapped side, back
+      // Its face close-ups: her base face photos edited, the new front sent with each.
+      const her = (await owner.req('GET', '/v1/models')).body.find((x: any) => x.id === m.id).slots;
+      const base = (k: string) => her.find((x: any) => x.key === k)?.image ?? her.find((x: any) => x.key === 'face').image;
+      expect(calls.slice(4).map(c => c.editOf)).toEqual(['face', 'faceTq', 'profile'].map(base));
     } finally { await a.close(); }
   });
 });

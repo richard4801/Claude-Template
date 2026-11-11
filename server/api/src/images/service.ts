@@ -106,7 +106,8 @@ export class ImageService {
     const p = this.photoPrices(), r = Math.min(clampIdentityRefs(identityRefs), p.maxRefs);
     return { ...p, loraShots: P.LORA_CANDIDATES, maxInputs: this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS, identityRefs: clampIdentityRefs(identityRefs),
       references: { max: 3, guides: SHOOT_GUIDES.map(g => ({ ...g })) },
-      estimates: { shoot: P.shootEstimate(p, 4, r), outfitSet: P.outfitSetEstimate(p, r), sheetAngle: P.sheetAnglesEstimate(p, 1, r), loraSet: P.loraSetEstimate(p, r) } };
+      /* outfitSet: the 4 angles and its 3 face close-ups (owner 2026-11-11); outfitFaces: the 3 face close-ups alone (My own set, Add face close-ups) */
+      estimates: { shoot: P.shootEstimate(p, 4, r), outfitSet: P.outfitSetEstimate(p, r) + P.outfitFacesEstimate(p), outfitFaces: P.outfitFacesEstimate(p), sheetAngle: P.sheetAnglesEstimate(p, 1, r), loraSet: P.loraSetEstimate(p, r) } };
   }
   /** How many of a model's own images the studio's photo steps send (1–7, default 3; plans/api.md "Identity images"). */
   async identityCount(studioId: string) {
@@ -139,7 +140,7 @@ export class ImageService {
     const auto = planShotImages(identity.map(i => i.image), refs, identity.length, inputs.capacity);
     const nId = auto.images.length - auto.sent.length;
     // What MUSE picks (images/sent.ts): her images first, then the reference images, each with why.
-    const autoSent: SentImage[] = [...identity.slice(0, nId).map(i => ({ image: i.image, role: i.role as SentRole, label: i.label, why: whyOf(i.label, i.role) })),
+    const autoSent: SentImage[] = [...identity.slice(0, nId).map(i => ({ image: i.image, role: i.role as SentRole, label: i.label, why: i.why ?? whyOf(i.label, i.role) })),
       ...refs.filter((_, k) => auto.refs[k]?.index != null).map(r => ({ image: r.image, role: roleOfGuides(r.guides), label: refPanelLabel(r.guides).slice(5), why: `your reference (${refPanelLabel(r.guides).slice(5)})`, guides: r.guides }))];
     const view = applySent(autoSent, sent, inputs.capacity);
     let plan: ShotPlan = auto, panels = planPanels(identity, auto), persons = identity.slice(0, nId).filter(i => i.role === 'person').length;

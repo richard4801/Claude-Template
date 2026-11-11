@@ -82,7 +82,8 @@ export type ShotRequest = z.infer<typeof ShotRequestSchema>;
 export type ModelPrefs = Record<string, { enabled?: boolean; acknowledgedAt?: number | null; priceScale?: number }>;
 export type SuitePrefs = { models?: ModelPrefs; ladder?: Partial<Record<Tier, LadderStep[]>>; capPerJob?: number | null; capPerDay?: number | null };
 
-export type Character = { name: string; look: string; neverAdd: string[]; images: { label: string; image: ImageRef }[]; outfit?: { name: string; description?: string; images: { label: string; image: ImageRef }[] } | null };
+/** `why` (an outfit's images): the reason the images-sent list shows instead of the usual one. */
+export type Character = { name: string; look: string; neverAdd: string[]; images: { label: string; image: ImageRef; why?: string }[]; outfit?: { name: string; description?: string; images: { label: string; image: ImageRef; why?: string }[] } | null };
 
 export type Need = {
   mode: Exclude<ShotMode, 'swap'>; start: boolean; end: boolean; middle: number; characterImages: number; extraImages: number; videos: number; guide: boolean;
@@ -338,7 +339,7 @@ export function billedSeconds(m: ModelSpec, seconds: number, o: { videoInput: bo
 /** An owner-added model priced per run (WS5): its per-run cost. */
 export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : m.byo ? m.byo.perRunUsd : 0);
 
-export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
+export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef; why?: string }[] };
 export type ShotPlan = {
   tier: Tier; mode: Need['mode'] | 'recast' | 'extend'; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
   seconds: number; aspect: string; audio: boolean; takes: number; seed?: number; prompt: string; negative?: string; params: Record<string, unknown>;
@@ -414,7 +415,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const chosen = [...charImgs].sort((a, b) => (prio(a.label) < 0 ? 99 : prio(a.label)) - (prio(b.label) < 0 ? 99 : prio(b.label))).slice(0, charRoom);
   // Keep the sheet's order in what is sent (face first).
   const charSent = charImgs.filter(x => chosen.includes(x));
-  images.refs = [...charSent.map(x => ({ label: x.label, role: 'character', image: x.image })), ...extraFit];
+  images.refs = [...charSent.map(x => ({ label: x.label, role: 'character', image: x.image, ...(x.why ? { why: x.why } : {}) })), ...extraFit];
   if (charImgs.length > charSent.length && charRoom > 0) notes.push(`${charImgs.length - charSent.length} character image(s) left out (limit ${m.refs.images})`);
   // Guide keyframes the model can't take as frames: reference images in the room left (her images and yours come first).
   if (kfLeft.length) {
@@ -508,8 +509,8 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
 
 const PLAN_ROLES: Record<string, SentRole> = { frame: 'other', product: 'product', location: 'location', style: 'style', pose: 'pose', outfit: 'outfit', person: 'other', prop: 'other', crop: 'other' };
 /** A plan's reference as the estimate shows it. */
-export function planRefSent(x: { label: string; role: string; image: ImageRef }): SentImage {
-  if (x.role === 'character') { const role = roleOfLabel(x.label, 'person'); return { image: x.image, role, label: x.label.replace(/^person \d+ · /, ''), why: whyOf(x.label.replace(/^person \d+ · /, ''), role) }; }
+export function planRefSent(x: { label: string; role: string; image: ImageRef; why?: string }): SentImage {
+  if (x.role === 'character') { const role = roleOfLabel(x.label, 'person'); return { image: x.image, role, label: x.label.replace(/^person \d+ · /, ''), why: x.why ?? whyOf(x.label.replace(/^person \d+ · /, ''), role) }; }
   return { image: x.image, role: PLAN_ROLES[x.role] ?? 'other', label: x.label, why: x.role === 'crop' ? 'the face to recast in the clip' : x.role === 'frame' ? `your ${x.label} (sent as a reference)` : `your ${x.role} reference${x.label && !x.label.startsWith(x.role) ? ` (${x.label})` : ''}` };
 }
 /** A chosen image as a plan reference: one of her own images keeps its sheet label (the prompt names her images and the

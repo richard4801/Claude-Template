@@ -59,11 +59,9 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
     expect(Live.videoSwap).toBe(B.videoSwap);
     expect(Live.collageLine).toBe(B.collageLine);
   });
-  it('dress up: body and close-ups, with and without the anchor', () => {
-    const anchor = ` ${DEFAULT_TEXTS['dress.anchor']}`;
-    expect(B.dressPrompt('tq', true)).toBe(DEFAULT_TEXTS['dress.body']!.replace('{anchor}', anchor));
-    expect(B.dressPrompt('front', false)).toBe(DEFAULT_TEXTS['dress.body']!.replace('{anchor}', ''));
-    expect(B.dressPrompt('profile', true)).toBe(DEFAULT_TEXTS['dress.closeup']!.replace('{anchor}', anchor));
+  it('outfit face close-ups: front, ¾ and side fill the angle words into outfit.face', () => {
+    expect(Live.outfitFacePrompt(0)).toBe(DEFAULT_TEXTS['outfit.face']!.replace('{angle}', 'face close-up from the front'));
+    expect(Live.outfitFacePrompt(2, { ...DEFAULT_TEXTS, 'outfit.face': 'FACE {angle}' })).toBe('FACE face close-up in profile (side view)');
   });
   it('video swaps (speaking): the details gain the speaking mouth line; the user section moved out of the details', () => {
     const labels = ['face, front', 'face, profile', 'body, front', 'body, ¾', 'body, back', 'outfit, front'];

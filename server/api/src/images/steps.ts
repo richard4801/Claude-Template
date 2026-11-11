@@ -113,7 +113,8 @@ export class ImageModels {
       price, priceLine: priceLine(price), compatible: map ? map.compatible : true, reasons: map?.reasons ?? [], warnings: map?.warnings ?? [],
       mapping: map?.mapping ?? {}, extra: ch.extra };
   }
-  async views(studioId: string) { return { steps: await Promise.all(IMAGE_STEPS.map(s => this.view(studioId, s))) }; }
+  /** The steps the owner picks models for (Dress up's dressA / dressB stay stored but hidden: the feature was removed 2026-11-11). */
+  async views(studioId: string) { return { steps: await Promise.all(IMAGE_STEPS.filter(s => s !== 'dressA' && s !== 'dressB').map(s => this.view(studioId, s))) }; }
 
   /** Owner picks a model for a step (checked against its schema), with optional extra inputs. */
   async set(studioId: string, step: ImageStep, model: string, extra?: Record<string, unknown>) {
