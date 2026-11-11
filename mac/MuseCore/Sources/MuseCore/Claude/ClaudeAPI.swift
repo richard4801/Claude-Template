@@ -46,8 +46,12 @@ public protocol ClaudeAPI: Sendable {
     func setChatPage(_ id: String, page: ClaudePage) async throws
     /// PATCH {archived: true}: out of the list, kept.
     func archiveChat(_ id: String) async throws
-    /// GET /v1/claude/memory: read-only for members.
+    /// GET /v1/claude/memory: this person's own memory (per person).
     func memory() async throws -> ClaudeMemory
+    /// POST: Remember (on Claude's question), or added by hand.
+    func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule
+    func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule
+    func deleteMemory(_ id: String) async throws
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -60,7 +64,10 @@ public extension ClaudeAPI {
     func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary { throw ApiError("not_found", "This server has one chat per place") }
     func setChatPage(_ id: String, page: ClaudePage) async throws {}
     func archiveChat(_ id: String) async throws { throw ApiError("not_found", "This server has one chat per place") }
-    func memory() async throws -> ClaudeMemory { throw ApiError("not_found", "This server has no shared memory yet") }
+    func memory() async throws -> ClaudeMemory { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func deleteMemory(_ id: String) async throws { throw ApiError("not_found", "This server has no Claude memory yet") }
 }
 
 enum ClaudeIds {
@@ -165,6 +172,17 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
     }
     public func memory() async throws -> ClaudeMemory { try await call("GET", "v1/claude/memory") }
+    private struct MemoryNew: Encodable { var text: String; var area: String; var characterId: String? }
+    private struct MemoryPin: Encodable { var pinned: Bool }
+    public func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule {
+        try await call("POST", "v1/claude/memory", MemoryNew(text: text, area: area, characterId: characterId))
+    }
+    public func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule {
+        try await call("PATCH", "v1/claude/memory/\(try ClaudeIds.check(id))", MemoryPin(pinned: pinned))
+    }
+    public func deleteMemory(_ id: String) async throws {
+        _ = try await send(request("DELETE", "v1/claude/memory/\(try ClaudeIds.check(id))"))
+    }
 
     // MARK: ClaudeAPI
 

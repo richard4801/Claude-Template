@@ -48,7 +48,7 @@ struct ComposerView: View {
             }
             // Claude's paid ask (owner only): the composer's Generate confirmation. Never in review mode (nothing the walk
             // presses may spend).
-            .sheet(isPresented: Binding(get: { store.isOwner && s.claude.confirmOpen && s.claude.ask != nil && SnapshotRunner.dir == nil },
+            .sheet(isPresented: Binding(get: { s.claude.confirmOpen && s.claude.ask != nil && SnapshotRunner.dir == nil }, // members approve their own (their wallet)
                                         set: { if !$0 { s.claude.confirmOpen = false } })) {
                 if let p = s.claude.ask {
                     SuiteClaudeGenerateSheet(pending: p)
@@ -210,8 +210,8 @@ struct ComposerView: View {
                 .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Engines")
                 .accessibilityLabel("Engines (owner)")
             }
-            if store.isOwner {
-                // One Claude (plans/one-claude.md): the panel on the right shares this composer with Claude.
+            if store.user != nil {
+                // One Claude (plans/one-claude.md): the panel on the right shares this composer with Claude (members too).
                 let on = store.oneClaude.open
                 SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on) { store.toggleOneClaude() }
                     .accessibilityLabel(on ? "Hide Claude" : "Show Claude")

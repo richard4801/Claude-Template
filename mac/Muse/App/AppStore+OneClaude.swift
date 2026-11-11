@@ -4,8 +4,9 @@ import Observation
 
 /// One Claude (plans/one-claude.md): one Claude panel on every page, with several chats. A chat is about a piece of work
 /// and follows the person across pages; Claude knows the page (sent with each message and when they move) and can open
-/// pages itself ("Opened … · Back"), asking first when they are in the middle of something. The owner's turns run on
-/// her Mac's Claude Code; members' (and the owner's, when Claude Code isn't set up) on the studio's Claude in the app.
+/// pages itself ("Opened … · Back"), asking first when they are in the middle of something. Everyone (the owner and each
+/// member) runs Claude on their own Claude plan through Claude Code on this Mac; memory is per person, and Claude
+/// saves to it only when asked, or after "Shall I remember …?" → Remember.
 @MainActor
 @Observable
 final class OneClaudeState {
@@ -22,26 +23,17 @@ final class OneClaudeState {
     /// Where the person was before Claude opened a page (Back), and what it opened.
     var back: ClaudePage?
     var opened: ClaudePage?
-    /// "Remembered: …" (Undo for the owner).
+    /// "Remembered: …" (the person asked Claude to remember).
     var remembered: ClaudeUI?
+    /// "Shall I remember: …?" (Remember / No): nothing is saved until Remember.
+    var suggestion: ClaudeUI?
     var memory: ClaudeMemory?
-    /// Members (and the owner without Claude Code): the chat on the studio's Claude.
-    var lines: [MemberLine] = []
-    var streaming = ""
-    var sending = false
-    var sendError: String?
-
-    struct MemberLine: Identifiable, Hashable {
-        let id: String
-        var fromClaude: Bool
-        var text: String
-    }
+    var memoryError: String?
 
     @ObservationIgnored var feedTask: Task<Void, Never>?
     @ObservationIgnored var pageTask: Task<Void, Never>?
     @ObservationIgnored var lastSentPage: ClaudePage?
     @ObservationIgnored var lastSentChat: String?
-    @ObservationIgnored var memberAPI: HTTPClaudeAPI?
 
     static let chatKey = "oneClaude.chatId"
     init() {}
@@ -79,9 +71,6 @@ extension AppStore {
         }
     }
 
-    /// Claude's chat runs on this Mac's Claude Code (the owner's), else on the studio's Claude in the app.
-    var oneClaudeOnMac: Bool { isOwner && ClaudeCodeService.shared.configured && ClaudeCodeService.shared.info.ready }
-
     // MARK: Open, chats
 
     func toggleOneClaude() {
@@ -95,14 +84,7 @@ extension AppStore {
         Task { await startOneClaude() }
     }
 
-    private var oneClaudeAPI: (any ClaudeAPI)? {
-        if let a = ClaudeCodeService.shared.api { return a }
-        guard let http = api as? HTTPMuseAPI else { return nil }
-        if let m = oneClaude.memberAPI { return m }
-        let m = HTTPClaudeAPI(baseURL: http.baseURL) { [http] in http.sessionToken }
-        oneClaude.memberAPI = m
-        return m
-    }
+    private var oneClaudeAPI: (any ClaudeAPI)? { ClaudeCodeService.shared.api }
 
     func startOneClaude() async {
         listenOneClaude()
@@ -112,7 +94,6 @@ extension AppStore {
         }
         await oneClaudeLinkSuite()
         oneClaudePageChanged(now: true)
-        if !oneClaudeOnMac { await loadMemberLines() }
     }
 
     func refreshOneClaudeChats() async {
@@ -140,9 +121,9 @@ extension AppStore {
         UserDefaults.standard.set(id, forKey: OneClaudeState.chatKey)
         oneClaude.askOpen = nil
         oneClaude.remembered = nil
+        oneClaude.suggestion = nil
         oneClaude.lastSentChat = nil
         oneClaudePageChanged(now: true)
-        if !oneClaudeOnMac { Task { await loadMemberLines() } }
     }
 
     func archiveOneClaudeChat(_ id: String) async {
@@ -205,6 +186,9 @@ extension AppStore {
             if ui.ask == true { oneClaude.askOpen = ui } else { performOneClaudeOpen(ui) }
         case "memory_add":
             oneClaude.remembered = ui
+            oneClaude.suggestion = nil
+        case "memory_suggest":
+            oneClaude.suggestion = ui
         default:
             break
         }
@@ -247,54 +231,34 @@ extension AppStore {
         performOneClaudeOpen(ClaudeUI(page: b.name, id: id, tool: b.tool, label: b.label), keepBack: true)
     }
 
-    /// Undo "Remembered …" (the owner: deletes the rule Claude just saved).
-    func undoOneClaudeMemory() async {
-        guard isOwner, let id = oneClaude.remembered?.remembered else { return }
-        oneClaude.remembered = nil
-        await confirmDeleteRule(id)
+    /// Remember (Claude's question): saved to this person's own memory.
+    func rememberSuggestion() async {
+        guard let ui = oneClaude.suggestion, let text = ui.suggest, let api = oneClaudeAPI else { return }
+        oneClaude.suggestion = nil
+        do {
+            let r = try await api.saveMemory(text: text, area: ui.area ?? "other", characterId: ui.characterId)
+            oneClaude.remembered = ClaudeUI(remembered: r.id, text: r.text)
+        } catch {
+            showToast("Couldn't remember that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
     }
 
     func loadOneClaudeMemory() async {
-        oneClaude.memory = try? await oneClaudeAPI?.memory()
+        guard let api = oneClaudeAPI else { oneClaude.memoryError = "Sign in to your MUSE server first."; return }
+        do { oneClaude.memory = try await api.memory(); oneClaude.memoryError = nil } catch {
+            oneClaude.memoryError = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+        }
     }
 
-    // MARK: The chat on the studio's Claude (members)
-
-    func loadMemberLines(after: Double? = nil) async {
-        guard let id = oneClaude.chatId, let api = oneClaudeAPI, let d = try? await api.threadDetail(id) else { oneClaude.lines = []; return }
-        // Lines Claude left during this turn (members get no live events): open the page, show "Remembered …".
-        if let after {
-            for m in d.messages where m.createdAt >= after { if let t = m.tool, let ui = t.ui { oneClaudeUI(threadId: id, name: t.name, ui) } }
-        }
-        oneClaude.lines = d.messages.filter { ($0.role == "user" || $0.role == "assistant") && !$0.text.isEmpty }
-            .map { .init(id: $0.id, fromClaude: $0.role == "assistant", text: ClaudePage.stripContext($0.text)) }
+    func pinOneClaudeMemory(_ r: ClaudeMemoryRule) async {
+        guard let api = oneClaudeAPI else { return }
+        _ = try? await api.pinMemory(r.id, pinned: !r.pinned)
+        await loadOneClaudeMemory()
     }
 
-    func sendMemberLine(_ text: String) async {
-        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !words.isEmpty, !oneClaude.sending, let id = oneClaude.chatId, let api = oneClaudeAPI as? HTTPClaudeAPI else { return }
-        oneClaude.sending = true
-        oneClaude.sendError = nil
-        oneClaude.streaming = ""
-        oneClaude.lines.append(.init(id: UUID().uuidString, fromClaude: false, text: words))
-        let started = Date().timeIntervalSince1970 * 1000 - 5000
-        defer { oneClaude.sending = false }
-        do {
-            for try await e in api.chatTurn(chatId: id, text: words, page: claudePage) {
-                switch e {
-                case .text(let d): oneClaude.streaming += d
-                case .tool: oneClaude.streaming = ""
-                case .error(_, let m): oneClaude.sendError = m
-                default: break
-                }
-            }
-        } catch {
-            oneClaude.sendError = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
-        }
-        let answer = oneClaude.streaming.trimmingCharacters(in: .whitespacesAndNewlines)
-        oneClaude.streaming = ""
-        if !answer.isEmpty { oneClaude.lines.append(.init(id: UUID().uuidString, fromClaude: true, text: answer)) }
-        await loadMemberLines(after: started)
-        await refreshOneClaudeChats()
+    func deleteOneClaudeMemory(_ r: ClaudeMemoryRule) async {
+        guard let api = oneClaudeAPI else { return }
+        try? await api.deleteMemory(r.id)
+        await loadOneClaudeMemory()
     }
 }

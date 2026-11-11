@@ -3,14 +3,14 @@ import SwiftUI
 
 /// One Claude (plans/one-claude.md, design/one-claude/*.png): the Claude panel on the right of every page. The chat's
 /// name opens the chat list (each with where it was last used), New chat starts one, and "Sees:" says which page Claude
-/// is looking at. Claude opens pages itself ("Opened … · Back"), asks first with Open when the person is busy, and shows
-/// "Remembered: …" (Undo for the owner). Money, deletes, posting and settings still need the person's press.
+/// is looking at. Claude opens pages itself ("Opened … · Back"), asks first with Open when the person is busy, asks
+/// "Shall I remember: …?" (Remember / No) and saves only when asked. Money, deletes, posting and settings still need the
+/// person's press. Everyone chats on their own Claude plan (Claude Code on this Mac); the setup states are the chat's.
 struct OneClaudePanel: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
     @State private var showMemory = false
-    @State private var memberText = ""
 
     static let width: CGFloat = 380
 
@@ -22,15 +22,11 @@ struct OneClaudePanel: View {
             Rectangle().fill(r.hairline).frame(height: 1)
             lines
             if let id = o.chatId {
-                if store.oneClaudeOnMac {
-                    ClaudeChatView(contextKind: "chat", contextId: id, title: o.current?.shownTitle ?? "Claude", showsHeader: false,
-                                   placeholder: "Ask Claude", emptyHint: "Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.",
-                                   wrapOutgoing: { [store] text in store.oneClaudeOutgoing(text) }, unwrapShown: ClaudePage.stripContext)
-                        .sessions(nil, onToolDone: { [store] name in store.suiteClaudeToolDone(name) })
-                        .id(id)
-                } else {
-                    memberChat
-                }
+                ClaudeChatView(contextKind: "chat", contextId: id, title: o.current?.shownTitle ?? "Claude", showsHeader: false,
+                               placeholder: "Ask Claude", emptyHint: "Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.",
+                               wrapOutgoing: { [store] text in store.oneClaudeOutgoing(text) }, unwrapShown: ClaudePage.stripContext)
+                    .sessions(nil, onToolDone: { [store] name in store.suiteClaudeToolDone(name) })
+                    .id(id)
             } else if let e = o.listError {
                 VStack(spacing: Space.s3) {
                     Text(e).scaled(t.scale.body, r.ink2).multilineTextAlignment(.center)
@@ -66,7 +62,7 @@ struct OneClaudePanel: View {
                         }
                     }
                     Divider()
-                    Button("Claude's memory…") { showMemory = true }
+                    Button("Your memory…") { showMemory = true }
                     if let id = o.chatId {
                         Button("Hide this chat") { Task { await store.archiveOneClaudeChat(id) } }
                     }
@@ -131,73 +127,34 @@ struct OneClaudePanel: View {
             .font(t.scale.caption.font).foregroundStyle(r.ink2)
             .padding(.horizontal, Space.s4).padding(.top, Space.s2)
         }
+        if let q = o.suggestion, let text = q.suggest {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Shall I remember this?").scaled(t.scale.label, r.ink)
+                Text("“\(text)”").scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: "Remember", filled: true) { Task { await store.rememberSuggestion() } }
+                    SuiteToolButton(title: "No", plain: true) { store.oneClaude.suggestion = nil }
+                }
+            }
+            .padding(Space.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
+            .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+        }
         if let m = o.remembered, let text = m.text {
             HStack(alignment: .top, spacing: Space.s1) {
                 Ph("push-pin", 13)
                 Text("Remembered: “\(text)”").fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                if m.undo == true, store.isOwner {
-                    Button("Undo") { Task { await store.undoOneClaudeMemory() } }.buttonStyle(.link)
-                }
             }
             .font(t.scale.caption.font).foregroundStyle(r.ink2)
             .padding(.horizontal, Space.s4).padding(.top, Space.s2)
         }
     }
-
-    // MARK: The chat on the studio's Claude (members, or the owner without Claude Code on this Mac)
-
-    private var memberChat: some View {
-        let o = store.oneClaude
-        let r = t.roles
-        return VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Space.s3) {
-                        if o.lines.isEmpty && o.streaming.isEmpty {
-                            Text("Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.")
-                                .scaled(t.scale.caption, r.ink2)
-                        }
-                        ForEach(o.lines) { l in
-                            Text(l.text).scaled(t.scale.body, r.ink).textSelection(.enabled)
-                                .padding(l.fromClaude ? 0 : Space.s2)
-                                .background(l.fromClaude ? Color.clear : r.field, in: RoundedRectangle(cornerRadius: t.radii.container))
-                                .frame(maxWidth: .infinity, alignment: l.fromClaude ? .leading : .trailing)
-                        }
-                        if !o.streaming.isEmpty {
-                            Text(o.streaming).scaled(t.scale.body, r.ink).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if let e = o.sendError { Text(e).scaled(t.scale.caption, r.danger) }
-                        Color.clear.frame(height: 1).id("end")
-                    }
-                    .padding(Space.s4)
-                }
-                .onChange(of: o.lines.count) { _, _ in proxy.scrollTo("end") }
-            }
-            HStack(spacing: Space.s2) {
-                TextField("Ask Claude", text: $memberText, axis: .vertical)
-                    .textFieldStyle(.plain).lineLimit(1...5)
-                    .onSubmit { sendMember() }
-                Button { sendMember() } label: { Ph("paper-plane-right", 16).frame(width: 28, height: 28).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).foregroundStyle(r.ink2)
-                    .disabled(o.sending || memberText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .help("Send").accessibilityLabel("Send")
-            }
-            .padding(Space.s3)
-            .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(r.hairline))
-            .padding(Space.s4)
-        }
-    }
-
-    private func sendMember() {
-        let text = memberText
-        memberText = ""
-        Task { await store.sendMemberLine(text) }
-    }
 }
 
-/// Claude's memory, read from every chat: figure rules, style, preferred models, things said no to, editing rules.
-/// Everyone can read it; the owner edits it in the Playbook (pins, edits, deletes).
+/// Your memory, read by every one of your chats (per person: nobody else sees it). Pin or remove rules here; the owner's
+/// memory is also her editing Playbook (edit words there).
 struct OneClaudeMemorySheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -208,15 +165,16 @@ struct OneClaudeMemorySheet: View {
         let rules = store.oneClaude.memory?.rules ?? []
         VStack(alignment: .leading, spacing: Space.s4) {
             HStack {
-                Text("Claude's memory").scaled(t.scale.title, r.ink)
+                Text("Your memory").scaled(t.scale.title, r.ink)
                 Spacer()
                 if store.isOwner {
                     SuiteToolButton(title: "Edit in Playbook", plain: true) { dismiss(); store.openLearn(.playbook) }
                 }
                 SuiteToolButton(title: "Done", filled: true) { dismiss() }
             }
-            Text("Every chat reads this. Pinned rules are always followed; Claude asks before breaking one.\(store.isOwner ? "" : " Only the owner can change it.")")
+            Text("Every one of your chats reads this, and only you see it. Pinned rules are always followed. Claude saves here only when you ask, or when you press Remember.")
                 .scaled(t.scale.caption, r.ink2)
+            if let e = store.oneClaude.memoryError { Text(e).scaled(t.scale.caption, r.danger) }
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s5) {
                     if rules.isEmpty { Text("Nothing remembered yet.").scaled(t.scale.body, r.ink2) }
@@ -228,7 +186,13 @@ struct OneClaudeMemorySheet: View {
                                     if rule.pinned { Ph("push-pin", 14) } else { Color.clear.frame(width: 14, height: 14) }
                                     Text(rule.text).scaled(t.scale.body, r.ink).fixedSize(horizontal: false, vertical: true)
                                     Spacer(minLength: Space.s2)
-                                    Text(rule.source == "owner" ? "You" : "Claude learned").scaled(t.scale.caption, r.ink2)
+                                    Text(rule.source == "owner" ? "You" : "Saved by Claude").scaled(t.scale.caption, r.ink2)
+                                    Button { Task { await store.pinOneClaudeMemory(rule) } } label: { Ph("push-pin", 14).frame(width: 24, height: 24).contentShape(Rectangle()) }
+                                        .buttonStyle(.plain).foregroundStyle(rule.pinned ? r.ink : r.ink2)
+                                        .help(rule.pinned ? "Unpin" : "Pin: always followed").accessibilityLabel(rule.pinned ? "Unpin rule" : "Pin rule")
+                                    Button { Task { await store.deleteOneClaudeMemory(rule) } } label: { Ph("trash", 14).frame(width: 24, height: 24).contentShape(Rectangle()) }
+                                        .buttonStyle(.plain).foregroundStyle(r.ink2)
+                                        .help("Remove from your memory").accessibilityLabel("Remove rule")
                                 }
                                 .padding(.vertical, Space.s2)
                                 .overlay(alignment: .top) { Rectangle().fill(r.hairline).frame(height: 1) }

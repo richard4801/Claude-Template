@@ -248,7 +248,7 @@ extension AppStore {
 
     /// A `suiteAssist` live event.
     func suiteAssistEvent(_ a: SuiteAssist) {
-        guard isOwner, suite.claude.assist?.id == a.id else { return }
+        guard suite.claude.assist?.id == a.id else { return } // one Claude: members' own drafts too
         takeSuiteAssist(a)
     }
 

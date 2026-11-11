@@ -75,15 +75,18 @@ public struct ClaudeUI: Codable, Hashable, Sendable {
     public var ask: Bool?
     /// The page the person was on (for Back).
     public var from: ClaudePage?
-    /// memory_add: the rule saved, its words, and whether this person may undo it (the owner only).
+    /// memory_add (the person asked): the rule saved and its words.
     public var remembered: String?
     public var text: String?
-    public var undo: Bool?
+    /// memory_suggest: Claude asks "Shall I remember: …?" (Remember / No); nothing is saved until Remember.
+    public var suggest: String?
+    public var area: String?
+    public var characterId: String?
 
     public init(page: String? = nil, id: String? = nil, tool: String? = nil, label: String? = nil, ask: Bool? = nil, from: ClaudePage? = nil,
-                remembered: String? = nil, text: String? = nil, undo: Bool? = nil) {
+                remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil) {
         self.page = page; self.id = id; self.tool = tool; self.label = label; self.ask = ask; self.from = from
-        self.remembered = remembered; self.text = text; self.undo = undo
+        self.remembered = remembered; self.text = text; self.suggest = suggest; self.area = area; self.characterId = characterId
     }
 
     /// Where it goes, as the person reads it ("AI Suite, Shot", "Take, Sunset walk 3").
@@ -102,6 +105,6 @@ public struct ClaudeMemoryRule: Codable, Hashable, Sendable, Identifiable {
 
 public struct ClaudeMemory: Codable, Hashable, Sendable {
     public var rules: [ClaudeMemoryRule]
-    /// Only the owner pins, edits or deletes.
+    /// The person changes their own (always true for one's own memory).
     public var canEdit: Bool
 }

@@ -142,7 +142,7 @@ struct ClaudeChatView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if !store.isOwner {
+        if !store.isOwner && contextKind != "chat" { // one Claude: members chat on their own Claude plan
             centered { EmptyState("Owner only", "Claude chat is for the studio owner. Ask them to run this edit with Claude.") }
         } else if !service.configured {
             centered {
