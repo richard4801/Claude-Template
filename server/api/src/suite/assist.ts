@@ -105,6 +105,7 @@ export function requestOf(d: Draft) {
     ...(camera ? { camera } : {}),
     ...(typeof extra.engineModel === 'string' ? { engineModel: extra.engineModel, ...(typeof extra.resolution === 'string' ? { resolution: extra.resolution } : {}) } : {}),
     ...(rig.gradeLook === false && (rig.palette || rig.stock) ? { gradeLook: false } : {}),
+    ...(extra.background === 'photo' || extra.background === 'describe' ? { background: extra.background as 'photo' | 'describe' } : {}),
     ...(referencesOf(d).length ? { references: { images: referencesOf(d).map(r => ({ image: { url: r.url }, role: r.use, label: r.label ?? r.use })) } } : {}),
     // Images sent (images/sent.ts): Claude's or the person's choice, kept in the draft (set_sent_images).
     ...sentOfDraft(d),
@@ -136,6 +137,8 @@ export const SetBody = z.object({
   directed: z.object({ cameraSessionId: z.string().max(80) }).strict().nullable().optional(),
   /** The model this shot runs on (a tier's model id, as the composer's model picker), null = Auto; and its resolution. */
   engineModel: z.string().max(40).nullable().optional(), resolution: z.string().max(20).nullable().optional(),
+  /** Swap / Recast background: keep the clip's place, a new photo, or describe it in the prompt; null = Keep. */
+  background: z.enum(['keep', 'photo', 'describe']).nullable().optional(),
 }).strict();
 export type SetInput = z.infer<typeof SetBody>;
 
@@ -234,6 +237,7 @@ export class SuiteAssist {
     }
     if (b.engineModel !== undefined) { if (b.engineModel === null) { delete d.engineModel; delete d.resolution; } else d.engineModel = b.engineModel; }
     if (b.resolution !== undefined) { if (b.resolution === null) delete d.resolution; else d.resolution = b.resolution; }
+    if (b.background !== undefined) { if (b.background === null || b.background === 'keep') delete (d as Record<string, unknown>).background; else (d as Record<string, unknown>).background = b.background; }
     // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
     // change Claude made outside Shot, because it only lays a draft over the composer of the same tool.
     if (!d.tool) d.tool = 'shot';

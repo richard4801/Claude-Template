@@ -31,6 +31,8 @@ export type BuiltPrompt = { slots: PromptSlot[]; seed: number | null; removed: s
 export type SourcePerformer = { description?: string; tattoos?: boolean; rings?: boolean; setting?: string };
 export type VideoSwapSpec = {
   identity: Identity; outfit: OutfitSpec; performer?: SourcePerformer; keepAudio?: boolean; keepBackground?: boolean;
+  /** Background "Describe it": the direction sets the new place (keepBackground false, no photo). */
+  describeBackground?: boolean;
   backgroundMotion?: string | null; steps?: number; seed?: number; direction?: string | null;
   /** Labels of the reference images actually sent, in <Image n> order ("face, front", "outfit, back"). Default: the sheet order. */
   referenceLabels?: string[];
@@ -215,6 +217,8 @@ export type ReplicateSwapSpec = {
   /** Roles of the images actually sent, in <Image n> order. */
   referenceLabels: string[];
   direction?: string | null;
+  /** Background "Describe it": the direction sets the new place; the clip's moves and timing are kept, not its background. */
+  newBackground?: boolean;
 };
 
 /** "<Image 3>", "<Image 3> and <Image 4>", "<Image 3> to <Image 5>", "<Image 1>, <Image 3> and <Image 6>". */

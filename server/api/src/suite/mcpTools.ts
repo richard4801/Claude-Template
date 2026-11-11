@@ -83,6 +83,7 @@ export const SUITE_TOOLS: EditTool[] = [
       quality: str('draft | standard | hd | cinema'), aspect: str('9:16 | 16:9 | 1:1 | 4:3 | 3:4 | 21:9'), duration: { type: 'integer', minimum: 2, maximum: 30 },
       takes: { type: 'integer', minimum: 1, maximum: 4 }, sound: { type: 'boolean' }, speaking: { type: ['boolean', 'null'] }, count: { type: 'integer', minimum: 1, maximum: 4, description: 'Photo: how many stills' },
       directed: { type: ['object', 'null'], properties: { cameraSessionId: str('The camera session (cs_…)', 80) }, required: ['cameraSessionId'], additionalProperties: false, description: 'Movement → Directed from a camera session; null = back to the chips' },
+      background: { type: ['string', 'null'], enum: ['keep', 'photo', 'describe', null], description: 'Swap / Recast background: keep (the clip’s place, default), photo (a new background picture), describe (the prompt’s words set the new place). New photo / Describe it run on Genjutsu Light under Auto' },
       engineModel: { type: ['string', 'null'], maxLength: 40, description: 'Pin the model (null = Auto). Swap / one-person Recast: genjutsu-light (or genjutsu) when the person wants the same moves with a new look or scene (outfit, background, added characters or products); Auto or a Recast model for the same scene with a new person. Say which you chose and why' }, resolution: { type: ['string', 'null'], maxLength: 20 } }),
     run: async (env, a) => {
       const { assistId: _a, chatId: _c, cameraSessionId: _s, ...rest } = a;
