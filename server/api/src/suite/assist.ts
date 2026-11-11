@@ -17,6 +17,8 @@ import { rigCheck } from './rigcheck.js';
 import { suiteAssists } from './schema.js';
 import { normaliseImage, uploadImage } from '../camera/claudeAttachments.js';
 import { putObject } from '../storage/objects.js';
+import { onScreen, screenOf, withScreen } from './screen.js';
+import { ImageInSchema, sentImagesOf } from '../images/sent.js';
 
 type Row = typeof suiteAssists.$inferSelect;
 export type AssistPending = { id: string; kind: 'suite_request_shot'; label: string; estimateUsd: number; maxUsd: number; status: 'waiting' | 'declined' | 'done' | 'failed'; jobId?: string; error?: string; createdAt: number };
@@ -27,9 +29,13 @@ const QUALITIES = ['draft', 'standard', 'hd', 'cinema'] as const;
 export const REFERENCE_USES = ['pose', 'style', 'location', 'outfit'] as const;
 export const MAX_DRAFT_REFERENCES = 3;
 export type DraftReference = { uploadId: string; url: string; use: typeof REFERENCE_USES[number]; label?: string };
-const DraftReferenceSchema = z.object({ uploadId: z.string().max(80), url: z.string().max(2000).regex(/\/uploads\/u\/[A-Za-z0-9._-]+$/, 'a studio image (/uploads/u/…)'),
+const DraftReferenceSchema = z.object({ uploadId: z.string().max(80), url: z.string().max(2000).regex(/\/uploads\/[a-z]+\/[A-Za-z0-9._-]+$/, 'a studio image (/uploads/…)'),
   use: z.enum(REFERENCE_USES), label: z.string().max(80).optional() }).strict();
-export const AddReferenceBody = z.object({ uploadId: z.string().min(1).max(80), use: z.enum(REFERENCE_USES), label: z.string().trim().max(80).optional(), remove: z.boolean().optional() }).strict();
+export const AddReferenceBody = z.object({ uploadId: z.string().min(1).max(80).optional(),
+  /** Any image of this studio instead of an upload: a take id (a Library still, or a video's frame with at), {takeId, at}, {url} as MUSE gives it, an outfit/character picture. */
+  image: ImageInSchema.optional(), takeId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/).optional(), at: z.number().min(0).max(3600).optional(),
+  use: z.enum(REFERENCE_USES), label: z.string().trim().max(80).optional(), remove: z.boolean().optional() }).strict()
+  .refine(b => !!(b.uploadId || b.image || b.takeId), { message: 'uploadId, takeId or image: the picture to use' });
 const ASPECTS = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'] as const;
 
 // ------------------------------------------------------------------ what members see (Claude picks only these)
@@ -91,7 +97,7 @@ export function requestOf(d: Draft) {
   // Directed (a camera session's camera and guides) replaces the chips' camera, as in the composer.
   const directed = (extra.directed as DraftDirected | undefined)?.camera;
   const camera = directed ?? cameraOf(rig, moves);
-  return {
+  return withScreen({
     ...(mention('character') ? { modelId: mention('character') } : {}),
     ...((mention('outfit') ?? extra.outfitId) ? { outfitId: (mention('outfit') ?? extra.outfitId) as string } : {}),
     prompt: promptText(toks), duration: Math.round(d.duration ?? 5), aspectRatio: d.aspect ?? '9:16', quality: d.quality ?? 'draft', takes: d.takes ?? 1,
@@ -103,7 +109,7 @@ export function requestOf(d: Draft) {
     // Images sent (images/sent.ts): Claude's or the person's choice, kept in the draft (set_sent_images).
     ...sentOfDraft(d),
     draft: d,
-  };
+  }, d);
 }
 
 /** The draft's images-sent choice as request fields (images/sent.ts), or nothing. */
@@ -120,7 +126,7 @@ export function referencesOf(d: Draft): DraftReference[] {
 /** Claude's changes to the draft: each given field replaces the draft's; the prompt keeps the @model first and the #moves last. */
 export const SetBody = z.object({
   modelId: z.string().max(80).nullable().optional(), outfitId: z.string().max(80).nullable().optional(),
-  prompt: z.string().max(2000).optional(), rig: RigSchema.omit({ moves: true }).optional(),
+  prompt: z.string().max(2000, 'at most 2000 characters (the models\' limit): shorten it, keep the skeleton and cut repeats').optional(), rig: RigSchema.omit({ moves: true }).optional(),
   moves: z.array(z.object({ id: z.string().max(40), intensity: z.number().min(0).max(1).optional() }).strict()).max(2).optional(),
   quality: z.enum(QUALITIES).optional(), aspect: z.enum(ASPECTS).optional(), duration: z.number().int().min(2).max(30).optional(), takes: z.number().int().min(1).max(4).optional(),
   sound: z.boolean().optional(), speaking: z.boolean().nullable().optional(),
@@ -138,7 +144,7 @@ export class SuiteAssist {
 
   view(r: Row) {
     const d = r.draft as Draft, req = requestOf(d);
-    return { id: r.id, userId: r.userId, draft: d, revision: r.revision, request: req,
+    return { id: r.id, userId: r.userId, draft: d, revision: r.revision, request: req, onScreen: onScreen(d),
       warnings: rigCheck({ prompt: req.prompt, camera: req.camera as never, speaking: (req as { speaking?: boolean }).speaking ?? false }),
       pending: (r.pending as AssistPending[]).filter(p => p.status === 'waiting').concat((r.pending as AssistPending[]).filter(p => p.status !== 'waiting').slice(-3)),
       createdAt: r.createdAt, updatedAt: r.updatedAt };
@@ -218,7 +224,14 @@ export class SuiteAssist {
     if (b.rig !== undefined) d.rig = { ...checkVisibleRig(RigSchema.parse(b.rig)) };
     for (const k of ['quality', 'aspect', 'duration', 'takes', 'sound', 'count'] as const) if (b[k] !== undefined) (d as Record<string, unknown>)[k] = b[k];
     if (b.speaking !== undefined) { if (b.speaking === null) delete d.speaking; else d.speaking = b.speaking; }
-    if (b.directed !== undefined) { if (b.directed === null) delete d.directed; else d.directed = await directedOf(this.ctx, u, b.directed.cameraSessionId); }
+    if (b.directed !== undefined) {
+      if (b.directed === null) {
+        delete d.directed;
+        // Back to the chips: a Directed camera picked on screen goes too (the app shows the chips again).
+        const sc = screenOf(d);
+        if ((sc?.request?.camera as { mode?: string } | undefined)?.mode === 'directed') { const { camera: _c, ...req } = sc!.request!; d.screen = { ...(d.screen as object), request: req }; }
+      } else d.directed = await directedOf(this.ctx, u, b.directed.cameraSessionId);
+    }
     if (b.engineModel !== undefined) { if (b.engineModel === null) { delete d.engineModel; delete d.resolution; } else d.engineModel = b.engineModel; }
     if (b.resolution !== undefined) { if (b.resolution === null) delete d.resolution; else d.resolution = b.resolution; }
     // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
@@ -240,7 +253,11 @@ export class SuiteAssist {
     const r = await this.row(u, id);
     const d = { ...(r.draft as Draft) } as Draft & Record<string, unknown>;
     let list = referencesOf(d);
-    const existing = list.find(x => x.uploadId === b.uploadId);
+    // The reference's id: the upload, the take (and moment), or the image's own link.
+    const imageIn = b.image ?? (b.takeId ? { takeId: b.takeId, ...(b.at !== undefined ? { at: b.at } : {}) } : undefined);
+    const refId = (b.uploadId ?? (b.takeId ? `${b.takeId}${b.at ? `@${b.at}` : ''}` : typeof b.image === 'string' ? b.image
+      : b.image && 'takeId' in b.image ? `${b.image.takeId}${b.image.at ? `@${b.image.at}` : ''}` : (b.image as { url?: string; asset?: string }).url ?? (b.image as { asset?: string }).asset ?? '')).slice(0, 80);
+    const existing = list.find(x => x.uploadId === refId);
     if (b.remove) {
       if (!existing) throw notFound('Reference');
       list = list.filter(x => x !== existing);
@@ -248,20 +265,35 @@ export class SuiteAssist {
       let url = existing?.url;
       if (!url) {
         if (list.length >= MAX_DRAFT_REFERENCES) throw new ApiError(409, 'too_many_references', `A shot takes at most ${MAX_DRAFT_REFERENCES} chat references · remove one first`);
-        const { up, buf, kind } = await uploadImage(this.ctx, u, b.uploadId);
-        if (kind !== 'heic' && up.storageKey.startsWith('u/')) url = `/uploads/${up.storageKey}`;
-        else {
-          const img = await normaliseImage(buf, kind, b.uploadId);
-          const key = `u/${uid('img')}.${img.mimeType === 'image/png' ? 'png' : img.mimeType === 'image/webp' ? 'webp' : 'jpg'}`;
-          await putObject(this.ctx, { key, body: img.buf, studioId: u.studioId, kind: 'image', userId: u.id, contentType: img.mimeType });
-          url = `/uploads/${key}`;
-        }
+        url = await this.referenceUrl(u, b.uploadId, imageIn);
       }
-      const item: DraftReference = { uploadId: b.uploadId, url, use: b.use, ...(b.label ? { label: b.label } : existing?.label && existing.use === b.use ? { label: existing.label } : {}) };
+      const item: DraftReference = { uploadId: refId, url, use: b.use, ...(b.label ? { label: b.label } : existing?.label && existing.use === b.use ? { label: existing.label } : {}) };
       list = existing ? list.map(x => (x === existing ? item : x)) : [...list, item];
     }
     if (list.length) d.references = list; else delete d.references;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
+  }
+
+  /** A studio image's /uploads/ link for a reference: an upload (HEIC made JPEG), else a take, Library still or link. */
+  private async referenceUrl(u: AuthUser, uploadId: string | undefined, image: z.infer<typeof ImageInSchema> | undefined): Promise<string> {
+    if (uploadId) {
+      try {
+        const { up, buf, kind } = await uploadImage(this.ctx, u, uploadId);
+        if (kind !== 'heic' && up.storageKey.startsWith('u/')) return `/uploads/${up.storageKey}`;
+        const img = await normaliseImage(buf, kind, uploadId);
+        const key = `u/${uid('img')}.${img.mimeType === 'image/png' ? 'png' : img.mimeType === 'image/webp' ? 'webp' : 'jpg'}`;
+        await putObject(this.ctx, { key, body: img.buf, studioId: u.studioId, kind: 'image', userId: u.id, contentType: img.mimeType });
+        return `/uploads/${key}`;
+      } catch (e) {
+        // Not an upload: a take or Library still given as uploadId (Claude's issue 2026-11-11) is taken as one.
+        if (!(e instanceof ApiError) || e.status !== 404 || image) throw e;
+        image = uploadId;
+      }
+    }
+    const ref = await sentImagesOf(this.ctx).image(u.studioId, image!);
+    const m = ref.url ? /\/uploads\/[a-z]+\/[A-Za-z0-9._-]+$/.exec(ref.url) : null;
+    if (!m) throw badRequest('That picture can\'t be a reference (only this studio\'s stored images)');
+    return m[0];
   }
 
   /** set_sent_images on the Suite: the images Generate sends, kept in the draft (null: back to MUSE's pick). */

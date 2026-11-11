@@ -9,6 +9,7 @@ import { claudeMessages, claudeThreads } from '../camera/schema.js';
 import type { EditTool } from '../editor/mcpTools.js';
 import { memoryAdd, memoryRead, ALL_AREAS } from './memory.js';
 import { PAGES, pageLine, pageOfContext, PageSchema, type PageRef } from './page.js';
+import { resolveAssist } from '../suite/screen.js';
 
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -42,7 +43,7 @@ export const CHAT_TOOLS: EditTool[] = [
   },
   {
     name: 'open_page', title: 'Open a page in MUSE', scope: 'edit:write',
-    description: `Opens a page in the person's MUSE app: ${PAGES.join(', ')}, with the item's id when it has one: for edit, the edit session id (es_…) open_edit gave you (a new blank project included) so the app opens the editor on exactly that session, or a take id; for take a take id; for recreate a reference id; for character a character id and for the AI Suite its tool (shot, photo, talking, ugc, storyboard, swap, extend). The app opens it and shows "Opened … · Back". When the person is in the middle of something (typing, playing, a dialog) or you set ask: true, the app asks them first with an Open button. Opening a page never spends, deletes or changes anything.`,
+    description: `Opens a page in the person's MUSE app: ${PAGES.join(', ')}, with the item's id when it has one: for edit, the edit session id (es_…) open_edit gave you (a new blank project included) so the app opens the editor on exactly that session, or a take id; for take a take id; for recreate a reference id; for character a character id and for the AI Suite its tool (shot, photo, talking, ugc, storyboard, swap, extend), and as id a shared draft (sa_…) or a camera session's Shot draft (sd_…) or session (cs_…) to open that shot in the Shot composer with its Directed camera and guides. The app opens it and shows "Opened … · Back". When the person is in the middle of something (typing, playing, a dialog) or you set ask: true, the app asks them first with an Open button. Opening a page never spends, deletes or changes anything.`,
     inputSchema: obj({ chatId: CHAT_ID, page: { type: 'string', enum: [...PAGES] }, id: str('The item to open (take, edit session, reference, character or draft id)', 80),
       tool: str('AI Suite tool', 20), label: str('Its name as the person knows it ("Sunset walk 3")', 120), ask: { type: 'boolean', description: 'Ask before opening' } }, ['chatId', 'page']),
     run: async (env, a) => {
@@ -51,9 +52,12 @@ export const CHAT_TOOLS: EditTool[] = [
       if (!to.success) throw badRequest(`page: one of ${PAGES.join(', ')}`);
       if (a.id !== undefined && (typeof a.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(a.id))) throw badRequest('id: an item id');
       const ask = a.ask === true || !!pageOf(t)?.busy;
-      const ui = compact({ page: to.data.name, id: a.id as string | undefined, tool: to.data.tool, label: to.data.label, ask, from: pageOf(t) });
+      // A camera session's Shot draft (sd_) or session (cs_) opens in the Shot composer as its own shared draft.
+      let id = a.id as string | undefined;
+      if (to.data.name === 'suite' && id && /^(sd|cs)_/.test(id)) id = await resolveAssist(env, { assistId: id });
+      const ui = compact({ page: to.data.name, id, ...(to.data.name === 'suite' && id?.startsWith('sa_') ? { assistId: id } : {}), tool: to.data.tool, label: to.data.label, ask, from: pageOf(t) });
       await uiLine(env.ctx, env.user, t.id, 'open_page', `${ask ? 'Asked to open' : 'Opened'} ${pageLine({ name: to.data.name, tool: to.data.tool, label: to.data.label })}`, ui);
-      return { ok: true, asked: ask, note: ask ? 'The person sees an Open button; the page changes when they press it.' : 'The app opens it now; the next turn tells you the page.' };
+      return { ok: true, asked: ask, ...(id !== a.id ? { assistId: id } : {}), note: ask ? 'The person sees an Open button; the page changes when they press it.' : 'The app opens it now; the next turn tells you the page.' };
     },
   },
   {

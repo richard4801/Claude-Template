@@ -13,7 +13,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads, type ImageRef } from '../db/schema.js';
-import { ApiError, badRequest, notFound } from '../errors.js';
+import { ApiError, badRequest } from '../errors.js';
 import { putObject } from '../storage/objects.js';
 import type { ShootGuide } from '../prompt/engine.js';
 
@@ -79,7 +79,8 @@ export class SentImages {
   async image(studioId: string, x: z.infer<typeof ImageInSchema>): Promise<ImageRef> {
     if (typeof x === 'string') {
       const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, x), eq(uploads.studioId, studioId)));
-      if (!up) throw notFound('Upload');
+      // Not an upload: a take or Library still named by its id (its picture; a video's first frame).
+      if (!up) return this.takeFrame(studioId, x).catch(e => { throw e instanceof ApiError && e.status === 404 ? new ApiError(404, 'not_found', `${x} is neither an upload nor a take of this studio (deleted?) · suite_feed or library lists the ids`) : e; });
       if (!/^image\//i.test(up.contentType)) throw badRequest(`${x} is not an image`);
       return { url: this.url(up.storageKey) };
     }
@@ -101,7 +102,7 @@ export class SentImages {
   /** A take's picture: a photo as it is; a video's frame at `at` seconds (default its first), stored once. */
   async takeFrame(studioId: string, takeId: string, at?: number): Promise<ImageRef> {
     const [t] = await this.ctx.db.select().from(takes).where(and(eq(takes.id, takeId), eq(takes.studioId, studioId)));
-    if (!t) throw notFound('Take');
+    if (!t) throw new ApiError(404, 'not_found', `Take ${takeId} isn't in this studio (deleted, or not a take id) · suite_feed lists the takes; {url} as MUSE gives it works for any studio picture`);
     if (t.kind === 'shot') {
       if (!t.thumb) throw new ApiError(409, 'not_ready', `${takeId} has no picture yet`);
       return t.thumb as ImageRef;
