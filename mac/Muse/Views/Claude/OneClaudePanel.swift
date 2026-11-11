@@ -133,6 +133,20 @@ struct OneClaudePanel: View {
             .fixedSize()
             .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
             .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
+        } else {
+            // The list isn't here yet (or the server is older): the line still shows, and tapping it tries again.
+            Button { Task { await store.loadClaudeModels() } } label: {
+                HStack(spacing: Space.s1) {
+                    Ph("cpu", 13)
+                    Text("Claude Code's default model").lineLimit(1)
+                }
+                .font(t.scale.caption.font).foregroundStyle(r.ink2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Loading the models to choose from. Click to try again.")
+            .accessibilityLabel("Claude model: default. Load the models to choose from")
+            .task { if store.oneClaude.models == nil { await store.loadClaudeModels() } }
         }
     }
 

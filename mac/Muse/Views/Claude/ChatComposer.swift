@@ -116,6 +116,8 @@ struct ChatTextArea: NSViewRepresentable {
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isAutomaticTextReplacementEnabled = false
+        // Owner bug (build 530): the system's Writing Tools badge sat on the + at the field's leading edge.
+        if #available(macOS 15.0, *) { tv.writingToolsBehavior = .none }
         tv.isContinuousSpellCheckingEnabled = true
         tv.textContainerInset = NSSize(width: 0, height: 6)
         tv.textContainer?.lineFragmentPadding = 0

@@ -174,6 +174,12 @@ extension SnapshotRunner {
         line(photoList.count == 2 && switched && returned && kept && shotOwn && photoAgain, "mode_sessions",
              "Photo chats \(photoList.count), switched to A with its draft \(switched), back after closing \(returned), messages kept \(kept), Shot has its own \(shotOwn), Photo returns to A \(photoAgain)")
 
+        // Step 6b (owner bug, build 530): the panel shows its model line (the models load for the panel header).
+        await store.loadClaudeModels()
+        let models = store.oneClaude.models?.models ?? []
+        line(!models.isEmpty && store.oneClaudeModel.info != nil, "model line visible in the panel header",
+             "\(models.count) models, showing \(store.oneClaudeModel.info?.name ?? "none")")
+
         // One Claude (owner bug, build 520): Claude opening an edit session (a new blank project) lands IN the editor on
         // that session, not on the Edit home.
         if let blank = try? await fakeMuse.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId, device: "check")) {
