@@ -144,6 +144,12 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   End like image n", length clamped, nearest aspect/resolution, refs/videos trimmed, each said in warnings + `adapted`.
   Refusals: "Can't make this shot · <Model>: <plain reasons>" + `reasons` + `fixes` [{fix: model:<id>|quality:<t>|
   drop_audio|drop_guide, label}] (HTTP and Claude's MCP errors). APP WORK (queue): a "Fix" chip per `fixes` entry.
+- 20:00 owner: Video Studio redesign YES (picture ~50%, Shape/Length/Takes in the prompt bar, small window = setup
+  button row, keep takes strip, Android tablet later) → session_01Py2rxphub3JG9Gtsd3sf7U, claude/studio-redesign (also
+  the prompt auto-grow fix, plans/patches/studio-prompt-grow.patch). Claude UI control of the MUSE window only (no
+  whole-Mac) → session_01Py2rxndkVj5NxWZnKdbvoX, claude/ui-control. Mac queue (one run at a time): one-claude run
+  552 (merging) → camera viewer → claude-issues-mac (Approve card + directed-draft restore) + sent-images row + mask
+  badge → prompt grow / redesign → Blender handshake → layers → ui-control.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
