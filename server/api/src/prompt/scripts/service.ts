@@ -6,7 +6,8 @@ import type { AuthUser, Ctx } from '../../ctx.js';
 import { users } from '../../db/schema.js';
 import { ApiError, notFound } from '../../errors.js';
 import { PROMPT_GROUPS } from '../library.js';
-import { SCRIPTS, scriptDef } from './defs.js';
+import { SAMPLE, SCRIPTS, scriptDef } from './defs.js';
+import { houseStyle, rulesOf, withRules } from './builders.js';
 import { cleanRules, resolveRules, runScript, ruleTargets, same, scriptBlocks, validateRules, type SavedRules } from './run.js';
 import { promptScriptRules } from './schema.js';
 import { COND_OPS, type Inputs, type Rule, type Script } from './types.js';
@@ -23,6 +24,18 @@ export async function loadRules(ctx: Pick<Ctx, 'db'>, studioId: string): Promise
 
 const sampleInputs = (s: Script): Inputs => Object.fromEntries(s.inputs.map(i => [i.name, i.sample]));
 const sampleVars = (s: Script) => Object.fromEntries((s.vars ?? []).map(v => [v.name, v.sample]));
+const usesStyle = (s: Script) => (s.vars ?? []).some(v => v.name === 'style');
+const hasCameraInput = (s: Script) => s.inputs.some(i => i.name === 'ownCamera');
+/** Preview variants a script offers (Settings shows each under the preview). */
+const variantsOf = (s: Script) => (hasCameraInput(s) ? [{ id: 'cinematic', label: 'With a cinematic rig' }] : []);
+type RunText = (inputs: Inputs, vars: Record<string, string>, direction: string) => string;
+function cinematic(s: Script, inputs: Inputs, runText: RunText, direction: string) {
+  const c = SAMPLE.cinematic;
+  const vi: Inputs = { ...inputs, ownCamera: true, ...(s.inputs.some(i => i.name === 'noGrade') ? { noGrade: false } : {}), ...(s.inputs.some(i => i.name === 'hasCamera') ? { hasCamera: true } : {}) };
+  const vv: Record<string, string> = s.id === 'photoshoot' ? { grade: c.grade } : s.id === 'template' ? { camera: c.camera } : {};
+  return { id: 'cinematic', label: 'With a cinematic rig', note: 'A rig with a cinema camera, lens and look: Camera feel and the default grade are left out.',
+    text: runText(vi, vv, s.id === 'photoshoot' ? c.direction : direction) };
+}
 
 export class PromptScripts {
   constructor(private ctx: Ctx) {}
@@ -33,7 +46,7 @@ export class PromptScripts {
     return {
       id: s.id, group: s.group, title: s.title, description: s.description, format: s.format,
       inputs: s.inputs, sections: s.sections.map(x => ({ id: x.id, label: x.label, kind: x.kind, pick: x.pick, ...(x.join != null ? { join: x.join } : {}), ...(x.each ? { each: x.each } : {}), ...(x.heading ? { heading: x.heading } : {}), ...(x.alias ? { alias: x.alias } : {}) })),
-      values: s.values ?? [], targets, vars: s.vars ?? [], blocks: scriptBlocks(s),
+      values: s.values ?? [], targets, vars: s.vars ?? [], blocks: scriptBlocks(s), variants: variantsOf(s),
       rules: res.rules, defaultRules: s.rules, overridden: res.overridden, stale: res.stale,
       updatedAt: res.overridden ? row!.updatedAt : null, updatedBy: res.overridden && row?.updatedBy ? emails?.get(row.updatedBy) ?? null : null,
     };
@@ -94,8 +107,14 @@ export class PromptScripts {
     if (b.texts && typeof b.texts === 'object') for (const [k, v] of Object.entries(b.texts as Record<string, unknown>)) if (typeof v === 'string' && scriptBlocks(s).includes(k)) texts[k] = v;
     const inputs = { ...sampleInputs(s), ...(b.inputs && typeof b.inputs === 'object' ? (b.inputs as Inputs) : {}) };
     const direction = typeof b.direction === 'string' ? b.direction.slice(0, 500) : 'smiling, glancing at the camera';
-    const r = runScript(s, { inputs, vars: sampleVars(s), texts, rules, user: { direction } });
-    return { id: s.id, text: r.text, parts: r.parts, fired: r.fired, inputs };
+    // The house style is built as the builders build it (Camera feel unless the shot has its own camera), with the
+    // studio's House style rules and any unsaved block edits.
+    const styled = withRules(texts, { ...(rulesOf(saved, 'style.house') ? { 'style.house': rulesOf(saved, 'style.house')! } : {}), ...(s.id === 'style.house' ? { 'style.house': rules } : {}) });
+    const varsFor = (own: boolean, extra: Record<string, string> = {}) => ({ ...sampleVars(s), ...(usesStyle(s) ? { style: houseStyle(styled, own) } : {}), ...extra });
+    const r = runScript(s, { inputs, vars: varsFor(!!inputs.ownCamera), texts, rules, user: { direction } });
+    // "With a cinematic rig": the same sample with a cinema camera, lens and look (Camera feel and the default grade left out).
+    const variants = hasCameraInput(s) ? [cinematic(s, inputs, (vi, vv, d) => runScript(s, { inputs: vi, vars: varsFor(true, vv), texts, rules, user: { direction: d } }).text, direction)] : [];
+    return { id: s.id, text: r.text, parts: r.parts, fired: r.fired, inputs, variants };
   }
 }
 

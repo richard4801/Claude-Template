@@ -8,6 +8,8 @@ import { ImageRefSchema } from './plan.js';
 import { APERTURES, BODIES, CameraSpecSchema, ERAS, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, canonicalSpec, resolvePreset, type CameraSpec, type Option } from './camera.js';
 import { rigCheck, type RigWarning } from './rigcheck.js';
 import { shotLook } from './looks.js';
+import { houseStyle } from '../prompt/engine.js';
+import type { PromptTexts } from '../prompt/library.js';
 
 /** A shoot reference (as `/v1/shoots`): an image and what to take from it. */
 const PhotoRefSchema = z.object({ image: ImageRefSchema, guides: z.array(z.enum(['pose', 'look', 'scene'])).min(1).max(3) })
@@ -53,6 +55,9 @@ export type StillRig = {
   direction?: string;
   /** What was left out ("Movement doesn't apply to photos"). */
   notes: string[];
+  /** The rig (or its camera preset) sets a camera body, lens character, look or grade: the house style's Camera feel and
+   *  the default grade are left out and the rig's own words stand (owner 2026-11-11). */
+  ownCamera?: boolean;
 };
 
 const SHOT_WORDS: Record<string, string> = {
@@ -99,7 +104,8 @@ export function stillRig(r: Pick<PhotoRequest, 'prompt' | 'camera'>): StillRig {
     wording(ERAS, s?.era),
     p ? `expression: ${p.emotion}${p.to ? ` turning to ${p.to}` : ''}` : '',
   ]) || undefined;
-  return { scene, camera, light, grade, direction, notes };
+  const ownCamera = !!(rig.body || rig.lens || rig.look || pal?.preset || pal?.colors?.length);
+  return { scene, camera, light, grade, direction, notes, ...(ownCamera ? { ownCamera } : {}) };
 }
 
 /** The rig-check rules that make sense for a still (no movement, no reveal, no lip sync). */
@@ -140,7 +146,8 @@ export function freePhotoPrompt(o: { prompt: string; still: StillRig; refs: { in
   }
   if (s.light || s.grade) lines.push([s.light && `Light: ${s.light.toLowerCase()}`, s.grade && `${s.light ? 'grade' : 'Grade'}: ${s.grade.toLowerCase()}`].filter(Boolean).join('; ') + '.');
   if (s.direction) lines.push(s.direction);
-  if (t['style.house']) lines.push(`Style: ${t['style.house'].trim().replace(/[.\s]+$/, '')}.`);
+  const style = houseStyle(t as PromptTexts, !!s.ownCamera);
+  if (style) lines.push(`Style: ${style}.`);
   const never = (t['never.base'] ?? '').split(',').map(x => x.trim()).filter(Boolean);
   if (never.length) lines.push(`Never add: ${never.join(', ')}.`);
   return lines.join('\n');

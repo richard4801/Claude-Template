@@ -19,7 +19,7 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(73 + SUITE_PROMPT_DEFS.length); // 53 + 20 blocks + 2 outfit keep (§6) + 1 outfit face − 3 Dress up (removed 2026-11-11) added with prompt scripts (workstream 4) + AI suite (workstream 1)
+    expect(PROMPT_DEFS.length).toBe(75 + SUITE_PROMPT_DEFS.length); // 53 + 20 blocks + 2 outfit keep (§6) + 1 outfit face − 3 Dress up (removed 2026-11-11) + house style split in two + light without grade (2026-11-11) added with prompt scripts (workstream 4) + AI suite (workstream 1)
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
     for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
@@ -27,7 +27,7 @@ describe('prompt library (unit)', () => {
   });
   it('validation: unknown placeholder, missing required, empty, too long; other braces are fine', () => {
     expect(validatePrompt('shoot.scene', 'Place: {where}.')).toBe('Unknown placeholder {where} · this prompt can use {scene}');
-    expect(validatePrompt('style.house', 'x {name}')).toBe('Unknown placeholder {name} · this prompt has no placeholders');
+    expect(validatePrompt('style.realism', 'x {name}')).toBe('Unknown placeholder {name} · this prompt has no placeholders');
     expect(validatePrompt('refs.pose', 'Copy the pose.')).toBe('Keep {refIndex} · this prompt needs it');
     expect(validatePrompt('enhance.prompt', '  ')).toBe('This prompt can’t be empty');
     expect(validatePrompt('shoot.camera.wide', '')).toBeNull();
@@ -36,7 +36,7 @@ describe('prompt library (unit)', () => {
     expect(validatePrompt('nope', 'x')).toBe('Unknown prompt');
     expect(fill('{a}-{b}-{a}', { a: 1 })).toBe('1--1');
     // A stored override that no longer validates (or names a removed key) falls back to the default.
-    expect(resolveTexts({ 'shoot.scene': 'no placeholder', gone: 'x', 'style.house': 'HOUSE' })).toMatchObject({ 'shoot.scene': DEFAULT_TEXTS['shoot.scene'], 'style.house': 'HOUSE' });
+    expect(resolveTexts({ 'shoot.scene': 'no placeholder', gone: 'x', 'style.realism': 'REAL' })).toMatchObject({ 'shoot.scene': DEFAULT_TEXTS['shoot.scene'], 'style.realism': 'REAL' });
   });
   it('the server-built shoot prompt matches shoot_prompt_fixture.json (the apps check their fallback against it)', () => {
     const fx = JSON.parse(fs.readFileSync(path.join(FIX, 'shoot_prompt_fixture.json'), 'utf8'));
@@ -81,10 +81,10 @@ describe('prompt library (unit)', () => {
   });
   it('overrides reach every builder', () => {
     const id = { name: 'Demo model', look: 'x', neverAdd: ['rings'] };
-    const t = { ...DEFAULT_TEXTS, 'style.house': 'HOUSE', 'never.base': 'aliens, hats', 'sheet.task': 'SHEET {angle}', 'outfit.edit': 'EDIT {angle}', 'enhance.prompt': 'ENH',
+    const t = { ...DEFAULT_TEXTS, 'style.camera': 'CAM', 'style.realism': 'HOUSE', 'never.base': 'aliens, hats', 'sheet.task': 'SHEET {angle}', 'outfit.edit': 'EDIT {angle}', 'enhance.prompt': 'ENH',
       'outfit.face': 'FACE {angle}', 'video.replicate.summary': 'RSUM', 'video.edit.detailed': 'EDET {outfit}', 'lora.variation': 'VAR {variation}', 'lora.variations': 'one\ntwo',
       'template.locked': 'LOCKED {name}' };
-    expect(E.characterSheetShot(id, E.SHEET_ANGLES[0], t).text).toContain('SHEET face · front\nStyle: HOUSE.\nNever add: rings, aliens, hats.');
+    expect(E.characterSheetShot(id, E.SHEET_ANGLES[0], t).text).toContain('SHEET face · front\nStyle: CAM, HOUSE.\nNever add: rings, aliens, hats.');
     expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[3], t)).toBe('EDIT full body back view');
     expect(E.outfitFacePrompt(1, t)).toBe('FACE face close-up from three-quarter view');
     expect(E.replicateSwap({ identity: id, referenceLabels: ['face, front'] }, t).text).toContain('summary:\nRSUM\n');
@@ -116,13 +116,13 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
   const refs3 = [{ image: R('c_front'), guides: ['pose'] }, { image: R('c_tq'), guides: ['look', 'scene'] }, { image: R('c_face'), guides: ['scene'] }];
 
   it('owner-only: list, save, reset, preview; members get 403 and no event', async () => {
-    for (const [m, u, b] of [['GET', '/v1/prompts'], ['PUT', '/v1/prompts/style.house', { text: 'x' }], ['DELETE', '/v1/prompts/style.house'], ['POST', '/v1/prompts/preview', { key: 'style.house' }]] as const) {
+    for (const [m, u, b] of [['GET', '/v1/prompts'], ['PUT', '/v1/prompts/style.realism', { text: 'x' }], ['DELETE', '/v1/prompts/style.realism'], ['POST', '/v1/prompts/preview', { key: 'style.realism' }]] as const) {
       const r = await tess.req(m, u, b);
       expect(r.status, u).toBe(403); expect(r.body.code).toBe('owner_only');
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
     expect(l.groups.map((g: any) => g.label)).toEqual(['Photo', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
-    expect(l.prompts).toHaveLength(73 + SUITE_PROMPT_DEFS.length);
+    expect(l.prompts).toHaveLength(75 + SUITE_PROMPT_DEFS.length);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,
       placeholders: [{ name: 'refIndex', required: true }] });
@@ -130,7 +130,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect((await owner.req('PUT', '/v1/prompts/shoot.scene', { text: 'Place: {where}.' })).body).toMatchObject({ code: 'prompt_invalid', error: 'Unknown placeholder {where} · this prompt can use {scene}' });
     expect((await owner.req('PUT', '/v1/prompts/refs.guard', { text: 'Not the face.' })).body.error).toBe('Keep {refIndex} · this prompt needs it');
     expect((await owner.req('PUT', '/v1/prompts/nope', { text: 'x' })).status).toBe(404);
-    expect((await owner.req('PUT', '/v1/prompts/style.house', {})).body.code).toBe('prompt_invalid');
+    expect((await owner.req('PUT', '/v1/prompts/style.realism', {})).body.code).toBe('prompt_invalid');
     // Save, with the live event to owners only.
     const oEs = await sse(base, owner.token), mEs = await sse(base, tess.token);
     const saved = (await owner.req('PUT', '/v1/prompts/shoot.scene', { text: 'Location: {scene}!' })).body;
@@ -146,12 +146,12 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(pv.text).toBe('Location: rooftop · golden hour!');
     expect(pv.example).toContain('\nLocation: rooftop · golden hour!\n');
     expect(pv.sample).toEqual({ scene: 'rooftop · golden hour' });
-    expect((await owner.req('POST', '/v1/prompts/preview', { key: 'refs.pose', text: 'Pose like image {refIndex}.' })).body.example).toContain('Pose like image 8. Copy the light');
+    expect((await owner.req('POST', '/v1/prompts/preview', { key: 'refs.pose', text: 'Pose like image {refIndex}.' })).body.example).toContain('Pose like image 5. Copy the light');
     expect((await owner.req('POST', '/v1/prompts/preview', { key: 'refs.pose', text: 'Pose.' })).status).toBe(400);
     // Reset; saving the default text also clears the override.
     expect((await owner.req('DELETE', '/v1/prompts/shoot.scene')).body).toMatchObject({ overridden: false, current: 'Scene: {scene}.', updatedAt: null });
-    await owner.req('PUT', '/v1/prompts/style.house', { text: 'x' });
-    expect((await owner.req('PUT', '/v1/prompts/style.house', { text: DEFAULT_TEXTS['style.house'] })).body.overridden).toBe(false);
+    await owner.req('PUT', '/v1/prompts/style.realism', { text: 'x' });
+    expect((await owner.req('PUT', '/v1/prompts/style.realism', { text: DEFAULT_TEXTS['style.realism'] })).body.overridden).toBe(false);
   });
 
   it('the server builds the shoot prompt; preview = what is sent; Edit as text is sent exactly; Presets off', async () => {
@@ -241,7 +241,8 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
 
   it('a saved override changes what is sent: shoots, sheet fills, outfit sets and their face close-ups, Enhance, video', async () => {
     const put = async (key: string, text: string) => expect((await owner.req('PUT', `/v1/prompts/${key}`, { text })).status, key).toBe(200);
-    await put('style.house', 'HOUSE STYLE X');
+    await put('style.camera', 'HOUSE');
+    await put('style.realism', 'STYLE X');
     await put('refs.pose', 'POSE FROM {refIndex}.');
     await put('sheet.task', 'SHEET TASK {angle}.');
     await put('outfit.edit', 'OUTFIT EDIT {angle}.');
@@ -250,7 +251,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     await put('video.edit.detailed', 'EDIT DETAILS {outfit}.');
     // Shoot (a member's).
     await tess.req('POST', '/v1/shoots', { modelId, refs: refs3.slice(0, 1), count: 1 });
-    expect(lastShots(1)[0]!.input.prompt).toContain('Style: HOUSE STYLE X.');
+    expect(lastShots(1)[0]!.input.prompt).toContain('Style: HOUSE, STYLE X.');
     expect(lastShots(1)[0]!.input.prompt).toContain('POSE FROM 4.');
     // Sheet fill.
     const m2 = (await owner.req('POST', '/v1/models', { name: 'Sheet test', age: 25 })).body;
@@ -260,13 +261,13 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     await until(async () => (await owner.req('GET', '/v1/models')).body.find((x: any) => x.id === m2.id).slots.every((s: any) => !s.busy), 30_000);
     const fills = fake.state.creates.slice(n0);
     expect(fills.length).toBe(6);
-    expect(fills.every(p => /SHEET TASK [a-z ·¾]+\.\nStyle: HOUSE STYLE X\./.test(p.input.prompt))).toBe(true);
+    expect(fills.every(p => /SHEET TASK [a-z ·¾]+\.\nStyle: HOUSE, STYLE X\./.test(p.input.prompt))).toBe(true);
     // Outfit set: the front, then the edits.
     const n1 = fake.state.creates.length;
     const o = (await tess.req('POST', '/v1/outfits', { modelId, name: 'Linen', mode: 'describe', description: 'a linen shirt' })).body;
     await until(async () => (await tess.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id)?.state === 'preview', 30_000);
     const set = fake.state.creates.slice(n1);
-    expect(set[0]!.input.prompt).toContain('Style: HOUSE STYLE X.');
+    expect(set[0]!.input.prompt).toContain('Style: HOUSE, STYLE X.');
     // The owner's text, then the body-angle line (her own body photo of that angle goes with each edit).
     const body = ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.';
     expect(set.slice(1, 4).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body));
@@ -282,8 +283,9 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
       background: 'keep', backgroundMotion: 'still', queue: true })).body;
     expect(job.prompt).toContain('detailed_description:\nEDIT DETAILS outfit.');
     // Reset: back to the default.
-    await owner.req('DELETE', '/v1/prompts/style.house');
+    await owner.req('DELETE', '/v1/prompts/style.camera');
+    await owner.req('DELETE', '/v1/prompts/style.realism');
     await tess.req('POST', '/v1/shoots', { modelId, count: 1 });
-    expect(lastShots(1)[0]!.input.prompt).toContain(`Style: ${DEFAULT_TEXTS['style.house']}.`);
+    expect(lastShots(1)[0]!.input.prompt).toContain(`Style: ${DEFAULT_TEXTS['style.camera']}, ${DEFAULT_TEXTS['style.realism']}.`);
   });
 });

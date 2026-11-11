@@ -820,7 +820,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const spec = { identity, outfit: outfitSpec(o) ?? { name: 'outfit' }, scene: b.scene, light: b.light, grade: b.grade, direction: b.direction, lockSeed: b.lockSeed,
       presets: b.presets, refs: plan.sent, camera: b.camera ? { shot: b.camera.shot, lensMm: b.camera.lens, aperture: b.camera.aperture } : undefined,
       // AI suite Photo tool (workstream 3): the composer's rig compiled for a still (suite/photo.ts) in place of the shoot pickers.
-      ...(still ? { scene: still.scene, light: still.light, grade: still.grade, direction: still.direction, camera: still.camera } : {}) };
+      ...(still ? { scene: still.scene, light: still.light, grade: still.grade, direction: still.direction, camera: still.camera, ownCamera: !!still.ownCamera } : {}) };
     const built = photoshoot(spec, texts);
     const custom = b.prompt?.trim() || null;
     return { kind: 'plain' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, spec, built, custom };
@@ -882,7 +882,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       label = (b.scene?.trim() || ch.scene).split(' · ')[0]!.slice(0, 28);
       const cv = cameraValues(ch.camera, s.texts);
       // The shot's own layers (for "Save as template"), from the choices rather than the (owner-editable) prompt wording.
-      if (b.presets !== false) layers = { scene: ch.scene.toLowerCase(), camera: `${cv.shot} shot, ${cv.lens}mm lens, ${cv.aperture}${cv.lensNote}`, light: `${ch.light.toLowerCase()}; grade: ${ch.grade.toLowerCase()}` };
+      if (b.presets !== false) layers = { scene: ch.scene.toLowerCase(), camera: `${cv.shot} shot, ${cv.lens}mm lens, ${cv.aperture}${cv.lensNote}`, light: ch.grade ? `${ch.light.toLowerCase()}; grade: ${ch.grade.toLowerCase()}` : ch.light.toLowerCase() };
     }
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m?.id ?? null, index: n + 1, of: r.images.length,

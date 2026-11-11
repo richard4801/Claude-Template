@@ -28,13 +28,18 @@ const d = (key: string, group: PromptGroup, title: string, description: string, 
 
 export const PROMPT_DEFS: PromptDef[] = [
   // ---------------------------------------------------------------- photoshoot
-  d('style.house', 'photoshoot', 'House style', 'The look every photo asks for. Used in the style line of shoots, template shoots, sheet fills and outfit sets.',
-    'realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss', [], { allowEmpty: false }),
+  // The house style, split in two (owner 2026-11-11): Realism is always on; Camera feel only when the shot has no camera
+  // body, lens, grade or look of its own (script `style.house`). Together, at their defaults, they read as the old single
+  // house style ("realistic smartphone photo, natural skin texture, …"). An old saved `style.house` is split by splitHouseStyle.
+  d('style.realism', 'photoshoot', 'Realism', 'Always on. How real every photo looks: skin, colour, no filters. In the style line of shoots, template shoots, sheet fills and outfit sets, after the camera feel.',
+    'natural skin texture, true-to-life colour, no beauty filter, no AI gloss', [], { allowEmpty: false }),
+  d('style.camera', 'photoshoot', 'Camera feel', 'The camera the photo looks taken with, when the shot names none. Left out when a rig or preset sets a camera body, lens, grade or look (its own words stand). Sheet fills and outfit sets always have it.',
+    'realistic smartphone photo', [], { allowEmpty: true }),
   d('never.base', 'photoshoot', 'Never add (every model)', 'Comma-separated. Added after each model’s own never-add list in every photo and video prompt.',
     'logos, extra fingers, warped jewellery', [], { kind: 'list' }),
   d('shoot.default.scene', 'photoshoot', 'Default scene', 'Used when a shoot sends no scene.', 'Rooftop · golden hour', [], { allowEmpty: false }),
   d('shoot.default.light', 'photoshoot', 'Default light', 'Used when a shoot sends no light.', 'Golden hour', [], { allowEmpty: false }),
-  d('shoot.default.grade', 'photoshoot', 'Default grade', 'Used when a shoot sends no grade.', 'Phone-natural', [], { allowEmpty: false }),
+  d('shoot.default.grade', 'photoshoot', 'Default grade', 'Used when a shoot sends no grade and has no camera body, lens or look of its own.', 'Phone-natural', [], { allowEmpty: false }),
   d('shoot.identity', 'photoshoot', 'Identity line', 'Who she is. First line of every photo prompt (shoots, templates, sheet fills, outfit sets, LoRA sets).',
     '{name}: {look}. Identity from {refCount} locked reference images{lora}.',
     [['name', 'her name'], ['look', 'her written look'], ['refCount', 'how many sheet images she has'], ['lora', '" + LoRA demo_v2 (photo)" when her LoRA is on, else empty']]),
@@ -47,9 +52,10 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('shoot.camera.wide', 'photoshoot', 'Camera · wide lens note', 'Added to the camera line at 24 mm and wider.', ', slight wide-angle distortion'),
   d('shoot.camera.tele', 'photoshoot', 'Camera · long lens note', 'Added to the camera line at 85 mm and longer.', ', compressed background, creamy bokeh'),
   d('shoot.light', 'photoshoot', 'Light line', 'Light and colour grade.', 'Light: {light}; grade: {grade}.', [['light', 'the chosen light, lower case'], ['grade', 'the chosen grade, lower case']]),
+  d('shoot.light.only', 'photoshoot', 'Light line · no grade', 'Light alone: the shot’s own camera, lens or look sets the colour, so the default grade is left out.', 'Light: {light}.', [['light', 'the chosen light, lower case']]),
   d('shoot.direction', 'photoshoot', 'Direction line', 'The user’s own words (anything that would change her identity is removed first).', 'Direction: {direction}',
     [['direction', 'the user’s direction', true]]),
-  d('shoot.style', 'photoshoot', 'Style line', 'The house style line.', 'Style: {style}.', [['style', 'the house style', true]]),
+  d('shoot.style', 'photoshoot', 'Style line', 'The house style line.', 'Style: {style}.', [['style', 'the house style: camera feel (unless the shot has its own camera) and realism', true]]),
   d('shoot.never', 'photoshoot', 'Never-add line', 'What must never appear.', 'Never add: {never}.', [['never', 'her never-add list plus the base list', true]]),
   d('shoot.seed.locked', 'photoshoot', 'Seed line · Lock look', 'When Lock look is on.', 'Seed: locked (variations keep the same look).'),
   d('shoot.seed.new', 'photoshoot', 'Seed line · new each shot', 'When Lock look is off.', 'Seed: new each shot.'),
@@ -193,9 +199,32 @@ export const fill = (text: string, values: Record<string, string | number | null
 export const listOf = (text: string, kind: 'list' | 'lines' = 'list') =>
   text.split(kind === 'lines' ? /\r?\n/ : /,|\r?\n/).map(s => s.trim()).filter(Boolean);
 
+/** The old single house style's key (before the split into Realism and Camera feel, 2026-11-11). */
+export const LEGACY_HOUSE_STYLE = 'style.house';
+const CAMERA_PHRASE = /\b(smart ?phones?|phones?|iphones?|mobile|selfies?|camera roll|snapshots?)\b/i;
+/**
+ * An owner's saved house style split into the two new entries, so nothing she wrote is lost: the phrases about the phone
+ * (smartphone, phone, selfie, camera roll …) go to Camera feel, everything else to Realism, each in her order and words.
+ * `realism` is empty when every phrase was about the phone (the default Realism then stays).
+ */
+export function splitHouseStyle(text: string): { camera: string; realism: string } {
+  const phrases = text.split(/[,;\n]|\.(?=\s|$)/).map(p => p.trim()).filter(Boolean);
+  const camera = phrases.filter(p => CAMERA_PHRASE.test(p)), realism = phrases.filter(p => !CAMERA_PHRASE.test(p));
+  return { camera: camera.join(', '), realism: realism.join(', ') };
+}
+/** Overrides with an old `style.house` replaced by its split (unless the new entries are saved already). */
+export function migrateOverrides(overrides: Record<string, string>): Record<string, string> {
+  const legacy = overrides[LEGACY_HOUSE_STYLE];
+  if (legacy == null) return overrides;
+  const { [LEGACY_HOUSE_STYLE]: _, ...rest } = overrides;
+  if (rest['style.camera'] != null || rest['style.realism'] != null) return rest;
+  const sp = splitHouseStyle(legacy);
+  return { ...rest, 'style.camera': sp.camera, ...(sp.realism ? { 'style.realism': sp.realism } : {}) };
+}
+
 /** Resolved texts: the defaults with the overrides that still name a known entry and still validate. */
 export function resolveTexts(overrides: Record<string, string>): PromptTexts {
   const out: PromptTexts = { ...DEFAULT_TEXTS };
-  for (const [k, v] of Object.entries(overrides)) if (BY_KEY.has(k) && validatePrompt(k, v) == null) out[k] = v;
+  for (const [k, v] of Object.entries(migrateOverrides(overrides))) if (BY_KEY.has(k) && validatePrompt(k, v) == null) out[k] = v;
   return out;
 }
