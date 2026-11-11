@@ -73,3 +73,11 @@ outfit "Product look" and an own set "My set" (AppStore+Actions.swift ~567); che
   (e.g. "Green halter mini skirt set"), using the vision helpers in server/api/src/suite/vision.ts.
 - Server test for the rename route (permissions, studio scope, length); the rest the owner checks by hand.
 - Build together with section 4 (same screens).
+
+## 6. Outfit from her base photos, keeping chosen pieces (owner, 2026-11-11; approved)
+Owner: "Allow me to control what base image I send … my model base is an underwear. I want her wearing a skirt with the
+bra of that underwear … it won't overwrite the bra because of the skirt, right?" Today it can: base photos are identity
+refs only; "Wearing:" is the whole outfit; the body-angle line says "not its clothes".
+Decided: base = her base photos, chosen explicitly; "Keep from base" tick boxes Top · Bottom · Shoes · Accessories +
+a note. Kept pieces → the front is an EDIT of her base front photo (keep X exactly, replace only the rest); ¾/side/back
+are edits of that front + her base photo of the same angle. Nothing kept → as today. Built by the outfit-page session.
