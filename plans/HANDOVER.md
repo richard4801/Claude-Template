@@ -68,6 +68,10 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - DONE 5A.5 (server, live f68c469): Claude in the Suite sees outfits and the @model (suite_cast, suite_see, pictures on
   set_draft; helpers in suite/vision.ts for Edit/Recreate later). Gap: on the Mac Claude Code path the per-turn face and
   outfit-front pictures aren't sent (the Mac builds its own turns); do with the next Mac Claude work.
+- Delegated 2026-11-11 02:31: Mac Claude can't start Blender's MCP (30 s timeout; likely uvx first download) →
+  session_01Py2rxpXsqXzUU5c85XYbCd, branch claude/mac-blender-timeout. One Claude step (a), owner's go ("do it now"),
+  design first then build, server + Mac (Android later) → session_01Py2rxp2U1ycTHGZcQ73s5x, branch claude/one-claude;
+  it waits for the owner's yes on plans/one-claude.md before building (relay the yes with send_message).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
