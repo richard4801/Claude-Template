@@ -11,7 +11,7 @@ import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
+import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, outfitFacePrompt, OUTFIT_FACES, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
 import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, type IdentityRef } from '../images/identity.js';
 import { applySent, sentImagesOf, sentOfBody, whyOf, type SentView } from '../images/sent.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
@@ -277,6 +277,37 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const hidden = new Set((await db.select({ id: models.id }).from(models).where(and(eq(models.studioId, req.user.studioId), isNotNull(models.archivedAt)))).map(x => x.id));
     return (await db.select().from(outfits).where(eq(outfits.studioId, req.user.studioId)).orderBy(outfits.createdAt)).filter(o => !hidden.has(o.modelId)).map(outfitView);
   });
+  /**
+   * Outfit face close-ups (owner 2026-11-11: "every outfit would come with its own hair, facial accessories and make-up"):
+   * front, ¾ and side, each an edit of HER base face photo of that angle (a missing ¾ or side uses her face front) with the
+   * outfit's front picture sent last, so the likeness stays hers. A custom (provider) model makes them as new shots from
+   * the same two images. Her base images are used here, when MAKING the outfit, never when shooting with it.
+   * `only`: which of the three (0 front, 1 ¾, 2 side); default all.
+   */
+  const outfitFaces = async (u: AuthUser, m: typeof models.$inferSelect, o: { imageEngine?: Partial<EngineSelection> | null; stepModels?: StepOverrides | null; only?: number[] }) => {
+    const slot = (k: string) => m.slots.find(x => x.key === k && x.image && !x.busy)?.image ?? null;
+    const base = (i: number) => slot(OUTFIT_FACES[i]!.key) ?? slot('face');
+    const which = (o.only ?? [0, 1, 2]).filter(i => i >= 0 && i < 3 && !!base(i));
+    const byo = !o.imageEngine?.provider && !!o.stepModels?.shot?.startsWith('c_');
+    const two = (img: ImageRef): IdentityRef[] => [{ image: img, label: 'face', role: 'person' }, { image: img, label: 'outfit', role: 'outfit' }];
+    const per = !which.length ? 0 : byo ? (await ctx.images.shotPlan(u.studioId, two(base(which[0]!)!), [], 1, o.imageEngine, o.stepModels, null)).perShot
+      : await ctx.images.editCost(u.studioId, o.stepModels);
+    /** Makes them from the outfit's `front`; one that fails stays empty (its spend is recorded on the bill). */
+    const run = async (refId: string, front: ImageRef, bill: PhotoBill, seed?: number | null) => {
+      const texts = await ctx.prompts.texts(u.studioId);
+      const out: (ImageRef | null)[] = [null, null, null];
+      for (const i of which) {
+        const req = { prompt: outfitFacePrompt(i, texts), width: 768, height: 1024, count: 1, seed: seed ?? undefined, simAssets: ['face'] };
+        const common = { studioId: u.studioId, userId: u.id, purpose: 'outfit', refId, override: o.imageEngine, models: o.stepModels, bill, req };
+        try {
+          out[i] = (await ctx.images.generate(byo ? { ...common, refs: [base(i), front], maxImages: 2, panels: [{ label: 'face', role: 'person' as const }, { label: 'outfit', role: 'outfit' as const }] }
+            : { ...common, editOf: base(i), refs: [front] })).images[0] ?? null;
+        } catch (e) { ctx.log.warn({ err: (e as Error).message, refId, face: i }, 'outfit face close-up failed'); }
+      }
+      return out;
+    };
+    return { which, perImage: per, cost: per * which.length, run };
+  };
   const createOutfit = async (req: { user: AuthUser; body: unknown }) => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
       description: z.string().max(1000).optional(), /* "My own set": one per angle, in order front, ¾, side, back (null = skipped, made later from the front) */
@@ -324,14 +355,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (keeping && b.base?.angles) baseSet = BODY_SLOTS.map((k, i) => (b.base!.angles![k] as ImageRef | undefined) ?? baseSet[i] ?? null);
     const baseFront = baseSet[0];
     if (keeping && !baseFront) throw badRequest('Choose a front base photo first');
-    const cost = !outfitPlan ? 0 : keeping ? 4 * await ctx.images.editCost(req.user.studioId, stepModels)
+    const bodyCost = !outfitPlan ? 0 : keeping ? 4 * await ctx.images.editCost(req.user.studioId, stepModels)
       : byoRun ? 4 * outfitPlan.perShot : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
+    // Every outfit comes with its own three face close-ups (always, every way of making one; "My own set" too).
+    const faceJob = await outfitFaces(req.user, m, { imageEngine: b.imageEngine, stepModels });
+    const cost = bodyCost + faceJob.cost;
     const faceRef = slotOf('face');
     const keepSent = keeping ? applySent([...(faceRef ? [{ image: faceRef, role: 'person' as const, label: 'face', why: whyOf('face', 'person') }] : []),
       ...productIds.map(x => ({ image: x.image, role: 'product' as const, label: x.label, why: whyOf(x.label, 'product') }))], sent, ctx.config.REPLICATE_IMAGE_MAX_INPUTS - 1, { what: 'besides the photo it edits' }) : null;
     const sentImages = keepSent ?? outfitPlan?.sentImages ?? null;
     // Estimate only: the price and the images the outfit's front would send (nothing held or made).
-    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, cost, sentImages };
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, cost, sentImages, images: (mode === 'own' ? 0 : 4) + faceJob.which.length, bodyCost, faces: faceJob.which.length, faceCost: faceJob.cost };
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m, outfitPlan ? sentOf(outfitIds, outfitPlan) : personCount(outfitIds));
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
@@ -399,8 +433,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           return;
         }
       }
+      // Its face close-ups, from her base face photos and this front (a set without a front gets none).
+      const faces = angles[0] ? await faceJob.run(id, angles[0], bill, set[0]!.seed ?? null) : [null, null, null];
       await bill.finish();
-      const [u] = await db.update(outfits).set({ angles, state: 'preview', cost: bill.spent }).where(and(eq(outfits.id, id), eq(outfits.state, 'generating'))).returning();
+      const [u] = await db.update(outfits).set({ angles, faces, state: 'preview', cost: bill.spent }).where(and(eq(outfits.id, id), eq(outfits.state, 'generating'))).returning();
       if (u) emitOutfit(u);
       if (u) void outfitResult(angles.some(Boolean) ? 'done' : 'failed');
     }, mode === 'own' ? 300 : 0);
@@ -439,50 +475,65 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     return reply.status(204).send();
   });
-  /** Make an outfit's missing ¾/side/back pictures from its front (a set where some angles came back empty). */
-  app.post<{ Params: { id: string } }>('/v1/outfits/:id/fill', async req => {
+  /**
+   * Makes some of an outfit's pictures (again): body angles 1–3 (¾, side, back) as edits of its front (a custom model: new
+   * shots with her body photo of that angle and the front as a reference), the front as a new shot (her identity images and
+   * the old front as the outfit photo), and face close-ups (0 front, 1 ¾, 2 side) from her base face photos and its front.
+   * Used by Fill (missing angles), Add face close-ups (missing faces) and Redo (one picture). `dryRun`: the price only.
+   */
+  const remakeOutfit = async (req: { user: AuthUser; body: unknown }, id: string, pick: (o: typeof outfits.$inferSelect) => { angles: number[]; faces: number[] }, what: string) => {
     const b = parse(z.object({ imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body ?? {});
-    const o = await outfitToChange(req.user, req.params.id, true);
+    const o = await outfitToChange(req.user, id, true);
     if (stillMaking(o)) throw new ApiError(409, 'outfit_busy', 'This outfit is still being made');
-    const front = o.angles[0];
-    if (!front) throw badRequest('Its front picture is missing · make a new outfit instead');
-    const missing = [1, 2, 3].filter(i => !o.angles[i]);
-    if (!missing.length) return { outfit: outfitView(o), cost: 0 };
+    const { angles: wantAngles, faces: wantFaces } = pick(o);
+    if (!o.angles[0] && (wantFaces.length || wantAngles.some(i => i > 0))) throw badRequest('Its front picture is missing · make a new outfit instead');
     const m = await model(req.user, o.modelId, true);
     const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'outfit', b);
     const user = req.user, texts = await ctx.prompts.texts(user.studioId);
     const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
     const angleBody = (k: string) => { const img = slotOf(k); return img && img !== slotOf('front') ? img : null; };
     const byoRun = !b.imageEngine?.provider && !!stepModels?.shot?.startsWith('c_');
-    // A custom model: new shots of the missing angles with her body photo of each and the outfit's front as a reference.
-    const frontRef = [{ image: front, label: 'outfit photo', role: 'product' as const }];
     const fillSent = await sentFor(user, req.body); // images/sent.ts: the body's choice (new shots only)
-    const plans = byoRun ? await Promise.all(missing.map(async i => {
+    // New shots: the front always; the other angles on a custom model. Each with her body photo of that angle and the
+    // outfit's (old) front as the outfit photo.
+    const newShot = (i: number) => i === 0 || byoRun;
+    const plans = await Promise.all(wantAngles.map(async i => {
+      if (!newShot(i)) return null;
+      const frontRef = o.angles[0] ? [{ image: o.angles[0], label: 'outfit photo', role: 'product' as const }] : [];
       const ids = await idRefs(user.studioId, { ...m, identityBodySlot: BODY_SLOTS[i]! }, null, { extra: frontRef });
       return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels, fillSent) };
-    })) : [];
-    const cost = byoRun ? plans.reduce((a, p) => a + p.plan.perShot, 0) : missing.length * await ctx.images.editCost(user.studioId, stepModels);
-    // Estimate only (Claude's go-ahead shows the price): nothing held or made.
-    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, angles: missing.length, cost };
-    const bill = await new PhotoBill(ctx, whoOf(user), uid('of'), cost, 'Outfit angles').start();
+    }));
+    const editCost = await ctx.images.editCost(user.studioId, stepModels);
+    const faceJob = await outfitFaces(user, m, { imageEngine: b.imageEngine, stepModels, only: wantFaces });
+    const bodyCost = wantAngles.reduce((a, i, k) => a + (plans[k] ? plans[k]!.plan.perShot : editCost), 0);
+    const cost = bodyCost + faceJob.cost;
+    const images = wantAngles.length + faceJob.which.length;
+    // Estimate only (the apps' price and Claude's go-ahead): nothing held or made.
+    if (!images) return { outfit: outfitView(o), cost: 0, images: 0 }; // nothing to make (Claude's tools read this as "nothing missing")
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, angles: wantAngles.length, faces: faceJob.which.length, images, cost, faceCost: faceJob.cost };
+    const bill = await new PhotoBill(ctx, whoOf(user), uid('of'), cost, what).start();
     filling.add(o.id);
     ctx.later(async () => {
       const made = new Map<number, ImageRef | null>();
+      let faces: (ImageRef | null)[] = [null, null, null];
       try {
-        for (const [k, i] of missing.entries()) {
+        let front = o.angles[0] ?? null;
+        for (const [k, i] of wantAngles.entries()) {
           const a = OUTFIT_ANGLES[i]!, body = angleBody(BODY_SLOTS[i]!);
-          if (byoRun) {
+          if (plans[k]) {
             const { ids, plan } = plans[k]!;
             const spec = { name: o.name, description: o.description || undefined, source: 'reference-set' as const };
             const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts)[i]!;
             made.set(i, (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
               req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } })).images[0] ?? null);
+            if (i === 0 && made.get(0)) front = made.get(0)!;
           } else {
             const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
             made.set(i, (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, bill,
-              editOf: front, refs: [slotOf('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: o.seed ?? undefined } })).images[0] ?? null);
+              editOf: front!, refs: [slotOf('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: o.seed ?? undefined } })).images[0] ?? null);
           }
         }
+        if (faceJob.which.length && front) faces = await faceJob.run(o.id, front, bill, o.seed);
       } catch {
         await bill.fail();
         filling.delete(o.id);
@@ -494,11 +545,28 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       filling.delete(o.id);
       const [cur] = await db.select().from(outfits).where(eq(outfits.id, o.id));
       if (!cur) return; // deleted meanwhile (refused while filling, but a model delete takes her outfits)
-      const angles = cur.angles.map((x, i) => x ?? made.get(i) ?? null);
-      const [u] = await db.update(outfits).set({ angles, cost: (cur.cost ?? 0) + bill.spent }).where(eq(outfits.id, o.id)).returning();
+      const angles = cur.angles.map((x, i) => made.get(i) ?? x ?? null);
+      const curFaces = [0, 1, 2].map(i => cur.faces?.[i] ?? null);
+      const nextFaces = curFaces.map((x, i) => faces[i] ?? x);
+      const [u] = await db.update(outfits).set({ angles, faces: nextFaces.some(Boolean) ? nextFaces : cur.faces ?? null, cost: (cur.cost ?? 0) + bill.spent }).where(eq(outfits.id, o.id)).returning();
       if (u) emitOutfit(u);
     }, 0);
-    return { outfit: outfitView(o), cost };
+    return { outfit: outfitView(o), cost, images };
+  };
+  /** Make an outfit's missing ¾/side/back pictures from its front (a set where some angles came back empty). */
+  app.post<{ Params: { id: string } }>('/v1/outfits/:id/fill', async req => {
+    const r = await remakeOutfit(req, req.params.id, o => ({ angles: [1, 2, 3].filter(i => !o.angles[i]), faces: [] }), 'Outfit angles');
+    return 'dryRun' in r ? r : { outfit: r.outfit, cost: r.cost };
+  });
+  /** "Add face close-ups" (older outfits made before every outfit had them): the missing faces, from her base faces and its front. */
+  app.post<{ Params: { id: string } }>('/v1/outfits/:id/faces', async req =>
+    remakeOutfit(req, req.params.id, o => ({ angles: [], faces: [0, 1, 2].filter(i => !o.faces?.[i]) }), 'Outfit face close-ups'));
+  /** Redo one picture: angle front | tq | side | back | face | faceTq | profile. */
+  const REDO = ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'] as const;
+  app.post<{ Params: { id: string } }>('/v1/outfits/:id/redo', async req => {
+    const { angle } = parse(z.object({ angle: z.enum(REDO) }).passthrough(), req.body ?? {});
+    const k = REDO.indexOf(angle);
+    return remakeOutfit(req, req.params.id, () => (k < 4 ? { angles: [k], faces: [] } : { angles: [], faces: [k - 4] }), `Outfit · redo ${angle}`);
   });
   app.post<{ Params: { id: string } }>('/v1/outfits/:id/save', async req => {
     // §5: the name chosen in the preview (optional; the set keeps its name without one).
@@ -901,7 +969,6 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     photo: async (u, body) => (await photoPlan(u, body)).s.plan.sentImages,
     outfit: async (u, body) => ((await createOutfit({ user: u, body: dry(body) })) as { sentImages?: SentView | null }).sentImages ?? null,
     fill_angles: async (u, body) => ((await fillAngles({ user: u, body: dry(body), params: { id: String((body as { modelId?: unknown }).modelId ?? '') } })) as { sentImages?: SentView }).sentImages ?? null,
-    dress_up: async (u, body) => (await ctx.tools.dressEstimate(u, String((body as { modelId?: unknown }).modelId ?? ''), body)).sentImages,
   };
   app.post('/v1/suite/photos/estimate', async req => {
     const { p, s, notes, graded } = await photoPlan(req.user, req.body);
@@ -1101,8 +1168,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post<{ Params: { id: string } }>('/v1/models/:id/enhance/estimate', async req => ctx.tools.enhanceEstimate(req.user, req.params.id, req.body));
   app.post<{ Params: { id: string } }>('/v1/models/:id/enhance', async req => ctx.tools.startEnhance(req.user, req.params.id, req.body));
-  app.post<{ Params: { id: string } }>('/v1/models/:id/dress-up/estimate', async req => ctx.tools.dressEstimate(req.user, req.params.id, req.body));
-  app.post<{ Params: { id: string } }>('/v1/models/:id/dress-up', async req => ctx.tools.startDressUp(req.user, req.params.id, req.body));
+  // Dress up was removed (owner 2026-11-11): older app builds hear why in plain words.
+  const dressUpRemoved = async () => { throw new ApiError(410, 'dress_up_removed', 'Dress up was removed · every outfit now comes with its own face close-ups (New outfit)'); };
+  app.post('/v1/models/:id/dress-up/estimate', dressUpRemoved);
+  app.post('/v1/models/:id/dress-up', dressUpRemoved);
   app.get('/v1/tool-runs', async req => ctx.tools.list(req.user, (req.query ?? {}) as any));
   app.get<{ Params: { id: string } }>('/v1/tool-runs/:id', async req => ctx.tools.get(req.user, req.params.id));
   app.patch<{ Params: { id: string; slot: string } }>('/v1/tool-runs/:id/items/:slot', async req => ctx.tools.decide(req.user, req.params.id, req.params.slot, req.body));
@@ -1145,7 +1214,6 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (u.role !== 'owner') return base;
     const om = await ctx.tools.ownerModels(u.studioId);
     base.features.tools.enhance.models = om.enhance;
-    base.features.tools.dressUp.models = om.dressUp;
     return { ...base, maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user', identityRefs: base.features.photo.identityRefs,
       warmIdleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, warmMaxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES,
       gpu: await ctx.gpu.status(), engines: await ctx.engines.view(u.studioId) };

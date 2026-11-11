@@ -1,4 +1,5 @@
-// Enhance and Dress up for a model's character sheet (plans/api.md "Model tools" §4–6). One hold for the whole run (the
+// Enhance for a model's character sheet (Dress up was removed 2026-11-11: every outfit now carries its own face
+// close-ups, made by New outfit) (plans/api.md "Model tools" §4–6). One hold for the whole run (the
 // sum of per-image estimates), images one after another through the shared Replicate gate, each image's exact cost added,
 // one settle at the end; then the user reviews every image (keep / reject / retry one) and applies what they kept.
 import { and, desc, eq } from 'drizzle-orm';
@@ -16,10 +17,11 @@ import type { ImageStep } from '../replicate/mapping.js';
 import { PHOTO_REF_MP, money } from '../pricing.js';
 import { randomImageSeed } from '../templates/prompt.js';
 import { DEFAULT_TEXTS } from '../prompt/library.js';
-import { dressPrompt } from '../prompt/service.js';
 import { enhancePrompt } from '../prompt/scripts/builders.js';
 
 type Run = typeof toolRuns.$inferSelect;
+/** A Dress up run (the feature was removed 2026-11-11; its outfits keep working). */
+const removed = () => new ApiError(410, 'dress_up_removed', 'Dress up was removed · every outfit now comes with its own face close-ups (New outfit)');
 type ModelRow = typeof models.$inferSelect;
 
 /** The 7 sheet images in the order apps show them (plans/api.md "Model tools" §1). */
@@ -29,24 +31,12 @@ export const SHEET_SLOTS: { key: string; label: string; kind: 'face' | 'body' }[
   { key: 'back', label: 'Full body · back', kind: 'body' },
 ];
 const slotInfo = (k: string) => SHEET_SLOTS.find(s => s.key === k)!;
-/** Dress up renders the full-body front first, so the other images can match it. */
-const DRESS_ORDER = ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'];
-
 export const REALISM = { off: 0, subtle: 0.25, balanced: 0.35, strong: 0.5 } as const;
 export type RealismId = keyof typeof REALISM;
 export const UPSCALE = { off: 0, '2x': 2, '4x': 4 } as const;
 export type UpscaleId = keyof typeof UPSCALE;
 /** The default realism prompt (the owner can change it: prompt library `enhance.prompt`). */
 export const ENHANCE_PROMPT = DEFAULT_TEXTS['enhance.prompt']!;
-export const DRESS_OPTIONS = [
-  { id: 'a', label: 'Option A', detail: 'Keeps each photo closest' },
-  { id: 'b', label: 'Option B', detail: 'Richer detail' },
-  { id: 'both', label: 'Both', detail: 'Makes both · pick per photo' },
-] as const;
-const stepOf = (e: 'a' | 'b'): ImageStep => (e === 'a' ? 'dressA' : 'dressB');
-
-export { dressPrompt };
-
 const ENHANCE_BODY = (b: any) => ({
   realism: (b?.realism ?? 'balanced') as RealismId, upscale: (b?.upscale ?? '2x') as UpscaleId,
   slots: Array.isArray(b?.slots) ? (b.slots as unknown[]).filter((x): x is string => typeof x === 'string') : null,
@@ -61,15 +51,14 @@ export class ToolService {
     const enhance: Record<string, unknown> = { available: true,
       realism: [{ id: 'off', label: 'Off' }, { id: 'subtle', label: 'Subtle' }, { id: 'balanced', label: 'Balanced' }, { id: 'strong', label: 'Strong' }],
       upscale: [{ id: 'off', label: 'Off' }, { id: '2x', label: '2×' }, { id: '4x', label: '4×' }] };
-    const dressUp: Record<string, unknown> = { available: true, options: DRESS_OPTIONS.map(o => ({ ...o })) };
     void role;
-    return { enhance, dressUp };
+    return { enhance };
   }
   /** Owner extra for features.tools: the current default per step (names only for the owner). */
   async ownerModels(studioId: string) {
     const all = await this.ctx.imageModels.resolveAll(studioId);
     const pick = (s: ImageStep) => ({ model: all[s].model, name: modelName(all[s].model) });
-    return { enhance: { realism: pick('realism'), upscale: pick('upscale') }, dressUp: { dressA: pick('dressA'), dressB: pick('dressB') } };
+    return { enhance: { realism: pick('realism'), upscale: pick('upscale') } };
   }
 
   // ------------------------------------------------------------------ helpers
@@ -98,10 +87,10 @@ export class ToolService {
   private async save(id: string, patch: Partial<Run>) {
     const [r] = await this.ctx.db.update(toolRuns).set(patch).where(eq(toolRuns.id, id)).returning();
     if (r) this.emitRun(r);
-    // Results arrive in the chat: Enhance / Dress up is ready to review (or failed).
+    // Results arrive in the chat: Enhance is ready to review (or failed).
     if (r && (patch.state === 'review' || patch.state === 'failed')) {
-      void resultsOf(this.ctx).report(`tool-${r.id}`, { kind: r.kind === 'dressup' ? 'dress up' : 'enhance', status: r.state === 'failed' ? 'failed' : 'done',
-        title: r.kind === 'dressup' ? 'Dress up' : 'Enhance', modelId: r.modelId, runId: r.id, ...(r.error ? { error: r.error } : {}) }).catch(() => undefined);
+      void resultsOf(this.ctx).report(`tool-${r.id}`, { kind: 'enhance', status: r.state === 'failed' ? 'failed' : 'done',
+        title: 'Enhance', modelId: r.modelId, runId: r.id, ...(r.error ? { error: r.error } : {}) }).catch(() => undefined);
     }
     return r!;
   }
@@ -131,41 +120,6 @@ export class ToolService {
     if (b.realism === 'off' && b.upscale === 'off') throw badRequest('Turn on realism or upscale');
     return b;
   }
-  private dressEngines(e: unknown): ('a' | 'b')[] {
-    const v = e ?? 'a';
-    if (v === 'both') return ['a', 'b'];
-    if (v === 'a' || v === 'b') return [v];
-    throw badRequest('engine: a, b or both');
-  }
-  private async dressPerEngine(studioId: string, eng: 'a' | 'b', n: number, ov?: StepOverrides, refs = 1) {
-    const model = (await this.ctx.imageModels.resolve(studioId, stepOf(eng), ov)).model;
-    // The front sends 1 + refs images (sheet + outfit), every other image one more (+ the new front).
-    let v = 0;
-    for (let i = 0; i < n; i++) v += await this.ctx.imageModels.estimate(model, { outMp: 1, inMp: PHOTO_REF_MP * (i === 0 ? 1 + refs : 2 + refs) });
-    return v;
-  }
-  /**
-   * Dress up's images besides the photo being dressed (and the new front for the other angles): the outfit photo, or
-   * the choice (images/sent.ts: the body's, else Claude's for this character's Dress up).
-   */
-  private async dressSent(u: AuthUser, modelId: string, b: Record<string, unknown>) {
-    const outfitImage = b.outfitImage as ImageRef | undefined;
-    const auto: SentImage[] = outfitImage && (outfitImage.url || outfitImage.asset) ? [{ image: outfitImage, role: 'outfit', label: 'outfit photo', why: 'the clothes to dress her in' }] : [];
-    const max = Math.max(1, this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS - 2);
-    return applySent(auto, await sentImagesOf(this.ctx).forRequest(u, b, `dressup:${modelId}`), max, { what: 'besides her photo and the new front' });
-  }
-  async dressEstimate(u: AuthUser, modelId: string, body: unknown) {
-    const m = await this.modelFor(u, modelId);
-    const b = (body ?? {}) as any;
-    const ov = this.ctx.imageModels.overridesFrom(u.role, b);
-    const engines = this.dressEngines(b.engine);
-    const n = this.filled(m).length;
-    const sentImages = await this.dressSent(u, m.id, b);
-    let est = 0;
-    for (const e of engines) est += await this.dressPerEngine(u.studioId, e, n, ov, Math.max(1, sentImages.images.length));
-    return { images: n, estimate: est, label: this.label(n, est, engines.length), sentImages };
-  }
-
   // ------------------------------------------------------------------ start
   async startEnhance(u: AuthUser, modelId: string, body: unknown) {
     const m = await this.modelFor(u, modelId);
@@ -190,39 +144,8 @@ export class ToolService {
     return this.view(r!, u.role);
   }
 
-  async startDressUp(u: AuthUser, modelId: string, body: unknown) {
-    const m = await this.modelFor(u, modelId);
-    const b = (body ?? {}) as any;
-    const ov = this.ctx.imageModels.overridesFrom(u.role, b);
-    const engines = this.dressEngines(b.engine);
-    const outfitImage = b.outfitImage as ImageRef | undefined;
-    const sent = await this.dressSent(u, m.id, b);
-    if (!sent.images.length) throw badRequest('Add the outfit photo');
-    if (typeof b.name === 'string' && b.name.length > 80) throw badRequest('name: at most 80 characters');
-    const slots = this.filled(m);
-    if (!slots.length) throw badRequest('Add photos to the character sheet first');
-    let est = 0;
-    for (const e of engines) est += await this.dressPerEngine(u.studioId, e, slots.length, ov, sent.images.length);
-    const all = await this.ctx.imageModels.resolveAll(u.studioId, ov);
-    const id = uid('tool');
-    const bill = await new PhotoBill(this.ctx, whoOf(u), id, est, `Dress up · ${slots.length} image${slots.length === 1 ? '' : 's'}${engines.length > 1 ? ' · 2 options' : ''}`).start();
-    const ordered = DRESS_ORDER.map(k => slots.find(s => s.key === k)).filter(Boolean) as typeof slots;
-    const items: ToolItem[] = ordered.map(s => ({ slot: s.key, label: s.label, before: s.image, results: {}, state: 'waiting', decision: 'pending', pick: null, cost: 0 }));
-    const usedModels: Record<string, string> = {};
-    for (const e of engines) usedModels[stepOf(e)] = all[stepOf(e)].model;
-    const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : null;
-    resultsOf(this.ctx).link(u, `tool-${id}`);
-    const [r] = await this.ctx.db.insert(toolRuns).values({ id, studioId: u.studioId, modelId: m.id, kind: 'dressup', state: 'running',
-      options: { engine: engines.length > 1 ? 'both' : engines[0], name, outfitImage: outfitImage ?? sent.images[0]!.image, seed: randomImageSeed(),
-        ...(sent.changed ? { sentImages: sent.images.map(x => x.image) } : {}) }, engines, models: usedModels, items, estimate: est,
-      phase: `Dressing up · 1 of ${items.length * engines.length}`, createdBy: u.id, createdAt: Date.now() }).returning();
-    this.emitRun(r!);
-    void this.run(r!, u, bill).catch(e => this.ctx.log.error({ err: (e as Error).message }, 'dress up failed'));
-    return this.view(r!, u.role);
-  }
-
   // ------------------------------------------------------------------ running
-  /** One image of a run on one engine (a = the only result for Enhance). Returns its image and exact cost. */
+  /** One image of an Enhance run. Returns its image and exact cost. */
   private async one(run: Run, u: { id: string; studioId: string }, item: ToolItem, eng: 'a' | 'b', seed: number, anchor: ImageRef | null) {
     const im = this.ctx.imageModels, imgs = this.ctx.images;
     const o = run.options as any;
@@ -246,13 +169,7 @@ export class ToolService {
       } catch (e) { throw e instanceof PhotoError ? new PhotoError(e.status, e.code, e.message, e.spentUsd + cost) : e; }
       return { image: img, cost };
     }
-    const step = stepOf(eng);
-    const ch = await im.resolve(u.studioId, step, { [step]: run.models[step] });
-    const useAnchor = !!anchor && item.slot !== 'front';
-    const r = await imgs.runModel({ studioId: u.studioId, userId: u.id, purpose: 'dressup', refId: run.id, step, model: ch.model, extra: ch.extra,
-      prompt: dressPrompt(item.slot, useAnchor, texts), refs: [item.before, ...((o.sentImages as ImageRef[] | undefined) ?? [o.outfitImage as ImageRef]), ...(useAnchor ? [anchor] : [])], matchInput: true, seed, outMp: 1,
-      simulate: item.before, cancelled });
-    return { image: r.image, cost: r.cost };
+    throw removed();
   }
 
   private async run(start: Run, u: AuthUser, bill: PhotoBill) {
@@ -265,7 +182,7 @@ export class ToolService {
       for (const item of items) {
         if (this.stopping.has(start.id) || fatal) break;
         item.state = 'running';
-        await this.save(start.id, { items, phase: `${start.kind === 'enhance' ? 'Enhancing' : 'Dressing up'} · ${done + 1} of ${total}`, progress: done / total * 100 });
+        await this.save(start.id, { items, phase: `Enhancing · ${done + 1} of ${total}`, progress: done / total * 100 });
         try {
           const r = await this.one(start, u, item, eng, seed, anchor);
           item.results[eng] = r.image;
@@ -306,13 +223,15 @@ export class ToolService {
   async list(u: AuthUser, q: { modelId?: string; kind?: string }) {
     const conds = [eq(toolRuns.studioId, u.studioId)];
     if (q.modelId) conds.push(eq(toolRuns.modelId, q.modelId));
-    if (q.kind === 'enhance' || q.kind === 'dressup') conds.push(eq(toolRuns.kind, q.kind));
+    conds.push(eq(toolRuns.kind, 'enhance')); // Dress up runs (removed) are no longer listed
     const rows = await this.ctx.db.select().from(toolRuns).where(and(...conds)).orderBy(desc(toolRuns.createdAt)).limit(20);
     return rows.map(r => this.view(r, u.role));
   }
   async get(u: AuthUser, id: string) { return this.view(await this.row(u, id), u.role); }
 
-  private inReview(r: Run) { if (r.state !== 'review') throw badRequest(r.state === 'running' ? 'Still working · wait for it to finish' : 'This run is closed'); }
+  private inReview(r: Run) {
+    if (r.kind !== 'enhance') throw removed();
+    if (r.state !== 'review') throw badRequest(r.state === 'running' ? 'Still working · wait for it to finish' : 'This run is closed'); }
 
   async decide(u: AuthUser, id: string, slot: string, body: unknown) {
     const r = await this.row(u, id);
@@ -349,17 +268,15 @@ export class ToolService {
     const it = r.items.find(i => i.slot === slot);
     if (!it) throw notFound('Image');
     const o = r.options as any;
-    const est = r.kind === 'enhance' ? await this.enhancePerImage(u.studioId, o.realism, o.upscale, r.models as StepOverrides)
-      : await this.ctx.imageModels.estimate(r.models[stepOf(eng)]!, { outMp: 1, inMp: PHOTO_REF_MP * (slot === 'front' ? 2 : 3) });
+    const est = await this.enhancePerImage(u.studioId, o.realism, o.upscale, r.models as StepOverrides);
     if ((body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, cost: est }; // estimate only (Claude's go-ahead)
-    const bill = await new PhotoBill(this.ctx, whoOf(u), `${r.id}_${uid('r')}`, est, `${r.kind === 'enhance' ? 'Enhance' : 'Dress up'} · retry 1 image`).start();
+    const bill = await new PhotoBill(this.ctx, whoOf(u), `${r.id}_${uid('r')}`, est, 'Enhance · retry 1 image').start();
     const items = r.items.map(i => (i.slot === slot ? { ...i, state: 'running' as const, decision: 'pending' as const, pick: null, error: undefined } : { ...i }));
     const saved = await this.save(r.id, { items });
     void (async () => {
       const cur = items.find(i => i.slot === slot)!;
-      const front = r.items.find(i => i.slot === 'front')?.results[eng] ?? null;
       try {
-        const res = await this.one(r, u, cur, eng, randomImageSeed(), slot === 'front' ? null : front);
+        const res = await this.one(r, u, cur, eng, randomImageSeed(), null);
         bill.add(res.cost);
         await bill.finish();
         const [now] = await this.ctx.db.select().from(toolRuns).where(eq(toolRuns.id, r.id));
@@ -386,27 +303,13 @@ export class ToolService {
     for (const i of r.items) if (i.decision === 'keep' && i.pick && i.results[i.pick]) kept.set(i.slot, i.results[i.pick]!);
     if (!kept.size) throw badRequest('Keep at least one image');
     const now = Date.now();
-    if (r.kind === 'enhance') {
-      const version: SheetVersion = { id: uid('sv'), createdAt: now, reason: 'enhance', slots: m.slots };
-      const slots: SheetSlot[] = m.slots.map(s => (kept.has(s.key) ? { ...s, image: kept.get(s.key)!, source: 'generated', busy: false } : s));
-      const [mm] = await this.ctx.db.update(models).set({ slots, sheetVersions: [version, ...(m.sheetVersions ?? [])].slice(0, 10) }).where(eq(models.id, m.id)).returning();
-      const run = await this.save(r.id, { state: 'applied', appliedAt: now, phase: 'Saved' });
-      this.ctx.hub.emit(u.studioId, { type: 'model', model: modelViewOf(mm!) });
-      return { run: this.view(run, u.role), model: modelViewOf(mm!) };
-    }
-    const b = (body ?? {}) as { name?: unknown };
-    if (b.name != null && (typeof b.name !== 'string' || b.name.length > 80)) throw badRequest('name: at most 80 characters');
-    const name = (typeof b.name === 'string' && b.name.trim()) || ((r.options as any).name as string | null) || 'Dressed look';
-    const oid = uid('o');
-    const [o] = await this.ctx.db.insert(outfits).values({ id: oid, studioId: u.studioId, modelId: m.id, name, mode: 'dressup', description: '',
-      angles: ['front', 'tq', 'side', 'back'].map(k => kept.get(k) ?? null), faces: ['face', 'faceTq', 'profile'].map(k => kept.get(k) ?? null),
-      state: 'ready', prompt: dressPrompt('front', false, await this.ctx.prompts.texts(u.studioId)), seed: Number((r.options as any).seed ?? 0) || null, cost: r.cost, createdBy: u.id, createdAt: now }).returning();
-    const [mm] = await this.ctx.db.update(models).set({ outfitIds: [...m.outfitIds, oid] }).where(eq(models.id, m.id)).returning();
-    const run = await this.save(r.id, { state: 'applied', appliedAt: now, phase: 'Saved', outfitId: oid });
-    const ov = outfitViewOf(o!);
-    this.ctx.hub.emit(u.studioId, { type: 'outfit', outfit: ov });
+    const version: SheetVersion = { id: uid('sv'), createdAt: now, reason: 'enhance', slots: m.slots };
+    const slots: SheetSlot[] = m.slots.map(s => (kept.has(s.key) ? { ...s, image: kept.get(s.key)!, source: 'generated', busy: false } : s));
+    const [mm] = await this.ctx.db.update(models).set({ slots, sheetVersions: [version, ...(m.sheetVersions ?? [])].slice(0, 10) }).where(eq(models.id, m.id)).returning();
+    const run = await this.save(r.id, { state: 'applied', appliedAt: now, phase: 'Saved' });
     this.ctx.hub.emit(u.studioId, { type: 'model', model: modelViewOf(mm!) });
-    return { run: this.view(run, u.role), model: modelViewOf(mm!), outfit: ov };
+    void body;
+    return { run: this.view(run, u.role), model: modelViewOf(mm!) };
   }
 
   async discard(u: AuthUser, id: string) {

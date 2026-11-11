@@ -85,3 +85,8 @@ are edits of that front + her base photo of the same angle. Nothing kept → as 
   looks → "Start from": her profile photos or any of her outfits (an outfit is a base set); 4 base thumbnails, click
   one to swap that angle (her body shots, an outfit angle, an upload). Server base {source:'base'|'outfit', outfitId?,
   angles?}. Outfit-page session.
+
+## 7. Outfits carry their own face close-ups; Dress up removed (owner, 2026-11-11; built on claude/outfit-faces)
+Every outfit = 4 body angles + 3 face close-ups with its own hair, make-up and face accessories, made from her base face
+photos and the outfit's front. Shots with an outfit send only the outfit's images. Dress up is removed. Spec, prices and
+app design: `plans/outfit-faces.md`. (Whether §2 Head looks is still wanted on top of this is the owner's call.)

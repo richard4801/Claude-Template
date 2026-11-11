@@ -43,7 +43,7 @@ export type Ctx = {
   engines: EngineHealth;
   /** The model per image step and Replicate's catalog (plans/api.md "Model tools" §2). */
   imageModels: ImageModels;
-  /** Enhance and Dress up (plans/api.md "Model tools" §4–6). */
+  /** Enhance (plans/api.md "Model tools" §4–6). */
   tools: ToolService;
   /** The studio's prompt library (plans/api.md "Shoot references and the prompt library" §3). */
   prompts: PromptLibrary;

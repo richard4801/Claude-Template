@@ -1,6 +1,6 @@
 // Model tools (plans/api.md "Model tools") against a FAKE Replicate on localhost (no real predictions, no money):
 // schema mapping on real model schemas (trimmed copies in fixtures/replicate, fetched 2026-11-04), prices from real
-// model pages, the catalog and step-model endpoints, Enhance, Dress up (incl. Both), exact settle, review/apply, archive.
+// model pages, the catalog and step-model endpoints, Enhance, outfit face close-ups, exact settle, review/apply, archive.
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import sharp from 'sharp';
-import { ledger } from '../src/db/schema.js';
+import { ledger, outfits as outfitsT } from '../src/db/schema.js';
+import * as Live from '../src/prompt/engine.js';
 import { buildInput, mapModel, type RawModel } from '../src/replicate/mapping.js';
 import { estimateOne, exactOne, parseModelPage, priceLine } from '../src/replicate/prices.js';
 import { replicateReferencesFor, referencesFor } from '../src/services/jobs.js';
@@ -120,7 +121,7 @@ describe('model tools on a fake Replicate', () => {
     const v = (await owner.req('GET', '/v1/image-models')).body;
     expect(v.steps.map((s: any) => [s.step, s.model, s.isDefault])).toEqual([
       ['shot', 'black-forest-labs/flux-2-pro', true], ['edit', 'qwen/qwen-image-edit-2511', true], ['realism', 'black-forest-labs/flux-krea-dev', true],
-      ['upscale', 'philz1337x/clarity-upscaler', true], ['dressA', 'qwen/qwen-image-edit-2511', true], ['dressB', 'black-forest-labs/flux-2-pro', true]]);
+      ['upscale', 'philz1337x/clarity-upscaler', true]]); // Dress up's steps are hidden (removed 2026-11-11)
     expect(v.steps.find((s: any) => s.step === 'upscale')).toMatchObject({ official: false, priceLine: 'by time · about $0.018 a run ($0.00115/s on A100 (40GB))', compatible: true });
     expect(v.steps.find((s: any) => s.step === 'realism').priceLine).toBe('$0.025 per output image');
     const cat = (await owner.req('GET', '/v1/image-models/catalog?step=upscale')).body;
@@ -150,7 +151,7 @@ describe('model tools on a fake Replicate', () => {
     expect((await owner.req('DELETE', '/v1/image-models/upscale')).body).toMatchObject({ model: 'philz1337x/clarity-upscaler', isDefault: true });
     // Members' settings carry the tools without model names; the owner's carry the defaults.
     const ms = (await tess.req('GET', '/v1/settings/studio')).body.features.tools;
-    expect(ms.dressUp.options.map((o: any) => o.label)).toEqual(['Option A', 'Option B', 'Both']);
+    expect(ms.dressUp).toBeUndefined(); // Dress up was removed (owner 2026-11-11)
     expect(JSON.stringify(ms)).not.toMatch(/qwen|flux|clarity|replicate/i);
     expect((await owner.req('GET', '/v1/settings/studio')).body.features.tools.enhance.models.realism.model).toBe('black-forest-labs/flux-krea-dev');
   });
@@ -208,56 +209,58 @@ describe('model tools on a fake Replicate', () => {
     expect((await tess.req('GET', `/v1/models/${modelId}/sheet-versions`)).body[0].reason).toBe('restore');
   }, 60_000);
 
-  it('Dress up, Both: front first then the anchor, one seed, both options side by side, pick a set, a new outfit with faces used for video', async () => {
-    const est = (await owner.req('POST', `/v1/models/${modelId}/dress-up/estimate`, { engine: 'both' })).body;
-    expect(est.images).toBe(7);
-    const flux = 0.015 + 0.015 * 1; // run + output MP
-    expect(est.estimate).toBeCloseTo(7 * 0.03 + (flux + 0.015 * 0.79 * 2) + 6 * (flux + 0.015 * 0.79 * 3), 9);
-    expect(est.label).toMatch(/^7 images · 2 options · about \$/);
-    expect((await owner.req('POST', `/v1/models/${modelId}/dress-up`, { engine: 'both' })).status).toBe(400); // no outfit photo
+  it('every outfit comes with its own face close-ups: priced in, edits of her base faces with the outfit front, 7 pictures, sent alone', async () => {
+    // Dress up is gone: older builds hear why.
+    const gone = await owner.req('POST', `/v1/models/${modelId}/dress-up`, { outfitImage: { asset: 'c_front' } });
+    expect(gone.status).toBe(410); expect(gone.body.code).toBe('dress_up_removed');
+    const est = (await owner.req('POST', '/v1/outfits', { modelId, name: 'Linen', mode: 'describe', description: 'a linen shirt', dryRun: true })).body;
+    expect(est).toMatchObject({ dryRun: true, images: 7, faces: 3 });
+    expect(est.faceCost).toBeGreaterThan(0);
+    expect(est.cost).toBeCloseTo(est.bodyCost + est.faceCost, 9);
     const before = fake.state.creates.length;
-    const start = (await owner.req('POST', `/v1/models/${modelId}/dress-up`, { engine: 'both', outfitImage: { asset: 'c_front' }, name: 'Silver night' })).body;
-    expect(start.models).toEqual({ dressA: 'qwen/qwen-image-edit-2511', dressB: 'black-forest-labs/flux-2-pro' }); // owner sees them
-    expect(start.items[0].slot).toBe('front');
-    const r = await run(owner, start.id);
-    expect(r.state).toBe('review');
+    const o = (await owner.req('POST', '/v1/outfits', { modelId, name: 'Linen', mode: 'describe', description: 'a linen shirt' })).body;
+    const done = await until(async () => { const x = (await owner.req('GET', '/v1/outfits')).body.find((y: any) => y.id === o.id); return x?.state === 'preview' ? x : null; }, 30_000);
     const made = fake.state.creates.slice(before);
-    const qw = made.filter(p => p.model === 'qwen/qwen-image-edit-2511'), fl = made.filter(p => p.model === 'black-forest-labs/flux-2-pro');
-    expect(qw.length).toBe(7); expect(fl.length).toBe(7);
-    expect(qw[0]!.input.image.length).toBe(2); // the front: sheet + outfit
-    expect(qw.slice(1).every(p => p.input.image.length === 3)).toBe(true); // + the new front
-    expect(fl[0]!.input.input_images.length).toBe(2);
-    expect(fl[1]!.input).toMatchObject({ safety_tolerance: 5 });
-    expect(new Set(made.map(p => p.input.seed)).size).toBe(1);
-    expect(qw[1]!.input.prompt).toMatch(/last image shows the same outfit already worn/);
-    expect(qw.find(p => /earrings, necklace/.test(p.input.prompt))).toBeTruthy();
-    expect(r.items.every((i: any) => i.results.a?.url && i.results.b?.url)).toBe(true);
-    // The whole set from B, then one image from A.
-    await owner.req('POST', `/v1/tool-runs/${start.id}/pick`, { pick: 'b' });
-    const one = (await owner.req('PATCH', `/v1/tool-runs/${start.id}/items/face`, { decision: 'keep', pick: 'a' })).body;
-    expect(one.items.find((i: any) => i.slot === 'face')).toMatchObject({ decision: 'keep', pick: 'a' });
-    const applied = (await owner.req('POST', `/v1/tool-runs/${start.id}/apply`, {})).body;
-    expect(applied.outfit).toMatchObject({ name: 'Silver night', mode: 'dressup', state: 'ready', modelId });
-    expect(applied.outfit.angles.every((x: any) => x?.url)).toBe(true);
-    expect(applied.outfit.faces[0].url).toBe(r.items.find((i: any) => i.slot === 'face').results.a.url);
-    expect(applied.model.outfitIds).toContain(applied.outfit.id);
-    // The sheet itself never changes.
-    expect((await owner.req('GET', '/v1/models')).body.find((m: any) => m.id === modelId).slots.find((s: any) => s.key === 'front').image).toEqual({ asset: 'g_front' });
+    expect(made.length).toBe(7);
+    const faces = made.slice(4);
+    expect(faces.map(p => p.input.prompt)).toEqual([0, 1, 2].map(i => Live.outfitFacePrompt(i)));
+    // Each face edits her base face photo of that angle; the outfit's new front goes with it.
+    const urls = (p: any) => JSON.stringify(p.input);
+    // Each face edits her base face photo of that angle (first), with the outfit's new front (last, the same for all three).
+    expect(faces.every(p => p.input.image.length === 2)).toBe(true);
+    expect(new Set(faces.map(p => p.input.image[1].split('?')[0])).size).toBe(1);
+    expect(new Set(faces.map(p => p.input.image[0].split('?')[0])).size).toBe(3);
+    expect(done.faces.every((x: any) => x?.url)).toBe(true);
+    expect(done.angles.every((x: any) => x?.url)).toBe(true);
+    // Shots with it send ONLY the outfit's images: its faces, then its angles (never her base face or body).
     const [m] = await a.ctx.db.query.models.findMany({ where: (t, { eq: e }) => e(t.id, modelId) });
-    const [o] = await a.ctx.db.query.outfits.findMany({ where: (t, { eq: e }) => e(t.id, applied.outfit.id) });
-    expect(replicateReferencesFor(m!, o!).map(x => x.label)).toEqual(['face, front', 'face, profile', 'face, ¾', 'outfit, front', 'outfit, ¾', 'outfit, side', 'outfit, back']);
-    expect(referencesFor(m!, o!)[0]!.image).toEqual(applied.outfit.faces[0]);
-  }, 60_000);
-
-  it('a failed image is not charged; the rest go to review', async () => {
-    fake.state.failNext = 1;
-    const start = (await owner.req('POST', `/v1/models/${modelId}/dress-up`, { engine: 'a', outfitImage: { asset: 'c_tq' } })).body;
-    const r = await run(owner, start.id);
-    expect(r.state).toBe('review');
-    expect(r.items[0]).toMatchObject({ slot: 'front', state: 'failed', error: "Something went wrong making the photos · you weren't charged" });
-    expect(r.cost).toBeCloseTo(6 * 0.03, 9);
-    await owner.req('DELETE', `/v1/tool-runs/${start.id}`);
-    expect((await owner.req('GET', `/v1/tool-runs/${start.id}`)).body.state).toBe('discarded');
+    const [row] = await a.ctx.db.query.outfits.findMany({ where: (t, { eq: e }) => e(t.id, o.id) });
+    const rep = replicateReferencesFor(m!, row!);
+    expect(rep.map(x => x.label)).toEqual(['face, front', 'outfit, front', 'face, ¾', 'face, profile', 'outfit, ¾', 'outfit, side', 'outfit, back']);
+    expect(rep[0]!.image).toEqual(done.faces[0]);
+    const base = m!.slots.filter(s => s.image).map(s => JSON.stringify(s.image));
+    expect(rep.some(x => base.includes(JSON.stringify(x.image)))).toBe(false);
+    expect(referencesFor(m!, row!).length).toBe(6);
+    // An older outfit without faces: her base face front only, plus the angles, and it says so.
+    const old = replicateReferencesFor(m!, { ...row!, faces: null });
+    expect(old.map(x => x.label)).toEqual(['face, front', 'outfit, front', 'outfit, ¾', 'outfit, side', 'outfit, back']);
+    expect(old[0]!.why).toMatch(/no face close-ups yet/);
+    // Add face close-ups (paid, priced first) and Redo one face.
+    await a.ctx.db.update(outfitsT).set({ faces: null }).where(eq(outfitsT.id, o.id));
+    const add = (await owner.req('POST', `/v1/outfits/${o.id}/faces`, { dryRun: true })).body;
+    expect(add).toMatchObject({ dryRun: true, faces: 3, images: 3 });
+    expect(add.cost).toBeCloseTo(est.faceCost, 9);
+    const n2 = fake.state.creates.length;
+    await owner.req('POST', `/v1/outfits/${o.id}/faces`, {});
+    const filled = await until(async () => { const x = (await owner.req('GET', '/v1/outfits')).body.find((y: any) => y.id === o.id); return x?.faces?.every(Boolean) ? x : null; }, 30_000);
+    expect(fake.state.creates.length - n2).toBe(3);
+    const redo = (await owner.req('POST', `/v1/outfits/${o.id}/redo`, { angle: 'faceTq', dryRun: true })).body;
+    expect(redo).toMatchObject({ dryRun: true, faces: 1, images: 1 });
+    const n3 = fake.state.creates.length;
+    await owner.req('POST', `/v1/outfits/${o.id}/redo`, { angle: 'faceTq' });
+    await until(async () => { const x = (await owner.req('GET', '/v1/outfits')).body.find((y: any) => y.id === o.id); return x?.faces?.[1]?.url !== filled.faces[1].url ? x : null; }, 30_000);
+    expect(fake.state.creates.slice(n3).map(p => p.input.prompt)).toEqual([Live.outfitFacePrompt(1)]);
+    expect((await owner.req('POST', `/v1/outfits/${o.id}/redo`, { angle: 'nose' })).status).toBe(400);
   }, 60_000);
 
   it('a per-run model for one photoshoot (owner): any model via the mapping, priced from its page', async () => {

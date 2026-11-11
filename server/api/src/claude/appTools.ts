@@ -226,8 +226,8 @@ export const APP_TOOLS: EditTool[] = [
     },
   },
   {
-    name: 'tool_run', title: 'Review a Dress up / Enhance run', scope: 'edit:write',
-    description: 'A Dress up or Enhance run\'s results (get; list without runId), and the review as on the screen: decide one picture (slot, decision keep|reject, pick a|b), pick a or b for all, then apply the kept pictures to her sheet (apply; her old sheet stays in her sheet versions). Free. Watch the pictures before deciding.',
+    name: 'tool_run', title: 'Review an Enhance run', scope: 'edit:write',
+    description: 'An Enhance run\'s results (get; list without runId), and the review as on the screen: decide one picture (slot, decision keep|reject, pick a|b), pick a or b for all, then apply the kept pictures to her sheet (apply; her old sheet stays in her sheet versions). Free. Watch the pictures before deciding.',
     inputSchema: obj({ action: { type: 'string', enum: ['list', 'get', 'decide', 'pick', 'apply'] }, runId: str('The run', 80), slot: str('The picture (decide)', 40),
       decision: { type: 'string', enum: ['keep', 'reject'] }, pick: { type: 'string', enum: ['a', 'b'] } }, ['action']),
     run: async (env, a) => {

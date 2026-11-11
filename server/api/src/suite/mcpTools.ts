@@ -105,7 +105,7 @@ export const SUITE_TOOLS: EditTool[] = [
   },
   {
     name: 'suite_see', title: 'Look at the model and outfit', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: 'Shows you the @model\'s reference images (face, ¾, profile, body front/¾/side/back) and an outfit\'s angles (front, ¾, side, back, and the face close-ups of a Dress up outfit), with the outfit\'s date and description. By default the draft\'s model and outfit; modelId / outfitId show others.',
+    description: 'Shows you the @model\'s reference images (face, ¾, profile, body front/¾/side/back) and an outfit\'s angles (front, ¾, side, back, and the outfit\'s face close-ups), with the outfit\'s date and description. By default the draft\'s model and outfit; modelId / outfitId show others.',
     inputSchema: obj({ assistId: AID, modelId: str('Another model', 80), outfitId: str('Another outfit', 80) }, ['assistId']),
     run: async (env, a) => {
       const r = (await assistOf(env.ctx).get(env.user, need(a, 'assistId'))).request as { modelId?: string; outfitId?: string };

@@ -231,7 +231,7 @@ StepModel    { step, label, model /* "owner/name" in use */, defaultModel, isDef
 
 Collections per step: `shot` → `text-to-image`, `image-editing`; `edit`, `dressA`, `dressB` → `image-editing`; `realism` → `image-editing`, `text-to-image`; `upscale` → `super-resolution`, `ai-image-restoration`. Members get `403 owner_only` from every `/v1/image-models` endpoint.
 
-**Per-run override (owner only):** `POST /v1/shoots`, `POST /v1/outfits`, `POST /v1/models/{id}/enhance`, `POST /v1/models/{id}/dress-up` (and their `/estimate`) accept `models?: { [step in ImageStep]?: "owner/name" }` for that one run. A member sending `models` gets `403 owner_only`. Owner apps show a small "Model" chooser on Shoot, Enhance and Dress up (opens the catalog for that step; "Default" clears it). Members never see it.
+**Per-run override (owner only):** `POST /v1/shoots`, `POST /v1/outfits`, `POST /v1/models/{id}/enhance` (and its `/estimate`) accept `models?: { [step in ImageStep]?: "owner/name" }` for that one run. A member sending `models` gets `403 owner_only`. Owner apps show a small "Model" chooser on Shoot and Enhance (opens the catalog for that step; "Default" clears it). Members never see it.
 
 **Schema mapping (server):** for a chosen model the server reads `latest_version.openapi_schema.components.schemas.Input` (enums are resolved from `$ref`s) and `Output`, and maps:
 - prompt: `prompt` (else `instruction`, `text`); image input: `image`, `input_image`, `input_images`, `images`, `image_input`, `image_url(s)`, `reference_images`, `init_image`, `img` (an array field with its `maxItems`, else a single field; extra single fields `image_2`, `image_3`… count as more images);
@@ -270,11 +270,12 @@ ToolsFeatures { enhance: { available: boolean, realism: { id: "off"|"subtle"|"ba
 - **Step 1 realism** (`realism` model, img2img): the slot image (original size, not shrunk) as `image`, `prompt_strength` Subtle 0.25 / Balanced 0.35 / Strong 0.5, **one seed and one prompt for every image**: `"candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter"`, aspect ratio nearest to the image. **Step 2 upscale** (`upscale` model) on step 1's output (or the original when realism is off): `scale_factor` 2 or 4, low creativity (clarity: `creativity` 0.2, `resemblance` 1.0; other models: their scale field only). Either step can be off.
 - Images run one after another; `tool` SSE events carry progress (`phase: "Enhancing · 3 of 7"`).
 
-### 5. Dress up (model profile and outfit screens)
-- `POST /v1/models/{id}/dress-up/estimate` `{engine?: "a"|"b"|"both", models?}` → `{ images: 7, estimate, label: "7 images · about $0.21" }` (Both: `"7 images · 2 options · about $0.86"`)
-- `POST /v1/models/{id}/dress-up` `{outfitImage: ImageRef /* one outfit-sheet photo: clothes + accessories */, name?: string /* ≤ 80 */, engine?: "a"|"b"|"both" /* default "a" */, models?}` → `ToolRun`. `bad_request` without `outfitImage` or when the sheet has no images.
-- For each engine: the **full-body front first** (`[sheet front, outfit image]`), then every other filled slot with `[that sheet image, outfit image, the new front]` so prints, colours and details match. **One seed for the whole set.** Full-body angles get the whole outfit; face close-ups get only what shows at that distance (earrings, necklace, glasses, hat, hair pieces) and the top's neckline. Face, hair, body, pose, framing and background of each sheet image stay the same. Option A (`dressA`) gets `image: [...]`; Option B (`dressB`) gets `input_images: [...]` (whatever the mapping says for a swapped model).
-- The original sheet is **never** changed.
+### 5. Dress up — REMOVED (owner, 2026-11-11)
+"The dress up feature is not needed at this point. It's redundant." Every outfit now comes with its own three face
+close-ups (see "Outfit face close-ups" under Outfits). `POST /v1/models/{id}/dress-up` and `/estimate` answer
+`410 dress_up_removed`; old Dress up runs are no longer listed and can't be reviewed or applied (`410`). Outfits made by
+Dress up (`mode: "dressup"`) keep working: they already have `faces`. The `dressA` / `dressB` step-model settings stay
+stored (unused) so old settings still read; the apps hide them.
 
 ### 6. Review and apply (both tools)
 ```ts
@@ -300,7 +301,7 @@ SheetVersion { id, createdAt, reason: "enhance"|"restore", slots: SheetSlot[] }
 | `GET /v1/models/{id}/sheet-versions` | → `SheetVersion[]`, newest first (the last 10 are kept) |
 | `POST /v1/models/{id}/sheet-versions/{vid}/restore` | → `Model`. The current sheet is saved as a version (`reason: "restore"`) first. |
 
-SSE: `{ type: "tool", tool: ToolRun }` on every change (to the studio). `Outfit` gains `mode: "dressup"` and `faces?: (ImageRef|null)[3] /* face, face ¾, profile */`. A dress-up outfit works everywhere an outfit does: photoshoots use its `faces` as the face references (before the model's own), and video renders use them in place of the model's face shots (Replicate: face, profile, face ¾, then the outfit's front, ¾, back, side; Edit: face, profile, then the outfit's front, ¾, back), so the accessories match.
+SSE: `{ type: "tool", tool: ToolRun }` on every change (to the studio). (Historical, Dress up removed 2026-11-11:) `Outfit` gained `mode: "dressup"` and `faces?: (ImageRef|null)[3] /* face, face ¾, profile */`. A dress-up outfit works everywhere an outfit does: photoshoots use its `faces` as the face references (before the model's own), and video renders use them in place of the model's face shots (Replicate: face, profile, face ¾, then the outfit's front, ¾, back, side; Edit: face, profile, then the outfit's front, ¾, back), so the accessories match.
 
 ### 7. Archive models (owner)
 | | |
@@ -357,8 +358,8 @@ ShootPreview { slots: PromptSlotView[] /* layer: identity|outfit|scene|camera|li
 ### 3. Prompt library (owner: Settings → Prompts)
 Every prompt or prompt fragment the server sends to a model is a library entry: a default in code, plus an optional owner override per studio (`prompt_overrides` table). A saved override is used for every new photo, outfit set, sheet fill, Enhance, Dress up, template shoot, LoRA set and video render in the studio, for owners and members alike. Running work keeps the prompt it started with.
 ```ts
-PromptGroup  "photoshoot"|"references"|"sheet"|"outfits"|"enhance"|"dressup"|"templates"|"video"|"lora"
-             // labels: Photoshoot, References, Character sheet, Outfits, Enhance, Dress up, Templates, Video, LoRA
+PromptGroup  "photoshoot"|"references"|"sheet"|"outfits"|"enhance"|"templates"|"video"|"lora"
+             // labels: Photoshoot, References, Character sheet, Outfits, Enhance, Templates, Video, LoRA (Dress up removed 2026-11-11)
 Placeholder  { name: string /* "look" */, description: string, required: boolean }
 PromptEntry  { key: string, group: PromptGroup, title: string, description: string,
                kind: "text" | "list" /* comma-separated items */ | "lines" /* one item per line */,
@@ -409,9 +410,7 @@ Members get `403 owner_only` from every `/v1/prompts` endpoint and never see thi
 | outfits | `outfit.seed` | seed | `Seed: {seed} (shared by all four angles).` |
 | outfits | `outfit.edit` | **angle** | `Show the same person in exactly the same outfit, on the same plain studio background, as a {angle}. Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.` (¾ / side / back as edits of the front) |
 | enhance | `enhance.prompt` | | the Enhance realism prompt ("Model tools" §4) |
-| dressup | `dress.body` | anchor | full-body Dress up prompt; `{anchor}` = ` ` + `dress.anchor` when the new front is sent too, else empty |
-| dressup | `dress.closeup` | anchor | face close-up Dress up prompt |
-| dressup | `dress.anchor` | | `The last image shows the same outfit already worn: match its colours, prints and details exactly.` |
+| outfits | `outfit.face` | angle | the outfit's face close-ups (front, ¾, side): match the outfit front's hair, make-up and head/face accessories; keep her face |
 | templates | `template.scene` | **scene** | `Scene: {scene}.` (template scene + drawn background / time of day) |
 | templates | `template.camera` | **camera** | `Camera: {camera}.` |
 | templates | `template.light` | **light** | `Light: {light}.` |
@@ -448,7 +447,7 @@ Photo steps (photoshoots, template shoots, outfit-set fronts, sheet fills, LoRA 
 1. **face front** (`face`; never dropped),
 2. **face ¾** (`faceTq`; her `profile` when the ¾ is empty),
 3. **ONE full-body image**: the slot she chose (`identityBodySlot`: `front` (default), `tq`, `side` or `back`; the next filled body slot when that one is empty),
-then, beyond 3 (studio setting below): her profile (when the ¾ was sent), then her other body angles. A Dress up outfit's own face close-ups (`faces`) stand in for hers. After the person images: the **outfit's front** angle when the step wears an outfit (shoots with `outfitId`), a product photo (template shoots, outfit sets from photos), then the user's **reference images** (§"Shoot references" §1, same model-limit rules: identity images give way from the end, never the face front).
+then, beyond 3 (studio setting below): her profile (when the ¾ was sent), then her other body angles. **With an outfit (owner, 2026-11-11): ONLY the outfit's images** — its face close-ups and its body angles, never her base face or body, in the order face front, outfit front, face ¾, face profile, outfit ¾, side, back (the person budget doesn't cut them; the model's limit does, from the end). An older outfit without face close-ups sends her base face front only, then its angles (the images-sent list says "this outfit has no face close-ups yet"). Video renders follow the same rule (Replicate ≤ 9, GPU ≤ 6). After the person images: a product photo (template shoots, outfit sets from photos), then the user's **reference images** (§"Shoot references" §1, same model-limit rules: identity images give way from the end, never the face front).
 
 ```ts
 Model          { …, identityBodySlot: "front"|"tq"|"side"|"back" /* default "front"; in GET /v1/models, every model view and live `model` events */ }
@@ -655,8 +654,8 @@ Model      { id, name, age (18–70), niche, look, neverAdd: string[], slots: Sh
              archived?: boolean, archivedAt?: number /* "Model tools" §7 */,
              identityBodySlot: "front"|"tq"|"side"|"back" /* 2026-11-05: the one body image her photos send, default "front" */ }
            // locked = all 6 slots filled. Missing face close-ups are only a warning, and saving is always allowed.
-Outfit     { id, modelId, name, mode: "describe"|"photo"|"own"|"dressup", description, angles: (ImageRef|null)[4] /* front, ¾, side, back */,
-             faces?: (ImageRef|null)[3] /* dressup: face, face ¾, profile */,
+Outfit     { id, modelId, name, mode: "describe"|"photo"|"own"|"dressup" /* dressup: made by the removed Dress up */, description, angles: (ImageRef|null)[4] /* front, ¾, side, back */,
+             faces?: (ImageRef|null)[3] /* its face close-ups: front, ¾, side (every outfit since 2026-11-11; older ones until Add face close-ups) */,
              state: "generating"|"preview"|"ready", prompt }
 ClipMeta   { name, durationSec, width, height, fps, people?, watermark?, talking? }
 ClipCheck  { label, value, status: "good"|"bad"|"info", fix? }
@@ -802,11 +801,14 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | | |
 |---|---|
 | `GET /v1/outfits` | → `Outfit[]` (includes unsaved previews), oldest first; each carries `createdAt` (ms) and `createdBy`. |
-| `POST /v1/outfits` `{modelId, name, mode, description, images: ImageRef[]}` | → `Outfit` (`state: "generating"`). An `outfit` event follows with `state: "preview"` and four angles on one seed. |
+| `POST /v1/outfits` `{modelId, name, mode, description, images: ImageRef[]}` | → `Outfit` (`state: "generating"`). An `outfit` event follows with `state: "preview"`, four angles on one seed **and its three face close-ups** (`faces`). |
+| Outfit face close-ups (owner, 2026-11-11) | Every way of making an outfit (describe, product photo, Keep from base, My own set) also makes `faces` = face front, ¾, side, ALWAYS (no switch): each is an edit of HER base face photo of that angle (a missing ¾/side uses her face front) with the outfit's new front sent last, prompt `outfit.face` (match the hair, make-up and head/face accessories; keep her face). A custom model makes them as new shots from the same two images. Her base images are used when MAKING the outfit, never when shooting with it. Priced in: `dryRun` → `{cost, bodyCost, faces: 3, faceCost, images: 7}` ("My own set": `images: 3`, cost = the 3 faces). A face that fails stays empty (Redo makes it). |
 | `POST /v1/outfits` `base?: {source: "base"|"outfit", outfitId?, angles?: {front?, tq?, side?, back?: ImageRef}, keep: {top?, bottom?, shoes?, accessories?}, note?}` | The base set is her profile body photos (`base`) or one of HER outfits (`outfit` + `outfitId`; another model's or studio's → 404); `angles` swaps single angles (another body shot, an outfit angle, an upload); a missing angle uses the front. §6 (plans/outfit-head-looks.md): with anything kept (a tick or a note), the front is an EDIT of her base front body photo (prompt `outfit.keep.front`: keep exactly the kept pieces, replace only the rest with the description or the product photo's clothes), then ¾/side/back are edits of that front plus her base photo of the same angle (`outfit.keep.angle`). Priced as 4 edits. 400 without her front body photo. Nothing kept → as before. |
 | `POST /v1/outfits/{id}/save` `{name?}` | → `Outfit` (`state: "ready"`), attached to the model; `name` (trimmed, 1–80) is the one chosen in the preview. Retake means another `POST /v1/outfits`. |
 | `PATCH /v1/outfits/{id}` `{name}` | Rename (trimmed, 1–80). Owner or the outfit's maker (`createdBy`), else `403 owner_only`; another studio's → 404. → `Outfit` + `outfit` event. |
 | `DELETE /v1/outfits/{id}` | Same permissions. `409 outfit_busy` while it is generating or its missing angles are being made. Removed from her `outfitIds`; takes and photos are kept. → 204, `{type: "outfit", op: "delete", id}` + a `model` event. Apps drop it from pickers/drafts (no outfit). |
+| `POST /v1/outfits/{id}/faces` `{imageEngine?, imageModel?, dryRun?}` | "Add face close-ups" for an older outfit: makes its missing face close-ups from her base face photos and its front (3 edits; a custom model: new shots). Same permissions; 409 while busy. `dryRun` → `{dryRun, faces, images, cost, faceCost}` (nothing held); else `{outfit, cost, images}` and an `outfit` event with `faces`. Nothing missing → `{outfit, cost: 0, images: 0}`. |
+| `POST /v1/outfits/{id}/redo` `{angle: "front"\|"tq"\|"side"\|"back"\|"face"\|"faceTq"\|"profile", dryRun?}` | Redo one of the 7 pictures: ¾/side/back as an edit of the front, the front as a new shot (her images + the old front as the outfit photo), a face as an edit of her base face of that angle with the front. Same permissions and answers as `/faces`. |
 | `POST /v1/outfits/{id}/fill` `{imageEngine?, imageModel?}` | Makes the missing ¾/side/back from the front (edits; a custom model makes new shots). Same permissions; 400 without a front; 409 while busy. → `{outfit, cost}` (estimate held); an `outfit` event with the filled angles follows (unchanged on failure, nothing charged). |
 
 ### Uploads
@@ -988,7 +990,7 @@ _Added 2026-11-05 (every change is live, so a phone and a Mac on one studio stay
 | `take` `{take}` / `{op: "delete", id}` | Photoshoot and template-shoot stills, video takes when a job finishes, a new edited version (`POST /v1/takes/{id}/versions`) and its server-made thumbnail, `PATCH /v1/takes/{id}`, `DELETE /v1/takes/{id}` | Everyone in the studio, each with the prompt *they* may see (a template's hidden layers only to its owner) |
 | `job` `{op: "delete", id}` | `DELETE /v1/jobs/{id}` | Everyone |
 | `model` `{model}` / `{op: "delete", id}` | Create, edit, sheet slot, fill-angles start and finish, archive/unarchive (`archived: true` → drop from lists), tool apply, version restore, delete (drop her outfits too) | Everyone |
-| `outfit` `{outfit}` | Create (`generating`), the set (`preview`), save (`ready`), Dress up apply | Everyone |
+| `outfit` `{outfit}` | Create (`generating`), the set (`preview`), save (`ready`), rename, faces/redo/fill results | Everyone |
 | `tool` `{tool}` | Start, progress, review decisions, retry, apply, discard | Everyone; `models` (which image models ran) only to owners |
 | `template` `{template}` / `{op: "delete", id}` | Create, edit, duplicate, delete, use count after a shoot | Everyone who can see it, each in their own view (layers and pool only to its maker); someone who can't see it (private, or just made private) gets a delete. A favourite only to that user. |
 | `clip` `{clip}` | Clip upload or presigned confirm | Everyone |

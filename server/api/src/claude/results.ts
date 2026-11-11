@@ -1,5 +1,5 @@
 // Results arrive in the chat (owner, 2026-11-11): anything the person waits for that was started while a Claude chat was
-// open (a shot, photos, an outfit, Dress up, Enhance, character-sheet angles, an Edit helper job) tells the chat's owner
+// open (a shot, photos, an outfit, Enhance, character-sheet angles, an Edit helper job) tells the chat's owner
 // when it ends: `{type: 'claude', op: 'result', result}`. Their Mac claims it (one Mac answers) and runs Claude on it.
 // The jobs table keeps the chat on the job's request (durable); the other kinds are linked here, in memory (they finish
 // in minutes; a restart forgets the link and the result simply shows in the app as usual).

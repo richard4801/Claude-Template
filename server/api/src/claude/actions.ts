@@ -196,14 +196,6 @@ export const ACTION_TOOLS: GatedTool[] = [
         when: typeof a.when === 'string' ? a.when : undefined, aiLabel: typeof a.aiLabel === 'boolean' ? a.aiLabel : undefined });
       return { summary: `${body.when ? `Schedule for ${body.when}` : 'Post now'} on ${platforms.join(', ')}${body.caption ? `: “${String(body.caption).slice(0, 80)}”` : ''}`, method: 'POST', url: '/v1/posts', body };
     } }),
-  gated({ name: 'character_dress_up', title: 'Dress up a character', scope: 'edit:write', gate: 'spend',
-    description: 'Dress up (as on the character page): new pictures of the character in a look. options are the Dress up screen\'s choices (the estimate tells you what is missing). Paid: without confirm it gives the price.',
-    props: { modelId: str('The character', 80), options: { type: 'object', description: 'The Dress up choices, as the screen sends them' } }, required: ['modelId'],
-    plan: async (env, a) => {
-      const m = enc(id(a.modelId, 'modelId')), body = (a.options && typeof a.options === 'object' ? a.options : {}) as object;
-      const e = await appCall(env.ctx, env.user, 'POST', `/v1/models/${m}/dress-up/estimate`, body);
-      return { summary: 'Dress up the character', method: 'POST', url: `/v1/models/${m}/dress-up`, body, priceUsd: priceOf(e) };
-    } }),
   gated({ name: 'character_enhance', title: 'Enhance a character\'s pictures', scope: 'edit:write', gate: 'spend',
     description: 'Enhance (as on the character page): sharper, cleaner sheet pictures. options are the Enhance screen\'s choices. Paid: without confirm it gives the price.',
     props: { modelId: str('The character', 80), options: { type: 'object', description: 'The Enhance choices, as the screen sends them' } }, required: ['modelId'],
@@ -232,8 +224,26 @@ export const ACTION_TOOLS: GatedTool[] = [
       if (!e?.dryRun) throw new ApiError(409, 'nothing_missing', 'This outfit has all its angles');
       return { summary: `Make ${e.angles} missing outfit angle${e.angles === 1 ? '' : 's'}`, method: 'POST', url: `/v1/outfits/${o}/fill`, body: {}, priceUsd: priceOf(e) };
     } }),
+  gated({ name: 'outfit_add_faces', title: 'Add an outfit\'s face close-ups', scope: 'edit:write', gate: 'spend',
+    description: 'Makes an older outfit\'s missing face close-ups (front, ¾, side, with the outfit\'s hair, make-up and face accessories) from her base face photos and the outfit\'s front (Add face close-ups on the outfit). Until then, shots with that outfit send her base face front only. Paid: without confirm it gives the price.',
+    props: { outfitId: str('The outfit', 80) }, required: ['outfitId'],
+    plan: async (env, a) => {
+      const o = enc(id(a.outfitId, 'outfitId'));
+      const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/faces`, { dryRun: true });
+      if (!e?.dryRun) throw new ApiError(409, 'nothing_missing', 'This outfit has its face close-ups');
+      return { summary: `Add ${e.faces} face close-up${e.faces === 1 ? '' : 's'} to the outfit`, method: 'POST', url: `/v1/outfits/${o}/faces`, body: {}, priceUsd: priceOf(e) };
+    } }),
+  gated({ name: 'outfit_redo', title: 'Redo one outfit picture', scope: 'edit:write', gate: 'spend',
+    description: 'Makes one of an outfit\'s 7 pictures again (Redo on the outfit): angle front, tq (¾), side or back (body), or face, faceTq or profile (face close-ups). Paid: without confirm it gives the price.',
+    props: { outfitId: str('The outfit', 80), angle: { type: 'string', enum: ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'] } }, required: ['outfitId', 'angle'],
+    plan: async (env, a) => {
+      const o = enc(id(a.outfitId, 'outfitId')), angle = String(a.angle ?? '');
+      const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/redo`, { angle, dryRun: true });
+      if (!e?.dryRun) throw new ApiError(409, 'nothing_to_make', 'That picture can\'t be made (her base face photo is missing)');
+      return { summary: `Redo the outfit's ${angle} picture`, method: 'POST', url: `/v1/outfits/${o}/redo`, body: { angle }, priceUsd: priceOf(e) };
+    } }),
   gated({ name: 'outfit_make', title: 'Make a new outfit', scope: 'edit:write', gate: 'spend',
-    description: 'Makes a new outfit for a character (4 pictures: front, ¾, side, back), as the Outfits sheet does: mode describe (from the description), photo (from product photos in images) or own. Name it. Paid: without confirm it gives the price.',
+    description: 'Makes a new outfit for a character (7 pictures: front, ¾, side, back, and 3 face close-ups with its own hair, make-up and face accessories), as the Outfits sheet does: mode describe (from the description), photo (from product photos in images) or own. Name it. Paid: without confirm it gives the price.',
     props: { modelId: str('The character', 80), name: str('The outfit\'s name', 80), mode: { type: 'string', enum: ['describe', 'photo', 'own'] },
       description: str('What she wears', 1000), images: { type: 'array', maxItems: 4, description: 'Product photos (image refs from the Library or uploads)' } },
     required: ['modelId', 'name'],
@@ -340,8 +350,8 @@ export const ACTION_TOOLS: GatedTool[] = [
       const body = { ...j.request, modelId: j.modelId, ...(j.outfitId ? { outfitId: j.outfitId } : {}) };
       return { summary: `Run “${j.title ?? j.id}” again`, method: 'POST', url: '/v1/jobs', body, priceUsd: typeof j.cost === 'number' ? j.cost : null };
     } }),
-  gated({ name: 'tool_run_retry', title: 'Retry one Dress up / Enhance picture', scope: 'edit:write', gate: 'spend',
-    description: 'Makes one picture of a Dress up or Enhance run again (tool_run get shows the slots), optionally on its other option (engine a or b). Paid: without confirm it gives the price.',
+  gated({ name: 'tool_run_retry', title: 'Retry one Enhance picture', scope: 'edit:write', gate: 'spend',
+    description: 'Makes one picture of an Enhance run again (tool_run get shows the slots). Paid: without confirm it gives the price.',
     props: { runId: str('The run', 80), slot: str('The picture', 40), engine: { type: 'string', enum: ['a', 'b'] } }, required: ['runId', 'slot'],
     plan: async (env, a) => {
       const url = `/v1/tool-runs/${enc(id(a.runId, 'runId'))}/items/${enc(id(a.slot, 'slot'))}/retry`, body = a.engine ? { engine: a.engine } : {};

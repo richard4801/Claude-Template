@@ -256,9 +256,9 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     expect(p.model).toBe('minimax/h3');
     expect(p.input).toMatchObject({ duration: 7, resolution: '768P', ratio: '9:16' });
     expect(p.input.reference_video_urls).toHaveLength(1);
-    expect(p.input.reference_image_urls).toHaveLength(6);         // 2 face shots + the outfit's 4 angles (her figure in the clothes; owner 2026-11-10)
+    expect(p.input.reference_image_urls).toHaveLength(7);         // only the outfit's images: its 3 face close-ups + its 4 angles (owner 2026-11-11)
     expect(p.input.prompt).toContain('keep the exact framing and crop of <Video 1>');
-    expect(p.input.prompt).toContain('<Image 1> to <Image 6>');
+    expect(p.input.prompt).toContain('<Image 1> to <Image 7>');
     expect(p.input).not.toHaveProperty('seed');
     expect(fake.state.unauthorized).toBe(0);
     // The padded source is exactly D seconds; the take is Replicate's file as delivered (whole seconds, its own audio, no trim).
@@ -442,30 +442,34 @@ describe('photos on Replicate (fake Replicate server)', () => {
     const f = (await owner.req('GET', '/v1/settings/studio')).body.features.photo;
     expect(f).toMatchObject({ perRun: 0.015, perInputMp: 0.015, perOutputMp: 0.015, perEdit: 0.03, refMp: 0.79, maxRefs: 6, loraShots: 30 });
     expect(P.aboutMoney(f.estimates.shoot)).toBe('about $0.32');
-    expect(P.aboutMoney(f.estimates.outfitSet)).toBe('about $0.16');
+    expect(P.aboutMoney(f.estimates.outfitSet)).toBe('about $0.25'); // 4 angles + 3 face close-ups
+    expect(P.aboutMoney(f.estimates.outfitFaces)).toBe('about $0.09');
     expect(P.aboutMoney(f.estimates.sheetAngle)).toBe('about $0.07');
     expect(P.aboutMoney(f.estimates.loraSet)).toBe('about $1.97');
   });
 
-  it('an outfit set: a FLUX.2 front, then three Qwen edits of it', async () => {
+  it('an outfit set: a FLUX.2 front, then three Qwen edits of it, then its three Qwen face close-ups', async () => {
     const n0 = fake.state.creates.length;
     const o = (await owner.req('POST', '/v1/outfits', { modelId, name: 'Cream knit', mode: 'describe', description: 'cream cable-knit sweater' })).body;
     const done = await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id && x.state === 'preview'), 30_000);
     expect(done.angles.every((x: any) => x?.url)).toBe(true);
     const ps = fake.state.creates.slice(n0);
-    expect(ps.map(p => p.model)).toEqual(['black-forest-labs/flux-2-pro', 'qwen/qwen-image-edit-2511', 'qwen/qwen-image-edit-2511', 'qwen/qwen-image-edit-2511']);
+    expect(ps.map(p => p.model)).toEqual(['black-forest-labs/flux-2-pro', ...Array(6).fill('qwen/qwen-image-edit-2511')]);
     expect(ps[1]!.input).toMatchObject({ aspect_ratio: 'match_input_image', output_format: 'jpg' });
     expect(ps[1]!.input.image[0]).toMatch(/rx\//);
     expect(ps[1]!.input.prompt).toMatch(/three-quarter/);
     // Body angle per picture (owner 2026-11-11): each edit gets the front, her face and her own body photo of ITS angle.
-    const edits = ps.slice(1).map(p => p.input.image as string[]);
+    const edits = ps.slice(1, 4).map(p => p.input.image as string[]);
     expect(edits.map(e => e.length)).toEqual([3, 3, 3]);
     expect(new Set(edits.map(e => e[2])).size).toBe(3);
-    for (const p of ps.slice(1)) expect(p.input.prompt).toMatch(/figure from this angle/);
-    // Exact: the FLUX.2 front + 3 × $0.03 edits.
-    expect(done.cost).toBeGreaterThan(0.09 + 0.015);
+    for (const p of ps.slice(1, 4)) expect(p.input.prompt).toMatch(/figure from this angle/);
+    // Its face close-ups (owner 2026-11-11): her base face of each angle edited, the new front last.
+    for (const p of ps.slice(4)) { expect(p.input.prompt).toMatch(/face close-up/); expect(p.input.image).toHaveLength(2); }
+    expect(done.faces.every((x: any) => x?.url)).toBe(true);
+    // Exact: the FLUX.2 front + 6 × $0.03 edits.
+    expect(done.cost).toBeGreaterThan(0.18 + 0.015);
     const imgs = (await a.ctx.db.select().from(generatedImages).where(eq(generatedImages.refId, o.id)));
-    expect(imgs.filter(i => i.model === 'qwen/qwen-image-edit-2511').map(i => i.costUsd)).toEqual([0.03, 0.03, 0.03]);
+    expect(imgs.filter(i => i.model === 'qwen/qwen-image-edit-2511').map(i => i.costUsd)).toEqual(Array(6).fill(0.03));
     expect(done.cost).toBeCloseTo(imgs.reduce((t, i) => t + i.costUsd, 0), 12);
   });
 

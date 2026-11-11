@@ -55,13 +55,16 @@ describe('identity images (unit)', () => {
     expect(pick({ slots: slotsOf(FULL), identityBodySlot: 'side' }, null, { count: 7 }).map(x => x.split(':')[0]))
       .toEqual(['face', 'c_face', 'g_side', 'profile', 'g_front', 'g_tq', 'g_back']);
     expect(pick({ slots: slotsOf(FULL) }, null, { count: 1 })).toEqual(['face:face:person']);
-    // The outfit's front when the step wears one, then product photos.
+    // With an outfit (owner 2026-11-11): ONLY the outfit's images. An older one without face close-ups: her base face front,
+    // then its angles; then product photos. The person budget doesn't cut them.
     const outfit = { angles: [R('o_front'), R('o_tq'), null, null] };
     expect(pick({ slots: slotsOf(FULL) }, outfit, { outfit: true, extra: [{ image: R('p1'), label: 'product', role: 'product' }] }).map(x => x.split(':')[0]))
-      .toEqual(['face', 'c_face', 'g_front', 'o_front', 'p1']);
-    // A Dress up outfit's own face close-ups stand in for hers.
-    expect(pick({ slots: slotsOf(FULL) }, { angles: [R('o_front')], faces: [R('o_face'), R('o_tq'), R('o_prof')] }, { outfit: true }).map(x => x.split(':')[0]))
-      .toEqual(['o_face', 'o_tq', 'g_front', 'o_front']);
+      .toEqual(['face', 'o_front', 'o_tq', 'p1']);
+    // Its own face close-ups (hair, make-up, accessories) in place of hers: face, front angle, ¾, profile, then the other angles.
+    expect(pick({ slots: slotsOf(FULL) }, { angles: [R('o_front'), R('o_tq'), R('o_side'), R('o_back')], faces: [R('o_face'), R('o_ftq'), R('o_prof')] }, { outfit: true, count: 1 }).map(x => x.split(':')[0]))
+      .toEqual(['o_face', 'o_front', 'o_ftq', 'o_prof', 'o_tq', 'o_side', 'o_back']);
+    // Without the outfit flag, her own images as before.
+    expect(pick({ slots: slotsOf(FULL) }, outfit, {}).map(x => x.split(':')[0])).toEqual(['face', 'c_face', 'g_front']);
     expect([clampIdentityRefs(null), clampIdentityRefs(0), clampIdentityRefs(9), clampIdentityRefs(5)]).toEqual([3, 1, 7, 5]);
     expect([bodySlotOf({ slots: [] }), bodySlotOf({ slots: [], identityBodySlot: 'left' }), bodySlotOf({ slots: [], identityBodySlot: 'back' })]).toEqual(['front', 'front', 'back']);
   });
@@ -171,13 +174,18 @@ describe('identity images and reference sheets (API, fake Replicate)', () => {
     expect((await tess.req('PATCH', `/v1/models/${own.id}`, { identityBodySlot: 'back' })).body.identityBodySlot).toBe('back');
     await tess.req('POST', '/v1/shoots', { modelId, count: 1 });
     expect(sent()).toEqual(await rx('face', 'c_face', 'g_side'));
-    // With an outfit: + its front.
+    // With an outfit: only its images (its 3 face close-ups, made from her base faces and its front, and its angles).
     const outfit = (await owner.req('POST', '/v1/outfits', { modelId, name: 'Own set', mode: 'own', images: [R('hero'), R('g_tq')] })).body;
-    await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === outfit.id)?.angles?.[0]);
+    const made = await until(async () => { const x = (await owner.req('GET', '/v1/outfits')).body.find((y: any) => y.id === outfit.id); return x?.state === 'preview' ? x : null; });
+    expect(made.faces.every((f: any) => f?.url)).toBe(true);
     const pv = (await owner.req('POST', '/v1/shoots/preview', { modelId, outfitId: outfit.id, count: 1 })).body;
-    expect(pv).toMatchObject({ images: 4, referenceSheet: false });
+    expect(pv).toMatchObject({ images: 5, referenceSheet: false });
+    expect(pv.sentImages.images.map((x: any) => x.label)).toEqual(['face', 'outfit, front', 'face ¾', 'face profile', 'outfit, ¾']);
     await owner.req('POST', '/v1/shoots', { modelId, outfitId: outfit.id, count: 1 });
-    expect(sent()).toEqual(await rx('face', 'c_face', 'g_side', 'hero'));
+    const out = sent();
+    expect(out.length).toBe(5);
+    expect([out[1], out[4]]).toEqual(await rx('hero', 'g_tq'));
+    for (const base of await rx('face', 'c_face', 'g_side')) expect(out).not.toContain(base);
   });
 
   it('the studio setting widens or narrows it; estimates follow', async () => {
