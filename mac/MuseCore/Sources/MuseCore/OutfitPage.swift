@@ -96,12 +96,34 @@ public struct OutfitKeep: Codable, Hashable, Sendable {
     var flags: [Bool] { [top, bottom, shoes, accessories] }
 }
 
-/// `POST /v1/outfits` `base`: start from her base photos, keeping the ticked pieces and the note.
+/// A base set's chosen angles (nil = the set's own; a missing one uses the front).
+public struct OutfitBaseAngles: Codable, Hashable, Sendable {
+    public var front: ImageRef?
+    public var tq: ImageRef?
+    public var side: ImageRef?
+    public var back: ImageRef?
+    public init() {}
+    public static let keys = ["front", "tq", "side", "back"]
+    public subscript(i: Int) -> ImageRef? {
+        get { [front, tq, side, back][i] }
+        set { switch i { case 0: front = newValue; case 1: tq = newValue; case 2: side = newValue; default: back = newValue } }
+    }
+    public var isEmpty: Bool { front == nil && tq == nil && side == nil && back == nil }
+}
+
+/// `POST /v1/outfits` `base`: start from her base photos (her profile photos, or one of her outfits), with single angles
+/// swapped, keeping the ticked pieces and the note.
 public struct OutfitBase: Codable, Hashable, Sendable {
+    /// "base" (her profile body photos) or "outfit" (one of her outfits as the base set).
     public var source = "base"
+    public var outfitId: String?
+    public var angles: OutfitBaseAngles?
     public var keep: OutfitKeep
     public var note: String?
-    public init(keep: OutfitKeep, note: String?) {
+    public init(keep: OutfitKeep, note: String?, outfitId: String? = nil, angles: OutfitBaseAngles? = nil) {
+        self.source = outfitId == nil ? "base" : "outfit"
+        self.outfitId = outfitId
+        self.angles = (angles?.isEmpty ?? true) ? nil : angles
         self.keep = keep
         let n = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.note = n.isEmpty ? nil : n

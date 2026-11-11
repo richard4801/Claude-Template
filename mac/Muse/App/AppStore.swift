@@ -140,7 +140,10 @@ struct OutfitDraft {
     var fromBase = false
     var keep = OutfitKeep()
     var keepNote = ""
-    var base: OutfitBase? { fromBase && mode != .own ? OutfitBase(keep: keep, note: keepNote) : nil }
+    /// The base set: nil = her profile photos, else one of her outfits; plus single angles swapped by choice.
+    var baseOutfitId: String?
+    var baseAngles = OutfitBaseAngles()
+    var base: OutfitBase? { fromBase && mode != .own ? OutfitBase(keep: keep, note: keepNote, outfitId: baseOutfitId, angles: baseAngles) : nil }
 }
 
 enum Niches {

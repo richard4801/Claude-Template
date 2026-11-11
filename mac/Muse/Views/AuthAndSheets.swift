@@ -295,6 +295,7 @@ struct OutfitSheetView: View {
             }
             .toggleStyle(.checkbox)
             if d.fromBase {
+                baseSetRow(d)
                 HStack(spacing: Space.s4) {
                     Text("Keep").scaled(t.scale.caption, t.roles.ink2)
                     keepBox("Top", \.top)
@@ -309,6 +310,58 @@ struct OutfitSheetView: View {
                     .roleField(focused: noteFocused)
                     .frame(maxWidth: 420)
                 Text(d.base?.summary ?? "").scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    static let baseLabels = ["Front", "¾", "Side", "Back"]
+
+    /// Which base set (her profile photos or one of her outfits) and the four images it sends; click one to swap it.
+    @ViewBuilder private func baseSetRow(_ d: OutfitDraft) -> some View {
+        let model = store.models.first { $0.id == d.modelId }
+        let fits = model.map { store.outfitFolders(for: $0) } ?? []
+        let set = store.baseSet(d)
+        HStack(spacing: Space.s3) {
+            Text("Start from").scaled(t.scale.caption, t.roles.ink2)
+            Menu(fits.first { $0.id == d.baseOutfitId }?.name ?? "Her profile photos") {
+                Button("Her profile photos") { store.setBaseSource(nil) }
+                if !fits.isEmpty { Divider() }
+                ForEach(fits) { o in Button(o.name) { store.setBaseSource(o.id) } }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        HStack(alignment: .top, spacing: Space.s3) {
+            ForEach(0..<4, id: \.self) { i in
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Menu {
+                        if let m = model {
+                            Section("Her body shots") {
+                                ForEach(0..<4, id: \.self) { k in
+                                    if let r = m.slot(OutfitBaseAngles.keys[k])?.image { Button(Self.baseLabels[k]) { store.swapBaseAngle(i, to: r) } }
+                                }
+                            }
+                        }
+                        ForEach(fits) { o in
+                            Menu(o.name) {
+                                ForEach(0..<4, id: \.self) { k in
+                                    if o.angles.indices.contains(k), let r = o.angles[k] { Button(Self.baseLabels[k]) { store.swapBaseAngle(i, to: r) } }
+                                }
+                            }
+                        }
+                        Divider()
+                        Button("Upload a photo of her…") { store.uploadBaseAngle(i) }
+                        if d.baseAngles[i] != nil { Button("Use the set's own") { store.swapBaseAngle(i, to: nil) } }
+                    } label: {
+                        MediaFrame(ref: set[i], ratio: 0.75).frame(width: 64)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Swap the \(Self.baseLabels[i] == "¾" ? "three-quarter" : Self.baseLabels[i].lowercased()) base photo")
+                    .accessibilityLabel("\(Self.baseLabels[i]) base photo, swap")
+                    Text(set[i] == nil && i > 0 ? "Uses the front" : Self.baseLabels[i]).scaled(t.scale.caption, t.roles.ink2)
+                }
             }
         }
     }
