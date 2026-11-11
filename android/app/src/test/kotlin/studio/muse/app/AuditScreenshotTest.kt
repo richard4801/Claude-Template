@@ -51,7 +51,7 @@ class AuditScreenshotTest(private val theme: String, private val screen: String)
         val DEMO = listOf(
             "welcome", "signin", "signup", "home", "gallery", "queue", "settings", "credits", "profile", "create1", "create3", "outfit",
             "photo", "result", "templates", "template_detail", "posts", "posts_posted", "post", "accounts", "lora", "members", "invite",
-            "studio_settings", "prompts", "enhance", "dressup", "archived",
+            "studio_settings", "prompts", "enhance", "outfits", "archived",
         )
         /** The real API as a new member: nothing made yet. */
         val EMPTY = listOf("home_empty", "gallery_empty", "queue_empty", "photo_empty", "posts_empty", "templates_empty", "settings_empty", "profile_empty", "credits_empty")

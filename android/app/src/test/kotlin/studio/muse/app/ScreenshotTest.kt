@@ -76,8 +76,10 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             // Video options (app clean-up): Render (Draft default, HD) and the Edit add-on (no steps, no start-up), Upscale coming soon on a take.
             "quality_draft", "quality_hd", "quality_edit", "result_upscale",
             // Model tools (plans/api.md "Model tools"): the owner's image models and catalog picker, Enhance setup and review,
-            // Dress up setup and the Both side-by-side review, archived models.
-            "image_models", "catalog", "enhance_setup", "enhance_review", "dressup_setup", "dressup_review", "archived",
+            // archived models. (Dress up was removed 2026-11-11.)
+            "image_models", "catalog", "enhance_setup", "enhance_review", "archived",
+            // Outfit face close-ups (plans/outfit-faces.md): an open outfit with its 7 pictures, and an older one without faces.
+            "outfit_open_faces", "outfit_open_nofaces",
             // The prompt library (2026-11-05): owner Settings → Prompts and one prompt's editor. (Photoshoot's screens moved to the Photo tool: SuitePhotoScreenshotTest.)
             "prompts", "prompt_edit",
         )
@@ -177,7 +179,10 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                     createdAt = System.currentTimeMillis(), videoUrl = "/uploads/r/j/take_1.mp4", durationSec = 6.4, width = 768, height = 1344))
             }
             "catalog" -> { c.drafts.catalogStep.value = "upscale"; c.drafts.catalogFor.value = "settings" }
-            "dressup_setup" -> c.drafts.dressUp.value = studio.muse.app.data.DressUpDraft(ImageRef.asset("c_front"), "Silver night", "both")
+            "outfit_open_faces" -> runBlocking {
+                val o = fake.listOutfits().first { it.id == SampleData.GREEN }
+                fake.debugPutOutfit(o.copy(faces = listOf("face", "c_face", "profile").map(ImageRef::asset)))
+            }
             "archived" -> runBlocking { fake.archiveModel(SampleData.NOOR, true) }
             "queue_run" -> runBlocking {
                 val req = JobRequest("Living-room dance", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP)
@@ -187,10 +192,9 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                     p.phase, p.secondsLeft, total, Pricing.totalCost(req.spec()), createdAt = System.currentTimeMillis(), thumb = studio.muse.app.data.ImageRef.asset("g_front")))
             }
         }
-        // Enhance / Dress up review: start a run on the demo engine and let it finish (it returns the sheet's own stills).
+        // Enhance review: start a run on the demo engine and let it finish (it returns the sheet's own stills).
         val toolRun = when (screen) {
             "enhance_review" -> runBlocking { fake.startEnhance(SampleData.DEMO, studio.muse.app.data.EnhanceRequest()) }
-            "dressup_review" -> runBlocking { fake.startDressUp(SampleData.DEMO, studio.muse.app.data.DressUpRequest(ImageRef.asset("c_front"), "Silver night", "both")) }
             else -> null
         }
         if (toolRun != null) {
@@ -198,23 +202,17 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             runBlocking {
                 val r = fake.toolRun(toolRun.id)
                 check(r.state == "review") { "run still ${r.state}" }
-                if (screen == "enhance_review") {
-                    fake.decideTool(r.id, "face", studio.muse.app.data.DecideRequest("keep"))
-                    fake.decideTool(r.id, "back", studio.muse.app.data.DecideRequest("reject"))
-                } else {
-                    fake.pickTool(r.id, "a")
-                    fake.decideTool(r.id, "front", studio.muse.app.data.DecideRequest("keep", "b"))
-                }
+                fake.decideTool(r.id, "face", studio.muse.app.data.DecideRequest("keep"))
+                fake.decideTool(r.id, "back", studio.muse.app.data.DecideRequest("reject"))
                 c.repo.putTool(fake.toolRun(r.id))
             }
-            if (screen == "enhance_review") c.drafts.enhance.value = studio.muse.app.data.EnhanceDraft(runId = toolRun.id)
-            else c.drafts.dressUp.value = studio.muse.app.data.DressUpDraft(ImageRef.asset("c_front"), "Silver night", "both", runId = toolRun.id)
+            c.drafts.enhance.value = studio.muse.app.data.EnhanceDraft(runId = toolRun.id)
         }
         val route = when (screen) {
             "image_models" -> Routes.IMAGE_MODELS
             "catalog" -> Routes.CATALOG
             "enhance_setup", "enhance_review" -> Routes.ENHANCE
-            "dressup_setup", "dressup_review" -> Routes.DRESSUP
+            "outfit_open_faces", "outfit_open_nofaces" -> Routes.HOME
             "archived" -> Routes.ARCHIVED
             "prompts" -> Routes.PROMPTS
             "prompt_edit" -> Routes.SETTINGS
@@ -241,7 +239,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "result_upscale" -> Routes.result("t_up"); "post", "post_schedule" -> Routes.post("t_j1")
             "template_detail", "template_edit" -> Routes.template("tpl_mirror-selfie"); "template_detail_other" -> Routes.template("tpl_maya_walk")
             "template_use" -> Routes.templateUse("tpl_mirror-selfie"); "template_use_prompt" -> Routes.templateUse("tpl_maya_walk")
-            "save_template" -> Routes.saveTemplate("t_g4"); "prompt_edit" -> Routes.prompt("refs.pose"); else -> null }
+            "save_template" -> Routes.saveTemplate("t_g4"); "prompt_edit" -> Routes.prompt("refs.pose")
+            "outfit_open_faces" -> Routes.outfitView(SampleData.GREEN); "outfit_open_nofaces" -> Routes.outfitView(SampleData.CRYSTAL); else -> null }
         compose.setContent { MuseApp(c, route, pending) }
         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()

@@ -127,7 +127,7 @@ class ShootReferencesTest {
         val lib = api.prompts()
         assertEquals(FakePromptLibrary.DEFAULTS.prompts.size, lib.prompts.size)
         assertTrue(lib.prompts.size >= 52)
-        assertEquals(listOf("Photo", "References", "Character sheet", "Outfits", "Enhance", "Dress up", "Templates", "Video", "LoRA", "AI suite"), lib.groups.map { it.label }) // + AI suite (workstream 1)
+        assertEquals(listOf("Photo", "References", "Character sheet", "Outfits", "Enhance", "Templates", "Video", "LoRA", "AI suite"), lib.groups.map { it.label }) // + AI suite (workstream 1)
         val pose = lib.prompts.first { it.key == "refs.pose" }
         assertEquals("Copy the pose and framing from image {refIndex}.", pose.current)
         assertTrue(pose.placeholders.single().required)

@@ -60,6 +60,8 @@ interface MuseService {
     @PATCH("v1/outfits/{id}") suspend fun renameOutfit(@Path("id") id: String, @Body r: OutfitNameBody): Outfit
     @DELETE("v1/outfits/{id}") suspend fun deleteOutfit(@Path("id") id: String)
     @POST("v1/outfits/{id}/fill") suspend fun fillOutfit(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
+    @POST("v1/outfits/{id}/faces") suspend fun addOutfitFaces(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
+    @POST("v1/outfits/{id}/redo") suspend fun redoOutfit(@Path("id") id: String, @Body r: OutfitRedoRequest): OutfitFill
     @Multipart @POST("v1/uploads/images") suspend fun uploadImage(@Part file: MultipartBody.Part): ImageRef
     @Multipart @POST("v1/uploads/clips") suspend fun uploadClip(@Part("meta") meta: RequestBody, @Part file: MultipartBody.Part?): Clip
     @POST("v1/uploads/presign") suspend fun presign(@Body r: PresignRequest): PresignResponse
@@ -378,6 +380,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun renameOutfit(outfitId: String, name: String) = call { renameOutfit(outfitId, OutfitNameBody(name)) }.abs()
     override suspend fun deleteOutfit(outfitId: String) = call { deleteOutfit(outfitId) }
     override suspend fun fillOutfit(outfitId: String, imageModel: String?) = call { fillOutfit(outfitId, FillAnglesRequest(imageModel)) }.let { it.copy(outfit = it.outfit.abs()) }
+    override suspend fun addOutfitFaces(outfitId: String) = call { addOutfitFaces(outfitId, FillAnglesRequest()) }.let { it.copy(outfit = it.outfit.abs()) }
+    override suspend fun redoOutfit(outfitId: String, angle: String) = call { redoOutfit(outfitId, OutfitRedoRequest(angle)) }.let { it.copy(outfit = it.outfit.abs()) }
 
     private suspend fun usePresigned(): Boolean = when (uploadMode) {
         UploadMode.PRESIGNED -> true

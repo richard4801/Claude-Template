@@ -44,6 +44,10 @@ interface MuseApi {
     suspend fun deleteOutfit(outfitId: String)
     /** Makes an outfit's missing ¾/side/back from its front; an outfit event with the filled angles follows. */
     suspend fun fillOutfit(outfitId: String, imageModel: String? = null): OutfitFill
+    /** "Add face close-ups" (an older outfit): makes its missing face front, ¾ and side; an outfit event with them follows. */
+    suspend fun addOutfitFaces(outfitId: String): OutfitFill
+    /** Redoes one of the 7 pictures ([OutfitPictures.KEYS]: front | tq | side | back | face | faceTq | profile); an outfit event follows. */
+    suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill
 
     // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
     suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef
@@ -128,7 +132,8 @@ interface MuseApi {
     /** {on: true|false} or {extend: true} ("Keep warm"). */
     suspend fun setWarmGpu(req: WarmRequest): WarmGpu
 
-    // Model tools (plans/api.md "Model tools"). Image models are owner only; Enhance and Dress up are for everyone.
+    // Model tools (plans/api.md "Model tools"). Image models are owner only; Enhance is for everyone. Dress up was removed
+    // (2026-11-11: the server answers 410 dress_up_removed); its two calls stay only so older code and tests still build.
     suspend fun imageModels(): StepModels
     suspend fun imageCatalog(step: String, q: String? = null, collection: String? = null): CatalogPage
     suspend fun imageModel(id: String, step: String): ModelDetail

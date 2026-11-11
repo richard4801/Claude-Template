@@ -448,7 +448,7 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
     ModelStatusList(st)
     val navX = LocalNav.current
     Column {
-        RowItem("Photo models by step", "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
+        RowItem("Photo models by step", "Any Replicate model for new shots, edits and Enhance", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
         RowItem("Archived models", "Hidden models you can restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Chevron() }
     }
     Heading("Our own GPUs")

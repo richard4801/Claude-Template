@@ -94,7 +94,7 @@ data class ProfileActions(
     val select: (Int) -> Unit = {}, val addOutfit: () -> Unit = {}, val allOutfits: () -> Unit = {}, val video: () -> Unit = {}, val shoot: () -> Unit = {},
     val back: () -> Unit = {}, val settings: () -> Unit = {}, val sheet: () -> Unit = {}, val menu: Boolean = true,
     val lora: () -> Unit = {}, val accounts: () -> Unit = {},
-    val enhance: () -> Unit = {}, val dressUp: () -> Unit = {}, val archive: (() -> Unit)? = null,
+    val enhance: () -> Unit = {}, val archive: (() -> Unit)? = null,
 )
 
 @Composable
@@ -109,7 +109,7 @@ fun ProfileScreen() {
             select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, allOutfits = { nav.go(Routes.OUTFITS) }, video = { studio.muse.app.ui.screens.suite.composer.openShot(c, nav, s.model?.id) }, shoot = { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, s.outfits.getOrNull(s.selected)?.id) },
             back = { nav.back() }, settings = { nav.tab(Routes.SETTINGS) }, sheet = { nav.go(Routes.CREATE3) },
             lora = { nav.go(Routes.LORA) }, accounts = { nav.go(Routes.ACCOUNTS) },
-            enhance = { nav.go(Routes.ENHANCE) }, dressUp = { nav.go(Routes.DRESSUP) },
+            enhance = { nav.go(Routes.ENHANCE) },
             archive = if (c.repo.demo || c.prefs.value.owner) ({ s.model?.let { md -> vm.archive(md) { nav.reset(Routes.HOME) } } }) else null,
         ),
     )
@@ -128,7 +128,7 @@ fun ProfileContent(s: ProfileState, a: ProfileActions) {
                 Modifier.padding(horizontal = MuseSpace.gutter))
         }
     }
-    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts, a.enhance, a.dressUp, a.archive) else emptyList()
+    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts, a.enhance, a.archive) else emptyList()
     ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize().padding(bottom = 88.dp)) {
             CalmTopBar(onBack = a.back, right = if (a.menu) ({ MoreMenu(menu, tint = m.roles.ink) }) else null)
