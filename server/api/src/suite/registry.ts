@@ -46,7 +46,9 @@ export type ModelSpec = {
   extend?: { after?: 'clip' | 'reference' | 'frame'; before?: 'reference' | 'frame'; sourceSeconds: [number, number] };
   recast?: { maxPeople: number; keepsCuts: boolean; keepsAudio: boolean; refsPerPerson: number; totalImages: number; faceCrops: boolean; sourceSeconds: [number, number]; maxShotSeconds?: number };
   frames: { start: boolean; end: boolean; middle: number; /** frames and references can be combined */ withRefs: boolean };
-  refs: { images: number; videos: number; audios: number; /** all images (frames + refs) together */ totalImages?: number; videoSecondsMax?: number; videoSecondsMin?: number };
+  refs: { images: number; videos: number; audios: number; /** all images (frames + refs) together */ totalImages?: number; videoSecondsMax?: number; videoSecondsMin?: number;
+    /** Reference images included in the price; each one beyond costs `extraImageUsd` per take (Higgsfield H3: 5, $0.08). */
+    includedImages?: number; extraImageUsd?: number };
   duration: { min: number; max: number; allowed?: number[]; /** billed at least this many seconds */ minBilled?: number };
   resolutions: Resolution[];
   aspectRatios: string[];
@@ -148,7 +150,7 @@ export const MODELS: ModelSpec[] = [
   { id: 'h3-hf', name: 'MiniMax H3 (Higgsfield)', provider: 'higgsfield',
     ref: { t2v: 'minimax/h3/text-to-video', ref2v: 'minimax/h3/reference-to-video' }, adapter: 'hf-h3',
     modes: { text: true, image: false, reference: true }, frames: { start: false, end: false, middle: 0, withRefs: false },
-    refs: { images: 9, videos: 3, audios: 3 }, duration: { min: 5, max: 15 },
+    refs: { images: 9, videos: 3, audios: 3, includedImages: 5, extraImageUsd: 0.08 }, duration: { min: 5, max: 15 },
     resolutions: [R('2K', '2K', 1440, 0.065)], aspectRatios: AR_FULL,
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 via Higgsfield (hosted)'), status: 'active',

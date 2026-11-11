@@ -333,10 +333,13 @@ export function billedSeconds(m: ModelSpec, seconds: number, o: { videoInput: bo
   if (m.id === 'kling-v4' && o.videoInput) s = seconds + Math.max(o.guideSeconds ?? seconds, seconds);
   return s;
 }
-/** Fixed extra per take (fal H3 Max reference tokens, an estimate). */
-/** Higgsfield H3: the first 5 reference images are included, each further one costs $0.08 per take. */
-/** An owner-added model priced per run (WS5): its per-run cost. */
-export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : m.byo ? m.byo.perRunUsd : 0);
+/** Reference images beyond the included ones that cost extra per take (Higgsfield H3: past the first 5). */
+export const paidImages = (m: ModelSpec, refImages: number) => (m.refs.extraImageUsd ? Math.max(0, refImages - (m.refs.includedImages ?? 0)) : 0);
+/**
+ * Fixed extra per take: fal H3 Max reference tokens (an estimate); per-image models (Higgsfield H3: the first 5 reference
+ * images are included, each further one costs $0.08 per take); an owner-added model priced per run (WS5): its per-run cost.
+ */
+export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.refs.extraImageUsd ? m.refs.extraImageUsd * paidImages(m, refImages) : m.byo ? m.byo.perRunUsd : 0);
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
 export type ShotPlan = {
@@ -418,7 +421,10 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   if (charImgs.length > charSent.length && charRoom > 0) notes.push(`${charImgs.length - charSent.length} character image(s) left out (limit ${m.refs.images})`);
   // Guide keyframes the model can't take as frames: reference images in the room left (her images and yours come first).
   if (kfLeft.length) {
-    const fits = kfLeft.slice(0, Math.max(0, room - images.refs.length));
+    // On a model that charges per extra image (Higgsfield H3), the stills only take the free slots while the guide clip
+    // goes too: the clip carries the blocking, so a still would add a charge (owner, 2026-11-11: "$1.17 is not right").
+    const stillRoom = m.refs.extraImageUsd && cam.usesGuide ? Math.min(room, m.refs.includedImages ?? 0) : room;
+    const fits = kfLeft.slice(0, Math.max(0, stillRoom - images.refs.length));
     images.refs.push(...fits);
     if (fits.length < kfLeft.length) notes.push(fits.length ? `${kfLeft.length - fits.length} guide still${kfLeft.length - fits.length > 1 ? 's' : ''} left out (no room for more images); the guide clip carries the blocking`
       : `the guide stills aren't sent on this model; ${cam.usesGuide ? 'the guide clip carries the blocking' : 'the camera is described in words'}`);
@@ -495,6 +501,8 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const guideSeconds = videos[0]?.video.seconds;
   const billed = billedSeconds(m, p.seconds, { videoInput, guideSeconds });
   const extraCost = extraPerTake(m, images.refs.length) * (m.byo ? o.priceScale ?? 1 : 1); // WS5: a custom model's per-run price takes its markup too
+  const paid = paidImages(m, images.refs.length);
+  if (paid) notes.push(`${paid} reference image${paid > 1 ? 's' : ''} past the ${m.refs.includedImages} included add $${extraCost.toFixed(2)} per take`);
   const separation = audioPlan?.beatOnly ? o.separationUsd ?? 0 : 0;
   const estimate = Math.round(((perSec * billed + extraCost) * r.takes + separation) * 10000) / 10000;
 

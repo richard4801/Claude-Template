@@ -127,4 +127,40 @@ final class ComposerModelPickerTests: XCTestCase {
         let talking = ComposerModelPicker.options(c, nil, tool: .talking, quality: "draft")
         XCTAssertTrue(talking.allSatisfy { $0.inputs?.audio == true })
     }
+
+    // Owner bug 2026-11-11: on Draft, picking MiniMax H3 (Higgsfield), which makes 2K only, left the Quality choice blank.
+    private func hfCatalog() throws -> SuiteCatalog {
+        let json = #"{"enabled":true,"test":false,"tiers":[],"camera":{},"engines":[{"model":"h3-hf","name":"MiniMax H3 (Higgsfield)","kind":"video","custom":false,"tier":"hd","tiers":["hd"],"resolution":"2K","resolutions":[{"id":"2K","label":"2K","perSec":0.065}],"perSec":0.065,"minSeconds":5,"maxSeconds":15,"aspectRatios":["9:16","16:9","1:1"]},{"model":"kling-v4","name":"Kling 4.0","kind":"video","custom":false,"tier":"standard","tiers":["standard","hd","cinema"],"resolution":null,"resolutions":[{"id":"720p","label":"720p · standard","perSec":0.168},{"id":"1080p","label":"1080p · pro","perSec":0.224},{"id":"4k","label":"4K","perSec":0.42}],"perSec":0.224,"minSeconds":3,"maxSeconds":30,"aspectRatios":["9:16","16:9","1:1"]}]}"#
+        return try JSONDecoder().decode(SuiteCatalog.self, from: Data(json.utf8))
+    }
+
+    func testPickingAModelAlwaysLandsOnOneOfItsResolutions() throws {
+        let c = try hfCatalog()
+        let hf = c.engines!.first { $0.model == "h3-hf" }!
+        var d = ComposerDraft(duration: 13)
+        d.quality = "draft"
+        d.resolution = "768P" // the Draft ladder's H3 Lite resolution
+        let p = ComposerModelPicker.pin(d, hf, catalog: c, settings: nil)
+        XCTAssertEqual(p.resolution, "2K")
+        XCTAssertEqual(p.quality, "hd", "the quality follows the model's own ladder, as on Android")
+        XCTAssertEqual(ComposerModelPicker.label(p, catalog: c, settings: nil), "MiniMax H3 (Higgsfield), 2K")
+        XCTAssertEqual(ComposerModelPicker.qualityLabel(p, catalog: c, settings: nil), "2K")
+        XCTAssertEqual(ComposerModelPicker.pin(d, hf, resolution: "768P", catalog: c, settings: nil).resolution, "2K")
+        // A restored draft carrying another model's resolution is snapped too.
+        var stale = d
+        stale.engineModel = "h3-hf"
+        XCTAssertEqual(ComposerModelPicker.validated(stale, catalog: c, settings: nil).resolution, "2K")
+        XCTAssertNil(ComposerModelPicker.qualityLabel(ComposerDraft(duration: 6), catalog: c, settings: nil), "Auto: the quality's own label")
+    }
+
+    func testSnapResolution() throws {
+        let kling = try hfCatalog().engines!.first { $0.model == "kling-v4" }!
+        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "1080p"), "1080p")
+        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "4K"), "4k", "any letter case")
+        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "2K"), "1080p", "the nearest in pixels")
+        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "480p"), "720p")
+        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, nil), "4k", "no ladder resolution: its best")
+        XCTAssertEqual(ComposerModelPicker.pixels("768P"), 768)
+        XCTAssertEqual(ComposerModelPicker.pixels("2K"), 1440)
+    }
 }
