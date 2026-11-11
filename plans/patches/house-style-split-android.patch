@@ -1,0 +1,767 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt
+index 27c0ebb6..c5acb3ae 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt
+@@ -41,7 +41,7 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
+         val text = req.text ?: view(e).current
+         validate(e, text)?.let { throw ApiException("prompt_invalid", it) }
+         val lib = { k: String -> if (k == e.key) text else text(k) }
+-        val values = SAMPLE + mapOf("style" to lib("style.house"), "never" to neverList(SAMPLE_ID, lib).joinToString(", "))
++        val values = SAMPLE + mapOf("style" to houseStyle(lib), "never" to neverList(SAMPLE_ID, lib).joinToString(", "))
+         val rendered = when (e.kind) {
+             "list" -> items(text, ",").joinToString(", ")
+             "lines" -> items(text, "\n").joinToString("\n")
+@@ -81,6 +81,13 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
+     }
+ 
+     companion object {
++        /**
++         * The house style (server prompt/library.ts, split 2026-11-11): Camera feel then Realism. The demo has no rigs, so
++         * Camera feel is always on (the server leaves it out when a rig or preset sets its own camera, lens, grade or look).
++         */
++        fun houseStyle(library: (String) -> String): String =
++            listOf(library("style.camera"), library("style.realism")).map { it.trim().trimEnd('.', ',', ';', ' ') }.filter { it.isNotEmpty() }.joinToString(", ")
++
+         private val PH = Regex("\\{([A-Za-z][A-Za-z0-9]*)\\}")
+         /** The server's default library (the same file the server checks is current). */
+         val DEFAULTS: PromptLibrary by lazy {
+@@ -176,7 +183,7 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
+             val lines = sent.map { referenceLine(it, library) }.iterator()
+             return slots.mapNotNull { s ->
+                 when (s.layer) {
+-                    Layer.STYLE.key -> s.copy(text = fill(library("shoot.style"), mapOf("style" to library("style.house"))))
++                    Layer.STYLE.key -> s.copy(text = fill(library("shoot.style"), mapOf("style" to houseStyle(library))))
+                     Layer.NEGATIVE.key -> s.copy(text = fill(library("shoot.never"), mapOf("never" to neverList(identity, library).joinToString(", "))))
+                     Layer.REFERENCE.key -> s.copy(text = if (lines.hasNext()) lines.next() else s.text)
+                     else -> s
+diff --git a/android/app/src/main/resources/prompt_library.json b/android/app/src/main/resources/prompt_library.json
+index 6f39437d..535578b3 100644
+--- a/android/app/src/main/resources/prompt_library.json
++++ b/android/app/src/main/resources/prompt_library.json
+@@ -43,19 +43,33 @@
+  ],
+  "prompts": [
+   {
+-   "key": "style.house",
++   "key": "style.realism",
+    "group": "photoshoot",
+-   "title": "House style",
+-   "description": "The look every photo asks for. Used in the style line of shoots, template shoots, sheet fills and outfit sets.",
++   "title": "Realism",
++   "description": "Always on. How real every photo looks: skin, colour, no filters. In the style line of shoots, template shoots, sheet fills and outfit sets, after the camera feel.",
+    "kind": "text",
+-   "default": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss",
+-   "current": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss",
++   "default": "natural skin texture, true-to-life colour, no beauty filter, no AI gloss",
++   "current": "natural skin texture, true-to-life colour, no beauty filter, no AI gloss",
+    "overridden": false,
+    "allowEmpty": false,
+    "placeholders": [],
+    "updatedAt": null,
+    "updatedBy": null
+   },
++  {
++   "key": "style.camera",
++   "group": "photoshoot",
++   "title": "Camera feel",
++   "description": "The camera the photo looks taken with, when the shot names none. Left out when a rig or preset sets a camera body, lens, grade or look (its own words stand). Sheet fills and outfit sets always have it.",
++   "kind": "text",
++   "default": "realistic smartphone photo",
++   "current": "realistic smartphone photo",
++   "overridden": false,
++   "allowEmpty": true,
++   "placeholders": [],
++   "updatedAt": null,
++   "updatedBy": null
++  },
+   {
+    "key": "never.base",
+    "group": "photoshoot",
+@@ -102,7 +116,7 @@
+    "key": "shoot.default.grade",
+    "group": "photoshoot",
+    "title": "Default grade",
+-   "description": "Used when a shoot sends no grade.",
++   "description": "Used when a shoot sends no grade and has no camera body, lens or look of its own.",
+    "kind": "text",
+    "default": "Phone-natural",
+    "current": "Phone-natural",
+@@ -315,6 +329,26 @@
+    "updatedAt": null,
+    "updatedBy": null
+   },
++  {
++   "key": "shoot.light.only",
++   "group": "photoshoot",
++   "title": "Light line · no grade",
++   "description": "Light alone: the shot’s own camera, lens or look sets the colour, so the default grade is left out.",
++   "kind": "text",
++   "default": "Light: {light}.",
++   "current": "Light: {light}.",
++   "overridden": false,
++   "allowEmpty": true,
++   "placeholders": [
++    {
++     "name": "light",
++     "description": "the chosen light, lower case",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
+   {
+    "key": "shoot.direction",
+    "group": "photoshoot",
+@@ -348,7 +382,7 @@
+    "placeholders": [
+     {
+      "name": "style",
+-     "description": "the house style",
++     "description": "the house style: camera feel (unless the shot has its own camera) and realism",
+      "required": true
+     }
+    ],
+diff --git a/android/app/src/main/resources/prompt_scripts.json b/android/app/src/main/resources/prompt_scripts.json
+index 80b9daa1..ac0bb83c 100644
+--- a/android/app/src/main/resources/prompt_scripts.json
++++ b/android/app/src/main/resources/prompt_scripts.json
+@@ -199,7 +199,7 @@
+       {
+        "panel": 5,
+        "role": "ref",
+-       "guides": "pose & framing"
++       "guides": "pose & framing and the look & colour and the scene"
+       }
+      ]
+     }
+@@ -243,6 +243,7 @@
+     "refs.collage.ref",
+     "refs.collage"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "panel.outfit",
+@@ -346,6 +347,108 @@
+    "updatedAt": null,
+    "updatedBy": null
+   },
++  {
++   "id": "style.house",
++   "group": "photoshoot",
++   "title": "House style",
++   "description": "The {style} of shoots, template shoots, sheet fills and outfit sets: Camera feel, unless a rig or preset sets its own camera body, lens, grade or look, then Realism. Video Suite shots don’t use it.",
++   "format": "lines",
++   "inputs": [
++    {
++     "name": "ownCamera",
++     "label": "Has its own camera",
++     "description": "A rig or preset sets a camera body, lens, grade or look. Then the camera feel and the default grade are left out and its own words stand.",
++     "type": "bool",
++     "sample": false
++    }
++   ],
++   "sections": [
++    {
++     "id": "camera",
++     "label": "Camera feel",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "realism",
++     "label": "Realism",
++     "kind": "system",
++     "pick": "first"
++    }
++   ],
++   "values": [],
++   "targets": [
++    {
++     "id": "camera",
++     "label": "Camera feel"
++    },
++    {
++     "id": "realism",
++     "label": "Realism"
++    }
++   ],
++   "vars": [],
++   "blocks": [
++    "style.camera",
++    "style.realism"
++   ],
++   "variants": [
++    {
++     "id": "cinematic",
++     "label": "With a cinematic rig"
++    }
++   ],
++   "rules": [
++    {
++     "id": "camera.feel",
++     "label": "Camera feel (the shot has no camera of its own)",
++     "target": "camera",
++     "when": [
++      {
++       "input": "ownCamera",
++       "op": "is",
++       "value": false
++      }
++     ],
++     "block": "style.camera"
++    },
++    {
++     "id": "realism",
++     "label": "Realism (always)",
++     "target": "realism",
++     "when": [],
++     "block": "style.realism",
++     "locked": true
++    }
++   ],
++   "defaultRules": [
++    {
++     "id": "camera.feel",
++     "label": "Camera feel (the shot has no camera of its own)",
++     "target": "camera",
++     "when": [
++      {
++       "input": "ownCamera",
++       "op": "is",
++       "value": false
++      }
++     ],
++     "block": "style.camera"
++    },
++    {
++     "id": "realism",
++     "label": "Realism (always)",
++     "target": "realism",
++     "when": [],
++     "block": "style.realism",
++     "locked": true
++    }
++   ],
++   "overridden": false,
++   "stale": false,
++   "updatedAt": null,
++   "updatedBy": null
++  },
+   {
+    "id": "photoshoot",
+    "group": "photoshoot",
+@@ -406,7 +509,7 @@
+        "label": "Image number",
+        "description": "Its 1-based number among the images sent.",
+        "type": "number",
+-       "sample": 8
++       "sample": 5
+       },
+       {
+        "name": "guides",
+@@ -436,7 +539,7 @@
+      ],
+      "sample": [
+       {
+-       "refIndex": 8,
++       "refIndex": 5,
+        "guides": [
+         "pose",
+         "look",
+@@ -444,6 +547,20 @@
+        ]
+       }
+      ]
++    },
++    {
++     "name": "ownCamera",
++     "label": "Has its own camera",
++     "description": "A rig or preset sets a camera body, lens, grade or look. Then the camera feel and the default grade are left out and its own words stand.",
++     "type": "bool",
++     "sample": false
++    },
++    {
++     "name": "noGrade",
++     "label": "No grade",
++     "description": "No grade was picked and the shot has its own camera, lens or look: the default grade is left out.",
++     "type": "bool",
++     "sample": false
+     }
+    ],
+    "sections": [
+@@ -571,12 +688,12 @@
+     {
+      "name": "look",
+      "description": "her written look",
+-     "sample": "young woman, shoulder-length dark brown hair"
++     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
+     },
+     {
+      "name": "refCount",
+-     "description": "how many sheet images she has",
+-     "sample": "7"
++     "description": "how many images of her are sent",
++     "sample": "3"
+     },
+     {
+      "name": "lora",
+@@ -590,13 +707,13 @@
+     },
+     {
+      "name": "style",
+-     "description": "the house style",
+-     "sample": "realistic smartphone photo"
++     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
++     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+     },
+     {
+      "name": "never",
+      "description": "her never-add list plus the base list",
+-     "sample": "tattoos, rings, logos"
++     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
+     },
+     {
+      "name": "scene",
+@@ -620,7 +737,7 @@
+     },
+     {
+      "name": "grade",
+-     "description": "the grade, lower case",
++     "description": "the grade, lower case (the default grade unless the shot has its own camera)",
+      "sample": "phone-natural"
+     }
+    ],
+@@ -633,6 +750,7 @@
+     "shoot.camera",
+     "shoot.camera.wide",
+     "shoot.camera.tele",
++    "shoot.light.only",
+     "shoot.light",
+     "shoot.direction",
+     "refs.pose",
+@@ -644,6 +762,12 @@
+     "shoot.seed.locked",
+     "shoot.seed.new"
+    ],
++   "variants": [
++    {
++     "id": "cinematic",
++     "label": "With a cinematic rig"
++    }
++   ],
+    "rules": [
+     {
+      "id": "identity",
+@@ -728,6 +852,20 @@
+      ],
+      "block": "shoot.camera.tele"
+     },
++    {
++     "id": "light.only",
++     "label": "Light without a grade (its own camera sets the colour)",
++     "target": "light",
++     "when": [
++      {
++       "input": "noGrade",
++       "op": "is",
++       "value": true
++      }
++     ],
++     "block": "shoot.light.only",
++     "optional": true
++    },
+     {
+      "id": "light",
+      "label": "Light and grade",
+@@ -913,6 +1051,20 @@
+      ],
+      "block": "shoot.camera.tele"
+     },
++    {
++     "id": "light.only",
++     "label": "Light without a grade (its own camera sets the colour)",
++     "target": "light",
++     "when": [
++      {
++       "input": "noGrade",
++       "op": "is",
++       "value": true
++      }
++     ],
++     "block": "shoot.light.only",
++     "optional": true
++    },
+     {
+      "id": "light",
+      "label": "Light and grade",
+@@ -1145,7 +1297,7 @@
+        "label": "Image number",
+        "description": "Its 1-based number among the images sent.",
+        "type": "number",
+-       "sample": 8
++       "sample": 5
+       },
+       {
+        "name": "guides",
+@@ -1175,7 +1327,7 @@
+      ],
+      "sample": [
+       {
+-       "refIndex": 8,
++       "refIndex": 5,
+        "guides": [
+         "pose",
+         "look",
+@@ -1183,6 +1335,13 @@
+        ]
+       }
+      ]
++    },
++    {
++     "name": "ownCamera",
++     "label": "Has its own camera",
++     "description": "The template’s camera words name a camera that is not a phone, or its style is cinematic: the camera feel is left out of the house style.",
++     "type": "bool",
++     "sample": false
+     }
+    ],
+    "sections": [
+@@ -1331,12 +1490,12 @@
+     {
+      "name": "look",
+      "description": "her written look",
+-     "sample": "young woman, shoulder-length dark brown hair"
++     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
+     },
+     {
+      "name": "refCount",
+-     "description": "how many sheet images she has",
+-     "sample": "7"
++     "description": "how many images of her are sent",
++     "sample": "3"
+     },
+     {
+      "name": "lora",
+@@ -1350,13 +1509,13 @@
+     },
+     {
+      "name": "style",
+-     "description": "the house style",
+-     "sample": "realistic smartphone photo"
++     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
++     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+     },
+     {
+      "name": "never",
+      "description": "her never-add list plus the base list",
+-     "sample": "tattoos, rings, logos"
++     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
+     },
+     {
+      "name": "scene",
+@@ -1406,6 +1565,12 @@
+     "template.seed.new",
+     "shoot.seed.new"
+    ],
++   "variants": [
++    {
++     "id": "cinematic",
++     "label": "With a cinematic rig"
++    }
++   ],
+    "rules": [
+     {
+      "id": "identity",
+@@ -2044,12 +2209,12 @@
+     {
+      "name": "look",
+      "description": "her written look",
+-     "sample": "young woman, shoulder-length dark brown hair"
++     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
+     },
+     {
+      "name": "refCount",
+-     "description": "how many sheet images she has",
+-     "sample": "7"
++     "description": "how many images of her are sent",
++     "sample": "3"
+     },
+     {
+      "name": "lora",
+@@ -2063,13 +2228,13 @@
+     },
+     {
+      "name": "style",
+-     "description": "the house style",
+-     "sample": "realistic smartphone photo"
++     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
++     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+     },
+     {
+      "name": "never",
+      "description": "her never-add list plus the base list",
+-     "sample": "tattoos, rings, logos"
++     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
+     },
+     {
+      "name": "angle",
+@@ -2088,6 +2253,7 @@
+     "shoot.style",
+     "shoot.never"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "identity",
+@@ -2285,12 +2451,12 @@
+     {
+      "name": "look",
+      "description": "her written look",
+-     "sample": "young woman, shoulder-length dark brown hair"
++     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
+     },
+     {
+      "name": "refCount",
+-     "description": "how many sheet images she has",
+-     "sample": "7"
++     "description": "how many images of her are sent",
++     "sample": "3"
+     },
+     {
+      "name": "lora",
+@@ -2304,13 +2470,13 @@
+     },
+     {
+      "name": "style",
+-     "description": "the house style",
+-     "sample": "realistic smartphone photo"
++     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
++     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+     },
+     {
+      "name": "never",
+      "description": "her never-add list plus the base list",
+-     "sample": "tattoos, rings, logos"
++     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
+     },
+     {
+      "name": "angle",
+@@ -2333,6 +2499,7 @@
+     "shoot.never",
+     "outfit.seed"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "identity",
+@@ -2508,6 +2675,7 @@
+    "blocks": [
+     "outfit.edit"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "prompt",
+@@ -2557,6 +2725,7 @@
+    "blocks": [
+     "enhance.prompt"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "prompt",
+@@ -2633,6 +2802,7 @@
+     "dress.closeup",
+     "dress.body"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "anchor",
+@@ -2817,12 +2987,12 @@
+     {
+      "name": "look",
+      "description": "her written look",
+-     "sample": "young woman, shoulder-length dark brown hair"
++     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
+     },
+     {
+      "name": "refCount",
+-     "description": "how many sheet images she has",
+-     "sample": "7"
++     "description": "how many images of her are sent",
++     "sample": "3"
+     },
+     {
+      "name": "lora",
+@@ -2836,13 +3006,13 @@
+     },
+     {
+      "name": "style",
+-     "description": "the house style",
+-     "sample": "realistic smartphone photo"
++     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
++     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+     },
+     {
+      "name": "never",
+      "description": "her never-add list plus the base list",
+-     "sample": "tattoos, rings, logos"
++     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
+     },
+     {
+      "name": "angle",
+@@ -2867,6 +3037,7 @@
+     "shoot.never",
+     "lora.variation"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "identity",
+@@ -3060,6 +3231,7 @@
+     "video.mouth.silent",
+     "video.user.direction"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "subjects",
+@@ -3466,6 +3638,7 @@
+     "video.mouth.silent",
+     "video.user.direction"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "audio.subjects",
+@@ -3869,6 +4042,7 @@
+     "audio.beat",
+     "audio.silent"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "lipsync",
+@@ -4072,6 +4246,7 @@
+     "suite.camera.format.veo",
+     "suite.camera.format.generic"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "kling",
+@@ -4616,6 +4791,7 @@
+     "suite.shot.avoid",
+     "suite.shot.footer"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "character.images",
+@@ -5238,6 +5414,7 @@
+     "suite.recast.direction",
+     "suite.shot.footer"
+    ],
++   "variants": [],
+    "rules": [
+     {
+      "id": "task",
+diff --git a/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt b/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt
+index 7a9f6657..8215a33e 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt
+@@ -92,7 +92,7 @@ class PromptScriptsTest {
+ 
+     @Test fun httpParsesTheScriptsListGetSaveResetAndPreview() = runBlocking {
+         val list = api.listPromptScripts()
+-        assertEquals(15, list.scripts.size) // 12 + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1)
++        assertEquals(16, list.scripts.size) // 12 + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1) + House style (2026-11-11)
+         assertTrue(list.ops.first { it.id == "in" }.types == listOf("enum"))
+         assertEquals("Video", list.groups.first { it.id == "video" }.label)
+         val v = list.scripts.first { it.id == "video.replicate" }
+@@ -188,7 +188,7 @@ class PromptScriptsTest {
+         val p = api.previewPromptScript("refs.collage", null)
+         assertEquals(listOf("panel.outfit", "panel.ref", "sheet"), p.fired)
+         assertEquals("The input image is a reference sheet of numbered panels (\"image N\" below means panel N): panels 1–3 show the person (use her face, hair " +
+-            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing only; create one new photo, not a collage.", p.text)
++            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing and the look & colour and the scene only; create one new photo, not a collage.", p.text)
+         // Item fields are offered (and validated) for a rule in a per-item value slot.
+         val s = api.getPromptScript("refs.collage")
+         assertTrue(ScriptText.inputsFor(s, "@panels").any { it.first == "item.role" })
+diff --git a/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt b/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
+index 3b2c9ad8..31274b30 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
+@@ -196,16 +196,16 @@ class RealApiContractTest {
+         val tplPv = member.previewShoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, templateId = mirror.id, shuffleSeed = 5, refs = refReq.refs))
+         assertTrue(tplPv.slots.map { it.layer }.toString(), tplPv.slots.any { it.layer == "reference" } && tplPv.refs.single().index != null)
+         expectCode("owner_only") { member.prompts() }
+-        expectCode("owner_only") { member.savePrompt("style.house", "x") }
++        expectCode("owner_only") { member.savePrompt("style.realism", "x") }
+         val lib = owner.prompts()
+         assertTrue("${lib.prompts.size} prompts", lib.prompts.size >= 52)
+         assertEquals(lib.prompts.size, lib.prompts.map { it.key }.toSet().size)
+         assertEquals("References", lib.groups[1].label)
+         expectCode("prompt_invalid") { owner.savePrompt("refs.pose", "no number") }
+-        assertTrue(owner.savePrompt("style.house", "HOUSE X").overridden)
+-        assertTrue(member.previewShoot(refReq).text.contains("Style: HOUSE X."))
++        assertTrue(owner.savePrompt("style.realism", "HOUSE X").overridden)
++        assertTrue(member.previewShoot(refReq).text.contains("Style: realistic smartphone photo, HOUSE X."))
+         assertTrue(owner.previewPrompt(studio.muse.app.data.PromptPreviewRequest("refs.look", "Look like image {refIndex}.")).text.startsWith("Look like image "))
+-        assertEquals(false, owner.resetPrompt("style.house").overridden)
++        assertEquals(false, owner.resetPrompt("style.realism").overridden)
+         val draft = member.templateDraft(plain.id)
+         assertTrue(draft.variationPool.getValue("pose").isNotEmpty())
+         val mine = member.createTemplate(CreateTemplateRequest("My mirror", listOf("Selfie"), variationPool = draft.variationPool + ("expression" to listOf("soft smile")), fromShotId = plain.id))
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt b/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
+index 502e9403..ca542dbe 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
+@@ -139,7 +139,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+             "templates_mine" -> c.drafts.templateFilter.value = studio.muse.app.data.TemplateFilter(tab = "mine")
+             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
+             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
+-            "prompts" -> runBlocking { fake.savePrompt("style.house", "realistic phone photo, visible skin texture, true colour, no filter") }
++            "prompts" -> runBlocking { fake.savePrompt("style.realism", "visible skin texture, true colour, no filter") }
+             "prompt_edit" -> runBlocking { fake.savePrompt("refs.pose", "Copy the pose and framing from image {refIndex}, but keep her own hands.") }
+             "warm_confirm" -> c.warmUi.confirm()
+             "quality_draft" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)) }
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt b/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
+index a54fb08f..7cacb89d 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
+@@ -105,11 +105,11 @@ class ShootReferencesTest {
+         val req = ShootDraft(refs = listOf(ref("c_front", "look"))).request(SampleData.DEMO, SampleData.GREEN)
+         val before = api.previewShoot(req).text
+         assertTrue(before.contains("Style: ${PromptEngine.HOUSE_STYLE}."))
+-        api.savePrompt("style.house", "HOUSE X")
++        api.savePrompt("style.realism", "HOUSE X")
+         api.savePrompt("refs.look", "Match the colours of image {refIndex}.")
+         api.savePrompt("never.base", "logos, stickers")
+         val after = api.previewShoot(req)
+-        assertTrue(after.text, after.text.contains("Style: HOUSE X."))
++        assertTrue(after.text, after.text.contains("Style: realistic smartphone photo, HOUSE X."))
+         assertEquals("Match the colours of image 7. Do not take the face, body, hair or clothes from image 7.", after.slots.single { it.layer == "reference" }.text)
+         assertTrue(after.text, after.text.contains("Never add: ") && after.text.contains("logos, stickers.") && !after.text.contains("warped jewellery"))
+         // The editor's preview: this entry with sample values, and the whole prompt it's part of.
+@@ -118,7 +118,7 @@ class ShootReferencesTest {
+         assertTrue(pv.example, pv.example.startsWith("Demo model: ") && pv.example.contains("Pose like image 8. Match the colours of image 8."))
+         assertTrue(api.previewPrompt(PromptPreviewRequest("shoot.scene", "Somewhere: {scene}.")).example.contains("\nSomewhere: rooftop · golden hour.\n"))
+         // Defaults again: the same text as the app's own engine.
+-        listOf("style.house", "refs.look", "never.base").forEach { api.resetPrompt(it) }
++        listOf("style.realism", "refs.look", "never.base").forEach { api.resetPrompt(it) }
+         assertEquals(FakePromptLibrary.shootPreview(FakeMuseApi.identity(SampleData.models().first()), "Green set", req, studio.muse.core.PhotoPrices()).text,
+             api.previewShoot(req).text)
+     }
+@@ -139,7 +139,7 @@ class ShootReferencesTest {
+         assertTrue(saved.overridden); assertEquals("Location: {scene}!", saved.current)
+         assertEquals("Location: rooftop · golden hour!", api.previewPrompt(PromptPreviewRequest("shoot.scene")).text)
+         assertFalse(api.resetPrompt("shoot.scene").overridden)
+-        assertFalse(api.savePrompt("style.house", lib.prompts.first { it.key == "style.house" }.default).overridden)
++        assertFalse(api.savePrompt("style.realism", lib.prompts.first { it.key == "style.realism" }.default).overridden)
+     }
+ }
+ 
