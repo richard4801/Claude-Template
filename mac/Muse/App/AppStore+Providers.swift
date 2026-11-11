@@ -91,11 +91,12 @@ extension AppStore {
     }
 
     /// Saves the key (checked by the server first). The typed key is cleared whatever happens.
-    func saveProviderKey() {
+    /// Saves the pasted key; `useServerKey` connects a serverKey provider (Higgsfield) with the server's own account instead.
+    func saveProviderKey(useServerKey: Bool = false) {
         let s = providersState
         guard let api = providersAPI, !s.saving else { return }
         let key = s.keyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { s.formError = "Paste the key first."; return }
+        guard !key.isEmpty || useServerKey else { s.formError = "Paste the key first."; return }
         s.saving = true
         Task {
             defer {
@@ -107,13 +108,13 @@ extension AppStore {
                 if let id = s.replacing {
                     p = try await api.replaceProviderKey(id, apiKey: key)
                 } else {
-                    p = try await api.addProvider(kind: s.addKind, apiKey: key, label: nil)
+                    p = try await api.addProvider(kind: s.addKind, apiKey: useServerKey ? "" : key, label: nil)
                 }
                 s.adding = false
                 s.replacing = nil
                 s.formError = nil
                 s.selected = p.id
-                showToast("\(p.label) key saved, ending \(p.keyLast4.replacingOccurrences(of: "…", with: ""))")
+                showToast(useServerKey ? "\(p.label) connected" : "\(p.label) key saved, ending \(p.keyLast4.replacingOccurrences(of: "…", with: ""))")
                 await loadProviders()
             } catch {
                 s.formError = ProviderText.message(error)
