@@ -155,6 +155,18 @@ export const ACTION_TOOLS: GatedTool[] = [
       if (!j) throw notFound('Job');
       return { summary: `Cancel the job “${j.title ?? j.id}” (${j.status ?? 'unknown'})`, method: 'DELETE', url: `/v1/jobs/${enc(id(a.jobId, 'jobId'))}` };
     } }),
+  gated({ name: 'queue_clear_failed', title: 'Clear all failed jobs', scope: 'edit:write', gate: 'delete',
+    description: 'Clears every failed job off the Queue for good, as "Clear all failed" there (the owner: the whole studio\'s; a member: their own). ONE Approve card for all of them. Without confirm it says how many and which. Needs the person\'s go-ahead.',
+    props: {}, required: [],
+    plan: async (env) => {
+      const all = await appCall(env.ctx, env.user, 'GET', '/v1/jobs') as { id: string; title?: string; state?: string; userId?: string }[];
+      const failed = (Array.isArray(all) ? all : []).filter(j => j.state === 'failed' && (env.user.role === 'owner' || j.userId === env.user.id));
+      if (!failed.length) throw badRequest('Nothing to clear: no failed jobs on the Queue');
+      const shown = failed.slice(0, 5).map(j => `“${j.title ?? j.id}”`).join(', ');
+      const more = failed.length > 5 ? ` and ${failed.length - 5} more` : '';
+      return { summary: `Clear ${failed.length} failed job${failed.length === 1 ? '' : 's'} from the Queue: ${shown}${more}`, method: 'POST', url: '/v1/jobs/clear-failed',
+        body: { ids: failed.map(j => j.id) } };
+    } }),
   gated({ name: 'suite_queue_remove', title: 'Remove a queued shot', scope: 'edit:write', gate: 'delete',
     description: 'Removes an AI Suite shot from the run-later queue (queue_list shows them). Needs the person\'s go-ahead.',
     props: { queuedId: str('The queued shot', 80) }, required: ['queuedId'],
