@@ -72,6 +72,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   session_01Py2rxpXsqXzUU5c85XYbCd, branch claude/mac-blender-timeout. One Claude step (a), owner's go ("do it now"),
   design first then build, server + Mac (Android later) → session_01Py2rxp2U1ycTHGZcQ73s5x, branch claude/one-claude;
   it waits for the owner's yes on plans/one-claude.md before building (relay the yes with send_message).
+  OWNER YES 2026-11-11 02:40 (sent): Claude opens pages itself (asks only if busy); memory saves with Undo (pins
+  owner-only); all old chats into one list; model picker (6b) as the very next small step; MEMBERS get one Claude now
+  (own chats only, own wallet, read memory, no owner tools).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
