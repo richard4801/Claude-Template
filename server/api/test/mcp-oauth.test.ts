@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cimd } from '../src/mcp/oauth.js';
+import { CHAT_REGISTRY } from '../src/claude/registry.js';
 import { oauthTokens } from '../src/camera/schema.js';
 import { makeApp, people, type Client } from './helpers.js';
 
@@ -161,6 +162,12 @@ describe('scopes, refresh, grants', () => {
     const mtools = (await mcp(mtok.token, 'tools/list')).body.result.tools.map((x: any) => x.name);
     expect(mtools).not.toContain('create_shot_draft');
     expect(mtools).not.toContain('list_characters');
+    // Every tool of the one registry is on the MCP list (images sent included); members get the ones members may use.
+    const otools = (await mcp(t.token, 'tools/list')).body.result.tools.map((x: any) => x.name);
+    expect(CHAT_REGISTRY.map(x => x.name).filter(n => !otools.includes(n))).toEqual([]);
+    expect(otools).toEqual(expect.arrayContaining(['get_sent_images', 'set_sent_images']));
+    expect(CHAT_REGISTRY.filter(x => x.members).map(x => x.name).filter(n => !mtools.includes(n))).toEqual([]);
+    expect(mtools).toEqual(expect.arrayContaining(['get_sent_images', 'set_sent_images']));
     expect((await owner.req('GET', '/v1/mcp/grants')).body.some((g: any) => g.clientId === 'muse-app')).toBe(false);
   });
 });
