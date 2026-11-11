@@ -69,6 +69,7 @@ card in the person's chat (`claude/actions.ts`, `/v1/claude/actions`). Only that
 | Settings | studio limits, image engine, editor helpers, Recreate links, Suite models, default models, models members see | `settings_read`, `settings_change` (owner) | settings |
 | Warm GPU | status / off; on / keep warm | `warm_gpu`; `warm_gpu_on` (owner) | none; spend |
 | Owner | Claude's reports | `claude_issues`, `claude_issue_mark` (MCP), `/v1/claude/issues` | none |
+| Anywhere (fallback) | operate the MUSE window itself (see its controls, press, type, pick, toggle, scroll, menu, keys); never keys/providers/prices/sign-out/payments/delete confirmations | `ui_snapshot`, `ui_act`, `ui_wait` (claude/uiControl.ts; the person's own Mac, X-Muse-Caps: ui) | none (Esc stops; Settings → Claude toggle) |
 | Mac files | read / write files on the person's Mac | Claude Code Bash/Read with the permission cards | asks each time |
 | Blender | complex scene work | Blender MCP `execute_blender_code` | none |
 

@@ -13,6 +13,7 @@ import { ImageService } from './images/service.js';
 import { Money } from './money/money.js';
 import { bindAppCaller, grantUser } from './claude/appCall.js';
 import { permissionsOf } from './claude/permissions.js';
+import { uiOf } from './claude/uiControl.js';
 import { authenticate, bootstrapOwnerInvite } from './auth/auth.js';
 import { JobService } from './services/jobs.js';
 import { LoraService } from './services/lora.js';
@@ -145,7 +146,10 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     if (typeof chat === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(chat)) req.user = { ...req.user, chatId: chat };
     // The newer Mac app can show file and upload cards (X-Muse-Caps: files); older ones never get asked.
     const caps = req.headers['x-muse-caps'];
-    if (typeof caps === 'string' && caps.split(',').map(c => c.trim()).includes('files')) permissionsOf(ctx).sawApp(req.user.id);
+    const capList = typeof caps === 'string' ? caps.split(',').map(c => c.trim()) : [];
+    if (capList.includes('files')) permissionsOf(ctx).sawApp(req.user.id);
+    // …and the newer still can operate its own window for Claude (X-Muse-Caps: ui; claude/uiControl.ts).
+    if (capList.includes('ui')) uiOf(ctx).sawApp(req.user.id);
     if (cfg?.owner && req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can do that');
   });
 

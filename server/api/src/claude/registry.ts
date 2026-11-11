@@ -12,6 +12,7 @@ import { ISSUE_TOOLS } from './issues.js';
 import { APP_TOOLS } from './appTools.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS } from './actions.js';
 import { SENT_TOOLS } from './sentTools.js';
+import { UI_TOOLS } from './uiControl.js';
 import { PAGE_IDS, type PageName, type PageRef } from './page.js';
 
 /** What a gated tool would do. Gated tools never act on Claude's word: without confirm they give the price or summary;
@@ -43,6 +44,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(ACTION_TOOLS, ['any'], t => !OWNER_ONLY.has(t.name)),
   // Studio settings (never keys, providers or prices): the owner's, behind her go-ahead to change.
   ...tag(SETTINGS_TOOLS, ['any', 'settings'], () => false),
+  // The MUSE window itself (claude/uiControl.ts): a fallback when no tool covers it; everyone, their own app only.
+  ...tag(UI_TOOLS, ['any'], () => true),
   // Images sent (images/sent.ts): see and change what a generation sends; free, own studio, everyone.
   ...tag(SENT_TOOLS, ['suite', 'character', 'cast'], () => true),
   ...tag(SUITE_TOOLS, ['suite'], () => true),

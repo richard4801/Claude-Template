@@ -21,6 +21,7 @@ import { ownChat, pageOf } from './chatTools.js';
 import { memoryAdd, memoryRead, memoryRemove, memoryUpdate } from './memory.js';
 import { pageLine, PageSchema } from './page.js';
 import { permissionsOf } from './permissions.js';
+import { UI_ERROR_CODES, uiOf } from './uiControl.js';
 import { resultsOf } from './results.js';
 import { claudeActions } from './schema.js';
 import { checkModel, CLAUDE_MODELS, personDefault, setPersonDefault } from './models.js';
@@ -146,6 +147,21 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
       if (!up || up.state !== 'ready' || (up.createdBy && up.createdBy !== req.user.id)) throw new ApiError(400, 'bad_request', 'result.uploadId: not a ready upload of yours');
     }
     permissionsOf(ctx).answer(req.user, req.params.id, b);
+    return reply.status(204).send();
+  });
+
+  /** Claude operating the MUSE window (claude/uiControl.ts): calls waiting for this person's Mac; one Mac claims, acts, answers. */
+  app.get('/v1/claude/ui', async req => ({ calls: uiOf(ctx).pending(req.user) }));
+  app.post<P>('/v1/claude/ui/:id/claim', async req => {
+    const b = parse(z.object({ device: z.string().min(1).max(120) }).strict(), req.body ?? {});
+    return uiOf(ctx).claim(req.user, req.params.id, b.device);
+  });
+  app.post<P>('/v1/claude/ui/:id', { bodyLimit: 3 * 1024 * 1024 }, async (req, reply) => {
+    const b = parse(z.object({ result: z.record(z.string(), z.unknown()).optional(),
+      image: z.string().max(2_500_000).regex(/^[A-Za-z0-9+/=]+$/).optional(), // a small JPEG of the MUSE window, base64
+      error: z.string().max(1000).optional(), code: z.enum(UI_ERROR_CODES).optional() }).strict(), req.body);
+    if (b.result && JSON.stringify(b.result).length > 400_000) throw new ApiError(400, 'bad_request', 'result: too large (send fewer controls)');
+    uiOf(ctx).answer(req.user, req.params.id, b);
     return reply.status(204).send();
   });
 

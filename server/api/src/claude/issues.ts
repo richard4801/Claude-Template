@@ -14,6 +14,7 @@ import { parse } from '../camera/validate.js';
 import type { EditTool } from '../editor/mcpTools.js';
 import { claudeIssues } from './schema.js';
 import { ownChat, pageOf } from './chatTools.js';
+import { UI_QUIET_CODES } from './uiControl.js';
 
 export const ISSUE_KINDS = ['missing_tool', 'bug', 'blocked', 'confusing_ui'] as const;
 export const SEVERITIES = ['low', 'medium', 'high'] as const;
@@ -79,6 +80,7 @@ export function captureToolError(ctx: Ctx, u: Pick<AuthUser, 'id' | 'studioId' |
   if (!u?.studioId || tool === 'report_issue') return;
   const api = e instanceof ApiError ? e : null;
   const code = api?.code ?? (typeof e === 'string' ? 'tool_error' : 'server_error');
+  if (UI_QUIET_CODES.has(code)) return; // the person stopped Claude or kept a control for themselves: not a MUSE problem
   const msg = api?.message ?? (typeof e === 'string' ? e : (e as Error)?.message ?? String(e));
   const status = api?.status ?? 500;
   const error = scrub(`${code}: ${msg}`, 500) ?? code;
