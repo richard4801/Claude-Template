@@ -55,3 +55,21 @@ two columns of four-angle rows, five of them named "Product look".)
   a way to make the missing ones. Find out why that set has two empty angles (failed edits, not refunded?) before
   building that part.
 - Owner's testing rule: the layout is checked by the owner by hand; automated tests only for the paging logic.
+
+## 5. Naming and renaming outfits (owner, 2026-11-11; approved, Mac and Android)
+Owner: "make sure outfits can be named before adding after creating. And can be renamed anytime. So we don't always end
+up with the generic Product Look."
+Today: no rename exists (no server route); POST /v1/outfits/:id/save takes no name; the Mac names an unnamed product-photo
+outfit "Product look" and an own set "My set" (AppStore+Actions.swift ~567); check Android for the same.
+- Server: PATCH /v1/outfits/:id { name } (1–80 chars, trimmed; owner or the outfit's maker; studio-scoped), and
+  POST /v1/outfits/:id/save accepts an optional { name }. Emits the outfit event so both apps update live.
+- Before adding (the preview step after the four pictures are made): a name field above "Add to her outfits", filled
+  with a suggestion the person can change. The suggestion: what they typed (describe mode), else the product photo's
+  file name, else "Outfit · 11 Nov". Never "Product look" / "My set" again.
+- Rename anytime: in the open outfit (click the name to edit, Enter saves) and on the folder's menu (right-click on the
+  Mac, long-press on Android) next to Delete.
+- Same-named outfits are allowed but the folder always shows the date under the name (section 4).
+- Optional, ASK the owner first (small spend per outfit): Claude suggests the name from the outfit's front picture
+  (e.g. "Green halter mini skirt set"), using the vision helpers in server/api/src/suite/vision.ts.
+- Server test for the rename route (permissions, studio scope, length); the rest the owner checks by hand.
+- Build together with section 4 (same screens).

@@ -64,7 +64,7 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   cancel prod's Mac CI); merge after its Mac CI is green.
 - NEW owner request (approved, Mac + Android): outfit section as front-only folders, 8 per page, full width, pager
   "‹ 1 of 3 ›", a full-size viewer that slides between angles, and outfit Delete (new: server route + both apps)
-  (`plans/outfit-head-looks.md` §4). Slot it with the character-consistency work (priority 2).
+  (`plans/outfit-head-looks.md` §4); naming before adding + rename anytime, no more "Product look" (§5). One session. Slot it with the character-consistency work (priority 2).
 - DONE 5A.5 (server, live f68c469): Claude in the Suite sees outfits and the @model (suite_cast, suite_see, pictures on
   set_draft; helpers in suite/vision.ts for Edit/Recreate later). Gap: on the Mac Claude Code path the per-turn face and
   outfit-front pictures aren't sent (the Mac builds its own turns); do with the next Mac Claude work.
