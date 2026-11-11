@@ -62,6 +62,8 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   (3) Send the Mac build when its CI is green, without asking.
 - Delegated: 5A.1 oval bug → session_01Py2rxn8a5F3AVgi5WFAKFc on branch claude/mac-edit-oval (not prod, so it can't
   cancel prod's Mac CI); merge after its Mac CI is green.
+- NEW owner request (approved, Mac + Android): outfit section as front-only folders, 8 per page, full width, pager
+  "‹ 1 of 3 ›" (`plans/outfit-head-looks.md` §4). Slot it with the character-consistency work (priority 2).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)

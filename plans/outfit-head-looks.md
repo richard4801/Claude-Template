@@ -26,3 +26,23 @@ models make four new shots at once). A missing slot falls back to the front body
 ## Touches
 Server (model, generation, swap/shot references use the look's head pictures), both apps (inventory, picker in the
 outfit flow), shared contracts, a migration (next free: 0029). Needs designs for the owner before building.
+
+## 4. Outfit section layout: folders, paging, full width (owner, 2026-11-11; approved, Mac and Android)
+Owner: "The outfit section is getting too clustered … outfit sessions should be single folders, each holding the front
+view only. You have to open any of the folders to see their full view … the right hand side is mostly empty … add a cap
+to how many can stay on the section. Add the navigation like < X of X >." (Screenshot: Mac character page, outfits in
+two columns of four-angle rows, five of them named "Product look".)
+- Each outfit is ONE folder tile: its front picture, its name, and its date (so same-named outfits can be told apart).
+  No ¾/side/back on the page.
+- Clicking (Mac) / tapping (Android) a folder opens the outfit: all four angles large, plus the actions it has today
+  (rename, use, delete, Dress up). Close returns to the same page of folders.
+- 8 folders per page on the Mac (two rows of four). The grid fills the page's full width (tiles grow with the window;
+  no empty right-hand side). Android: the same, fewer per row on a phone (2 per row, 8 per page).
+- Pager under the grid: "‹  1 of 3  ›". Arrows disabled at the ends; hidden when there is only one page. Newest first;
+  a new outfit appears on page 1. Keyboard ←/→ on the Mac only when no text box has the cursor (see EditShortcuts).
+- The cap is per page (8); outfits are not deleted or limited in number.
+- Unfinished outfits: a folder whose front is still generating shows the progress; a set with missing angles (the
+  screenshot's second "Product look" has two empty angles) shows a small "2 of 4 angles" note inside the folder, with
+  a way to make the missing ones. Find out why that set has two empty angles (failed edits, not refunded?) before
+  building that part.
+- Owner's testing rule: the layout is checked by the owner by hand; automated tests only for the paging logic.
