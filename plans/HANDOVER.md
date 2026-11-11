@@ -114,6 +114,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   layerBase, layerSource, TextItem.pin); server render draws max 3 layers on Railway Trial (512 MB; Hobby lifts it).
   Price: objects × (15+3·sec) GPU-s × $0.000975 × 2 (2 layers/10 s ≈ $0.18). Asked to make Android keep the new
   fields when saving before go. Video vision Stage 1 (server) → session_01Py2rxmK54XsoNn7vH2Nxf2.
+- DONE video vision Stage 1 server (abd6e3a, live): tools watch / watch_closer for everyone (own studio), free.
+  APP WORK (queue): chat attach button for videos (Mac+Android) and Mac Claude Code path sends video attachments as
+  "Attached video … call watch first" (plans/claude-video-vision.md).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
