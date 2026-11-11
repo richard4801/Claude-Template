@@ -218,6 +218,13 @@
       "when": 1794372017912,
       "tag": "0030_claude_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794413782649,
+      "tag": "0031_claude_issues",
+      "breakpoints": true
     }
   ]
 }

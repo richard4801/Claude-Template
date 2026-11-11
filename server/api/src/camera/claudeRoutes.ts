@@ -9,6 +9,7 @@ import type { CameraService } from './service.js';
 import { storeAttachments } from './claudeAttachments.js';
 import { registerChatRoutes } from '../claude/chatRoutes.js';
 import { CHAT_TOOLS } from '../claude/chatTools.js';
+import { ISSUE_ADMIN_TOOLS, ISSUE_TOOLS, registerIssueRoutes } from '../claude/issues.js';
 import * as mcpTools from '../mcp/tools.js';
 
 type P = { Params: { id: string } };
@@ -79,6 +80,8 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   // One Claude (plans/one-claude.md): the chat list for the owner and members, and the chat tools on the MCP server
   // (Claude Code on the owner's Mac passes its chatId).
   await registerChatRoutes(app, ctx, claude, director);
-  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools(CHAT_TOOLS);
+  // Claude's own reports and captured tool errors (owner reads them; plans/HANDOVER.md 4a, 16:15).
+  await registerIssueRoutes(app, ctx);
+  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools([...CHAT_TOOLS, ...ISSUE_TOOLS, ...ISSUE_ADMIN_TOOLS]);
   return claude;
 }
