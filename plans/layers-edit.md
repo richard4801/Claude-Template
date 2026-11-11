@@ -255,3 +255,10 @@ pin?: { clip: string; layer: string; anchor: 'centroid' | 'top' | 'bbox'; offset
 
 ### Not in this plan
 No detection-evasion tricks of any kind (declined items stay declined).
+
+## Owner decisions (2026-11-11)
+- Prices OK at the Edit markup (×2). Layer runs go ahead with the price shown; anything above $1 per clip asks first.
+- Build Phase 1 Layers first (Mac, then server export, then Android). Phase 2 later; Phase 3 held until Higgsfield
+  exposes Miracle (watch for API/MCP access).
+- No depth in Phase 1.
+- Longest clip for the Layers step: 60 s.
