@@ -10,8 +10,10 @@ import { modelById } from '../src/suite/registry.js';
 import { demoModel, makeApp, people, type Client } from './helpers.js';
 import { fakeReplicate, TOKEN } from './fakeReplicate.js';
 
-/** Words members must never see. */
+/** Words a member's run estimate (no model picked) never carries. */
 const PROVIDER_WORDS = /\b(replicate|fal|runpod|minimax|h3|kling|seedance|veo|wan|ltx|lightricks|bytedance|google|sora|seedvr|whisperx|demucs|viggle|flux)\b/i;
+/** 4c: what members never see, whatever the studio settings: keys, prices at cost, markups, licence lines. */
+const OWNER_ONLY_WORDS = /costUsd|priceScale|apiKey|last4|"notice"|"members"|browsed/;
 const UPSCALE = JSON.stringify({ '1080p': { usdPerSec: 0.02, gpuSecPerSec: 8 }, '2k': { usdPerSec: 0.04, gpuSecPerSec: 15 } });
 
 describe('model choice · purposes (unit)', () => {
@@ -83,16 +85,41 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect(outfit.find((e: any) => e.default).model).toBe(a.ctx.config.REPLICATE_IMAGE_MODEL);
   });
 
-  it('members: no built-in engines, no provider or model names', async () => {
+  it('members (4c): every video and image model not hidden, with provider names while the studio shows them; no tools, defaults or owner-only fields', async () => {
     const r = await member.req('GET', '/v1/engines');
     expect(r.status).toBe(200);
-    expect(r.body.engines).toEqual([]);
+    const ids = r.body.engines.map((e: any) => e.model);
+    expect(ids).toEqual(expect.arrayContaining(['kling-v4', 'h3', 'h3-lite', 'h3-open']));
+    expect(r.body.engines.every((e: any) => e.kind === 'video' || e.kind === 'image')).toBe(true);
+    expect(r.body.engines.find((e: any) => e.model === 'kling-v4')).toMatchObject({ provider: expect.any(String), providerName: expect.any(String) });
     expect(r.body.purposes.every((p: any) => p.default === null && p.studioDefault === null)).toBe(true);
-    expect(JSON.stringify(r.body)).not.toMatch(PROVIDER_WORDS);
+    expect(JSON.stringify(r.body)).not.toMatch(OWNER_ONLY_WORDS);
+    expect(r.body.memberSettings).toBeUndefined();
     expect((await member.req('GET', '/v1/engines/defaults')).status).toBe(403);
+    // The owner's switches: members can't see or change them.
+    expect((await member.req('GET', '/v1/engines/members')).status).toBe(403);
+    expect((await member.req('PATCH', '/v1/engines/members', { showProviderNames: false })).status).toBe(403);
+    const ow = (await owner.req('GET', '/v1/engines')).body;
+    expect(ow.memberSettings).toEqual({ showProviderNames: true });
+    expect(ow.engines.find((e: any) => e.model === 'kling-v4').members).toBe(true);
+    // Provider names off and Kling hidden: gone from the member's list and refused when picked; the owner still has it.
+    const off = await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false, hidden: { 'kling-v4': true } });
+    expect(off.status).toBe(200);
+    expect(off.body.showProviderNames).toBe(false);
+    expect(off.body.models.find((m: any) => m.model === 'kling-v4').members).toBe(false);
+    const hid = (await member.req('GET', '/v1/engines')).body;
+    expect(hid.engines.map((e: any) => e.model)).not.toContain('kling-v4');
+    expect(JSON.stringify(hid)).not.toMatch(/"provider(Name)?"/);
+    expect((await member.req('GET', '/v1/suite/catalog')).body.engines.some((e: any) => e.model === 'kling-v4' || e.provider)).toBe(false);
+    const shot = { modelId: char.id, prompt: 'She smiles.', duration: 5, quality: 'standard', engineModel: 'kling-v4' };
+    expect((await member.req('POST', '/v1/suite/shots/estimate', shot)).status).toBe(403);
+    expect((await owner.req('POST', '/v1/suite/shots/estimate', shot)).status).toBe(200);
+    expect((await owner.req('PATCH', '/v1/engines/members', { hidden: { 'no-such-model': true } })).status).toBe(400);
+    expect((await owner.req('PATCH', '/v1/engines/members', { showProviderNames: true, hidden: { 'kling-v4': false } })).body.showProviderNames).toBe(true);
+    expect((await member.req('GET', '/v1/engines')).body.engines.map((e: any) => e.model)).toContain('kling-v4');
   });
 
-  it('shot: an override is priced on that model; a model of another purpose is refused with the valid list; members get 403', async () => {
+  it('shot: an override is priced on that model (members too, 4c); a model of another purpose is refused with the valid list', async () => {
     const body = { modelId: char.id, prompt: 'She smiles.', duration: 5, quality: 'standard' };
     const k = (await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4', resolution: '720p' })).body;
     expect(k.engine).toMatchObject({ model: 'kling-v4', resolution: '720p' });
@@ -102,7 +129,10 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect(bad.body.code).toBe('engine_not_allowed');
     expect(bad.body.valid).toEqual(expect.arrayContaining(['h3', 'kling-v4']));
     expect(bad.body.valid).not.toContain('h3-max-recast');
-    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' })).status).toBe(403);
+    const mk = await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4', resolution: '720p' });
+    expect(mk.status).toBe(200);
+    expect(mk.body.estimate).toBeCloseTo(k.estimate, 6); // charged as the owner's run is priced
+    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-max-recast' })).body.code).toBe('engine_not_allowed');
   });
 
   it('recast, extend, guide: refused outside their candidates', async () => {
@@ -114,7 +144,7 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect([guide.status, guide.body.code]).toEqual([400, 'engine_not_allowed']);
   });
 
-  it('swap (Suite): any swap engine, priced on it; a non-swap model is refused; members get 403; nothing runs', async () => {
+  it('swap (Suite): any swap engine, priced on it (members too, 4c); a non-swap model is refused; nothing runs', async () => {
     const body = { mode: 'swap', modelId: char.id, clipId: 'c_swap', quality: 'standard' };
     const base = (await owner.req('POST', '/v1/suite/shots/estimate', body)).body;
     expect(base.estimate).toBeCloseTo(0.08 * 8, 2); // H3 Standard 768P · 8 billed seconds (built-in price)
@@ -127,7 +157,7 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     const bad = await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' });
     expect([bad.status, bad.body.code]).toEqual([400, 'engine_not_allowed']);
     expect(bad.body.valid).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']);
-    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-lite' })).status).toBe(403);
+    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-lite' })).body.estimate).toBeCloseTo(lite.estimate, 6);
     expect(JSON.stringify((await member.req('POST', '/v1/suite/shots/estimate', body)).body)).not.toMatch(PROVIDER_WORDS);
     expect(fake.state.creates).toEqual([]);
   });
@@ -165,7 +195,10 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     const [r4] = await a.ctx.db.execute(sql`select request from jobs where id = ${sneak.id}`).then((r: any) => r.rows ?? r);
     expect(r4.request.videoModel).toBeUndefined();
     expect((await owner.req('POST', '/v1/jobs', { modelId: char.id, clipId: 'c_swap', engineModel: 'kling-v4', queue: true })).body.code).toBe('engine_not_allowed');
+    // 4c: a member may pick a swap model unless the owner hid it from members.
+    await owner.req('PATCH', '/v1/engines/members', { hidden: { 'h3-lite': true } });
     expect((await member.req('POST', '/v1/jobs', { modelId: char.id, clipId: 'c_swap', engineModel: 'h3-lite', queue: true })).status).toBe(403);
+    await owner.req('PATCH', '/v1/engines/members', { hidden: { 'h3-lite': false } });
     expect(fake.state.creates).toEqual([]);
   });
 
@@ -218,11 +251,16 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect((await owner.req('PATCH', '/v1/engines/defaults', { photo: 'not a model' })).status).toBe(400);
   });
 
-  it('outfits and character photos: imageModel is owner only and checked', async () => {
+  it('outfits and character photos: imageModel is checked; members (4c) only a shown model, never any Replicate ref', async () => {
+    expect((await member.req('POST', `/v1/models/${char.id}/fill-angles`, { imageModel: 'someone/else' })).status).toBe(403);
+    await owner.req('PATCH', '/v1/engines/members', { hidden: { 'black-forest-labs/flux-2-dev': true } });
     expect((await member.req('POST', `/v1/models/${char.id}/fill-angles`, { imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(403);
+    expect((await member.req('POST', '/v1/suite/photos/estimate', { modelId: char.id, prompt: 'x', count: 1, imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(403);
+    await owner.req('PATCH', '/v1/engines/members', { hidden: { 'black-forest-labs/flux-2-dev': false } });
+    expect((await member.req('POST', '/v1/suite/photos/estimate', { modelId: char.id, prompt: 'x', count: 1, imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(200);
     const bad = await owner.req('POST', `/v1/models/${char.id}/fill-angles`, { imageModel: 'not a model' });
     expect([bad.status, bad.body.code]).toEqual([400, 'engine_not_allowed']);
-    expect((await member.req('POST', '/v1/outfits', { modelId: char.id, name: 'Red', mode: 'own', imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(403);
+    expect((await member.req('POST', '/v1/outfits', { modelId: char.id, name: 'Red', mode: 'own', imageModel: 'someone/else' })).status).toBe(403);
   });
 
   it('upscale and editor helpers: only their own candidates; members get 403', async () => {

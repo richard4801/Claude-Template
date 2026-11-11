@@ -85,6 +85,14 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   soft circle + Invert) or a chroma key on the owner's clip(s). Owner asked to check "Mask & green screen" on each clip.
   If not that, get the edit's project JSON through the app/API. Probe check lives on branch claude/mac-edit-oval
   (d2c2c162, test-only; merge only if useful later). Blender timeout fix MERGED to prod (fc2b53e6).
+- MERGED 2026-11-11 04:40: one Claude step (a) (0bccd53e; migration 0029 live). Mac build 520 (one-claude CI run, same
+  Mac code as prod) sent to the owner. One-Claude session now builds 6b model picker on claude/claude-model-picker
+  (holds mac/ pushes until the blank-project Mac CI is done). Blank project: merging prod, then its Mac CI alone.
+  Rule learned: overlapping Mac CI runs on the shared runners hit the 60-min limit; run them one at a time.
+- 06:38 owner chose to start (server-only, push to prod when green): 4c model choice for everyone →
+  session_01Py2rxnr69VxPZkmkFkWCpB; 5A.3 metadata cleanup + AI-label switch → session_01Py2rxpXcxkJ4h5H23LKfbg.
+  Mac queue (one at a time): blank project (claude/edit-blank, mac.yml timeout 60→75 with it) → model picker
+  (claude/one-claude, migration 0030) → outfit page §4/§5 → app parts of 4c and 5A.3.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)

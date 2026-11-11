@@ -27,7 +27,8 @@ import { rigCheck } from './rigcheck.js';
 import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
-import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
+import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
+import { providerLabel } from '../engines/members.js'; // WS13: model choice everywhere
 import { purposeOfShot, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
@@ -177,9 +178,10 @@ export class SuiteService {
       // Photo (workstream 3): stills on the shoot pipeline (POST /v1/suite/photos), so it doesn't depend on the video engines.
       { id: 'photo', available: true },
     ];
-    // WS5: owner-added models (members: only those the owner made available, by display name).
+    // WS5: owner-added models (members: those the owner hasn't hidden, by display name).
     const custom = this.mode === 'off' ? [] : await this.byo.catalog(u);
-    const engines = u.role === 'owner' && this.mode !== 'off' ? await this.ownerEngines(u.studioId, p, avail) : undefined; // WS5: the owner's model picker
+    // WS5: the model picker. 4c: members get it too, without hidden models, licence lines or Replicate's browse list.
+    const engines = this.mode === 'off' ? undefined : u.role === 'owner' ? await this.ownerEngines(u.studioId, p, avail) : await this.memberEngines(u.studioId, p, avail);
     return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, custom, ...(engines ? { engines } : {}), modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
   }
@@ -190,6 +192,7 @@ export class SuiteService {
    * Image: the studio's photo model and each enabled custom image model. Prices are after the model's priceScale.
    */
   async ownerEngines(studioId: string, p: SuitePrefs, avail: Set<ProviderId>) {
+    const rules = await modelChoice(this.ctx).memberRules(studioId); // 4c: `members` = shown to members
     const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === id));
     const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
     const video = [...MODELS, ...customModelsOf(studioId)].filter(m => m.status !== 'removed' && !m.licence.blockNewFeatures && p.models?.[m.id]?.enabled !== false
@@ -199,7 +202,7 @@ export class SuiteService {
         const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
         // WS13: what this model can be picked for (plans/model-choice.md); the hosted H3 family also swaps.
         const purposes = [...videoPurposes(m), ...(SWAP_ENGINES.some(e => e.id === m.id && (e.runs === 'replicate' ? this.ctx.replicate.configured : e.runs === 'higgsfield' && this.providers.higgsfield.configured())) ? ['swap' as const] : [])];
-        return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, purposes, tier: tiers[0] ?? null, tiers, resolution,
+        return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, members: !rules.hidden.has(m.id), purposes, tier: tiers[0] ?? null, tiers, resolution,
           resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
           perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
           perRun: m.byo?.perRunUsd ? Math.round(m.byo.perRunUsd * scale * 10000) / 10000 : null,
@@ -210,10 +213,23 @@ export class SuiteService {
     const image: Record<string, unknown>[] = (await modelChoice(this.ctx).all({ studioId, role: 'owner' } as AuthUser, ['image']).catch(() => [])).map(e => ({
       model: e.model, name: e.name, kind: 'image', custom: e.custom, purposes: e.purposes, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
       perRun: e.price?.basis === 'per_run' ? e.price.usd : null, minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: e.limits.aspectRatios ?? [],
-      inputs: e.inputs, ...(e.members ? { members: e.members } : {}) }));
+      inputs: e.inputs, members: ModelChoice.forMembers(e, rules) }));
     // One price per entry for the picker: per run for per-run custom models and image models, else per second.
     return [...video, ...image].map(e => ({ ...e, price: e.perRun != null ? { basis: 'per_run' as const, usd: e.perRun as number }
       : e.perSec != null ? { basis: 'per_second' as const, usd: e.perSec as number } : null }));
+  }
+
+  /** 4c: the picker as a member sees it (engines/members.ts): shown models only; the provider while the studio shows it. */
+  async memberEngines(studioId: string, p: SuitePrefs, avail: Set<ProviderId>) {
+    const mc = modelChoice(this.ctx), rules = await mc.memberRules(studioId);
+    const all = await mc.all({ studioId, role: 'owner' } as AuthUser, ['video', 'image']).catch(() => []);
+    const ok = new Map(all.filter(e => ModelChoice.forMembers(e, rules)).map(e => [e.model, e]));
+    const list = (await this.ownerEngines(studioId, p, avail)) as (Record<string, unknown> & { model: string })[];
+    return list.filter(e => ok.has(e.model)).map(e => {
+      const { members: _m, ...rest } = e;
+      const prov = ok.get(e.model)!.provider;
+      return rules.showProviderNames && prov ? { ...rest, provider: prov, providerName: providerLabel(prov) } : rest;
+    });
   }
 
   // ------------------------------------------------------------------ character
@@ -234,9 +250,8 @@ export class SuiteService {
   parse(body: unknown, u: AuthUser): ShotRequest {
     const r = ShotRequestSchema.safeParse(body ?? {});
     if (!r.success) throw badRequest(`Invalid shot: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
-    // WS5: members may pick a custom model the owner made available (checked when planning); nothing else.
-    const memberCustom = !!r.data.engineModel?.startsWith('c_') && !r.data.resolution;
-    if ((r.data.engineModel || r.data.resolution) && u.role !== 'owner' && !memberCustom) throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the engine');
+    // 4c: members pick any model the owner hasn't hidden from them (checked when planning), and its resolution with it.
+    if (r.data.resolution && !r.data.engineModel && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Pick a model to choose its resolution');
     return r.data;
   }
 
@@ -556,7 +571,10 @@ export class SuiteService {
     const b = (body ?? {}) as { camera?: unknown; quality?: unknown; engineModel?: unknown; duration?: unknown };
     const spec = CameraSpecSchema.safeParse(b.camera ?? {});
     if (!spec.success) throw badRequest(`Invalid camera: ${spec.error.issues[0]?.path.join('.')} ${spec.error.issues[0]?.message}`);
-    if (b.engineModel !== undefined && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the engine');
+    if (b.engineModel !== undefined && u.role !== 'owner') { // 4c: a member's model must be one shown to members
+      const mc = modelChoice(this.ctx), rules = await mc.memberRules(u.studioId);
+      if (!(await mc.all(u, ['video'])).some(e => e.model === b.engineModel && ModelChoice.forMembers(e, rules))) throw new ApiError(403, 'owner_only', 'Only the studio owner can pick that model');
+    }
     const tier = (TIERS as string[]).includes(String(b.quality)) ? (b.quality as Tier) : 'cinema';
     const prefs = await this.prefs(u.studioId);
     const id = typeof b.engineModel === 'string' ? b.engineModel : (prefs.ladder?.[tier]?.[0] ?? DEFAULT_LADDER[tier][0]!).model;

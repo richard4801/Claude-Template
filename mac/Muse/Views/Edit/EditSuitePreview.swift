@@ -54,6 +54,12 @@ struct EditSuitePreview: View {
                 let w = h * aspect
                 ZStack {
                     SuitePlayerSurface(player: session.player)
+                    if session.project.mainClips.isEmpty {
+                        // A blank project before its first clip (owner request 2026-11-11).
+                        Text("Add a video from the media panel to start")
+                            .font(t.scale.caption.font).foregroundStyle(.white.opacity(0.75))
+                            .multilineTextAlignment(.center).padding(Space.s3)
+                    }
                     if let a = session.state.safeArea { SafeAreaGuide(area: a) }
                     if session.pickingKeyColour { KeyColourPicker(session: session, scale: Double(c.width) / Double(max(1, w))) }
                 }

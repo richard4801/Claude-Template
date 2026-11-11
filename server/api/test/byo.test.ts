@@ -23,8 +23,10 @@ const fixture = (n: string) => JSON.parse(fs.readFileSync(path.join(FIX, n), 'ut
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
 const SECRET = crypto.randomBytes(32).toString('hex');
 const R8_GOOD = 'r8_good_token_abcd', FAL_GOOD = 'fal-key-id:fal-secret-wxyz';
-/** Words members must never see for a custom model. */
+/** Words members never see for a custom model once the owner switches "Show provider names to members" off (4c). */
 const PROVIDER_WORDS = /\b(replicate|fal|acme|motion-1|still-1|vidgen)\b/i;
+/** The provider's model refs: members never see them (only the owner's display name), whatever the settings. */
+const MODEL_REFS = /\b(acme|motion-1|still-1|vidgen)\b/i;
 
 describe('keys at rest', () => {
   it('AES-256-GCM round trip, bound to the row, fails closed without a valid secret', () => {
@@ -194,7 +196,7 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       // Add: switched off; Replicate has no prices, so it needs one before it can be switched on.
       const vm = await owner.req('POST', `/v1/providers/${pid}/models`, { ref: 'acme/motion-1', displayName: 'Studio Motion' });
       expect(vm.status).toBe(201);
-      expect(vm.body).toMatchObject({ displayName: 'Studio Motion', providerName: 'motion-1', kind: 'video', enabled: false, members: false, status: 'ready', price: null });
+      expect(vm.body).toMatchObject({ displayName: 'Studio Motion', providerName: 'motion-1', kind: 'video', enabled: false, members: true, status: 'ready', price: null }); // 4c: shown to members by default
       expect(vm.body.id).toMatch(/^c_/);
       const off = await owner.req('PATCH', `/v1/providers/models/${vm.body.id}`, { enabled: true });
       expect(off.status).toBe(400);
@@ -253,7 +255,7 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
     } finally { await a.close(); }
   });
 
-  it('Suite: members see only models made available, by display name; estimate and run go through hold → settle (test renderer, no calls)', async () => {
+  it('Suite: members see models the owner hasn\'t hidden, by display name; estimate and run go through hold → settle (test renderer, no calls)', async () => {
     calls.length = 0;
     const a = await makeApp(env({ SUITE_MODE: 'mock', SUITE_MOCK_CHARGE: 'true' }));
     const { owner, members: [member] } = await people(a, 1, { topUp: 100 });
@@ -261,7 +263,7 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
     try {
       const p = (await owner.req('POST', '/v1/providers', { kind: 'replicate', apiKey: R8_GOOD })).body;
       const vm = (await owner.req('POST', `/v1/providers/${p.id}/models`, { ref: 'acme/motion-1', displayName: 'House Motion' })).body;
-      await owner.req('PATCH', `/v1/providers/models/${vm.id}`, { enabled: true, price: { basis: 'per_run', costUsd: 0.4 }, priceScale: 1.5 });
+      await owner.req('PATCH', `/v1/providers/models/${vm.id}`, { enabled: true, price: { basis: 'per_run', costUsd: 0.4 }, priceScale: 1.5, members: false }); // hidden from members
       const im = (await owner.req('POST', `/v1/providers/${p.id}/models`, { ref: 'acme/still-1', displayName: 'House Still' })).body;
       await owner.req('PATCH', `/v1/providers/models/${im.id}`, { enabled: true, price: { basis: 'per_run', costUsd: 0.05 }, members: true });
 
@@ -273,13 +275,20 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       const denied = await member!.req('POST', '/v1/suite/shots/estimate', shot);
       expect(denied.status).toBe(400);
       expect(denied.body.code).toBe('engine_unavailable');
-      expect((await member!.req('POST', '/v1/suite/shots/estimate', { ...shot, engineModel: 'h3' })).status).toBe(403); // built-ins stay owner-only
+      expect((await member!.req('POST', '/v1/suite/shots/estimate', { ...shot, engineModel: 'h3' })).status).toBe(200); // 4c: built-ins too
 
       await owner.req('PATCH', `/v1/providers/models/${vm.id}`, { members: true });
       mc = (await member!.req('GET', '/v1/suite/catalog')).body.custom;
       expect(mc.map((c: any) => c.name)).toEqual(['House Motion', 'House Still']);
-      expect(Object.keys(mc[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'maxSeconds', 'minSeconds', 'name', 'price']);
-      expect(JSON.stringify(mc)).not.toMatch(PROVIDER_WORDS);
+      expect(Object.keys(mc[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'maxSeconds', 'minSeconds', 'name', 'price', 'provider', 'providerName']);
+      expect(mc[0].providerName).toBe('Replicate');
+      expect(JSON.stringify(mc)).not.toMatch(MODEL_REFS);
+      expect(JSON.stringify(mc)).not.toMatch(/costUsd|priceScale|r8_/);
+      await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false });
+      const plain = (await member!.req('GET', '/v1/suite/catalog')).body.custom;
+      expect(Object.keys(plain[0]).sort()).toEqual(['aspectRatios', 'id', 'inputs', 'kind', 'maxSeconds', 'minSeconds', 'name', 'price']);
+      expect(JSON.stringify(plain)).not.toMatch(PROVIDER_WORDS);
+      await owner.req('PATCH', '/v1/engines/members', { showProviderNames: true });
       expect(mc[0]).toMatchObject({ minSeconds: 5, maxSeconds: 10, aspectRatios: ['16:9', '9:16', '1:1'], inputs: { start: true, images: 0 } });
 
       const est = (await member!.req('POST', '/v1/suite/shots/estimate', shot)).body;
@@ -308,9 +317,9 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       const ph = await member!.req('POST', '/v1/suite/photos', { modelId: dm.id, prompt: 'On the pier', count: 2, engineModel: im.id });
       expect(ph.status).toBe(200);
       expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, engineModel: vm.id })).status).toBe(400); // not an image model
-      // Owner-only image model override: a custom id or any Replicate "owner/name"; members get 403.
-      expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: im.id })).status).toBe(403);
-      expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(403);
+      // Image model override: the owner any custom id or Replicate "owner/name"; members (4c) a model shown to them only.
+      expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: im.id })).body.perPhoto).toBeCloseTo(0.05, 6);
+      expect((await member!.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: 'someone/else' })).status).toBe(403);
       const oe = (await owner.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 2, imageModel: im.id })).body;
       expect(oe.perPhoto).toBeCloseTo(0.05, 6);
       expect((await owner.req('POST', '/v1/suite/photos/estimate', { modelId: dm.id, prompt: 'x', count: 1, imageModel: 'black-forest-labs/flux-2-dev' })).status).toBe(200);
@@ -329,7 +338,12 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       expect(imgs.filter(([, c]: any) => !c).map(([n]: any) => n)).toEqual(expect.arrayContaining(['FLUX.2 [pro]', 'FLUX.2 [max]', 'FLUX.2 [flex]', 'FLUX.2 [dev]']));
       expect(imgs.at(-1)).toEqual(['House Still', true]);
       expect(engines.find((e: any) => e.model === im.id).perRun).toBeCloseTo(0.05, 6);
-      expect((await member!.req('GET', '/v1/suite/catalog')).body.engines).toBeUndefined();
+      // 4c: members get the picker too, without hidden or licence-blocked models and without the owner's fields.
+      const me = (await member!.req('GET', '/v1/suite/catalog')).body.engines;
+      expect(me.map((e: any) => e.model)).toEqual(expect.arrayContaining([vm.id, im.id, 'h3-lite']));
+      expect(me.find((e: any) => e.model === 'h3-open')).toBeUndefined();
+      expect(me.every((e: any) => e.members === undefined)).toBe(true);
+      expect(me.find((e: any) => e.model === 'h3-lite')).toMatchObject({ perSec: 0.02, provider: expect.any(String), providerName: expect.any(String) });
 
       // The test renderer called no provider.
       expect(calls.filter(c => c.url.includes('/predictions'))).toHaveLength(0);

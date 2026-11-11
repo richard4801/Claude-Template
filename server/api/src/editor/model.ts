@@ -144,6 +144,17 @@ export type Track = { id: string; kind: TrackKind; name?: string; muted?: boolea
 /** fill (wave 1): what shows where a contain-fitted main clip leaves the frame empty: the background colour (default) or a blurred copy of the clip (blurFill). */
 export type Canvas = { width: number; height: number; fps: number; background?: string; fill?: 'color' | 'blur' };
 export type EditProject = { version: 2; sourceTakeId: string; canvas: Canvas; assets: Asset[]; tracks: Track[]; mute?: boolean };
+/**
+ * A blank project (owner request 2026-11-11, "New blank project"): no source take. Its sourceTakeId is this marker until it
+ * is saved; POST /v1/edits saves it as a new Library video (no parentTakeId), and re-opening that video edits its project
+ * with the saved take as the source (later saves are its versions). While being built (edit sessions, the apps) its main
+ * track may be empty (0 s); saving still needs a clip (validate without `draft`).
+ */
+export const BLANK_SOURCE = 'blank';
+export const isBlank = (p: Pick<EditProject, 'sourceTakeId'>) => p.sourceTakeId === BLANK_SOURCE;
+/** An empty blank project: the Edit page's default shape (9:16, 1080×1920, 30 fps), an empty main track. */
+export const blankProject = (canvas: Canvas = { width: 1080, height: 1920, fps: 30, background: '#000000' }): EditProject =>
+  ({ version: 2, sourceTakeId: BLANK_SOURCE, canvas, assets: [], tracks: [{ id: 'main', kind: 'main', items: [] }] });
 
 export type V1Segment = { inSec: number; outSec: number; speed: number; muted?: boolean };
 export type EditListV1 = { version: 1; sourceTakeId: string; sourceDurationSec: number; segments: V1Segment[]; mute: boolean };
@@ -1131,7 +1142,8 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** All the rules of plans/video-editor.md "Rules". Throws EditProblem (field path + message) on the first one broken. */
-export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: Set<string> = new Set(), paletteIds: Set<string> = new Set()): { durationSec: number } {
+/** opts.draft: a blank project still being built may have an empty main track (0 s); everything else is checked. */
+export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: Set<string> = new Set(), paletteIds: Set<string> = new Set(), opts: { draft?: boolean } = {}): { durationSec: number } {
   const bad = (f: string, m: string): never => { throw new EditProblem(f, m); };
   const num = (f: string, v: unknown, lo: number, hi: number, optional = true) => {
     if (v === undefined && optional) return;
@@ -1204,6 +1216,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   if (!Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > LIMITS.maxTracks) bad('edits.tracks', `must have 1–${LIMITS.maxTracks} tracks`);
   if (p.tracks[0]!.kind !== 'main') bad('edits.tracks.0.kind', 'the first track must be the main track');
   if (p.tracks.filter(t => t.kind === 'main').length !== 1) bad('edits.tracks', 'needs exactly one main track');
+  const emptyDraft = !!opts.draft && isBlank(p) && Array.isArray(p.tracks[0]!.items) && p.tracks[0]!.items.length === 0;
   if (p.tracks.filter(t => t.kind === 'caption').length > 1) bad('edits.tracks', 'at most one caption track');
   const ids = new Set<string>();
   const assetKinds = new Map([...assets.values()].map(a => [a.id, a.kind as string]));
@@ -1308,7 +1321,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (!Array.isArray(t.items) || t.items.length > LIMITS.maxItemsPerTrack) bad(`${f}.items`, `at most ${LIMITS.maxItemsPerTrack} items`);
     total += t.items.length;
     if (total > LIMITS.maxItems) bad(`${f}.items`, `at most ${LIMITS.maxItems} items in all`);
-    if (t.kind === 'main' && t.items.length < 1) bad(`${f}.items`, 'the main track needs at least one clip');
+    if (t.kind === 'main' && t.items.length < 1 && !emptyDraft) bad(`${f}.items`, 'the main track needs at least one clip');
     if (t.kind === 'caption') {
       if (t.items.length) bad(`${f}.items`, 'a caption track has no items');
       const c = t.caption;
@@ -1468,7 +1481,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (s.background !== undefined) { color(`${f}.background.color`, s.background.color, false); num(`${f}.background.opacity`, s.background.opacity, 0, 1, false); num(`${f}.background.paddingPct`, s.background.paddingPct, 0, 1, false); num(`${f}.background.radiusPct`, s.background.radiusPct, 0, 1, false); }
   }
   const d = durationSec(p);
-  if (d < LIMITS.minOutputSec - 1e-9) bad('edits', `the edited video must be at least ${LIMITS.minOutputSec} s`);
+  if (d < LIMITS.minOutputSec - 1e-9 && !emptyDraft) bad('edits', `the edited video must be at least ${LIMITS.minOutputSec} s`);
   if (d > LIMITS.maxOutputSec + 1e-9) bad('edits', `the edited video must be at most ${LIMITS.maxOutputSec} s`);
   return { durationSec: d };
 }

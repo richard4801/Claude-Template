@@ -16,6 +16,7 @@ import { takeView } from '../services/jobs.js';
 import { putObject } from '../storage/objects.js';
 import { mediaToolsAvailable, thumbnail } from '../replicate/media.js';
 import { checkProject } from '../editor/versions.js';
+import { BLANK_SOURCE } from '../editor/model.js';
 
 export const EDIT_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 export const EDIT_LIMITS = { maxSegments: 50, minSegmentSec: 0.1, minOutputSec: 0.5, maxOutputSec: 600, maxJsonBytes: 16 * 1024, endSlackSec: 0.05 } as const;
@@ -128,21 +129,22 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
     }
   }
 
-  app.post<{ Params: { id: string } }>('/v1/takes/:id/versions', async req => {
-    const u = req.user;
+  /** Saves an edit as a new take: a version of `srcId`, or (null) a blank project's first save as a new Library video. */
+  async function saveEdit(u: { id: string; studioId: string }, srcId: string | null, body: unknown) {
     // Editor v2 (workstream 3): a v2 project is checked by editor/versions.ts (its own size limit and rules).
-    const v2 = ((req.body as { edits?: { version?: unknown } } | null)?.edits?.version) === 2;
-    if (!v2 && JSON.stringify((req.body as { edits?: unknown } | null)?.edits ?? null).length > EDIT_LIMITS.maxJsonBytes) throw badRequest(`edits: at most ${EDIT_LIMITS.maxJsonBytes / 1024} KB`);
-    const b = parse(VersionBody, req.body);
+    const v2 = ((body as { edits?: { version?: unknown } } | null)?.edits?.version) === 2;
+    if (srcId === null && !v2) throw badRequest('edits.version: a blank project is saved as version 2');
+    if (!v2 && JSON.stringify((body as { edits?: unknown } | null)?.edits ?? null).length > EDIT_LIMITS.maxJsonBytes) throw badRequest(`edits: at most ${EDIT_LIMITS.maxJsonBytes / 1024} KB`);
+    const b = parse(VersionBody, body);
     if (b.edits === undefined) throw badRequest('edits: Required');
     const edits = v2 ? (b.edits as EditList) : (parse(EditListSchema, b.edits, 'edits') as EditList);
-    const expected = v2 ? (await checkProject(ctx, u.studioId, b.edits, req.params.id)).durationSec : checkEditList(edits);
+    const expected = v2 ? (await checkProject(ctx, u.studioId, b.edits, srcId ?? BLANK_SOURCE)).durationSec : checkEditList(edits);
     if (Math.abs(b.durationSec - expected) > Math.max(0.5, expected * 0.05))
       throw badRequest(`durationSec: ${b.durationSec.toFixed(2)} s doesn't match the edit list (${expected.toFixed(2)} s)`);
 
-    const src = await sourceTake(u.studioId, req.params.id);
-    if (!isVideo(src)) throw badRequest('Edit works on a video take');
-    if (edits.sourceTakeId !== src.id) throw badRequest('edits.sourceTakeId: must be the take in the URL');
+    const src = srcId === null ? null : await sourceTake(u.studioId, srcId);
+    if (src && !isVideo(src)) throw badRequest('Edit works on a video take');
+    if (src && edits.sourceTakeId !== src.id) throw badRequest('edits.sourceTakeId: must be the take in the URL');
 
     const [up] = await db.select().from(uploads).where(and(eq(uploads.id, b.uploadId), eq(uploads.studioId, u.studioId)));
     if (!up) throw notFound('Upload');
@@ -154,20 +156,28 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
     const thumb = await clientThumb(u.studioId, b);
     await db.update(uploads).set({ state: 'ready', bytes: head.size }).where(eq(uploads.id, up.id));
 
+    // A blank project has no source: a new Library video of its own (no parentTakeId; its project re-opens in Edit).
+    const from = src ? { modelId: src.modelId, title: src.title, engineLabel: src.engineLabel, seed: src.seed, thumb: src.thumb, prompt: src.prompt,
+      publicPrompt: src.publicPrompt, templateId: src.templateId, templateName: src.templateName, templateOwnerId: src.templateOwnerId }
+      : { modelId: null, title: b.name ?? 'New project', engineLabel: '', seed: 0, thumb: null, prompt: '', publicPrompt: null, templateId: null, templateName: null, templateOwnerId: null };
     const [row] = await db.insert(takes).values({
-      id: uid('take'), studioId: u.studioId, userId: u.id, kind: 'edit' as 'take', jobId: null, modelId: src.modelId,
-      index: 1, of: 1, title: src.title, label: 'Edited', engineLabel: src.engineLabel, cost: 0, seed: src.seed, status: 'test',
-      thumb: thumb ?? src.thumb ?? null, prompt: src.prompt, publicPrompt: src.publicPrompt,
-      templateId: src.templateId, templateName: src.templateName, templateOwnerId: src.templateOwnerId,
+      id: uid('take'), studioId: u.studioId, userId: u.id, kind: 'edit' as 'take', jobId: null, modelId: from.modelId,
+      index: 1, of: 1, title: from.title, label: 'Edited', engineLabel: from.engineLabel, cost: 0, seed: from.seed, status: 'test',
+      thumb: thumb ?? from.thumb ?? null, prompt: from.prompt, publicPrompt: from.publicPrompt,
+      templateId: from.templateId, templateName: from.templateName, templateOwnerId: from.templateOwnerId,
       mediaKey: up.storageKey,
       media: { durationSec: b.durationSec, width: b.width, height: b.height, ...(b.fps ? { fps: b.fps } : {}), bytes: head.size, contentType: up.contentType,
-        parentTakeId: src.id, edits, ...(b.name ? { name: b.name } : {}), ...(b.aiLabel ? { aiLabel: true } : {}) },
+        ...(src ? { parentTakeId: src.id } : {}), edits, ...(b.name ? { name: b.name } : {}), ...(b.aiLabel ? { aiLabel: true } : {}) },
       createdAt: Date.now(),
     }).returning();
     emitTake(row!);
     if (!thumb) void serverThumb(row!);
     return takeView(row!, pub, u.id);
-  });
+  }
+
+  app.post<{ Params: { id: string } }>('/v1/takes/:id/versions', async req => saveEdit(req.user, req.params.id, req.body));
+  /** "New blank project" in Edit: saves a project with no source take (edits.sourceTakeId "blank") as a new Library video. */
+  app.post('/v1/edits', async req => saveEdit(req.user, null, req.body));
 
   app.get<{ Params: { id: string } }>('/v1/takes/:id/versions', async req => {
     const src = await sourceTake(req.user.studioId, req.params.id);

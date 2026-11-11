@@ -311,14 +311,17 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 
-  it('estimate: price, caps and warnings for a member; the owner also gets the engine and the inputs', async () => {
+  it('estimate: price, caps and warnings for a member (who may pick a model, 4c); the owner also gets the engine and the inputs', async () => {
     const body = { modelId: model.id, prompt: 'She waves at the camera.', duration: 6, quality: 'hd', camera: { preset: 'phone_ugc' } };
     const e = (await member.req('POST', '/v1/suite/shots/estimate', body)).body;
     expect(e).toMatchObject({ quality: 'hd', label: 'Shot · HD · 2K', seconds: 6, estimate: 0.78, priceLine: 'about $0.78 · 6 s', ok: true, mode: 'reference', test: true });
     expect(JSON.stringify(e)).not.toMatch(PROVIDER_WORDS);
     const o = (await owner.req('POST', '/v1/suite/shots/estimate', body)).body;
     expect(o.engine).toMatchObject({ model: 'h3', provider: 'replicate', ref: 'minimax/h3', resolution: '2K', perSec: 0.13 });
-    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' })).status).toBe(403);
+    // 4c: members may pick the model too; the reply carries no engine details (refs stay with the owner).
+    const mk = await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' });
+    expect(mk.status).toBe(200);
+    expect(mk.body.engine).toBeUndefined();
     const none = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', duration: 30, quality: 'draft' });
     expect(none.status).toBe(400);
     expect(none.body.code).toBe('nothing_fits');

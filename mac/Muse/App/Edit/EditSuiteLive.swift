@@ -28,7 +28,8 @@ extension EditSuiteSession {
             // The session is the live copy: when it already holds other changes (Claude's, the phone's), they show here.
             if sync.synced != project { showRemote(sync.synced) }
             // Edits this Mac made but never got to the server (closed, offline): ask before anything replaces them.
-            let saved = drafts.load(takeId: sourceTakeId)
+            // A blank project is new every time: no kept drafts (they are per take).
+            let saved = project.isBlank ? nil : drafts.load(takeId: sourceTakeId)
             if let d = saved, sync.conflicts(with: d) { draftAsk = d } else { drafts.remove(takeId: sourceTakeId) }
             mirrorLive()
             if let p = sync.waiting.first { askPending = p }
@@ -48,7 +49,7 @@ extension EditSuiteSession {
         live = nil
         liveConnected = false
         // The last change still goes out, then this Mac leaves the online list.
-        let drafts = self.drafts, takeId = sourceTakeId, asking = draftAsk != nil
+        let drafts = self.drafts, takeId = sourceTakeId, asking = draftAsk != nil || project.isBlank
         Task { @MainActor in
             _ = try? await sync.flush()
             // Whatever still couldn't be sent stays on this Mac for next time.
@@ -116,7 +117,7 @@ extension EditSuiteSession {
 
     /// Keeps the unsent change on this Mac (removed once it reached the server).
     func saveDraft() {
-        guard let sync = live, draftAsk == nil else { return }
+        guard let sync = live, draftAsk == nil, !project.isBlank else { return }
         drafts.save(sync.draft, takeId: sourceTakeId)
     }
 
