@@ -65,6 +65,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - NEW owner request (approved, Mac + Android): outfit section as front-only folders, 8 per page, full width, pager
   "‹ 1 of 3 ›", a full-size viewer that slides between angles, and outfit Delete (new: server route + both apps)
   (`plans/outfit-head-looks.md` §4). Slot it with the character-consistency work (priority 2).
+- DONE 5A.5 (server, live f68c469): Claude in the Suite sees outfits and the @model (suite_cast, suite_see, pictures on
+  set_draft; helpers in suite/vision.ts for Edit/Recreate later). Gap: on the Mac Claude Code path the per-turn face and
+  outfit-front pictures aren't sent (the Mac builds its own turns); do with the next Mac Claude work.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
