@@ -608,6 +608,56 @@
    "updatedBy": null
   },
   {
+   "key": "outfit.keep.front",
+   "group": "outfits",
+   "title": "Keep from base (front)",
+   "description": "Starting from her base photos with pieces kept: the front is an edit of her base front photo with this prompt.",
+   "kind": "text",
+   "default": "Keep exactly: {keep} (colour, cut, fabric, straps). Replace only {replace} with {outfit}. Same person, same face, hair, body and pose, plain studio background. Realistic smartphone photo, natural skin texture.",
+   "current": "Keep exactly: {keep} (colour, cut, fabric, straps). Replace only {replace} with {outfit}. Same person, same face, hair, body and pose, plain studio background. Realistic smartphone photo, natural skin texture.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "keep",
+     "description": "the kept pieces and the note: \"the top (the black lace bra)\"",
+     "required": true
+    },
+    {
+     "name": "replace",
+     "description": "the rest: \"the bottom, the shoes and the accessories\"",
+     "required": true
+    },
+    {
+     "name": "outfit",
+     "description": "what to change to: the description, or the clothes in the product photo",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.keep.angle",
+   "group": "outfits",
+   "title": "Keep from base (other angles)",
+   "description": "Added to the ¾, side and back edits when pieces are kept: the last image is her base photo of that angle.",
+   "kind": "text",
+   "default": "The last image shows her from this angle in her base clothes: keep {keep} exactly as in the first image and in that image, and take her body shape and proportions from it.",
+   "current": "The last image shows her from this angle in her base clothes: keep {keep} exactly as in the first image and in that image, and take her body shape and proportions from it.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "keep",
+     "description": "the kept pieces and the note",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "enhance.prompt",
    "group": "enhance",
    "title": "Realism prompt",

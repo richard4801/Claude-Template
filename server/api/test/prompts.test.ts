@@ -19,7 +19,7 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(73 + SUITE_PROMPT_DEFS.length); // 53 + 20 blocks added with prompt scripts (workstream 4) + AI suite (workstream 1)
+    expect(PROMPT_DEFS.length).toBe(75 + SUITE_PROMPT_DEFS.length); // 53 + 20 blocks + 2 outfit keep (§6) added with prompt scripts (workstream 4) + AI suite (workstream 1)
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
     for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'dressup', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
@@ -123,7 +123,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
     expect(l.groups.map((g: any) => g.label)).toEqual(['Photo', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
-    expect(l.prompts).toHaveLength(73 + SUITE_PROMPT_DEFS.length);
+    expect(l.prompts).toHaveLength(75 + SUITE_PROMPT_DEFS.length);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,
       placeholders: [{ name: 'refIndex', required: true }] });

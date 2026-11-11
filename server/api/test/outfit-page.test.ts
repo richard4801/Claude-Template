@@ -69,3 +69,32 @@ describe('outfit page · rename, delete, fill', () => {
     expect((await maker.req('POST', '/v1/outfits/o_nofront/fill')).status).toBe(400);
   });
 });
+
+// §6: an outfit from her base photos keeping chosen pieces.
+describe('outfit from her base photos, keeping pieces', () => {
+  it('keep/replace lines', async () => {
+    const E = await import('../src/prompt/engine.js');
+    const k = { keep: { top: true }, note: 'the black lace bra.' };
+    expect(E.outfitKeepParts(k)).toMatchObject({ keeping: true, keep: 'the top (the black lace bra)', replace: 'the bottom, the shoes and the accessories' });
+    expect(E.outfitKeepFront(k, 'a pleated tennis skirt.')).toContain('Keep exactly: the top (the black lace bra) (colour, cut, fabric, straps). Replace only the bottom, the shoes and the accessories with a pleated tennis skirt.');
+    expect(E.outfitKeepAngle(k)).toContain('keep the top (the black lace bra) exactly');
+    expect(E.outfitKeepParts({ keep: {} }).keeping).toBe(false);
+  });
+
+  it('kept pieces: four edits (front from her base front photo), priced as edits', async () => {
+    const a = await makeApp({ BALANCE_MODE: 'simulated' });
+    try {
+      const { owner } = await people(a, 0);
+      const m = await demoModel(owner);
+      const o = (await owner.req('POST', '/v1/outfits', { modelId: m.id, mode: 'describe', description: 'a pleated tennis skirt', base: { source: 'base', keep: { top: true }, note: 'the black lace bra' } })).body;
+      expect(o.prompt).toContain('Keep exactly: the top (the black lace bra)');
+      const done = await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id && x.state === 'preview'));
+      expect(done.angles.filter(Boolean)).toHaveLength(4);
+      const imgs = (await a.ctx.db.query.generatedImages.findMany()).filter(i => i.purpose === 'outfit');
+      expect(imgs).toHaveLength(4);
+      expect(imgs.some(i => i.prompt.includes('Keep exactly: the top'))).toBe(true);
+      expect(imgs.filter(i => i.prompt.includes('in her base clothes'))).toHaveLength(3);
+      expect(done.cost).toBeCloseTo(4 * 0.03, 6);
+    } finally { await a.close(); }
+  });
+});

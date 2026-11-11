@@ -74,6 +74,14 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('outfit.edit', 'outfits', 'Other angles (edit)', 'The ¾, side and back are made as edits of the front with this prompt.',
     'Show the same person in exactly the same outfit, on the same plain studio background, as a {angle}. Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.',
     [['angle', 'full body three-quarter view …', true]], { allowEmpty: false }),
+  // Outfit from her base photos, keeping chosen pieces (plans/outfit-head-looks.md §6).
+  d('outfit.keep.front', 'outfits', 'Keep from base (front)', 'Starting from her base photos with pieces kept: the front is an edit of her base front photo with this prompt.',
+    'Keep exactly: {keep} (colour, cut, fabric, straps). Replace only {replace} with {outfit}. Same person, same face, hair, body and pose, plain studio background. Realistic smartphone photo, natural skin texture.',
+    [['keep', 'the kept pieces and the note: "the top (the black lace bra)"', true], ['replace', 'the rest: "the bottom, the shoes and the accessories"', true], ['outfit', 'what to change to: the description, or the clothes in the product photo', true]],
+    { allowEmpty: false }),
+  d('outfit.keep.angle', 'outfits', 'Keep from base (other angles)', 'Added to the ¾, side and back edits when pieces are kept: the last image is her base photo of that angle.',
+    'The last image shows her from this angle in her base clothes: keep {keep} exactly as in the first image and in that image, and take her body shape and proportions from it.',
+    [['keep', 'the kept pieces and the note', true]], { allowEmpty: false }),
   // ---------------------------------------------------------------- enhance
   d('enhance.prompt', 'enhance', 'Realism prompt', 'One prompt for every image of the sheet in Enhance step 1.',
     'candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter', [], { allowEmpty: false }),

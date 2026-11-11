@@ -169,6 +169,24 @@ export function shootChoices(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS) {
 
 
 
+/** Outfit from her base photos (plans/outfit-head-looks.md §6): which pieces stay, which change. */
+export const OUTFIT_PIECES = ['top', 'bottom', 'shoes', 'accessories'] as const;
+export type OutfitPiece = typeof OUTFIT_PIECES[number];
+export type OutfitKeep = { keep?: Partial<Record<OutfitPiece, boolean>>; note?: string | null };
+const andList = (xs: string[]) => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+export function outfitKeepParts(k: OutfitKeep | null | undefined) {
+  const kept = OUTFIT_PIECES.filter(p => k?.keep?.[p]), rest = OUTFIT_PIECES.filter(p => !k?.keep?.[p]);
+  const note = (k?.note ?? '').trim().replace(/[.\s]+$/, '');
+  const words = (ps: readonly string[]) => andList(ps.map(p => `the ${p}`));
+  const keep = kept.length ? words(kept) + (note ? ` (${note})` : '') : note;
+  return { keeping: kept.length > 0 || !!note, kept, rest, keep, replace: rest.length ? words(rest) : 'the rest of the clothes' };
+}
+export const outfitKeepFront = (k: OutfitKeep, outfit: string, t: PromptTexts = DEFAULT_TEXTS) => {
+  const p = outfitKeepParts(k);
+  return fill(t['outfit.keep.front']!, { keep: p.keep, replace: p.replace, outfit: trimEndChars(outfit.trim(), '.') });
+};
+export const outfitKeepAngle = (k: OutfitKeep, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.keep.angle']!, { keep: outfitKeepParts(k).keep });
+
 export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS) => OUTFIT_ANGLES.map(a => outfitAngle(id, outfit, a, seed, t));
 
 

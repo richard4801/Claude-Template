@@ -11,7 +11,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
+import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
 import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, type IdentityRef } from '../images/identity.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
@@ -267,7 +267,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   app.post('/v1/outfits', async req => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
-      description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
+      description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional(),
+      /* §6: start from her base photos, keeping the ticked pieces */
+      base: z.object({ source: z.literal('base'), keep: z.object({ top: z.boolean().optional(), bottom: z.boolean().optional(), shoes: z.boolean().optional(), accessories: z.boolean().optional() }).partial().default({}),
+        note: z.string().max(200).optional() }).optional() }).passthrough(), req.body);
     const m = await model(req.user, b.modelId, true);
     const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'outfit', b); // WS13: `imageModel`, else the Outfits default
     const mode = b.mode ?? 'describe';
@@ -287,14 +290,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const outfitRefs = outfitPlan?.images ?? [], outfitPanels = outfitPlan?.panels ?? [];
     // A custom model makes all four angles as new shots (no edits); else a front shot and three edits of it.
     const byoRun = !b.imageEngine?.provider && !!stepModels?.shot?.startsWith('c_');
-    const cost = !outfitPlan ? 0 : byoRun ? 4 * outfitPlan.perShot : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
+    // §6: pieces kept from her base photos → the front is an edit of her base front photo, the others edits of that front.
+    const keep = mode !== 'own' && b.base ? { keep: b.base.keep, note: b.base.note } : null;
+    const keeping = !!keep && outfitKeepParts(keep).keeping;
+    const baseFront = slotOf('front');
+    if (keeping && !baseFront) throw badRequest('Add her front body photo to the character sheet first');
+    const cost = !outfitPlan ? 0 : keeping ? 4 * await ctx.images.editCost(req.user.studioId, stepModels)
+      : byoRun ? 4 * outfitPlan.perShot : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m, outfitPlan ? sentOf(outfitIds, outfitPlan) : personCount(outfitIds));
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
     const texts = await ctx.prompts.texts(req.user.studioId);
     const set = outfitSet(identity, spec, undefined, texts);
     const [o] = await db.insert(outfits).values({ id, studioId: req.user.studioId, modelId: m.id, name: spec.name, mode, description: b.description ?? '',
-      angles: [null, null, null, null], state: 'generating', prompt: set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
+      angles: [null, null, null, null], state: 'generating', prompt: keeping ? outfitKeepFront(keep!, b.description?.trim() || (productIds.length ? 'the clothes in the product photo' : spec.name), texts) : set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
     emitOutfit(o!);
     const user = req.user;
     ctx.later(async () => {
@@ -306,7 +315,22 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           const slot = slotOf;
           const refs = outfitRefs;
           const sel = await ctx.images.selection(user.studioId, b.imageEngine, stepModels);
-          if (sel.provider === 'simulated') {
+          if (keeping) {
+            // Keep the ticked pieces from her base: the front edits her base front photo (her face and the product photos
+            // as references), then each angle edits that front with her base photo of that angle.
+            const k = keep!, what = b.description?.trim() || (productIds.length ? 'the clothes in the product photo' : spec.name);
+            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
+              editOf: baseFront!, refs: [slot('face'), ...productIds.map(x => x.image)].filter((r): r is ImageRef => !!r),
+              req: { prompt: outfitKeepFront(k, what, texts), width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null;
+            if (!front) throw new Error('no front');
+            angles = [front];
+            for (const [i, a] of OUTFIT_ANGLES.slice(1).entries()) {
+              const body = slot(BODY_SLOTS[i + 1]!) ?? null;
+              const prompt = outfitEditPrompt(a, texts) + (body ? ' ' + outfitKeepAngle(k, texts) : '');
+              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
+                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null);
+            }
+          } else if (sel.provider === 'simulated') {
             angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
           } else if (sel.provider === 'replicate') {
