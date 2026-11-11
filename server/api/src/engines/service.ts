@@ -14,7 +14,8 @@ import { estimateOne } from '../replicate/prices.js';
 /** How many of Replicate's image models the picker lists beyond the curated ones. */
 const BROWSE_IMAGE_MODELS = 40;
 import { modelName, type StepOverrides } from '../images/steps.js';
-import { memberRules, providerLabel, saveMemberRules, type MemberRules } from './members.js';
+import { memberRules, saveMemberRules, type MemberRules } from './members.js';
+import { labelList } from './labels.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
@@ -23,6 +24,8 @@ import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_EN
 export type Price = { basis: 'per_second' | 'per_run' | 'per_output_second'; usd: number };
 export type Engine = {
   model: string; name: string; kind: EngineKind; purposes: Purpose[]; custom: boolean;
+  /** What to show: "<Model> · <Provider>" (engines/labels.ts); `name` is the model's own name without the provider. */
+  label?: string;
   /** Owner only (members: `provider` + `providerName` while the studio shows provider names). */
   provider?: string; providerName?: string; notice?: string | null;
   /** Shown to members (owner view; video and image models). */
@@ -175,7 +178,7 @@ export class ModelChoice {
     const prices = P.upscalePrices(this.ctx.config.UPSCALE_PRICES);
     const sizes = P.UPSCALE_SIZES.filter(z => prices[z.id]);
     if (caps.includes('upscale') && sizes.length)
-      out.push({ model: 'seedvr2', name: 'SeedVR2 (own GPU)', kind: 'tool', purposes: ['upscale'], custom: false, provider: 'runpod', notice: null,
+      out.push({ model: 'seedvr2', name: 'SeedVR2', kind: 'tool', purposes: ['upscale'], custom: false, provider: 'runpod', notice: null,
         limits: { ...noLimits, resolutions: sizes.map(z => ({ id: z.id, label: z.label })) }, resolution: sizes[0]!.id,
         price: { basis: 'per_output_second', usd: Math.min(...sizes.map(z => prices[z.id]!.usdPerSec)) }, inputs: NO_INPUTS });
     const ed = editorAi(this.ctx), pr = ed.provider;
@@ -195,11 +198,11 @@ export class ModelChoice {
 
   /** Every engine of the studio (owner view), or only those of one kind. */
   async all(u: AuthUser, kinds: EngineKind[] = ['video', 'image', 'tool']): Promise<Engine[]> {
-    return [
+    return labelList([
       ...(kinds.includes('video') ? await this.videoEngines(u.studioId) : []),
       ...(kinds.includes('image') ? await this.imageEngines(u.studioId, u) : []),
       ...(kinds.includes('tool') ? this.toolEngines() : []),
-    ];
+    ], { showProviders: true }) as Engine[];
   }
   /** The candidates for one purpose (owner view). */
   async candidates(u: AuthUser, purpose: Purpose) {
@@ -267,18 +270,21 @@ export class ModelChoice {
     return (e.kind === 'video' || e.kind === 'image') && !e.browsed && !rules.hidden.has(e.model);
   }
 
-  /** What a member may see of an entry: name, limits, price as charged; the provider's name while the studio shows it. */
-  private memberView(e: Engine, rules: MemberRules): Engine | null {
-    if (!ModelChoice.forMembers(e, rules)) return null;
-    const { provider, notice: _n, members: _m, browsed: _b, providerName: _pn, ...rest } = e;
-    // The provider goes in providerName (while shown), not in the name: "Genjutsu (Higgsfield)" → "Genjutsu".
-    const named = { ...rest, name: rest.name.replace(/\s*\((Higgsfield|Replicate|fal|Muapi)\)$/, '') };
-    return rules.showProviderNames && provider ? { ...named, provider, providerName: providerLabel(provider) } : named;
+  /**
+   * What a member may see of a list: name, limits, price as charged; the provider while the studio shows it. Labels are
+   * redone for the member's list (engines/labels.ts): with provider names hidden, the bare name, and "· Option n" for
+   * models that would otherwise look the same.
+   */
+  private memberViews(list: Engine[], rules: MemberRules): Engine[] {
+    return labelList(list.filter(e => ModelChoice.forMembers(e, rules)).map(e => {
+      const { provider, notice: _n, members: _m, browsed: _b, providerName: _pn, label: _l, ...rest } = e;
+      return rules.showProviderNames && provider ? { ...rest, provider } : rest;
+    }), { showProviders: rules.showProviderNames }) as Engine[];
   }
   /** The owner's view of an entry: every field, `members` (shown to members) on video and image models. */
   private ownerView(e: Engine, rules: MemberRules): Engine {
     const { browsed: _b, ...rest } = e;
-    return { ...rest, ...(e.provider ? { providerName: providerLabel(e.provider) } : {}), ...(e.kind !== 'tool' ? { members: ModelChoice.forMembers(e, rules) } : {}) };
+    return { ...rest, ...(e.kind !== 'tool' ? { members: ModelChoice.forMembers(e, rules) } : {}) };
   }
 
   /** GET /v1/engines/members (owner): the studio's "Show provider names to members" and the models hidden from members. */
@@ -286,7 +292,7 @@ export class ModelChoice {
     const rules = await this.memberRules(u.studioId);
     const engines = await this.all(u, ['video', 'image']);
     return { showProviderNames: rules.showProviderNames,
-      models: engines.filter(e => !e.browsed).map(e => ({ model: e.model, name: e.name, kind: e.kind, custom: e.custom, provider: e.provider ?? null, members: ModelChoice.forMembers(e, rules) })) };
+      models: engines.filter(e => !e.browsed).map(e => ({ model: e.model, name: e.name, label: e.label, kind: e.kind, custom: e.custom, provider: e.provider ?? null, members: ModelChoice.forMembers(e, rules) })) };
   }
   /** PATCH /v1/engines/members (owner): {showProviderNames?: boolean, hidden?: {model: true | false}}. */
   async setMembers(u: AuthUser, body0: unknown) {
@@ -339,7 +345,7 @@ export class ModelChoice {
     }
     const def = only ? purposes[0]!.default : null;
     const rules = await this.memberRules(u.studioId);
-    const shown = u.role === 'owner' ? engines.map(e => this.ownerView(e, rules)) : engines.map(e => this.memberView(e, rules)).filter((e): e is Engine => !!e);
+    const shown = u.role === 'owner' ? engines.map(e => this.ownerView(e, rules)) : this.memberViews(engines, rules);
     const view = [];
     for (const e of shown) view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}) });
     const ps = u.role === 'owner' ? purposes : purposes.map(p => ({ ...p, default: null }));

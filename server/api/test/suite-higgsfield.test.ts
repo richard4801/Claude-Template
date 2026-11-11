@@ -139,7 +139,7 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
     return { req: r.body.request, j };
   };
 
-  it('Character swap: MiniMax H3 (Higgsfield) is offered only with the key, at $0.065/s 2K, 5–15 s', async () => {
+  it('Character swap: MiniMax H3 · Higgsfield is offered only with the key, at $0.065/s 2K, 5–15 s', async () => {
     for (const [creds, offered] of [[true, true], [false, false]] as const) {
       const a = await makeApp(env(creds ? { HF_CREDENTIALS: 'hfid:hfsecret' } : {}));
       const { owner } = await people(a, 0, { topUp: 100 });
@@ -147,11 +147,41 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
         const list = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
         const hfRow = (list.engines ?? list).find((e: any) => e.model === 'h3-hf');
         if (!offered) { expect(hfRow).toBeUndefined(); continue; }
-        expect(hfRow).toMatchObject({ name: 'MiniMax H3 (Higgsfield)', resolution: '2K', price: { basis: 'per_second', usd: 0.065 } });
+        expect(hfRow).toMatchObject({ name: 'MiniMax H3', label: 'MiniMax H3 · Higgsfield', providerName: 'Higgsfield', resolution: '2K', price: { basis: 'per_second', usd: 0.065 } });
         expect(hfRow.purposes).toContain('swap');
         expect(hfRow.limits).toMatchObject({ minSeconds: 5, maxInputSeconds: 15 });
       } finally { await a.close(); }
     }
+  });
+
+  it('labels: the same H3 on Replicate and on Higgsfield never look the same (owner, members, provider names off)', async () => {
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner, members: [member] } = await people(a, 1, { topUp: 100 });
+    try {
+      const h3s = (l: any[]) => l.filter((e: any) => e.model === 'h3' || e.model === 'h3-hf').sort((x: any, y: any) => x.model.localeCompare(y.model));
+      const unique = (l: any[]) => expect(new Set(l.map((e: any) => e.label)).size).toBe(l.length);
+      for (const who of [owner, member!]) {
+        const eng = (await who.req('GET', '/v1/engines?purpose=swap')).body.engines;
+        expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate', 'MiniMax H3 · Higgsfield']);
+        unique(eng);
+        for (const e of eng) expect(e.label).toBe(`${e.name} · ${e.providerName}`);
+        const cat = (await who.req('GET', '/v1/suite/catalog')).body.engines;
+        expect(h3s(cat).map((e: any) => [e.name, e.label, e.providerName])).toEqual([['MiniMax H3', 'MiniMax H3 · Replicate', 'Replicate'], ['MiniMax H3', 'MiniMax H3 · Higgsfield', 'Higgsfield']]);
+        unique(cat);
+      }
+      // 4c switch off: members get no provider, and the two H3s become "Option 1" and "Option 2", never the same bare name.
+      await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false });
+      const eng = (await member!.req('GET', '/v1/engines?purpose=swap')).body.engines;
+      expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Option 1', 'MiniMax H3 · Option 2']);
+      unique(eng);
+      expect(JSON.stringify(eng)).not.toMatch(/Higgsfield|Replicate|"provider(Name)?"/);
+      const cat = (await member!.req('GET', '/v1/suite/catalog')).body.engines;
+      unique(cat);
+      expect(h3s(cat).map((e: any) => e.name)).toEqual(['MiniMax H3 · Option 1', 'MiniMax H3 · Option 2']);
+      expect(JSON.stringify(cat)).not.toMatch(/Higgsfield|Replicate|"provider(Name)?"/);
+      // The owner always sees providers.
+      expect(h3s((await owner.req('GET', '/v1/engines?purpose=swap')).body.engines).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate', 'MiniMax H3 · Higgsfield']);
+    } finally { await a.close(); }
   });
 
   it('Character swap on Higgsfield: the clip is the reference video, 2K, padded to 5 s, settled at $0.065/s (+$0.08 per image beyond 5)', async () => {

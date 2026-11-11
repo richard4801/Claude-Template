@@ -50,7 +50,9 @@ Each of these is a default, not a choice. Remove it unless the direction file na
   - Vague errors ("Something went wrong").
   - Buttons named "Submit" or "OK".
   - Different names for the same thing on different screens.
-  - Model or provider names shown to members (they never see them).
+  - A model shown without its provider, or two models that look the same ("MiniMax H3" on Replicate and on Higgsfield).
+    Show the server's `label`, "<Model> · <Provider>", everywhere; never build it in the app. Members see providers only
+    while the studio's "Show provider names to members" is on (4c); otherwise the server sends a distinct neutral label.
 - **Placeholder residue:** lorem ipsum, "Coming soon" tiles that do nothing, dead buttons, grey boxes where images should be.
 
 ## 2. What professional looks like here

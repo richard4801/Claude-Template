@@ -9,6 +9,7 @@ import { run } from '../prompt/scripts/builders.js';
 import { CameraSpecSchema, stripMoveTokens, VideoRefSchema, type VideoRef } from './camera.js';
 import { compileCamera, type CompiledCamera } from './compile.js';
 import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
+import { modelLabel } from '../engines/labels.js';
 
 export const ImageRefSchema = z.object({ asset: z.string().max(80).optional(), url: z.string().max(2000).optional() }).refine(v => !!v.asset || !!v.url, 'an image needs asset or url');
 
@@ -161,8 +162,8 @@ export function whyWords(code: string, m: ModelSpec, n?: Need): string {
   return code;
 }
 
-/** A model's name as members see it (owner-added models by their own name). */
-export const modelName = (m: ModelSpec) => m.byo?.displayName ?? m.name;
+/** A model's label, "<Model> · <Provider>" (engines/labels.ts; owner-added models by their own name and provider). */
+export const modelName = (m: ModelSpec) => modelLabel(m.byo?.displayName ?? m.name, m.byo ? m.byo.providerKind : m.provider);
 
 const ASPECT_VALUE = (a: string) => { const [w, h] = a.split(':').map(Number); return (w ?? 1) / (h ?? 1); };
 /** The supported aspect closest to `a`. */
@@ -312,7 +313,7 @@ export function pickAdapted(tier: Tier, r: ShotRequest, character: Character | n
   return { error: 'nothing_fits', tried, refusals };
 }
 
-/** "MiniMax H3 (Higgsfield): can't use a start frame; length must be 5–15 s" */
+/** "MiniMax H3 · Higgsfield: can't use a start frame; length must be 5–15 s" */
 export const refusalLine = (x: Refusal) => `${x.name}: ${x.reasons.join('; ')}`;
 
 /** Which endpoint kind a plan calls. */

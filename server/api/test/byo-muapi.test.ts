@@ -317,9 +317,17 @@ describe('Bring your own provider · Muapi against a FAKE Muapi (recorded fixtur
       expect((await owner.req('GET', '/v1/engines?purpose=outfit')).body.default).toBe(im.id);
       // The start frame is required: a member's text-only shot is refused before anything is spent.
       const shot = { prompt: 'She walks along the pier at dusk.', duration: 5, quality: 'draft', aspectRatio: '9:16', engineModel: vm.id };
-      const est = await member!.req('POST', '/v1/suite/shots/estimate', shot);
-      expect(JSON.stringify(est.body)).not.toMatch(PROVIDER_WORDS);
+      // Provider names shown (owner 2026-11-11): the refusal names the model as "<Model> · Muapi", never its ref.
+      let est = await member!.req('POST', '/v1/suite/shots/estimate', shot);
+      expect(est.body.error).toMatch(/House Motion · Muapi: /);
+      expect(JSON.stringify(est.body).replace(/House (Motion|Still) · Muapi/g, '')).not.toMatch(PROVIDER_WORDS);
       expect(est.body.engine).toBeUndefined();
+      // Provider names off: the same refusal says only the model's name.
+      await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false });
+      est = await member!.req('POST', '/v1/suite/shots/estimate', shot);
+      expect(est.body.error).toMatch(/House Motion: /);
+      expect(JSON.stringify(est.body)).not.toMatch(PROVIDER_WORDS);
+      await owner.req('PATCH', '/v1/engines/members', { showProviderNames: true });
     } finally { await a.close(); }
   });
 
