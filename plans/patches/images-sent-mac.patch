@@ -1,0 +1,609 @@
+From c91a2d0884a2a86997f26d967fc77d347514d29a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 16:49:04 +0000
+Subject: [PATCH] Mac: Images sent row in the composer and the outfit sheet
+
+Estimates decode sentImages; the composer shows Images sent (n) with each
+image's role (why in the tooltip), Changed by Claude, and Reset to automatic.
+The draft carries Claude's choice (sent) to estimates and Generate; Reset
+sends sent: null. The new-outfit sheet reads a dry-run estimate, refreshes on
+the sentImages live event, and Reset sends sentImages: null.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxqVfAVLFVK1ZtqBNbu
+---
+ mac/Muse/App/AppStore+Actions.swift           | 14 ++++
+ mac/Muse/App/AppStore+Photo.swift             |  3 +-
+ mac/Muse/App/AppStore+Suite.swift             |  9 ++-
+ mac/Muse/App/AppStore.swift                   |  5 ++
+ mac/Muse/Views/AuthAndSheets.swift            |  7 ++
+ .../Views/Suite/Composer/ComposerView.swift   |  1 +
+ mac/Muse/Views/Suite/SentImagesRow.swift      | 74 +++++++++++++++++++
+ .../Sources/MuseCore/FakeMuseAPI.swift        |  7 ++
+ .../Sources/MuseCore/HTTPMuseAPI.swift        |  5 ++
+ mac/MuseCore/Sources/MuseCore/Models.swift    | 20 +++++
+ mac/MuseCore/Sources/MuseCore/MuseAPI.swift   |  2 +
+ .../MuseCore/Suite/ComposerDrafts.swift       |  2 +
+ .../MuseCore/Suite/ComposerShell.swift        |  4 +
+ .../Sources/MuseCore/Suite/SentImages.swift   | 71 ++++++++++++++++++
+ .../MuseCore/Suite/SuiteAssistDraft.swift     |  5 ++
+ .../Sources/MuseCore/Suite/SuiteModels.swift  |  5 +-
+ .../Sources/MuseCore/Suite/SuitePhoto.swift   |  6 +-
+ .../Tests/MuseCoreTests/SentImagesTests.swift | 31 ++++++++
+ 18 files changed, 265 insertions(+), 6 deletions(-)
+ create mode 100644 mac/Muse/Views/Suite/SentImagesRow.swift
+ create mode 100644 mac/MuseCore/Sources/MuseCore/Suite/SentImages.swift
+ create mode 100644 mac/MuseCore/Tests/MuseCoreTests/SentImagesTests.swift
+
+diff --git a/mac/Muse/App/AppStore+Actions.swift b/mac/Muse/App/AppStore+Actions.swift
+index 4a88b2a..86ec847 100644
+--- a/mac/Muse/App/AppStore+Actions.swift
++++ b/mac/Muse/App/AppStore+Actions.swift
+@@ -543,6 +543,19 @@ extension AppStore {
+         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { outfitSheet = OutfitDraft(modelId: id) }
+     }
+ 
++    /// Images sent: what the outfit's front would send now (her images, Claude's choice), plus the product photo to upload.
++    func refreshOutfitSent() async {
++        guard let d = outfitSheet, d.mode != .own, d.state != .busy else { return }
++        var req = CreateOutfitRequest(modelId: d.modelId, name: "", mode: d.mode.rawValue, description: d.description)
++        req.imageModel = enginePick(.outfit)?.model
++        if d.sentReset { req.sentImages = .null }
++        guard var s = (try? await api.outfitEstimate(req))?.sentImages else { return }
++        if !s.changed { // the product photos go after her images (uploaded when the angles are made)
++            s.images += d.images.map { SentImage(image: ImageRef(url: $0.absoluteString), role: "product", label: "product photo", why: "the product photo") }
++        }
++        if outfitSheet?.modelId == d.modelId { outfitSheet?.sent = s }
++    }
++
+     func outfitGenerate() {
+         guard var d = outfitSheet, d.state != .busy else { return }
+         if d.mode == .describe && d.description.trimmingCharacters(in: .whitespaces).isEmpty {
+@@ -573,6 +586,7 @@ extension AppStore {
+                 var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(OutfitNaming.maxLength)), mode: draft.mode.rawValue,
+                                               description: draft.description, images: refs)
+                 if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
++                if draft.sentReset { req.sentImages = .null } // images sent: the person reset Claude's choice
+                 let o = try await api.createOutfit(req)
+                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
+                 outfitSheet?.outfitId = o.id
+diff --git a/mac/Muse/App/AppStore+Photo.swift b/mac/Muse/App/AppStore+Photo.swift
+index 30d5cd0..ce895a3 100644
+--- a/mac/Muse/App/AppStore+Photo.swift
++++ b/mac/Muse/App/AppStore+Photo.swift
+@@ -51,13 +51,14 @@ extension AppStore {
+ 
+     /// The price, the still rig check and the Look (debounced by the composer's `.task(id:)`). Holds nothing.
+     func estimatePhoto() async {
+-        guard let req = photoRequest else {
++        guard var req = photoRequest else {
+             suite.photoEstimate = nil
+             suite.photoError = nil
+             suite.rig = []
+             return
+         }
+         suite.rigDismissals.sync(RigChoices(req))
++        if suite.composer.sent != nil { req.draft = ComposerDrafts.draft(suite.composer, photo: suite.photo) } // images sent
+         do {
+             let e = try await api.suitePhotoEstimate(req)
+             guard !Task.isCancelled else { return }
+diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
+index 57960ce..8c82e48 100644
+--- a/mac/Muse/App/AppStore+Suite.swift
++++ b/mac/Muse/App/AppStore+Suite.swift
+@@ -397,8 +397,9 @@ extension AppStore {
+     func estimateShot() async {
+         if suite.composer.tool == .extend { return await estimateExtend() }
+         guard suite.enabled, suite.catalog != nil else { return }
+-        let req = shotRequest
++        var req = shotRequest
+         suite.rigDismissals.sync(RigChoices(req))
++        if suite.composer.sent != nil { req.draft = ComposerDrafts.draft(suite.composer) } // images sent: the draft carries the choice
+         do {
+             let e = try await api.suiteEstimate(req)
+             suite.estimate = e
+@@ -637,10 +638,11 @@ extension AppStore {
+     }
+ 
+     func estimateSwap() async {
+-        guard suite.enabled, suite.catalog != nil, let req = swapRequest else {
++        guard suite.enabled, suite.catalog != nil, var req = swapRequest else {
+             suite.swapEstimate = nil
+             return
+         }
++        if suite.composer.sent != nil, req.draft == nil { req.draft = ComposerDrafts.draft(suite.composer) } // images sent
+         do {
+             suite.swapEstimate = try await api.suiteEstimate(req)
+             suite.swapError = nil
+@@ -662,7 +664,7 @@ extension AppStore {
+             suite.swapUsesStage = true
+             return
+         }
+-        guard let req = swapRequest else {
++        guard var req = swapRequest else {
+             showToast(clip == nil ? "Choose a clip first" : "Pick who to replace")
+             return
+         }
+@@ -671,6 +673,7 @@ extension AppStore {
+             return
+         }
+         guard !suite.generating else { return }
++        if suite.composer.sent != nil, req.draft == nil { req.draft = ComposerDrafts.draft(suite.composer) } // images sent
+         suite.generating = true
+         perform { [self] in
+             defer { suite.generating = false }
+diff --git a/mac/Muse/App/AppStore.swift b/mac/Muse/App/AppStore.swift
+index 98c7229..15dde44 100644
+--- a/mac/Muse/App/AppStore.swift
++++ b/mac/Muse/App/AppStore.swift
+@@ -136,6 +136,9 @@ struct OutfitDraft {
+     var angles: [ImageRef?] = [nil, nil, nil, nil]
+     /// The angle open full size (ImageLightbox), an index into `lightboxItems`.
+     var viewing: Int?
++    /// Images sent (server images/sent.ts): what the front would send, and the person's "Reset to automatic".
++    var sent: SentImages?
++    var sentReset = false
+ }
+ 
+ enum Niches {
+@@ -725,6 +728,8 @@ final class AppStore {
+         if e.type == "queue" { Task { await loadQueue() } }
+         // Claude in the Suite: Claude or another device changed the shared composer draft.
+         if e.type == "suiteAssist", let a = e.assist { suiteAssistEvent(a) }
++        // Images sent: Claude changed what a page's generation sends (the outfit sheet reads it again).
++        if e.type == "sentImages", outfitSheet != nil { outfitSheet?.sentReset = false; Task { await refreshOutfitSent() } }
+         if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
+         if isOwner {
+             if e.type == "member" { LiveEvents.applyMembers(&members, e) }
+diff --git a/mac/Muse/Views/AuthAndSheets.swift b/mac/Muse/Views/AuthAndSheets.swift
+index fc8fdf5..3fa7051 100644
+--- a/mac/Muse/Views/AuthAndSheets.swift
++++ b/mac/Muse/Views/AuthAndSheets.swift
+@@ -228,6 +228,12 @@ struct OutfitSheetView: View {
+                                 .onSubmit { store.outfitSave() }
+                         }
+                     }
++                    if d.mode != .own && d.state != .done {
++                        SentImagesRow(sent: d.sent) {
++                            store.outfitSheet?.sentReset = true
++                            Task { await store.refreshOutfitSent() }
++                        }
++                    }
+                     HStack(spacing: Space.s3) {
+                         Text("All four angles use one seed, so the outfit matches from every side. Never add: logos.")
+                             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+@@ -246,6 +252,7 @@ struct OutfitSheetView: View {
+                 }
+                 .padding(Space.s6)
+                 .floatingPanel(width: 760)
++                .task(id: "\(d.mode.rawValue)|\(d.images.count)|\(d.modelId)") { await store.refreshOutfitSent() } // images sent
+                 // The angles full size (owner 2026-11-08): zoom, ← →, Escape.
+                 ImageLightbox(items: Self.lightboxItems(d),
+                               index: Binding(get: { store.outfitSheet?.viewing }, set: { store.outfitSheet?.viewing = $0 }))
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index 3c468c9..08956eb 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -481,6 +481,7 @@ struct ComposerRail: View {
+                 }
+             }
+             if tool == .extend { ExtendDirectionControl() }
++            ComposerSentImagesRow() // images sent (server images/sent.ts)
+             RigCheckRow()
+         }
+     }
+diff --git a/mac/Muse/Views/Suite/SentImagesRow.swift b/mac/Muse/Views/Suite/SentImagesRow.swift
+new file mode 100644
+index 0000000..efae04a
+--- /dev/null
++++ b/mac/Muse/Views/Suite/SentImagesRow.swift
+@@ -0,0 +1,74 @@
++import MuseCore
++import SwiftUI
++
++// Images sent (server images/sent.ts, owner 2026-11-11): the images the model gets for what's set up now, in the order
++// sent ("Image 1, 2, …" in the prompt), each with its role; the reason MUSE (or Claude) picked it is in the tooltip. When
++// Claude or the person changed the list: "Changed by Claude" and "Reset to automatic". Quiet when there's nothing to send.
++
++struct SentImagesRow: View {
++    @Environment(\.theme) private var t
++    var sent: SentImages?
++    /// Back to MUSE's own pick (nil: no reset offered).
++    var reset: (() -> Void)?
++
++    var body: some View {
++        if let s = sent, !s.images.isEmpty || s.changed {
++            VStack(alignment: .leading, spacing: Space.s2) {
++                HStack(spacing: Space.s2) {
++                    Text(s.title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
++                    if let tag = s.tag {
++                        Text(tag).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++                    }
++                    Spacer(minLength: Space.s2)
++                    if s.changed, let reset {
++                        Button("Reset to automatic", action: reset)
++                            .buttonStyle(.plain)
++                            .font(t.scale.label.font).foregroundStyle(t.roles.accent)
++                            .help("Send the images MUSE picks by itself")
++                    }
++                }
++                ScrollView(.horizontal, showsIndicators: false) {
++                    HStack(alignment: .top, spacing: Space.s2) {
++                        ForEach(Array(s.images.enumerated()), id: \.offset) { i, img in
++                            thumb(img, index: i + 1)
++                        }
++                    }
++                }
++            }
++            .accessibilityElement(children: .contain)
++            .accessibilityLabel(s.title + (s.tag.map { ", \($0)" } ?? ""))
++        }
++    }
++
++    private func thumb(_ x: SentImage, index: Int) -> some View {
++        VStack(alignment: .leading, spacing: Space.s1) {
++            MuseImage(ref: x.image)
++                .frame(width: 44, height: 58)
++                .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
++                .overlay(RoundedRectangle(cornerRadius: t.radii.chip).stroke(t.roles.hairline, lineWidth: 1))
++            Text(x.caption).font(t.scale.micro.font).foregroundStyle(t.roles.ink2)
++                .lineLimit(1).frame(width: 44, alignment: .leading)
++        }
++        .help("Image \(index): \(x.why.isEmpty ? x.caption : x.why)")
++        .accessibilityElement(children: .ignore)
++        .accessibilityLabel("Image \(index), \(x.caption)\(x.why.isEmpty ? "" : ", \(x.why)")")
++    }
++}
++
++/// The composer's row: the estimate of the open tool; Reset clears the draft's choice (the server forgets it too).
++struct ComposerSentImagesRow: View {
++    @Environment(AppStore.self) private var store
++
++    private var sent: SentImages? {
++        switch store.suite.composer.tool {
++        case .photo: return store.suite.photoEstimate?.sentImages
++        case .swap, .recast: return store.suite.swapEstimate?.sentImages
++        case .shot, .talking, .ugc: return store.suite.estimate?.sentImages
++        default: return nil
++        }
++    }
++
++    var body: some View {
++        SentImagesRow(sent: sent) { store.suite.composer.sent = .null }
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+index 146164d..e97f18e 100644
+--- a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+@@ -597,6 +597,13 @@ public actor FakeMuseAPI: MuseAPI {
+         return outfits.filter { !archived.contains($0.modelId) }
+     }
+ 
++    public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
++        let m = try activeModel(req.modelId)
++        let pick: [SentImage] = [("face", "face"), ("faceTq", "face ¾"), ("front", "body")].compactMap { p in
++            m.slots.first(where: { $0.key == p.0 })?.image.map { SentImage(image: $0, role: "person", label: p.1, why: "") } }
++        return OutfitEstimate(cost: req.mode == "own" ? 0 : photoPricing.outfitSet(), sentImages: SentImages(images: pick, max: 8))
++    }
++
+     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit {
+         try checkOverrides(req.models)
+         let m = try activeModel(req.modelId)
+diff --git a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+index b4e90b4..ded3fca 100644
+--- a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+@@ -262,6 +262,11 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
+     }
+     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
+     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
++    public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
++        var r = req
++        r.dryRun = true
++        return try await call("POST", "v1/outfits", r)
++    }
+     public func saveOutfit(outfitId: String, name: String?) async throws -> Outfit { try await call("POST", "v1/outfits/\(Self.pathKey(outfitId))/save", OutfitName(name: name)) }
+     public func renameOutfit(id: String, name: String) async throws -> Outfit { try await call("PATCH", "v1/outfits/\(Self.pathKey(id))", OutfitName(name: name)) }
+     public func deleteOutfit(id: String) async throws { _ = try await send(request("DELETE", "v1/outfits/\(Self.pathKey(id))")) }
+diff --git a/mac/MuseCore/Sources/MuseCore/Models.swift b/mac/MuseCore/Sources/MuseCore/Models.swift
+index ab045f0..49db753 100644
+--- a/mac/MuseCore/Sources/MuseCore/Models.swift
++++ b/mac/MuseCore/Sources/MuseCore/Models.swift
+@@ -293,6 +293,10 @@ public struct CreateOutfitRequest: Codable, Sendable {
+     public var models: ModelOverrides?
+     /// Owner only: the outfit's image model (EngineChoice.swift, purpose "outfit"); nil = the studio's default.
+     public var imageModel: String?
++    /// Price and images only (`outfitEstimate`): nothing is held or made.
++    public var dryRun: Bool?
++    /// Images sent (server images/sent.ts): `.null` = MUSE's own pick, dropping a choice Claude made for this sheet.
++    public var sentImages: JSONValue?
+ 
+     public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef] = [], models: ModelOverrides? = nil) {
+         self.models = (models?.isEmpty ?? true) ? nil : models
+@@ -304,6 +308,22 @@ public struct CreateOutfitRequest: Codable, Sendable {
+     }
+ }
+ 
++/// `POST /v1/outfits` with dryRun: the price and the images the outfit's front would send.
++public struct OutfitEstimate: Codable, Hashable, Sendable {
++    public var cost: Double
++    public var sentImages: SentImages?
++    public init(cost: Double = 0, sentImages: SentImages? = nil) {
++        self.cost = cost
++        self.sentImages = sentImages
++    }
++    enum CodingKeys: String, CodingKey { case cost, sentImages }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: CodingKeys.self)
++        cost = c.v(.cost, 0)
++        sentImages = c.o(.sentImages)
++    }
++}
++
+ /// status: good | bad | info
+ public struct ClipCheck: Codable, Hashable, Sendable {
+     public var label: String
+diff --git a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+index bfb6b95..8e3b36d 100644
+--- a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+@@ -65,6 +65,8 @@ public protocol MuseAPI: AnyObject, Sendable {
+     func listOutfits() async throws -> [Outfit]
+     /// Starts generating an outfit set preview (state=generating; an outfit event follows with state=preview).
+     func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit
++    /// Images sent: the price and the images a new outfit's front would send (nothing made).
++    func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate
+     /// Attaches a generated preview to the model, with the name chosen in the preview (nil keeps its name).
+     func saveOutfit(outfitId: String, name: String?) async throws -> Outfit
+     /// Renames an outfit (1–80 characters; the owner or whoever made it).
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/ComposerDrafts.swift b/mac/MuseCore/Sources/MuseCore/Suite/ComposerDrafts.swift
+index 9786930..98c3c72 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/ComposerDrafts.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/ComposerDrafts.swift
+@@ -42,6 +42,7 @@ public enum ComposerDrafts {
+         var extra: [String: JSONValue] = [:]
+         if let o = d.outfitId { extra["outfitId"] = .string(o) }
+         if let p = photo?.presetId { extra["presetId"] = .string(p) }
++        if let s = d.sent { extra["sent"] = s } // images sent (the server reads the draft's choice)
+         if d.tool == .photo {
+             return SuiteDraft(tool: "photo", count: photo?.count, rig: SuiteRig(d.settings), tokens: encode(d.tokens), extra: extra)
+         }
+@@ -62,6 +63,7 @@ public enum ComposerDrafts {
+         if let r = s.rig { out.settings = r.settings }
+         if let toks = s.tokens { out.tokens = decode(toks) }
+         if case .string(let o)? = s.extra["outfitId"] { out.outfitId = o }
++        out.sent = s.raw["sent"]
+         out.collapsed = nil
+         out.directed = nil
+         return out
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift b/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift
+index 9e2a720..f2b036d 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift
+@@ -535,6 +535,10 @@ public struct ComposerDraft: Hashable, Sendable {
+     public var resolution: String?
+     /// Extend: the video, After / Before and what happens (ComposerExtend.swift).
+     public var extend: ExtendDraft
++    /// Images sent (server images/sent.ts): Claude's or the person's choice of the images the model gets, as the draft's
++    /// `sent` ({sentImages | addImages, excludeImages, sentImagesBy}). nil = automatic; `.null` = reset to automatic (the
++    /// server then drops a choice it kept).
++    public var sent: JSONValue? = nil
+ 
+     public init(tool: ComposerTool = .shot, tokens: PromptTokens = PromptTokens(), settings: ComposerSettings = ComposerSettings(), outfitId: String? = nil,
+                 quality: String = "draft", aspect: String = "9:16", duration: Int = 8, sound: Bool = true, speaking: ComposerSpeaking = .auto, takes: Int = 1,
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SentImages.swift b/mac/MuseCore/Sources/MuseCore/Suite/SentImages.swift
+new file mode 100644
+index 0000000..2dd0475
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SentImages.swift
+@@ -0,0 +1,71 @@
++import Foundation
++
++// Images sent (server images/sent.ts, owner 2026-11-11): every estimate says which images go to the model, in order, each
++// with its role and why MUSE picked it, and whether Claude or the person changed the list. The composer shows them as
++// "Images sent (n)" with "Changed by Claude" and "Reset to automatic".
++
++/// One image a generation sends.
++public struct SentImage: Codable, Hashable, Sendable {
++    public var image: ImageRef
++    /// person | outfit | product | location | style | pose | other
++    public var role: String
++    public var label: String
++    public var why: String
++
++    public init(image: ImageRef, role: String, label: String, why: String = "") {
++        self.image = image
++        self.role = role
++        self.label = label
++        self.why = why
++    }
++
++    enum CodingKeys: String, CodingKey { case image, role, label, why }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: CodingKeys.self)
++        image = try c.decode(ImageRef.self, forKey: .image)
++        role = c.v(.role, "other")
++        label = c.v(.label, "")
++        why = c.v(.why, "")
++    }
++
++    /// The caption under its thumbnail: the label, else the role in words.
++    public var caption: String {
++        let l = label.trimmingCharacters(in: .whitespaces)
++        if !l.isEmpty { return l.prefix(1).uppercased() + l.dropFirst() }
++        return SentImage.roleWords[role] ?? "Reference"
++    }
++    public static let roleWords = ["person": "Her", "outfit": "Outfit", "product": "Product", "location": "Location", "style": "Style", "pose": "Pose", "other": "Reference"]
++}
++
++/// What an estimate returns as `sentImages`.
++public struct SentImages: Codable, Hashable, Sendable {
++    public var images: [SentImage]
++    /// Different from MUSE's own pick.
++    public var changed: Bool
++    /// "claude" | "person" when changed.
++    public var changedBy: String?
++    /// The most the model takes.
++    public var max: Int?
++
++    public init(images: [SentImage] = [], changed: Bool = false, changedBy: String? = nil, max: Int? = nil) {
++        self.images = images
++        self.changed = changed
++        self.changedBy = changedBy
++        self.max = max
++    }
++
++    enum CodingKeys: String, CodingKey { case images, changed, changedBy, max }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: CodingKeys.self)
++        images = c.v(.images, [])
++        changed = c.v(.changed, false)
++        changedBy = c.o(.changedBy)
++        max = c.o(.max)
++    }
++
++    public var byClaude: Bool { changed && changedBy == "claude" }
++    /// "Images sent (3)".
++    public var title: String { "Images sent (\(images.count))" }
++    /// "Changed by Claude" / "Changed by you", nil when automatic.
++    public var tag: String? { changed ? (byClaude ? "Changed by Claude" : "Changed by you") : nil }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift
+index d0e3690..a7bc9ac 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift
+@@ -112,6 +112,9 @@ public enum SuiteAssistDraft {
+         if case .string(let o)? = draft.extra["outfitId"], o != current.outfitId {
+             if options.outfits[o] != nil { out.outfitId = o } else { refuse("Outfit", o, "isn't one of this character's outfits") }
+         }
++        // Images sent: Claude's choice (or none) as the draft has it.
++        let sent = draft.raw["sent"]
++        if !(sent == nil && current.sent == .null) { out.sent = sent } // a reset the server already applied stays a reset
+         // A preset's collapsed composer opens up once Claude changes its rig or prompt.
+         if out.settings != current.settings || out.tokens != current.tokens { out.collapsed = nil }
+         return SuiteDraftApplied(composer: out, changed: changedRows(current, out), rejected: rejected)
+@@ -261,6 +264,7 @@ public enum SuiteAssistDraft {
+         if a.takes != b.takes { out.append("Takes") }
+         if a.sound != b.sound { out.append("Sound") }
+         if a.speaking != b.speaking { out.append("Speaking") }
++        if (a.sent == .null ? nil : a.sent) != (b.sent == .null ? nil : b.sent) { out.append("Images sent") }
+         return out
+     }
+ 
+@@ -290,6 +294,7 @@ public enum SuiteAssistDraft {
+         take(\.takes)
+         take(\.sound)
+         take(\.speaking)
++        take(\.sent)
+         take(\.settings.body)
+         take(\.settings.lens)
+         take(\.settings.focalMm)
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
+index b4834d2..9bbc953 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
+@@ -975,6 +975,8 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
+     public var look: SuiteLook?
+     /// The rig check (workstream 3): clashes between the choices, or with the prompt. Empty when nothing clashes; never changes `ok`.
+     public var rig: [RigWarning]
++    /// The images the model gets (server images/sent.ts); nil from an older server.
++    public var sentImages: SentImages? = nil
+ 
+     public init(quality: String, label: String, resolution: String, seconds: Double, takes: Int, mode: String, estimate: Double, priceLine: String, buttonLabel: String,
+                 ok: Bool = true, code: String? = nil, message: String? = nil, caps: SuiteCaps? = nil, warnings: [String] = [], camera: SuiteEstimateCamera = SuiteEstimateCamera(),
+@@ -1006,7 +1008,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
+ 
+     enum CodingKeys: String, CodingKey {
+         case quality, label, resolution, seconds, takes, mode, estimate, priceLine, buttonLabel, ok, code, message, caps, warnings, camera, prompt, test, speaking
+-        case cast, keepAudio, engine, tried, look, rig
++        case cast, keepAudio, engine, tried, look, rig, sentImages
+     }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+@@ -1034,6 +1036,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
+         tried = c.o(.tried)
+         look = c.o(.look)
+         rig = c.v(.rig, RigWarnings()).list
++        sentImages = c.o(.sentImages)
+     }
+ 
+     /// The line to show when it can't be made as is (a cap), or nil.
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift
+index a12d1b2..fc6968b 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift
+@@ -91,6 +91,8 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+     /// The still's prompt (absent with a preset).
+     public var prompt: String?
+     public var preset: PhotoPresetRef?
++    /// The images the model gets (server images/sent.ts); nil from an older server.
++    public var sentImages: SentImages? = nil
+ 
+     public init(count: Int, perPhoto: Double, estimate: Double? = nil, priceLine: String? = nil, buttonLabel: String? = nil, ok: Bool = true, warnings: [String] = [],
+                 rig: [RigWarning] = [], look: SuiteLook? = nil, prompt: String? = nil, preset: PhotoPresetRef? = nil) {
+@@ -109,7 +111,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+         self.preset = preset
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset }
++    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset, sentImages }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         tool = c.v(.tool, "photo")
+@@ -124,6 +126,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+         look = c.o(.look)
+         prompt = c.o(.prompt)
+         preset = c.o(.preset)
++        sentImages = c.o(.sentImages)
+     }
+ 
+     public static func photos(_ n: Int) -> String { "\(n) photo\(n == 1 ? "" : "s")" }
+@@ -137,6 +140,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+         var e = ShotEstimate(quality: "photo", label: "Photo · \(PhotoEstimate.photos(count))", resolution: "", seconds: 0, takes: count, mode: "photo",
+                              estimate: estimate, priceLine: priceLine, buttonLabel: buttonLabel, ok: ok, warnings: warnings, prompt: prompt, rig: rig)
+         e.look = look
++        e.sentImages = sentImages
+         return e
+     }
+ }
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/SentImagesTests.swift b/mac/MuseCore/Tests/MuseCoreTests/SentImagesTests.swift
+new file mode 100644
+index 0000000..79a907f
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/SentImagesTests.swift
+@@ -0,0 +1,31 @@
++import XCTest
++@testable import MuseCore
++
++/// Images sent (server images/sent.ts): estimates decode `sentImages`, and the composer's draft carries Claude's choice.
++final class SentImagesTests: XCTestCase {
++    func testEstimatesDecodeSentImages() throws {
++        let json = #"{"quality":"draft","label":"Shot","estimate":0.4,"priceLine":"","buttonLabel":"Generate","sentImages":{"images":[{"image":{"asset":"g_back"},"role":"person","label":"body, back","why":"chosen by Claude"}],"changed":true,"changedBy":"claude","max":9}}"#
++        let e = try JSONDecoder().decode(ShotEstimate.self, from: Data(json.utf8))
++        XCTAssertEqual(e.sentImages?.images.first?.image.asset, "g_back")
++        XCTAssertEqual(e.sentImages?.tag, "Changed by Claude")
++        XCTAssertEqual(e.sentImages?.title, "Images sent (1)")
++        let p = try JSONDecoder().decode(PhotoEstimate.self, from: Data(#"{"count":1,"perPhoto":0.1,"sentImages":{"images":[],"changed":false}}"#.utf8))
++        XCTAssertEqual(p.asShotEstimate.sentImages?.changed, false)
++        XCTAssertNil(try JSONDecoder().decode(ShotEstimate.self, from: Data(#"{"quality":"draft"}"#.utf8)).sentImages) // older server
++    }
++
++    func testDraftCarriesTheChoiceAndReset() {
++        var d = ComposerDraft(tool: .shot)
++        let choice: JSONValue = .object(["excludeImages": .array([.object(["asset": .string("c_face")])]), "sentImagesBy": .string("claude")])
++        d.sent = choice
++        let s = ComposerDrafts.draft(d)
++        XCTAssertEqual(s.raw["sent"], choice)
++        XCTAssertEqual(ComposerDrafts.restore(s, into: ComposerDraft(tool: .shot)).sent, choice)
++        d.sent = .null // Reset to automatic: sent as null so the server forgets it
++        XCTAssertEqual(ComposerDrafts.draft(d).raw["sent"], .null)
++        var c = ComposerDraft(tool: .shot)
++        c.sent = choice
++        XCTAssertTrue(SuiteAssistDraft.changedRows(ComposerDraft(tool: .shot), c).contains("Images sent"))
++        XCTAssertFalse(SuiteAssistDraft.changedRows(ComposerDraft(tool: .shot), d).contains("Images sent")) // reset = automatic
++    }
++}
+-- 
+2.43.0
+
