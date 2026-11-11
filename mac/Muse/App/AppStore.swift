@@ -136,6 +136,8 @@ struct OutfitDraft {
     var angles: [ImageRef?] = [nil, nil, nil, nil]
     /// The angle open full size (ImageLightbox), an index into `lightboxItems`.
     var viewing: Int?
+    /// "My own set": one file per angle (front, ¾, side, back), set box by box; nil = skipped.
+    var own: [URL?] = [nil, nil, nil, nil]
     /// §6: start from her base photos, keeping the ticked pieces.
     var fromBase = false
     var keep = OutfitKeep()

@@ -288,7 +288,8 @@ public struct CreateOutfitRequest: Codable, Sendable {
     public var name: String
     public var mode: String
     public var description: String
-    public var images: [ImageRef]
+    /// One per angle for "My own set" (front, ¾, side, back; nil = skipped); the product photo otherwise.
+    public var images: [ImageRef?]
     /// Owner only: per-run model override (step → "owner/name").
     public var models: ModelOverrides?
     /// Owner only: the outfit's image model (EngineChoice.swift, purpose "outfit"); nil = the studio's default.
@@ -296,7 +297,7 @@ public struct CreateOutfitRequest: Codable, Sendable {
     /// §6: start from her base photos, keeping the ticked pieces (nil = a new outfit as before).
     public var base: OutfitBase?
 
-    public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef] = [], models: ModelOverrides? = nil) {
+    public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef?] = [], models: ModelOverrides? = nil) {
         self.models = (models?.isEmpty ?? true) ? nil : models
         self.modelId = modelId
         self.name = name
