@@ -29,7 +29,7 @@ describe('B1 tools', () => {
   it('are in everyone\'s tools and none takes confirm (nothing here spends, deletes or posts)', () => {
     const m = toolsForUser({ role: 'member' }).map(t => t.name);
     expect(m).not.toContain('character_archive');
-    for (const t of APP_TOOLS.filter(x => x.name !== 'character_archive')) {
+    for (const t of APP_TOOLS.filter(x => !['character_archive', 'warm_gpu'].includes(x.name))) {
       expect(m).toContain(t.name);
       expect(registryByName.get(t.name)!.gate).toBe('none');
       expect(Object.keys((t.inputSchema as any).properties ?? {})).not.toContain('confirm');

@@ -969,6 +969,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get<{ Params: { id: string } }>('/v1/models/:id/lora', async req => ctx.lora.get(req.user, req.params.id));
   app.post<{ Params: { id: string } }>('/v1/models/:id/lora/candidates', async req => ctx.lora.buildCandidates(req.user, req.params.id));
   app.patch<{ Params: { id: string; cid: string } }>('/v1/models/:id/lora/candidates/:cid', async req => ctx.lora.keep(req.user, req.params.id, req.params.cid, (req.body as any)?.keep === true));
+  app.post<{ Params: { id: string } }>('/v1/models/:id/lora/estimate', async req => ctx.lora.prices(req.user, req.params.id));
   app.post<{ Params: { id: string } }>('/v1/models/:id/lora/train', async req => ctx.lora.train(req.user, req.params.id));
   app.patch<{ Params: { id: string } }>('/v1/models/:id/lora', async req => ctx.lora.patch(req.user, req.params.id, (req.body ?? {}) as any));
 

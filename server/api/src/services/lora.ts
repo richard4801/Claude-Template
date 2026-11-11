@@ -54,6 +54,12 @@ export class LoraService {
     if (m.archivedAt) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
   }
 
+  /** What building the training set and training would cost now (Claude's go-ahead shows it; nothing held). */
+  async prices(user: AuthUser, modelId: string) {
+    const m = await this.model(user, modelId);
+    return { build: P.LORA_CANDIDATES * (await this.identityPlan(user, m)).plan.perShot, train: P.loraTrainCost(), photos: P.LORA_CANDIDATES };
+  }
+
   async buildCandidates(user: AuthUser, modelId: string) {
     const m = await this.model(user, modelId);
     this.archived(m);

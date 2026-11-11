@@ -351,6 +351,7 @@ export class ToolService {
     const o = r.options as any;
     const est = r.kind === 'enhance' ? await this.enhancePerImage(u.studioId, o.realism, o.upscale, r.models as StepOverrides)
       : await this.ctx.imageModels.estimate(r.models[stepOf(eng)]!, { outMp: 1, inMp: PHOTO_REF_MP * (slot === 'front' ? 2 : 3) });
+    if ((body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, cost: est }; // estimate only (Claude's go-ahead)
     const bill = await new PhotoBill(this.ctx, whoOf(u), `${r.id}_${uid('r')}`, est, `${r.kind === 'enhance' ? 'Enhance' : 'Dress up'} · retry 1 image`).start();
     const items = r.items.map(i => (i.slot === slot ? { ...i, state: 'running' as const, decision: 'pending' as const, pick: null, error: undefined } : { ...i }));
     const saved = await this.save(r.id, { items });

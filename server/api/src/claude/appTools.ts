@@ -240,4 +240,52 @@ export const APP_TOOLS: EditTool[] = [
       throw badRequest('action: list, get, decide, pick or apply');
     },
   },
+  // B3d
+  {
+    name: 'lora', title: 'A character\'s LoRA', scope: 'edit:write',
+    description: 'A character\'s LoRA (her own trained look): status, version, the training set (get), the prices of building the set and training (prices), and keeping or dropping a training photo (keep with candidateId and keep: true/false). Free. Building, training, use on/off and retrain go through lora_action with the person\'s go-ahead.',
+    inputSchema: obj({ action: { type: 'string', enum: ['get', 'prices', 'keep'] }, modelId: str('The character', 80), candidateId: str('A training photo (keep)', 80), keep: { type: 'boolean' } }, ['action', 'modelId']),
+    run: async (env, a) => {
+      const m = enc(id(a.modelId, 'modelId'));
+      if (a.action === 'get') return slim(await appCall(env.ctx, env.user, 'GET', `/v1/models/${m}/lora`), 40);
+      if (a.action === 'prices') return appCall(env.ctx, env.user, 'POST', `/v1/models/${m}/lora/estimate`, {});
+      if (a.action === 'keep') return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/models/${m}/lora/candidates/${enc(id(a.candidateId, 'candidateId'))}`, { keep: a.keep === true }), 40);
+      throw badRequest('action: get, prices or keep');
+    },
+  },
+  {
+    name: 'warm_gpu', title: 'Warm GPU (owner)', scope: 'edit:write',
+    description: 'The warm GPU (a GPU kept running so jobs start at once): status (state, minutes, cost so far, rate per hour, auto-off) or turn it off (off: stops the charge). Owner only. Turning it on or keeping it warm longer costs money: warm_gpu_on, with her go-ahead.',
+    inputSchema: obj({ action: { type: 'string', enum: ['status', 'off'] } }, ['action']),
+    run: async (env, a) => a.action === 'off' ? slim(await appCall(env.ctx, env.user, 'POST', '/v1/gpu/warm', { on: false })) : slim(await appCall(env.ctx, env.user, 'GET', '/v1/gpu/warm')),
+  },
+  {
+    name: 'suite_rigs', title: 'Saved rigs and locations', scope: 'edit:write',
+    description: 'The AI Suite\'s saved rigs (camera, lens, light, look set-ups) and the studio\'s locations (@location): list rigs or locations, save the open draft\'s rig under a name (save_rig with assistId and name), or rename a rig. Free. Deleting a rig or location needs the person\'s go-ahead (suite_rig_delete).',
+    inputSchema: obj({ action: { type: 'string', enum: ['list_rigs', 'list_locations', 'save_rig', 'rename_rig'] }, rigId: str('The rig (rename_rig)', 80),
+      assistId: str('The Suite draft whose rig to save (filled in when the Suite is open)', 80), name: str('Its name', 60) }, ['action']),
+    run: async (env, a) => {
+      if (a.action === 'list_rigs') return slim(await appCall(env.ctx, env.user, 'GET', '/v1/suite/rigs'), 40);
+      if (a.action === 'list_locations') return slim(await appCall(env.ctx, env.user, 'GET', '/v1/suite/locations'), 40);
+      if (a.action === 'rename_rig') return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/suite/rigs/${enc(id(a.rigId, 'rigId'))}`, { name: a.name }));
+      if (a.action === 'save_rig') {
+        const v = await assistOf(env.ctx).get(env.user, id(a.assistId, 'assistId'));
+        const rig = (v.request as { rig?: unknown }).rig;
+        if (!rig) throw badRequest('This draft has no rig set yet (suite_set_draft rig)');
+        return slim(await appCall(env.ctx, env.user, 'POST', '/v1/suite/rigs', { name: a.name, rig }));
+      }
+      throw badRequest('action: list_rigs, list_locations, save_rig or rename_rig');
+    },
+  },
+  {
+    name: 'edit_kits', title: 'Edit style kits', scope: 'edit:write',
+    description: 'Edit\'s style kits (saved caption/text/look styles): list, save one (name + kit, as the editor sends it), or rename/change one. Free. Deleting needs the person\'s go-ahead (edit_kit_delete).',
+    inputSchema: obj({ action: { type: 'string', enum: ['list', 'save', 'update'] }, kitId: str('The kit (update)', 80), name: str('Its name', 60), kit: { type: 'object', description: 'The kit, as the editor saves it' } }, ['action']),
+    run: async (env, a) => {
+      if (a.action === 'list') return slim(await appCall(env.ctx, env.user, 'GET', '/v1/editor/kits'), 40);
+      if (a.action === 'save') return slim(await appCall(env.ctx, env.user, 'POST', '/v1/editor/kits', { name: a.name, kit: a.kit }));
+      if (a.action === 'update') return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/editor/kits/${enc(id(a.kitId, 'kitId'))}`, { ...(a.name ? { name: a.name } : {}), ...(a.kit ? { kit: a.kit } : {}) }));
+      throw badRequest('action: list, save or update');
+    },
+  },
 ];

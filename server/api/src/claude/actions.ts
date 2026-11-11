@@ -282,6 +282,59 @@ export const ACTION_TOOLS: GatedTool[] = [
       const r = await appCall(env.ctx, env.user, 'GET', `/v1/recreate/references/${enc(id(a.referenceId, 'referenceId'))}`);
       return { summary: `Delete the Recreate reference “${r?.title ?? r?.name ?? a.referenceId}”`, method: 'DELETE', url: `/v1/recreate/references/${enc(a.referenceId as string)}` };
     } }),
+  // B3d
+  gated({ name: 'lora_action', title: 'Build, train or switch a LoRA', scope: 'edit:write', gate: 'spend',
+    description: 'A character\'s LoRA, as on its screen: build the training set (build: paid photos), train it on the kept photos (train: paid GPU time), use it on/off (use: true/false), or retrain (retrain: back to the review grid; the current version stays in use). Without confirm it says what happens and the price.',
+    props: { modelId: str('The character', 80), action: { type: 'string', enum: ['build', 'train', 'use', 'retrain'] }, use: { type: 'boolean', description: 'use: on or off' } }, required: ['modelId', 'action'],
+    plan: async (env, a) => {
+      const m = enc(id(a.modelId, 'modelId'));
+      const p = a.action === 'build' || a.action === 'train' ? await appCall(env.ctx, env.user, 'POST', `/v1/models/${m}/lora/estimate`, {}) as { build: number; train: number; photos: number } : null;
+      if (a.action === 'build') return { summary: `Build her LoRA training set (${p!.photos} photos)`, method: 'POST', url: `/v1/models/${m}/lora/candidates`, body: {}, priceUsd: p!.build };
+      if (a.action === 'train') return { summary: 'Train her LoRA on the kept photos', method: 'POST', url: `/v1/models/${m}/lora/train`, body: {}, priceUsd: p!.train };
+      if (a.action === 'use') return { summary: `${a.use === false ? 'Stop using' : 'Use'} her LoRA in new photos and videos`, method: 'PATCH', url: `/v1/models/${m}/lora`, body: { use: a.use !== false } };
+      if (a.action === 'retrain') return { summary: 'Retrain her LoRA (back to the review grid)', method: 'PATCH', url: `/v1/models/${m}/lora`, body: { state: 'review' } };
+      throw badRequest('action: build, train, use or retrain');
+    } }),
+  gated({ name: 'warm_gpu_on', title: 'Turn on / keep warm a GPU (owner)', scope: 'edit:write', gate: 'spend',
+    description: 'Turns the warm GPU on, or keeps it warm longer (extend: true), as on the Warm GPU screen. Owner only. Charged per hour until it turns off (it turns itself off when idle). Without confirm it gives the rate.',
+    props: { extend: { type: 'boolean', description: 'Keep it warm longer instead of turning it on' } }, required: [],
+    plan: async (env, a) => {
+      const w = await appCall(env.ctx, env.user, 'GET', '/v1/gpu/warm') as { ratePerHour?: number; idleMinutes?: number; maxMinutes?: number };
+      const rate = typeof w.ratePerHour === 'number' ? ` at $${w.ratePerHour.toFixed(2)}/hour` : '';
+      return { summary: a.extend === true ? `Keep the warm GPU on longer${rate}` : `Turn on a warm GPU${rate} (off by itself after ${w.idleMinutes ?? '?'} idle minutes, at most ${w.maxMinutes ?? '?'} minutes)`,
+        method: 'POST', url: '/v1/gpu/warm', body: a.extend === true ? { extend: true } : { on: true }, priceUsd: typeof w.ratePerHour === 'number' ? w.ratePerHour : null };
+    } }),
+  gated({ name: 'job_retry', title: 'Run a video job again', scope: 'edit:write', gate: 'spend',
+    description: 'Runs a finished or failed video job again with exactly its settings (queue_list for ids), as Run again on the Queue. Photo jobs are run again from the AI Suite (set the draft and request the shot). Paid: without confirm it gives the price.',
+    props: { jobId: str('The job', 80) }, required: ['jobId'],
+    plan: async (env, a) => {
+      const jobs = await appCall(env.ctx, env.user, 'GET', '/v1/jobs');
+      const j = ((Array.isArray(jobs) ? jobs : jobs?.jobs ?? []) as { id: string; title?: string; modelId?: string; outfitId?: string; cost?: number; request?: Record<string, unknown> }[]).find(x => x.id === a.jobId);
+      if (!j?.request) throw notFound('Job');
+      if (j.request.engine === 'photo' || j.request.tool === 'photo') throw badRequest('A photo job runs again from the AI Suite: set the draft (suite_set_draft) and request the shot');
+      const body = { ...j.request, modelId: j.modelId, ...(j.outfitId ? { outfitId: j.outfitId } : {}) };
+      return { summary: `Run “${j.title ?? j.id}” again`, method: 'POST', url: '/v1/jobs', body, priceUsd: typeof j.cost === 'number' ? j.cost : null };
+    } }),
+  gated({ name: 'tool_run_retry', title: 'Retry one Dress up / Enhance picture', scope: 'edit:write', gate: 'spend',
+    description: 'Makes one picture of a Dress up or Enhance run again (tool_run get shows the slots), optionally on its other option (engine a or b). Paid: without confirm it gives the price.',
+    props: { runId: str('The run', 80), slot: str('The picture', 40), engine: { type: 'string', enum: ['a', 'b'] } }, required: ['runId', 'slot'],
+    plan: async (env, a) => {
+      const url = `/v1/tool-runs/${enc(id(a.runId, 'runId'))}/items/${enc(id(a.slot, 'slot'))}/retry`, body = a.engine ? { engine: a.engine } : {};
+      const e = await appCall(env.ctx, env.user, 'POST', url, { ...body, dryRun: true });
+      return { summary: `Make the ${String(a.slot)} picture again`, method: 'POST', url, body, priceUsd: priceOf(e) };
+    } }),
+  gated({ name: 'suite_rig_delete', title: 'Delete a saved rig or location', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes a saved AI Suite rig (rigId) or a location (locationId). Needs the person\'s go-ahead.',
+    props: { rigId: str('The rig', 80), locationId: str('Or the location', 80) }, required: [],
+    plan: async (_env, a) => {
+      if (typeof a.rigId === 'string' && a.rigId) return { summary: 'Delete a saved rig', method: 'DELETE', url: `/v1/suite/rigs/${enc(id(a.rigId, 'rigId'))}` };
+      if (typeof a.locationId === 'string' && a.locationId) return { summary: 'Delete a location', method: 'DELETE', url: `/v1/suite/locations/${enc(id(a.locationId, 'locationId'))}` };
+      throw badRequest('rigId or locationId');
+    } }),
+  gated({ name: 'edit_kit_delete', title: 'Delete a style kit', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes an Edit style kit. Needs the person\'s go-ahead.',
+    props: { kitId: str('The kit', 80) }, required: ['kitId'],
+    plan: async (_env, a) => ({ summary: 'Delete a style kit', method: 'DELETE', url: `/v1/editor/kits/${enc(id(a.kitId, 'kitId'))}` }) }),
 ];
 
 /** Studio settings Claude may read and (with the owner's go-ahead) change. Never keys, providers or prices. */

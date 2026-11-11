@@ -1,118 +1,87 @@
-# One Claude · full-control audit (2026-11-11)
+# One Claude · full-control audit (2026-11-11) — ALL COVERED
 
 Owner rule (16:15): Claude has total control of the app and reports its own issues; the owner is not the tester.
 Method: every Mac screen action (traced view → AppStore → MuseCore client → server route), checked against the one
-registry (`claude/registry.ts`) and the owner's MCP tools. Keys, providers, prices, MCP tokens, top-ups and wallet
-transfers stay owner-only in Settings and never go through Claude (rule, not a gap).
+registry (`server/api/src/claude/registry.ts`) and the owner's MCP tools.
 
-Gate column: none · spend · delete · post · settings. A gated tool never acts on Claude's word: without `confirm` it says
-what would happen (and the price); with `confirm: true` it puts an approval card in the person's app.
+**Never through Claude (rule, not a gap):** keys, providers and provider models, prices/markup, MCP tokens, top-ups and
+credit transfers, connecting social accounts. Owner-only screens stay owner-only (the tools are hidden from members and
+the routes refuse them).
 
-## Status today
+**How the tools work.** New tools call MUSE's own routes in-process AS the person (`claude/appCall.ts`: a one-time
+grant, never a token), so permissions, member limits and the wallet are exactly the app's. Gate column: none · spend ·
+delete · post · settings. A gated tool never acts on Claude's word: without `confirm` it says what would happen and the
+price (from the screen's own estimate or `dryRun`); with `confirm: true` it stores the exact call and puts an Approve
+card in the person's chat (`claude/actions.ts`, `/v1/claude/actions`). Only that person, once, within 30 minutes.
 
-| Screen | Action | Tool today | Gate | Plan |
-|---|---|---|---|---|
-| Anywhere | open a page / take / character / edit / Suite tool / Recreate | `open_page`, `where_am_i` | none | ✓ |
-| Anywhere | memory, other chats | `memory_*`, `chats_list`, `chat_read` | none | ✓ |
-| Anywhere | watch a video | `watch`, `watch_closer` | none | ✓ |
-| Anywhere | report what it couldn't do | `report_issue` (+ auto-captured tool errors) | none | ✓ Part A |
-| Home / Queue | Run queue | GAP | spend | B2 `queue_run` |
-| Queue | list jobs, watch progress | GAP | none | B1 `queue_list` |
-| Queue | cancel / remove a job | GAP | delete | B2 `queue_cancel` |
-| Queue | retry / run again | GAP | spend | B2 `queue_retry` |
-| Queue | queued Suite shots: list / run / remove | GAP | none / spend / delete | B1 list, B2 run/remove |
-| Suite | set up Shot, Talking, UGC, Storyboard, Swap/Recast, Extend, Photo | `suite_set_draft`, `suite_options`, `suite_cast`, `suite_see`, `suite_add_reference` | none | ✓ |
-| Suite | price / Generate | `suite_estimate`, `suite_request_shot` | spend | ✓ |
-| Suite | Upscale a take | GAP | spend | B2 `take_upscale` |
-| Suite | Add shot to queue | GAP | none | B2 `suite_queue_add` |
-| Suite | saved rigs: list / save / delete; locations | GAP | none / delete | B1 list; B3 save/delete |
-| Suite | turn a Suite model on/off | GAP | settings | B3 (owner) |
-| Cast | list characters (all people) | `list_characters` (owner MCP only) | none | B1 `characters_list` for everyone |
-| Cast | create character, set sheet slots | GAP | none | B3 (needs uploads; app side) |
-| Cast | fill missing angles / retake angle | GAP | spend | B2 `character_fill_angles` |
-| Cast | Dress up / Enhance (estimate, start) | GAP | spend | B2 `character_dress_up`, `character_enhance` |
-| Cast | tool run keep/reject/apply, retry, discard | GAP | none / spend / delete | B3 |
-| Cast | archive / unarchive / duplicate / "never" list | GAP | none / settings | B3 |
-| Cast | delete character | GAP | delete | B3 `character_delete` |
-| Outfits | list / see | `suite_cast`, `suite_see` (in a Suite draft) | none | B1 `outfits_list` anywhere |
-| Outfits | generate an outfit | GAP | spend | B2 `outfit_make` |
-| Outfits | save with a name / rename | GAP | none | B1 `outfit_rename` |
-| Outfits | fill angles | GAP | spend | B2 `outfit_fill` |
-| Outfits | delete | GAP | delete | B2 `outfit_delete` |
-| Edit | every edit op, undo, frames, contact sheet, looks, captions, beats, versions, export | `open_edit`, `get_edit`, `apply_edit_ops`, `undo_edit`, `get_frame`, `get_contact_sheet`, `save_version`, `export_video`, … | none | ✓ (owner; editing is owner-only by design) |
-| Edit | paid helpers: captions, fillers, cut-out, denoise | `auto_captions`, `cut_fillers`, `remove_background`, `denoise` | spend | ✓ |
-| Edit | other helpers: reverse, stabilize, slow-mo, translate, separate stems | GAP | spend | B3 `edit_helper {feature}` via /v1/editor/jobs |
-| Edit | style kits list / save / delete | GAP | none / delete | B3 |
-| Recreate | analyse, recipe, briefs, match, fill, replace, apply | `analyze_reference`, `get_recipe`, `set_slot_briefs`, `match_slots`, `fill_slot`, `replace_slot`, `apply_recipe` | spend on fill | ✓ |
-| Recreate | list references, retry analysis, export | GAP | none / spend | B1 list; B3 retry/export |
-| Camera | sessions, cast, path, guides, shot draft | camera MCP tools (owner, Claude Code on the Mac) | none | ✓ |
-| Camera | delete a session | GAP | delete | B3 |
-| Library | find / filter takes | `list_takes` (edit-scoped, owner) | none | B1 `library_find` for everyone (query, character, status, date) |
-| Library | collections: list / create / rename / add / remove | GAP | none | B1 `library_collections`, B1 `library_collect` |
-| Library | delete a collection | GAP | delete | B2 |
-| Library | approve / unapprove a take | GAP | none | B1 `take_status` |
-| Library | discard a take | GAP | delete | B2 `take_discard` |
-| Library | tag | no tag feature in the app (recipe tags only) | — | not a gap; ask owner if wanted |
-| Library | save a take as a template | GAP | none | B3 |
-| Templates | list / open | GAP | none | B1 `templates_list` |
-| Templates | use (opens Photo with the preset) | `open_page` + `suite_set_draft` | none | ✓ (B1: templates_list returns the preset to set) |
-| Templates | create / edit / duplicate / favourite / delete | GAP | none / delete | B3 |
-| Posts | list scheduled / posted | GAP | none | B1 `posts_list` |
-| Posts | schedule / post now (caption, hashtags) | GAP | post | B2 `post_schedule` |
-| Posts | cancel a scheduled post | GAP | delete | B2 `post_cancel` |
-| Posts | connect / disconnect an account | — | — | never through Claude (account credentials) |
-| LoRA | build set / train / use | GAP | spend / settings | B3 (owner asks first: spend) |
-| Settings | studio limits, editor helpers, strict links, image engine, engine defaults, members' caps, prompt library, prompt scripts | GAP | settings | B3 `studio_settings_get` (none) / `studio_settings_set` (settings, owner) |
-| Settings | keys, providers, provider models, prices, MCP tokens, top-ups, credit transfers | — | — | never through Claude (owner rule) |
-| Learn | playbook read / add | `playbook_read`, `playbook_add`, `memory_*` | none | ✓ (pin/delete stay the owner's by design) |
-| Learn | recipes list / rename / tag / delete; gaps | GAP (`report_gap` writes gaps) | none / delete | B3 |
-| Link import | import a public video link into the Library | GAP (`analyze_reference` takes links for Recreate only) | none | B3 `import_link` |
-| Warm GPU | status / warm / off | GAP | spend | B3 (owner) |
-| Mac files | read / write files on the person's Mac | Claude Code Bash/Read with the permission cards (one-Claude session, shipping) | ask each time | prompt guidance (below) |
-| Blender | complex scene work | Blender MCP `execute_blender_code` (Mac) | none | prompt guidance (below) |
+## Table
 
-## The go-ahead for new gated tools (B2)
+| Screen | Action | Tool | Gate |
+|---|---|---|---|
+| Anywhere | open a page / take / character / edit / Suite tool / Recreate | `open_page`, `where_am_i` | none |
+| Anywhere | memory, other chats | `memory_read/add/suggest`, `chats_list`, `chat_read` | none |
+| Anywhere | watch a video | `watch`, `watch_closer` | none |
+| Anywhere | report what it couldn't do | `report_issue` (+ auto-captured tool errors) | none |
+| Anywhere | hear about new tools | capability note per chat (`claude/capability.ts`) | — |
+| Home / Queue | list jobs, progress | `queue_list` | none |
+| Home / Queue | Run queue | `queue_run` | spend |
+| Queue | cancel / remove a job | `queue_cancel` | delete |
+| Queue | Run again (video job) | `job_retry` (photo: via the Suite) | spend |
+| Queue | queued Suite shots: list / run / remove | `queue_list`, `suite_queue_run`, `suite_queue_remove` | none / spend / delete |
+| Suite | set up any tool (Shot, Talking, UGC, Storyboard, Swap/Recast, Extend, Photo), images sent | `suite_*` tools | none |
+| Suite | price / Generate | `suite_estimate`, `suite_request_shot` | spend |
+| Suite | Add to queue | `suite_queue_add` | none |
+| Suite | Upscale a take | `take_upscale` | spend |
+| Suite | saved rigs: list / save / rename; locations list | `suite_rigs` | none |
+| Suite | delete a rig or location | `suite_rig_delete` | delete |
+| Suite | Suite models on/off | `settings_change` (owner) | settings |
+| Cast | list / find characters | `characters_list` | none |
+| Cast | new character, details, "never add" list | `character_create`, `character_update` | none |
+| Cast | fill missing angles | `character_fill_angles` | spend |
+| Cast | Dress up / Enhance | `character_dress_up`, `character_enhance` | spend |
+| Cast | review a run: keep/reject, pick, apply | `tool_run` | none |
+| Cast | retry one picture | `tool_run_retry` | spend |
+| Cast | archive / restore (owner) | `character_archive` | none |
+| Cast | delete a character, discard a run | on screen (owner or maker; the routes check) | — |
+| Outfits | list / rename | `outfits_list`, `outfit_rename` | none |
+| Outfits | make an outfit | `outfit_make` | spend |
+| Outfits | fill angles | `outfit_fill` | spend |
+| Outfits | delete | `outfit_delete` | delete |
+| LoRA | status, prices, keep/drop training photos | `lora` | none |
+| LoRA | build set / train / use on-off / retrain | `lora_action` | spend |
+| Edit | every edit op, undo, frames, looks, captions, beats, versions, export | Edit tools (`open_edit`, `apply_edit_ops`, …) | none |
+| Edit | AI helpers (captions, cuts, cut-out, denoise, reverse, stabilize, slow-mo, translate, separate) | `auto_captions`, `cut_fillers`, `remove_background`, `denoise`, `edit_helper`; `edit_jobs` to follow | spend |
+| Edit | style kits: list / save / change; delete | `edit_kits`; `edit_kit_delete` | none; delete |
+| Recreate | analyse, recipe, briefs, match, fill, replace, apply | Recreate tools | spend on fill |
+| Recreate | list references; delete | `recreate_list`; `recreate_delete` | none; delete |
+| Camera | sessions, cast, path, guides, shot draft | camera MCP tools (owner, Claude Code on the Mac) | none |
+| Camera | delete a session | `camera_session_delete` (owner) | delete |
+| Library | find / filter takes | `library_find` | none |
+| Library | approve / unapprove | `take_status` | none |
+| Library | collections: list / create / rename / add / remove; delete | `library_collections`, `library_collect`; `collection_delete` | none; delete |
+| Library | discard a take | `take_discard` | delete |
+| Library | tag | no tag feature in the app (recipe tags: `recipes`) | — |
+| Templates | list / open; create / update / duplicate / favourite; delete | `templates_list`; `templates_manage`; `template_delete` | none; none; delete |
+| Posts | list; schedule / post now; cancel | `posts_list`; `post_schedule`; `post_cancel` | none; post; delete |
+| Link import | check / import / list; delete | `import_link`; `import_delete` | none; delete |
+| Learn | playbook read / add | `playbook_read`, `playbook_add`, `memory_*` | none (pin/delete stay the owner's) |
+| Learn | recipes list / open / rename / retag; delete | `recipes`; `recipe_delete` | none; delete |
+| Settings | studio limits, image engine, editor helpers, Recreate links, Suite models, default models, models members see | `settings_read`, `settings_change` (owner) | settings |
+| Warm GPU | status / off; on / keep warm | `warm_gpu`; `warm_gpu_on` (owner) | none; spend |
+| Owner | Claude's reports | `claude_issues`, `claude_issue_mark` (MCP), `/v1/claude/issues` | none |
+| Mac files | read / write files on the person's Mac | Claude Code Bash/Read with the permission cards | asks each time |
+| Blender | complex scene work | Blender MCP `execute_blender_code` | none |
 
-Today each place has its own approval (Suite assist `pending`, edit-session `pending`). New gated tools share one:
-`claude_actions` rows (tool, args, summary, price, status) created by `confirm: true`, shown in the chat as a card
-(`uiLine` name `approve`: "Delete 3 takes · Approve / Decline", "Post to TikTok Fri 18:00 · Approve"); the app calls
-`POST /v1/claude/actions/:id {approve: true}` and the server runs the stored action as that person (their wallet,
-their permissions). Server-side first; the Mac card is held on this branch for the coordinator's "go" (until then the
-tool also says "Approve it in …" with the page to open, and the existing screen's own button still works).
+## Scripts and Blender (in the one prompt)
+- Bash on the person's Mac (Claude Code, with the permission card each time) only for jobs no MUSE tool covers: batch
+  file work, ffprobe checks, reading a file the person points at. Never credential files, never sudo, never to get
+  around a go-ahead.
+- Blender Python through the Blender MCP for building/blocking scenes; guides still via `render_camera_guides`.
 
-## Scripts and Blender (guidance added to the one prompt)
-
-- Bash on the person's Mac (Claude Code, with the permission card each time): batch file work (rename/convert/move
-  exports), ffprobe/ffmpeg checks, reading a log or a project file the person points at. Never credential files,
-  never sudo, deletes and network always ask.
-- Blender Python (Blender MCP `execute_blender_code`): building and blocking scenes, many objects at once, procedural
-  set dressing. Guides are still rendered with `render_camera_guides`.
-- Prefer a MUSE tool when one exists; a script never replaces a gated MUSE action.
-
-## Batches
-
-- **B1 (no gate, server):** queue_list, characters_list, outfits_list, outfit_rename, library_find,
-  library_collections, library_collect, take_status, templates_list, posts_list, recreate_list.
-- **B2 (gated, server + held Mac card):** claude_actions + approve route; queue_run/cancel/retry, take_upscale,
-  suite_queue_add, character_fill_angles, character_dress_up, character_enhance, outfit_make, outfit_fill,
-  outfit_delete, take_discard, collection delete, post_schedule, post_cancel.
-- **B3:** the rest of the GAP rows above.
-
-## Progress
-- Part A (issues) live e6c9ba3e. B1 live ff2d1bd8 (appCall: tools call the app's own routes in-process as the person).
-- B2 server: claude_actions (0032), GET/POST /v1/claude/actions[/:id], tools take_discard, collection_delete, outfit_delete,
-  queue_cancel, suite_queue_remove, suite_queue_run, post_schedule, post_cancel, character_dress_up, character_enhance.
-  Mac Approve card HELD (no mac/ push): `plans/patches/mac-claude-approve-card.patch` (git apply; ClaudeUI approve
-  fields, OneClaudePanel card, answerAction/waitingActions, reload on chat switch). Until it ships, old apps show the
-  "Waiting for your go-ahead" line without a button; Claude is told to send the person to the screen instead.
-- Delete ownership fix live da798e70 (takes, characters, jobs, posts, tool runs: owner or maker only).
-- B3a live 07a276b6: character_fill_angles, outfit_make, outfit_fill, take_upscale, queue_run (spend, priced via the
-  routes' dryRun); settings_read / settings_change (owner; studio limits, image engine, editor helpers, recreate,
-  Suite models, default models, models members see; never keys/providers/prices; settings gate).
-- B3b: templates_manage, recipes, import_link, edit_jobs, character_archive (owner); template_delete, recipe_delete,
-  import_delete, camera_session_delete (owner), edit_helper (any Edit AI helper, priced by /v1/editor/estimate).
-- B3c: character_create, character_update (incl. "never add"), suite_queue_add (from the open draft), tool_run (Dress
-  up/Enhance review: get, keep/reject, pick, apply); recreate_delete (gated).
-- Left, by choice: LoRA build/train and Warm GPU (spend: ask the owner first), saved rigs/locations, style kits, queue
-  retry (photo retry reopens the composer; a video job retry needs its original request), Dress up/Enhance item retry
-  (no estimate route), Recreate export (Edit's export_video covers applied edits). Playbook pin/delete stay the owner's.
+## Shipped
+- Part A issues e6c9ba3e (0031) · B1 ff2d1bd8 · B2 eaa4f337 (0032) · delete ownership da798e70 · B3a 07a276b6 ·
+  B3b 419891cb · B3c 469b1701 · capability note 6cc924ef (0033) · B3d (LoRA, warm GPU, rigs/locations, kits, job
+  retry, Dress up/Enhance item retry with `dryRun`, LoRA `/estimate`).
+- Held for the coordinator's "go": the Mac Approve card (local branch `claude/claude-issues-mac`; backup
+  `plans/patches/mac-claude-approve-card.patch`). Until it ships, older apps show "Waiting for your go-ahead: …"
+  without a button and Claude sends the person to the screen.

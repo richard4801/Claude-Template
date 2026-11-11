@@ -76,3 +76,18 @@ describe('B3: priced makes and settings', () => {
     expect((await run(ownerU, 'settings_read', { area: 'recreate' })).strictLinks).toBe(!before.strictLinks);
   });
 });
+
+describe('B3d: LoRA, warm GPU, rigs, kits, retries', () => {
+  it('warm GPU tools are the owner\'s; reads answer; a delete with nothing named is refused', async () => {
+    const mine = toolsForUser({ role: 'member' }).map(t => t.name);
+    for (const n of ['warm_gpu', 'warm_gpu_on']) expect(mine).not.toContain(n);
+    for (const n of ['lora', 'lora_action', 'suite_rigs', 'edit_kits', 'job_retry', 'tool_run_retry']) expect(mine).toContain(n);
+    expect((await run(ownerU, 'warm_gpu', { action: 'status' })).state).toBeTruthy();
+    const on = await run(ownerU, 'warm_gpu_on', {});
+    expect(on.needsConfirmation).toBe(true);
+    await expect(run(memberU, 'suite_rigs', { action: 'list_rigs' })).resolves.toBeTruthy();
+    await expect(run(ownerU, 'edit_kits', { action: 'list' })).resolves.toBeTruthy();
+    await expect(run(ownerU, 'suite_rig_delete', {})).rejects.toMatchObject({ status: 400 });
+    await expect(run(ownerU, 'job_retry', { jobId: 'j_nothere' })).rejects.toMatchObject({ status: 404 });
+  });
+});
