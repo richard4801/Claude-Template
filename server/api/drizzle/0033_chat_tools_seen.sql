@@ -1,0 +1,1 @@
+ALTER TABLE "claude_threads" ADD COLUMN IF NOT EXISTS "tools_seen" jsonb;

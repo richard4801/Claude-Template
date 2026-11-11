@@ -232,6 +232,13 @@
       "when": 1794415271159,
       "tag": "0032_claude_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794419405486,
+      "tag": "0033_chat_tools_seen",
+      "breakpoints": true
     }
   ]
 }

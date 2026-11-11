@@ -151,6 +151,8 @@ export const claudeThreads = pgTable('claude_threads', {
   model: text('model'),
   /** One Claude (0029): hidden from the chat list (kept, not deleted). */
   archivedAt: ms('archived_at'),
+  /** 0033: the tools this chat last saw (name → short hash), so a chat hears about tools shipped since (claude/capability.ts). */
+  toolsSeen: jsonb('tools_seen').$type<Record<string, string>>(),
   createdAt: ms('created_at').notNull(),
   updatedAt: ms('updated_at').notNull(),
 }, t => [index('claude_threads_context_idx').on(t.ownerId, t.contextKind, t.contextId), index('claude_threads_key_idx').on(t.ownerId, t.contextKey, t.updatedAt)]);

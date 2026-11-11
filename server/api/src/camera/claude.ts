@@ -11,6 +11,7 @@ import type { CameraService } from './service.js';
 import { parse } from './validate.js';
 import { EDIT_PROMPT, onePrompt, RECREATE_PROMPT } from '../recreate/assistant.js';
 import { CHAT_REGISTRY } from '../claude/registry.js';
+import { capabilityNote } from '../claude/capability.js';
 import { pageOfContext } from '../claude/page.js';
 import { SUITE_PROMPT } from '../suite/mcpTools.js';
 import { attachmentViews, storeAttachments, type Attachment } from './claudeAttachments.js';
@@ -263,9 +264,11 @@ export class ClaudeService {
     if (!n) throw new ApiError(409, 'already_claimed', 'Another Mac is answering this');
     this.arm(id, this.silentTurnMs, u, 'Your Mac stopped answering');
     const view = await this.turnView(n);
+    // Tools shipped since this chat's last turn: Claude Code reads the note before the person's words.
+    const note = await capabilityNote(this.ctx, u, n.threadId);
     void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'turn', turn: view });
     void this.emitStatus(u);
-    return view;
+    return note ? { ...view, text: `${note}\n\n${n.text}` } : view; // only the claiming Mac's Claude Code reads the note
   }
 
   async stop(u: AuthUser, id: string) {
