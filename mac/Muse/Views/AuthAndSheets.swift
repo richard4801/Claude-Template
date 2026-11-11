@@ -161,6 +161,7 @@ struct OutfitSheetView: View {
     @Environment(\.theme) private var t
     @State private var targeted = false
     @FocusState private var nameFocused: Bool
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         if let d = store.outfitSheet {
@@ -184,9 +185,11 @@ struct OutfitSheetView: View {
                         store.outfitSheet?.images = []
                     }))
                     .frame(maxWidth: 420)
+                    if d.mode != .own { baseRow(d) }
                     switch d.mode {
                     case .describe:
-                        RTextBox(placeholder: "e.g. sheer crystal mini dress, silver strappy heels",
+                        if d.fromBase { Text("What to change").scaled(t.scale.label, t.roles.ink) }
+                        RTextBox(placeholder: d.fromBase ? "e.g. a pleated white tennis skirt" : "e.g. sheer crystal mini dress, silver strappy heels",
                                  text: Binding(get: { store.outfitSheet?.description ?? "" }, set: { store.outfitSheet?.description = $0 }), lines: 2)
                     case .photo, .own:
                         dropZone(d)
@@ -282,6 +285,39 @@ struct OutfitSheetView: View {
         } else {
             tile()
         }
+    }
+
+    /// §6: start from her base photos and tick what to keep (the rest is replaced by the description or the photo).
+    @ViewBuilder private func baseRow(_ d: OutfitDraft) -> some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Toggle(isOn: Binding(get: { store.outfitSheet?.fromBase ?? false }, set: { store.outfitSheet?.fromBase = $0 })) {
+                Text("Start from her base photos").scaled(t.scale.label, t.roles.ink)
+            }
+            .toggleStyle(.checkbox)
+            if d.fromBase {
+                HStack(spacing: Space.s4) {
+                    Text("Keep").scaled(t.scale.caption, t.roles.ink2)
+                    keepBox("Top", \.top)
+                    keepBox("Bottom", \.bottom)
+                    keepBox("Shoes", \.shoes)
+                    keepBox("Accessories", \.accessories)
+                }
+                TextField("Note, e.g. the black lace bra", text: Binding(get: { store.outfitSheet?.keepNote ?? "" },
+                                                                        set: { store.outfitSheet?.keepNote = String($0.prefix(200)) }))
+                    .textFieldStyle(.plain)
+                    .focused($noteFocused)
+                    .roleField(focused: noteFocused)
+                    .frame(maxWidth: 420)
+                Text(d.base?.summary ?? "").scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func keepBox(_ label: String, _ key: WritableKeyPath<OutfitKeep, Bool>) -> some View {
+        Toggle(isOn: Binding(get: { store.outfitSheet?.keep[keyPath: key] ?? false }, set: { store.outfitSheet?.keep[keyPath: key] = $0 })) {
+            Text(label).scaled(t.scale.caption, t.roles.ink)
+        }
+        .toggleStyle(.checkbox)
     }
 
     private func dropZone(_ d: OutfitDraft) -> some View {

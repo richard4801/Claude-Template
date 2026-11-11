@@ -81,3 +81,46 @@ public enum OutfitNaming {
 
     static func clip(_ s: String) -> String { String(s.prefix(maxLength)).trimmingCharacters(in: .whitespaces) }
 }
+
+/// Which pieces of her base photos an outfit keeps (plans/outfit-head-looks.md §6).
+public struct OutfitKeep: Codable, Hashable, Sendable {
+    public var top = false
+    public var bottom = false
+    public var shoes = false
+    public var accessories = false
+    public init(top: Bool = false, bottom: Bool = false, shoes: Bool = false, accessories: Bool = false) {
+        self.top = top; self.bottom = bottom; self.shoes = shoes; self.accessories = accessories
+    }
+
+    static let names = ["top", "bottom", "shoes", "accessories"]
+    var flags: [Bool] { [top, bottom, shoes, accessories] }
+}
+
+/// `POST /v1/outfits` `base`: start from her base photos, keeping the ticked pieces and the note.
+public struct OutfitBase: Codable, Hashable, Sendable {
+    public var source = "base"
+    public var keep: OutfitKeep
+    public var note: String?
+    public init(keep: OutfitKeep, note: String?) {
+        self.keep = keep
+        let n = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.note = n.isEmpty ? nil : n
+    }
+
+    /// Anything kept: a tick or a note (else the outfit is made as before).
+    public var keeping: Bool { keep.flags.contains(true) || note != nil }
+
+    /// The sheet's preview line: "Keeps the top (the black lace bra). Changes the bottom, the shoes and the accessories."
+    public var summary: String {
+        let kept = zip(OutfitKeep.names, keep.flags).filter { $0.1 }.map { "the \($0.0)" }
+        let rest = zip(OutfitKeep.names, keep.flags).filter { !$0.1 }.map { "the \($0.0)" }
+        var k = Self.and(kept)
+        if let note { k = k.isEmpty ? note : "\(k) (\(note))" }
+        guard !k.isEmpty else { return "Tick what to keep from her base photos." }
+        return "Keeps \(k). Changes \(rest.isEmpty ? "the rest" : Self.and(rest))."
+    }
+
+    static func and(_ xs: [String]) -> String {
+        xs.count <= 1 ? xs.joined() : xs.dropLast().joined(separator: ", ") + " and " + xs.last!
+    }
+}

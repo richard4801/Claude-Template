@@ -136,6 +136,11 @@ struct OutfitDraft {
     var angles: [ImageRef?] = [nil, nil, nil, nil]
     /// The angle open full size (ImageLightbox), an index into `lightboxItems`.
     var viewing: Int?
+    /// §6: start from her base photos, keeping the ticked pieces.
+    var fromBase = false
+    var keep = OutfitKeep()
+    var keepNote = ""
+    var base: OutfitBase? { fromBase && mode != .own ? OutfitBase(keep: keep, note: keepNote) : nil }
 }
 
 enum Niches {
@@ -1015,7 +1020,11 @@ final class AppStore {
     var videoFeatures: VideoFeatures { studioSettings?.features.video ?? .fallback }
     /// `features.photo` from the server, or the contract's prices: photo estimates ("about $0.46").
     var photoPricing: PhotoPricing { studioSettings?.features.photo ?? .standard }
-    var outfitSetEstimate: Double { photoPricing.estimates?.outfitSet ?? photoPricing.outfitSet() }
+    var outfitSetEstimate: Double {
+        // Kept pieces: four edits (the front edits her base front photo).
+        if outfitSheet?.base?.keeping == true { return 4 * photoPricing.perEdit }
+        return photoPricing.estimates?.outfitSet ?? photoPricing.outfitSet()
+    }
     func sheetAnglesEstimate(_ missing: Int) -> Double { photoPricing.estimates?.sheetAngle.map { $0 * Double(missing) } ?? photoPricing.sheetAngles(missing) }
     var loraSetEstimate: Double { photoPricing.estimates?.loraSet ?? photoPricing.loraSet() }
     /// Edit is picked: lip sync and a new background photo apply.

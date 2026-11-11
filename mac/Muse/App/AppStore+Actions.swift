@@ -573,6 +573,7 @@ extension AppStore {
                 var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(OutfitNaming.maxLength)), mode: draft.mode.rawValue,
                                               description: draft.description, images: refs)
                 if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
+                if let base = draft.base, base.keeping { req.base = base } // §6: keep pieces from her base photos
                 let o = try await api.createOutfit(req)
                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
                 outfitSheet?.outfitId = o.id
