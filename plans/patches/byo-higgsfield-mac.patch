@@ -1,0 +1,186 @@
+diff --git a/mac/Muse/App/AppStore+Providers.swift b/mac/Muse/App/AppStore+Providers.swift
+index f507b758..9faec011 100644
+--- a/mac/Muse/App/AppStore+Providers.swift
++++ b/mac/Muse/App/AppStore+Providers.swift
+@@ -91,11 +91,12 @@ extension AppStore {
+     }
+ 
+     /// Saves the key (checked by the server first). The typed key is cleared whatever happens.
+-    func saveProviderKey() {
++    /// Saves the pasted key; `useServerKey` connects a serverKey provider (Higgsfield) with the server's own account instead.
++    func saveProviderKey(useServerKey: Bool = false) {
+         let s = providersState
+         guard let api = providersAPI, !s.saving else { return }
+         let key = s.keyText.trimmingCharacters(in: .whitespacesAndNewlines)
+-        guard !key.isEmpty else { s.formError = "Paste the key first."; return }
++        guard !key.isEmpty || useServerKey else { s.formError = "Paste the key first."; return }
+         s.saving = true
+         Task {
+             defer {
+@@ -107,13 +108,13 @@ extension AppStore {
+                 if let id = s.replacing {
+                     p = try await api.replaceProviderKey(id, apiKey: key)
+                 } else {
+-                    p = try await api.addProvider(kind: s.addKind, apiKey: key, label: nil)
++                    p = try await api.addProvider(kind: s.addKind, apiKey: useServerKey ? "" : key, label: nil)
+                 }
+                 s.adding = false
+                 s.replacing = nil
+                 s.formError = nil
+                 s.selected = p.id
+-                showToast("\(p.label) key saved, ending \(p.keyLast4.replacingOccurrences(of: "…", with: ""))")
++                showToast(useServerKey ? "\(p.label) connected" : "\(p.label) key saved, ending \(p.keyLast4.replacingOccurrences(of: "…", with: ""))")
+                 await loadProviders()
+             } catch {
+                 s.formError = ProviderText.message(error)
+diff --git a/mac/Muse/Views/Settings/ProvidersSettings.swift b/mac/Muse/Views/Settings/ProvidersSettings.swift
+index cbcd5147..f95bbd2c 100644
+--- a/mac/Muse/Views/Settings/ProvidersSettings.swift
++++ b/mac/Muse/Views/Settings/ProvidersSettings.swift
+@@ -147,6 +147,12 @@ struct ProviderKeyForm: View {
+                         .frame(width: max(160, CGFloat(s.kinds.count) * 110))
+                 }
+             }
++            if s.replacing == nil, kind?.serverKey == true {
++                RField("Studio account", hint: "MUSE's server is already set up with a \(label) account. Connect it with no key to paste; the key stays on the server.") {
++                    RButton(s.saving ? "Connecting…" : "Use the studio's \(label) account", kind: .action, off: s.saving) { store.saveProviderKey(useServerKey: true) }
++                }
++                Text("Or paste a different \(label) key:").scaled(t.scale.caption, t.roles.ink2)
++            }
+             RField("API key", hint: "Saved encrypted on the MUSE server, checked with \(label) first. Afterwards you only see its last 4 characters.") {
+                 SecureField(kind?.keyHint ?? "Paste the key", text: Binding(get: { s.keyText }, set: { s.keyText = $0; s.formError = nil }))
+                     .textContentType(.password)
+diff --git a/mac/MuseCore/Sources/MuseCore/Providers/Providers.swift b/mac/MuseCore/Sources/MuseCore/Providers/Providers.swift
+index 18f39bf0..99279cfe 100644
+--- a/mac/MuseCore/Sources/MuseCore/Providers/Providers.swift
++++ b/mac/MuseCore/Sources/MuseCore/Providers/Providers.swift
+@@ -10,22 +10,26 @@ public struct ProviderKind: Decodable, Hashable, Sendable, Identifiable {
+     public var label: String
+     public var keyHint: String?
+     public var keyUrl: String?
++    /// The server already has an account for this provider (Higgsfield): it connects with no key to paste.
++    public var serverKey: Bool
+     public var id: String { kind }
+ 
+-    public init(kind: String, label: String, keyHint: String? = nil, keyUrl: String? = nil) {
++    public init(kind: String, label: String, keyHint: String? = nil, keyUrl: String? = nil, serverKey: Bool = false) {
+         self.kind = kind
+         self.label = label
+         self.keyHint = keyHint
+         self.keyUrl = keyUrl
++        self.serverKey = serverKey
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case kind, label, keyHint, keyUrl }
++    enum CodingKeys: String, CodingKey { case kind, label, keyHint, keyUrl, serverKey }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         kind = try c.decode(String.self, forKey: .kind)
+         label = c.v(.label, kind)
+         keyHint = c.o(.keyHint)
+         keyUrl = c.o(.keyUrl)
++        serverKey = c.v(.serverKey, false)
+     }
+ }
+ 
+@@ -50,6 +54,8 @@ public struct ProviderAccount: Decodable, Hashable, Sendable, Identifiable {
+     public var label: String
+     /// "…a1b2": all the app ever sees of the key.
+     public var keyLast4: String
++    /// Connected with the server's own account (no key stored for it).
++    public var serverKey: Bool = false
+     /// "ok" | "invalid" (the provider refused the key during a run).
+     public var status: String
+     public var checkedAt: Int64?
+@@ -68,12 +74,13 @@ public struct ProviderAccount: Decodable, Hashable, Sendable, Identifiable {
+         self.models = models
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case id, kind, label, keyLast4, status, checkedAt, createdAt, models }
++    enum CodingKeys: String, CodingKey { case id, kind, label, keyLast4, serverKey, status, checkedAt, createdAt, models }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         id = try c.decode(String.self, forKey: .id)
+         kind = c.v(.kind, "")
+         label = c.v(.label, kind)
++        serverKey = c.v(.serverKey, false)
+         keyLast4 = c.v(.keyLast4, "")
+         status = c.v(.status, "ok")
+         checkedAt = c.o(.checkedAt)
+@@ -268,7 +275,7 @@ public enum ProviderText {
+     /// "Key ending a1b2, added 8 Nov. 9 of 48 models on." (the owner's words in the approved mock).
+     public static func line(_ p: ProviderAccount, now: Date = Date()) -> String {
+         let last4 = p.keyLast4.replacingOccurrences(of: "…", with: "")
+-        var s = "Key ending \(last4)"
++        var s = p.serverKey ? "The studio's account" : "Key ending \(last4)"
+         if let c = p.createdAt {
+             let f = DateFormatter()
+             f.setLocalizedDateFormatFromTemplate("dMMM")
+@@ -303,7 +310,8 @@ public enum ProviderText {
+ // MARK: HTTP
+ 
+ extension HTTPMuseAPI: ProvidersAPI {
+-    private struct AddBody: Encodable { var kind: String; var apiKey: String; var label: String? }
++    /// apiKey nil: connect with the server's own account (kinds with serverKey).
++    private struct AddBody: Encodable { var kind: String; var apiKey: String?; var label: String? }
+     private struct KeyBody: Encodable { var apiKey: String }
+     private struct RefBody: Encodable { var ref: String; var displayName: String? }
+     private struct ModelPatch: Encodable { var enabled: Bool?; var displayName: String? }
+@@ -311,7 +319,7 @@ extension HTTPMuseAPI: ProvidersAPI {
+     public func providerKinds() async throws -> ProviderKindsList { try await suiteCall("GET", "v1/providers/kinds") }
+     public func providers() async throws -> ProviderAccountsList { try await suiteCall("GET", "v1/providers") }
+     public func addProvider(kind: String, apiKey: String, label: String?) async throws -> ProviderAccount {
+-        try await suiteCall("POST", "v1/providers", body: try JSONEncoder().encode(AddBody(kind: kind, apiKey: apiKey, label: label)))
++        try await suiteCall("POST", "v1/providers", body: try JSONEncoder().encode(AddBody(kind: kind, apiKey: apiKey.isEmpty ? nil : apiKey, label: label)))
+     }
+     public func replaceProviderKey(_ id: String, apiKey: String) async throws -> ProviderAccount {
+         try await suiteCall("PATCH", "v1/providers/\(Self.pathId(id))", body: try JSONEncoder().encode(KeyBody(apiKey: apiKey)))
+@@ -347,7 +355,9 @@ extension HTTPMuseAPI: ProvidersAPI {
+ public enum DemoProviders {
+     public static let kinds = [ProviderKind(kind: "replicate", label: "Replicate", keyHint: "r8_…", keyUrl: "https://replicate.com/account/api-tokens"),
+                                ProviderKind(kind: "fal", label: "fal", keyHint: "Key ID:Secret", keyUrl: "https://fal.ai/dashboard/keys"),
+-                               ProviderKind(kind: "muapi", label: "Muapi", keyHint: "An API key from muapi.ai → Access keys", keyUrl: "https://muapi.ai/access-keys")]
++                               ProviderKind(kind: "muapi", label: "Muapi", keyHint: "An API key from muapi.ai → Access keys", keyUrl: "https://muapi.ai/access-keys"),
++                               ProviderKind(kind: "higgsfield", label: "Higgsfield", keyHint: "An API key from console.higgsfield.ai, as KEY_ID:KEY_SECRET",
++                                            keyUrl: "https://console.higgsfield.ai", serverKey: true)]
+ 
+     public static func catalog(_ kind: String) -> [ProviderCatalogModel] {
+         kind == "fal" ? [
+@@ -387,7 +397,14 @@ extension FakeMuseAPI: ProvidersAPI {
+     public func addProvider(kind: String, apiKey: String, label: String?) async throws -> ProviderAccount {
+         try ownerOnly()
+         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+-        guard DemoProviders.kinds.contains(where: { $0.kind == kind }) else { throw ApiError("bad_request", "Unknown provider") }
++        guard let k = DemoProviders.kinds.first(where: { $0.kind == kind }) else { throw ApiError("bad_request", "Unknown provider") }
++        if key.isEmpty, k.serverKey {
++            var p = ProviderAccount(id: "prov_" + shortId(), kind: kind, label: label ?? "\(k.label) (studio account)", keyLast4: "server key",
++                                    createdAt: Int64(Date().timeIntervalSince1970 * 1000))
++            p.serverKey = true
++            demoProviders.append(p)
++            return p
++        }
+         guard key.count >= 8 else { throw ApiError("invalid_key", "The provider didn't accept that key") }
+         let p = ProviderAccount(id: "prov_" + shortId(), kind: kind, label: label ?? DemoProviders.kinds.first { $0.kind == kind }!.label,
+                                 keyLast4: "…" + String(key.suffix(4)), createdAt: Int64(Date().timeIntervalSince1970 * 1000))
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ProvidersTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ProvidersTests.swift
+index 4a21a6fa..e0dcd010 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ProvidersTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ProvidersTests.swift
+@@ -34,4 +34,17 @@ final class ProvidersTests: XCTestCase {
+         let customs = try await api.customModels()
+         XCTAssertTrue(customs.isEmpty)
+     }
++
++    /// Higgsfield (2026-11-11): a provider the server already has an account for connects with no key pasted.
++    func testServerKeyProvider() async throws {
++        let kinds = try JSONDecoder().decode(ProviderKindsList.self, from: Data(#"{"kinds":[{"kind":"muapi","label":"Muapi"},{"kind":"higgsfield","label":"Higgsfield","keyHint":"x","keyUrl":"https://console.higgsfield.ai","serverKey":true}],"keysReady":true}"#.utf8))
++        XCTAssertEqual(kinds.kinds.map(\.serverKey), [false, true])
++        let acc = try JSONDecoder().decode(ProviderAccountsList.self, from: Data(#"{"providers":[{"id":"p1","kind":"higgsfield","label":"Higgsfield (studio account)","keyLast4":"server key","serverKey":true,"status":"ok","createdAt":1793952000000,"models":{"added":2,"enabled":1}}],"keysReady":true}"#.utf8))
++        XCTAssertTrue(ProviderText.line(acc.providers[0]).hasPrefix("The studio's account, added "))
++        let api = FakeMuseAPI()
++        let p = try await api.addProvider(kind: "higgsfield", apiKey: "", label: nil)
++        XCTAssertTrue(p.serverKey)
++        XCTAssertEqual(p.label, "Higgsfield (studio account)")
++        do { _ = try await api.addProvider(kind: "muapi", apiKey: "", label: nil); XCTFail("a key is needed for the others") } catch let e as ApiError { XCTAssertEqual(e.code, "invalid_key") }
++    }
+ }

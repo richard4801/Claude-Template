@@ -218,7 +218,7 @@ describe('Bring your own provider · Muapi against a FAKE Muapi (recorded fixtur
     const { owner } = await people(a, 0);
     try {
       const kinds = (await owner.req('GET', '/v1/providers/kinds')).body.kinds;
-      expect(kinds.map((k: any) => k.kind)).toEqual(['replicate', 'fal', 'muapi']);
+      expect(kinds.map((k: any) => k.kind)).toEqual(['replicate', 'fal', 'muapi', 'higgsfield']);
       expect(kinds[2]).toEqual({ kind: 'muapi', label: 'Muapi', keyHint: 'An API key from muapi.ai → Access keys', keyUrl: 'https://muapi.ai/access-keys' });
 
       const bad = await owner.req('POST', '/v1/providers', { kind: 'muapi', apiKey: 'mu_wrong_key_0000' });

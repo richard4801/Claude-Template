@@ -3,15 +3,18 @@
 // the owner's key. Everything happens server-side; keys go only into the auth header (Authorization, or Muapi's x-api-key)
 // of calls to the provider's own host and never into an error message or a log line. To add a provider (e.g. an
 // OpenAI-compatible image endpoint), implement ProviderAdapter and add it to KINDS and adapters().
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CREDIT_RE, errorText, ReplicateError, SAFETY_RE } from '../replicate/client.js';
 import { analyse, type Analysis, type Kind } from './classify.js';
 
-export type ProviderKind = 'replicate' | 'fal' | 'muapi';
+export type ProviderKind = 'replicate' | 'fal' | 'muapi' | 'higgsfield';
 export type Price = { basis: 'per_run' | 'per_second'; costUsd: number; source: 'provider' | 'owner' };
 export type RawModel = { ref: string; version: string | null; name: string; description: string | null; analysis: Analysis; price: Price | null };
 export type Page = { models: RawModel[]; nextCursor: string | null };
 export type RunStatus = { status: 'running' | 'succeeded' | 'failed' | 'canceled'; url?: string; error?: ReplicateError };
-export type Urls = { replicate: string; falPlatform: string; falQueue: string; muapi: string };
+export type Urls = { replicate: string; falPlatform: string; falQueue: string; muapi: string; higgsfield: string };
 
 export interface ProviderAdapter {
   kind: ProviderKind;
@@ -327,6 +330,32 @@ async function pool<T, R>(items: T[], n: number, f: (x: T) => Promise<R>): Promi
   return out;
 }
 
+/**
+ * A price from a provider's quote call: quoted at the shortest and longest durations at every resolution (up to 4), and
+ * the dearest rate is kept so a run never costs the studio more than it charges: per second when the cost grows with the
+ * duration, per run when it doesn't. Any failed quote: null (the owner sets the price).
+ */
+export async function dearestPrice(a: Analysis, base: Record<string, unknown>, quote: (body: Record<string, unknown>) => Promise<number | null>): Promise<Price | null> {
+  const d = a.kind === 'video' && a.map.duration ? a.inputs.duration : null;
+  const durs = d ? [...new Set(d.allowed?.length ? [d.allowed[0]!, d.allowed.at(-1)!] : [d.min, d.max])] : [null];
+  const res = a.map.resolution && a.inputs.resolutions.length ? a.inputs.resolutions.slice(0, 4) : [null];
+  const shape = (v: number) => a.shapes.duration === 'string' ? String(v) : a.shapes.duration === 'integer' ? Math.round(v) : v;
+  const cases = durs.flatMap(s => res.map(r => ({ s, r })));
+  const quotes = await pool(cases, 4, async c => {
+    const body: Record<string, unknown> = { ...base };
+    if (c.s != null) body[a.map.duration!] = shape(c.s);
+    if (c.r != null) body[a.map.resolution!] = c.r;
+    return { ...c, cost: await quote(body) };
+  });
+  if (quotes.some(q => q.cost == null)) return null;
+  const round = (x: number) => Math.round(x * 1e6) / 1e6;
+  const most = Math.max(...quotes.map(q => q.cost!));
+  if (!d || durs.length < 2) return { basis: 'per_run', costUsd: round(most), source: 'provider' };
+  const flat = res.every(r => { const [lo, hi] = durs.map(s => quotes.find(q => q.s === s && q.r === r)!.cost!); return Math.abs(hi! - lo!) <= 0.01 * Math.max(hi!, 1e-9); });
+  if (flat) return { basis: 'per_run', costUsd: round(most), source: 'provider' };
+  return { basis: 'per_second', costUsd: round(Math.max(...quotes.map(q => q.cost! / q.s!))), source: 'provider' };
+}
+
 export class MuapiAdapter implements ProviderAdapter {
   kind = 'muapi' as const;
   label = 'Muapi';
@@ -371,32 +400,13 @@ export class MuapiAdapter implements ProviderAdapter {
 
   /**
    * Muapi publishes a USD price per model. A fixed price is used as is (per run). A dynamic one (it depends on duration,
-   * resolution…) is quoted at the shortest and longest durations at every resolution, and the dearest rate is kept so a
-   * run never costs the studio more than it charges: per second when the cost grows with the duration, per run when it
-   * doesn't. No quote, no price: the owner sets one (Price corrections).
+   * resolution…) is quoted by dearestPrice. No quote, no price: the owner sets one (Price corrections).
    */
   private async price(m: any, a: Analysis): Promise<Price | null> {
     if (m.cost_currency && String(m.cost_currency).toUpperCase() !== 'USD') return null;
     const base = Number(m.cost);
     if (m.dynamic_pricing === false || m.cost_strategy === 'fixed_cost') return Number.isFinite(base) && base >= 0 ? { basis: 'per_run', costUsd: base, source: 'provider' } : null;
-    const d = a.kind === 'video' && a.map.duration ? a.inputs.duration : null;
-    const durs = d ? [...new Set(d.allowed?.length ? [d.allowed[0]!, d.allowed.at(-1)!] : [d.min, d.max])] : [null];
-    const res = a.map.resolution && a.inputs.resolutions.length ? a.inputs.resolutions.slice(0, 4) : [null];
-    const shape = (v: number) => a.shapes.duration === 'string' ? String(v) : a.shapes.duration === 'integer' ? Math.round(v) : v;
-    const cases = durs.flatMap(s => res.map(r => ({ s, r })));
-    const quotes = await pool(cases, 4, async c => {
-      const body: Record<string, unknown> = { prompt: 'x' };
-      if (c.s != null) body[a.map.duration!] = shape(c.s);
-      if (c.r != null) body[a.map.resolution!] = c.r;
-      return { ...c, cost: await this.quote(m.name, body) };
-    });
-    if (quotes.some(q => q.cost == null)) return null;
-    const round = (x: number) => Math.round(x * 1e6) / 1e6;
-    const most = Math.max(...quotes.map(q => q.cost!));
-    if (!d || durs.length < 2) return { basis: 'per_run', costUsd: round(most), source: 'provider' };
-    const flat = res.every(r => { const [lo, hi] = durs.map(s => quotes.find(q => q.s === s && q.r === r)!.cost!); return Math.abs(hi! - lo!) <= 0.01 * Math.max(hi!, 1e-9); });
-    if (flat) return { basis: 'per_run', costUsd: round(most), source: 'provider' };
-    return { basis: 'per_second', costUsd: round(Math.max(...quotes.map(q => q.cost! / q.s!))), source: 'provider' };
+    return dearestPrice(a, { prompt: 'x' }, body => this.quote(m.name, body));
   }
 
   /** One model with its schema and price (cached 10 min). */
@@ -493,7 +503,158 @@ export function muapiError(status: number, text: string) {
   return new ReplicateError(`Muapi rejected the request (${status}: ${t.slice(0, 200)})`, 'failed', status);
 }
 
-export const KINDS = ['replicate', 'fal', 'muapi'] as const satisfies readonly ProviderKind[];
+// ----------------------------------------------------------------------------------------------------------- Higgsfield
+// https://docs.higgsfield.ai (llms-full.txt) · auth `Authorization: Key <key_id>:<key_secret>` on api.higgsfield.ai only.
+// Higgsfield has NO model-list or schema API: the catalog is assets/higgsfield/catalog.json, built from the "Complete JSON
+// schema" on each model page of its docs (scripts/higgsfield-catalog.py; refresh when Higgsfield adds models). Prices
+// come live from POST /estimate/{endpoint} (free, keyed, priced for this account). A run is POST /{endpoint} with the
+// flat input, polled at its status_url (GET /requests/{id}/status: queued, in_progress, completed, failed, nsfw,
+// canceled; result images[].url or video.url); cancel is POST /requests/{id}/cancel (queued only). Money: a prepaid USD
+// balance; 403 means no balance (or an expired/disabled key: code api_key_expired / api_key_disabled), 401 a bad key.
+export const HIGGSFIELD_CATALOG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/higgsfield/catalog.json');
+export type HfEntry = { ref: string; name: string; kind: Kind; docs: string; schema: { type?: string; properties?: Record<string, any>; required?: string[] } };
+let hfCatalog: HfEntry[] | null = null;
+/** The documented Higgsfield models (read once). */
+export function higgsfieldCatalog(file = HIGGSFIELD_CATALOG): HfEntry[] {
+  if (hfCatalog && file === HIGGSFIELD_CATALOG) return hfCatalog;
+  const list = ((JSON.parse(fs.readFileSync(file, 'utf8')) as { models?: HfEntry[] }).models ?? [])
+    .filter(m => typeof m?.ref === 'string' && validRef(m.ref) && (m.kind === 'image' || m.kind === 'video') && m.schema && typeof m.schema === 'object');
+  if (file === HIGGSFIELD_CATALOG) hfCatalog = list;
+  return list;
+}
+const HF_KEY_RE = /api_key_(expired|disabled)|invalid credentials/i;
+/** Higgsfield's words for an empty balance (403 "Not enough credits" in its SDKs; "insufficient balance" in its docs). */
+const HF_CREDIT_RE = /not enough (credits?|balance|funds)|insufficient (balance|credits?|funds)|top[ -]?up/i;
+/** Placeholder media for price quotes (the estimate prices the request; it fetches nothing). */
+const HF_SAMPLE = { image: 'https://example.com/muse-estimate.jpg', video: 'https://example.com/muse-estimate.mp4', audio: 'https://example.com/muse-estimate.wav' };
+
+/** A Higgsfield refusal at submit (or quote) as the suite's error kinds. */
+export function higgsfieldError(status: number, text: string) {
+  const t = text.slice(0, 500);
+  if (status === 401 || (status === 403 && HF_KEY_RE.test(t))) return new ReplicateError("Higgsfield refused the studio's key", 'unavailable', status);
+  if (status === 402 || status === 403 || CREDIT_RE.test(t) || HF_CREDIT_RE.test(t)) return new ReplicateError('Higgsfield is out of credit', 'out_of_credit', status);
+  if (SAFETY_RE.test(t)) return new ReplicateError(`Higgsfield refused the request (${t.slice(0, 200)})`, 'refused', status);
+  if (status === 429) return new ReplicateError('Higgsfield is busy', 'rate_limited', status);
+  if (status === 423 || status === 503) return new ReplicateError('Higgsfield has paused this model for now', 'unavailable', status);
+  if (status >= 500) return new ReplicateError(`Higgsfield is having trouble (${status})`, 'unavailable', status);
+  return new ReplicateError(`Higgsfield rejected the request (${status}: ${t.slice(0, 200)})`, 'failed', status);
+}
+
+/** A request body with every required field filled with a sample value (for the free estimate). */
+export function higgsfieldSample(schema: HfEntry['schema'], a: Analysis): Record<string, unknown> {
+  const props = schema.properties ?? {}, out: Record<string, unknown> = {};
+  const media = (n: string) => /video/.test(n) ? HF_SAMPLE.video : /audio/.test(n) ? HF_SAMPLE.audio : HF_SAMPLE.image;
+  const want = new Set([...(schema.required ?? []), ...[a.map.prompt, a.map.startImage].filter((x): x is string => !!x)]);
+  for (const n of want) {
+    const p = props[n];
+    if (!p) continue;
+    if (p.default !== undefined && p.default !== null) { out[n] = p.default; continue; }
+    if (Array.isArray(p.enum) && p.enum.length) { out[n] = p.enum[0]; continue; }
+    if (p.type === 'array') { const it = p.items ?? {}; out[n] = Array.from({ length: Math.max(1, Number(p.minItems) || 1) }, () => it.format === 'uri' ? media(n) : it.type === 'string' ? 'x' : {}); continue; }
+    if (p.type === 'string') { out[n] = p.format === 'uri' ? media(n) : p.format === 'uuid' ? '00000000-0000-0000-0000-000000000000' : 'x'; continue; }
+    if (p.type === 'integer' || p.type === 'number') { out[n] = Number.isFinite(Number(p.minimum)) ? Number(p.minimum) : 1; continue; }
+    if (p.type === 'boolean') out[n] = false;
+  }
+  return out;
+}
+
+export class HiggsfieldAdapter implements ProviderAdapter {
+  kind = 'higgsfield' as const;
+  label = 'Higgsfield';
+  keyHint = 'An API key from console.higgsfield.ai, as KEY_ID:KEY_SECRET';
+  keyUrl = 'https://console.higgsfield.ai';
+  private details = new Map<string, { at: number; value: RawModel | null }>();
+  constructor(private base: () => string, private f: Fetch = fetch, private catalogFile = HIGGSFIELD_CATALOG) {}
+  validRef(ref: string) { return validRef(ref) && ref.split('/').length <= 6; }
+  private h(key: string) { return { authorization: `Key ${key}`, 'content-type': 'application/json', accept: 'application/json' }; }
+  private entries() { return higgsfieldCatalog(this.catalogFile); }
+
+  /** The free estimate of a cheap image model: 401 (or an expired/disabled key) is a refused key. */
+  async validate(key: string) {
+    const r = await call(this.f, 'higgsfield', `${trim(this.base())}/estimate/higgsfield-ai/soul/v2/standard`, { method: 'POST', headers: this.h(key), body: JSON.stringify({ prompt: 'x' }) });
+    const text = await r.text().catch(() => '');
+    if (r.status === 401 || (r.status === 403 && HF_KEY_RE.test(text))) return 'invalid' as const;
+    if (r.ok || r.status === 403 || r.status === 422) return 'ok' as const; // an empty balance or a picky body is still a good key
+    throw new ProviderUnreachable('higgsfield', String(r.status));
+  }
+
+  /** One quote for this account (USD), or null. */
+  private async quote(key: string, ref: string, body: Record<string, unknown>): Promise<number | null> {
+    const r = await call(this.f, 'higgsfield', `${trim(this.base())}/estimate/${ref}`, { method: 'POST', headers: this.h(key), body: JSON.stringify(body) }).catch(() => null);
+    if (!r?.ok) return null;
+    const b = (await r.json().catch(() => ({}))) as { usd?: unknown; currency?: string };
+    const c = Number(b.usd);
+    return (b.currency && b.currency.toUpperCase() !== 'USD') || !Number.isFinite(c) || c < 0 ? null : c;
+  }
+
+  /** One documented model with its schema and this account's price (cached 10 min; a missing price 30 s). */
+  private async detail(key: string, e: HfEntry): Promise<RawModel> {
+    const hit = this.details.get(e.ref);
+    if (hit?.value && Date.now() - hit.at < MUAPI_TTL) return hit.value;
+    const analysis = analyse({}, e.schema as any, { category: `x-to-${e.kind}`, text: e.name });
+    const price = await dearestPrice(analysis, higgsfieldSample(e.schema, analysis), body => this.quote(key, e.ref, body));
+    const value: RawModel = { ref: e.ref, version: null, name: e.name, description: e.docs, analysis, price };
+    this.details.set(e.ref, { at: price ? Date.now() : Date.now() - MUAPI_TTL + 30_000, value });
+    return value;
+  }
+
+  async model(key: string, ref: string) {
+    if (!this.validRef(ref)) return null;
+    const e = this.entries().find(x => x.ref === ref);
+    return e ? this.detail(key, e) : null;
+  }
+
+  /** The documented catalog, filtered here (every word, in the name or endpoint id). */
+  async search(key: string, o: { q?: string; kind?: Kind; cursor?: string | null; limit: number }) {
+    const off = Math.max(0, Number(o.cursor) || 0);
+    const words = (o.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const all = this.entries().filter(e => (!o.kind || e.kind === o.kind) && words.every(w => `${e.name} ${e.ref}`.toLowerCase().includes(w)));
+    const page = all.slice(off, off + o.limit);
+    const models = await pool(page, 4, e => this.detail(key, e));
+    return { models, nextCursor: off + o.limit < all.length ? String(off + o.limit) : null };
+  }
+
+  /** Our input URLs are public https (presigned), which Higgsfield takes as is: nothing goes to /files. */
+  async start(key: string, m: { ref: string }, input: Record<string, unknown>) {
+    if (!this.validRef(m.ref)) throw new ReplicateError('not a Higgsfield model', 'failed');
+    const b = trim(this.base());
+    const r = await call(this.f, 'higgsfield', `${b}/${m.ref}`, { method: 'POST', headers: this.h(key), body: JSON.stringify(input) }, 60_000)
+      .catch(e => { throw e instanceof ProviderUnreachable ? new ReplicateError(e.message, 'unavailable') : e; });
+    const text = await r.text().catch(() => '');
+    if (!r.ok) throw higgsfieldError(r.status, text);
+    let j: { request_id?: unknown; status_url?: string; cancel_url?: string } = {};
+    try { j = JSON.parse(text); } catch { /* below */ }
+    if (typeof j.request_id !== 'string' || !j.request_id) throw new ReplicateError('Higgsfield gave no request id', 'failed');
+    const req = `${b}/requests/${encodeURIComponent(j.request_id)}`;
+    // The key is only ever sent to Higgsfield's own host: URLs pointing anywhere else are replaced by the documented ones.
+    const same = (u: string | undefined) => { try { return u && new URL(u).origin === new URL(b).origin ? u : undefined; } catch { return undefined; } };
+    return JSON.stringify({ id: j.request_id, s: same(j.status_url) ?? `${req}/status`, c: same(j.cancel_url) ?? `${req}/cancel` });
+  }
+  async get(key: string, handle: string): Promise<RunStatus> {
+    const h = JSON.parse(handle) as { s: string };
+    const r = await this.f(h.s, { headers: this.h(key), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    if (r && r.status === 401) return { status: 'failed', error: new ReplicateError("Higgsfield refused the studio's key", 'unavailable', 401) };
+    if (!r || !r.ok) return { status: 'running' };
+    const st = (await r.json().catch(() => ({}))) as { status?: string; error?: unknown; images?: unknown; video?: unknown };
+    const s = String(st.status ?? '').toLowerCase();
+    if (s === 'completed') {
+      const url = firstUrl({ video: st.video, images: st.images });
+      return url ? { status: 'succeeded', url } : { status: 'failed', error: new ReplicateError('Higgsfield finished without a result', 'failed') };
+    }
+    if (s === 'nsfw') return { status: 'failed', error: new ReplicateError('Higgsfield’s content check refused this', 'refused') };
+    if (s === 'failed') { const t = errorText(st.error ?? 'failed'); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : CREDIT_RE.test(t) || HF_CREDIT_RE.test(t) ? 'out_of_credit' : 'failed') }; }
+    if (s === 'canceled' || s === 'cancelled') return { status: 'canceled' };
+    return { status: 'running' }; // queued, in_progress
+  }
+  /** Higgsfield cancels only while queued (a running one answers 400 and finishes; Higgsfield bills it). */
+  async cancel(key: string, handle: string) {
+    const h = JSON.parse(handle) as { c: string };
+    await this.f(h.c, { method: 'POST', headers: this.h(key), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+  }
+}
+
+export const KINDS = ['replicate', 'fal', 'muapi', 'higgsfield'] as const satisfies readonly ProviderKind[];
 export function adapters(urls: () => Urls, f: Fetch = fetch): Record<ProviderKind, ProviderAdapter> {
-  return { replicate: new ReplicateAdapter(() => urls().replicate, f), fal: new FalAdapter(() => urls(), f), muapi: new MuapiAdapter(() => urls().muapi, f) };
+  return { replicate: new ReplicateAdapter(() => urls().replicate, f), fal: new FalAdapter(() => urls(), f), muapi: new MuapiAdapter(() => urls().muapi, f),
+    higgsfield: new HiggsfieldAdapter(() => urls().higgsfield, f) };
 }

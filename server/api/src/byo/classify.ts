@@ -62,7 +62,7 @@ const NAMES: Record<Exclude<Role, 'referenceImages'>, string[]> = {
   prompt: ['prompt', 'text', 'text_prompt', 'caption'],
   negativePrompt: ['negative_prompt', 'negative', 'negative_text'],
   startImage: ['start_image', 'first_frame_image', 'first_frame', 'image', 'image_url', 'input_image', 'start_image_url', 'init_image', 'first_frame_url', 'images_list'],
-  endImage: ['end_image', 'last_frame_image', 'last_frame', 'end_image_url', 'tail_image_url', 'last_frame_url', 'end_frame', 'last_image'],
+  endImage: ['end_image', 'last_frame_image', 'last_frame', 'end_image_url', 'tail_image_url', 'last_frame_url', 'end_frame', 'last_image', 'last_image_url'],
   duration: ['duration', 'seconds', 'duration_seconds', 'video_length', 'length'],
   aspectRatio: ['aspect_ratio', 'ratio'],
   resolution: ['resolution', 'video_resolution'],
