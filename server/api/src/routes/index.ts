@@ -684,9 +684,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refsAll.length ? refsAll : undefined, templateId: p.presetId,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true };
     // WS5: a custom image model the user may use replaces the studio's image engine for this run.
-    // Owner only: `imageModel` picks any image model for this run (a Replicate "owner/name" or a custom "c_…").
-    if (p.imageModel && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the image model');
+    // `imageModel` picks the image model for this run (a Replicate "owner/name" or a custom "c_…"): the owner any; 4c: a
+    // member any model shown to members (checked, 403 otherwise).
     if (p.imageModel && p.engineModel) throw badRequest('Use imageModel or engineModel, not both');
+    if (p.imageModel && u.role !== 'owner') await modelChoice(ctx).check(u, 'photo', p.imageModel);
     // WS13: nothing picked → the studio's Photo default (a Replicate model or a custom one), if it is still available.
     const imageModel = p.imageModel ?? (p.engineModel ? undefined : (await modelChoice(ctx).choose(u, 'photo'))?.model);
     const custom = p.engineModel ?? (imageModel?.startsWith('c_') ? imageModel : undefined);

@@ -2,7 +2,8 @@
 // API key (validated, then stored AES-256-GCM encrypted), browses that provider's models, adds the ones they want, names
 // them and switches them on. Enabled video models join the Suite registry as custom models (ids "c_…"), so shots on them
 // go through the normal estimate → confirm → hold → settle flow and the daily caps; enabled image models run Photo. Members
-// see a custom model only when the owner marks it "available to members", and only by the owner's display name.
+// see every enabled custom model by the owner's display name unless the owner hides it from members (4c: the switch lives
+// in suite_settings.models, engines/members.ts; `members` here is "shown to members", the old column is no longer read).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { Readable } from 'node:stream';
@@ -20,6 +21,7 @@ import { adapters, KINDS, ProviderUnreachable, type Price, type ProviderAdapter,
 import type { Analysis, Inputs, Kind } from './classify.js';
 import { keyFromSecret, keysUnavailable, last4, openKey, sealKey } from './crypto.js';
 import { byoModels, byoProviders } from './schema.js';
+import { memberRules, providerLabel, saveMemberRules } from '../engines/members.js';
 
 type ProviderRow = typeof byoProviders.$inferSelect;
 type ModelRow = typeof byoModels.$inferSelect;
@@ -173,10 +175,16 @@ export class ByoService {
     return { models: page.models.map(m => this.catalogView(m, added.find(a => a.ref === m.ref))), nextCursor: page.nextCursor };
   }
 
-  modelView(r: ModelRow, p?: Pick<ProviderRow, 'kind'>) {
+  /** Whether members see this model (4c: shown unless the owner hid it). */
+  private async shown(studioId: string) { const h = (await memberRules(this.ctx, studioId)).hidden; return (id: string) => !h.has(id); }
+  async isStudioModel(studioId: string, id: string) {
+    return (await this.ctx.db.select({ id: byoModels.id }).from(byoModels).where(and(eq(byoModels.id, id), eq(byoModels.studioId, studioId)))).length > 0;
+  }
+
+  modelView(r: ModelRow, p: Pick<ProviderRow, 'kind'> | undefined, shown: (id: string) => boolean) {
     const s = setupOf(r);
     return { id: r.id, providerId: r.providerId, providerKind: (p?.kind ?? null) as ProviderKind | null, ref: r.ref, providerName: r.providerName, displayName: r.displayName,
-      kind: r.kind, enabled: r.enabled, members: r.members, status: s.ready ? 'ready' as const : 'needs_setup' as const, missing: s.missing, inputs: r.analysis.inputs,
+      kind: r.kind, enabled: r.enabled, members: shown(r.id), status: s.ready ? 'ready' as const : 'needs_setup' as const, missing: s.missing, inputs: r.analysis.inputs,
       fields: r.analysis.fields, fixedInputs: r.fixedInputs, price: r.price, priceScale: r.priceScale,
       memberPrice: r.price ? { basis: r.price.basis, usd: Math.round(r.price.costUsd * r.priceScale * 10000) / 10000 } : null, createdAt: r.createdAt, updatedAt: r.updatedAt };
   }
@@ -190,7 +198,7 @@ export class ByoService {
     const p = await this.providerRow(u, providerId);
     if (!this.adapters[p.kind as ProviderKind]?.validRef(b.ref)) throw badRequest('That isn’t a model id on this provider');
     const [dup] = await this.ctx.db.select().from(byoModels).where(and(eq(byoModels.providerId, p.id), eq(byoModels.ref, b.ref)));
-    if (dup) return this.modelView(dup, p);
+    if (dup) return this.modelView(dup, p, await this.shown(u.studioId));
     const n = (await this.ctx.db.select({ id: byoModels.id }).from(byoModels).where(eq(byoModels.studioId, u.studioId))).length;
     if (n >= MAX_MODELS) throw badRequest(`At most ${MAX_MODELS} custom models`);
     const { key } = await this.keyOf(p.id).catch(() => { throw keysUnavailable(); });
@@ -200,22 +208,22 @@ export class ByoService {
     if (!m) throw notFound('Model on this provider');
     const now = Date.now();
     const row: ModelRow = { id: newId('c'), studioId: u.studioId, providerId: p.id, ref: m.ref, version: m.version, providerName: m.name,
-      displayName: b.displayName ?? m.name.slice(0, 60), kind: m.analysis.kind, enabled: false, members: false, analysis: m.analysis, fixedInputs: {},
+      displayName: b.displayName ?? m.name.slice(0, 60), kind: m.analysis.kind, enabled: false, members: true, analysis: m.analysis, fixedInputs: {},
       price: m.price, priceScale: 1, createdAt: now, updatedAt: now };
     await this.ctx.db.insert(byoModels).values(row);
-    return this.modelView(row, p);
+    return this.modelView(row, p, await this.shown(u.studioId));
   }
   async models(u: AuthUser) {
     const rows = await this.ctx.db.select().from(byoModels).where(eq(byoModels.studioId, u.studioId));
     const ps = await this.ctx.db.select({ id: byoProviders.id, kind: byoProviders.kind }).from(byoProviders).where(eq(byoProviders.studioId, u.studioId));
-    return { models: rows.sort((a, b) => a.createdAt - b.createdAt).map(r => this.modelView(r, ps.find(p => p.id === r.providerId))) };
+    const shown = await this.shown(u.studioId);
+    return { models: rows.sort((a, b) => a.createdAt - b.createdAt).map(r => this.modelView(r, ps.find(p => p.id === r.providerId), shown)) };
   }
   async patchModel(u: AuthUser, id: string, body: unknown) {
     const b = parse(PatchModelBody, body);
     const r = await this.modelRow(u, id);
     const next: ModelRow = { ...r, updatedAt: Date.now() };
     if (b.displayName !== undefined) next.displayName = b.displayName;
-    if (b.members !== undefined) next.members = b.members;
     if (b.priceScale !== undefined) next.priceScale = b.priceScale;
     if (b.kind !== undefined) next.kind = b.kind;
     if (b.price !== undefined) next.price = b.price ? { ...b.price, source: 'owner' } : null;
@@ -237,9 +245,11 @@ export class ByoService {
     }
     const { id: _id, studioId: _s, ...set } = next;
     await this.ctx.db.update(byoModels).set(set).where(eq(byoModels.id, r.id));
+    // The old "available to members" switch (apps before 4c) is now the model's hide-from-members flag.
+    if (b.members !== undefined) await saveMemberRules(this.ctx, u, { hidden: { [r.id]: !b.members } });
     await this.ensure(u.studioId, true);
     const [p] = await this.ctx.db.select({ kind: byoProviders.kind }).from(byoProviders).where(eq(byoProviders.id, r.providerId));
-    return this.modelView(next, p);
+    return this.modelView(next, p, await this.shown(u.studioId));
   }
   async removeModel(u: AuthUser, id: string) {
     const r = await this.modelRow(u, id);
@@ -271,28 +281,32 @@ export class ByoService {
     if (!force && Date.now() - (this.loadedAt.get(studioId) ?? 0) < LOAD_MS) return;
     const rows = await this.ctx.db.select().from(byoModels).where(and(eq(byoModels.studioId, studioId), eq(byoModels.enabled, true)));
     const ps = await this.ctx.db.select({ id: byoProviders.id, kind: byoProviders.kind }).from(byoProviders).where(eq(byoProviders.studioId, studioId));
+    const shown = await this.shown(studioId);
     for (const [k, v] of this.usable) if (v.studioId === studioId) this.usable.delete(k);
     const video: ModelSpec[] = [];
     for (const r of rows) {
       const p = ps.find(x => x.id === r.providerId);
       if (!p || !r.price || !setupOf(r).ready) continue;
-      this.usable.set(r.id, { ...r, providerKind: p.kind });
-      if (r.kind === 'video') video.push(this.specOf(r, p));
+      const row = { ...r, members: shown(r.id) };
+      this.usable.set(r.id, { ...row, providerKind: p.kind });
+      if (r.kind === 'video') video.push(this.specOf(row, p));
     }
     setCustomModels(studioId, video);
     this.loadedAt.set(studioId, Date.now());
   }
-  /** The enabled custom models this user may pick (members: only those the owner made available), member-safe. */
+  /** The enabled custom models this user may pick (members: those the owner hasn't hidden), member-safe. */
   async catalog(u: AuthUser) {
     await this.ensure(u.studioId);
     const rows = [...this.usable.values()].filter(r => r.studioId === u.studioId && (u.role === 'owner' || r.members));
+    const names = u.role !== 'owner' && (await memberRules(this.ctx, u.studioId)).showProviderNames;
     return rows.sort((a, b) => a.createdAt - b.createdAt).map(r => {
       const spec = r.kind === 'video' ? customModelsOf(u.studioId).find(m => m.id === r.id) : undefined;
       const price = { basis: r.price!.basis, usd: Math.round(r.price!.costUsd * r.priceScale * 10000) / 10000 };
       const base = { id: r.id, name: r.displayName, kind: r.kind as Kind, price,
         inputs: spec ? inputSlotsOf([spec]) : { start: false, end: false, middle: 0, images: Math.min(6, r.analysis.inputs.referenceImages), videos: 0, audio: false, framesWithRefs: false },
         minSeconds: spec?.duration.min ?? null, maxSeconds: spec?.duration.max ?? null, aspectRatios: spec?.aspectRatios ?? r.analysis.inputs.aspectRatios };
-      return u.role === 'owner' ? { ...base, members: r.members, provider: r.providerKind } : base;
+      return u.role === 'owner' ? { ...base, members: r.members, provider: r.providerKind, providerName: providerLabel(r.providerKind) }
+        : names ? { ...base, provider: r.providerKind, providerName: providerLabel(r.providerKind) } : base;
     });
   }
   /** Whether this user may run this custom model now (throws otherwise). */

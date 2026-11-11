@@ -1,7 +1,8 @@
 // WS13 · model choice everywhere (plans/model-choice.md, plans/api.md "Model choice"): one owner catalog of every model
 // MUSE can run, per purpose; validation of an owner's override (`engineModel` / `imageModel`); and the studio's default
-// model per purpose (suite_settings.engine_defaults). Members only ever see custom models the owner made available, by
-// display name, never a provider or model ref.
+// model per purpose (suite_settings.engine_defaults). 4c (owner 2026-11-11): members see and pick every video and image
+// model the owner hasn't hidden from them, with the provider's company name while "Show provider names to members" is
+// on (engines/members.ts); tools, studio defaults, licence lines and arbitrary Replicate refs stay owner only.
 import { ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from '../editor/assemblyai.js';
 import { eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -13,6 +14,7 @@ import { estimateOne } from '../replicate/prices.js';
 /** How many of Replicate's image models the picker lists beyond the curated ones. */
 const BROWSE_IMAGE_MODELS = 40;
 import { modelName, type StepOverrides } from '../images/steps.js';
+import { memberRules, providerLabel, saveMemberRules, type MemberRules } from './members.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
@@ -21,8 +23,12 @@ import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_EN
 export type Price = { basis: 'per_second' | 'per_run' | 'per_output_second'; usd: number };
 export type Engine = {
   model: string; name: string; kind: EngineKind; purposes: Purpose[]; custom: boolean;
-  /** Owner only. */
-  provider?: string; notice?: string | null; members?: boolean;
+  /** Owner only (members: `provider` + `providerName` while the studio shows provider names). */
+  provider?: string; providerName?: string; notice?: string | null;
+  /** Shown to members (owner view; video and image models). */
+  members?: boolean;
+  /** Internal: one of Replicate's popular image models the picker lists for the owner (not a model the owner added). */
+  browsed?: boolean;
   limits: { minSeconds: number | null; maxSeconds: number | null; allowedSeconds: number[] | null; aspectRatios: string[]; resolutions: { id: string; label: string }[]; maxInputSeconds: number | null };
   resolution: string | null; price: Price | null; inputs: InputSlots;
 };
@@ -76,7 +82,7 @@ export class ModelChoice {
     const res = (resolution && m.resolutions.find(r => r.id === resolution)) || m.resolutions.at(-1)!;
     const perRun = m.byo?.perRunUsd ? r4(m.byo.perRunUsd * scale) : null;
     return { model: m.id, name: m.byo?.displayName ?? m.name, kind: 'video', purposes, custom: !!m.byo, provider: m.byo ? m.byo.providerKind : m.provider,
-      notice: m.licence.notice ?? null, ...(m.byo ? { members: m.byo.members } : {}),
+      notice: m.licence.notice ?? null,
       limits: { minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios,
         resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label })), maxInputSeconds: m.recast?.sourceSeconds[1] ?? m.extend?.sourceSeconds[1] ?? m.refs.videoSecondsMax ?? null },
       resolution: res.id, price: perRun != null ? { basis: 'per_run', usd: perRun } : { basis: 'per_second', usd: r4(res.perSec * scale) }, inputs: inputSlotsOf([m]) };
@@ -147,12 +153,13 @@ export class ModelChoice {
         : cached ? (() => { try { return estimateOne(cached, { outMp: 2, inMp }, im.estOpts()); } catch { return null; } })() : null;
       const nm = modelName(id);
       out.push({ model: id, name: nm !== id ? nm : names.get(id) ? `${names.get(id)} (${id.split('/')[0]})` : id, kind: 'image', purposes: [...IMAGE_PURPOSES], custom: false, provider: 'replicate', notice: null,
+        ...(curated.has(id) ? {} : { browsed: true }),
         limits: noLimits, resolution: null, price: usd == null ? null : { basis: 'per_run', usd: r4(usd) }, inputs });
     }
     // WS5: the studio's custom image models, for every image purpose (Photo, Outfits, Character photos, Background plates).
     for (const c of await this.ctx.suite.byo.catalog({ ...u, studioId, role: 'owner' } as AuthUser)) if (c.kind === 'image') {
-      const cc = c as typeof c & { members?: boolean; provider?: string };
-      out.push({ model: c.id, name: c.name, kind: 'image', purposes: [...IMAGE_PURPOSES], custom: true, provider: cc.provider, members: !!cc.members, notice: null,
+      const cc = c as typeof c & { provider?: string };
+      out.push({ model: c.id, name: c.name, kind: 'image', purposes: [...IMAGE_PURPOSES], custom: true, provider: cc.provider, notice: null,
         limits: { ...noLimits, aspectRatios: c.aspectRatios }, resolution: null, price: c.price as Price, inputs: c.inputs });
     }
     return out;
@@ -248,11 +255,52 @@ export class ModelChoice {
   }
 
   // ------------------------------------------------------------------ views and checks
-  /** What a member may see of an entry: custom models the owner made available, no provider or licence line. */
-  private memberView(e: Engine): Engine | null {
-    if (!e.custom || !e.members) return null;
-    const { provider: _p, notice: _n, members: _m, ...rest } = e;
-    return rest;
+  /** The owner's member switches (engines/members.ts). */
+  memberRules(studioId: string) { return memberRules(this.ctx, studioId); }
+
+  /** Whether members may see and pick this engine: a video or image model the owner added or MUSE offers, not hidden. */
+  static forMembers(e: Engine, rules: MemberRules) {
+    return (e.kind === 'video' || e.kind === 'image') && !e.browsed && !rules.hidden.has(e.model);
+  }
+
+  /** What a member may see of an entry: name, limits, price as charged; the provider's name while the studio shows it. */
+  private memberView(e: Engine, rules: MemberRules): Engine | null {
+    if (!ModelChoice.forMembers(e, rules)) return null;
+    const { provider, notice: _n, members: _m, browsed: _b, providerName: _pn, ...rest } = e;
+    return rules.showProviderNames && provider ? { ...rest, provider, providerName: providerLabel(provider) } : rest;
+  }
+  /** The owner's view of an entry: every field, `members` (shown to members) on video and image models. */
+  private ownerView(e: Engine, rules: MemberRules): Engine {
+    const { browsed: _b, ...rest } = e;
+    return { ...rest, ...(e.provider ? { providerName: providerLabel(e.provider) } : {}), ...(e.kind !== 'tool' ? { members: ModelChoice.forMembers(e, rules) } : {}) };
+  }
+
+  /** GET /v1/engines/members (owner): the studio's "Show provider names to members" and the models hidden from members. */
+  async membersView(u: AuthUser) {
+    const rules = await this.memberRules(u.studioId);
+    const engines = await this.all(u, ['video', 'image']);
+    return { showProviderNames: rules.showProviderNames,
+      models: engines.filter(e => !e.browsed).map(e => ({ model: e.model, name: e.name, kind: e.kind, custom: e.custom, provider: e.provider ?? null, members: ModelChoice.forMembers(e, rules) })) };
+  }
+  /** PATCH /v1/engines/members (owner): {showProviderNames?: boolean, hidden?: {model: true | false}}. */
+  async setMembers(u: AuthUser, body0: unknown) {
+    const b = (body0 ?? {}) as { showProviderNames?: unknown; hidden?: unknown };
+    if (typeof body0 !== 'object' || Array.isArray(body0) || Object.keys(b).some(k => k !== 'showProviderNames' && k !== 'hidden')) throw badRequest('Send {showProviderNames?, hidden?: {model: true or false}}');
+    if (b.showProviderNames !== undefined && typeof b.showProviderNames !== 'boolean') throw badRequest('showProviderNames: true or false');
+    let hidden: Record<string, boolean> | undefined;
+    if (b.hidden !== undefined) {
+      if (!b.hidden || typeof b.hidden !== 'object' || Array.isArray(b.hidden)) throw badRequest('hidden: {model: true or false}');
+      hidden = {};
+      const known = new Set((await this.all(u, ['video', 'image'])).map(e => e.model));
+      for (const [id, v] of Object.entries(b.hidden as Record<string, unknown>)) {
+        if (typeof v !== 'boolean') throw badRequest(`hidden.${id}: true or false`);
+        if (!known.has(id) && !(await this.ctx.suite.byo.isStudioModel(u.studioId, id))) throw badRequest(`Unknown model ${id}`);
+        hidden[id] = v;
+      }
+    }
+    await saveMemberRules(this.ctx, u, { showProviderNames: b.showProviderNames as boolean | undefined, hidden });
+    await this.ctx.suite.byo.ensure(u.studioId, true); // custom models' "available to members" follows at once
+    return this.membersView(u);
   }
 
   /** GET /v1/engines[?purpose=]. */
@@ -284,25 +332,33 @@ export class ModelChoice {
       purposes.push({ id: p, label: PURPOSE_INFO[p].label, kind: PURPOSE_INFO[p].kind, default: st ?? b.model, studioDefault: u.role === 'owner' ? st : null, rule: st ? 'fixed' : b.rule });
     }
     const def = only ? purposes[0]!.default : null;
-    const shown = u.role === 'owner' ? engines : engines.map(e => this.memberView(e)).filter((e): e is Engine => !!e);
+    const rules = await this.memberRules(u.studioId);
+    const shown = u.role === 'owner' ? engines.map(e => this.ownerView(e, rules)) : engines.map(e => this.memberView(e, rules)).filter((e): e is Engine => !!e);
     const view = [];
     for (const e of shown) view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}) });
     const ps = u.role === 'owner' ? purposes : purposes.map(p => ({ ...p, default: null }));
     // With ?purpose: also `purpose`, `default` and `models` (= engines), the shape WS7 proposed.
-    return { ...(only ? { purpose: only, default: ps[0]!.default, models: view } : {}), purposes: ps, engines: view };
+    return { ...(only ? { purpose: only, default: ps[0]!.default, models: view } : {}), purposes: ps, engines: view,
+      ...(u.role === 'owner' ? { memberSettings: { showProviderNames: rules.showProviderNames } } : {}) };
   }
 
   /**
    * An override for a purpose: allowed for this user and a candidate (image purposes also take any Replicate "owner/name",
-   * checked against its schema when it runs). 403 owner_only for members (unless a custom model the owner made available);
-   * 400 engine_not_allowed with the valid list otherwise.
+   * checked against its schema when it runs, owner only). Members: any video or image candidate the owner hasn't hidden
+   * from them (4c), else 403 owner_only (tools, hidden models, other refs); 400 engine_not_allowed with the valid list otherwise.
    */
   async check(u: AuthUser, purpose: Purpose, model: string): Promise<Engine> {
     const cands = await this.candidates(u, purpose);
     const e = cands.find(x => x.model === model);
     if (u.role !== 'owner') {
-      if (e?.custom && e.members) return e;
-      throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the engine');
+      const rules = await this.memberRules(u.studioId);
+      if (e && ModelChoice.forMembers(e, rules)) return e;
+      if (!e && PURPOSE_INFO[purpose].kind !== 'tool' && !MODEL_ID_RE.test(model)) {
+        const err = new ApiError(400, 'engine_not_allowed', `That model can't be used for ${PURPOSE_INFO[purpose].label}`);
+        (err as ApiError & { extra?: unknown }).extra = { purpose, valid: cands.filter(x => ModelChoice.forMembers(x, rules)).map(x => x.model) };
+        throw err;
+      }
+      throw new ApiError(403, 'owner_only', 'Only the studio owner can pick that model');
     }
     if (e) return e;
     if (PURPOSE_INFO[purpose].kind === 'image' && MODEL_ID_RE.test(model))
@@ -332,8 +388,8 @@ export class ModelChoice {
     const d = (await this.studioDefaults(u.studioId))[purpose];
     if (!d) return null;
     const e = (await this.candidates(u, purpose)).find(x => x.model === d);
-    // A member runs on the studio's default too, unless it's a custom model the owner kept to themselves.
-    if (!e || (u.role !== 'owner' && e.custom && !e.members)) return null;
+    // A member runs on the studio's default too, unless it's a custom model the owner hid from members.
+    if (!e || (u.role !== 'owner' && e.custom && !ModelChoice.forMembers(e, await this.memberRules(u.studioId)))) return null;
     return { model: d, source: 'studio', engine: e };
   }
 }

@@ -9,4 +9,7 @@ export async function registerEngineRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/engines', async req => mc.list(req.user, (req.query as { purpose?: string } | undefined)?.purpose));
   app.get('/v1/engines/defaults', { config: { owner: true } }, async req => mc.defaultsView(req.user));
   app.patch('/v1/engines/defaults', { config: { owner: true } }, async req => mc.setDefaults(req.user, req.body));
+  // 4c: "Show provider names to members" and the per-model "hide from members" switches (owner).
+  app.get('/v1/engines/members', { config: { owner: true } }, async req => mc.membersView(req.user));
+  app.patch('/v1/engines/members', { config: { owner: true } }, async req => mc.setMembers(req.user, req.body));
 }
