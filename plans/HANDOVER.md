@@ -57,6 +57,11 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   server/api/src/prompt/library.ts on every prompt-text change.
 - Pushed (server, live): outfit body angle per picture (`plans/outfit-head-looks.md` §1). Server suite 695 green.
 - Mac CI: run 513 (head 892e2062) holds all three Mac commits; confirm it is green before sending a Mac build.
+- OWNER RULES (2026-11-11): (1) tests the owner can easily do by hand are left to the owner; automated tests only when
+  really necessary. (2) Coordinator delegates jobs to new sessions that report back (send_message), not doing them itself.
+  (3) Send the Mac build when its CI is green, without asking.
+- Delegated: 5A.1 oval bug → session_01Py2rxn8a5F3AVgi5WFAKFc on branch claude/mac-edit-oval (not prod, so it can't
+  cancel prod's Mac CI); merge after its Mac CI is green.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
