@@ -445,6 +445,11 @@ struct TimelineCanvas: View {
             if !locked { session.view { $0.selection = id } }
         }
         .gesture(moveGesture(b, row: row, locked: locked))
+        .overlay(alignment: .topTrailing) {
+            if let id = b.itemId, let badge = MaskBadge(session.project.track(row.trackId)?.item(id)), w >= 36 {
+                maskBadge(badge, itemId: id, locked: locked).offset(x: x, y: 6)
+            }
+        }
         .overlay(alignment: .topLeading) {
             if row.kind == .main, let tr = b.transition {
                 Ph("diamond.fill", 13).foregroundStyle(t.roles.accent)
@@ -459,9 +464,27 @@ struct TimelineCanvas: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.label): \(b.label)")
+        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")")
         .accessibilityValue("\(EditSuite.clockTenths(b.startSec)) to \(EditSuite.clockTenths(b.endSec))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// A clip's mask, Invert, green-screen key or cut-out, which can hide most of the picture without showing on the
+    /// timeline (the owner's "oval", 2026-11-11). Click: select the clip and open "Mask & green screen".
+    private func maskBadge(_ badge: MaskBadge, itemId: String, locked: Bool) -> some View {
+        Button {
+            guard !locked else { return }
+            session.view { $0.selection = itemId; $0.tab = .video }
+            session.reveal = MaskBadge.panelId
+        } label: {
+            Ph(badge.icon, 12).foregroundStyle(.white).shadow(color: .black, radius: 1)
+                .frame(width: 20, height: 20).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, Space.s1)
+        .help("\(badge.text). Click to open Mask & green screen")
+        .accessibilityLabel(badge.text)
+        .accessibilityHint("Opens Mask & green screen")
     }
 
     @ViewBuilder private func blockContent(_ b: EditSuite.Block, row: EditSuite.Row, width: CGFloat, height: CGFloat) -> some View {
@@ -611,5 +634,24 @@ struct TimelineCanvas: View {
                 if drag != nil { session.endGesture() }
                 drag = nil
             }
+    }
+}
+
+/// What a clip's badge says is on: a mask (Invert noted), a green-screen key, a cut-out. Nil when none.
+struct MaskBadge {
+    static let panelId = "edit.mask"
+    let text: String
+    let icon: String
+
+    init?(_ item: EditV2.Item?) {
+        let mask = item?.videoClip?.mask ?? item?.imageItem?.mask
+        let c = item?.videoClip
+        var on: [String] = []
+        if let mask { on.append(mask.invert == true ? "Inverted mask" : "Mask") }
+        if c?.chroma != nil { on.append("Green screen") }
+        if let m = c?.alphaMatte { on.append(m.invert == true ? "Inverted cut-out" : "Cut-out") }
+        guard let first = on.first else { return nil }
+        text = ListFormatter.localizedString(byJoining: on)
+        icon = mask?.invert == true ? "selection-background" : mask != nil ? "selection" : first == "Green screen" ? "drop" : "scissors"
     }
 }

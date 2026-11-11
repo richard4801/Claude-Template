@@ -226,6 +226,7 @@ struct OneClaudePanel: View {
             .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
             .padding(.horizontal, Space.s4).padding(.top, Space.s3)
         }
+        ClaudeEditNoticeLine()
         if let m = o.remembered, let text = m.text {
             HStack(alignment: .top, spacing: Space.s1) {
                 Ph("push-pin", 13)

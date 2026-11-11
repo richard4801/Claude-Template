@@ -36,6 +36,8 @@ final class EditSuiteSession {
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
     var mode: Mode = .timeline
+    /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
+    var reveal: String?
     var binTab: EditSuite.BinTab = .takes
     /// The playhead while playing (timeline seconds); `state.playhead` follows it when playback stops or an edit needs it.
     private(set) var playhead: Double = 0

@@ -1,4 +1,5 @@
 import MuseCore
+import Observation
 import SwiftUI
 
 // Claude in the Edit suite (workstream 3, plans/claude-editing.md A and E), owner only: the "Claude" badge, the shared
@@ -99,6 +100,46 @@ struct EditSuiteClaudeToast: View {
     }
 }
 
+/// The last mask, Invert, green-screen key or cut-out Claude changed in the open edit ("Added an inverted oval mask to
+/// clip 2 · Undo"), shown as one line in the chat (the Edit Claude panel and the one-Claude panel). Undo reverts exactly
+/// that change through the session's history.
+@MainActor
+@Observable
+final class ClaudeEditNotice {
+    static let shared = ClaudeEditNotice()
+    private(set) var entry: EditHistoryEntry? = nil
+    @ObservationIgnored private weak var session: EditSuiteSession? = nil
+
+    func post(_ e: EditHistoryEntry, from s: EditSuiteSession) { entry = e; session = s }
+    func clear(if s: EditSuiteSession? = nil) { if s == nil || s === session { entry = nil; session = nil } }
+    func undo() async {
+        guard let e = entry, let s = session else { return }
+        clear()
+        await s.undoLive(e)
+    }
+}
+
+/// "Added an inverted oval mask to clip 2 · Undo".
+struct ClaudeEditNoticeLine: View {
+    @Environment(\.theme) private var t
+    private var notice: ClaudeEditNotice { .shared }
+
+    var body: some View {
+        if let e = notice.entry, let text = e.notice {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
+                Text(text).fixedSize(horizontal: false, vertical: true)
+                Button("Undo") { Task { await notice.undo() } }
+                    .buttonStyle(.link)
+                    .help("Undo this change of Claude's")
+                Spacer(minLength: 0)
+                SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 22) { notice.clear() }
+            }
+            .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+            .padding(.horizontal, Space.s4).padding(.top, Space.s2)
+        }
+    }
+}
+
 /// "Claude wants to run <label> · about $X": the owner's yes starts the paid helper (its cost held as usual).
 struct EditSuiteClaudeAsk: View {
     @Environment(\.theme) private var t
@@ -175,6 +216,7 @@ struct EditSuiteClaudePanel: View {
                 if let id = session.live?.sessionId ?? (SnapshotRunner.probing && SnapshotRunner.state.chatSample ? "es_review" : nil) {
                     // Workstream 2's chat on the owner's Claude Code, about this edit session.
                     // No second header: this panel already has one (badge, sharing state, close).
+                    ClaudeEditNoticeLine()
                     ClaudeChatView(contextKind: "edit", contextId: id, title: session.title, showsHeader: false)
                 } else {
                     noSession

@@ -18,14 +18,17 @@ public struct EditHistoryEntry: Codable, Hashable, Sendable, Identifiable {
     public var undoes: Int?
     public var undone: Bool
     public var createdAt: Double
+    /// Claude added, changed or removed a mask, Invert, green-screen key or cut-out: one plain line ("Added an inverted
+    /// oval mask to clip 2"), shown in the chat with Undo (server editor/maskNotice.ts).
+    public var notice: String?
 
     public init(id: Int, revision: Int, author: String, byClaude: Bool? = nil, kind: String = "edit", label: String, undoes: Int? = nil,
-                undone: Bool = false, createdAt: Double = 0) {
+                undone: Bool = false, createdAt: Double = 0, notice: String? = nil) {
         self.id = id; self.revision = revision; self.author = author; self.byClaude = byClaude ?? (author == "claude"); self.kind = kind
-        self.label = label; self.undoes = undoes; self.undone = undone; self.createdAt = createdAt
+        self.label = label; self.undoes = undoes; self.undone = undone; self.createdAt = createdAt; self.notice = notice
     }
 
-    enum CodingKeys: String, CodingKey { case id, revision, author, byClaude, kind, label, undoes, undone, createdAt }
+    enum CodingKeys: String, CodingKey { case id, revision, author, byClaude, kind, label, undoes, undone, createdAt, notice }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         if let n = try? c.decode(Int.self, forKey: .id) { id = n } else { id = Int(try c.decode(String.self, forKey: .id)) ?? 0 }
@@ -37,6 +40,7 @@ public struct EditHistoryEntry: Codable, Hashable, Sendable, Identifiable {
         undoes = try? c.decodeIfPresent(Int.self, forKey: .undoes)
         undone = (try? c.decode(Bool.self, forKey: .undone)) ?? false
         createdAt = (try? c.decode(Double.self, forKey: .createdAt)) ?? 0
+        notice = try? c.decodeIfPresent(String.self, forKey: .notice)
     }
 
     /// A change that can still be undone (not a note, not undone yet).

@@ -43,19 +43,26 @@ struct EditSuiteInspector: View {
             .padding(.horizontal, Space.s4)
             .padding(.bottom, Space.s3)
             SuiteRule().padding(.horizontal, Space.s4)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch session.state.tab {
-                    case .captions: CaptionsPanel(session: session)
-                    case .text: TextPanel(session: session)
-                    case .video: VideoPanels(session: session)
-                    case .audio: AudioPanels(session: session)
-                    case .speed: SpeedPanel(session: session)
-                    case .anim: AnimPanel(session: session)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch session.state.tab {
+                        case .captions: CaptionsPanel(session: session)
+                        case .text: TextPanel(session: session)
+                        case .video: VideoPanels(session: session)
+                        case .audio: AudioPanels(session: session)
+                        case .speed: SpeedPanel(session: session)
+                        case .anim: AnimPanel(session: session)
+                        }
                     }
+                    .padding(.vertical, Space.s1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.vertical, Space.s1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // The timeline's mask badge: scroll "Mask & green screen" (or Cut out) into view.
+                .onChange(of: session.reveal) { _, id in
+                    guard let id else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top); session.reveal = nil }
+                }
             }
         }
         .background(t.roles.canvas)
