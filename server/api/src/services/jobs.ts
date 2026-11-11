@@ -296,9 +296,12 @@ export class JobService {
   /**
    * "Clear all failed" on the Queue: hides every failed job at once (the owner's: the whole studio's; a member's: their
    * own). Like Dismiss, it is stored on the job (hiddenAt), so it holds after a restart or a deploy. Returns the ids.
+   * `only`: just these jobs (still only failed ones the person may clear), e.g. the list on Claude's Approve card.
    */
-  async clearFailed(user: AuthUser) {
+  async clearFailed(user: AuthUser, only?: string[]) {
+    if (only && !only.length) return [];
     const conds = [eq(jobs.studioId, user.studioId), eq(jobs.kind, 'render'), eq(jobs.state, 'failed'), isNull(jobs.hiddenAt)];
+    if (only) conds.push(inArray(jobs.id, only));
     if (user.role !== 'owner') conds.push(eq(jobs.userId, user.id));
     const rows = await this.ctx.db.update(jobs).set({ hiddenAt: Date.now() }).where(and(...conds)).returning({ id: jobs.id });
     return rows.map(r => r.id);

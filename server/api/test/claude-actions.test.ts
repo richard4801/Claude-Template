@@ -3,7 +3,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/ctx.js';
-import { users } from '../src/db/schema.js';
+import { jobs, users } from '../src/db/schema.js';
 import { CHAT_REGISTRY, registryByName } from '../src/claude/registry.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS, priceOf } from '../src/claude/actions.js';
 import { toolsForUser } from '../src/claude/registry.js';
@@ -52,6 +52,30 @@ describe('gated actions', () => {
     const ask = await run(ownerU, 'collection_delete', { collectionId: c.id, confirm: true });
     expect((await owner.req('POST', `/v1/claude/actions/${ask.actionId}`, { approve: false })).body.status).toBe('declined');
     expect(await names(owner)).toContain('Keep me');
+  });
+});
+
+describe('queue_clear_failed (owner bug 2026-11-11: failed jobs kept coming back)', () => {
+  const failed = async (id: string, u: AuthUser, title: string) => a.ctx.db.insert(jobs).values({ id, studioId: u.studioId, userId: u.id, kind: 'render', title,
+    modelId: '', modelName: '', request: { engine: 'replicate', takes: 1 }, state: 'failed', cost: 0.67, refunded: 0.67, prompt: '', seed: 0, createdAt: Date.now() } as never);
+  const shown = async () => ((await owner.req('GET', '/v1/jobs')).body as any[]).map(j => j.id).sort();
+
+  it('previews the count and titles, then clears exactly those after ONE Approve; a member only their own', async () => {
+    await failed('jf_o1', ownerU, 'ZELPHIRA SUBJECT'); await failed('jf_o2', ownerU, 'Photo · 2 photos'); await failed('jf_m1', memberU, 'Kick test');
+    const mine = await run(memberU, 'queue_clear_failed');
+    expect(mine).toMatchObject({ needsConfirmation: true, would: 'Clear 1 failed job from the Queue: “Kick test”' });
+    const look = await run(ownerU, 'queue_clear_failed');
+    expect(look.would).toMatch(/^Clear 3 failed jobs from the Queue: /);
+    for (const t of ['ZELPHIRA SUBJECT', 'Photo · 2 photos', 'Kick test']) expect(look.would).toContain(t);
+    expect(await shown()).toEqual(['jf_m1', 'jf_o1', 'jf_o2']); // nothing happened yet
+    const ask = await run(ownerU, 'queue_clear_failed', { confirm: true });
+    expect(ask.waitingForApproval).toBe(true);
+    await failed('jf_late', ownerU, 'Failed after the card'); // not on the card: stays
+    expect((await owner.req('POST', `/v1/claude/actions/${ask.actionId}`, { approve: true })).body.status).toBe('done');
+    expect(await shown()).toEqual(['jf_late']);
+    expect((await owner.req('POST', '/v1/jobs/clear-failed', { ids: ['jf_late'] })).body).toEqual({ cleared: 1, ids: ['jf_late'] });
+    await expect(run(ownerU, 'queue_clear_failed')).rejects.toMatchObject({ code: 'bad_request' });
+    expect((await owner.req('POST', '/v1/jobs/clear-failed', { ids: 'x' })).status).toBe(400);
   });
 });
 

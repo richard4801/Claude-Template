@@ -824,7 +824,7 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `GET /v1/jobs` | → `Job[]`, newest first |
 | `POST /v1/jobs` `JobRequest` | → `Job` (`running`). Charges the price. Rejects a failing clip, low balance and the per-job limit. |
 | `DELETE /v1/jobs/{id}` | 204. Removes the job from the list and stops it if it's running. |
-| `POST /v1/jobs/clear-failed` | → `{cleared, ids}`. "Clear all failed": hides every failed job (owner: the studio's; member: their own) for good, like `DELETE` on each; a `job` `{op: "delete"}` event per id. Dismiss on the Queue must call `DELETE /v1/jobs/{id}` (a local-only hide comes back on the next launch). |
+| `POST /v1/jobs/clear-failed` `{ids?: string[]}` | → `{cleared, ids}`. With `ids`, only those (Claude's `queue_clear_failed` Approve card lists them). "Clear all failed": hides every failed job (owner: the studio's; member: their own) for good, like `DELETE` on each; a `job` `{op: "delete"}` event per id. Dismiss on the Queue must call `DELETE /v1/jobs/{id}` (a local-only hide comes back on the next launch). |
 | `GET /v1/takes` | → `Take[]` (renders and photoshoot stills). `status: "final"` is the Final gallery, and everything else is Tests. |
 | `PATCH /v1/takes/{id}` `{status: "test"\|"final"}` | → `Take` (Approve) |
 | `DELETE /v1/takes/{id}` | 204 (Discard) |
