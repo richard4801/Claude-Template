@@ -91,6 +91,8 @@ enum ClaudeIds {
 public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public let baseURL: URL
     private let token: @Sendable () -> String?
+    /// The signed-in token, for the chat's video upload through HTTPMuseAPI (same module only).
+    var currentToken: String? { token() }
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()

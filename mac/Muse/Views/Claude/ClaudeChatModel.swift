@@ -18,7 +18,8 @@ final class ClaudeChatModel {
     /// The thread couldn't open, in plain words; `offline` when it was the connection.
     private(set) var loadError: String?
     private(set) var offline = false
-    /// Images waiting to go with the next message (Edit, Recreate and Camera: kept on this Mac for Claude Code to read).
+    /// Images waiting to go with the next message (Edit, Recreate and Camera: kept on this Mac for Claude Code to read),
+    /// and videos (uploaded to the server as soon as they are picked: Claude watches them there).
     var localImages: [ChatPendingImage] = []
     var attachNote: String?
     /// Images sent from this Mac, by the words they went with, for the thumbnails in that bubble.
@@ -39,6 +40,8 @@ final class ClaudeChatModel {
     /// A tool step finished (its name, e.g. `mcp__muse__suite_set_draft`): the Suite reads its draft again.
     @ObservationIgnored var onToolDone: ((String) -> Void)?
     @ObservationIgnored private var removing: Set<String> = []
+    /// Videos uploading, by their pending row.
+    @ObservationIgnored private var videoUploads: [UUID: Task<Void, Never>] = [:]
 
     @ObservationIgnored private var key: String?
     @ObservationIgnored private var feedTask: Task<Void, Never>?
@@ -145,6 +148,7 @@ final class ClaudeChatModel {
         transcript.load(d.messages)
         remoteTurn = d.activeTurn.flatMap { $0.isOpen ? $0 : nil }
         composer = ""
+        dropVideoUploads()
         localImages = []
         attachNote = nil
         if let key = d.thread.contextKey ?? listKey(d.thread) { Self.remember(key, threadId: d.thread.id) }
@@ -301,6 +305,15 @@ final class ClaudeChatModel {
 
     func send() {
         let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A video goes by its upload id: it must be on the server first.
+        if localImages.contains(where: { $0.video?.uploading == true }) {
+            attachNote = "The video is still uploading. Send when it is ready."
+            return
+        }
+        if localImages.contains(where: { $0.video?.error != nil }) {
+            attachNote = "A video didn't upload. Remove it, then send."
+            return
+        }
         guard deliver(text, images: localImages) else { return }
         composer = ""
         localImages = []
@@ -318,8 +331,15 @@ final class ClaudeChatModel {
         let outgoing = wrapOutgoing?(text) ?? text
         transcript.begin(userText: outgoing, source: "mac")
         if !images.isEmpty {
-            files += images.compactMap { save($0, threadId: tid) }
-            sentLocal[ChatLeakFilter.userText(text)] = images.map(\.data)
+            files += images.filter { $0.video == nil }.compactMap { save($0, threadId: tid) }
+            // Videos go by their upload id (Claude calls watch); the server keeps them with the message.
+            files += images.compactMap { img -> ClaudeAttachmentFile? in
+                guard let v = img.video, let id = v.uploadId else { return nil }
+                return ClaudeAttachmentFile.video(uploadId: id, name: img.name, seconds: v.seconds > 0 ? v.seconds : nil)
+            }
+            sentLocal[ChatLeakFilter.userText(text)] = images.map { img in
+                img.video.map { ChatVideoProbe.chip(poster: img.data, seconds: $0.seconds) } ?? img.data
+            }
         }
         service.send(threadId: tid, text: outgoing, files: files)
         return true
@@ -366,28 +386,96 @@ final class ClaudeChatModel {
         service.stop(threadId: tid, remoteTurnId: remoteTurn?.id)
     }
 
-    // MARK: Images on this Mac
+    // MARK: Images (and videos) on this Mac
 
     func addImages(urls: [URL], data: [(name: String, data: Data, mime: String)]) {
         var list = data
-        for u in urls where ChatImageInput.isImage(u) {
-            if let d = try? Data(contentsOf: u) { list.append((u.lastPathComponent, d, ChatImageInput.mime(u))) }
+        var videos: [URL] = []
+        var refusal: String?
+        var skipped = 0
+        for u in urls {
+            if ChatImageInput.isImage(u) {
+                if let d = try? Data(contentsOf: u) { list.append((u.lastPathComponent, d, ChatImageInput.mime(u))) }
+            } else if ChatImageInput.isVideo(u) {
+                let size = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil
+                if let size, size > ChatImageInput.maxVideoBytes { refusal = ChatImageInput.videoTooLarge } else { videos.append(u) }
+            } else if ChatImageInput.isMovie(u) {
+                refusal = ChatImageInput.videoUnsupported
+            } else {
+                skipped += 1
+            }
         }
-        let skipped = urls.count - urls.filter(ChatImageInput.isImage).count
-        let room = max(0, Self.maxLocalImages - localImages.count)
-        for f in list.prefix(room) where NSImage(data: f.data) != nil {
+        // Images and videos share the limit.
+        var room = max(0, Self.maxLocalImages - localImages.count)
+        var full = false
+        for f in list where NSImage(data: f.data) != nil {
+            guard room > 0 else { full = true; break }
             localImages.append(ChatPendingImage(name: f.name, data: f.data, mime: f.mime))
+            room -= 1
         }
-        if list.count > room {
-            attachNote = "Up to \(Self.maxLocalImages) images go with one message."
+        for v in videos {
+            guard room > 0 else { full = true; break }
+            addVideo(v)
+            room -= 1
+        }
+        if full {
+            attachNote = "Up to \(Self.maxLocalImages) images or videos go with one message."
+        } else if let refusal {
+            attachNote = refusal
         } else if skipped > 0 {
-            attachNote = "Only images can go with a message: JPEG, PNG, HEIC, WebP, GIF or TIFF."
+            attachNote = "Only images and videos can go with a message: JPEG, PNG, HEIC, WebP, GIF, TIFF, MP4 or MOV."
         } else {
             attachNote = nil
         }
     }
 
+    /// A video: its poster and length read here, then uploaded to the server (an upload of kind "clip"), so Claude can
+    /// watch it by its upload id.
+    private func addVideo(_ url: URL) {
+        let mime = ChatImageInput.videoMime(url)
+        let item = ChatPendingImage(name: url.lastPathComponent, data: Data(), mime: mime, video: ChatPendingVideo(file: url))
+        localImages.append(item)
+        let id = item.id
+        videoUploads[id] = Task { [weak self] in
+            guard let info = await ChatVideoProbe.read(url) else {
+                self?.setVideo(id) { $0.video?.state = .failed("This video can't be read. \(ChatImageInput.videoUnsupported)") }
+                return
+            }
+            self?.setVideo(id) {
+                $0.data = info.poster
+                $0.video?.seconds = info.seconds
+            }
+            guard !Task.isCancelled else { return }
+            guard let uploader = self?.service?.api as? any ClaudeVideoUploading else {
+                self?.setVideo(id) { $0.video?.state = .failed("Sign in to your MUSE server to send videos.") }
+                return
+            }
+            do {
+                let a = try await uploader.uploadClaudeVideo(url, meta: info.meta(name: url.lastPathComponent), contentType: mime, progress: nil)
+                self?.setVideo(id) { $0.video?.state = .ready(uploadId: a.uploadId) }
+            } catch {
+                guard !Task.isCancelled else { return }
+                let why = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+                self?.setVideo(id) { $0.video?.state = .failed("Couldn't upload the video. \(why)") }
+            }
+            self?.videoUploads[id] = nil
+        }
+    }
+
+    /// Changes a pending row, if it is still there.
+    private func setVideo(_ id: UUID, _ change: (inout ChatPendingImage) -> Void) {
+        guard let i = localImages.firstIndex(where: { $0.id == id }) else { return }
+        change(&localImages[i])
+    }
+
+    private func dropVideoUploads() {
+        videoUploads.values.forEach { $0.cancel() }
+        videoUploads = [:]
+    }
+
     func removeImage(_ id: UUID) {
+        videoUploads[id]?.cancel()
+        videoUploads[id] = nil
         localImages.removeAll { $0.id == id }
         attachNote = nil
     }
@@ -401,8 +489,8 @@ final class ClaudeChatModel {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = ChatImageInput.types
-        panel.message = "Choose up to \(Self.maxLocalImages) images for Claude to look at."
+        panel.allowedContentTypes = ChatImageInput.types + ChatImageInput.videoTypes
+        panel.message = "Choose up to \(Self.maxLocalImages) images or videos for Claude to look at. Videos: MP4 or MOV, 500 MB at most."
         guard panel.runModal() == .OK else { return }
         addImages(urls: panel.urls, data: [])
     }

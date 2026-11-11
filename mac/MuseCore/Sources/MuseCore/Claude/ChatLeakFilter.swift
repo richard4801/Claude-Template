@@ -21,7 +21,7 @@ public enum ChatLeakFilter {
     // MARK: The user's messages
 
     /// The user's message as they typed it: without the context line the app put in front ("[Suite …]", "[Recreate …]"),
-    /// the attached-image paths, or a suggestion's instructions for Claude ("Use get_recipe.").
+    /// the attached-image paths and video lines, or a suggestion's instructions for Claude ("Use get_recipe.").
     public static func userText(_ text: String) -> String {
         var s = stripTaggedBlocks(text)
         // A leading context line in square brackets.
@@ -29,8 +29,9 @@ public enum ChatLeakFilter {
             s = String(s[s.index(after: nl)...])
         }
         if s.hasPrefix("["), !s.contains("\n"), s.hasSuffix("]"), contextLine(s) { s = "" }
-        // The image list ClaudeAttachmentPrompt appends.
-        if let r = s.range(of: "Attached images (Read each one):") { s = String(s[..<r.lowerBound]) }
+        // The image list and the video lines ClaudeAttachmentPrompt appends (whichever comes first, to the end).
+        let cuts = [ClaudeAttachmentPrompt.imagesHeader, ClaudeAttachmentPrompt.videoPrefix].compactMap { s.range(of: $0)?.lowerBound }
+        if let first = cuts.min() { s = String(s[..<first]) }
         s = dropToolSentences(s)
         s = scrub(s)
         return tidy(s)

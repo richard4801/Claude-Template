@@ -10,6 +10,8 @@ import SwiftUI
 struct ChatImage: Hashable {
     var ref: ImageRef?
     var data: Data?
+    /// A video the message carried, with no poster here (sent from the phone, or after a restart): a "Video" chip.
+    var video = false
 }
 
 struct ChatToolLine: Hashable, Identifiable {
@@ -315,7 +317,14 @@ struct ChatUserBubble: View {
 
     @ViewBuilder private func thumb(_ img: ChatImage) -> some View {
         Group {
-            if let d = img.data, let ns = NSImage(data: d) {
+            if img.video {
+                VStack(spacing: Space.s1) {
+                    Ph("film", 20)
+                    Text("Video").scaled(t.scale.caption, t.roles.ink2)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(t.roles.field)
+            } else if let d = img.data, let ns = NSImage(data: d) {
                 Image(nsImage: ns).resizable().aspectRatio(contentMode: .fill)
             } else {
                 MuseImage(ref: img.ref.map { ImageRef(asset: $0.asset, url: $0.url.map(resolve)) }, symbol: "photo")
@@ -323,7 +332,7 @@ struct ChatUserBubble: View {
         }
         .frame(width: 64, height: 64)
         .clipShape(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous))   // an image, never a pill
-        .accessibilityLabel("Attached image")
+        .accessibilityLabel(img.video ? "Attached video" : "Attached image")
     }
 }
 

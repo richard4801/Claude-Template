@@ -42,6 +42,11 @@ public struct ClaudeTranscript: Hashable, Sendable {
     /// A stored message (`{op: "message"}`, or a reply's message).
     public mutating func upsert(_ m: ClaudeMessage) { upsertMessage(m) }
 
+    /// How many videos a stored message carries (they show as a "Video" chip, never loaded as a picture).
+    public func videoCount(_ messageId: String) -> Int {
+        messages.first { $0.id == messageId }?.attachments?.filter(\.isVideo).count ?? 0
+    }
+
     /// The image links a stored message carries (attachments with a link), for the thumbnails in its bubble.
     public func attachmentURLs(_ messageId: String) -> [String] {
         messages.first { $0.id == messageId }?.attachments?.compactMap { $0.url } ?? []

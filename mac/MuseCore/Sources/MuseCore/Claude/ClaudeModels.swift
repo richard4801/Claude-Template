@@ -501,7 +501,8 @@ enum ClaudeTime {
 }
 
 /// Decodes an element or nil, so one malformed entry never drops a whole list.
-/// An image on a Claude message or turn. Every field but the upload id is optional; a bare string reads as an upload id.
+/// An image (or a video) on a Claude message or turn. Every field but the upload id is optional; a bare string reads as
+/// an upload id.
 public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var uploadId: String
@@ -509,10 +510,16 @@ public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
     public var bytes: Int?
     public var width: Int?
     public var height: Int?
-    /// A private signed link (about an hour), or a normal /uploads address.
+    /// A private signed link (about an hour), or a normal /uploads address. Always an image: bubbles draw it as one, so a
+    /// video's link is kept in `videoURL` instead (never downloaded as a picture).
     public var url: String?
+    /// The server marks a video attachment (plans/claude-video-vision.md); mimeType video/* says the same.
+    public var video: Bool?
+    /// A video's own link (the whole file, up to 500 MB): not a poster.
+    public var videoURL: String?
 
-    public init(id: String? = nil, uploadId: String, mimeType: String? = nil, bytes: Int? = nil, width: Int? = nil, height: Int? = nil, url: String? = nil) {
+    public init(id: String? = nil, uploadId: String, mimeType: String? = nil, bytes: Int? = nil, width: Int? = nil, height: Int? = nil, url: String? = nil,
+                video: Bool? = nil, videoURL: String? = nil) {
         self.id = id ?? uploadId
         self.uploadId = uploadId
         self.mimeType = mimeType
@@ -520,9 +527,14 @@ public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
         self.width = width
         self.height = height
         self.url = url
+        self.video = video
+        self.videoURL = videoURL
     }
 
-    private enum K: String, CodingKey { case id, uploadId, mimeType, bytes, width, height, url }
+    /// A video: Claude watches it with `watch {id: uploadId}`; it is never read or shown as an image.
+    public var isVideo: Bool { video == true || (mimeType?.lowercased().hasPrefix("video/") ?? false) }
+
+    private enum K: String, CodingKey { case id, uploadId, mimeType, bytes, width, height, url, video }
 
     public init(from d: Decoder) throws {
         if let s = try? d.singleValueContainer().decode(String.self) {
@@ -534,7 +546,12 @@ public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
         func n(_ k: K) -> Int? { ((try? c.decodeIfPresent(Double.self, forKey: k)) ?? nil).map { Int($0) } }
         var up = ""
         if let u = s(.uploadId) { up = u } else if let i = s(.id) { up = i }
-        self.init(id: s(.id), uploadId: up, mimeType: s(.mimeType), bytes: n(.bytes), width: n(.width), height: n(.height), url: s(.url))
+        let video = (try? c.decodeIfPresent(Bool.self, forKey: .video)) ?? nil
+        let mime = s(.mimeType)
+        let isVideo = video == true || (mime?.lowercased().hasPrefix("video/") ?? false)
+        let link = s(.url)
+        self.init(id: s(.id), uploadId: up, mimeType: mime, bytes: n(.bytes), width: n(.width), height: n(.height),
+                  url: isVideo ? nil : link, video: video, videoURL: isVideo ? link : nil)
     }
 
     public func encode(to e: Encoder) throws {
@@ -545,7 +562,8 @@ public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
         try c.encodeIfPresent(bytes, forKey: .bytes)
         try c.encodeIfPresent(width, forKey: .width)
         try c.encodeIfPresent(height, forKey: .height)
-        try c.encodeIfPresent(url, forKey: .url)
+        try c.encodeIfPresent(url ?? videoURL, forKey: .url)
+        try c.encodeIfPresent(video, forKey: .video)
     }
 }
 
