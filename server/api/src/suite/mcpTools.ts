@@ -32,7 +32,7 @@ The owner describes the shot in words. You:
 - explain your choices in a few short lines (why this lens, this light, this move), and mention any rig-check warnings it returns;
 - price it with suite_estimate when the owner is happy;
 - generate only with suite_request_shot: without confirm it gives the price; with confirm: true it asks the owner in the app, and nothing runs until they approve. Never say it is generating before they do;
-- suite_feed shows what they made recently, if they refer to it;
+- suite_feed shows what they made recently, if they refer to it; to judge or compare takes, WATCH them first (watch with the take's id, then watch_closer on any moment): never judge a take from its title, prompt or the owner's description;
 - you can SEE the cast: suite_cast lists the studio's models and their outfits (newest first, each with its date and a small picture; two outfits can share a name, so tell them apart by date and picture, and say which one you mean); suite_see shows the @model's reference images and an outfit's angles (the draft's by default). When suite_set_draft changes the model or outfit you get their pictures back, and pictures of the draft's model and outfit may come with the owner's message. Describe the clothes and look from these pictures, never guess them from a name;
 - when the owner attaches images (you see them, each with its uploadId), use one in the shot with suite_add_reference (use: pose, style, location or outfit; at most 3). Her face and body always come from her own references: never describe or copy the face of anyone in an attached image, and never use an image to change who she is. Describe what to take from it in the prompt (the pose, the clothes, the place, the look).
 The draft is the composer that is open (its tool is on the context line: Shot, Photo, Talking, UGC ad, Storyboard, …): it keeps that tool, so set only the rows that tool uses. suite_request_shot is for Shot only; in the other tools, tell the owner to press Generate.
@@ -126,11 +126,13 @@ export const SUITE_TOOLS: EditTool[] = [
   },
   {
     name: 'suite_feed', title: 'Recent takes', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: 'The studio\'s newest Suite takes and jobs (title, tool, model, the draft\'s summary, state), when the owner refers to something they made.',
-    inputSchema: obj({ limit: { type: 'integer', minimum: 1, maximum: 30 }, tool: str('shot | photo | swap | recast | extend | …') }),
+    description: 'The studio\'s newest Suite takes and jobs (title, tool, model, the draft\'s summary, state), or one Library collection\'s, when the person refers to something they made. Each finished video take has its takeId: WATCH it (watch {id: takeId}) before you judge or compare it.',
+    inputSchema: obj({ limit: { type: 'integer', minimum: 1, maximum: 30 }, tool: str('shot | photo | swap | recast | extend | …'), collection: str('A Library collection id: only its items', 80) }),
     run: async (env, a) => {
-      const f = await feed(env.ctx, env.user, { ...(typeof a.limit === 'number' ? { limit: a.limit } : { limit: 10 }), ...(typeof a.tool === 'string' && a.tool ? { tool: a.tool } : {}) });
-      return { items: f.items.map(x => { const i = x as Record<string, unknown>; return { id: i.id, kind: i.kind, status: i.status, tool: i.tool, title: i.title, modelName: i.modelName, summary: i.summary, createdAt: i.createdAt }; }) };
+      const f = await feed(env.ctx, env.user, { ...(typeof a.limit === 'number' ? { limit: a.limit } : { limit: 10 }), ...(typeof a.tool === 'string' && a.tool ? { tool: a.tool } : {}),
+        ...(typeof a.collection === 'string' && a.collection ? { collection: a.collection } : {}) });
+      return { items: f.items.map(x => { const i = x as Record<string, unknown>; return { id: i.id, kind: i.kind, status: i.status, tool: i.tool, title: i.title, modelName: i.modelName, summary: i.summary, createdAt: i.createdAt,
+        ...(i.kind === 'take' ? { takeId: i.id, watch: true } : {}) }; }) };
     },
   },
 ];

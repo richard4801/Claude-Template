@@ -20,7 +20,10 @@ export const MAX_ATTACHMENTS = 4, MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const API_MAX_BYTES = 5 * 1024 * 1024, LONG_EDGE = 2048, URL_TTL_SEC = 3600;
 const TYPES: Record<string, 'jpeg' | 'png' | 'webp' | 'heic'> = { 'image/jpeg': 'jpeg', 'image/jpg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heic' };
 export type AttachmentMime = 'image/jpeg' | 'image/png' | 'image/webp';
-export type Attachment = { id: string; uploadId: string; key: string; mimeType: AttachmentMime; bytes: number; width: number; height: number };
+export type Attachment = { id: string; uploadId: string; key: string; mimeType: AttachmentMime; bytes: number; width: number; height: number; video?: undefined }
+  /** A video (plans/claude-video-vision.md): kept as the upload itself (key = its storage key); Claude watches it with watch {id: uploadId}. */
+  | { id: string; uploadId: string; key: string; mimeType: string; bytes: number; width: 0; height: 0; video: true };
+export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 
 export const AttachmentsInput = z.array(z.object({ uploadId: z.string().min(1).max(80) }).strict()).max(MAX_ATTACHMENTS, `attachments: at most ${MAX_ATTACHMENTS} images a message`);
 
@@ -75,8 +78,17 @@ export async function storeAttachments(ctx: Ctx, u: AuthUser, threadId: string, 
   const p = AttachmentsInput.safeParse(input);
   if (!p.success) throw badRequest(p.error.issues[0]?.message ?? 'attachments: invalid');
   const ids = [...new Set(p.data.map(x => x.uploadId))];
-  const ready = await Promise.all(ids.map(async id => { const { buf, kind } = await uploadImage(ctx, u, id); return { id, ...(await normaliseImage(buf, kind, id)) }; }));
-  const out: Attachment[] = [];
+  // Videos stay where they were uploaded (not copied or decoded here): Claude watches them on demand.
+  const videos = new Map<string, Attachment>();
+  for (const id of ids) {
+    const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
+    if (!up || !/^video\//i.test(up.contentType)) continue;
+    if (up.state !== 'ready') throw new ApiError(409, 'upload_not_ready', `${id}: the upload isn't confirmed yet`);
+    if ((up.bytes ?? 0) > MAX_VIDEO_BYTES) throw badRequest(`${id}: at most 500 MB a video`);
+    videos.set(id, { id: uid('att'), uploadId: id, key: up.storageKey, mimeType: up.contentType, bytes: up.bytes ?? 0, width: 0, height: 0, video: true });
+  }
+  const ready = await Promise.all(ids.filter(id => !videos.has(id)).map(async id => { const { buf, kind } = await uploadImage(ctx, u, id); return { id, ...(await normaliseImage(buf, kind, id)) }; }));
+  const out: Attachment[] = ids.flatMap(id => (videos.has(id) ? [videos.get(id)!] : []));
   for (const r of ready) {
     const id = uid('att'), key = `ca/${threadId}/${id}.${EXT[r.mimeType]}`;
     await ctx.storage.put(key, r.buf, r.mimeType);
@@ -88,22 +100,26 @@ export async function storeAttachments(ctx: Ctx, u: AuthUser, threadId: string, 
 /** What the apps see: no storage key, a private link valid 1 h. */
 export async function attachmentViews(ctx: Ctx, list: Attachment[] | null | undefined) {
   if (!list?.length) return undefined;
-  return Promise.all(list.map(async a => ({ id: a.id, uploadId: a.uploadId, mimeType: a.mimeType, bytes: a.bytes, width: a.width, height: a.height, url: await ctx.storage.presignGet(a.key, URL_TTL_SEC) })));
+  return Promise.all(list.map(async a => ({ id: a.id, uploadId: a.uploadId, mimeType: a.mimeType, bytes: a.bytes, width: a.width, height: a.height, ...(a.video ? { video: true } : {}), url: await ctx.storage.presignGet(a.key, URL_TTL_SEC) })));
 }
 
 /** The Claude API's image blocks for these attachments (images that went missing are left out). */
 export async function imageBlocks(ctx: Ctx, list: Attachment[]) {
   const out: { type: 'image'; source: { type: 'base64'; media_type: AttachmentMime; data: string } }[] = [];
   for (const a of list) {
+    if (a.video) continue; // a video is watched with the watch tool, not sent as an image
     const obj = await ctx.storage.get(a.key);
     if (!obj) continue;
     const parts: Buffer[] = [];
     for await (const ch of obj.body) parts.push(ch as Buffer);
-    out.push({ type: 'image', source: { type: 'base64', media_type: a.mimeType, data: Buffer.concat(parts).toString('base64') } });
+    out.push({ type: 'image', source: { type: 'base64', media_type: a.mimeType as AttachmentMime, data: Buffer.concat(parts).toString('base64') } });
   }
   return out;
 }
 
 /** The line Claude reads with the images, so it can name them to suite_add_reference. */
-export const attachmentLine = (list: Attachment[]) =>
-  list.length ? `[Attached image${list.length > 1 ? 's' : ''}, in order: ${list.map((a, i) => `${i + 1}. uploadId ${a.uploadId}`).join('; ')}]` : '';
+export const attachmentLine = (list: Attachment[]) => {
+  const imgs = list.filter(a => !a.video), vids = list.filter(a => a.video);
+  return [imgs.length ? `[Attached image${imgs.length > 1 ? 's' : ''}, in order: ${imgs.map((a, i) => `${i + 1}. uploadId ${a.uploadId}`).join('; ')}]` : '',
+    vids.length ? `[Attached video${vids.length > 1 ? 's' : ''}: ${vids.map(a => `uploadId ${a.uploadId}`).join('; ')} · you can't see a video until you watch it: call watch {id: uploadId} first]` : ''].filter(Boolean).join('\n');
+};
