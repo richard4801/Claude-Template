@@ -23,6 +23,8 @@ import { bindArgs, claudeSchema, missingHint, registryByName, toolsForUser } fro
 import { ownChat, pageOf } from '../claude/chatTools.js';
 import { pageLine, type PageRef } from '../claude/page.js';
 import { memoryFacts } from '../claude/memory.js';
+import { effectiveModel } from '../claude/models.js';
+import { claudeThreads } from '../camera/schema.js';
 
 /** workstream 1: at most this many attached images are replayed from earlier messages (newest first). */
 const HISTORY_IMAGES = 8;
@@ -153,14 +155,19 @@ export class EditAssistant {
       const prev = history.at(-1);
       if (prev?.role === 'user') (prev.content as BetaContentBlockParam[]).push(...turnBlocks); else history.push({ role: 'user', content: turnBlocks });
       const c = this.ctx.config;
+      // Step 6b: a chat runs on its own model, else the person's default, else the studio's.
+      const [thr] = await this.ctx.db.select({ model: claudeThreads.model }).from(claudeThreads).where(eq(claudeThreads.id, threadId));
+      const model = await effectiveModel(this.ctx, u, thr?.model);
+      // Haiku has no server-side refusal fallback.
+      const fallbacks = c.DIRECTOR_FALLBACKS && !model.startsWith('claude-haiku');
       let stopReason = 'end_turn';
       for (let step = 0; ; step++) {
         if (step >= c.DIRECTOR_MAX_STEPS) { stopReason = 'max_steps'; finalText += '\n\n(I stopped after many steps · tell me to continue.)'; break; }
         const stream = client.beta.messages.stream({
-          model: c.DIRECTOR_MODEL, max_tokens: c.DIRECTOR_MAX_TOKENS,
+          model, max_tokens: c.DIRECTOR_MAX_TOKENS,
           system: [{ type: 'text', text: kind === 'chat' ? onePrompt() : kind === 'recreate' ? RECREATE_PROMPT : kind === 'suite' ? SUITE_PROMPT : EDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
           tools: this.tools(kind, u), messages: history, output_config: { effort: c.DIRECTOR_EFFORT }, cache_control: { type: 'ephemeral' },
-          ...(c.DIRECTOR_FALLBACKS ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
+          ...(fallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
         });
         stream.on('text', delta => { finalText += delta; emit({ type: 'text', delta }); });
         const msg: BetaMessage = await stream.finalMessage();

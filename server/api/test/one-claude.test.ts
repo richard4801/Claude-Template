@@ -171,3 +171,20 @@ describe('the page and the old chats', () => {
     expect((await owner.req('GET', '/v1/claude/chats?archived=1')).body.chats.map((c: { id: string }) => c.id)).toContain(old.id);
   });
 });
+
+describe('the Claude model per chat (step 6b)', () => {
+  it('anyone picks a listed model per chat and a default for themselves; unknown models are refused; defaults are per person', async () => {
+    const list = (await member.req('GET', '/v1/claude/models')).body;
+    expect(list.models.map((m: { id: string }) => m.id)).toEqual(expect.arrayContaining(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']));
+    for (const m of list.models) { expect(m.speed).toBeTruthy(); expect(m.cost).toBeTruthy(); }
+    expect(list.default).toBeNull();
+    const c = (await member.req('POST', '/v1/claude/chats', {})).body;
+    expect((await member.req('PATCH', `/v1/claude/chats/${c.id}`, { model: 'gpt-x' })).status).toBe(400);
+    const set = (await member.req('PATCH', `/v1/claude/chats/${c.id}`, { model: 'claude-haiku-5-5' })).body;
+    expect(set).toMatchObject({ model: 'claude-haiku-5-5', brief: { model: 'claude-haiku-5-5', chatId: c.id } });
+    expect((await member.req('PATCH', `/v1/claude/chats/${c.id}`, { model: null })).body.model).toBeUndefined();
+    expect((await member.req('PUT', '/v1/claude/prefs', { defaultModel: 'claude-sonnet-5-5' })).body.default).toBe('claude-sonnet-5-5');
+    expect((await owner.req('GET', '/v1/claude/models')).body.default).toBeNull();
+    expect((await member.req('PUT', '/v1/claude/prefs', { defaultModel: 'nope' })).status).toBe(400);
+  });
+});
