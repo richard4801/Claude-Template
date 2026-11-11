@@ -96,7 +96,7 @@ struct ModelPickerList: View {
                 if m.resolutions.isEmpty {
                     // A photo model, or a per-run model: one choice, one price.
                     chip(ComposerModelPicker.price(m).isEmpty ? "Use" : ComposerModelPicker.price(m), picked: on,
-                         help: "Use \(m.name)", label: "Use \(m.name)") { store.pinComposerModel(m) }
+                         help: "Use \(m.shownName)", label: "Use \(m.shownName)") { store.pinComposerModel(m) }
                 } else {
                     // Wraps: Seedance 2.0 has four resolutions, more than one line holds with their prices whole.
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: Space.s1, alignment: .leading)], alignment: .leading, spacing: Space.s1) {
@@ -104,7 +104,7 @@ struct ModelPickerList: View {
                             let res = ComposerModelPicker.resLabel(r.label)
                             let price = ComposerModelPicker.price(m, resolution: r.id)
                             chip("\(res)  \(price)", picked: on && (d.resolution ?? m.resolution) == r.id,
-                                 help: "Use \(m.name) at \(res), \(price)", label: "Use \(m.name) at \(res)") { store.pinComposerModel(m, resolution: r.id) }
+                                 help: "Use \(m.shownName) at \(res), \(price)", label: "Use \(m.shownName) at \(res)") { store.pinComposerModel(m, resolution: r.id) }
                         }
                     }
                 }

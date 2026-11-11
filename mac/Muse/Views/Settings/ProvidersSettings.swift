@@ -248,8 +248,8 @@ struct MemberModelsSettings: View {
                 RSwitch(label: "Show provider names to members", isOn: Binding(get: { v.showProviderNames }, set: { on in save(showProviderNames: on, hidden: [:]) }))
             }
             ForEach(v.models) { m in
-                SettingRow(m.name, hint: [m.kind == "image" ? "Image" : "Video", v.showProviderNames ? m.provider?.capitalized : nil].compactMap { $0 }.joined(separator: " · ")) {
-                    RSwitch(label: "Hide \(m.name) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
+                SettingRow(m.shownName, hint: m.kind == "image" ? "Image" : "Video") {
+                    RSwitch(label: "Hide \(m.shownName) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
                 }
             }
             Text("The switch hides a model from members. You always see every model.")

@@ -88,7 +88,7 @@ struct EngineList: View {
         let catalog = store.engineChoice.catalog
         let all = catalog?.engines(for: purpose) ?? []
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        let shown = q.isEmpty ? all : all.filter { "\($0.name) \($0.model)".lowercased().contains(q) }
+        let shown = q.isEmpty ? all : all.filter { "\($0.shownName) \($0.model)".lowercased().contains(q) }
         let label = catalog?.purpose(purpose)?.label ?? purpose.fallbackLabel
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
@@ -132,7 +132,7 @@ struct EngineList: View {
     private func autoRow(_ catalog: EngineCatalog?, label: String) -> some View {
         let on = selected == nil
         let info = catalog?.purpose(purpose)
-        let defName = info?.default.flatMap { id in catalog?.engines.first { $0.model == id }?.name }
+        let defName = info?.default.flatMap { id in catalog?.engines.first { $0.model == id }?.shownName }
         let line = info?.studioDefault != nil && defName != nil ? "The studio's default: \(defName!)" : "MUSE picks the model for \(label.lowercased())"
         return Button { onPick(nil, nil) } label: {
             HStack(alignment: .top, spacing: Space.s2) {
@@ -164,14 +164,14 @@ struct EngineList: View {
                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
                 if o.resolutions.count < 2 {
                     let price = ComposerModelPicker.price(o, resolution: o.resolution)
-                    chip(price.isEmpty ? "Use" : price, picked: on, label: "Use \(e.name)") { onPick(e.model, o.resolution) }
+                    chip(price.isEmpty ? "Use" : price, picked: on, label: "Use \(e.shownName)") { onPick(e.model, o.resolution) }
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: Space.s1, alignment: .leading)], alignment: .leading, spacing: Space.s1) {
                         ForEach(o.resolutions, id: \.id) { r in
                             let res = ComposerModelPicker.resLabel(r.label)
                             let price = r.perSec > 0 ? ComposerModelPicker.price(o, resolution: r.id) : ""
                             chip(price.isEmpty ? res : "\(res)  \(price)", picked: on && (selectedResolution ?? o.resolution) == r.id,
-                                 label: "Use \(e.name) at \(res)") { onPick(e.model, r.id) }
+                                 label: "Use \(e.shownName) at \(res)") { onPick(e.model, r.id) }
                         }
                     }
                 }

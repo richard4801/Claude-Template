@@ -149,8 +149,11 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
     /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
     public var providerName: String?
     public var id: String { model }
-    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
-    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
+    /// The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts: one format everywhere;
+    /// for members while the studio hides providers, the bare name or "· Option n").
+    public var label: String?
+    /// What to show for the model: the server's label; older servers: the name with its provider.
+    public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
 
     public init(model: String, name: String, kind: String = "video", custom: Bool = false, tier: String? = nil, tiers: [String] = [], resolution: String? = nil,
                 resolutions: [SuiteResolution] = [], perSec: Double? = nil, perRun: Double? = nil, minSeconds: Double? = nil, maxSeconds: Double? = nil,
@@ -174,7 +177,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName
+        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName, label
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -183,6 +186,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
         kind = c.v(.kind, "video")
         custom = c.v(.custom, false)
         providerName = c.o(.providerName)
+        label = c.o(.label)
         tier = c.o(.tier)
         tiers = c.v(.tiers, [])
         resolution = c.o(.resolution)
@@ -390,14 +394,14 @@ public enum ComposerModelPicker {
     public static func label(_ d: ComposerDraft, catalog: SuiteCatalog?, settings: SuiteSettings?) -> String {
         guard let id = d.engineModel else { return "Auto" }
         let e = pinned(d, catalog, settings)
-        let name = e?.name ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
+        let name = e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
         let res = e?.resolutions.first { $0.id == d.resolution }?.label ?? d.resolution
         return res.map { "\(name), \(resLabel($0))" } ?? name
     }
 
     public static func imageLabel(_ photo: PhotoDraft, catalog: SuiteCatalog?) -> String {
         guard let id = photo.imageModel else { return "Auto" }
-        return pinnedImage(photo, catalog)?.name ?? id
+        return pinnedImage(photo, catalog)?.shownName ?? id
     }
 
     /// "720p · standard" → "720p": the first word of the provider's label.
