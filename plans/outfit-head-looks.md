@@ -81,3 +81,7 @@ refs only; "Wearing:" is the whole outfit; the body-angle line says "not its clo
 Decided: base = her base photos, chosen explicitly; "Keep from base" tick boxes Top · Bottom · Shoes · Accessories +
 a note. Kept pieces → the front is an EDIT of her base front photo (keep X exactly, replace only the rest); ¾/side/back
 are edits of that front + her base photo of the same angle. Nothing kept → as today. Built by the outfit-page session.
+- Follow-up (owner, build 538): the base can't be seen or chosen. Decided: SEE + SWAP PER ANGLE; she has several base
+  looks → "Start from": her profile photos or any of her outfits (an outfit is a base set); 4 base thumbnails, click
+  one to swap that angle (her body shots, an outfit angle, an upload). Server base {source:'base'|'outfit', outfitId?,
+  angles?}. Outfit-page session.
