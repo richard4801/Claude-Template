@@ -229,6 +229,10 @@ data class JobRequest(
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }
 
+/** POST /v1/jobs/clear-failed: the failed jobs it hid for good. */
+@Serializable
+data class ClearedJobs(val cleared: Int = 0, val ids: List<String> = emptyList())
+
 /**
  * A render job. state: queued | running | done | failed.
  * progress 0..100; step/totalSteps are per take; phase is the human line ("step 12/20 · ~6 min left").

@@ -169,7 +169,7 @@ fun storyStatus(s: StoryShot, jobs: List<Job>): StoryStatus {
     val st = SuitePane.of(j, emptyList(), null)
     return when (st.phase) {
         StagePhase.READY -> StoryStatus("Ready", "good")
-        StagePhase.FAILED -> StoryStatus("Failed · free retry", "bad")
+        StagePhase.FAILED -> StoryStatus("Failed · not charged", "bad")
         StagePhase.QUEUED -> StoryStatus(st.badge, "warn")
         StagePhase.RENDERING -> StoryStatus(st.percent, "busy")
         StagePhase.IDLE -> StoryStatus("Not made", "")

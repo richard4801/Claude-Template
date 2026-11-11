@@ -444,6 +444,8 @@ class MuseRepository(
 
     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
 
+    suspend fun clearFailedJobs() = attempt { clearFailedJobs() }?.also { ids -> _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id in ids }) } }
+
     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }
 
     suspend fun deleteTake(id: String) = attempt { deleteTake(id) }?.also { _state.update { s -> s.copy(takes = s.takes.filterNot { it.id == id }) } }

@@ -565,6 +565,12 @@ class FakeMuseApi(
         }
     }
 
+    override suspend fun clearFailedJobs(): List<String> = lock.withLock {
+        val ids = jobs.filter { it.state == "failed" }.map { it.id }
+        jobs.removeAll { it.id in ids }; hiddenJobs += ids
+        ids
+    }
+
     override suspend fun removeJob(jobId: String) {
         lock.withLock { jobs.removeAll { it.id == jobId }; hiddenJobs += jobId }
         runners.remove(jobId)?.cancel()
