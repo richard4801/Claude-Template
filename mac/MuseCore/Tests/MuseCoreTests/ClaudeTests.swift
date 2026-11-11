@@ -117,6 +117,17 @@ final class ClaudeTests: XCTestCase {
 
     // MARK: Command
 
+    /// Step 6b: a chat's model goes to Claude Code as --model; anything that isn't a plain model id is left out.
+    func testCommandPassesOnlyAPlainModelId() {
+        var c = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "t")
+        c.model = "claude-sonnet-5-5"
+        XCTAssertEqual(Array(c.arguments(configPath: "/x").suffix(2)), ["--model", "claude-sonnet-5-5"])
+        c.model = "opus --dangerously-skip-permissions"
+        XCTAssertFalse(c.arguments(configPath: "/x").contains("--model"))
+        c.model = nil
+        XCTAssertFalse(c.arguments(configPath: "/x").contains("--model"))
+    }
+
     func testCommandArgumentsAreExact() {
         let c = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "muse_oat_x")
         XCTAssertEqual(c.arguments(configPath: "/u/MUSE/Claude/ct_1/.mcp.json"), [

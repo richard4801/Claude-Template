@@ -211,6 +211,13 @@
       "when": 1794365962678,
       "tag": "0029_one_claude",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794372017912,
+      "tag": "0030_claude_prefs",
+      "breakpoints": true
     }
   ]
 }

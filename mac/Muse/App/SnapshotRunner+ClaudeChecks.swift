@@ -33,6 +33,8 @@ extension SnapshotRunner {
             m.transcript.items.filter { if case .user(_, let t, _) = $0 { return ClaudeSessions.typedText(t) == words }; return false }.count
         }
         lines.append("START claude chat check")
+        // One Claude: the panel has a single header (its own switcher, New chat and close); the chat inside adds none.
+        line(!ClaudeChatView.ownChatSwitcher(contextKind: "chat"), "one-Claude panel has one header", "the embedded chat shows no chat switcher of its own")
         write()
 
         let svc = ClaudeCodeService.shared
@@ -171,6 +173,17 @@ extension SnapshotRunner {
         let photoAgain = c.assist?.id == a.id
         line(photoList.count == 2 && switched && returned && kept && shotOwn && photoAgain, "mode_sessions",
              "Photo chats \(photoList.count), switched to A with its draft \(switched), back after closing \(returned), messages kept \(kept), Shot has its own \(shotOwn), Photo returns to A \(photoAgain)")
+
+        // One Claude (owner bug, build 520): Claude opening an edit session (a new blank project) lands IN the editor on
+        // that session, not on the Edit home.
+        if let blank = try? await fakeMuse.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId, device: "check")) {
+            store.performOneClaudeOpen(ClaudeUI(page: "edit", id: blank.id, label: "Blank edit"))
+            let inEditor = await until(15) { store.screen == .edit && store.oneClaude.viewPage?.ids?["sessionId"] == blank.id }
+            line(inEditor, "open_page edit session", "the editor opened on Claude's session \(blank.id): \(inEditor) (page \(store.claudePage.line))")
+            store.go(.home)
+        } else {
+            line(false, "open_page edit session", "couldn't make a blank session in demo mode")
+        }
 
         lines.append("ALL DONE")
         write()

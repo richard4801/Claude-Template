@@ -219,6 +219,9 @@ final class SuiteState {
 
     /// The take Edit opens with (top-level Edit: nil).
     var editTakeId: String?
+    /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
+    var editAttach: EditAttach?
+    struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
     /// Swap with an add-on renders on the classic pipeline: the result pane follows the studio stage's job.
     var swapUsesStage = false
 

@@ -92,9 +92,48 @@ struct OneClaudePanel: View {
             }
             .font(t.scale.caption.font).foregroundStyle(r.ink2)
             .accessibilityLabel("Claude sees \(store.claudePage.line)")
+            modelMenu
         }
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s3)
+    }
+
+    // MARK: The chat's Claude model (step 6b): speed and cost in plain words, per chat, with your own default
+
+    @ViewBuilder private var modelMenu: some View {
+        let r = t.roles
+        if let list = store.oneClaude.models, !list.models.isEmpty {
+            let cur = store.oneClaudeModel
+            Menu {
+                Section("Model for this chat") {
+                    ForEach(list.models) { m in
+                        Button { Task { await store.setOneClaudeModel(m.id) } } label: {
+                            let words = "\(m.name): \(m.speed.lowercased()), \(m.cost.lowercased())"
+                            if m.id == cur.info?.id && !cur.isDefault { Label(words, systemImage: "checkmark") } else { Text(words) }
+                        }
+                    }
+                }
+                Divider()
+                Button(cur.isDefault ? "Using your default" : "Use your default") { Task { await store.setOneClaudeModel(nil) } }
+                    .disabled(cur.isDefault)
+                if let id = cur.info?.id, id != list.default {
+                    Button("Make \(cur.info?.name ?? "this") your default") { Task { await store.setOneClaudeDefaultModel(id) } }
+                }
+            } label: {
+                HStack(spacing: Space.s1) {
+                    Ph("cpu", 13)
+                    Text("\(cur.info?.name ?? "Claude")\(cur.isDefault ? " (your default)" : "") · \(cur.info?.speed ?? "")").lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                }
+                .font(t.scale.caption.font).foregroundStyle(r.ink2)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
+            .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
+        }
     }
 
     // MARK: Claude's lines: open a page, back, remembered

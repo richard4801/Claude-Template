@@ -537,3 +537,5 @@ export * from '../prompt/scripts/schema.js';
 
 // Bring your own provider (WS5, migration 0024).
 export * from '../byo/schema.js';
+// One Claude (plans/one-claude.md, step 6b): per-person Claude preferences.
+export * from '../claude/schema.js';

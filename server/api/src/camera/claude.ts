@@ -90,7 +90,7 @@ export class ClaudeService {
   // ------------------------------------------------------------------ threads
   private threadView = (t: ThreadRow) => compact({ id: t.id, contextKind: t.contextKind, contextId: t.contextId, claudeSessionId: t.claudeSessionId ?? undefined,
     contextKey: t.contextKey ?? undefined, title: t.title ?? undefined, // WS18: the chat's list and name
-    createdAt: t.createdAt, updatedAt: t.updatedAt, brief: threadBrief(t.contextKind, t.contextKind === 'chat' ? t.id : t.contextId) });
+    createdAt: t.createdAt, updatedAt: t.updatedAt, model: t.model ?? undefined, brief: (b => (b && t.model ? { ...b, model: t.model } : b))(threadBrief(t.contextKind, t.contextKind === 'chat' ? t.id : t.contextId)) });
   private async messageView(m: MessageRow) {
     return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ?? undefined,
       image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, attachments: await attachmentViews(this.ctx, m.attachments), createdAt: m.createdAt });

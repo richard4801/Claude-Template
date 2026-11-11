@@ -29,6 +29,8 @@ final class OneClaudeState {
     var suggestion: ClaudeUI?
     var memory: ClaudeMemory?
     var memoryError: String?
+    /// Step 6b: the models and this person's default.
+    var models: ClaudeModelList?
 
     @ObservationIgnored var feedTask: Task<Void, Never>?
     @ObservationIgnored var pageTask: Task<Void, Never>?
@@ -88,6 +90,7 @@ extension AppStore {
 
     func startOneClaude() async {
         listenOneClaude()
+        await loadClaudeModels()
         await refreshOneClaudeChats()
         if oneClaude.chatId == nil || !oneClaude.chats.contains(where: { $0.id == oneClaude.chatId }) {
             if let first = oneClaude.chats.first { pickOneClaudeChat(first.id) } else { await newOneClaudeChat() }
@@ -205,7 +208,9 @@ extension AppStore {
         case "character": if let id = ui.id { openProfile(id) } else { go(.models) }
         case "suite":
             if let t = ui.tool, let tool = ComposerTool(rawValue: t) { openTool(tool) } else { openSuite() }
-        case "edit": openEdit(takeId: ui.id)
+        case "edit":
+            // An edit session (es_…, a blank project included) opens the editor on it; a take id opens that take.
+            if let id = ui.id, id.hasPrefix("es_") { Task { await openEditSession(id) } } else { openEdit(takeId: ui.id) }
         case "take": if let id = ui.id { openTake(id) } else { go(.gallery) }
         case "library": go(.gallery)
         case "queue": go(.queue)
@@ -227,7 +232,7 @@ extension AppStore {
         guard let b = oneClaude.back else { return }
         oneClaude.back = nil
         oneClaude.opened = nil
-        let id = b.ids?["takeId"] ?? b.ids?["modelId"] ?? b.ids?["referenceId"]
+        let id = b.name == "edit" ? (b.ids?["sessionId"] ?? b.ids?["takeId"]) : (b.ids?["takeId"] ?? b.ids?["modelId"] ?? b.ids?["referenceId"])
         performOneClaudeOpen(ClaudeUI(page: b.name, id: id, tool: b.tool, label: b.label), keepBack: true)
     }
 
@@ -260,5 +265,40 @@ extension AppStore {
         guard let api = oneClaudeAPI else { return }
         try? await api.deleteMemory(r.id)
         await loadOneClaudeMemory()
+    }
+
+    // MARK: The Claude model (step 6b)
+
+    func loadClaudeModels() async {
+        guard let api = oneClaudeAPI, let list = try? await api.claudeModels() else { return }
+        oneClaude.models = list
+        await ClaudeCodeService.shared.relayDefaultModel(list.default)
+    }
+
+    /// The model the open chat runs on, and whether it is the person's default.
+    var oneClaudeModel: (info: ClaudeModelInfo?, isDefault: Bool) {
+        let list = oneClaude.models
+        let own = oneClaude.current?.model
+        let id = own ?? list?.default ?? list?.studioDefault
+        return (list?.models.first { $0.id == id }, own == nil)
+    }
+
+    /// Picks the open chat's model (nil: back to the person's default). The next message uses it.
+    func setOneClaudeModel(_ id: String?) async {
+        guard let api = oneClaudeAPI, let chat = oneClaude.chatId else { return }
+        do {
+            try await api.setChatModel(chat, model: id)
+            if let i = oneClaude.chats.firstIndex(where: { $0.id == chat }) { oneClaude.chats[i].model = id }
+            await ClaudeCodeService.shared.relayChatModel(threadId: chat, id)
+        } catch {
+            showToast("Couldn't change the model. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
+    }
+
+    /// The person's default for chats that don't pick one.
+    func setOneClaudeDefaultModel(_ id: String?) async {
+        guard let api = oneClaudeAPI else { return }
+        try? await api.setDefaultModel(id)
+        await loadClaudeModels()
     }
 }

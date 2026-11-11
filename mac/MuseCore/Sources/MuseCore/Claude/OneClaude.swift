@@ -54,6 +54,8 @@ public struct ClaudeChatSummary: Codable, Hashable, Sendable, Identifiable {
     public var lastOn: String?
     public var updatedAt: Double
     public var messageCount: Int?
+    /// Step 6b: the chat's own Claude model; nil = the person's default.
+    public var model: String?
 
     public init(id: String, title: String? = nil, kind: String = "chat", page: ClaudePage? = nil, lastOn: String? = nil, updatedAt: Double = 0, messageCount: Int? = nil) {
         self.id = id; self.title = title; self.kind = kind; self.page = page; self.lastOn = lastOn; self.updatedAt = updatedAt; self.messageCount = messageCount
@@ -107,4 +109,20 @@ public struct ClaudeMemory: Codable, Hashable, Sendable {
     public var rules: [ClaudeMemoryRule]
     /// The person changes their own (always true for one's own memory).
     public var canEdit: Bool
+}
+
+/// Step 6b: a Claude model anyone can pick for a chat, with speed and cost in plain words (GET /v1/claude/models).
+public struct ClaudeModelInfo: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var speed: String
+    public var cost: String
+    public var good: String
+}
+
+public struct ClaudeModelList: Codable, Hashable, Sendable {
+    public var models: [ClaudeModelInfo]
+    /// This person's default (nil: the studio's).
+    public var `default`: String?
+    public var studioDefault: String?
 }

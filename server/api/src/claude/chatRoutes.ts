@@ -19,15 +19,19 @@ import { assistantOf } from '../recreate/assistant.js';
 import { ownChat, pageOf } from './chatTools.js';
 import { memoryAdd, memoryRead, memoryRemove, memoryUpdate } from './memory.js';
 import { pageLine, PageSchema } from './page.js';
+import { checkModel, CLAUDE_MODELS, personDefault, setPersonDefault } from './models.js';
 
 type Row = typeof claudeThreads.$inferSelect;
 type P = { Params: { id: string } };
+
+/** Step 6b: the chat's own model rides in the brief (the Mac passes it to Claude Code as --model; none = the person's default). */
+const withModel = <B extends object>(b: B | undefined, model: string | null) => (b && model ? { ...b, model } : b);
 
 export const chatView = (t: Row, messageCount?: number) => {
   const page = pageOf(t);
   return compact({ id: t.id, title: t.title ?? undefined, kind: t.contextKind, page, lastOn: pageLine(page), model: t.model ?? undefined,
     archived: t.archivedAt ? true : undefined, claudeSessionId: t.claudeSessionId ?? undefined, createdAt: t.createdAt, updatedAt: t.updatedAt, messageCount,
-    brief: t.contextKind === 'chat' ? threadBrief('chat', t.id) : threadBrief(t.contextKind, t.contextId) });
+    brief: withModel(t.contextKind === 'chat' ? threadBrief('chat', t.id) : threadBrief(t.contextKind, t.contextId), t.model) });
 };
 
 export async function listChats(ctx: Ctx, u: AuthUser, query: unknown) {
@@ -61,15 +65,24 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     return { ...full, ...chatView(t) };
   });
   app.patch<P>('/v1/claude/chats/:id', async req => {
-    const b = parse(z.object({ title: z.string().trim().max(TITLE_MAX).optional(), archived: z.boolean().optional() }).strict()
-      .refine(x => x.title !== undefined || x.archived !== undefined, 'title or archived'), req.body);
+    const b = parse(z.object({ title: z.string().trim().max(TITLE_MAX).optional(), archived: z.boolean().optional(), model: z.union([z.string().max(60), z.null()]).optional() }).strict()
+      .refine(x => x.title !== undefined || x.archived !== undefined || x.model !== undefined, 'title, archived or model'), req.body);
     const t = await ownChat(ctx, req.user, req.params.id);
     const [n] = await ctx.db.update(claudeThreads).set({ ...(b.title !== undefined ? { title: b.title || t.title } : {}),
+      ...(b.model !== undefined ? { model: checkModel(b.model) } : {}),
       ...(b.archived !== undefined ? { archivedAt: b.archived ? Date.now() : null } : {}) }).where(eq(claudeThreads.id, t.id)).returning();
     const view = chatView(n!);
     void ctx.hub.emitTo(req.user.id, { type: 'claude', op: 'chat', chat: view });
     return view;
   });
+  /** Step 6b: the Claude models anyone can pick (plain-words speed and cost) and this person's default. */
+  app.get('/v1/claude/models', async req => ({ models: CLAUDE_MODELS, default: await personDefault(ctx, req.user), studioDefault: ctx.config.DIRECTOR_MODEL }));
+  app.put('/v1/claude/prefs', async req => {
+    const b = parse(z.object({ defaultModel: z.union([z.string().max(60), z.null()]) }).strict(), req.body);
+    await setPersonDefault(ctx, req.user, checkModel(b.defaultModel));
+    return { default: await personDefault(ctx, req.user) };
+  });
+
   /** The app reports the page as the person moves (debounced); Claude reads it each turn (where_am_i over MCP). */
   app.put<P>('/v1/claude/chats/:id/page', async req => {
     const page = parse(PageSchema, (req.body as { page?: unknown } | undefined)?.page);

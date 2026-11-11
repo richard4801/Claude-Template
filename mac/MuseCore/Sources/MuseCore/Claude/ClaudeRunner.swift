@@ -16,6 +16,8 @@ public struct ClaudeRunRequest: Hashable, Sendable {
     public var uploadIds: [String] = []
     /// Where the turn's images were saved (Claude Code may Read there).
     public var readDirectory: String?
+    /// Step 6b: the chat's Claude model (`--model`).
+    public var model: String?
 
     public init(threadId: String, turnId: String? = nil, text: String, resume: String? = nil, blender: ClaudeCommand.Blender? = nil,
                 systemPrompt: String? = nil) {
@@ -119,6 +121,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             var cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume, appendSystemPrompt: req.systemPrompt)
             cmd.readDirectory = req.readDirectory
+            cmd.model = req.model
             try Self.writePrivate(cmd.mcpConfigJSON(), to: config)
         } catch {
             return await fail("Couldn't prepare ~/MUSE/Claude: \(error.localizedDescription)")
@@ -144,6 +147,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
                       onEvent: @escaping @Sendable (ClaudeEvent) -> Void) async throws -> Attempt {
         var cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume, appendSystemPrompt: req.systemPrompt)
         cmd.readDirectory = req.readDirectory
+        cmd.model = req.model
         let (lines, cont) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
         let exit = ExitBox()
         let h = try launcher.launch(executable: executable, arguments: cmd.arguments(configPath: config.path), cwd: config.deletingLastPathComponent(),

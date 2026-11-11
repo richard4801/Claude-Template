@@ -30,6 +30,8 @@ final class EditSuiteSession {
 
     let take: Take
     private(set) var sourceTakeId: String
+    /// One Claude: the edit session to join (Claude opened it) instead of opening the take's.
+    var attachSessionId: String?
     private(set) var phase: Phase = .loading("Opening the video…")
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
