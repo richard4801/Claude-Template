@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,7 +88,15 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
         swapAngle(i, r)
     }
 
-    fun mode(m: String) = edit { it.copy(mode = m, previewId = null, images = emptyList()) }
+    fun mode(m: String) = edit { it.copy(mode = m, previewId = null, images = emptyList(), own = listOf(null, null, null, null)) }
+
+    /** "My own set": the photo for one angle box, uploaded and set on exactly that angle (never by file order). */
+    fun setOwn(i: Int, u: Uri) = viewModelScope.launch {
+        val media = c.media ?: return@launch
+        val r = media.bytes(u)?.let { c.repo.uploadImage(media.displayName(u), it, media.mime(u)) } ?: return@launch
+        edit { d -> d.copy(own = d.own.toMutableList().also { it[i] = r }) }
+    }
+    fun clearOwn(i: Int) = edit { d -> d.copy(own = d.own.toMutableList().also { it[i] = null }) }
 
     fun addImages(uris: List<Uri>) = viewModelScope.launch {
         val media = c.media ?: return@launch
@@ -101,8 +110,12 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
     fun generate() = viewModelScope.launch {
         val s = state.value
         val model = s.model ?: return@launch
-        if (s.draft.mode != "describe" && s.draft.images.isEmpty()) {
-            c.repo.toast(if (s.draft.mode == "own") "Upload front, ¾, side and back first" else "Upload a product or outfit photo first")
+        if (s.draft.mode == "photo" && s.draft.images.isEmpty()) {
+            c.repo.toast("Upload a product or outfit photo first")
+            return@launch
+        }
+        if (s.draft.mode == "own" && s.draft.own.firstOrNull() == null) {
+            c.repo.toast("Add the front photo first")
             return@launch
         }
         if (s.draft.mode == "describe" && s.draft.description.isBlank()) {
@@ -115,7 +128,7 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
             OutfitNaming.suggestion(if (s.draft.mode == "describe") s.draft.description else "", s.draft.photoName.takeIf { s.draft.mode == "photo" }, outfitDay(System.currentTimeMillis()))
         }
         edit { it.copy(name = name) }
-        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, name.take(OutfitNaming.MAX), s.draft.mode, s.draft.description, s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" }, s.draft.base?.takeIf { it.keeping })) ?: return@launch
+        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, name.take(OutfitNaming.MAX), s.draft.mode, s.draft.description, if (s.draft.mode == "own") s.draft.own else s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" }, s.draft.base?.takeIf { it.keeping })) ?: return@launch
         edit { it.copy(previewId = o.id) }
     }
 
@@ -144,11 +157,13 @@ fun OutfitScreen() {
     val m = muse
     val img = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
     val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.addImages(listOf(u)) }
-    val pickFour = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { us -> if (us.isNotEmpty()) vm.addImages(us) }
+    // "My own set": each angle box picks its own photo.
+    var ownFor by remember { mutableStateOf(0) }
+    val pickAngle = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.setOwn(ownFor, u) }
     val name = s.model?.name?.substringBefore(' ') ?: "Her"
     // The four angles as they show in the grid; a tap opens them full size (pinch to zoom, swipe between angles).
     val angles: List<ImageRef?> = OutfitAngle.entries.indices.map { idx ->
-        if (s.done) s.preview?.angles?.getOrNull(idx) else if (s.draft.mode == "own") s.draft.images.getOrNull(idx) else null
+        if (s.done) s.preview?.angles?.getOrNull(idx) else if (s.draft.mode == "own") s.draft.own.getOrNull(idx) else null
     }
     var viewing by remember { mutableStateOf<Int?>(null) }
     ScreenBox(bg = m.roles.canvas) {
@@ -172,8 +187,7 @@ fun OutfitScreen() {
                             Caption(if (s.draft.images.isEmpty()) "A flat-lay, mannequin or model photo. We'll dress $name in it." else "Photo added.")
                         }
                         else -> {
-                            SecondaryButton(if (s.draft.images.isEmpty()) "Upload front, ¾, side and back" else "Replace the images", { pickFour.launch(img) }, Modifier.fillMaxWidth(), icon = "upload")
-                            Caption(if (s.draft.images.isEmpty()) "Already have a set? Bring it in as it is. Any missing angle can be generated later." else "${s.draft.images.size} of 4 added.")
+                            Caption("Tap a box to add that view. Any you skip can be made later from the front.")
                         }
                     }
                 }
@@ -189,6 +203,21 @@ fun OutfitScreen() {
                                     val ref: ImageRef? = angles[idx]
                                     val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
                                     if (s.busy && ref == null) Skeleton(tile, containerShape())
+                                    else if (s.draft.mode == "own" && !s.done) Box(
+                                        tile.clip(containerShape()).background(m.roles.field).press { ownFor = idx; pickAngle.launch(img) }
+                                            .semantics { contentDescription = if (ref == null) "Choose the ${a.label} photo" else "Replace the ${a.label} photo"; role = Role.Button },
+                                        contentAlignment = androidx.compose.ui.Alignment.Center,
+                                    ) {
+                                        if (ref != null) {
+                                            RefImage(ref, Modifier.fillMaxSize())
+                                            Box(Modifier.align(androidx.compose.ui.Alignment.TopEnd).size(48.dp).press { vm.clearOwn(idx) }
+                                                .semantics { contentDescription = "Clear the ${a.label} photo"; role = Role.Button }, contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                Box(Modifier.size(24.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .6f)), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                    studio.muse.app.ui.theme.Ic("x", 14.dp, androidx.compose.ui.graphics.Color.White)
+                                                }
+                                            }
+                                        } else studio.muse.app.ui.theme.Ic("plus", 22.dp, m.roles.ink2)
+                                    }
                                     else Box(
                                         tile.clip(containerShape()).background(m.roles.field).let { t ->
                                             if (ref == null) t else t.press { viewing = angles.filterNotNull().indexOf(ref) }
@@ -216,7 +245,7 @@ fun OutfitScreen() {
                 PrimaryButton("Add to her outfits", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
             } else {
                 PrimaryButton(
-                    if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(photoPrices().let { p -> if (s.draft.base?.keeping == true) 4 * p.perEdit else studio.muse.core.PhotoPricing.outfitSet(p) })}",
+                    if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") (if (s.draft.own.firstOrNull() == null) "Add the front photo" else "Use my images") else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(photoPrices().let { p -> if (s.draft.base?.keeping == true) 4 * p.perEdit else studio.muse.core.PhotoPricing.outfitSet(p) })}",
                     { if (!s.busy) vm.generate() }, Modifier.weight(1f), busy = s.busy,
                 )
             }

@@ -107,6 +107,8 @@ data class OutfitDraft(
     val name: String = "",
     val previewId: String? = null,
     val images: List<ImageRef> = emptyList(),
+    /** "My own set": one uploaded photo per angle box (front, ¾, side, back); null = skipped. */
+    val own: List<ImageRef?> = listOf(null, null, null, null),
     /** The picked photo's file name (the name suggestion, §5). */
     val photoName: String? = null,
     /** §6: start from her base photos, keeping the ticked pieces. */

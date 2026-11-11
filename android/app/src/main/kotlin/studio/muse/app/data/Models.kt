@@ -124,7 +124,8 @@ data class CreateOutfitRequest(
     val name: String,
     val mode: String,
     val description: String = "",
-    val images: List<ImageRef> = emptyList(),
+    /** "My own set": one per angle (front, ¾, side, back; null = skipped); the product photo otherwise. */
+    val images: List<ImageRef?> = emptyList(),
     /** WS13 (owner): the image model for the set; null = the studio's default. */
     val imageModel: String? = null,
     /** §6: start from her base photos, keeping the ticked pieces (null = a new outfit as before). */
