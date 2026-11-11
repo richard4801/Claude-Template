@@ -126,8 +126,8 @@ class SuitePhotoTest {
         assertNull(PhotoComposer.request(draft(moves = listOf("dolly_in")), PhotoDraft())!!.camera)
         assertEquals(false, PhotoComposer.request(draft(ComposerSettings(palette = pal, gradeLook = false)), PhotoDraft())!!.gradeLook)
         assertNull(PhotoComposer.request(draft(ComposerSettings(gradeLook = false)), PhotoDraft())!!.gradeLook)
-        // No character: no request.
-        assertNull(PhotoComposer.request(draft().copy(modelId = null), PhotoDraft()))
+        // No character, no image and no words: no request (words alone are enough, owner 2026-11-11).
+        assertNull(PhotoComposer.request(draft(text = "").copy(modelId = null), PhotoDraft()))
     }
 
     @Test fun `a preset sends presetId and its own camera, the product and the references go as they are`() {
