@@ -318,6 +318,20 @@ export class CameraService {
     if (!relay.online) return { ok: false, error: 'The MUSE Mac app is not connected: open MUSE on the Mac and switch on the Blender relay, then try again.' };
     if (!relay.blender) return { ok: false, error: 'The Blender relay is on but Blender is not connected: open Blender with the MUSE add-on, then try again.' };
     if (this.relay.running(u.id, s.id, 'blender_render_guides')) return { ok: false, busy: true, error: 'A guide render for this session is already running. Check get_camera_session for its files.' };
+    // The camera the guides are rendered through is the session's own path (lens included), put on the Blender scene's
+    // MUSE_camera first, so set_camera_path (and focalMm here: every key's lens, e.g. 50) is what the guides show.
+    // applyPath: false renders the scene's camera as it is (a camera built by hand in Blender).
+    let path = s.cameraPath;
+    const focal = typeof b.focalMm === 'number' && b.focalMm >= 8 && b.focalMm <= 300 ? b.focalMm : undefined;
+    if (focal && path?.keyframes?.length) {
+      path = { ...path, keyframes: path.keyframes.map(k => ({ ...k, focalMm: focal })) };
+      await this.db.update(cameraSessions).set({ cameraPath: path }).where(eq(cameraSessions.id, s.id));
+    }
+    if (b.applyPath !== false && path?.keyframes?.length) {
+      const set = parse(blenderToolByName.get('blender_set_camera')!.args, compact({ keyframes: path.keyframes, cuts: path.cuts, sensorMm: path.sensorMm }));
+      const r = await this.relay.call(u, s.id, 'blender_set_camera', set);
+      if (!r.ok) return { ok: false, error: `Couldn't put the session's camera on the Blender scene: ${r.error ?? 'unknown error'}` };
+    } else if (focal) return { ok: false, error: 'focalMm needs a camera path: store one with set_camera_path first.' };
     const call = this.relay.call(u, s.id, 'blender_render_guides', args);
     if (opts.wait === false) {
       void call.catch(() => undefined);

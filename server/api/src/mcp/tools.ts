@@ -110,9 +110,11 @@ export const MUSE_TOOLS: MuseTool[] = [
   },
   {
     name: 'render_camera_guides', scope: 'camera:write', title: 'Render the guides (on the owner\'s Mac)', session: true,
-    description: 'Renders this session\'s guides from the Blender scene open on the owner\'s Mac and uploads them to the session, the same job as the Camera page\'s Re-render: greybox (flat-grey video), keyframes (start/mid/end stills), camera_json, characters_json. Use this for guides, never a render through the Blender MCP (its files stay on the Mac and do not reach MUSE). Free (a local render), takes up to a few minutes. Needs the MUSE Mac app\'s Blender relay on and Blender connected. wait: false starts it and returns at once (for several sessions in a row, build each scene, then render it, before moving to the next: one Blender scene at a time).',
+    description: 'Renders this session\'s guides from the Blender scene open on the owner\'s Mac and uploads them to the session, the same job as the Camera page\'s Re-render: greybox (flat-grey video), keyframes (start/mid/end stills), camera_json, characters_json. Use this for guides, never a render through the Blender MCP (its files stay on the Mac and do not reach MUSE). Free (a local render), takes up to a few minutes. It renders through the session\'s stored camera path (set_camera_path, lens included); to change the lens, pass focalMm (e.g. 50) or store keys with that focalMm. Needs the MUSE Mac app\'s Blender relay on and Blender connected. wait: false starts it and returns at once (for several sessions in a row, build each scene, then render it, before moving to the next: one Blender scene at a time).',
     inputSchema: obj({ sessionId: SESSION_ID, passes: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string', enum: ['greybox', 'keyframes', 'camera_json', 'characters_json'] }, description: 'Default: all four' },
-      resolutionShort: { type: 'integer', minimum: 480, maximum: 1080 }, wait: { type: 'boolean', description: 'Wait for the render and upload (default true)' } }, ['sessionId']),
+      resolutionShort: { type: 'integer', minimum: 480, maximum: 1080 }, wait: { type: 'boolean', description: 'Wait for the render and upload (default true)' },
+      focalMm: num('Lens for the whole shot (mm), e.g. 50: rewrites every camera key\'s focal length, then renders', 8, 300),
+      applyPath: { type: 'boolean', description: 'Put the session\'s stored camera path (set_camera_path, lens included) on the Blender camera before rendering (default true); false renders the scene\'s camera as it is' } }, ['sessionId']),
     run: async (env, a) => env.camera.renderGuides(env.user, sid(env, a), without(a, 'sessionId', 'wait'), { wait: a.wait !== false }),
   },
   {

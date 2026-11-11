@@ -4,6 +4,7 @@
 // approved in the app, like Recreate's fill_slot). The draft is the composer's own Reuse-settings draft, shared live:
 // Claude's changes reach the app as `suiteAssist` events and the owner's own edits come back with PATCH.
 import { and, desc, eq } from 'drizzle-orm';
+import { type DraftDirected, directedOf } from './directed.js';
 import { z } from 'zod';
 import { sentOfBody, type SentInput } from '../images/sent.js';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -87,13 +88,17 @@ export function requestOf(d: Draft) {
   const mention = (k: string) => toks.find((x): x is Extract<Token, { t: 'mention' }> => x.t === 'mention' && x.kind === k)?.id;
   const moves = toks.filter((x): x is Extract<Token, { t: 'move' }> => x.t === 'move').map(m => ({ id: m.id, intensity: Math.round(m.intensity) / 100 }));
   const extra = d as Record<string, unknown>;
-  const camera = cameraOf(rig, moves);
+  // Directed (a camera session's camera and guides) replaces the chips' camera, as in the composer.
+  const directed = (extra.directed as DraftDirected | undefined)?.camera;
+  const camera = directed ?? cameraOf(rig, moves);
   return {
     ...(mention('character') ? { modelId: mention('character') } : {}),
     ...((mention('outfit') ?? extra.outfitId) ? { outfitId: (mention('outfit') ?? extra.outfitId) as string } : {}),
     prompt: promptText(toks), duration: Math.round(d.duration ?? 5), aspectRatio: d.aspect ?? '9:16', quality: d.quality ?? 'draft', takes: d.takes ?? 1,
     ...(d.sound !== undefined ? { audio: !!d.sound } : {}), ...(typeof extra.speaking === 'boolean' ? { speaking: extra.speaking } : {}),
-    ...(camera ? { camera } : {}), ...(rig.gradeLook === false && (rig.palette || rig.stock) ? { gradeLook: false } : {}),
+    ...(camera ? { camera } : {}),
+    ...(typeof extra.engineModel === 'string' ? { engineModel: extra.engineModel, ...(typeof extra.resolution === 'string' ? { resolution: extra.resolution } : {}) } : {}),
+    ...(rig.gradeLook === false && (rig.palette || rig.stock) ? { gradeLook: false } : {}),
     ...(referencesOf(d).length ? { references: { images: referencesOf(d).map(r => ({ image: { url: r.url }, role: r.use, label: r.label ?? r.use })) } } : {}),
     // Images sent (images/sent.ts): Claude's or the person's choice, kept in the draft (set_sent_images).
     ...sentOfDraft(d),
@@ -121,6 +126,10 @@ export const SetBody = z.object({
   sound: z.boolean().optional(), speaking: z.boolean().nullable().optional(),
   /** WS18: Photo's number of stills. */
   count: z.number().int().min(1).max(4).optional(),
+  /** Movement → Directed: the camera (and blocking guides) from a camera session; null goes back to the chips. */
+  directed: z.object({ cameraSessionId: z.string().max(80) }).strict().nullable().optional(),
+  /** The model this shot runs on (a tier's model id, as the composer's model picker), null = Auto; and its resolution. */
+  engineModel: z.string().max(40).nullable().optional(), resolution: z.string().max(20).nullable().optional(),
 }).strict();
 export type SetInput = z.infer<typeof SetBody>;
 
@@ -209,6 +218,9 @@ export class SuiteAssist {
     if (b.rig !== undefined) d.rig = { ...checkVisibleRig(RigSchema.parse(b.rig)) };
     for (const k of ['quality', 'aspect', 'duration', 'takes', 'sound', 'count'] as const) if (b[k] !== undefined) (d as Record<string, unknown>)[k] = b[k];
     if (b.speaking !== undefined) { if (b.speaking === null) delete d.speaking; else d.speaking = b.speaking; }
+    if (b.directed !== undefined) { if (b.directed === null) delete d.directed; else d.directed = await directedOf(this.ctx, u, b.directed.cameraSessionId); }
+    if (b.engineModel !== undefined) { if (b.engineModel === null) { delete d.engineModel; delete d.resolution; } else d.engineModel = b.engineModel; }
+    if (b.resolution !== undefined) { if (b.resolution === null) delete d.resolution; else d.resolution = b.resolution; }
     // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
     // change Claude made outside Shot, because it only lays a draft over the composer of the same tool.
     if (!d.tool) d.tool = 'shot';

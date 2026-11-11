@@ -26,7 +26,7 @@ export const GATES: Record<string, Gate> = {
 /** Recreate tools a member can't use: they act on edit sessions or the editing playbook, which are the owner's. */
 const OWNER_ONLY = new Set(['apply_recipe', 'replace_slot', 'playbook_read', 'playbook_add', 'report_gap',
   // Full control: owner-only screens (archive, camera).
-  'character_archive', 'camera_session_delete', 'warm_gpu', 'warm_gpu_on']);
+  'character_archive', 'camera_session_delete', 'warm_gpu', 'warm_gpu_on', 'camera_sessions_list']);
 
 const tag = (tools: EditTool[], pages: ChatTool['pages'], members: (t: EditTool) => boolean): ChatTool[] =>
   tools.map(t => ({ ...t, pages, gate: GATES[t.name] ?? (t as { gate?: Gate }).gate ?? 'none', members: members(t) }));

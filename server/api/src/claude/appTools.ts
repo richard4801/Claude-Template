@@ -288,4 +288,10 @@ export const APP_TOOLS: EditTool[] = [
       throw badRequest('action: list, save or update');
     },
   },
+  {
+    name: 'camera_sessions_list', title: 'Camera sessions (owner)', ...read,
+    description: 'The owner\'s Camera (blocking) sessions: id, title, status, guides rendered. Use the id for suite_set_draft directed {cameraSessionId} (Movement → Directed) or open_page camera.',
+    inputSchema: obj({}),
+    run: async env => slim({ sessions: await appCall(env.ctx, env.user, 'GET', '/v1/camera-sessions') }, 40),
+  },
 ];
