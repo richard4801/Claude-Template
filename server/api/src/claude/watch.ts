@@ -267,6 +267,7 @@ const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
 const ID = str('A take id (Suite feed, Library, list_takes, an edited version), a Suite job id with one take, an imported clip id, or the uploadId of a video attached to the chat', 80);
 const result = (o: Overview) => ({ ...o.meta, mcpContent: o.blocks, structuredContent: o.meta });
 
+const PHOTOS_MAX = 6;
 export const WATCH_TOOLS: EditTool[] = [
   {
     name: 'watch', title: 'Watch a video (free)', scope: 'edit:read', readOnly: true, idempotent: true,
@@ -281,4 +282,33 @@ export const WATCH_TOOLS: EditTool[] = [
       frames: num(`At most this many frames (default ${CLOSER_MAX})`, 1, CLOSER_MAX) }, ['fromSec']),
     run: async (env, a) => result(await watchCloser(env.ctx, env.user, a.id ?? a.takeId, a.fromSec, a.toSec, a.frames)),
   },
+  {
+    name: 'see_photos', title: 'See photos (free)', scope: 'edit:read', readOnly: true, idempotent: true,
+    description: `Look at photos yourself: the stills a Photo run made (their take ids, e.g. from a "Result arrived" message), up to ${PHOTOS_MAX} at once, each sized to about 1024 px with its id and title. Free. Videos: use watch.`,
+    inputSchema: obj({ ids: { type: 'array', minItems: 1, maxItems: PHOTOS_MAX, items: { type: 'string', maxLength: 80 }, description: 'Photo take ids' } }, ['ids']),
+    run: async (env, a) => seePhotos(env.ctx, env.user, a.ids),
+  },
 ];
+
+/** Photo takes (kind "shot") of the person's studio as image blocks, small enough for Claude to read. */
+export async function seePhotos(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, ids: unknown) {
+  if (!Array.isArray(ids) || !ids.length || ids.length > PHOTOS_MAX || !ids.every(x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(x))) {
+    throw badRequest(`ids: 1 to ${PHOTOS_MAX} photo take ids`);
+  }
+  const blocks: Block[] = [];
+  const seen: { id: string; title?: string }[] = [];
+  for (const id of ids as string[]) {
+    const [t] = await ctx.db.select().from(takes).where(and(eq(takes.id, id), eq(takes.studioId, u.studioId)));
+    if (!t) throw notFound(`Photo ${id}`);
+    if (t.kind !== 'shot') throw badRequest(`${id} is a video: watch it instead`);
+    if (!t.mediaKey) throw new ApiError(409, 'not_ready', `${id} has no image yet`);
+    const obj = await ctx.storage.get(t.mediaKey);
+    if (!obj) throw new ApiError(409, 'not_ready', `${id}: the image hasn't arrived yet`);
+    const parts: Buffer[] = [];
+    for await (const ch of obj.body) parts.push(ch as Buffer);
+    const jpg = await sharp(Buffer.concat(parts)).rotate().resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+    blocks.push({ type: 'text', text: `${id}${t.title ? ` · ${t.title}` : ''}${t.label ? ` · ${t.label}` : ''}` }, { type: 'image', data: jpg.toString('base64'), mimeType: 'image/jpeg' });
+    seen.push({ id, title: t.title ?? undefined });
+  }
+  return { mcpContent: blocks, structuredContent: { photos: seen } };
+}

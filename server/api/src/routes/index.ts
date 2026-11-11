@@ -16,7 +16,8 @@ import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_
 import { applySent, sentImagesOf, sentOfBody, whyOf, type SentView } from '../images/sent.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
-import { takeView } from '../services/jobs.js';
+import { linkChat, takeView } from '../services/jobs.js';
+import { resultsOf } from '../claude/results.js';
 import { ASSET_DIR, ASSET_KEYS, PROVIDERS, type ShootRefIn } from '../images/service.js';
 import { PhotoBill } from '../images/bill.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
@@ -240,6 +241,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
     emitModel(u!);
     const user = req.user;
+    const fillKey = `fill-${uid('f')}`;
+    resultsOf(ctx).link(user, fillKey); // results arrive in the chat
     void (async () => {
       const identity = await identityOf(u!, sentOf(fillIds, fillPlan));
       const texts = await ctx.prompts.texts(user.studioId);
@@ -261,6 +264,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       const next: SheetSlot[] = curSlots.map(s => (s.key in filled ? (filled[s.key] ? { ...s, busy: false, image: filled[s.key]!, source: 'generated' } : { ...s, busy: false }) : s));
       const [v] = await db.update(models).set({ slots: next }).where(eq(models.id, m.id)).returning();
       emitModel(v!);
+      if (missing.length) void resultsOf(ctx).report(fillKey, { kind: 'character sheet', status: failed < missing.length ? 'done' : 'failed', modelId: m.id,
+        title: `Character sheet · ${missing.length - failed} of ${missing.length} angle${missing.length === 1 ? '' : 's'}`, ...(failed ? { error: `${failed} angle${failed === 1 ? '' : 's'} didn’t come out` } : {}) }).catch(() => undefined);
     })().catch(e => ctx.log.error({ err: (e as Error).message }, 'fill angles failed'));
     return { model: modelView(u!), cost, sentImages: fillPlan.sentImages };
   };
@@ -334,6 +339,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       angles: [null, null, null, null], state: 'generating', prompt: keeping ? outfitKeepFront(keep!, b.description?.trim() || (productIds.length ? 'the clothes in the product photo' : spec.name), texts) : set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
     emitOutfit(o!);
     const user = req.user;
+    resultsOf(ctx).link(user, `outfit-${id}`); // results arrive in the chat
+    const outfitResult = (status: 'done' | 'failed') => resultsOf(ctx).report(`outfit-${id}`, { kind: 'outfit', status, title: `Outfit · ${spec.name}`, modelId: m.id, outfitId: id,
+      ...(status === 'failed' ? { error: 'The outfit pictures didn’t come out' } : {}) }).catch(() => undefined);
     ctx.later(async () => {
       let angles: (ImageRef | null)[];
       if (mode === 'own' && b.images?.length) angles = [0, 1, 2, 3].map(i => (b.images![i] as ImageRef) ?? null);
@@ -385,12 +393,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           await bill.fail();
           const [f] = await db.update(outfits).set({ state: 'preview', angles: [null, null, null, null] }).where(eq(outfits.id, id)).returning();
           if (f) emitOutfit(f);
+          void outfitResult('failed');
           return;
         }
       }
       await bill.finish();
       const [u] = await db.update(outfits).set({ angles, state: 'preview', cost: bill.spent }).where(and(eq(outfits.id, id), eq(outfits.state, 'generating'))).returning();
       if (u) emitOutfit(u);
+      if (u) void outfitResult(angles.some(Boolean) ? 'done' : 'failed');
     }, mode === 'own' ? 300 : 0);
     return outfitView(o!);
   };
@@ -920,7 +930,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const run = runShoot(req, s, graded?.filter, { noun: 'Photo', draft, started: () => held(),
       made: (n, of) => { void set({ progress: Math.round((n / of) * 100), take: n + 1, step: n, phase: photoPhase(of, n) }); } });
     await Promise.race([holding, run]); // the bill refused: nothing was held and no job is made (the error goes back)
-    const [j0] = await db.insert(jobs).values(row).returning();
+    const [j0] = await db.insert(jobs).values(linkChat(u, row)).returning();
     ctx.jobs.emitJob(j0!);
     const finished = run.then(async out => {
       const j = await set({ state: 'done', progress: 100, step: count, phase: 'Done', finishedAt: Date.now(), thumb: out[0]?.thumb ?? row.thumb,

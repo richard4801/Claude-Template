@@ -2,6 +2,7 @@
 // background removal (green-screen video the apps key out) and voice clean-up. Each job: estimate → hold → run on the
 // provider → settle at the GPU time actually billed (or release on failure/cancel), with `editor` live events. Results are
 // data the APP applies to its edit project; nothing here touches video frames (outputs are copied byte for byte).
+import { resultsOf } from '../claude/results.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -157,6 +158,9 @@ export class EditorAiService {
     const [r] = await this.ctx.db.update(editorJobs).set(set).where(eq(editorJobs.id, id)).returning();
     if (r) {
       this.emit(r);
+      // Results arrive in the chat: an Edit helper job (captions, cut fillers, background, …) ended.
+      if (r.state === 'done' || r.state === 'failed') void resultsOf(this.ctx).report(`editor-${r.id}`, { kind: `edit ${r.kind}`, status: r.state === 'done' ? 'done' : 'failed',
+        title: `Edit · ${String(r.kind).replace(/[_-]/g, ' ')}`, editorJobId: r.id, ...(r.error ? { error: r.error } : {}) }).catch(() => undefined);
       if (r.state !== 'running') for (const f of this.finished) void Promise.resolve(f(r)).catch(e => this.ctx.log.warn({ err: (e as Error).message, job: r.id }, 'editor job listener failed'));
     }
     return r;
@@ -297,6 +301,7 @@ export class EditorAiService {
     const models = e.kind === 'cutout' ? (e.usd > 0 ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : []) : e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
+    resultsOf(this.ctx).link(u, `editor-${id}`);
     try {
       [row] = await this.ctx.db.insert(editorJobs).values({
         id, studioId: u.studioId, userId: u.id, kind: e.kind, state: 'running', source: e.src.source, mediaKey: e.src.key, options: e.opts as Record<string, unknown>,

@@ -2,6 +2,7 @@
 // sum of per-image estimates), images one after another through the shared Replicate gate, each image's exact cost added,
 // one settle at the end; then the user reviews every image (keep / reject / retry one) and applies what they kept.
 import { and, desc, eq } from 'drizzle-orm';
+import { resultsOf } from '../claude/results.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { models, outfits, toolRuns, type ImageRef, type SheetSlot, type SheetVersion, type ToolItem } from '../db/schema.js';
 import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
@@ -97,6 +98,11 @@ export class ToolService {
   private async save(id: string, patch: Partial<Run>) {
     const [r] = await this.ctx.db.update(toolRuns).set(patch).where(eq(toolRuns.id, id)).returning();
     if (r) this.emitRun(r);
+    // Results arrive in the chat: Enhance / Dress up is ready to review (or failed).
+    if (r && (patch.state === 'review' || patch.state === 'failed')) {
+      void resultsOf(this.ctx).report(`tool-${r.id}`, { kind: r.kind === 'dressup' ? 'dress up' : 'enhance', status: r.state === 'failed' ? 'failed' : 'done',
+        title: r.kind === 'dressup' ? 'Dress up' : 'Enhance', modelId: r.modelId, runId: r.id, ...(r.error ? { error: r.error } : {}) }).catch(() => undefined);
+    }
     return r!;
   }
   private label(n: number, est: number, options = 1) { return `${n} image${n === 1 ? '' : 's'}${options > 1 ? ` · ${options} options` : ''} · about ${money(est)}`; }
@@ -175,6 +181,7 @@ export class ToolService {
     const usedModels: Record<string, string> = {};
     if (b.realism !== 'off') usedModels.realism = all.realism.model;
     if (b.upscale !== 'off') usedModels.upscale = all.upscale.model;
+    resultsOf(this.ctx).link(u, `tool-${id}`);
     const [r] = await this.ctx.db.insert(toolRuns).values({ id, studioId: u.studioId, modelId: m.id, kind: 'enhance', state: 'running',
       options: { realism: b.realism, upscale: b.upscale, seed: randomImageSeed() }, engines: ['a'], models: usedModels, items, estimate: per * slots.length,
       phase: `Enhancing · 1 of ${items.length}`, createdBy: u.id, createdAt: Date.now() }).returning();
@@ -204,6 +211,7 @@ export class ToolService {
     const usedModels: Record<string, string> = {};
     for (const e of engines) usedModels[stepOf(e)] = all[stepOf(e)].model;
     const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : null;
+    resultsOf(this.ctx).link(u, `tool-${id}`);
     const [r] = await this.ctx.db.insert(toolRuns).values({ id, studioId: u.studioId, modelId: m.id, kind: 'dressup', state: 'running',
       options: { engine: engines.length > 1 ? 'both' : engines[0], name, outfitImage: outfitImage ?? sent.images[0]!.image, seed: randomImageSeed(),
         ...(sent.changed ? { sentImages: sent.images.map(x => x.image) } : {}) }, engines, models: usedModels, items, estimate: est,

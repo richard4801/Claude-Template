@@ -1,6 +1,8 @@
 // The MUSE MCP server: Streamable HTTP JSON-RPC round-trips, personal access tokens, owner-only, presigned uploads.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { repairHistory } from '../src/camera/director.js';
+import { uploads } from '../src/db/schema.js';
+import { sql } from 'drizzle-orm';
 import { makeApp, people, demoModel, type Client } from './helpers.js';
 
 type App = Awaited<ReturnType<typeof makeApp>>;
@@ -202,5 +204,66 @@ describe('render_camera_guides (Claude Code renders guides through the Mac relay
     await owner.req('POST', `/v1/blender/calls/${c2.id}/result`, { ok: true, result: { frames: 144 } });
     expect((await done).structuredContent).toMatchObject({ ok: true, revision: expect.any(Number) });
     await owner.req('POST', '/v1/blender/relay', { online: false });
+  });
+});
+
+describe('permission_prompt (files on the person\'s Mac ask first)', () => {
+  it('waits for the person: allow, deny; credentials are refused outright; members have it too', async () => {
+    const ask = (tool_name: string, input: Record<string, unknown>) => rpc('tools/call', { name: 'permission_prompt', arguments: { tool_name, input, tool_use_id: 'toolu_1' } });
+    // An older Mac app (no X-Muse-Caps: files): answered at once, never left waiting.
+    expect(JSON.parse((await ask('Read', { file_path: '/Users/me/a.txt' })).body.result.content[0].text)).toEqual({ behavior: 'deny', message: expect.stringMatching(/newer MUSE app/) });
+    expect(JSON.parse((await rpc('tools/call', { name: 'upload_local_file', arguments: { path: '/Users/me/a.png' } })).body.result.content[0].text).error).toMatch(/newer MUSE app/);
+    await a.app.inject({ method: 'GET', url: '/v1/claude/permissions', headers: { authorization: `Bearer ${owner.token}`, 'x-muse-caps': 'files,results' } });
+    const pending = ask('Read', { file_path: '/Users/me/Movies/clip.mov' });
+    let asks: any[] = [];
+    for (let i = 0; i < 50 && !asks.length; i++) { asks = (await owner.req('GET', '/v1/claude/permissions')).body.asks; if (!asks.length) await new Promise(r => setTimeout(r, 20)); }
+    expect(asks[0]).toMatchObject({ toolName: 'Read', input: { file_path: '/Users/me/Movies/clip.mov' }, toolUseId: 'toolu_1' });
+    expect((await member.req('POST', `/v1/claude/permissions/${asks[0].id}`, { allow: true })).status).toBe(410); // not theirs
+    expect((await owner.req('POST', `/v1/claude/permissions/${asks[0].id}`, { allow: true })).status).toBe(204);
+    const r = (await pending).body.result;
+    expect(r.content).toEqual([{ type: 'text', text: '{"behavior":"allow"}' }]);
+    expect(r.structuredContent).toBeUndefined();
+
+    const p2 = ask('Bash', { command: 'ls ~/Movies' });
+    let a2: any;
+    for (let i = 0; i < 50 && !a2; i++) { a2 = (await owner.req('GET', '/v1/claude/permissions')).body.asks[0]; if (!a2) await new Promise(r => setTimeout(r, 20)); }
+    await owner.req('POST', `/v1/claude/permissions/${a2.id}`, { allow: false });
+    expect(JSON.parse((await p2).body.result.content[0].text)).toEqual({ behavior: 'deny', message: 'The person said no.' });
+
+    for (const [t, i] of [['Read', { file_path: '/Users/me/project/.env' }], ['Read', { file_path: '/Users/me/.ssh/id_ed25519' }], ['Bash', { command: 'cat ~/.aws/credentials' }],
+      ['Read', { file_path: '/Users/me/MUSE/Claude/ct_1/.mcp-abc.json' }], ['Grep', { pattern: 'x', path: '/Users/me/Library/Keychains' }]] as const) {
+      expect(JSON.parse((await ask(t, i)).body.result.content[0].text)).toMatchObject({ behavior: 'deny', message: expect.stringMatching(/never lets Claude read/) });
+    }
+    expect((await owner.req('GET', '/v1/claude/permissions')).body.asks).toEqual([]);
+
+    // A member's own Mac (session token from the app) has the tool too.
+    const mt = (await member.req('POST', '/v1/mcp/session-token')).body;
+    const names = (await rpc('tools/list', {}, { token: mt.token })).body.result.tools.map((x: any) => x.name);
+    expect(names).toContain('permission_prompt');
+    expect(names).not.toContain('render_camera_guides');
+  });
+});
+
+describe('upload_local_file (a Mac file into MUSE, after the person says yes)', () => {
+  it('asks with an Upload card, returns the upload the Mac made, refuses keys and other people\'s uploads', async () => {
+    const up = (path: string, purpose = 'reference') => rpc('tools/call', { name: 'upload_local_file', arguments: { path, purpose } });
+    const next = async () => { let x: any; for (let i = 0; i < 50 && !x; i++) { x = (await owner.req('GET', '/v1/claude/permissions')).body.asks[0]; if (!x) await new Promise(r => setTimeout(r, 20)); } return x; };
+    expect(JSON.parse((await up('~/.ssh/id_rsa')).body.result.content[0].text).error).toMatch(/never lets Claude/);
+    expect((await up('relative/a.png')).body.result.isError).toBe(true);
+
+    const p1 = up('/Users/me/Shoot/layout_A_house.png');
+    const a1 = await next();
+    expect(a1).toMatchObject({ toolName: 'Upload', input: { file_path: '/Users/me/Shoot/layout_A_house.png', purpose: 'reference' } });
+    expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true })).status).toBe(400); // needs the upload
+    expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true, result: { uploadId: 'up_nope', kind: 'image' } })).status).toBe(400);
+    const studioId = ((await a.ctx.db.execute(sql`select studio_id from users where id = ${owner.id}`)) as any).rows[0].studio_id;
+    await a.ctx.db.insert(uploads).values({ id: 'up_layout', studioId, kind: 'image', storageKey: 'u/layout.png', contentType: 'image/png', bytes: 10, state: 'ready', createdAt: Date.now() });
+    expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true, result: { uploadId: 'up_layout', kind: 'image', url: '/uploads/u/layout.png' } })).status).toBe(204);
+    expect(JSON.parse((await p1).body.result.content[0].text)).toEqual({ uploadId: 'up_layout', kind: 'image', url: '/uploads/u/layout.png' });
+
+    const p2 = up('/Users/me/Shoot/b.mov', 'clip');
+    const a2 = await next();
+    await owner.req('POST', `/v1/claude/permissions/${a2.id}`, { allow: false });
+    expect(JSON.parse((await p2).body.result.content[0].text).error).toMatch(/said no/);
   });
 });

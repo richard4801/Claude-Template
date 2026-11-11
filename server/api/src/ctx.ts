@@ -59,4 +59,6 @@ export type Ctx = {
 };
 
 /** The signed-in user, attached to each authenticated request. */
-export type AuthUser = { id: string; studioId: string; email: string; role: 'owner' | 'member'; studioName: string; sessionId: string | null };
+export type AuthUser = { id: string; studioId: string; email: string; role: 'owner' | 'member'; studioName: string; sessionId: string | null;
+  /** The Claude chat open in the app when this request was made (header x-muse-chat): jobs it starts report back to it. */
+  chatId?: string };

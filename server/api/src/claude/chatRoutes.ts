@@ -10,6 +10,7 @@ import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { claudeMessages, claudeThreads } from '../camera/schema.js';
+import { uploads } from '../db/schema.js';
 import { parse } from '../camera/validate.js';
 import type { ChatEvent, Director } from '../camera/director.js';
 import type { ClaudeService } from '../camera/claude.js';
@@ -19,6 +20,8 @@ import { assistantOf } from '../recreate/assistant.js';
 import { ownChat, pageOf } from './chatTools.js';
 import { memoryAdd, memoryRead, memoryRemove, memoryUpdate } from './memory.js';
 import { pageLine, PageSchema } from './page.js';
+import { permissionsOf } from './permissions.js';
+import { resultsOf } from './results.js';
 import { checkModel, CLAUDE_MODELS, personDefault, setPersonDefault } from './models.js';
 
 type Row = typeof claudeThreads.$inferSelect;
@@ -99,6 +102,24 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
   app.patch<P>('/v1/claude/memory/:id', async req => memoryUpdate(ctx, req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.delete<P>('/v1/claude/memory/:id', async (req, reply) => { await memoryRemove(ctx, req.user, req.params.id); return reply.status(204).send(); });
 
+  /** Files on this Mac: Claude Code's questions waiting for this person (the Mac shows them as approval cards). */
+  app.get('/v1/claude/permissions', async req => ({ asks: permissionsOf(ctx).pending(req.user) }));
+  app.post<P>('/v1/claude/permissions/:id', async (req, reply) => {
+    const b = parse(z.object({ allow: z.boolean(), message: z.string().max(500).optional(),
+      result: z.object({ uploadId: z.string().min(1).max(120), kind: z.enum(['image', 'clip']), url: z.string().max(2000).optional(), name: z.string().max(200).optional() }).strict().optional() }).strict(), req.body);
+    if (b.result) {
+      // An upload the Mac made for upload_local_file: this person's, in this studio, confirmed.
+      const [up] = await ctx.db.select({ id: uploads.id, state: uploads.state, createdBy: uploads.createdBy }).from(uploads)
+        .where(and(eq(uploads.id, b.result.uploadId), eq(uploads.studioId, req.user.studioId)));
+      if (!up || up.state !== 'ready' || (up.createdBy && up.createdBy !== req.user.id)) throw new ApiError(400, 'bad_request', 'result.uploadId: not a ready upload of yours');
+    }
+    permissionsOf(ctx).answer(req.user, req.params.id, b);
+    return reply.status(204).send();
+  });
+
+  /** Results arrive in the chat: one of the person's Macs claims a result before running Claude on it. */
+  app.post<P>('/v1/claude/results/:id/claim', async req => resultsOf(ctx).claim(req.user, req.params.id));
+
   /**
    * A turn in the app on the STUDIO's Claude key (SSE; the opt-in API fallback, billed to the studio's Anthropic account).
    * Owner only: everyone else runs Claude on their own Claude plan on their own computer (owner, 2026-11-11).
@@ -109,11 +130,15 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     const body = parse(z.object({ text: z.string().max(8000).optional(), attachments: z.unknown().optional(), page: PageSchema.optional() }).strict(), req.body ?? {});
     const message = body.text ?? '';
     const hasImages = Array.isArray(body.attachments) && body.attachments.length > 0;
-    const camera = t.contextKind === 'camera';
+    // One Claude: an old Camera chat, or any chat while the person is on the Camera page with a session open, runs the
+    // director there (camera session tools + Blender through the Mac's relay), as the Camera page's own chat did.
+    const pageNow = body.page ?? pageOf(t);
+    const camId = t.contextKind === 'camera' ? t.contextId : pageNow?.name === 'camera' ? pageNow.ids?.cameraSessionId : undefined;
+    const camera = !!camId;
     if (camera && hasImages) throw new ApiError(400, 'bad_request', 'attachments: the camera chat on the API takes text only');
     // The page first, so the turn sees where the person is. An old per-place chat becomes a chat that follows them.
     if (body.page) await ctx.db.update(claudeThreads).set({ page: body.page }).where(eq(claudeThreads.id, t.id));
-    if (camera) await director.precheck(req.user, t.contextId, message);
+    if (camera) await director.precheck(req.user, camId!, message);
     else await assistantOf(ctx).precheck(req.user, 'chat', t.id, message, hasImages);
     const attachments = camera ? [] : await storeAttachments(ctx, req.user, t.id, body.attachments);
     reply.hijack();
@@ -140,7 +165,7 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     };
     try {
       const mine = await claude.mirrorFallback(req.user, t.id, 'user', message, attachments);
-      if (camera) await director.run(req.user, t.contextId, message, send);
+      if (camera) await director.run(req.user, camId!, message, send);
       else text = await assistantOf(ctx).run(req.user, t.id, 'chat', t.id, message, send, { attachments, skipMessageId: mine?.id as string | undefined }) || text;
       await claude.mirrorFallback(req.user, t.id, 'assistant', text);
     } finally {

@@ -26,7 +26,7 @@ export const rpcError = (id: RpcId, code: number, message: string, data?: unknow
 const ok = (id: RpcId, result: unknown) => ({ jsonrpc: '2.0', id, result });
 
 /** One Claude: a member's connection sees and calls only the tools members may use (registry `members`). */
-const memberOk = (user: AuthUser, name: string) => user.role === 'owner' || !!registryByName.get(name)?.members;
+const memberOk = (user: AuthUser, name: string) => user.role === 'owner' || name === 'permission_prompt' || name === 'upload_local_file' || !!registryByName.get(name)?.members;
 const toolList = (user: AuthUser, scopes?: string[]) => MUSE_TOOLS.filter(t => allowedBy(t, scopes) && memberOk(user, t.name)).map(t => ({
   name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
   annotations: { title: t.title, readOnlyHint: !!t.readOnly, destructiveHint: false, idempotentHint: !!t.idempotent, openWorldHint: false },

@@ -12,6 +12,7 @@ import { RunpodGpu, SimulatedGpu } from './gpu/pool.js';
 import { ImageService } from './images/service.js';
 import { Money } from './money/money.js';
 import { bindAppCaller, grantUser } from './claude/appCall.js';
+import { permissionsOf } from './claude/permissions.js';
 import { authenticate, bootstrapOwnerInvite } from './auth/auth.js';
 import { JobService } from './services/jobs.js';
 import { LoraService } from './services/lora.js';
@@ -139,6 +140,12 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     const cfg = req.routeOptions.config;
     if (!req.url.startsWith('/v1/') || cfg?.public) return;
     req.user = grantUser(req) ?? await authenticate(ctx, req); // grantUser: Claude's in-process call as the person (claude/appCall.ts)
+    // Results arrive in the chat (owner, 2026-11-11): the app names the Claude chat that is open; a job started now reports to it.
+    const chat = req.headers['x-muse-chat'];
+    if (typeof chat === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(chat)) req.user = { ...req.user, chatId: chat };
+    // The newer Mac app can show file and upload cards (X-Muse-Caps: files); older ones never get asked.
+    const caps = req.headers['x-muse-caps'];
+    if (typeof caps === 'string' && caps.split(',').map(c => c.trim()).includes('files')) permissionsOf(ctx).sawApp(req.user.id);
     if (cfg?.owner && req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can do that');
   });
 

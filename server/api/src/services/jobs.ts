@@ -17,6 +17,7 @@ import { replicateSwap, videoSwap } from '../prompt/scripts/builders.js';
 import { resolveSpeaking } from '../audio/service.js';
 import { gpuCanRun, type JobRow } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
+import { resultsOf } from '../claude/results.js';
 import { shotPromptFor } from '../templates/service.js';
 import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
 import { draftOf } from '../suite/drafts.js';
@@ -87,7 +88,7 @@ export class JobService {
   view(j: JobRow, takesOut?: unknown[]) {
     const q = j.state === 'running' && j.gpuState === 'pending' ? this.queueInfo.get(j.id) ?? this.lineInfo.get(j.id) : undefined;
     return compact({
-      id: j.id, title: j.title, modelId: j.modelId, modelName: j.modelName, outfitId: j.outfitId, request: j.request, state: j.state,
+      id: j.id, title: j.title, modelId: j.modelId, modelName: j.modelName, outfitId: j.outfitId, request: withoutChat(j.request), state: j.state,
       progress: j.progress, take: j.take, step: j.step, totalSteps: j.totalSteps, phase: j.phase, secondsLeft: q ? q.etaSeconds : j.secondsLeft,
       totalSeconds: j.totalSeconds, cost: j.cost, refunded: j.refunded, error: j.error, createdAt: j.createdAt, finishedAt: j.finishedAt,
       prompt: j.prompt, seed: j.seed, thumb: j.thumb ?? undefined, queuePosition: q?.queuePosition, etaSeconds: q?.etaSeconds,
@@ -101,6 +102,22 @@ export class JobService {
   emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
     if (j.kind !== 'render' || j.hiddenAt) return;
     this.ctx.hub.emit(j.studioId, { type: 'job', job: this.view(j), ...extra });
+    if (j.state === 'done' || j.state === 'failed') void this.resultToChat(j, extra).catch(() => undefined);
+  }
+
+  /**
+   * Results arrive in the chat (owner, 2026-11-11): a job started while a Claude chat was open (by Claude through the
+   * panel, or by the person on a page) tells that chat's owner's apps it finished; their Mac runs Claude on it.
+   */
+  private async resultToChat(j: JobRow, extra: Record<string, unknown>) {
+    const chatId = typeof j.request?.chatId === 'string' ? j.request.chatId : undefined;
+    if (!chatId || !j.userId) return;
+    const fromExtra = Array.isArray(extra.takes) ? (extra.takes as { id?: unknown }[]).map(x => x.id).filter((x): x is string => typeof x === 'string') : [];
+    const takeIds = fromExtra.length ? fromExtra : ((j.stats as { photo?: { takeIds?: string[] } } | null)?.photo?.takeIds ?? []);
+    const kind = isPhoto(j) ? 'photo' : typeof j.request?.tool === 'string' ? j.request.tool : 'video';
+    await resultsOf(this.ctx).reportFor(j.id, { chatId, userId: j.userId, studioId: j.studioId }, {
+      kind, status: j.state === 'done' ? 'done' : 'failed', title: j.title, takeIds,
+      ...(j.state === 'failed' ? { error: j.error ?? 'It didn’t finish' } : {}), ...(j.modelId ? { modelId: j.modelId } : {}) });
   }
 
   async list(studioId: string) {
@@ -181,7 +198,7 @@ export class JobService {
       ...(draft ? { draft } : {}),
     };
     if (queue) {
-      const [ins] = await this.ctx.db.insert(jobs).values(row).returning();
+      const [ins] = await this.ctx.db.insert(jobs).values(linkChat(user, row)).returning();
       this.emitJob(ins!);
       return this.view(ins!);
     }
@@ -220,7 +237,7 @@ export class JobService {
   private async startNew(user: AuthUser, row: typeof jobs.$inferInsert) {
     const hold = await this.ctx.money.hold(whoOf(user), row.id!, row.cost!, { perJob: row.kind === 'render', note: this.holdNote(row) });
     try {
-      const [ins] = await this.ctx.db.insert(jobs).values({ ...row, ...this.pendingFields(hold) }).returning();
+      const [ins] = await this.ctx.db.insert(jobs).values({ ...linkChat(user, row), ...this.pendingFields(hold) }).returning();
       this.emitJob(ins!);
       this.kick();
       return ins!;
@@ -606,3 +623,9 @@ export function takeView(t: typeof takes.$inferSelect, publicUrl?: string, viewe
     ...((t.kind as string) === 'edit' ? { parentTakeId: t.media?.parentTakeId, edits: t.media?.edits, fps: t.media?.fps, ...(t.media?.name ? { name: t.media.name } : {}), ...(t.media?.aiLabel ? { aiLabel: true } : {}) /* Edit suite (workstream 3) */ } : {}),
   }) as Record<string, unknown> & { jobId?: string | null };
 }
+
+/** The open chat (x-muse-chat) rides on the job's request, so its result can go back to that chat. */
+export function linkChat<R extends { request?: Record<string, any> }>(user: AuthUser, row: R): R {
+  return user.chatId && row.request ? { ...row, request: { ...row.request, chatId: user.chatId } } : row;
+}
+const withoutChat = (r: Record<string, any>) => { if (!r || !('chatId' in r)) return r; const { chatId: _c, ...rest } = r; return rest; };
