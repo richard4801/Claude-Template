@@ -7,6 +7,9 @@ import { ClaudeService } from './claude.js';
 import { assistantOf } from '../recreate/assistant.js';
 import type { CameraService } from './service.js';
 import { storeAttachments } from './claudeAttachments.js';
+import { registerChatRoutes } from '../claude/chatRoutes.js';
+import { CHAT_TOOLS } from '../claude/chatTools.js';
+import * as mcpTools from '../mcp/tools.js';
 
 type P = { Params: { id: string } };
 
@@ -47,7 +50,8 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
     const kind = t.contextKind === 'camera' ? null : t.contextKind;
     const hasImages = Array.isArray(body.attachments) && body.attachments.length > 0;
     if (!kind && hasImages) throw new ApiError(400, 'bad_request', 'attachments: the camera chat on the API takes text only');
-    if (kind) await assistantOf(ctx).precheck(req.user, kind, t.contextId, message, hasImages);
+    const ctxId = kind === 'chat' ? t.id : t.contextId; // One Claude: a chat is its own context
+    if (kind) await assistantOf(ctx).precheck(req.user, kind, ctxId, message, hasImages);
     else await director.precheck(req.user, t.contextId, message);
     // workstream 1: attached images are checked and stored before the stream starts (plain JSON errors).
     const attachments = kind ? await storeAttachments(ctx, req.user, t.id, body.attachments) : [];
@@ -63,10 +67,14 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
       if (open) res.write(`data: ${JSON.stringify(e)}\n\n`);
     };
     const mine = await claude.mirrorFallback(req.user, t.id, 'user', String(message ?? ''), attachments);
-    if (kind) text = await assistantOf(ctx).run(req.user, t.id, kind, t.contextId, String(message ?? ''), send, { attachments, skipMessageId: mine?.id as string | undefined }) || text;
+    if (kind) text = await assistantOf(ctx).run(req.user, t.id, kind, ctxId, String(message ?? ''), send, { attachments, skipMessageId: mine?.id as string | undefined }) || text;
     else await director.run(req.user, t.contextId, String(message), send);
     await claude.mirrorFallback(req.user, t.id, 'assistant', text);
     if (open) res.end();
   });
+  // One Claude (plans/one-claude.md): the chat list for the owner and members, and the chat tools on the MCP server
+  // (Claude Code on the owner's Mac passes its chatId).
+  await registerChatRoutes(app, ctx, claude, director);
+  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools(CHAT_TOOLS);
   return claude;
 }

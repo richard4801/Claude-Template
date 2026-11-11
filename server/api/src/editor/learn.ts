@@ -23,6 +23,8 @@ import { editOps, editSessions } from './schema.js';
 
 export const LEARN_LIMITS = { rules: 200, ruleChars: 300, tags: 30, tagChars: 32, nearest: 10, corrections: 200, gapExamples: 5 } as const;
 export const AREAS = ['captions', 'text', 'transition', 'look', 'motion', 'speed', 'timing', 'audio', 'pacing', 'ratio', 'other'] as const;
+/** One Claude (plans/one-claude.md): the memory's own groups (claude/memory.ts), valid areas for the owner's rules too. */
+export const MEMORY_AREAS = ['figure', 'style', 'models', 'rejected'] as const;
 export type Area = (typeof AREAS)[number];
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -489,7 +491,8 @@ export class Learning {
       out.text = b.text.trim();
     }
     if (b.area !== undefined) {
-      if (typeof b.area !== 'string' || !(AREAS as readonly string[]).includes(b.area)) throw badRequest(`area: one of ${AREAS.join(', ')}`);
+      const areas: readonly string[] = [...MEMORY_AREAS, ...AREAS];
+      if (typeof b.area !== 'string' || !areas.includes(b.area)) throw badRequest(`area: one of ${areas.join(', ')}`);
       out.area = b.area;
     }
     if (b.evidence !== undefined) {

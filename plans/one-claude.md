@@ -51,7 +51,17 @@ name and messages. Each starts on the page it belonged to.
 
 **Phone:** the Android app keeps working as it does now. It gets the same design in a later session.
 
-### Questions for you
+### Your answers (2026-11-11)
+1. Opening pages: Claude opens them itself and shows "Back"; it asks first only when you'd be pulled out of something.
+2. Memory: Claude saves what it learns and shows "Remembered … Undo"; only you pin, edit or delete rules.
+3. Old chats: all of them come into the one list.
+4. Choosing the Claude model per chat: its own small step straight after this one.
+5. Members get one Claude now too. Each member sees only their own chats, never yours or anyone else's. Their Claude
+   spends from their own wallet, with the same go-ahead button and the price shown. They can read the studio memory and
+   Claude can learn from them, but only you pin, edit or delete rules and change settings. Their tools are what members
+   can already do (no providers, keys, prices or studio defaults).
+
+### The questions as asked
 1. **Opening pages:** should Claude open pages on its own and tell you (with "Back"), and ask only when you'd be pulled
    away from something you're doing? Or should it ask every time? _Recommended: the first._
 2. **Memory:** should Claude save what it learns on its own and show "Remembered … Undo"? Or should it ask "Shall I
@@ -200,6 +210,20 @@ target (the existing approval rows).
   revision check refuses the stale one (as today).
 - **Shared files** with the Mac Edit and Blender sessions: AppStore.swift and RootView.swift. Keep the changes small
   and additive, and rebase on prod often.
+
+### Members (answer 5), as built
+- `/v1/claude/chats*` routes are open to every signed-in person; every query is by `owner_id = the caller`, so a
+  member never sees or opens anyone else's chat (404), and Claude's chat tools act on the caller's chats only.
+- `toolsForUser`: the owner gets every tool; members get the chat tools, the Suite tools and the Recreate tools that
+  work on their own references. Edit tools and the editing playbook tools stay the owner's (the server's own checks
+  refuse them too). Paid tools keep the go-ahead: the approval comes up in the member's app and their wallet pays.
+- Memory: members read it (`GET /v1/claude/memory`, `memory_read`) and Claude adds what it learns in their chats
+  (unpinned, "Claude learned"); pin, edit and delete stay on the owner-only `/v1/learn/playbook` routes. The
+  "Remembered … Undo" line offers Undo only to the owner.
+- Members' turns run on the studio's Claude key (`POST /v1/claude/chats/:id/turn`) and only while the owner's
+  "Claude in the app" switch (Settings → Connections) is on. **Open point for the owner:** the Claude tokens of a member's
+  chat are paid by the studio's key today, not the member's wallet (generations they approve are charged to their
+  wallet). Charging chat tokens to members belongs with the model picker step (6b), which has to price messages anyway.
 
 ### Build order after the yes
 1. Server: registry + gates + binding (tests), chat routes + 0029, page context, open_page/memory/chat tools,

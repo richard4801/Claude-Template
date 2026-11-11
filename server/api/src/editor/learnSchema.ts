@@ -54,6 +54,8 @@ export const playbookRules = pgTable('playbook_rules', {
   /** Who wrote it: the owner, Claude (playbook_add), or a lesson learned from corrections. */
   source: text('source').notNull().$type<'owner' | 'claude' | 'learned'>(),
   pinned: boolean('pinned').notNull().default(false),
+  /** One Claude (0029): a rule about one character (her figure), else the whole studio. */
+  characterId: text('character_id'),
   /** [{kind: correction|post|recipe|note, id?, note, at}] */
   evidence: jsonb('evidence').$type<{ kind: string; id?: string | number; note: string; at: number }[]>().notNull().default([]),
   createdAt: ms('created_at').notNull(),
