@@ -47,6 +47,18 @@ https://angelic-elegance-production-c42b.up.railway.app). Prod head when written
 - Claude in Edit: `detect_beats` returns beatTimes and strongTimes.
 - Check first: the Mac CI run for the last pushes (a Mac test fixture changed), and that Railway deployed.
 
+## 4a. Session of 2026-11-11 (coordinator, continued) — read first
+Owner answers at the start: keep the 4b order; the typing bug is on the Mac; push green approved fixes straight to prod.
+- Pushed (Mac, needs a new Mac build for the owner): 5A.6 typing in Claude chat inside Edit no longer fires editor
+  shortcuts (MuseCore `EditShortcuts` + `EditShortcutsTests`; app `EditShortcutRunner`/`TextInputFocus`; ⌘Z undoes the
+  text while typing). 5A.2 Export: Save panel opens in Movies/MUSE, the notice names the file with "Show in Finder".
+- Fixed Mac CI run 511 (red since the figure-lock push): the Mac's built-in `video.replicate.retention` default text
+  lacked "body shape or proportions" (MuseCore PromptLibrary.swift). Keep Mac PromptLibraryDefaults in step with
+  server/api/src/prompt/library.ts on every prompt-text change.
+- Pushed (server, live): outfit body angle per picture (`plans/outfit-head-looks.md` §1). Server suite 695 green.
+- Mac CI: run 513 (head 892e2062) holds all three Mac commits; confirm it is green before sending a Mac build.
+- Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
+
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
 1. Bugs the owner hits today: Claude chat typing disturbs the Edit page (5A.6); Mac Edit oval (5A.1); Mac Export to
    file (5A.2).
