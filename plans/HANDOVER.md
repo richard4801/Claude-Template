@@ -101,6 +101,11 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - MERGED blank project (44cf00f2; mac.yml timeout 75).
 - Layers (Miracle-style) plan: plans/layers-edit.md; owner said YES to Phase 1 (decisions at its end). Building on
   branch claude/layers (Mac queue after model picker + outfit page).
+- DONE 5A.3 server (5096684, live): every stored/served generated file cleaned (storage/clean.ts; videos remuxed
+  without metadata, photos re-saved sRGB no EXIF); aiLabel ON writes "AI-generated · made with MUSE" in the MP4 comment.
+  Member source uploads left as sent (ASKED owner whether to strip GPS EXIF from member photo uploads).
+  APP WORK (Mac/Android queue): strip metadata on device exports (Mac AVAssetExportSession/Writer metadata = [], label
+  only when on; Android Transformer same; photos without EXIF); update the label hint text in both apps.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
