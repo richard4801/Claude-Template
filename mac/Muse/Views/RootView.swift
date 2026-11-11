@@ -209,6 +209,7 @@ struct TitleBar: View {
                     let on = store.oneClaude.open
                     Button { store.toggleOneClaude() } label: {
                         Ph("chat-circle-text", 16).frame(width: 28, height: 28).contentShape(Rectangle())
+                            .overlay(alignment: .topTrailing) { ClaudeResultDot() }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(on ? t.roles.ink : t.roles.ink2)

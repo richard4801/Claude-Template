@@ -134,6 +134,8 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         r.timeoutInterval = long ? 360 : 30
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         if let t = currentToken { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        // Results arrive in the chat: a job started while a Claude chat is open reports back to it.
+        if method == "POST", let chat = ClaudeChatLink.current { r.setValue(chat, forHTTPHeaderField: ClaudeChatLink.header) }
         if let body {
             r.httpBody = body
             r.setValue(contentType, forHTTPHeaderField: "Content-Type")

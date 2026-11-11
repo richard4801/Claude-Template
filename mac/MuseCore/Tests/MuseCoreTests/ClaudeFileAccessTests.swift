@@ -112,3 +112,41 @@ final class ClaudeFileAccessTests: XCTestCase {
         XCTAssertEqual(ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"permission_end","id":"perm_1"}"#.utf8)), .permissionEnd(id: "perm_1"))
     }
 }
+
+/// Results arrive in the chat: one turn per chat and batch, the person sees one line, Claude gets the details.
+final class ClaudeResultsTests: XCTestCase {
+    func r(_ chat: String, _ job: String, status: String = "done", kind: String = "shot", title: String = "Shot · Beach walk", takes: [String]? = ["t_1", "t_2"]) -> ClaudeJobResult {
+        ClaudeJobResult(chatId: chat, jobId: job, kind: kind, status: status, title: title, takeIds: takes, error: status == "done" ? nil : "Out of credit")
+    }
+
+    func testResultsOfAChatWithinFiveSecondsMakeOneTurn() {
+        var b = ClaudeResultBatcher(quiet: 5)
+        b.add(r("ct_1", "j1"), now: 100)
+        b.add(r("ct_1", "j2"), now: 103)
+        b.add(r("ct_1", "j2"), now: 103.5) // the same job again: once
+        b.add(r("ct_2", "j3"), now: 104)
+        XCTAssertTrue(b.due(now: 107).isEmpty)          // ct_1 heard 3.5 s ago
+        let first = b.due(now: 108.6)
+        XCTAssertEqual(first.map(\.chatId), ["ct_1"])
+        XCTAssertEqual(first[0].results.map(\.jobId), ["j1", "j2"])
+        XCTAssertEqual(b.due(now: 109.1).map(\.chatId), ["ct_2"])
+        XCTAssertTrue(b.isEmpty)
+    }
+
+    func testTheMessageShowsOneLineAndHidesTheInstructions() {
+        let m = ClaudeResultBatcher.message([r("ct_1", "j1"), r("ct_1", "j2", status: "failed", kind: "photo", title: "Photo · 4 photos", takes: nil)])
+        XCTAssertTrue(m.hasPrefix("Result arrived · Shot · Beach walk · 2 takes · Photo · 4 photos · didn't finish\n<instructions>"))
+        XCTAssertTrue(m.contains("takes t_1, t_2"))
+        XCTAssertTrue(m.contains("failed: Out of credit"))
+        XCTAssertTrue(m.contains("Never retry or start anything that costs money on your own"))
+        XCTAssertEqual(ChatLeakFilter.userText(m), "Result arrived · Shot · Beach walk · 2 takes · Photo · 4 photos · didn't finish")
+        XCTAssertEqual(r("c", "j", kind: "photo", title: "Photo · 4 photos", takes: ["a", "b", "c", "d"]).line, "Photo · 4 photos")
+    }
+
+    func testResultLiveEventAndDefaultMode() throws {
+        let e = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"result","result":{"chatId":"ct_1","jobId":"j1","kind":"shot","status":"done","title":"Shot","takeIds":["t_1"]}}"#.utf8))
+        XCTAssertEqual(e, .result(ClaudeJobResult(chatId: "ct_1", jobId: "j1", kind: "shot", status: "done", title: "Shot", takeIds: ["t_1"])))
+        let old = try JSONDecoder().decode(ClaudeFileSettings.self, from: Data(#"{"mode":"ask","folders":[]}"#.utf8))
+        XCTAssertEqual(old.resultMode, .look)
+    }
+}

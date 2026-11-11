@@ -10,9 +10,11 @@ import Observation
 @MainActor
 @Observable
 final class OneClaudeState {
-    var open = false
+    var open = false { didSet { syncChatLink() } }
     /// The open chat (kept on this Mac).
-    var chatId: String? = UserDefaults.standard.string(forKey: OneClaudeState.chatKey)
+    var chatId: String? = UserDefaults.standard.string(forKey: OneClaudeState.chatKey) { didSet { syncChatLink() } }
+    /// Results arrive in the chat: while the panel shows a chat, what the person starts reports back to it.
+    private func syncChatLink() { ClaudeChatLink.set(open ? chatId : nil) }
     var chats: [ClaudeChatSummary] = []
     var listError: String?
     var loadingList = false
@@ -79,12 +81,16 @@ extension AppStore {
 
     func toggleOneClaude() {
         oneClaude.open.toggle()
-        if oneClaude.open { Task { await startOneClaude() } }
+        if oneClaude.open {
+            ClaudeCodeService.shared.clearUnseenResults()
+            Task { await startOneClaude() }
+        }
     }
 
     func showOneClaude() {
         guard !oneClaude.open else { return }
         oneClaude.open = true
+        ClaudeCodeService.shared.clearUnseenResults()
         Task { await startOneClaude() }
     }
 

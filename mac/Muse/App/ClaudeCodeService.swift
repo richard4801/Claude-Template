@@ -236,6 +236,8 @@ final class ClaudeCodeService: ObservableObject {
                 await handlePermission(a)
             case .permissionEnd(let id):
                 fileAsks.removeAll { $0.id == id }
+            case .result(let r):
+                resultArrived(r)
             case .turn(let t):
                 await relay.offer([t])
             case .stop(let id):
@@ -490,6 +492,51 @@ final class ClaudeCodeService: ObservableObject {
         fileAsks.removeAll { $0.threadId == threadId }
         guard let api else { return }
         for a in mine { Task { try? await api.answerPermission(a.id, allow: false, message: message) } }
+    }
+
+    // MARK: Results arrive in the chat
+
+    /// Results that came while the Claude panel was closed (the dot on the Claude button).
+    @Published private(set) var unseenResults = 0
+    private var results = ClaudeResultBatcher()
+    private var resultTimer: Task<Void, Never>?
+
+    func clearUnseenResults() { unseenResults = 0 }
+
+    func setResultMode(_ m: ClaudeResultMode) {
+        fileSettings.results = m
+        saveFileSettings()
+    }
+
+    /// Something started from one of this person's chats finished. Only the Mac that runs this person's Claude Code acts
+    /// (every Mac of theirs hears it); with "Just notify me", or Claude Code not ready, it only tells them.
+    private func resultArrived(_ r: ClaudeJobResult) {
+        if ClaudeChatLink.current == nil { unseenResults += 1 } // the panel is closed
+        let look = fileSettings.resultMode == .look && info.ready && relay != nil
+        if !look {
+            Notifier.shared.post(title: r.failed ? "Didn't finish" : "Result arrived", body: r.line)
+            return
+        }
+        results.add(r, now: Date().timeIntervalSince1970)
+        guard resultTimer == nil else { return }
+        resultTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                for b in self.results.due(now: Date().timeIntervalSince1970) { self.lookAt(b.chatId, b.results) }
+                if self.results.isEmpty { self.resultTimer = nil; return }
+            }
+        }
+    }
+
+    /// One follow-up turn per chat and batch: queued behind a turn that is running; it never takes the person's focus.
+    private func lookAt(_ chatId: String, _ batch: [ClaudeJobResult]) {
+        guard let relay else { return }
+        let text = ClaudeResultBatcher.message(batch)
+        Task { await relay.submit(threadId: chatId, text: text) }
+        let first = batch[0]
+        Notifier.shared.post(title: batch.allSatisfy(\.failed) ? "Claude is looking at what went wrong" : "Claude looked at your \(first.isPhoto ? "photos" : first.kind)",
+                             body: batch.map(\.line).joined(separator: " · "))
     }
 
     // MARK: Feed

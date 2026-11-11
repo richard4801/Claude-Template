@@ -55,12 +55,20 @@ struct ClaudeFileSettingsSection: View {
 
     var body: some View {
         let s = service.fileSettings
-        SectionTitle("Claude · Files on this Mac")
+        SectionTitle("Claude")
         SettingRow("Files on this Mac", hint: s.mode == .ask
                    ? "Claude asks in the chat before it reads or changes a file or runs a command. Keys, passwords and tokens are never shared."
                    : "Claude can't read, change or run anything on this Mac") {
             Picker("Files on this Mac", selection: Binding(get: { s.mode }, set: { service.setFileMode($0) })) {
                 ForEach(ClaudeFileMode.allCases, id: \.self) { m in Text(m.label).tag(m) }
+            }
+            .labelsHidden().pickerStyle(.menu).fixedSize()
+        }
+        SettingRow("When results arrive", hint: s.resultMode == .look
+                   ? "When something you started from a chat finishes, Claude looks at it and tells you in that chat (a notification too)."
+                   : "A notification only; Claude looks when you ask") {
+            Picker("When results arrive", selection: Binding(get: { s.resultMode }, set: { service.setResultMode($0) })) {
+                ForEach(ClaudeResultMode.allCases, id: \.self) { m in Text(m.label).tag(m) }
             }
             .labelsHidden().pickerStyle(.menu).fixedSize()
         }
@@ -71,6 +79,19 @@ struct ClaudeFileSettingsSection: View {
                     RButton("Remove", kind: .plain, small: true) { service.removeAllowedFolder(f.id) }
                 }
             }
+        }
+    }
+}
+
+/// The dot on the Claude button: results arrived while the panel was closed.
+struct ClaudeResultDot: View {
+    @Environment(\.theme) private var t
+    @ObservedObject private var service: ClaudeCodeService = .shared
+
+    var body: some View {
+        if service.unseenResults > 0 {
+            Circle().fill(t.roles.accent).frame(width: 7, height: 7).offset(x: -3, y: 3)
+                .accessibilityLabel("\(service.unseenResults) result\(service.unseenResults == 1 ? "" : "s") arrived")
         }
     }
 }
