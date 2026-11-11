@@ -120,6 +120,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - MERGED 09:15 one-claude @98825b0 → prod e7f0cebd (model picker 6b, single header, composer, open edit session,
   early MUSE-mac upload in mac.yml; migration 0030 live). Build 530 sent early. Next Mac runs: one-claude export-card
   fix → outfit page → mask badge → layers → 4c app switches + 5A.3 device strip + video attach button.
+- Owner (14:55): remove the Camera/Blocking page's own "Direct with Claude" chat (one Claude replaces it); keep a
+  compact status strip (Claude session / Blender / Renders); one Claude must have every camera-director tool first.
+  → one-Claude session (with its held 4c/5A.3/video-attach app work).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
