@@ -392,7 +392,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     }
 
     public func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) async throws -> Take {
-        absolutize(try await call("POST", "v1/takes/\(Self.pathKey(takeId))/versions", req))
+        // A blank project's first save (no source take): POST /v1/edits makes it a new Library video.
+        if takeId == EditV2.blankSourceId { return absolutize(try await call("POST", "v1/edits", req)) }
+        return absolutize(try await call("POST", "v1/takes/\(Self.pathKey(takeId))/versions", req))
     }
 
     // MARK: Edit sessions (workstream 3): the live edit shared with Claude (plans/api.md "Edit sessions")

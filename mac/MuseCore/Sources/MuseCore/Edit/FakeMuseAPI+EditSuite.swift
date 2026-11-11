@@ -265,7 +265,11 @@ extension FakeMuseAPI {
     }
 
     public func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) throws -> Take {
-        guard let src = takes.first(where: { $0.id == takeId }) else { throw ApiError("not_found", "Take not found") }
+        // A blank project's first save (POST /v1/edits): a new Library video with no source take.
+        let blank = takeId == EditV2.blankSourceId
+        let found = blank ? Take(id: EditV2.blankSourceId, kind: "edit", title: TakeVersionV2Request.versionName(req.name) ?? "New project", label: "Edited", thumb: ImageRef())
+            : takes.first(where: { $0.id == takeId })
+        guard let src = found else { throw ApiError("not_found", "Take not found") }
         guard src.isVideo else { throw ApiError("bad_request", "Edit works on a video take") }
         if req.edits.sourceTakeId != takeId { throw ApiError("bad_request", "edits.sourceTakeId: must be the take in the URL") }
         if let p = EditV2.problem(req.edits) { throw ApiError("bad_request", p.description) }
@@ -283,7 +287,7 @@ extension FakeMuseAPI {
         t.width = req.width
         t.height = req.height
         t.fps = req.fps
-        t.parentTakeId = takeId
+        t.parentTakeId = blank ? nil : takeId
         t.editsV2 = req.edits
         t.name = TakeVersionV2Request.versionName(req.name)
         t.aiLabel = req.aiLabel == true ? true : nil

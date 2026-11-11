@@ -71,6 +71,14 @@ export class EditSessions {
   async open(u: AuthUser, b: { takeId?: unknown; project?: unknown; baseVersionId?: unknown; device?: unknown; fresh?: unknown }) {
     this.owner(u);
     if (typeof b.takeId !== 'string') throw badRequest('takeId: required');
+    // A blank project ("New blank project", no source take): always a new session, stored under the marker take id.
+    if (b.takeId === M.BLANK_SOURCE) {
+      const project = b.project !== undefined ? this.check(b.project as M.EditProject, M.BLANK_SOURCE) : M.blankProject();
+      const now = Date.now();
+      const [s] = await this.ctx.db.insert(editSessions).values({ id: uid('es'), studioId: u.studioId, ownerId: u.id, takeId: M.BLANK_SOURCE,
+        baseVersionId: null, project: project as unknown as Record<string, unknown>, revision: 0, updatedBy: this.author(b.device), createdAt: now, updatedAt: now }).returning();
+      return this.view(s!);
+    }
     const [t] = await this.ctx.db.select().from(takes).where(and(eq(takes.id, b.takeId), eq(takes.studioId, u.studioId)));
     if (!t) throw notFound('Take');
     if (!t.mediaKey || !(t.kind === 'take' || (t.kind as string) === 'edit')) throw badRequest('takeId: must be a video take');
@@ -92,7 +100,8 @@ export class EditSessions {
   private fromTake(t: typeof takes.$inferSelect): M.EditProject {
     const media = (t.media ?? {}) as { durationSec?: number; width?: number; height?: number; fps?: number; edits?: unknown; parentTakeId?: string };
     const e = media.edits as { version?: number } | undefined;
-    if (e?.version === 2) return e as unknown as M.EditProject;
+    // A saved blank project: its own video is now the source it is a version of (sessions check sourceTakeId).
+    if (e?.version === 2) { const p = e as unknown as M.EditProject; return M.isBlank(p) ? { ...p, sourceTakeId: t.id } : p; }
     // Live takes can carry 0 or no width / height / fps / duration (owner blocker 2026-11-07): never a 0×0 canvas or a 0 s clip.
     const pos = (v: unknown, d: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
     const facts = { width: Math.round(pos(media.width, 1080)), height: Math.round(pos(media.height, 1920)), fps: pos(media.fps, 30) };
@@ -106,7 +115,7 @@ export class EditSessions {
   }
   private check(p: M.EditProject, takeId?: string): M.EditProject {
     if (JSON.stringify(p ?? null).length > M.LIMITS.maxJsonBytes) throw badRequest(`project: at most ${M.LIMITS.maxJsonBytes / 1024} KB`);
-    try { M.validate(p, FILTERS, LOOK_IDS, paletteIds()); } catch (e) {
+    try { M.validate(p, FILTERS, LOOK_IDS, paletteIds(), { draft: true }); } catch (e) {
       if (e instanceof M.EditProblem) throw badRequest(e.message.replace(/^edits/, 'project'));
       throw badRequest(`project: ${(e as Error).message}`);
     }
@@ -351,7 +360,9 @@ export class EditSessions {
       for (const t of p.tracks) { const it = t.items.find(i => i.id === itemId) as M.VideoClip | undefined; if (it?.asset) return p.assets.find(a => a.id === it.asset)!; }
       throw badRequest(`itemId: no item ${itemId}`);
     }
-    return p.assets.find(a => a.take === takeId && a.kind === 'video') ?? p.assets.find(a => a.id === (M.mainTrack(p).items[0] as M.VideoClip).asset)!;
+    const first = M.mainTrack(p).items[0] as M.VideoClip | undefined;
+    if (!first && !p.assets.some(a => a.take === takeId && a.kind === 'video')) throw badRequest('The edit has no clip yet · add a video first');
+    return p.assets.find(a => a.take === takeId && a.kind === 'video') ?? p.assets.find(a => a.id === first!.asset)!;
   }
   applyResult(p0: M.EditProject, w: { kind: string; itemId?: string; reasons?: string[] }, result: Record<string, unknown>): M.EditProject | null {
     const p: M.EditProject = JSON.parse(JSON.stringify(p0));

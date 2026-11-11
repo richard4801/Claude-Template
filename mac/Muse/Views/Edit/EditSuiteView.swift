@@ -23,7 +23,7 @@ struct EditSuiteView: View {
             } else if openId != nil {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("Opening the video…").font(t.body(13)).foregroundStyle(t.muted)
+                    Text(openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…").font(t.body(13)).foregroundStyle(t.muted)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.recreate.open {
@@ -84,9 +84,11 @@ struct EditSuiteHome: View {
                     SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
                 }
                 SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
+                // A fresh project with no source video (owner request 2026-11-11); saved to the Library as a new video.
+                SuiteToolButton(title: "New blank project", icon: "plus") { open(EditV2.blankSourceId) }
             }
             if takes.isEmpty {
-                Note("Make a video in the Video suite first; its takes show up here to edit.")
+                Note("Start a blank project, or make a video in the Video suite; its takes show up here to edit.")
                     .padding(.top, 12)
             }
             if !edits.isEmpty {

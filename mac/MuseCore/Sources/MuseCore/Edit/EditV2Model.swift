@@ -948,6 +948,9 @@ extension EditV2 {
         }
     }
 
+    /// The marker `sourceTakeId` of a blank project (server model.ts BLANK_SOURCE).
+    public static let blankSourceId = "blank"
+
     public struct Project: Codable, Hashable, Sendable {
         public var version: Int
         public var sourceTakeId: String
@@ -957,6 +960,13 @@ extension EditV2 {
         public var mute: Bool?
         public init(version: Int = 2, sourceTakeId: String, canvas: Canvas, assets: [Asset], tracks: [Track], mute: Bool? = nil) {
             self.version = version; self.sourceTakeId = sourceTakeId; self.canvas = canvas; self.assets = assets; self.tracks = tracks; self.mute = mute
+        }
+
+        /// "New blank project" (owner request 2026-11-11): no source take; `sourceTakeId` is `EditV2.blankSourceId` until the
+        /// first save (POST /v1/edits makes it a new Library video). Empty until a clip is added (0 s; Export waits for a clip).
+        public var isBlank: Bool { sourceTakeId == EditV2.blankSourceId }
+        public static func blank(_ canvas: Canvas = Canvas(width: 1080, height: 1920, fps: 30, background: "#000000")) -> Project {
+            Project(sourceTakeId: EditV2.blankSourceId, canvas: canvas, assets: [], tracks: [Track(id: "main", kind: .main)])
         }
 
         public func asset(_ id: String) -> Asset? { assets.first { $0.id == id } }

@@ -78,6 +78,15 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
   const d = M.durationSec(p);
   t = Math.min(Math.max(0, t), Math.max(0, d - 1e-3));
   const spans = M.timeline(p), main = M.mainTrack(p);
+  if (!main.items.length) { // A blank project with no clip yet: its background colour (text and captions still drawn).
+    const hex = /^#[0-9a-f]{6}$/i.test(p.canvas.background ?? '') ? p.canvas.background! : '#000000';
+    const rgb = Buffer.alloc(W * H * 3);
+    for (let i = 0; i < rgb.length; i += 3) { rgb[i] = parseInt(hex.slice(1, 3), 16); rgb[i + 1] = parseInt(hex.slice(3, 5), 16); rgb[i + 2] = parseInt(hex.slice(5, 7), 16); }
+    let img = sharp(rgb, { raw: { width: W, height: H, channels: 3 } });
+    const svg = overlaySvg(p, t, W, H);
+    if (svg) img = img.composite([{ input: Buffer.from(svg) }]);
+    return { png: await img.png().toBuffer(), width: W, height: H, note: 'approximate: the edit has no clip yet, so only its background is shown' };
+  }
   let k = spans.length - 1;
   for (let i = spans.length - 1; i >= 0; i--) if (t >= spans[i]!.startSec) { k = i; break; }
   const clip = main.items[k] as M.VideoClip, asset = p.assets.find(a => a.id === clip.asset);
