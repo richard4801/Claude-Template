@@ -127,7 +127,7 @@ object ModelPicker {
         fun ladderRes(id: String) = cat.tiers.mapNotNull { t -> t.models?.firstOrNull { it.model == id }?.resolution?.ifBlank { null }?.let { t.id to it } }.toMap()
         cat.engines?.let { list ->
             return list.filter { it.kind == kind }.map { e ->
-                PickerEngine(e.model, e.name.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
+                PickerEngine(e.model, e.shownName.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
                     e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes)
             }
         }
@@ -142,7 +142,7 @@ object ModelPicker {
         return core + cat.custom.orEmpty().filter { it.kind == "video" }.map(::customEngine)
     }
 
-    private fun customEngine(c: SuiteCustomEngine) = PickerEngine(c.id, c.name.ifBlank { c.id }, emptyList(), null, emptyList(), c.minSeconds, c.maxSeconds, null,
+    private fun customEngine(c: SuiteCustomEngine) = PickerEngine(c.id, c.label.ifBlank { c.name }.ifBlank { c.id }, emptyList(), null, emptyList(), c.minSeconds, c.maxSeconds, null,
         c.aspectRatios, c.price?.takeIf { it.basis == "per_second" }?.usd, c.inputs, custom = true, perRun = c.price?.takeIf { it.basis != "per_second" }?.usd, kind = c.kind)
 
     /** The picker's groups for a shot on [quality]: the engines on that quality's ladder first, then the rest, then "Your providers". */
