@@ -56,7 +56,10 @@ interface MuseService {
     @POST("v1/models/{id}/fill-angles") suspend fun fillAngles(@Path("id") id: String, @Body r: FillAnglesRequest = FillAnglesRequest()): FillAnglesResponse
     @GET("v1/outfits") suspend fun outfits(): List<Outfit>
     @POST("v1/outfits") suspend fun createOutfit(@Body r: CreateOutfitRequest): Outfit
-    @POST("v1/outfits/{id}/save") suspend fun saveOutfit(@Path("id") id: String): Outfit
+    @POST("v1/outfits/{id}/save") suspend fun saveOutfit(@Path("id") id: String, @Body r: OutfitNameBody): Outfit
+    @PATCH("v1/outfits/{id}") suspend fun renameOutfit(@Path("id") id: String, @Body r: OutfitNameBody): Outfit
+    @DELETE("v1/outfits/{id}") suspend fun deleteOutfit(@Path("id") id: String)
+    @POST("v1/outfits/{id}/fill") suspend fun fillOutfit(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
     @Multipart @POST("v1/uploads/images") suspend fun uploadImage(@Part file: MultipartBody.Part): ImageRef
     @Multipart @POST("v1/uploads/clips") suspend fun uploadClip(@Part("meta") meta: RequestBody, @Part file: MultipartBody.Part?): Clip
     @POST("v1/uploads/presign") suspend fun presign(@Body r: PresignRequest): PresignResponse
@@ -370,7 +373,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun fillAngles(modelId: String, imageModel: String?) = call { fillAngles(modelId, FillAnglesRequest(imageModel)) }.let { it.copy(model = it.model.abs()) }
     override suspend fun listOutfits() = shared("outfits") { call { outfits() }.map { it.abs() } }
     override suspend fun createOutfit(req: CreateOutfitRequest) = callLong { createOutfit(req) }.abs()
-    override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }.abs()
+    override suspend fun saveOutfit(outfitId: String, name: String?) = call { saveOutfit(outfitId, OutfitNameBody(name)) }.abs()
+    override suspend fun renameOutfit(outfitId: String, name: String) = call { renameOutfit(outfitId, OutfitNameBody(name)) }.abs()
+    override suspend fun deleteOutfit(outfitId: String) = call { deleteOutfit(outfitId) }
+    override suspend fun fillOutfit(outfitId: String, imageModel: String?) = call { fillOutfit(outfitId, FillAnglesRequest(imageModel)) }.let { it.copy(outfit = it.outfit.abs()) }
 
     private suspend fun usePresigned(): Boolean = when (uploadMode) {
         UploadMode.PRESIGNED -> true

@@ -56,6 +56,7 @@ import studio.muse.app.ui.theme.scale
 import androidx.compose.foundation.layout.aspectRatio
 import studio.muse.core.OutfitAngle
 import studio.muse.core.Pricing
+import studio.muse.core.OutfitNaming
 
 data class OutfitState(val draft: OutfitDraft = OutfitDraft(), val model: Model? = null, val preview: Outfit? = null) {
     val busy get() = preview?.state == "generating"
@@ -74,7 +75,7 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
         val media = c.media ?: return@launch
         val refs = uris.mapNotNull { u -> media.bytes(u)?.let { c.repo.uploadImage(media.displayName(u), it, media.mime(u)) } }
         if (refs.isNotEmpty()) {
-            edit { it.copy(images = refs) }
+            edit { it.copy(images = refs, photoName = uris.firstOrNull()?.let(media::displayName)) }
             c.repo.toast(if (state.value.draft.mode == "own") "${refs.size} of 4 angles added" else "Photo added")
         }
     }
@@ -86,18 +87,31 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
             c.repo.toast(if (s.draft.mode == "own") "Upload front, ¾, side and back first" else "Upload a product or outfit photo first")
             return@launch
         }
-        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, s.draft.name, s.draft.mode, s.draft.description, s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" })) ?: return@launch
+        if (s.draft.mode == "describe" && s.draft.description.isBlank()) {
+            c.repo.toast("Describe the outfit first")
+            return@launch
+        }
+        // §5: a name from the start (what was typed, the photo's file name, else "Outfit · 11 Nov"); it can be changed
+        // before it's added. Never a generic "Product look".
+        val name = s.draft.name.trim().ifEmpty {
+            OutfitNaming.suggestion(if (s.draft.mode == "describe") s.draft.description else "", s.draft.photoName.takeIf { s.draft.mode == "photo" }, outfitDay(System.currentTimeMillis()))
+        }
+        edit { it.copy(name = name) }
+        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, name.take(OutfitNaming.MAX), s.draft.mode, s.draft.description, s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" })) ?: return@launch
         edit { it.copy(previewId = o.id) }
     }
 
     /** Saves the set, then [onDone] with the character and the new outfit (the screen opens Suite → Photo with them picked). */
     fun save(celebrate: () -> Unit, onDone: (modelId: String?, outfitId: String) -> Unit) = viewModelScope.launch {
         val id = state.value.draft.previewId ?: return@launch
-        val o = c.repo.saveOutfit(id) ?: return@launch
+        val name = state.value.draft.name.trim()
+        if (name.isEmpty()) { c.repo.toast("Give the outfit a name"); return@launch }
+        val o = c.repo.saveOutfit(id, name.take(OutfitNaming.MAX)) ?: return@launch
         c.drafts.outfitId.value = o.id
         c.drafts.outfit.value = OutfitDraft()
+        c.drafts.outfitPage.value = 0 // newest first: it's on page 1
         celebrate()
-        c.repo.toast("Outfit saved · ready in Photo")
+        c.repo.toast("Added to her outfits · ready in Photo")
         onDone(state.value.model?.id, o.id)
     }
 }
@@ -144,7 +158,7 @@ fun OutfitScreen() {
                         }
                     }
                 }
-                Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, calm = true) }
+                Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v.take(OutfitNaming.MAX)) } }, placeholder = "Suggested when the set is made", calm = true) }
                 // WS7/WS13: the owner's model for the set (not for "My own set": nothing is generated).
                 if (s.draft.mode != "own") ModelChoiceRow(studio.muse.app.data.ModelPurpose.OUTFIT, ModelPick(s.draft.imageModel), { p -> vm.edit { it.copy(imageModel = p.model) } })
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
@@ -180,7 +194,7 @@ fun OutfitScreen() {
         ActionDock {
             if (s.done) {
                 SecondaryButton("Generate again", { vm.generate() }, icon = "retry")
-                PrimaryButton("Save outfit", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
+                PrimaryButton("Add to her outfits", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
             } else {
                 PrimaryButton(
                     if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.outfitSet(photoPrices()))}",

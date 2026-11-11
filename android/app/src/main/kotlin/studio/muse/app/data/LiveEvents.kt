@@ -5,6 +5,10 @@ package studio.muse.app.data
  * phone) shows up here within a second or two. Pure: side effects (toasts, notifications) stay in [MuseRepository].
  */
 object LiveEvents {
+    /** An outfit deleted: out of the list and her outfits. */
+    fun dropOutfit(s: StudioState, id: String): StudioState =
+        s.copy(outfits = s.outfits.filterNot { it.id == id }, models = s.models.map { if (id in it.outfitIds) it.copy(outfitIds = it.outfitIds - id) else it })
+
     fun apply(s0: StudioState, ev: ApiEvent, owner: Boolean): StudioState {
         var s = s0
         val delete = ev.op == "delete"
@@ -18,9 +22,12 @@ object LiveEvents {
                 ev.model != null -> s.copy(models = s.models.upsert(ev.model) { it.id == ev.model.id })
                 else -> s
             }
-            "outfit" -> ev.outfit?.let { o ->
-                s = s.copy(outfits = s.outfits.upsert(o) { it.id == o.id },
-                    models = if (o.state == "ready") s.models.map { if (it.id == o.modelId && o.id !in it.outfitIds) it.copy(outfitIds = it.outfitIds + o.id) else it } else s.models)
+            "outfit" -> {
+                if (delete && ev.id != null) s = dropOutfit(s, ev.id)
+                else ev.outfit?.let { o ->
+                    s = s.copy(outfits = s.outfits.upsert(o) { it.id == o.id },
+                        models = if (o.state == "ready") s.models.map { if (it.id == o.modelId && o.id !in it.outfitIds) it.copy(outfitIds = it.outfitIds + o.id) else it } else s.models)
+                }
             }
             "tool" -> ev.tool?.let { t -> s = s.copy(toolRuns = s.toolRuns + (t.id to t)) }
             "lora" -> ev.lora?.let { l -> s = s.copy(loras = s.loras + (l.modelId to l)) }

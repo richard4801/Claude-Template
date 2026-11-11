@@ -91,7 +91,7 @@ class ProfileViewModel(private val c: AppContainer) : ViewModel() {
 
 /** Callbacks for [ProfileContent], so the same layout renders live in Settings theme previews. */
 data class ProfileActions(
-    val select: (Int) -> Unit = {}, val addOutfit: () -> Unit = {}, val video: () -> Unit = {}, val shoot: () -> Unit = {},
+    val select: (Int) -> Unit = {}, val addOutfit: () -> Unit = {}, val allOutfits: () -> Unit = {}, val video: () -> Unit = {}, val shoot: () -> Unit = {},
     val back: () -> Unit = {}, val settings: () -> Unit = {}, val sheet: () -> Unit = {}, val menu: Boolean = true,
     val lora: () -> Unit = {}, val accounts: () -> Unit = {},
     val enhance: () -> Unit = {}, val dressUp: () -> Unit = {}, val archive: (() -> Unit)? = null,
@@ -106,7 +106,7 @@ fun ProfileScreen() {
     ProfileContent(
         s,
         ProfileActions(
-            select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, video = { studio.muse.app.ui.screens.suite.composer.openShot(c, nav, s.model?.id) }, shoot = { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, s.outfits.getOrNull(s.selected)?.id) },
+            select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, allOutfits = { nav.go(Routes.OUTFITS) }, video = { studio.muse.app.ui.screens.suite.composer.openShot(c, nav, s.model?.id) }, shoot = { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, s.outfits.getOrNull(s.selected)?.id) },
             back = { nav.back() }, settings = { nav.tab(Routes.SETTINGS) }, sheet = { nav.go(Routes.CREATE3) },
             lora = { nav.go(Routes.LORA) }, accounts = { nav.go(Routes.ACCOUNTS) },
             enhance = { nav.go(Routes.ENHANCE) }, dressUp = { nav.go(Routes.DRESSUP) },
@@ -140,7 +140,8 @@ fun ProfileContent(s: ProfileState, a: ProfileActions) {
                 Caption("${if (model.locked) "Identity locked" else "Draft"} · ${model.filled} of 7 shots")
             }
             Heading("Outfits", Modifier.padding(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s4)) {
-                s.outfits.getOrNull(s.selected)?.let { Caption(it.name, maxLines = 1) }
+                // §4: every outfit as a folder (name, date, rename, delete), 8 per page.
+                if (s.outfits.isNotEmpty()) TextAction("See all", a.allOutfits)
             }
             OutfitStrip(s, a)
             ProfileExtras(s.lora, s.connected, a.lora, a.accounts, Modifier.padding(horizontal = MuseSpace.gutter))
