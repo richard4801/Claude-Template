@@ -132,6 +132,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   auto-captured tool errors → GET /v1/claude/issues; an hourly fresh-session check polls it and messages the
   coordinator, who delegates fixes (bugs and capability gaps = approved; spend/new features still ask the owner).
   → session on claude/claude-issues (Part A issues, Part B full-control audit plans/claude-control-audit.md).
+- Owner (16:25): when a generation started with Claude finishes, Claude continues the chat at once (auto follow-up
+  turn: watches/sees the result, reports, suggests next; failures explained, no auto-spend). Setting to turn it into
+  notify-only. → one-Claude session (held branch).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
