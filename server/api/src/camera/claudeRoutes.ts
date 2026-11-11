@@ -17,16 +17,20 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   const claude = new ClaudeService(ctx, camera);
   app.addHook('onClose', async () => claude.close());
   const owner = { config: { owner: true } };
+  // One Claude (owner, 2026-11-11): every member runs Claude on their own Claude plan on their own computer, like the
+  // owner, so the chat routes serve everyone's OWN threads (each query is by the caller's id). The studio switch and
+  // the studio-key turn stay the owner's.
+  const mine = {};
 
-  app.get('/v1/claude/status', owner, async req => claude.status(req.user));
+  app.get('/v1/claude/status', mine, async req => claude.status(req.user));
   app.patch('/v1/claude/settings', owner, async req => claude.setSettings(req.user, req.body));
-  app.post('/v1/claude/mac/heartbeat', owner, async req => claude.heartbeat(req.user, req.body));
-  app.post('/v1/claude/threads', owner, async req => claude.openThread(req.user, req.body));
-  app.get('/v1/claude/threads', owner, async req => claude.list(req.user, req.query)); // WS18: a place's list of chats
-  app.get<P>('/v1/claude/threads/:id', owner, async req => claude.get(req.user, req.params.id));
-  app.delete<P>('/v1/claude/threads/:id', owner, async req => claude.deleteThread(req.user, req.params.id));
-  app.patch<P>('/v1/claude/threads/:id', owner, async req => claude.patchThread(req.user, req.params.id, req.body));
-  app.post<P>('/v1/claude/threads/:id/messages', owner, async (req, reply) => {
+  app.post('/v1/claude/mac/heartbeat', mine, async req => claude.heartbeat(req.user, req.body));
+  app.post('/v1/claude/threads', mine, async req => claude.openThread(req.user, req.body));
+  app.get('/v1/claude/threads', mine, async req => claude.list(req.user, req.query)); // WS18: a place's list of chats
+  app.get<P>('/v1/claude/threads/:id', mine, async req => claude.get(req.user, req.params.id));
+  app.delete<P>('/v1/claude/threads/:id', mine, async req => claude.deleteThread(req.user, req.params.id));
+  app.patch<P>('/v1/claude/threads/:id', mine, async req => claude.patchThread(req.user, req.params.id, req.body));
+  app.post<P>('/v1/claude/threads/:id/messages', mine, async (req, reply) => {
     try {
       return reply.status(202).send(await claude.ask(req.user, req.params.id, req.body));
     } catch (e) {
@@ -35,10 +39,10 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
       throw e;
     }
   });
-  app.get('/v1/claude/turns', owner, async req => claude.pending(req.user));
-  app.post<P>('/v1/claude/turns/:id/claim', owner, async req => claude.claim(req.user, req.params.id));
-  app.post<P>('/v1/claude/turns/:id/stop', owner, async req => claude.stop(req.user, req.params.id));
-  app.post<P>('/v1/claude/threads/:id/events', { ...owner, bodyLimit: 4 * 1024 * 1024 }, async req => claude.events(req.user, req.params.id, req.body));
+  app.get('/v1/claude/turns', mine, async req => claude.pending(req.user));
+  app.post<P>('/v1/claude/turns/:id/claim', mine, async req => claude.claim(req.user, req.params.id));
+  app.post<P>('/v1/claude/turns/:id/stop', mine, async req => claude.stop(req.user, req.params.id));
+  app.post<P>('/v1/claude/threads/:id/events', { ...mine, bodyLimit: 4 * 1024 * 1024 }, async req => claude.events(req.user, req.params.id, req.body));
 
   // The opt-in API-key fallback (billed per use): the camera chat's director, mirrored into the thread.
   app.post<P>('/v1/claude/threads/:id/api-turn', owner, async (req, reply) => {

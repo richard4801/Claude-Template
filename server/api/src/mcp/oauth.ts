@@ -115,7 +115,9 @@ export async function authenticateAccessToken(ctx: Ctx, token: string, audience:
   const now = Date.now();
   const [row] = await ctx.db.select({ t: oauthTokens, u: users, s: studios }).from(oauthTokens).innerJoin(users, eq(users.id, oauthTokens.userId))
     .innerJoin(studios, eq(studios.id, users.studioId)).where(and(eq(oauthTokens.tokenHash, sha256(token)), eq(oauthTokens.kind, 'access'), isNull(oauthTokens.revokedAt)));
-  if (!row || row.t.expiresAt <= now || row.t.audience !== audience || row.u.disabledAt || row.u.role !== 'owner') return null;
+  // Members only through the MUSE app's own session token (one Claude: their Claude Code on their own plan); OAuth
+  // connections (claude.ai, other clients) stay the owner's.
+  if (!row || row.t.expiresAt <= now || row.t.audience !== audience || row.u.disabledAt || (row.u.role !== 'owner' && row.t.clientId !== 'muse-app')) return null;
   if (!row.t.lastUsedAt || now - row.t.lastUsedAt > 60_000) await ctx.db.update(oauthTokens).set({ lastUsedAt: now }).where(eq(oauthTokens.id, row.t.id));
   return { user: { id: row.u.id, studioId: row.u.studioId, email: row.u.email, role: row.u.role, studioName: row.s.name, sessionId: null }, scopes: row.t.scopes };
 }

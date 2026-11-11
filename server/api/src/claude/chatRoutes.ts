@@ -17,7 +17,7 @@ import { TITLE_MAX, threadBrief } from '../camera/claude.js';
 import { storeAttachments } from '../camera/claudeAttachments.js';
 import { assistantOf } from '../recreate/assistant.js';
 import { ownChat, pageOf } from './chatTools.js';
-import { memoryRead } from './memory.js';
+import { memoryAdd, memoryRead, memoryRemove, memoryUpdate } from './memory.js';
 import { pageLine, PageSchema } from './page.js';
 
 type Row = typeof claudeThreads.$inferSelect;
@@ -77,19 +77,23 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     await ctx.db.update(claudeThreads).set({ page }).where(eq(claudeThreads.id, t.id));
     return { ok: true, page, lastOn: pageLine(page) };
   });
-  /** The studio's memory, read-only for everyone (only the owner changes it: /v1/learn/playbook). */
+  /** The person's OWN memory (per person: the owner's is hers, a member's is theirs). Remember on Claude's question saves here. */
   app.get('/v1/claude/memory', async req => {
     const q = parse(z.object({ area: z.string().max(20).optional(), characterId: z.string().max(80).optional() }).strict(), req.query ?? {});
-    return { rules: await memoryRead(ctx, req.user, q), canEdit: req.user.role === 'owner' };
+    return { rules: await memoryRead(ctx, req.user, q), canEdit: true };
   });
+  app.post('/v1/claude/memory', async req => memoryAdd(ctx, req.user, (req.body ?? {}) as Record<string, unknown>, 'owner'));
+  app.patch<P>('/v1/claude/memory/:id', async req => memoryUpdate(ctx, req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
+  app.delete<P>('/v1/claude/memory/:id', async (req, reply) => { await memoryRemove(ctx, req.user, req.params.id); return reply.status(204).send(); });
 
-  /** A turn in the app on the studio's Claude key (SSE). Members always; the owner when her Mac isn't answering. */
-  app.post<P>('/v1/claude/chats/:id/turn', async (req, reply) => {
+  /**
+   * A turn in the app on the STUDIO's Claude key (SSE; the opt-in API fallback, billed to the studio's Anthropic account).
+   * Owner only: everyone else runs Claude on their own Claude plan on their own computer (owner, 2026-11-11).
+   */
+  app.post<P>('/v1/claude/chats/:id/turn', { config: { owner: true } }, async (req, reply) => {
     const t = await ownChat(ctx, req.user, req.params.id);
-    if (!(await claude.fallbackAllowed(req.user))) throw new ApiError(409, 'fallback_off', req.user.role === 'owner'
-      ? 'Claude in the app is off · turn it on in Settings → Connections' : 'Claude isn\'t switched on for the studio yet · ask the owner');
+    if (!(await claude.fallbackAllowed(req.user))) throw new ApiError(409, 'fallback_off', 'Claude in the app is off · turn it on in Settings → Connections');
     const body = parse(z.object({ text: z.string().max(8000).optional(), attachments: z.unknown().optional(), page: PageSchema.optional() }).strict(), req.body ?? {});
-    if (t.contextKind === 'camera' && req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Camera chats are the owner\'s');
     const message = body.text ?? '';
     const hasImages = Array.isArray(body.attachments) && body.attachments.length > 0;
     const camera = t.contextKind === 'camera';
@@ -113,7 +117,7 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
       write(e);
       // Lines the app acts on (open a page, "Remembered … Undo") also arrive in the stream, right after their tool.
       const ev = e as { type: string; name?: string; status?: string };
-      if (ev.type === 'tool' && ev.status === 'done' && (ev.name === 'open_page' || ev.name === 'memory_add')) {
+      if (ev.type === 'tool' && ev.status === 'done' && (ev.name === 'open_page' || ev.name === 'memory_add' || ev.name === 'memory_suggest')) {
         uiQueue = uiQueue.then(async () => {
           const [m] = await ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, t.id), eq(claudeMessages.role, 'tool')))
             .orderBy(desc(claudeMessages.createdAt)).limit(1);

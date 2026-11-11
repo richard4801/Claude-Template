@@ -30,14 +30,12 @@ Recreate. When it does:
 - when moving would take you away from something you're in the middle of, it asks first with an **Open** button
   (mock 1). Your unsaved work is never lost: edits already save on every change.
 
-**One memory, shared by every chat** (mock 3, in Settings → Claude's memory). Four groups: her figure (per
-character), style, preferred models, and things you said no to. Today's Edit "playbook" rules move in here too. Every
-chat reads it.
-- **Pinned** rules are always followed. Claude asks before breaking one.
-- You can add, edit, pin and delete rules.
-- When Claude learns something ("you turned down slow-motion hair flips twice"), it saves it and shows one line,
-  "Remembered: …", with **Undo** (mock 4). Or it can ask you each time instead: your choice (question 2).
-- Each rule shows who wrote it: "You" or "Claude learned".
+**Your own memory, shared by all your chats** (in the panel's menu: "Your memory"). Yours only: each member has their
+own, and nobody sees anyone else's. Yours holds your figure rules per character, style, preferred models, things you
+said no to, and your editing rules (it is your Playbook). Every one of your chats reads it.
+- **Pinned** rules are always followed. Only you change your own.
+- Claude saves to it when you **ask** ("remember that…"). When Claude thinks something is worth keeping, it **asks
+  first**: "Shall I remember this?" with **Remember** and **No**. It never saves quietly.
 
 **Claude can look into your other chats, but only when you ask** ("what did we decide in the Café recreate chat?").
 It never mixes chats on its own.
@@ -53,13 +51,14 @@ name and messages. Each starts on the page it belonged to.
 
 ### Your answers (2026-11-11)
 1. Opening pages: Claude opens them itself and shows "Back"; it asks first only when you'd be pulled out of something.
-2. Memory: Claude saves what it learns and shows "Remembered … Undo"; only you pin, edit or delete rules.
+2. Memory (corrected the same day): memory is **per person**, not per studio. Claude saves when you ask; when it
+   thinks something is important it asks first (Remember / No). No silent saves, no "save with Undo".
 3. Old chats: all of them come into the one list.
 4. Choosing the Claude model per chat: its own small step straight after this one.
-5. Members get one Claude now too. Each member sees only their own chats, never yours or anyone else's. Their Claude
-   spends from their own wallet, with the same go-ahead button and the price shown. They can read the studio memory and
-   Claude can learn from them, but only you pin, edit or delete rules and change settings. Their tools are what members
-   can already do (no providers, keys, prices or studio defaults).
+5. Members get one Claude now too, **on their own Claude plan on their own computer** (corrected the same day; Claude
+   isn't part of MUSE's billing). Each member sees only their own chats and their own memory. MUSE actions they approve
+   cost what they cost today, from their wallet, behind the same go-ahead button. Their tools are what members can
+   already do (no providers, keys, prices or studio defaults).
 
 ### The questions as asked
 1. **Opening pages:** should Claude open pages on its own and tell you (with "Back"), and ask only when you'd be pulled
@@ -202,8 +201,8 @@ target (the existing approval rows).
 - **Wrong-target edits:** the page fills ids in, so "make it warmer" right after a navigation could hit the new
   page. Mitigation: the facts line always names the item, and gated actions name it on their button.
 - **Claude navigating while the owner types or plays:** `busy` turns it into an ask, and every move has a Back.
-- **Memory drift:** Claude's learned rules could pile up or contradict each other. They are visible, have Undo, and
-  are capped in the prompt. Only the owner pins.
+- **Memory drift:** saved rules could pile up or contradict each other. Claude saves only on request or Remember; rules are visible, removable, and
+  are capped in the prompt. Each person pins their own.
 - **Old app builds:** Android 0.1.9 and the current Mac use `/threads?key=` routes, which are kept. A chat started on
   the new Mac shows on the old phone only as plain messages.
 - **Busy locks** moving from per-context to per-chat: two chats could edit the same edit at once. The edit's own
@@ -211,19 +210,20 @@ target (the existing approval rows).
 - **Shared files** with the Mac Edit and Blender sessions: AppStore.swift and RootView.swift. Keep the changes small
   and additive, and rebase on prod often.
 
-### Members (answer 5), as built
-- `/v1/claude/chats*` routes are open to every signed-in person; every query is by `owner_id = the caller`, so a
-  member never sees or opens anyone else's chat (404), and Claude's chat tools act on the caller's chats only.
-- `toolsForUser`: the owner gets every tool; members get the chat tools, the Suite tools and the Recreate tools that
-  work on their own references. Edit tools and the editing playbook tools stay the owner's (the server's own checks
-  refuse them too). Paid tools keep the go-ahead: the approval comes up in the member's app and their wallet pays.
-- Memory: members read it (`GET /v1/claude/memory`, `memory_read`) and Claude adds what it learns in their chats
-  (unpinned, "Claude learned"); pin, edit and delete stay on the owner-only `/v1/learn/playbook` routes. The
-  "Remembered … Undo" line offers Undo only to the owner.
-- Members' turns run on the studio's Claude key (`POST /v1/claude/chats/:id/turn`) and only while the owner's
-  "Claude in the app" switch (Settings → Connections) is on. **Open point for the owner:** the Claude tokens of a member's
-  chat are paid by the studio's key today, not the member's wallet (generations they approve are charged to their
-  wallet). Charging chat tokens to members belongs with the model picker step (6b), which has to price messages anyway.
+### Members and memory, as built (after the correction)
+- Members run Claude Code on their own Claude plan, like the owner: `/v1/mcp/session-token` and the `/v1/claude/threads*`
+  and `/v1/claude/chats*` routes serve everyone's OWN chats (every query is by the caller's id; someone else's is a 404).
+  The MCP server lists and runs only members' tools for a member's connection (`registry.members`); camera tools and
+  resources, Edit tools and the editing playbook tools stay the owner's. OAuth connections (claude.ai) and personal
+  tokens stay owner-only; a member's token comes only from the app's session token (`client muse-app`).
+- Paid tools keep the go-ahead: the approval comes up in the member's app and their wallet pays.
+- Memory per person: `playbook_rules.user_id` (0029). The owner's rules have none (her memory is her Playbook, which
+  the editor enforces); a member's carry theirs and never join the Playbook. `GET/POST/PATCH/DELETE /v1/claude/memory`
+  act on the caller's own rules only. `memory_add` is for when the person asked; `memory_suggest` puts "Shall I remember
+  this?" (Remember / No) in the app; Remember saves through `POST /v1/claude/memory`.
+- The in-app turn on the studio's Claude key (`POST /v1/claude/chats/:id/turn`, and the older `api-turn`) is
+  **owner only**, behind her "Claude in the app" switch (off by default). It is billed to the studio's Anthropic account
+  (`ANTHROPIC_API_KEY`), never to anyone's wallet. Kept as it was; ask the owner before removing it.
 
 ### Build order after the yes
 1. Server: registry + gates + binding (tests), chat routes + 0029, page context, open_page/memory/chat tools,

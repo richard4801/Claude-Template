@@ -19,6 +19,8 @@ import { PALETTES } from '../suite/camera.js';
 import { swatchesOf } from '../suite/looks.js';
 import * as M from './model.js';
 import { editCorrections, editGaps, editRecipes, playbookRules } from './learnSchema.js';
+/** One Claude: the playbook is the owner's memory; members' memories (user_id set) never join it. */
+const ownersRules = () => isNull(playbookRules.userId);
 import { editOps, editSessions } from './schema.js';
 
 export const LEARN_LIMITS = { rules: 200, ruleChars: 300, tags: 30, tagChars: 32, nearest: 10, corrections: 200, gapExamples: 5 } as const;
@@ -282,7 +284,7 @@ export class Learning {
       groups.set(k, g);
     }
     const cited = new Map<number, string>();
-    for (const r of await this.db.select({ id: playbookRules.id, evidence: playbookRules.evidence }).from(playbookRules).where(eq(playbookRules.studioId, u.studioId)))
+    for (const r of await this.db.select({ id: playbookRules.id, evidence: playbookRules.evidence }).from(playbookRules).where(and(eq(playbookRules.studioId, u.studioId), ownersRules())))
       for (const e of r.evidence) if (e.kind === 'correction' && typeof e.id === 'number') cited.set(e.id, r.id);
     return [...groups.values()].sort((a, b) => b.count - a.count || b.last - a.last).map(g => {
       const ruleId = g.ids.map(i => cited.get(i)).find(Boolean);
@@ -470,7 +472,7 @@ export class Learning {
   /** Pinned first, then the best-evidenced, then the newest. */
   async playbook(u: AuthUser, o: { area?: string } = {}) {
     owner(u);
-    const rows = await this.db.select().from(playbookRules).where(and(eq(playbookRules.studioId, u.studioId), o.area ? eq(playbookRules.area, o.area) : undefined));
+    const rows = await this.db.select().from(playbookRules).where(and(eq(playbookRules.studioId, u.studioId), ownersRules(), o.area ? eq(playbookRules.area, o.area) : undefined));
     return rows.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.evidence.length - a.evidence.length || b.updatedAt - a.updatedAt).map(this.ruleView);
   }
   /** The playbook as the app shows it: correction evidence carries its take and whether that take still exists. */
@@ -507,7 +509,7 @@ export class Learning {
   async addRule(u: AuthUser, b: { text?: unknown; area?: unknown; evidence?: unknown; pinned?: unknown }, source: 'owner' | 'claude' | 'learned' = 'owner') {
     owner(u);
     const v = this.checkRule(b, false);
-    const [{ n }] = await this.db.select({ n: sql<number>`count(*)::int` }).from(playbookRules).where(eq(playbookRules.studioId, u.studioId)) as [{ n: number }];
+    const [{ n }] = await this.db.select({ n: sql<number>`count(*)::int` }).from(playbookRules).where(and(eq(playbookRules.studioId, u.studioId), ownersRules())) as [{ n: number }];
     if (n >= LEARN_LIMITS.rules) throw badRequest(`The playbook holds up to ${LEARN_LIMITS.rules} rules · delete some first`);
     const now = Date.now();
     const [r] = await this.db.insert(playbookRules).values({ id: uid('rule'), studioId: u.studioId, text: v.text!, area: v.area ?? 'other', source,
@@ -519,13 +521,13 @@ export class Learning {
     const v = this.checkRule(b, true);
     if (b.pinned !== undefined && typeof b.pinned !== 'boolean') throw badRequest('pinned: true or false');
     const [r] = await this.db.update(playbookRules).set({ ...v, ...(typeof b.pinned === 'boolean' ? { pinned: b.pinned } : {}), updatedAt: Date.now() })
-      .where(and(eq(playbookRules.id, id), eq(playbookRules.studioId, u.studioId))).returning();
+      .where(and(eq(playbookRules.id, id), eq(playbookRules.studioId, u.studioId), ownersRules())).returning();
     if (!r) throw notFound('Rule');
     return this.ruleView(r);
   }
   async removeRule(u: AuthUser, id: string) {
     owner(u);
-    const gone = await this.db.delete(playbookRules).where(and(eq(playbookRules.id, id), eq(playbookRules.studioId, u.studioId))).returning({ id: playbookRules.id });
+    const gone = await this.db.delete(playbookRules).where(and(eq(playbookRules.id, id), eq(playbookRules.studioId, u.studioId), ownersRules())).returning({ id: playbookRules.id });
     if (!gone.length) throw notFound('Rule');
   }
 
