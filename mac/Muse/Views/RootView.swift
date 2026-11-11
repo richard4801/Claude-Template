@@ -15,6 +15,7 @@ struct RootView: View {
                 Shell()
             }
             if store.outfitSheet != nil { OutfitSheetView().transition(.opacity) }
+            if store.openOutfitId != nil { OutfitOpenView().transition(.opacity) }
             if store.linkImport.open { LinkImportSheet().transition(.opacity) } // import a video from a link (WS6)
             if store.postDraft != nil { PostSheetView().transition(.opacity) }
             if store.templateForm != nil { TemplateSheetView().transition(.opacity) }

@@ -409,7 +409,12 @@ class MuseRepository(
 
     suspend fun createOutfit(req: CreateOutfitRequest) = attempt { createOutfit(req) }?.also { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
 
-    suspend fun saveOutfit(id: String) = attempt { saveOutfit(id) }?.also { o ->
+    /** Outfit page (plans/outfit-head-looks.md §4/§5): rename, delete (gone from every pick), make the missing angles. */
+    suspend fun renameOutfit(id: String, name: String) = attempt { renameOutfit(id, name) }?.also { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
+    suspend fun deleteOutfit(id: String) = attempt { deleteOutfit(id) }?.also { _state.update { s -> LiveEvents.dropOutfit(s, id) } }
+    suspend fun fillOutfit(id: String, imageModel: String?) = attempt { fillOutfit(id, imageModel) }?.also { refreshBalance() }
+
+    suspend fun saveOutfit(id: String, name: String? = null) = attempt { saveOutfit(id, name) }?.also { o ->
         _state.update { s ->
             s.copy(
                 outfits = s.outfits.upsert(o) { it.id == o.id },

@@ -564,8 +564,13 @@ extension AppStore {
             do {
                 var refs: [ImageRef] = []
                 for u in draft.images { refs.append(try await uploadImage(u)) }
-                let name = draft.name.isEmpty ? (draft.mode == .describe ? draft.description : draft.mode == .photo ? "Product look" : "My set") : draft.name
-                var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(32)), mode: draft.mode.rawValue,
+                // §5: a name from the start (what was typed, the product photo's file name, else "Outfit · 11 Nov"); it
+                // can be changed in the preview before it's added. Never "Product look" / "My set".
+                let typed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let name = typed.isEmpty ? OutfitNaming.suggestion(description: draft.mode == .describe ? draft.description : "",
+                                                                   fileName: draft.mode == .own ? nil : draft.images.first?.lastPathComponent) : typed
+                if outfitSheet?.modelId == draft.modelId { outfitSheet?.name = name }
+                var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(OutfitNaming.maxLength)), mode: draft.mode.rawValue,
                                               description: draft.description, images: refs)
                 if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
                 let o = try await api.createOutfit(req)
@@ -585,15 +590,21 @@ extension AppStore {
 
     func outfitSave() {
         guard let d = outfitSheet, let oid = d.outfitId else { return }
+        let name = d.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            showToast("Give the outfit a name")
+            return
+        }
         perform { [self] in
-            let o = try await api.saveOutfit(outfitId: oid)
+            let o = try await api.saveOutfit(outfitId: oid, name: String(name.prefix(OutfitNaming.maxLength)))
+            outfitPage[d.modelId] = 0 // newest first: it's on page 1
             if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
             if let i = models.firstIndex(where: { $0.id == d.modelId }), !models[i].outfitIds.contains(o.id) { models[i].outfitIds.append(o.id) }
             outfitIdByModel[d.modelId] = o.id
             let who = models.first { $0.id == d.modelId }?.shortName ?? "your model"
             withAnimation { outfitSheet = nil }
             // The outfit set generator's way on (was Photoshoot's Outfit tool): Photo with her and this outfit (workstream 3).
-            showToast("Outfit saved to \(who)", action: "Use in Photo") { [weak self] in self?.openPhoto(model: d.modelId, outfit: o.id) }
+            showToast("Added to \(who)'s outfits", action: "Use in Photo") { [weak self] in self?.openPhoto(model: d.modelId, outfit: o.id) }
         }
     }
 

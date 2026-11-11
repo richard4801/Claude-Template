@@ -50,6 +50,12 @@ public enum LiveEvents {
         if o.state == "ready", let m = models.firstIndex(where: { $0.id == o.modelId }), !models[m].outfitIds.contains(o.id) { models[m].outfitIds.append(o.id) }
     }
 
+    /// `outfit` `{op: "delete", id}`: gone from the list and from her outfits.
+    public static func removeOutfit(_ outfits: inout [Outfit], _ models: inout [MuseModel], id: String) {
+        outfits.removeAll { $0.id == id }
+        for i in models.indices where models[i].outfitIds.contains(id) { models[i].outfitIds.removeAll { $0 == id } }
+    }
+
     /// `post` events: upsert or delete.
     public static func applyPosts(_ posts: inout [Post], _ e: ApiEvent) {
         if e.type == "post", e.op == "delete", let id = e.id { posts.removeAll { $0.id == id }; return }

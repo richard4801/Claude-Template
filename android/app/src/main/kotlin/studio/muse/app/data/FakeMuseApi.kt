@@ -166,7 +166,8 @@ class FakeMuseApi(
             val m = model(req.modelId)
             val spec = OutfitSpec(req.name, req.description, if (req.mode == "describe") OutfitSource.DESCRIBED else if (req.mode == "photo") OutfitSource.PRODUCT_PHOTO else OutfitSource.REFERENCE_SET)
             val prompt = PromptEngine.outfitSet(identity(m, loras[m.id]), spec).first().text
-            val o = Outfit("o_" + uid(), req.modelId, req.name.ifBlank { "New outfit" }, req.mode, req.description, listOf(null, null, null, null), "generating", prompt, cost = cost.takeIf { it > 0 })
+            val o = Outfit("o_" + uid(), req.modelId, req.name.ifBlank { "New outfit" }, req.mode, req.description, listOf(null, null, null, null), "generating", prompt, cost = cost.takeIf { it > 0 },
+                createdAt = System.currentTimeMillis())
             outfits += o
             o
         }
@@ -185,9 +186,50 @@ class FakeMuseApi(
         return o
     }
 
-    override suspend fun saveOutfit(outfitId: String): Outfit {
+    private fun outfitName(name: String): String {
+        val n = name.trim()
+        if (n.isEmpty()) throw ApiException("bad_request", "Give the outfit a name")
+        if (n.length > 80) throw ApiException("bad_request", "At most 80 characters")
+        return n
+    }
+
+    override suspend fun renameOutfit(outfitId: String, name: String): Outfit {
+        val o = lock.withLock { outfit(outfitId).copy(name = outfitName(name)).also { replaceOutfit(it) } }
+        events.tryEmit(ApiEvent("outfit", outfit = o))
+        return o
+    }
+
+    override suspend fun deleteOutfit(outfitId: String) {
+        val m = lock.withLock {
+            val o = outfit(outfitId)
+            if (o.state == "generating") throw ApiException("outfit_busy", "This outfit is still being made · delete it when it finishes")
+            outfits.removeAll { it.id == outfitId }
+            model(o.modelId).takeIf { outfitId in it.outfitIds }?.let { it.copy(outfitIds = it.outfitIds - outfitId) }?.also { replaceModel(it) }
+        }
+        events.tryEmit(ApiEvent("outfit", op = "delete", id = outfitId))
+        m?.let { events.tryEmit(ApiEvent("model", model = it)) }
+    }
+
+    override suspend fun fillOutfit(outfitId: String, imageModel: String?): OutfitFill {
+        val (o, cost) = lock.withLock {
+            val o0 = outfit(outfitId)
+            if (o0.front == null) throw ApiException("bad_request", "Its front picture is missing · make a new outfit instead")
+            val missing = (1 until 4).filter { o0.angles.getOrNull(it) == null }
+            val cost = missing.size * photoPrices.perEdit
+            if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(cost)
+            val fill = listOf("c_tq", "c_face", "c_front")
+            val o = o0.copy(angles = (0 until 4).map { i -> o0.angles.getOrNull(i) ?: if (i in missing) ImageRef(asset = fill[i - 1]) else null })
+            replaceOutfit(o)
+            o to cost
+        }
+        events.tryEmit(ApiEvent("outfit", outfit = o))
+        return OutfitFill(o, cost)
+    }
+
+    override suspend fun saveOutfit(outfitId: String, name: String?): Outfit {
         val (o, m) = lock.withLock {
-            val o = outfit(outfitId).copy(state = "ready")
+            val o = outfit(outfitId).let { if (name != null) it.copy(name = outfitName(name)) else it }.copy(state = "ready")
             replaceOutfit(o)
             val m = model(o.modelId).let { it.copy(outfitIds = it.outfitIds + o.id) }
             replaceModel(m)

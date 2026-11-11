@@ -101,9 +101,22 @@ data class Outfit(
     val cost: Double? = null,
     /** Dress up outfits: the face close-ups wearing its accessories (face, face ¾, profile). */
     val faces: List<ImageRef?>? = null,
+    /** When it was made (ms; the folder's date) and who made it (they or the owner may rename/delete it). */
+    val createdAt: Long? = null,
+    val createdBy: String? = null,
 ) {
     val front: ImageRef? get() = angles.firstOrNull()
+    /** How many of the four angles have a picture (a set can come back with some empty). */
+    val madeAngles: Int get() = (0 until 4).count { angles.getOrNull(it) != null }
 }
+
+/** PATCH /v1/outfits/{id}, POST /v1/outfits/{id}/save: the outfit's name (save: null keeps it). */
+@Serializable
+data class OutfitNameBody(val name: String? = null)
+
+/** POST /v1/outfits/{id}/fill: the outfit now and the estimate held for its missing angles. */
+@Serializable
+data class OutfitFill(val outfit: Outfit, val cost: Double = 0.0)
 
 @Serializable
 data class CreateOutfitRequest(

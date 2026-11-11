@@ -160,6 +160,7 @@ struct OutfitSheetView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @State private var targeted = false
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         if let d = store.outfitSheet {
@@ -214,13 +215,26 @@ struct OutfitSheetView: View {
                             }
                         }
                     }
+                    if d.state == .done {
+                        // §5: named before it's added (a suggestion, never "Product look"); renamable later.
+                        VStack(alignment: .leading, spacing: Space.s2) {
+                            Text("Name").scaled(t.scale.label, t.roles.ink)
+                            TextField("e.g. Green halter set", text: Binding(get: { store.outfitSheet?.name ?? "" },
+                                                                            set: { store.outfitSheet?.name = String($0.prefix(OutfitNaming.maxLength)) }))
+                                .textFieldStyle(.plain)
+                                .focused($nameFocused)
+                                .roleField(focused: nameFocused)
+                                .frame(maxWidth: 420)
+                                .onSubmit { store.outfitSave() }
+                        }
+                    }
                     HStack(spacing: Space.s3) {
                         Text("All four angles use one seed, so the outfit matches from every side. Never add: logos.")
                             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Space.s4)
                         if d.state == .done {
                             if d.mode != .own { RButton("Retake · \(Pricing.money(store.outfitSetEstimate))") { store.outfitGenerate() } }
-                            RButton("Save outfit", kind: .action) { store.outfitSave() }
+                            RButton("Add to her outfits", kind: .action) { store.outfitSave() }
                                 .keyboardShortcut(d.viewing == nil ? .defaultAction : nil)
                         } else {
                             if d.mode != .own { OwnerModelPill(purpose: .outfit) } // the owner's outfit model (WS6)

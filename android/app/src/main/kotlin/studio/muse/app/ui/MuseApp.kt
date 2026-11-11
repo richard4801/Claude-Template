@@ -108,6 +108,9 @@ object Routes {
     const val SPLASH = "splash"; const val WELCOME = "welcome"; const val SIGNIN = "signin"; const val SIGNUP = "signup"
     const val HOME = "home"; const val GALLERY = "gallery"; const val QUEUE = "queue"; const val SETTINGS = "settings"; const val CREDITS = "credits"
     const val PROFILE = "profile"; const val CREATE1 = "create1"; const val CREATE3 = "create3"; const val OUTFIT = "outfit"
+    /** Outfit page (plans/outfit-head-looks.md §4): her outfits as folders, and one outfit open. */
+    const val OUTFITS = "outfits"; const val OUTFIT_VIEW = "outfitview/{id}"
+    fun outfitView(id: String) = "outfitview/$id"
     /** Photoshoot's old route: kept only so old links redirect to Suite → Photo ([redirect]). */
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
@@ -252,6 +255,8 @@ fun MuseApp(
                     composable(Routes.CREATE1) { CreateBasicsScreen() }
                     composable(Routes.CREATE3) { CharacterSheetScreen() }
                     composable(Routes.OUTFIT) { OutfitScreen() }
+                    composable(Routes.OUTFITS) { OutfitFoldersScreen() }
+                    composable(Routes.OUTFIT_VIEW) { e -> OutfitOpenScreen(e.arguments?.getString("id") ?: "") }
                     // Photoshoot is the Photo tool now (workstream 3): an old "shoot" route that reaches the graph directly opens Suite → Photo.
                     composable(Routes.SHOOT) { LaunchedEffect(Unit) { nav.navigate(Routes.SUITE_PHOTO) { popUpTo(Routes.SHOOT) { inclusive = true }; launchSingleTop = true } } }
                     composable(Routes.SOURCE) { SourceScreen() }

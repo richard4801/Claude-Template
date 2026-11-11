@@ -37,7 +37,13 @@ interface MuseApi {
     /** Starts generating an outfit set preview (state=generating; an outfit event follows). */
     suspend fun createOutfit(req: CreateOutfitRequest): Outfit
     /** Attaches a generated preview to the model. */
-    suspend fun saveOutfit(outfitId: String): Outfit
+    suspend fun saveOutfit(outfitId: String, name: String? = null): Outfit
+    /** Renames an outfit (1–80 characters; the owner or whoever made it). */
+    suspend fun renameOutfit(outfitId: String, name: String): Outfit
+    /** Deletes an outfit (refused while it is being made); takes made with it are kept. */
+    suspend fun deleteOutfit(outfitId: String)
+    /** Makes an outfit's missing ¾/side/back from its front; an outfit event with the filled angles follows. */
+    suspend fun fillOutfit(outfitId: String, imageModel: String? = null): OutfitFill
 
     // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
     suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef

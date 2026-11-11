@@ -102,10 +102,13 @@ data class ModelDraft(val name: String = "", val age: Int = 27, val niche: Strin
 /** New outfit set. mode: describe | photo | own. */
 data class OutfitDraft(
     val mode: String = "describe",
-    val description: String = "Cream cable-knit sweater, light-wash straight jeans, white sneakers",
-    val name: String = "Cream knit + jeans",
+    val description: String = "",
+    /** §5: filled with a suggestion when the set is made (what was typed, the photo's file name, else "Outfit · 11 Nov"). */
+    val name: String = "",
     val previewId: String? = null,
     val images: List<ImageRef> = emptyList(),
+    /** The picked photo's file name (the name suggestion, §5). */
+    val photoName: String? = null,
     /** WS7/WS13: the owner's model for the set (null = the studio's default). */
     val imageModel: String? = null,
 )
@@ -114,6 +117,8 @@ data class OutfitDraft(
 class Drafts {
     val modelId = MutableStateFlow(SampleData.DEMO)
     val outfitId = MutableStateFlow(SampleData.GREEN)
+    /** The outfit folders' page (0-based; plans/outfit-head-looks.md §4). */
+    val outfitPage = MutableStateFlow(0)
     val video = MutableStateFlow(VideoDraft())
     val templateUse = MutableStateFlow(TemplateUseDraft())
     val templateFilter = MutableStateFlow(TemplateFilter())

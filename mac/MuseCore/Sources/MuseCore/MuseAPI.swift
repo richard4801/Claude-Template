@@ -65,8 +65,14 @@ public protocol MuseAPI: AnyObject, Sendable {
     func listOutfits() async throws -> [Outfit]
     /// Starts generating an outfit set preview (state=generating; an outfit event follows with state=preview).
     func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit
-    /// Attaches a generated preview to the model.
-    func saveOutfit(outfitId: String) async throws -> Outfit
+    /// Attaches a generated preview to the model, with the name chosen in the preview (nil keeps its name).
+    func saveOutfit(outfitId: String, name: String?) async throws -> Outfit
+    /// Renames an outfit (1–80 characters; the owner or whoever made it).
+    func renameOutfit(id: String, name: String) async throws -> Outfit
+    /// Deletes an outfit (refused while it is being made); takes made with it are kept.
+    func deleteOutfit(id: String) async throws
+    /// Makes an outfit's missing ¾/side/back from its front; an outfit event with the filled angles follows.
+    func fillOutfit(id: String, imageModel: String?) async throws -> OutfitFill
 
     // Uploads (HTTP: presign → PUT → confirm, falling back to a multipart upload). `progress` reports 0…1.
     func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef

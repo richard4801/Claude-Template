@@ -1,3 +1,4 @@
+import AppKit
 import MuseCore
 import SwiftUI
 
@@ -22,6 +23,9 @@ struct ImageLightbox: View {
     @State private var pinchStart: CGFloat?
     @State private var offset: CGSize = .zero
     @State private var dragStart: CGSize?
+    /// Two-finger trackpad swipes slide to the next/previous image (owner 2026-11-11: "slide to the next image").
+    @State private var wheel: Any?
+    @State private var swipeX: CGFloat = 0
 
     static let zoomSteps: [CGFloat] = [1, 1.5, 2, 3, 4]
 
@@ -53,6 +57,8 @@ struct ImageLightbox: View {
             }
             .transition(.opacity)
             .onChange(of: index) { _, _ in setZoom(1) }
+            .onAppear { watchSwipes() }
+            .onDisappear { stopSwipes() }
         }
     }
 
@@ -123,10 +129,41 @@ struct ImageLightbox: View {
                 if dragStart == nil { dragStart = start }
                 offset = CGSize(width: start.width + v.translation.width, height: start.height + v.translation.height)
             }
-            .onEnded { _ in
+            .onEnded { v in
+                // Not zoomed: a sideways drag slides to the next or previous image.
+                if zoom <= 1, abs(v.translation.width) > 80, abs(v.translation.width) > abs(v.translation.height) { step(v.translation.width < 0 ? 1 : -1) }
                 offset = Self.clamp(offset, image: image, view: view)
                 dragStart = nil
             }
+    }
+
+    private func watchSwipes() {
+        stopSwipes()
+        wheel = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { e in
+            guard e.hasPreciseScrollingDeltas, e.momentumPhase == [] else { return e }
+            let dx = e.scrollingDeltaX, dy = e.scrollingDeltaY
+            let began = e.phase.contains(.began), ended = e.phase.contains(.ended) || e.phase.contains(.cancelled)
+            let used = MainActor.assumeIsolated { swipe(dx: dx, dy: dy, began: began, ended: ended) }
+            return used ? nil : e
+        }
+    }
+
+    private func stopSwipes() {
+        if let w = wheel { NSEvent.removeMonitor(w) }
+        wheel = nil
+    }
+
+    /// Adds up one swipe's sideways travel; at its end, far enough one way steps once (natural scrolling: fingers left → next).
+    @MainActor private func swipe(dx: CGFloat, dy: CGFloat, began: Bool, ended: Bool) -> Bool {
+        guard index != nil, zoom <= 1, items.count > 1 else { return false }
+        if began { swipeX = 0 }
+        if abs(dx) > abs(dy) { swipeX += dx }
+        if ended {
+            let total = swipeX
+            swipeX = 0
+            if abs(total) > 50 { step(total < 0 ? 1 : -1) }
+        }
+        return abs(dx) > abs(dy) || ended
     }
 
     private func close() {
