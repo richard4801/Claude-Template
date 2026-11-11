@@ -1,0 +1,1463 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Drafts.kt b/android/app/src/main/kotlin/studio/muse/app/data/Drafts.kt
+index 814e39f5..94724b1e 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Drafts.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Drafts.kt
+@@ -138,9 +138,8 @@ class Drafts {
+     val memberOpen = MutableStateFlow<String?>(null)
+     val lastInvite = MutableStateFlow<InviteCreated?>(null)
+     val outfit = MutableStateFlow(OutfitDraft())
+-    /** Enhance and Dress up setup, and the run being reviewed (plans/api.md "Model tools"). */
++    /** Enhance setup, and the run being reviewed (plans/api.md "Model tools"). */
+     val enhance = MutableStateFlow(EnhanceDraft())
+-    val dressUp = MutableStateFlow(DressUpDraft())
+     /** Owner Settings → Engines → Image models: the step whose catalog is open; the owner's per-run model choice ("Model" chooser). */
+     val catalogStep = MutableStateFlow("shot")
+     /** Where the catalog picker returns its choice: "settings" (the studio default) or "run" (this run only). */
+@@ -182,5 +181,3 @@ class Drafts {
+ /** Enhance setup: realism off | subtle | balanced | strong, upscale off | 2x | 4x; [runId] once started. models: the owner's per-run choice. */
+ data class EnhanceDraft(val realism: String = "balanced", val upscale: String = "2x", val runId: String? = null, val models: Map<String, String> = emptyMap())
+ 
+-/** Dress up setup: one outfit-sheet photo, a name, Option A / B / Both; [runId] once started. */
+-data class DressUpDraft(val outfitImage: ImageRef? = null, val name: String = "", val engine: String = "a", val runId: String? = null, val models: Map<String, String> = emptyMap())
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+index 946af1dc..fb602fda 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+@@ -159,7 +159,8 @@ class FakeMuseApi(
+     override suspend fun listOutfits() = lock.withLock { outfits.filter { o -> models.none { it.id == o.modelId && it.archived } } }
+ 
+     override suspend fun createOutfit(req: CreateOutfitRequest): Outfit {
+-        val cost = if (req.mode == "own") 0.0 else PhotoPricing.outfitSet(photoPrices)
++        // Every outfit also gets its 3 face close-ups (plans/outfit-faces.md); "My own set" pays for those alone.
++        val cost = OutfitPictures.createEstimate(photoPrices, req.mode, req.base?.keeping == true)
+         val o = lock.withLock {
+             if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+             charge(cost)
+@@ -177,7 +178,7 @@ class FakeMuseApi(
+             val ready = lock.withLock {
+                 val angles = if (req.mode == "own" && req.images.isNotEmpty()) (0 until 4).map { req.images.getOrNull(it) }
+                 else listOf("c_front", "c_tq", "c_face", "c_front").map(ImageRef::asset)
+-                val r = outfit(o.id).copy(angles = angles, state = "preview")
++                val r = outfit(o.id).copy(angles = angles, faces = DEMO_FACES, state = "preview")
+                 replaceOutfit(r)
+                 r
+             }
+@@ -227,6 +228,45 @@ class FakeMuseApi(
+         return OutfitFill(o, cost)
+     }
+ 
++    /** Demo face close-ups (face front, face ¾, face side). */
++    private val DEMO_FACES = listOf("face", "c_face", "profile").map(ImageRef::asset)
++
++    /** Makes the given pictures of an outfit (indexes into [OutfitPictures.KEYS]) after a moment, then an outfit event. */
++    private suspend fun remakeOutfit(outfitId: String, pictures: (Outfit) -> List<Int>): OutfitFill {
++        val (o, cost, todo) = lock.withLock {
++            val o = outfit(outfitId)
++            if (o.state == "generating") throw ApiException("outfit_busy", "This outfit is still being made · try again when it finishes")
++            if (o.front == null) throw ApiException("bad_request", "Its front picture is missing · make a new outfit instead")
++            val todo = pictures(o)
++            val cost = todo.sumOf { OutfitPictures.redoEstimate(photoPrices, it) }
++            if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
++            charge(cost)
++            Triple(o, cost, todo)
++        }
++        if (cost > 0) events.tryEmit(ApiEvent("balance", balance = balance))
++        if (todo.isNotEmpty()) scope.launch {
++            delay(genDelayMs + 100)
++            val done = lock.withLock {
++                val cur = outfits.firstOrNull { it.id == outfitId } ?: return@withLock null
++                val all = OutfitPictures.all(cur).toMutableList()
++                val body = listOf("c_front", "c_tq", "c_face", "c_front").map(ImageRef::asset)
++                todo.forEach { i -> all[i] = if (i < OutfitPictures.BODY) body[i] else DEMO_FACES[i - OutfitPictures.BODY] }
++                cur.copy(angles = all.take(OutfitPictures.BODY), faces = all.drop(OutfitPictures.BODY)).also { replaceOutfit(it) }
++            }
++            done?.let { events.emit(ApiEvent("outfit", outfit = it)) }
++        }
++        return OutfitFill(o, cost)
++    }
++
++    override suspend fun addOutfitFaces(outfitId: String): OutfitFill =
++        remakeOutfit(outfitId) { o -> (0 until OutfitPictures.FACES).filter { o.faces?.getOrNull(it) == null }.map { OutfitPictures.BODY + it } }
++
++    override suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill {
++        val i = OutfitPictures.KEYS.indexOf(angle)
++        if (i < 0) throw ApiException("bad_request", "Unknown picture")
++        return remakeOutfit(outfitId) { listOf(i) }
++    }
++
+     override suspend fun saveOutfit(outfitId: String, name: String?): Outfit {
+         val (o, m) = lock.withLock {
+             val o = outfit(outfitId).let { if (name != null) it.copy(name = outfitName(name)) else it }.copy(state = "ready")
+@@ -513,6 +553,7 @@ class FakeMuseApi(
+     suspend fun debugPutLora(l: Lora) = lock.withLock { loras[l.modelId] = l }
+     suspend fun debugPutAccount(a: Account) = lock.withLock { accounts.getOrPut(a.modelId) { mutableMapOf() }[a.platform] = a }
+     suspend fun debugPutTake(t: Take) = lock.withLock { takes.removeAll { it.id == t.id }; takes.add(0, t) }
++    suspend fun debugPutOutfit(o: Outfit) = lock.withLock { outfits.removeAll { it.id == o.id }; outfits.add(o) }
+         suspend fun debugPutPost(p: Post) = lock.withLock { posts.removeAll { it.id == p.id }; posts.add(p) }
+ 
+     private fun run(job: Job) {
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+index d5e74b30..076db110 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+@@ -60,6 +60,8 @@ interface MuseService {
+     @PATCH("v1/outfits/{id}") suspend fun renameOutfit(@Path("id") id: String, @Body r: OutfitNameBody): Outfit
+     @DELETE("v1/outfits/{id}") suspend fun deleteOutfit(@Path("id") id: String)
+     @POST("v1/outfits/{id}/fill") suspend fun fillOutfit(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
++    @POST("v1/outfits/{id}/faces") suspend fun addOutfitFaces(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
++    @POST("v1/outfits/{id}/redo") suspend fun redoOutfit(@Path("id") id: String, @Body r: OutfitRedoRequest): OutfitFill
+     @Multipart @POST("v1/uploads/images") suspend fun uploadImage(@Part file: MultipartBody.Part): ImageRef
+     @Multipart @POST("v1/uploads/clips") suspend fun uploadClip(@Part("meta") meta: RequestBody, @Part file: MultipartBody.Part?): Clip
+     @POST("v1/uploads/presign") suspend fun presign(@Body r: PresignRequest): PresignResponse
+@@ -377,6 +379,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
+     override suspend fun renameOutfit(outfitId: String, name: String) = call { renameOutfit(outfitId, OutfitNameBody(name)) }.abs()
+     override suspend fun deleteOutfit(outfitId: String) = call { deleteOutfit(outfitId) }
+     override suspend fun fillOutfit(outfitId: String, imageModel: String?) = call { fillOutfit(outfitId, FillAnglesRequest(imageModel)) }.let { it.copy(outfit = it.outfit.abs()) }
++    override suspend fun addOutfitFaces(outfitId: String) = call { addOutfitFaces(outfitId, FillAnglesRequest()) }.let { it.copy(outfit = it.outfit.abs()) }
++    override suspend fun redoOutfit(outfitId: String, angle: String) = call { redoOutfit(outfitId, OutfitRedoRequest(angle)) }.let { it.copy(outfit = it.outfit.abs()) }
+ 
+     private suspend fun usePresigned(): Boolean = when (uploadMode) {
+         UploadMode.PRESIGNED -> true
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index 8cc31ec1..a7f9edd5 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -99,7 +99,7 @@ data class Outfit(
+     val prompt: String = "",
+     /** What the set really cost once made (exact, pass-through); null before, or from an older server. */
+     val cost: Double? = null,
+-    /** Dress up outfits: the face close-ups wearing its accessories (face, face ¾, profile). */
++    /** Its face close-ups with its hair, make-up and accessories (face front, face ¾, face side); null on older outfits. */
+     val faces: List<ImageRef?>? = null,
+     /** When it was made (ms; the folder's date) and who made it (they or the owner may rename/delete it). */
+     val createdAt: Long? = null,
+@@ -114,10 +114,14 @@ data class Outfit(
+ @Serializable
+ data class OutfitNameBody(val name: String? = null)
+ 
+-/** POST /v1/outfits/{id}/fill: the outfit now and the estimate held for its missing angles. */
++/** POST /v1/outfits/{id}/fill, /faces, /redo: the outfit now and the estimate held for the pictures being made. */
+ @Serializable
+ data class OutfitFill(val outfit: Outfit, val cost: Double = 0.0)
+ 
++/** POST /v1/outfits/{id}/redo: which of the 7 pictures (front | tq | side | back | face | faceTq | profile). */
++@Serializable
++data class OutfitRedoRequest(val angle: String)
++
+ @Serializable
+ data class CreateOutfitRequest(
+     val modelId: String,
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+index f4ccf231..a760e3fc 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+@@ -44,6 +44,10 @@ interface MuseApi {
+     suspend fun deleteOutfit(outfitId: String)
+     /** Makes an outfit's missing ¾/side/back from its front; an outfit event with the filled angles follows. */
+     suspend fun fillOutfit(outfitId: String, imageModel: String? = null): OutfitFill
++    /** "Add face close-ups" (an older outfit): makes its missing face front, ¾ and side; an outfit event with them follows. */
++    suspend fun addOutfitFaces(outfitId: String): OutfitFill
++    /** Redoes one of the 7 pictures ([OutfitPictures.KEYS]: front | tq | side | back | face | faceTq | profile); an outfit event follows. */
++    suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill
+ 
+     // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
+     suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef
+@@ -126,7 +130,8 @@ interface MuseApi {
+     /** {on: true|false} or {extend: true} ("Keep warm"). */
+     suspend fun setWarmGpu(req: WarmRequest): WarmGpu
+ 
+-    // Model tools (plans/api.md "Model tools"). Image models are owner only; Enhance and Dress up are for everyone.
++    // Model tools (plans/api.md "Model tools"). Image models are owner only; Enhance is for everyone. Dress up was removed
++    // (2026-11-11: the server answers 410 dress_up_removed); its two calls stay only so older code and tests still build.
+     suspend fun imageModels(): StepModels
+     suspend fun imageCatalog(step: String, q: String? = null, collection: String? = null): CatalogPage
+     suspend fun imageModel(id: String, step: String): ModelDetail
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
+index c59d3b45..4de253a6 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
+@@ -34,9 +34,9 @@ data class StudioState(
+     val video: VideoFeatures? = null,
+     /** Photo prices for the estimates ("about $0.46"), from features.photo. */
+     val photo: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices(),
+-    /** Enhance and Dress up options (features.tools); the owner's copy also names the current models. */
++    /** Enhance options (features.tools); the owner's copy also names the current models. */
+     val tools: ToolsFeatures = ToolsFeatures(),
+-    /** Enhance and Dress up runs this session has seen, by id (kept live by `tool` events). */
++    /** Enhance runs this session has seen, by id (kept live by `tool` events). */
+     val toolRuns: Map<String, ToolRun> = emptyMap(),
+     /** The owner's studio balance card, kept live by `studio` events (null until loaded; never for members). */
+     val studioBalance: StudioBalance? = null,
+@@ -250,6 +250,7 @@ class MuseRepository(
+         // gpu events only ever reach the owner who switched Keep add-on engine ready on; never shown to members.
+         val apply = if (ev.type == "gpu" && !owner) ev.copy(gpu = null) else ev
+         _state.update { LiveEvents.apply(it, apply, owner) }
++        if (ev.type == "outfit") (ev.outfit?.id ?: ev.id)?.let { id -> if (id in _outfitMaking.value) making(id, null) }
+         ev.wallet?.let { w -> onWallet(w, prevWallet) }
+         // Owner notices only (an engine's own account is out of credit): Settings → Engines says which.
+         ev.notice?.let { n ->
+@@ -340,13 +341,11 @@ class MuseRepository(
+         toolToasts(prev, r)
+     }
+     private fun toolToasts(prev: ToolRun?, r: ToolRun) {
+-        if (prev?.state == "running" && r.state == "review") toast("${if (r.kind == "enhance") "Enhance" else "Dress up"} is ready to review")
++        if (prev?.state == "running" && r.state == "review") toast("Enhance is ready to review")
+         if (prev?.state == "running" && r.state == "failed") toast(r.error ?: "Something went wrong · you weren't charged")
+     }
+     suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest) = attemptInline { enhanceEstimate(modelId, req) }
+-    suspend fun dressUpEstimate(modelId: String, req: DressUpRequest) = attemptInline { dressUpEstimate(modelId, req) }
+     suspend fun startEnhance(modelId: String, req: EnhanceRequest) = attempt { startEnhance(modelId, req) }?.also { putTool(it); refreshBalance() }
+-    suspend fun startDressUp(modelId: String, req: DressUpRequest) = attempt { startDressUp(modelId, req) }?.also { putTool(it); refreshBalance() }
+     suspend fun loadToolRuns(modelId: String) = attempt { toolRuns(modelId) }?.also { list -> _state.update { s -> s.copy(toolRuns = s.toolRuns + list.associateBy { it.id }) } }
+     suspend fun decideTool(id: String, slot: String, keep: Boolean, pick: String? = null) = attempt { decideTool(id, slot, DecideRequest(if (keep) "keep" else "reject", pick)) }?.also(::putTool)
+     suspend fun pickTool(id: String, pick: String) = attempt { pickTool(id, pick) }?.also(::putTool)
+@@ -414,6 +413,25 @@ class MuseRepository(
+     suspend fun deleteOutfit(id: String) = attempt { deleteOutfit(id) }?.also { _state.update { s -> LiveEvents.dropOutfit(s, id) } }
+     suspend fun fillOutfit(id: String, imageModel: String?) = attempt { fillOutfit(id, imageModel) }?.also { refreshBalance() }
+ 
++    /** The outfit pictures being made right now, by outfit id → [OutfitPictures] indexes (0–6); cleared by its next outfit event. */
++    private val _outfitMaking = MutableStateFlow<Map<String, Set<Int>>>(emptyMap())
++    val outfitMaking: StateFlow<Map<String, Set<Int>>> = _outfitMaking
++    private fun making(id: String, pictures: Set<Int>?) = _outfitMaking.update { m -> if (pictures.isNullOrEmpty()) m - id else m + (id to ((m[id] ?: emptySet()) + pictures)) }
++
++    /** "Add face close-ups" (plans/outfit-faces.md): the missing faces show as skeletons until the outfit event. */
++    suspend fun addOutfitFaces(id: String): OutfitFill? {
++        val missing = _state.value.outfit(id)?.let { o -> (0 until OutfitPictures.FACES).filter { o.faces?.getOrNull(it) == null }.map { OutfitPictures.BODY + it }.toSet() }
++        making(id, missing ?: (OutfitPictures.BODY until OutfitPictures.BODY + OutfitPictures.FACES).toSet())
++        return attempt { addOutfitFaces(id) }.also { r -> if (r == null || r.cost <= 0.0) making(id, null) else refreshBalance() }
++    }
++
++    /** Redo one of the 7 pictures ([index] into [OutfitPictures.KEYS]). */
++    suspend fun redoOutfit(id: String, index: Int): OutfitFill? {
++        val key = OutfitPictures.KEYS.getOrNull(index) ?: return null
++        making(id, setOf(index))
++        return attempt { redoOutfit(id, key) }.also { r -> if (r == null) making(id, null) else refreshBalance() }
++    }
++
+     suspend fun saveOutfit(id: String, name: String? = null) = attempt { saveOutfit(id, name) }?.also { o ->
+         _state.update { s ->
+             s.copy(
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt b/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt
+new file mode 100644
+index 00000000..7e2f34eb
+--- /dev/null
++++ b/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt
+@@ -0,0 +1,44 @@
++package studio.muse.app.data
++
++import studio.muse.core.PhotoPrices
++import studio.muse.core.PhotoPricing
++
++/**
++ * An outfit's 7 pictures (plans/outfit-faces.md): the 4 body angles (front, ¾, side, back), then its 3 face close-ups
++ * (face front, face ¾, face side) with the outfit's hair, make-up and accessories. Older outfits have no faces.
++ */
++object OutfitPictures {
++    /** The /redo `angle` of each picture, in order. */
++    val KEYS = listOf("front", "tq", "side", "back", "face", "faceTq", "profile")
++    val LABELS = listOf("Front", "¾", "Side", "Back", "Face front", "Face ¾", "Face side")
++    const val BODY = 4
++    const val FACES = 3
++
++    /** All 7 in order (null = missing or not made yet). */
++    fun all(o: Outfit): List<ImageRef?> = (0 until BODY).map { o.angles.getOrNull(it) } + (0 until FACES).map { o.faces?.getOrNull(it) }
++
++    /** The pictures the full-size viewer pages through: index into [KEYS] and the image, missing ones skipped. */
++    fun shown(pictures: List<ImageRef?>): List<Pair<Int, ImageRef>> = pictures.take(KEYS.size).mapIndexedNotNull { i, r -> r?.let { i to it } }
++
++    /** Where picture [index] sits in [shown] (0 when it isn't shown). */
++    fun pageOf(pictures: List<ImageRef?>, index: Int): Int = shown(pictures).indexOfFirst { it.first == index }.coerceAtLeast(0)
++
++    /** How many face close-ups it has. */
++    fun madeFaces(o: Outfit): Int = (0 until FACES).count { o.faces?.getOrNull(it) != null }
++
++    /** An older outfit (made before every outfit had face close-ups): none at all. */
++    fun noFaces(o: Outfit): Boolean = madeFaces(o) == 0
++
++    /** "Add face close-ups": one edit per missing face. */
++    fun facesEstimate(p: PhotoPrices, o: Outfit): Double = (FACES - madeFaces(o)) * p.perEdit
++
++    /** Redo one picture: the front is a new shot, the others one edit each. */
++    fun redoEstimate(p: PhotoPrices, index: Int): Double = if (index == 0) PhotoPricing.newShot(p, 1.0, p.maxRefs) else p.perEdit
++
++    /** The New outfit sheet's price: describe / product photo = the set + 3 faces; keep-from-base = 7 edits; My own set = 3 faces. */
++    fun createEstimate(p: PhotoPrices, mode: String, keeping: Boolean): Double = when {
++        mode == "own" -> FACES * p.perEdit
++        keeping -> (BODY + FACES) * p.perEdit
++        else -> PhotoPricing.outfitSet(p) + FACES * p.perEdit
++    }
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/MuseApp.kt b/android/app/src/main/kotlin/studio/muse/app/ui/MuseApp.kt
+index 74922998..cb415c45 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/MuseApp.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/MuseApp.kt
+@@ -115,7 +115,7 @@ object Routes {
+     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
+     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
+     const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
+-    const val ENHANCE = "enhance"; const val DRESSUP = "dressup"; const val IMAGE_MODELS = "imagemodels"; const val CATALOG = "catalog"; const val ARCHIVED = "archived"
++    const val ENHANCE = "enhance"; const val IMAGE_MODELS = "imagemodels"; const val CATALOG = "catalog"; const val ARCHIVED = "archived"
+     const val PROMPTS = "prompts"; const val PROMPT = "prompt/{key}"
+     /** Prompt scripts (workstream 4): one script's rules, inputs, blocks and preview. */
+     const val PROMPT_SCRIPT = "promptscript/{id}"
+@@ -296,7 +296,6 @@ fun MuseApp(
+                     composable(Routes.STUDIO) { StudioSettingsScreen() }
+                     composable(Routes.TEMPLATES) { TemplatesScreen() }
+                     composable(Routes.ENHANCE) { EnhanceScreen() }
+-                    composable(Routes.DRESSUP) { DressUpScreen() }
+                     composable(Routes.IMAGE_MODELS) { ImageModelsScreen() }
+                     composable(Routes.CATALOG) { CatalogScreen() }
+                     composable(Routes.ARCHIVED) { ArchivedModelsScreen() }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt b/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt
+index 25f70c60..708c20f8 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt
+@@ -60,6 +60,9 @@ import studio.muse.app.ui.theme.scale
+ /** One picture in [ImageViewer]: the image and what it is ("Front", "¾"…). A null image is a slot still being made. */
+ data class ViewerImage(val ref: ImageRef?, val label: String)
+ 
++/** A text action in the viewer's top bar for the picture shown (the outfit's "Redo · $0.03"). */
++data class ViewerAction(val label: String, val onClick: () -> Unit, val enabled: Boolean = true)
++
+ /** How far a pinch can zoom in, and where a double tap lands. */
+ private const val MAX_ZOOM = 5f
+ private const val DOUBLE_TAP_ZOOM = 2.5f
+@@ -70,15 +73,15 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
+  * pictures at 1×. Back or the close button leaves it. Shown in a full-screen [Dialog] so it covers the bars.
+  */
+ @Composable
+-fun ImageViewer(images: List<ViewerImage>, start: Int, onClose: () -> Unit) {
++fun ImageViewer(images: List<ViewerImage>, start: Int, action: ((Int) -> ViewerAction?)? = null, onClose: () -> Unit) {
+     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+-        ImageViewerContent(images, start, onClose)
++        ImageViewerContent(images, start, onClose, action = action)
+     }
+ }
+ 
+ /** [ImageViewer]'s content, without the window (screenshot tests render this directly). */
+ @Composable
+-fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier) {
++fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier, action: ((Int) -> ViewerAction?)? = null) {
+     val pager = rememberPagerState(initialPage = start.coerceIn(0, (images.size - 1).coerceAtLeast(0))) { images.size }
+     // Each page's zoom; swiping between pictures only works at 1× (a zoomed picture pans instead).
+     val zoomed = remember { mutableStateMapOf<Int, Boolean>() }
+@@ -100,6 +103,14 @@ fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Uni
+                 T(current?.label.orEmpty(), muse.scale.title.copy(fontSize = muse.scale.body.fontSize), Color.White, maxLines = 1)
+                 if (images.size > 1) T("${pager.currentPage + 1} of ${images.size}", muse.scale.caption, Color.White.copy(alpha = .72f), maxLines = 1)
+             }
++            // The action for the picture shown (one quiet text button, white on the black bar).
++            action?.invoke(pager.currentPage)?.let { a ->
++                Box(
++                    Modifier.height(48.dp).press(enabled = a.enabled, onClick = a.onClick).padding(horizontal = 12.dp)
++                        .semantics { contentDescription = a.label; role = Role.Button },
++                    contentAlignment = Alignment.Center,
++                ) { T(a.label, muse.scale.label, Color.White.copy(alpha = if (a.enabled) 1f else .5f), maxLines = 1) }
++            }
+         }
+         // Where you are in the set, as dots along the bottom (only with more than one picture).
+         if (images.size > 1) Row(
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/Common.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/Common.kt
+index fd0b1b02..06a829ad 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/Common.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/Common.kt
+@@ -86,10 +86,9 @@ fun ModelInitial(model: Model, modifier: Modifier = Modifier, size: Float = 42f)
+  */
+ @Composable
+ fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = {}, onAccounts: () -> Unit = {},
+-    onEnhance: () -> Unit = {}, onDressUp: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> = listOfNotNull(
++    onEnhance: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> = listOfNotNull(
+     MenuItem("grid", "Character sheet", onClick = onSheet),
+     MenuItem("quality", "Enhance character sheet", onClick = onEnhance),
+-    MenuItem("outfit", "Dress up", onClick = onDressUp),
+     MenuItem("outfit", "Add outfit", onClick = onOutfit),
+     MenuItem("lock", "Identity LoRA", onClick = onLora),
+     MenuItem("export", "Accounts", onClick = onAccounts),
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/CreateModelScreens.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/CreateModelScreens.kt
+index 9c061504..1abf0c2e 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/CreateModelScreens.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/CreateModelScreens.kt
+@@ -227,10 +227,7 @@ fun CharacterSheetScreen() {
+                         SecondaryButton("Fill $miss missing angle${if (miss > 1) "s" else ""} · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}",
+                             { vm.fill() }, Modifier.fillMaxWidth())
+                     }
+-                    if (filled > 0) Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+-                        SecondaryButton("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.weight(1f))
+-                        SecondaryButton("Dress up", { nav.go(Routes.DRESSUP) }, Modifier.weight(1f))
+-                    }
++                    if (filled > 0) SecondaryButton("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.fillMaxWidth())
+                 }
+                 if (faces < 2) Notice("Two face close-ups keep her face sharp and consistent in videos. You can still save without them.", tone = NoticeTone.CAUTION)
+                 else Notice("$filled of 7 shots. ${if (filled < 7) "More angles help when she turns." else "Full sheet: her identity is locked."}", tone = if (filled == 7) NoticeTone.POSITIVE else NoticeTone.NEUTRAL)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/ModelToolsScreens.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/ModelToolsScreens.kt
+index 6934d452..ea175d46 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/ModelToolsScreens.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/ModelToolsScreens.kt
+@@ -51,8 +51,6 @@ import kotlinx.coroutines.flow.update
+ import kotlinx.coroutines.launch
+ import studio.muse.app.AppContainer
+ import studio.muse.app.data.CatalogModel
+-import studio.muse.app.data.DressUpDraft
+-import studio.muse.app.data.DressUpRequest
+ import studio.muse.app.data.EnhanceDraft
+ import studio.muse.app.data.EnhanceRequest
+ import studio.muse.app.data.ImageRef
+@@ -75,7 +73,7 @@ import studio.muse.app.ui.theme.scale
+ import androidx.compose.ui.semantics.contentDescription
+ import androidx.compose.ui.semantics.semantics
+ 
+-// Model tools (plans/api.md "Model tools"): Enhance and Dress up for the character sheet (everyone), the image model
++// Model tools (plans/api.md "Model tools"): Enhance for the character sheet (everyone), the image model
+ // catalog and archived models (owner only). Members never see a model or provider name here.
+ 
+ private fun isOwner(c: AppContainer) = c.repo.demo || c.prefs.value.owner
+@@ -259,109 +257,10 @@ fun OwnerModelLine(steps: List<String>, chosen: Map<String, String>, defaults: M
+     }
+ }
+ 
+-val STEP_NAMES = mapOf("shot" to "New shots", "edit" to "Edits", "realism" to "Realism", "upscale" to "Upscale", "dressA" to "Option A", "dressB" to "Option B")
++val STEP_NAMES = mapOf("shot" to "New shots", "edit" to "Edits", "realism" to "Realism", "upscale" to "Upscale")
+ 
+-// ---------------------------------------------------------------- Dress up
+-
+-data class DressUpState(val model: Model? = null, val draft: DressUpDraft = DressUpDraft(), val run: ToolRun? = null, val tools: ToolsFeatures = ToolsFeatures(),
+-    val estimate: ToolEstimate? = null)
+-
+-class DressUpViewModel(private val c: AppContainer) : ViewModel() {
+-    private val est = MutableStateFlow<ToolEstimate?>(null)
+-    val state: StateFlow<DressUpState> = combine(c.repo.state, c.drafts.modelId, c.drafts.dressUp, est) { s, mid, d, e ->
+-        DressUpState(s.model(mid) ?: s.models.firstOrNull(), d, d.runId?.let { s.toolRuns[it] }, s.tools, e)
+-    }.stateIn(viewModelScope, SharingStarted.Eagerly, DressUpState())
+-
+-    init { refreshEstimate() }
+-    private fun req(d: DressUpDraft) = DressUpRequest(d.outfitImage, d.name.ifBlank { null }, d.engine, d.models.ifEmpty { null })
+-    fun refreshEstimate() = viewModelScope.launch { est.value = c.repo.dressUpEstimate(c.drafts.modelId.value, req(c.drafts.dressUp.value)).first }
+-    fun set(f: (DressUpDraft) -> DressUpDraft) { c.drafts.dressUp.update(f); refreshEstimate() }
+-    fun upload(uri: Uri) = viewModelScope.launch {
+-        val media = c.media ?: return@launch
+-        val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that image")
+-        val ref = c.repo.uploadImage(media.displayName(uri), bytes, media.mime(uri)) ?: return@launch
+-        val name = media.displayName(uri).substringBeforeLast('.').replace(Regex("[_-]+"), " ").trim().take(40)
+-        c.drafts.dressUp.update { it.copy(outfitImage = ref, name = it.name.ifBlank { name }) }
+-    }
+-    fun start() = viewModelScope.launch {
+-        val d = c.drafts.dressUp.value
+-        if (d.outfitImage == null) return@launch c.repo.toast("Add the outfit photo first")
+-        val r = c.repo.startDressUp(c.drafts.modelId.value, req(d)) ?: return@launch
+-        c.drafts.dressUp.update { it.copy(runId = r.id) }
+-    }
+-    fun decide(item: ToolItem, keep: Boolean) = viewModelScope.launch { state.value.run?.let { c.repo.decideTool(it.id, item.slot, keep) } }
+-    fun pick(item: ToolItem, e: String) = viewModelScope.launch { state.value.run?.let { c.repo.decideTool(it.id, item.slot, true, e) } }
+-    fun pickAll(e: String) = viewModelScope.launch { state.value.run?.let { c.repo.pickTool(it.id, e) } }
+-    fun retry(item: ToolItem) = viewModelScope.launch { state.value.run?.let { c.repo.retryTool(it.id, item.slot, it.engines.first()) } }
+-    fun apply(done: () -> Unit) = viewModelScope.launch {
+-        val r = state.value.run ?: return@launch
+-        val res = c.repo.applyTool(r.id, c.drafts.dressUp.value.name.ifBlank { null }) ?: return@launch
+-        c.repo.toast("Saved as a new outfit · ${res.outfit?.name ?: "Dressed look"}")
+-        res.outfit?.let { c.drafts.outfitId.value = it.id }
+-        c.drafts.dressUp.value = DressUpDraft()
+-        done()
+-    }
+-    fun discard() = viewModelScope.launch { state.value.run?.let { c.repo.discardTool(it.id) }; c.drafts.dressUp.update { it.copy(runId = null) } }
+-}
+-
+-@Composable
+-fun DressUpScreen() {
+-    val c = LocalContainer.current
+-    val vm: DressUpViewModel = viewModel { DressUpViewModel(c) }
+-    val s by vm.state.collectAsState()
+-    val nav = LocalNav.current
+-    val run = s.run?.takeIf { it.state == "running" || it.state == "review" }
+-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.upload(uri) }
+-    ScreenBox(bg = muse.roles.canvas) {
+-        Column(Modifier.fillMaxSize()) {
+-            CalmTopBar("Dress up", onBack = { nav.back() })
+-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+-                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
+-                if (run == null) DressUpSetup(s, vm, isOwner(c)) { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+-                else {
+-                    if (run.both && run.state == "review") Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+-                        SecondaryButton("Use all A", { vm.pickAll("a") }, Modifier.weight(1f), height = 48.dp)
+-                        SecondaryButton("Use all B", { vm.pickAll("b") }, Modifier.weight(1f), height = 48.dp)
+-                    }
+-                    ToolReview(run, s.model, onKeep = { i, k -> vm.decide(i, k) }, onRetry = { vm.retry(it) }, onPick = if (run.both) ({ i, e -> vm.pick(i, e) }) else null)
+-                }
+-            }
+-        }
+-        ActionDock {
+-            when {
+-                run == null -> PrimaryButton("Dress up · ${s.estimate?.label?.substringAfterLast("· ") ?: "7 images"}", vm::start, Modifier.weight(1f), off = s.draft.outfitImage == null)
+-                run.state == "running" -> PrimaryButton(run.phase.ifBlank { "Dressing up…" }, {}, Modifier.weight(1f), busy = true)
+-                else -> {
+-                    SecondaryButton("Discard", vm::discard)
+-                    PrimaryButton("Save outfit · ${run.kept}", { vm.apply { nav.back() } }, Modifier.weight(1f), off = run.kept == 0)
+-                }
+-            }
+-        }
+-    }
+-}
+-
+-@Composable
+-private fun DressUpSetup(s: DressUpState, vm: DressUpViewModel, owner: Boolean, onPick: () -> Unit) {
+-    val m = muse
+-    val first = s.model?.name?.substringBefore(' ') ?: "her"
+-    Body("Add one photo of an outfit (clothes and accessories). $first's whole character sheet is made again wearing it: the full-body photos get the outfit, the close-ups get the jewellery, glasses or hat and the neckline. Face, hair, pose and background stay the same.")
+-    Box(Modifier.fillMaxWidth().height(220.dp).clip(containerShape()).background(m.roles.field).press(onClick = onPick)
+-        .semantics { contentDescription = if (s.draft.outfitImage == null) "Add the outfit photo" else "Replace the outfit photo" }, contentAlignment = Alignment.Center) {
+-        val img = s.draft.outfitImage
+-        if (img != null) RefImage(img, Modifier.fillMaxSize(), 50)
+-        else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+-            Ic("upload", 24.dp, m.roles.ink2); T("Add the outfit photo", m.scale.label, m.roles.ink)
+-        }
+-    }
+-    Labeled("Outfit name") { Input(s.draft.name, { v -> vm.set { it.copy(name = v.take(80)) } }, placeholder = "Named after the photo", calm = true) }
+-    Labeled("Look") {
+-        Segmented(s.tools.dressUp.options.map { it.id to it.label }, s.draft.engine, { v -> vm.set { it.copy(engine = v) } })
+-        Caption(s.tools.dressUp.options.firstOrNull { it.id == s.draft.engine }?.detail ?: "")
+-    }
+-    if (owner) StepModels(if (s.draft.engine == "both") listOf("dressA", "dressB") else listOf(if (s.draft.engine == "b") "dressB" else "dressA"), s.draft.models,
+-        s.tools.dressUp.models?.mapValues { it.value.name } ?: emptyMap())
+-    Notice("${s.estimate?.label ?: "Working out the price…"}. Saved as a new outfit you can shoot and film. The character sheet itself never changes.")
+-}
++/** Image-model steps still stored on the server but no longer used by any tool (Dress up, removed 2026-11-11). */
++val HIDDEN_STEPS = setOf("dressA", "dressB")
+ 
+ // ---------------------------------------------------------------- Owner: image models and the catalog
+ 
+@@ -395,7 +294,8 @@ fun ImageModelsScreen() {
+                     steps.isEmpty() && err != null -> ErrorState("Can't load the image models", err ?: "", onAction = { vm.load() })
+                     else -> err?.let { Notice(it, tone = NoticeTone.DANGER) }
+                 }
+-                steps.forEach { s ->
++                // Dress up was removed (plans/outfit-faces.md): its stored dressA / dressB steps are hidden.
++                steps.filter { it.step !in HIDDEN_STEPS }.forEach { s ->
+                     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+                         Row(verticalAlignment = Alignment.CenterVertically) {
+                             T(s.label, m.scale.heading, m.roles.ink, Modifier.weight(1f))
+@@ -437,7 +337,6 @@ class CatalogViewModel(private val c: AppContainer) : ViewModel() {
+         if (c.drafts.catalogFor.value == "run") {
+             val put: (Map<String, String>) -> Map<String, String> = { it + (step to m.id) }
+             if (step == "realism" || step == "upscale") c.drafts.enhance.update { it.copy(models = put(it.models)) }
+-            else if (step == "dressA" || step == "dressB") c.drafts.dressUp.update { it.copy(models = put(it.models)) }
+             c.repo.toast("This run uses ${m.id}")
+             return@launch done()
+         }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
+index 5f782784..d12e27c8 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
+@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
+ import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.BoxWithConstraints
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.Spacer
+@@ -43,7 +44,9 @@ import kotlinx.coroutines.flow.stateIn
+ import kotlinx.coroutines.launch
+ import studio.muse.app.AppContainer
+ import studio.muse.app.data.Model
++import studio.muse.app.data.ImageRef
+ import studio.muse.app.data.Outfit
++import studio.muse.app.data.OutfitPictures
+ import studio.muse.app.ui.LocalContainer
+ import studio.muse.app.ui.LocalNav
+ import studio.muse.app.ui.Routes
+@@ -53,6 +56,7 @@ import studio.muse.app.ui.components.MenuItem
+ import studio.muse.app.ui.components.MuseMenu
+ import studio.muse.app.ui.components.RefImage
+ import studio.muse.app.ui.components.T
++import studio.muse.app.ui.components.ViewerAction
+ import studio.muse.app.ui.components.ViewerImage
+ import studio.muse.app.ui.components.press
+ import studio.muse.app.ui.screens.edit.learn.LearnConfirm
+@@ -61,9 +65,9 @@ import studio.muse.app.ui.theme.muse
+ import studio.muse.app.ui.theme.radii
+ import studio.muse.app.ui.theme.roles
+ import studio.muse.app.ui.theme.scale
+-import studio.muse.core.OutfitAngle
+ import studio.muse.core.OutfitNaming
+ import studio.muse.core.OutfitPages
++import studio.muse.core.Pricing
+ import java.text.SimpleDateFormat
+ import java.util.Calendar
+ import java.util.Date
+@@ -79,16 +83,18 @@ fun outfitDate(ms: Long?): String? {
+     return if (year(ms) == year(System.currentTimeMillis())) outfitDay(ms) else SimpleDateFormat("d MMM yyyy", Locale.UK).format(Date(ms))
+ }
+ 
+-data class OutfitsState(val model: Model? = null, val folders: List<Outfit> = emptyList(), val page: Int = 0, val filling: Set<String> = emptySet())
++data class OutfitsState(val model: Model? = null, val folders: List<Outfit> = emptyList(), val page: Int = 0, val filling: Set<String> = emptySet(),
++    /** Pictures being made (Add face close-ups, Redo): outfit id → [OutfitPictures] indexes. */
++    val making: Map<String, Set<Int>> = emptyMap())
+ 
+ /** Her outfits as folders and one outfit open (plans/outfit-head-looks.md §4/§5): paging, rename, delete, missing angles. */
+ class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
+     private val filling = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+-    val state: StateFlow<OutfitsState> = combine(c.repo.state, c.drafts.modelId, c.drafts.outfitPage, filling) { s, mid, page, f ->
++    val state: StateFlow<OutfitsState> = combine(c.repo.state, c.drafts.modelId, c.drafts.outfitPage, filling, c.repo.outfitMaking) { s, mid, page, f, making ->
+         val model = s.model(mid) ?: s.models.firstOrNull()
+         val folders = OutfitPages.newestFirst(s.outfitsOf(model?.id).filter { it.state == "ready" }) { it.createdAt }
+         // An outfit that came back whole stops showing "Making angles".
+-        OutfitsState(model, folders, OutfitPages.clamp(page, folders.size), f.filterTo(mutableSetOf()) { id -> s.outfit(id)?.let { it.madeAngles < 4 } ?: false })
++        OutfitsState(model, folders, OutfitPages.clamp(page, folders.size), f.filterTo(mutableSetOf()) { id -> s.outfit(id)?.let { it.madeAngles < 4 } ?: false }, making)
+     }.stateIn(viewModelScope, SharingStarted.Eagerly, OutfitsState())
+ 
+     fun outfit(id: String): Outfit? = c.repo.state.value.outfit(id)
+@@ -120,6 +126,20 @@ class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
+     }
+ 
+     fun fillEstimate(o: Outfit): Double = (4 - o.madeAngles) * photoPrices(c).perEdit
++
++    /** "Add face close-ups" (an older outfit, plans/outfit-faces.md): its missing face front, ¾ and side. */
++    fun addFaces(o: Outfit) = viewModelScope.launch {
++        if (o.front == null) { c.repo.toast("Its front picture is missing · make a new outfit instead"); return@launch }
++        c.repo.addOutfitFaces(o.id)
++    }
++    fun facesEstimate(o: Outfit): Double = OutfitPictures.facesEstimate(photoPrices(c), o)
++
++    /** Redo one of the 7 pictures ([index] into [OutfitPictures.KEYS]). */
++    fun redo(o: Outfit, index: Int) = viewModelScope.launch {
++        if (o.id in state.value.filling || state.value.making[o.id]?.contains(index) == true) return@launch
++        c.repo.redoOutfit(o.id, index)
++    }
++    fun redoEstimate(index: Int): Double = OutfitPictures.redoEstimate(photoPrices(c), index)
+ }
+ 
+ private fun photoPrices(c: AppContainer): studio.muse.core.PhotoPrices = c.repo.state.value.photo
+@@ -148,7 +168,7 @@ fun OutfitFoldersScreen() {
+                     OutfitPages.slice(s.folders, s.page).chunked(2).forEach { row ->
+                         Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                             row.forEach { o ->
+-                                OutfitFolder(o, o.id in s.filling, vm.canChange(o), Modifier.weight(1f),
++                                OutfitFolder(o, o.id in s.filling || o.id in s.making, vm.canChange(o), Modifier.weight(1f),
+                                     open = { nav.go(Routes.outfitView(o.id)) }, rename = { renaming = o }, delete = { deleting = o })
+                             }
+                             if (row.size == 1) Spacer(Modifier.weight(1f))
+@@ -224,7 +244,7 @@ fun RenameOutfit(current: String, onKeep: () -> Unit, onSave: (String) -> Unit)
+     }
+ }
+ 
+-/** One outfit open: its four angles large (tap one to view it full size and swipe between them) and its actions. */
++/** One outfit open: its 4 body angles and 3 face close-ups (tap one to view it full size and swipe between all 7) and its actions. */
+ @Composable
+ fun OutfitOpenScreen(id: String) {
+     val c = LocalContainer.current
+@@ -247,7 +267,20 @@ fun OutfitOpenScreen(id: String) {
+     }
+     val filling = o.id in s.filling
+     val canChange = vm.canChange(o)
+-    val shown = OutfitAngle.entries.mapIndexedNotNull { i, a -> o.angles.getOrNull(i)?.let { ViewerImage(it, a.label) } }
++    val making = s.making[o.id].orEmpty()
++    val pictures = OutfitPictures.all(o)
++    val shownAt = OutfitPictures.shown(pictures)
++    val shown = shownAt.map { (i, r) -> ViewerImage(r, OutfitPictures.LABELS[i]) }
++    // Full size: "Redo · $0.03" for the picture shown (the owner or whoever made the outfit).
++    val redoAction: ((Int) -> ViewerAction?)? = if (canChange) ({ page: Int ->
++        shownAt.getOrNull(page)?.let { (i, _) ->
++            ViewerAction("Redo · ${Pricing.money(vm.redoEstimate(i))}", { vm.redo(o, i); viewing = null }, enabled = i !in making && !filling)
++        }
++    }) else null
++    val facesMissing = OutfitPictures.FACES - OutfitPictures.madeFaces(o)
++    val makingFaces = (OutfitPictures.BODY until OutfitPictures.KEYS.size).any { it in making }
++    // "Make missing angles": the empty ¾ / side / back show as skeletons until they come back.
++    val fillingAt: List<Int> = if (filling) (1 until OutfitPictures.BODY).filter { pictures[it] == null } else emptyList()
+     ScreenBox(bg = m.roles.canvas) {
+         Column(Modifier.fillMaxSize()) {
+             CalmTopBar(onBack = { nav.back() }, right = if (canChange) ({ BarButton("trash", "Delete outfit", { deleting = true }) }) else null)
+@@ -262,32 +295,29 @@ fun OutfitOpenScreen(id: String) {
+                     DisplayTitle(o.name)
+                     Caption(listOfNotNull(s.model?.name?.substringBefore(' ')?.let { "For $it" }, outfitDate(o.createdAt)?.let { "made $it" }).joinToString(", "))
+                 }
+-                OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->
+-                    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+-                        row.forEachIndexed { i, a ->
+-                            val idx = r * 2 + i
+-                            val ref = o.angles.getOrNull(idx)
+-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+-                                val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+-                                if (ref == null && filling) Skeleton(tile, containerShape())
+-                                else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
+-                                    if (ref == null) t.semantics { contentDescription = "${a.label} missing" }
+-                                    else t.press { viewing = shown.indexOfFirst { it.label == a.label }.coerceAtLeast(0) }.semantics { contentDescription = "${a.label}, view full size"; role = Role.Button }
+-                                }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
+-                                Caption(a.label)
+-                            }
+-                        }
+-                    }
++                OutfitPictureGrid(pictures, making + fillingAt, busy = false) { i ->
++                    viewing = OutfitPictures.pageOf(pictures, i)
+                 }
+                 if (filling) Notice("Making the missing angles from the front.")
+                 else if (o.madeAngles < 4 && o.front != null && canChange) {
+                     Notice("${o.madeAngles} of 4 angles. The others came back empty.", tone = NoticeTone.CAUTION)
+                     SecondaryButton("Make missing angles · ${studio.muse.core.PhotoPricing.about(vm.fillEstimate(o))}", { vm.fill(o) }, Modifier.fillMaxWidth())
+                 }
+-                RowItem("Dress up", "Her character sheet made again wearing an outfit photo", onClick = { nav.go(Routes.DRESSUP) }) { Chevron() }
++                // An older outfit (made before every outfit had face close-ups), or faces that came back empty.
++                if (facesMissing > 0 && !makingFaces) {
++                    Notice(
++                        if (facesMissing == OutfitPictures.FACES) "No face close-ups yet. Shots with this outfit use her base face."
++                        else "${OutfitPictures.FACES - facesMissing} of 3 face close-ups. The others came back empty.",
++                        tone = if (facesMissing == OutfitPictures.FACES) NoticeTone.NEUTRAL else NoticeTone.CAUTION,
++                    )
++                    if (canChange && o.front != null) SecondaryButton(
++                        "${if (facesMissing == OutfitPictures.FACES) "Add face close-ups" else "Make missing face close-ups"} · ${Pricing.money(vm.facesEstimate(o))}",
++                        { vm.addFaces(o) }, Modifier.fillMaxWidth(),
++                    )
++                }
+             }
+         }
+-        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start) { viewing = null } }
++        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction) { viewing = null } }
+         ActionDock {
+             PrimaryButton("Use in Photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, o.modelId, o.id) }, Modifier.weight(1f))
+         }
+@@ -295,3 +325,40 @@ fun OutfitOpenScreen(id: String) {
+         if (deleting) LearnConfirm("Delete this outfit?", "Takes and photos already made with it are kept.", "Delete", { deleting = false; vm.delete(o) { nav.back() } }, { deleting = false })
+     }
+ }
++
++/**
++ * An outfit's 7 pictures (plans/outfit-faces.md): the 4 body angles, then the 3 face close-ups in the same columns, grouped
++ * by space with their captions ("Face front"). 2 columns on a phone, 4 when wide. A picture in [making] (or, while [busy],
++ * any not made yet) shows a skeleton; a tap opens [onOpen] with its index into [OutfitPictures.KEYS].
++ */
++@Composable
++fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onOpen: (Int) -> Unit) {
++    val m = muse
++    BoxWithConstraints(Modifier.fillMaxWidth()) {
++        val cols = if (maxWidth >= 600.dp) 4 else 2
++        Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s6)) {
++            listOf((0 until OutfitPictures.BODY).toList(), (OutfitPictures.BODY until OutfitPictures.KEYS.size).toList()).forEach { group ->
++                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
++                    group.chunked(cols).forEach { row ->
++                        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
++                            row.forEach { i ->
++                                val ref = pictures.getOrNull(i)
++                                val label = OutfitPictures.LABELS[i]
++                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
++                                    val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
++                                    if (i in making || (busy && ref == null)) Skeleton(tile.semantics { contentDescription = "$label, being made" }, containerShape())
++                                    else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
++                                        if (ref == null) t.semantics { contentDescription = "$label missing" }
++                                        else t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
++                                    }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
++                                    Caption(label, maxLines = 1)
++                                }
++                            }
++                            repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt
+index 096cf32c..0d23a0f7 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt
+@@ -47,6 +47,7 @@ import studio.muse.app.data.Model
+ import studio.muse.app.data.Outfit
+ import studio.muse.app.data.OutfitDraft
+ import studio.muse.app.data.OutfitBaseAngles
++import studio.muse.app.data.OutfitPictures
+ import androidx.compose.foundation.layout.heightIn
+ import studio.muse.app.ui.LocalCelebrate
+ import studio.muse.app.ui.LocalContainer
+@@ -161,10 +162,11 @@ fun OutfitScreen() {
+     var ownFor by remember { mutableStateOf(0) }
+     val pickAngle = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.setOwn(ownFor, u) }
+     val name = s.model?.name?.substringBefore(' ') ?: "Her"
+-    // The four angles as they show in the grid; a tap opens them full size (pinch to zoom, swipe between angles).
+-    val angles: List<ImageRef?> = OutfitAngle.entries.indices.map { idx ->
+-        if (s.done) s.preview?.angles?.getOrNull(idx) else if (s.draft.mode == "own") s.draft.own.getOrNull(idx) else null
+-    }
++    // "My own set" before it's sent: the four angle boxes (each picks its photo). No face boxes: MUSE makes those.
++    val ownPicking = s.draft.mode == "own" && !s.done && !s.busy
++    val angles: List<ImageRef?> = OutfitAngle.entries.indices.map { idx -> if (ownPicking) s.draft.own.getOrNull(idx) else null }
++    // Otherwise the 7 pictures (4 body angles, 3 face close-ups) as they come back; a tap opens them full size.
++    val pictures: List<ImageRef?> = s.preview?.takeIf { s.done || s.busy }?.let { OutfitPictures.all(it) } ?: List(OutfitPictures.KEYS.size) { null }
+     var viewing by remember { mutableStateOf<Int?>(null) }
+     ScreenBox(bg = m.roles.canvas) {
+         Column(Modifier.fillMaxSize()) {
+@@ -175,7 +177,7 @@ fun OutfitScreen() {
+             ) {
+                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                     DisplayTitle("Outfit set")
+-                    Body("$name in a new outfit, from four angles. Every shoot and video with this outfit uses them.")
++                    Body("$name in a new outfit: four angles and three face close-ups with its hair and make-up. Every shoot and video with this outfit uses them.")
+                 }
+                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                     Segmented(listOf("describe" to "Describe", "photo" to "From a photo", "own" to "My own set"), s.draft.mode, vm::mode)
+@@ -188,13 +190,17 @@ fun OutfitScreen() {
+                         }
+                         else -> {
+                             Caption("Tap a box to add that view. Any you skip can be made later from the front.")
++                            Caption("MUSE makes her 3 face close-ups from your front")
+                         }
+                     }
+                 }
+                 Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v.take(OutfitNaming.MAX)) } }, placeholder = "Suggested when the set is made", calm = true) }
+-                // WS7/WS13: the owner's model for the set (not for "My own set": nothing is generated).
++                // WS7/WS13: the owner's model for the set (not for "My own set": only its face close-ups are made, on the default).
+                 if (s.draft.mode != "own") ModelChoiceRow(studio.muse.app.data.ModelPurpose.OUTFIT, ModelPick(s.draft.imageModel), { p -> vm.edit { it.copy(imageModel = p.model) } })
+-                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
++                if (!ownPicking) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
++                    OutfitPictureGrid(pictures, emptyList(), busy = s.busy) { i -> viewing = OutfitPictures.pageOf(pictures, i) }
++                    Caption("Plain, unbranded clothes work best. Visible logos carry into the video.")
++                } else Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                     OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->
+                         Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                             row.forEachIndexed { i, a ->
+@@ -202,8 +208,7 @@ fun OutfitScreen() {
+                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                     val ref: ImageRef? = angles[idx]
+                                     val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+-                                    if (s.busy && ref == null) Skeleton(tile, containerShape())
+-                                    else if (s.draft.mode == "own" && !s.done) Box(
++                                    Box(
+                                         tile.clip(containerShape()).background(m.roles.field).press { ownFor = idx; pickAngle.launch(img) }
+                                             .semantics { contentDescription = if (ref == null) "Choose the ${a.label} photo" else "Replace the ${a.label} photo"; role = Role.Button },
+                                         contentAlignment = androidx.compose.ui.Alignment.Center,
+@@ -218,12 +223,6 @@ fun OutfitScreen() {
+                                             }
+                                         } else studio.muse.app.ui.theme.Ic("plus", 22.dp, m.roles.ink2)
+                                     }
+-                                    else Box(
+-                                        tile.clip(containerShape()).background(m.roles.field).let { t ->
+-                                            if (ref == null) t else t.press { viewing = angles.filterNotNull().indexOf(ref) }
+-                                                .semantics { contentDescription = "${a.label}, view full size"; role = Role.Button }
+-                                        },
+-                                    ) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
+                                     Caption(a.label)
+                                 }
+                             }
+@@ -231,12 +230,10 @@ fun OutfitScreen() {
+                     }
+                     Caption("Plain, unbranded clothes work best. Visible logos carry into the video.")
+                 }
+-                RowItem("Dress up the whole character sheet", "One outfit photo: all 7 sheet photos made again wearing it, saved as a new outfit",
+-                    onClick = { nav.go(studio.muse.app.ui.Routes.DRESSUP) }) { Chevron() }
+             }
+         }
+         viewing?.let { start ->
+-            val shown = OutfitAngle.entries.mapIndexedNotNull { i, a -> angles[i]?.let { ViewerImage(it, a.label) } }
++            val shown = OutfitPictures.shown(pictures).map { (i, r) -> ViewerImage(r, OutfitPictures.LABELS[i]) }
+             if (shown.isNotEmpty()) ImageViewer(shown, start) { viewing = null }
+         }
+         ActionDock {
+@@ -244,8 +241,10 @@ fun OutfitScreen() {
+                 SecondaryButton("Generate again", { vm.generate() }, icon = "retry")
+                 PrimaryButton("Add to her outfits", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
+             } else {
++                // The full price: the body angles and the 3 face close-ups ("My own set": the faces alone).
++                val price = Pricing.money(OutfitPictures.createEstimate(photoPrices(), s.draft.mode, s.draft.base?.keeping == true))
+                 PrimaryButton(
+-                    if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") (if (s.draft.own.firstOrNull() == null) "Add the front photo" else "Use my images") else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(photoPrices().let { p -> if (s.draft.base?.keeping == true) 4 * p.perEdit else studio.muse.core.PhotoPricing.outfitSet(p) })}",
++                    if (s.busy) "Making the 7 pictures…" else if (s.draft.mode == "own") (if (s.draft.own.firstOrNull() == null) "Add the front photo" else "Use my images · $price") else "Make 7 pictures · $price",
+                     { if (!s.busy) vm.generate() }, Modifier.weight(1f), busy = s.busy,
+                 )
+             }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OwnerScreens.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OwnerScreens.kt
+index e27d7307..88fb56fc 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OwnerScreens.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OwnerScreens.kt
+@@ -448,7 +448,7 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
+     ModelStatusList(st)
+     val navX = LocalNav.current
+     Column {
+-        RowItem("Photo models by step", "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
++        RowItem("Photo models by step", "Any Replicate model for new shots, edits and Enhance", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
+         RowItem("Archived models", "Hidden models you can restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Chevron() }
+     }
+     Heading("Our own GPUs")
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProfileScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProfileScreen.kt
+index 550bb018..4ccb71e0 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProfileScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProfileScreen.kt
+@@ -94,7 +94,7 @@ data class ProfileActions(
+     val select: (Int) -> Unit = {}, val addOutfit: () -> Unit = {}, val allOutfits: () -> Unit = {}, val video: () -> Unit = {}, val shoot: () -> Unit = {},
+     val back: () -> Unit = {}, val settings: () -> Unit = {}, val sheet: () -> Unit = {}, val menu: Boolean = true,
+     val lora: () -> Unit = {}, val accounts: () -> Unit = {},
+-    val enhance: () -> Unit = {}, val dressUp: () -> Unit = {}, val archive: (() -> Unit)? = null,
++    val enhance: () -> Unit = {}, val archive: (() -> Unit)? = null,
+ )
+ 
+ @Composable
+@@ -109,7 +109,7 @@ fun ProfileScreen() {
+             select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, allOutfits = { nav.go(Routes.OUTFITS) }, video = { studio.muse.app.ui.screens.suite.composer.openShot(c, nav, s.model?.id) }, shoot = { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, s.outfits.getOrNull(s.selected)?.id) },
+             back = { nav.back() }, settings = { nav.tab(Routes.SETTINGS) }, sheet = { nav.go(Routes.CREATE3) },
+             lora = { nav.go(Routes.LORA) }, accounts = { nav.go(Routes.ACCOUNTS) },
+-            enhance = { nav.go(Routes.ENHANCE) }, dressUp = { nav.go(Routes.DRESSUP) },
++            enhance = { nav.go(Routes.ENHANCE) },
+             archive = if (c.repo.demo || c.prefs.value.owner) ({ s.model?.let { md -> vm.archive(md) { nav.reset(Routes.HOME) } } }) else null,
+         ),
+     )
+@@ -128,7 +128,7 @@ fun ProfileContent(s: ProfileState, a: ProfileActions) {
+                 Modifier.padding(horizontal = MuseSpace.gutter))
+         }
+     }
+-    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts, a.enhance, a.dressUp, a.archive) else emptyList()
++    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts, a.enhance, a.archive) else emptyList()
+     ScreenBox(bg = m.roles.canvas) {
+         Column(Modifier.fillMaxSize().padding(bottom = 88.dp)) {
+             CalmTopBar(onBack = a.back, right = if (a.menu) ({ MoreMenu(menu, tint = m.roles.ink) }) else null)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/PromptScreens.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/PromptScreens.kt
+index a721d1c5..03820fef 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/PromptScreens.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/PromptScreens.kt
+@@ -247,5 +247,5 @@ fun PromptEditorBody(entry: PromptEntry, group: String?, text: String, preview:
+ 
+ private fun groupLabel(id: String) = when (id) {
+     "photoshoot" -> "Photo"; "references" -> "References"; "sheet" -> "Character sheet"; "outfits" -> "Outfits"; "enhance" -> "Enhance"
+-    "dressup" -> "Dress up"; "templates" -> "Templates"; "video" -> "Video"; "lora" -> "LoRA"; else -> id
++    "templates" -> "Templates"; "video" -> "Video"; "lora" -> "LoRA"; else -> id
+ }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/SettingsSections.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/SettingsSections.kt
+index 1b1db563..b8c05f96 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/SettingsSections.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/SettingsSections.kt
+@@ -206,7 +206,7 @@ private fun OwnerAiSpending() {
+     SettingsGroup("Models and our own GPUs", "Status, GPU limits, the photo service and price corrections") {
+         RowItem("Our own GPUs", st?.let { "${it.maxGpus} at once, off after ${it.engines?.keepReady?.idleMinutes ?: it.warmIdleMinutes} idle minutes" }, onClick = { nav.go(Routes.SETTINGS_GPUS) }) { Chevron() }
+         RowItem("Price corrections", "Each model's price and the qualities that use it", onClick = { nav.go(Routes.SUITE_ENGINES) }) { Chevron() }
+-        RowItem("Photo models by step", "The model behind each photo step: new shots, edits, Enhance and Dress up", onClick = { nav.go(Routes.IMAGE_MODELS) }) { Chevron() }
++        RowItem("Photo models by step", "The model behind each photo step: new shots, edits and Enhance", onClick = { nav.go(Routes.IMAGE_MODELS) }) { Chevron() }
+         RowItem("Model status", modelStatusLine(st), onClick = { nav.go(Routes.SETTINGS_MODEL_STATUS) }) { Chevron() }
+     }
+ }
+diff --git a/android/app/src/main/resources/prompt_library.json b/android/app/src/main/resources/prompt_library.json
+index 6f39437d..92ad592a 100644
+--- a/android/app/src/main/resources/prompt_library.json
++++ b/android/app/src/main/resources/prompt_library.json
+@@ -20,10 +20,6 @@
+    "id": "enhance",
+    "label": "Enhance"
+   },
+-  {
+-   "id": "dressup",
+-   "label": "Dress up"
+-  },
+   {
+    "id": "templates",
+    "label": "Templates"
+@@ -658,69 +654,35 @@
+    "updatedBy": null
+   },
+   {
+-   "key": "enhance.prompt",
+-   "group": "enhance",
+-   "title": "Realism prompt",
+-   "description": "One prompt for every image of the sheet in Enhance step 1.",
+-   "kind": "text",
+-   "default": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
+-   "current": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
+-   "overridden": false,
+-   "allowEmpty": false,
+-   "placeholders": [],
+-   "updatedAt": null,
+-   "updatedBy": null
+-  },
+-  {
+-   "key": "dress.body",
+-   "group": "dressup",
+-   "title": "Full-body images",
+-   "description": "Dress up for the four full-body sheet images.",
+-   "kind": "text",
+-   "default": "Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.",
+-   "current": "Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.",
+-   "overridden": false,
+-   "allowEmpty": false,
+-   "placeholders": [
+-    {
+-     "name": "anchor",
+-     "description": "a space and the anchor sentence when the new front is sent too, else empty",
+-     "required": false
+-    }
+-   ],
+-   "updatedAt": null,
+-   "updatedBy": null
+-  },
+-  {
+-   "key": "dress.closeup",
+-   "group": "dressup",
++   "key": "outfit.face",
++   "group": "outfits",
+    "title": "Face close-ups",
+-   "description": "Dress up for the three face close-ups: only what shows at that distance.",
++   "description": "The outfit's three face close-ups: each edits her base face photo of that angle, the outfit's front picture sent last.",
+    "kind": "text",
+-   "default": "Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.",
+-   "current": "Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.",
++   "default": "Make this {angle} match the person in the last image: the same hairstyle, hair colour and length, make-up, and every head and face accessory it shows (earrings, glasses, hat, hair pieces, piercings), with the neckline of the top where it shows. Keep her face, features, skin, expression, camera angle and framing exactly as in the first image, plain studio background. Realistic close-up photo, natural skin texture.",
++   "current": "Make this {angle} match the person in the last image: the same hairstyle, hair colour and length, make-up, and every head and face accessory it shows (earrings, glasses, hat, hair pieces, piercings), with the neckline of the top where it shows. Keep her face, features, skin, expression, camera angle and framing exactly as in the first image, plain studio background. Realistic close-up photo, natural skin texture.",
+    "overridden": false,
+    "allowEmpty": false,
+    "placeholders": [
+     {
+-     "name": "anchor",
+-     "description": "a space and the anchor sentence when the new front is sent too, else empty",
+-     "required": false
++     "name": "angle",
++     "description": "face close-up from the front / three-quarter / side",
++     "required": true
+     }
+    ],
+    "updatedAt": null,
+    "updatedBy": null
+   },
+   {
+-   "key": "dress.anchor",
+-   "group": "dressup",
+-   "title": "Anchor sentence",
+-   "description": "Added when the newly dressed front is sent as a third image.",
++   "key": "enhance.prompt",
++   "group": "enhance",
++   "title": "Realism prompt",
++   "description": "One prompt for every image of the sheet in Enhance step 1.",
+    "kind": "text",
+-   "default": "The last image shows the same outfit already worn: match its colours, prints and details exactly.",
+-   "current": "The last image shows the same outfit already worn: match its colours, prints and details exactly.",
++   "default": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
++   "current": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
+    "overridden": false,
+-   "allowEmpty": true,
++   "allowEmpty": false,
+    "placeholders": [],
+    "updatedAt": null,
+    "updatedBy": null
+diff --git a/android/app/src/main/resources/prompt_scripts.json b/android/app/src/main/resources/prompt_scripts.json
+index 80b9daa1..c86267fe 100644
+--- a/android/app/src/main/resources/prompt_scripts.json
++++ b/android/app/src/main/resources/prompt_scripts.json
+@@ -20,10 +20,6 @@
+    "id": "enhance",
+    "label": "Enhance"
+   },
+-  {
+-   "id": "dressup",
+-   "label": "Dress up"
+-  },
+   {
+    "id": "templates",
+    "label": "Templates"
+@@ -2580,134 +2576,6 @@
+    "updatedAt": null,
+    "updatedBy": null
+   },
+-  {
+-   "id": "dressup",
+-   "group": "dressup",
+-   "title": "Dress up",
+-   "description": "Dress up, one sheet image at a time.",
+-   "format": "lines",
+-   "inputs": [
+-    {
+-     "name": "closeup",
+-     "label": "Face close-up",
+-     "description": "The image is a face close-up (face front, profile or ¾).",
+-     "type": "bool",
+-     "sample": false
+-    },
+-    {
+-     "name": "anchor",
+-     "label": "Dressed front sent",
+-     "description": "The newly dressed front is sent as a third image.",
+-     "type": "bool",
+-     "sample": true
+-    }
+-   ],
+-   "sections": [
+-    {
+-     "id": "prompt",
+-     "label": "Prompt",
+-     "kind": "system",
+-     "pick": "first"
+-    }
+-   ],
+-   "values": [
+-    {
+-     "name": "anchor",
+-     "label": "Anchor sentence",
+-     "prefix": " "
+-    }
+-   ],
+-   "targets": [
+-    {
+-     "id": "prompt",
+-     "label": "Prompt"
+-    },
+-    {
+-     "id": "@anchor",
+-     "label": "Anchor sentence"
+-    }
+-   ],
+-   "vars": [],
+-   "blocks": [
+-    "dress.anchor",
+-    "dress.closeup",
+-    "dress.body"
+-   ],
+-   "rules": [
+-    {
+-     "id": "anchor",
+-     "label": "Match the dressed front",
+-     "target": "@anchor",
+-     "when": [
+-      {
+-       "input": "anchor",
+-       "op": "is",
+-       "value": true
+-      }
+-     ],
+-     "block": "dress.anchor"
+-    },
+-    {
+-     "id": "closeup",
+-     "label": "Face close-up",
+-     "target": "prompt",
+-     "when": [
+-      {
+-       "input": "closeup",
+-       "op": "is",
+-       "value": true
+-      }
+-     ],
+-     "block": "dress.closeup"
+-    },
+-    {
+-     "id": "body",
+-     "label": "Full body",
+-     "target": "prompt",
+-     "when": [],
+-     "block": "dress.body"
+-    }
+-   ],
+-   "defaultRules": [
+-    {
+-     "id": "anchor",
+-     "label": "Match the dressed front",
+-     "target": "@anchor",
+-     "when": [
+-      {
+-       "input": "anchor",
+-       "op": "is",
+-       "value": true
+-      }
+-     ],
+-     "block": "dress.anchor"
+-    },
+-    {
+-     "id": "closeup",
+-     "label": "Face close-up",
+-     "target": "prompt",
+-     "when": [
+-      {
+-       "input": "closeup",
+-       "op": "is",
+-       "value": true
+-      }
+-     ],
+-     "block": "dress.closeup"
+-    },
+-    {
+-     "id": "body",
+-     "label": "Full body",
+-     "target": "prompt",
+-     "when": [],
+-     "block": "dress.body"
+-    }
+-   ],
+-   "overridden": false,
+-   "stale": false,
+-   "updatedAt": null,
+-   "updatedBy": null
+-  },
+   {
+    "id": "lora.candidate",
+    "group": "lora",
+diff --git a/android/app/src/test/kotlin/studio/muse/app/AuditScreenshotTest.kt b/android/app/src/test/kotlin/studio/muse/app/AuditScreenshotTest.kt
+index 28a2da38..d7f0ef21 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/AuditScreenshotTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/AuditScreenshotTest.kt
+@@ -51,7 +51,7 @@ class AuditScreenshotTest(private val theme: String, private val screen: String)
+         val DEMO = listOf(
+             "welcome", "signin", "signup", "home", "gallery", "queue", "settings", "credits", "profile", "create1", "create3", "outfit",
+             "photo", "result", "templates", "template_detail", "posts", "posts_posted", "post", "accounts", "lora", "members", "invite",
+-            "studio_settings", "prompts", "enhance", "dressup", "archived",
++            "studio_settings", "prompts", "enhance", "outfits", "archived",
+         )
+         /** The real API as a new member: nothing made yet. */
+         val EMPTY = listOf("home_empty", "gallery_empty", "queue_empty", "photo_empty", "posts_empty", "templates_empty", "settings_empty", "profile_empty", "credits_empty")
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ModelToolsTest.kt b/android/app/src/test/kotlin/studio/muse/app/ModelToolsTest.kt
+index dd8ab250..95730ffc 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ModelToolsTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ModelToolsTest.kt
+@@ -7,8 +7,7 @@ import org.junit.Assert.assertNull
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ import studio.muse.app.data.DecideRequest
+-import studio.muse.app.data.DressUpFeatures
+-import studio.muse.app.data.DressUpRequest
++import studio.muse.app.data.EnhanceFeatures
+ import studio.muse.app.data.EnhanceRequest
+ import studio.muse.app.data.FakeCatalog
+ import studio.muse.app.data.FakeMuseApi
+@@ -19,7 +18,7 @@ import studio.muse.app.data.Sheet
+ import studio.muse.app.data.ToolRun
+ import studio.muse.app.data.ApiException
+ 
+-/** Model tools in Demo mode (plans/api.md "Model tools"): estimates, Enhance and Dress up review/apply, catalog, archive. */
++/** Model tools in Demo mode (plans/api.md "Model tools"): estimates, Enhance review/apply, catalog, archive (Dress up was removed 2026-11-11). */
+ class ModelToolsTest {
+     @Test fun estimatesMatchTheContract() {
+         // Enhance on the defaults: Krea $0.025 + Clarity's typical $0.018 per image → "7 images · about $0.30".
+@@ -30,9 +29,9 @@ class ModelToolsTest {
+     }
+ 
+     @Test fun memberLabelsNameNoModelsOrProviders() {
+-        val text = DressUpFeatures().options.joinToString { it.label + it.detail }
++        val e = EnhanceFeatures()
++        val text = (e.realism + e.upscale).joinToString { it.label + it.detail }
+         assertFalse(Regex("(?i)qwen|flux|replicate|clarity|krea|gpu").containsMatchIn(text))
+-        assertEquals(listOf("Option A", "Option B", "Both"), DressUpFeatures().options.map { it.label })
+     }
+ 
+     @Test fun sheetHasSevenImages() {
+@@ -50,11 +49,11 @@ class ModelToolsTest {
+         return x
+     }
+ 
+-    @Test fun enhanceAndDressUp() = runTest {
++    @Test fun enhance() = runTest {
+         val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime }, genDelayMs = 40)
+         val est = api.enhanceEstimate(SampleData.DEMO, EnhanceRequest())
+         assertEquals("7 images · about \$0.30", est.label)
+-        var run = api.finish(api.startEnhance(SampleData.DEMO, EnhanceRequest())) { testScheduler.advanceTimeBy(100); testScheduler.runCurrent() }
++        val run = api.finish(api.startEnhance(SampleData.DEMO, EnhanceRequest())) { testScheduler.advanceTimeBy(100); testScheduler.runCurrent() }
+         assertEquals("review", run.state)
+         assertEquals(Sheet.SLOTS.map { it.key }, run.items.map { it.slot })
+         try { api.applyTool(run.id); error("expected bad_request") } catch (e: ApiException) { assertEquals("bad_request", e.code) }
+@@ -63,16 +62,6 @@ class ModelToolsTest {
+         val applied = api.applyTool(run.id)
+         assertEquals("applied", applied.run.state)
+         assertEquals(1, api.sheetVersions(SampleData.DEMO).size)
+-
+-        val d = api.dressUpEstimate(SampleData.DEMO, DressUpRequest(engine = "both"))
+-        assertTrue(d.label.startsWith("7 images · 2 options · about $"))
+-        run = api.finish(api.startDressUp(SampleData.DEMO, DressUpRequest(ImageRef.asset("c_front"), "Silver night", "both"))) { testScheduler.advanceTimeBy(100); testScheduler.runCurrent() }
+-        assertEquals("front", run.items.first().slot)
+-        api.pickTool(run.id, "b")
+-        val res = api.applyTool(run.id)
+-        assertEquals("Silver night", res.outfit!!.name)
+-        assertEquals("dressup", res.outfit!!.mode)
+-        assertTrue(res.model.outfitIds.contains(res.outfit!!.id))
+     }
+ 
+     @Test fun catalogAndArchive() = runTest {
+diff --git a/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt b/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt
+new file mode 100644
+index 00000000..23eba14b
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt
+@@ -0,0 +1,70 @@
++package studio.muse.app
++
++import kotlinx.coroutines.test.runTest
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import studio.muse.app.data.CreateOutfitRequest
++import studio.muse.app.data.FakeMuseApi
++import studio.muse.app.data.ImageRef
++import studio.muse.app.data.Outfit
++import studio.muse.app.data.OutfitPictures
++import studio.muse.app.data.SampleData
++import studio.muse.core.PhotoPrices
++import studio.muse.core.PhotoPricing
++
++/** Outfits with their own face close-ups (plans/outfit-faces.md): the 7 pictures, the viewer's order, prices, the demo. */
++class OutfitFacesTest {
++    private fun ref(n: String) = ImageRef.asset(n)
++
++    @Test fun sevenPicturesInOrderBodyThenFaces() {
++        val o = Outfit("o", "m", "Linen shirt", angles = listOf(ref("f"), ref("t"), ref("s"), ref("b")), faces = listOf(ref("ff"), ref("ft"), ref("fs")))
++        assertEquals(listOf("f", "t", "s", "b", "ff", "ft", "fs"), OutfitPictures.all(o).map { it?.asset })
++        assertEquals(listOf("Front", "¾", "Side", "Back", "Face front", "Face ¾", "Face side"), OutfitPictures.LABELS)
++        assertEquals(listOf("front", "tq", "side", "back", "face", "faceTq", "profile"), OutfitPictures.KEYS)
++        assertEquals((0 until 7).toList(), OutfitPictures.shown(OutfitPictures.all(o)).map { it.first })
++        assertEquals(6, OutfitPictures.pageOf(OutfitPictures.all(o), 6)) // "Face side · 7 of 7"
++    }
++
++    @Test fun viewerSkipsMissingPictures() {
++        // An older outfit: no faces at all, and its side came back empty.
++        val old = Outfit("o", "m", "Green set", angles = listOf(ref("f"), ref("t"), null, ref("b")))
++        val all = OutfitPictures.all(old)
++        assertEquals(7, all.size)
++        assertEquals(listOf(0, 1, 3), OutfitPictures.shown(all).map { it.first })
++        assertEquals(2, OutfitPictures.pageOf(all, 3)) // the back is the 3rd page
++        assertTrue(OutfitPictures.noFaces(old))
++        // A face ¾ that failed: the face side is 6 of 6.
++        val partial = old.copy(angles = listOf(ref("f"), ref("t"), ref("s"), ref("b")), faces = listOf(ref("ff"), null, ref("fs")))
++        assertEquals(listOf(0, 1, 2, 3, 4, 6), OutfitPictures.shown(OutfitPictures.all(partial)).map { it.first })
++        assertEquals(5, OutfitPictures.pageOf(OutfitPictures.all(partial), 6))
++        assertEquals(2, OutfitPictures.madeFaces(partial))
++    }
++
++    @Test fun pricesIncludeTheFaces() {
++        val p = PhotoPrices()
++        assertEquals(PhotoPricing.outfitSet(p) + 3 * p.perEdit, OutfitPictures.createEstimate(p, "describe", keeping = false), 1e-9)
++        assertEquals(PhotoPricing.outfitSet(p) + 3 * p.perEdit, OutfitPictures.createEstimate(p, "photo", keeping = false), 1e-9)
++        assertEquals(7 * p.perEdit, OutfitPictures.createEstimate(p, "describe", keeping = true), 1e-9)
++        assertEquals(3 * p.perEdit, OutfitPictures.createEstimate(p, "own", keeping = false), 1e-9)
++        assertEquals(0.09, OutfitPictures.facesEstimate(p, Outfit("o", "m", "x")), 1e-9)
++        assertEquals(p.perEdit, OutfitPictures.redoEstimate(p, 5), 1e-9)
++        assertEquals(PhotoPricing.newShot(p, 1.0, p.maxRefs), OutfitPictures.redoEstimate(p, 0), 1e-9)
++    }
++
++    @Test fun demoMakesFacesAddsThemAndRedoes() = runTest {
++        val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime }, genDelayMs = 0)
++        // A new outfit comes with its 3 face close-ups.
++        val o = api.createOutfit(CreateOutfitRequest(SampleData.DEMO, "Linen shirt", "describe", "White linen shirt"))
++        testScheduler.advanceTimeBy(1_000); testScheduler.runCurrent()
++        val made = api.listOutfits().first { it.id == o.id }
++        assertEquals(7, OutfitPictures.shown(OutfitPictures.all(made)).size)
++        // An older outfit: Add face close-ups makes the 3 for 3 edits.
++        val r = api.addOutfitFaces(SampleData.CRYSTAL)
++        assertEquals(3 * PhotoPrices().perEdit, r.cost, 1e-9)
++        testScheduler.advanceTimeBy(1_000); testScheduler.runCurrent()
++        assertEquals(3, OutfitPictures.madeFaces(api.listOutfits().first { it.id == SampleData.CRYSTAL }))
++        // Redo one face: one edit.
++        assertEquals(PhotoPrices().perEdit, api.redoOutfit(SampleData.CRYSTAL, "faceTq").cost, 1e-9)
++    }
++}
+diff --git a/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt b/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
+index 3b2c9ad8..91142f1a 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
+@@ -299,14 +299,13 @@ class RealApiContractTest {
+         expectCode("upscale_unavailable") { owner.upscale("t_j1", "2k") }
+     }
+ 
+-    /** Model tools (plans/api.md "Model tools") on the real server with simulated images: Enhance, Dress up, review, apply, archive. */
++    /** Model tools (plans/api.md "Model tools") on the real server with simulated images: Enhance, review, apply, archive; Dress up is gone (410). */
+     @Test fun modelTools(): Unit = runBlocking {
+         val owner = HttpMuseApi(base)
+         owner.setToken(owner.signIn(SignInRequest("jen@studio.com", "x")).token)
+         val demo = owner.listModels().first { it.id == SampleData.DEMO }
+         assertEquals(studio.muse.app.data.Sheet.KEYS, demo.slots.map { it.key })
+-        val tools = owner.studioSettings().features.tools!!
+-        assertEquals(listOf("Option A", "Option B", "Both"), tools.dressUp.options.map { it.label })
++        assertTrue(owner.studioSettings().features.tools != null)
+         val est = owner.enhanceEstimate(demo.id, studio.muse.app.data.EnhanceRequest())
+         assertEquals(7, est.images); assertEquals("7 images · about \$0.30", est.label)
+         var run = owner.startEnhance(demo.id, studio.muse.app.data.EnhanceRequest(upscale = "off"))
+@@ -317,12 +316,8 @@ class RealApiContractTest {
+         val applied = owner.applyTool(run.id)
+         assertEquals("applied", applied.run.state)
+         assertEquals(1, owner.sheetVersions(demo.id).size)
+-        var dress = owner.startDressUp(demo.id, studio.muse.app.data.DressUpRequest(studio.muse.app.data.ImageRef.asset("c_front"), "Silver night", "both"))
+-        while (dress.state == "running") { check(System.currentTimeMillis() < deadline + 20_000); kotlinx.coroutines.delay(100); dress = owner.toolRun(dress.id) }
+-        assertEquals(listOf("a", "b"), dress.engines)
+-        owner.pickTool(dress.id, "b")
+-        val outfit = owner.applyTool(dress.id).outfit!!
+-        assertEquals("dressup", outfit.mode); assertEquals(3, outfit.faces!!.size)
++        // Dress up was removed (plans/outfit-faces.md): every outfit now has its own face close-ups.
++        expectCode("dress_up_removed") { owner.startDressUp(demo.id, studio.muse.app.data.DressUpRequest(studio.muse.app.data.ImageRef.asset("c_front"), "Silver night", "both")) }
+         // Image models: the owner sees six steps (simulated server: no catalog).
+         assertEquals(studio.muse.app.data.Sheet.STEPS, owner.imageModels().steps.map { it.step })
+         // Archive: hidden from the list, listed as archived, back again.
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt b/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
+index 502e9403..eb13270b 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
+@@ -76,8 +76,10 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+             // Video options (app clean-up): Render (Draft default, HD) and the Edit add-on (no steps, no start-up), Upscale coming soon on a take.
+             "quality_draft", "quality_hd", "quality_edit", "result_upscale",
+             // Model tools (plans/api.md "Model tools"): the owner's image models and catalog picker, Enhance setup and review,
+-            // Dress up setup and the Both side-by-side review, archived models.
+-            "image_models", "catalog", "enhance_setup", "enhance_review", "dressup_setup", "dressup_review", "archived",
++            // archived models. (Dress up was removed 2026-11-11.)
++            "image_models", "catalog", "enhance_setup", "enhance_review", "archived",
++            // Outfit face close-ups (plans/outfit-faces.md): an open outfit with its 7 pictures, and an older one without faces.
++            "outfit_open_faces", "outfit_open_nofaces",
+             // The prompt library (2026-11-05): owner Settings → Prompts and one prompt's editor. (Photoshoot's screens moved to the Photo tool: SuitePhotoScreenshotTest.)
+             "prompts", "prompt_edit",
+         )
+@@ -177,7 +179,10 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+                     createdAt = System.currentTimeMillis(), videoUrl = "/uploads/r/j/take_1.mp4", durationSec = 6.4, width = 768, height = 1344))
+             }
+             "catalog" -> { c.drafts.catalogStep.value = "upscale"; c.drafts.catalogFor.value = "settings" }
+-            "dressup_setup" -> c.drafts.dressUp.value = studio.muse.app.data.DressUpDraft(ImageRef.asset("c_front"), "Silver night", "both")
++            "outfit_open_faces" -> runBlocking {
++                val o = fake.listOutfits().first { it.id == SampleData.GREEN }
++                fake.debugPutOutfit(o.copy(faces = listOf("face", "c_face", "profile").map(ImageRef::asset)))
++            }
+             "archived" -> runBlocking { fake.archiveModel(SampleData.NOOR, true) }
+             "queue_run" -> runBlocking {
+                 val req = JobRequest("Living-room dance", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP)
+@@ -187,10 +192,9 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+                     p.phase, p.secondsLeft, total, Pricing.totalCost(req.spec()), createdAt = System.currentTimeMillis(), thumb = studio.muse.app.data.ImageRef.asset("g_front")))
+             }
+         }
+-        // Enhance / Dress up review: start a run on the demo engine and let it finish (it returns the sheet's own stills).
++        // Enhance review: start a run on the demo engine and let it finish (it returns the sheet's own stills).
+         val toolRun = when (screen) {
+             "enhance_review" -> runBlocking { fake.startEnhance(SampleData.DEMO, studio.muse.app.data.EnhanceRequest()) }
+-            "dressup_review" -> runBlocking { fake.startDressUp(SampleData.DEMO, studio.muse.app.data.DressUpRequest(ImageRef.asset("c_front"), "Silver night", "both")) }
+             else -> null
+         }
+         if (toolRun != null) {
+@@ -198,23 +202,17 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+             runBlocking {
+                 val r = fake.toolRun(toolRun.id)
+                 check(r.state == "review") { "run still ${r.state}" }
+-                if (screen == "enhance_review") {
+-                    fake.decideTool(r.id, "face", studio.muse.app.data.DecideRequest("keep"))
+-                    fake.decideTool(r.id, "back", studio.muse.app.data.DecideRequest("reject"))
+-                } else {
+-                    fake.pickTool(r.id, "a")
+-                    fake.decideTool(r.id, "front", studio.muse.app.data.DecideRequest("keep", "b"))
+-                }
++                fake.decideTool(r.id, "face", studio.muse.app.data.DecideRequest("keep"))
++                fake.decideTool(r.id, "back", studio.muse.app.data.DecideRequest("reject"))
+                 c.repo.putTool(fake.toolRun(r.id))
+             }
+-            if (screen == "enhance_review") c.drafts.enhance.value = studio.muse.app.data.EnhanceDraft(runId = toolRun.id)
+-            else c.drafts.dressUp.value = studio.muse.app.data.DressUpDraft(ImageRef.asset("c_front"), "Silver night", "both", runId = toolRun.id)
++            c.drafts.enhance.value = studio.muse.app.data.EnhanceDraft(runId = toolRun.id)
+         }
+         val route = when (screen) {
+             "image_models" -> Routes.IMAGE_MODELS
+             "catalog" -> Routes.CATALOG
+             "enhance_setup", "enhance_review" -> Routes.ENHANCE
+-            "dressup_setup", "dressup_review" -> Routes.DRESSUP
++            "outfit_open_faces", "outfit_open_nofaces" -> Routes.HOME
+             "archived" -> Routes.ARCHIVED
+             "prompts" -> Routes.PROMPTS
+             "prompt_edit" -> Routes.SETTINGS
+@@ -241,7 +239,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+         val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "result_upscale" -> Routes.result("t_up"); "post", "post_schedule" -> Routes.post("t_j1")
+             "template_detail", "template_edit" -> Routes.template("tpl_mirror-selfie"); "template_detail_other" -> Routes.template("tpl_maya_walk")
+             "template_use" -> Routes.templateUse("tpl_mirror-selfie"); "template_use_prompt" -> Routes.templateUse("tpl_maya_walk")
+-            "save_template" -> Routes.saveTemplate("t_g4"); "prompt_edit" -> Routes.prompt("refs.pose"); else -> null }
++            "save_template" -> Routes.saveTemplate("t_g4"); "prompt_edit" -> Routes.prompt("refs.pose")
++            "outfit_open_faces" -> Routes.outfitView(SampleData.GREEN); "outfit_open_nofaces" -> Routes.outfitView(SampleData.CRYSTAL); else -> null }
+         compose.setContent { MuseApp(c, route, pending) }
+         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
+         idle()
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt b/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
+index a54fb08f..fcf1f9e5 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
+@@ -127,7 +127,7 @@ class ShootReferencesTest {
+         val lib = api.prompts()
+         assertEquals(FakePromptLibrary.DEFAULTS.prompts.size, lib.prompts.size)
+         assertTrue(lib.prompts.size >= 52)
+-        assertEquals(listOf("Photo", "References", "Character sheet", "Outfits", "Enhance", "Dress up", "Templates", "Video", "LoRA", "AI suite"), lib.groups.map { it.label }) // + AI suite (workstream 1)
++        assertEquals(listOf("Photo", "References", "Character sheet", "Outfits", "Enhance", "Templates", "Video", "LoRA", "AI suite"), lib.groups.map { it.label }) // + AI suite (workstream 1)
+         val pose = lib.prompts.first { it.key == "refs.pose" }
+         assertEquals("Copy the pose and framing from image {refIndex}.", pose.current)
+         assertTrue(pose.placeholders.single().required)
