@@ -118,7 +118,7 @@ struct Shell: View {
                 TitleBar()
                 HStack(spacing: 0) {
                     // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
-                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
+                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor || (store.screen == .suite && store.oneClaude.open))
                     ScreenHost()
                     // One Claude (plans/one-claude.md): the same Claude on every page, its chat following the person.
                     if store.oneClaude.open && store.user != nil {
