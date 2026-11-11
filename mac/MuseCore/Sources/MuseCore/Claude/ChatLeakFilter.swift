@@ -213,7 +213,8 @@ public enum ChatLeakFilter {
                 s = replace(pathRe, in: s) { m in
                     // A full stop or comma after the path is the sentence's, not the file's.
                     let tail = String(m.reversed().prefix { ".,;:!?".contains($0) }.reversed())
-                    return fileName(String(m.dropLast(tail.count))) + tail
+                    let path = String(m.dropLast(tail.count))
+                    return (showsPath(path) ? path : fileName(path)) + tail
                 }
             }
             s = replace(uuidRe, in: s) { _ in "" }
@@ -226,13 +227,23 @@ public enum ChatLeakFilter {
         return lines.joined(separator: "\n")
     }
 
+    /// The person's own file on their own Mac is shown as its real path (it's how they find it; their chats are theirs
+    /// alone, phone included). MUSE's own folders (caches, run folders, token files), id-named files and anything that
+    /// looks like a key stay hidden.
+    static func showsPath(_ path: String) -> Bool {
+        guard path.hasPrefix("~/") || path.hasPrefix("/Users/") || path.hasPrefix("/Volumes/") else { return false }
+        let internal = ["/Library/Caches/", "/MUSE/Claude/", "/MUSE/CameraSessions/", "/Library/Application Support/", "/Library/Containers/", "/.claude", "/.mcp-"]
+        if internal.contains(where: { path.contains($0) }) || ClaudeFilePolicy.isSecret(path) { return false }
+        return fileName(path) != "a file on this Mac"
+    }
+
     /// A path shown as its file name when that reads as a name ("Final cut.mp4"), else "a file on this Mac".
     private static func fileName(_ path: String) -> String {
         let last = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? ""
         let stem = (last as NSString).deletingPathExtension
         let ext = (last as NSString).pathExtension
         let idLike = stem.range(of: #"^(?:[a-z]{1,8}_)+[A-Za-z0-9]*\d|^[0-9a-fA-F-]{12,}$|^\d+$"#, options: .regularExpression) != nil
-        if last.isEmpty || ext.isEmpty || idLike || stem.count > 48 { return "a file on this Mac" }
+        if last.isEmpty || ext.isEmpty || idLike || stem.count > 48 || stem.hasPrefix(".") || ClaudeFilePolicy.isSecret(path) { return "a file on this Mac" }
         return last
     }
 

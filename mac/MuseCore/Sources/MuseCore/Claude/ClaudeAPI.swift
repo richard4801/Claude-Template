@@ -59,6 +59,8 @@ public protocol ClaudeAPI: Sendable {
     /// Files on this Mac: Claude Code's questions waiting for this person, and their answer.
     func pendingPermissions() async throws -> [ClaudePermissionAsk]
     func answerPermission(_ id: String, allow: Bool, message: String?) async throws
+    /// upload_local_file: the person said yes and the Mac uploaded the file.
+    func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -80,6 +82,7 @@ public extension ClaudeAPI {
     func setDefaultModel(_ model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
     func pendingPermissions() async throws -> [ClaudePermissionAsk] { [] }
     func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
+    func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws { throw ApiError("not_found", "This server can't take uploads from Claude yet") }
 }
 
 enum ClaudeIds {
@@ -213,6 +216,10 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         return list.asks
     }
     private struct PermissionAnswer: Encodable { var allow: Bool; var message: String? }
+    private struct UploadAnswer: Encodable { var allow = true; var result: ClaudeLocalUpload }
+    public func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws {
+        _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(UploadAnswer(result: result))))
+    }
     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))
     }

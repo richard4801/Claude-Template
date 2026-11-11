@@ -85,6 +85,23 @@ extension HTTPClaudeAPI: ClaudeVideoUploading {
     }
 }
 
+/// upload_local_file: an image from the Mac, uploaded the chat's way (presign, PUT, confirm; the server strips its metadata).
+public protocol ClaudeImageUploading: Sendable {
+    func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment
+}
+extension HTTPClaudeAPI: ClaudeImageUploading {
+    public func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment {
+        let http = HTTPMuseAPI(baseURL: baseURL)
+        if let tok = currentToken { await http.setToken(tok) }
+        return try await http.uploadClaudeImage(name: name, data: data, mime: mime)
+    }
+}
+extension FakeClaudeAPI: ClaudeImageUploading {
+    public func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment {
+        ClaudeAttachment(uploadId: "up_" + shortId(), mimeType: mime, bytes: data.count)
+    }
+}
+
 /// Demo mode: nothing leaves this Mac; the video gets a made-up upload id.
 extension FakeClaudeAPI: ClaudeVideoUploading {
     public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment {

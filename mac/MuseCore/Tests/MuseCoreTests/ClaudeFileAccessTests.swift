@@ -75,6 +75,20 @@ final class ClaudeFileAccessTests: XCTestCase {
         }
     }
 
+    func testUploadAsksWithTheFileNameAndTakesOnlyImagesAndVideos() {
+        guard case .ask(let c) = ClaudeFilePolicy.verdict(ask("Upload", ["file_path": .string("~/Shoot/layout_A_house.png"), "purpose": .string("reference")]),
+                                                          mode: .ask, folders: [], cwd: cwd, home: home) else { return XCTFail() }
+        XCTAssertEqual(c.action, "Upload layout_A_house.png to MUSE")
+        XCTAssertEqual(c.detail, "/Users/me/Shoot/layout_A_house.png")
+        XCTAssertEqual(c.folder, "/Users/me/Shoot")
+        XCTAssertEqual(ClaudeFilePolicy.verdict(ask("Upload", ["file_path": .string("/Users/me/Shoot/b.MOV")]), mode: .ask, folders: ["/Users/me/Shoot"], cwd: cwd, home: home), .allow)
+        XCTAssertEqual(ClaudeFilePolicy.verdict(ask("Upload", ["file_path": .string("/Users/me/notes.txt")]), mode: .ask, folders: [], cwd: cwd, home: home), .deny(ClaudeFilePolicy.uploadRefusal))
+        XCTAssertEqual(ClaudeFilePolicy.verdict(ask("Upload", ["file_path": .string("/Users/me/.ssh/id_rsa.png")]), mode: .ask, folders: ["/"], cwd: cwd, home: home), .deny(ClaudeFilePolicy.credentialRefusal))
+        XCTAssertEqual(ClaudeFilePolicy.uploadType("a.heic")?.mime, "image/heic")
+        XCTAssertEqual(ClaudeFilePolicy.uploadType("a.mov")?.video, true)
+        XCTAssertNil(ClaudeFilePolicy.uploadType("a.txt"))
+    }
+
     func testOffRefusesEverything() {
         XCTAssertEqual(ClaudeFilePolicy.verdict(ask("Read", ["file_path": .string("/Users/me/a.txt")]), mode: .off, folders: ["/"], cwd: cwd, home: home), .deny(ClaudeFilePolicy.offRefusal))
     }

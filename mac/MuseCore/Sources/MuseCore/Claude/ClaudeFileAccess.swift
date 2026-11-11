@@ -92,7 +92,18 @@ public enum ClaudeFilePolicy {
     public static let offRefusal = "Files on this Mac are off for Claude (Settings → Claude)."
 
     /// The tools a file-enabled run lets Claude ask for (Web stays off).
-    public static let fileTools: Set<String> = ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "Bash"]
+    public static let fileTools: Set<String> = ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "Bash", "Upload"]
+    /// upload_local_file: what can go up (the chat's own limits).
+    public static let uploadImageTypes = SuiteClaudeAttachments.extensions
+    public static let uploadVideoTypes: [String: String] = ["mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime"]
+    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB) and videos (MP4, MOV, up to 500 MB) can be uploaded."
+    /// The upload type of a file name, or nil.
+    public static func uploadType(_ path: String) -> (mime: String, video: Bool)? {
+        let ext = (path as NSString).pathExtension.lowercased()
+        if let m = uploadImageTypes[ext] { return (m, false) }
+        if let m = uploadVideoTypes[ext] { return (m, true) }
+        return nil
+    }
     static let writeTools: Set<String> = ["Write", "Edit", "MultiEdit"]
 
     private static let secretDirs = [".ssh", ".aws", ".gnupg", ".kube", ".docker", ".claude", ".password-store", "Keychains"]
@@ -175,6 +186,7 @@ public enum ClaudeFilePolicy {
         let path = resolve(raw, cwd: cwd, home: home)
         if isSecret(path) { return .deny(credentialRefusal) }
         if tool == "Glob" || tool == "Grep", let pat = str(ask.input, "pattern"), isSecret(pat) || mentionsSecret(pat) { return .deny(credentialRefusal) }
+        if tool == "Upload", uploadType(path) == nil { return .deny(uploadRefusal) }
         let isFile = !(tool == "Glob" || tool == "Grep" || tool == "LS")
         let folder = isFile ? (path as NSString).deletingLastPathComponent : path
         if folders.contains(where: { inside(path, $0) }) { return .allow }
@@ -184,6 +196,7 @@ public enum ClaudeFilePolicy {
         case "Write": action = "Write a file"
         case "Edit", "MultiEdit": action = "Change a file"
         case "Grep": action = "Search inside files"
+        case "Upload": action = "Upload \((path as NSString).lastPathComponent) to MUSE"
         default: action = "List a folder"
         }
         var detail = path
@@ -208,4 +221,18 @@ public enum ClaudePermissionAnswer: Hashable, Sendable {
     case allowOnce
     case alwaysFolder(String)
     case deny
+}
+
+/// What upload_local_file's Mac side sends back once the file is up.
+public struct ClaudeLocalUpload: Codable, Hashable, Sendable {
+    public var uploadId: String
+    public var kind: String
+    public var url: String?
+    public var name: String?
+    public init(uploadId: String, kind: String, url: String? = nil, name: String? = nil) {
+        self.uploadId = uploadId
+        self.kind = kind
+        self.url = url
+        self.name = name
+    }
 }

@@ -409,9 +409,17 @@ final class ClaudeCodeService: ObservableObject {
         guard let api, !fileAsks.contains(where: { $0.id == a.id }) else { return }
         // Only the Mac running that turn answers (each of the person's Macs hears the question).
         let tid = a.toolUseId.flatMap { toolThreads[$0] } ?? relayState.running.first { !$0.value.fromPhone }?.key
-        guard let tid else { return }
+        guard let tid else {
+            // A phone turn running here has nobody at the Mac to answer: say so at once instead of waiting.
+            if relayState.running.values.contains(where: { $0.fromPhone }) {
+                try? await api.answerPermission(a.id, allow: false, message: "Files on the Mac need you at the Mac: ask again from MUSE on your Mac.")
+            }
+            return
+        }
         let cwd = ClaudeTurnRunner.defaultRoot.appendingPathComponent(tid, isDirectory: true).path
         switch ClaudeFilePolicy.verdict(a, mode: fileSettings.mode, folders: fileSettings.folders(chatId: tid), cwd: cwd, home: NSHomeDirectory()) {
+        case .allow where a.toolName == "Upload":
+            await uploadLocal(a, cwd: cwd)
         case .allow:
             try? await api.answerPermission(a.id, allow: true, message: nil)
         case .deny(let why):
@@ -436,7 +444,43 @@ final class ClaudeCodeService: ObservableObject {
         let allow: Bool
         if case .deny = answer { allow = false } else { allow = true }
         guard let api else { return }
+        if allow, a.ask.toolName == "Upload" {
+            let cwd = ClaudeTurnRunner.defaultRoot.appendingPathComponent(a.threadId ?? "", isDirectory: true).path
+            Task { await uploadLocal(a.ask, cwd: cwd) }
+            return
+        }
         Task { try? await api.answerPermission(id, allow: allow, message: allow ? nil : "The person said no.") }
+    }
+
+    /// upload_local_file, after the yes: the file goes up the chat's way (an image: presign, PUT, confirm, so the server
+    /// strips its metadata; a video as a clip with its length and size), and the upload goes back to Claude.
+    private func uploadLocal(_ a: ClaudePermissionAsk, cwd: String) async {
+        guard let api else { return }
+        var raw = ""
+        if case .object(let o)? = a.input, case .string(let p)? = o["file_path"] { raw = p }
+        let path = ClaudeFilePolicy.resolve(raw, cwd: cwd, home: NSHomeDirectory())
+        let url = URL(fileURLWithPath: path)
+        let name = url.lastPathComponent
+        func fail(_ why: String) async { try? await api.answerPermission(a.id, allow: false, message: why) }
+        guard !ClaudeFilePolicy.isSecret(path) else { return await fail(ClaudeFilePolicy.credentialRefusal) }
+        guard let type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue
+        guard let size else { return await fail("There's no file at \(path).") }
+        do {
+            let att: ClaudeAttachment
+            if type.video {
+                guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(url) else { return await fail("That video can't be read.") }
+                att = try await up.uploadClaudeVideo(url, meta: info.meta(name: name), contentType: type.mime, progress: nil)
+            } else {
+                guard size <= SuiteClaudeAttachments.maxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard let up = api as? any ClaudeImageUploading else { return await fail("This server can't take images from Claude yet.") }
+                att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
+            }
+            try await api.finishUpload(a.id, ClaudeLocalUpload(uploadId: att.uploadId, kind: type.video ? "clip" : "image", url: att.url, name: name))
+        } catch {
+            await fail("Couldn't upload \(name): \((error as? ApiError)?.message ?? error.localizedDescription)")
+        }
     }
 
     /// A stopped or finished turn: its open cards end as a no (nothing is done without an answer).
