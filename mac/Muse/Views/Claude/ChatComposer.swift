@@ -308,7 +308,12 @@ struct ChatComposerBar: View {
     @State private var focus = 0
     @State private var focused = false
 
+    /// Claude's own chat box: Claude never types or sends here through the window (MuseCore UiRefusal "claude.chat").
     var body: some View {
+        content.accessibilityElement(children: .contain).accessibilityIdentifier("claude.chat.composer")
+    }
+
+    private var content: some View {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let canSend = !empty && !held && !busy
         let font = Fonts.nsFont(t.scale.textFamily, t.scale.body.size, .regular) ?? NSFont.systemFont(ofSize: t.scale.body.size)

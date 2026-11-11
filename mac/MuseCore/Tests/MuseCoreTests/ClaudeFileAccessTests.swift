@@ -91,7 +91,7 @@ final class ClaudeFileAccessTests: XCTestCase {
 
     func testTheAppSaysItCanAnswerFileQuestions() {
         let api = HTTPClaudeAPI(baseURL: URL(string: "https://muse.example")!, token: { "t" })
-        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results")
+        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results,ui")
     }
 
     func testOffRefusesEverything() {

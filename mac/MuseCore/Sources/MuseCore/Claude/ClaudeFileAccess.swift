@@ -33,11 +33,14 @@ public struct ClaudeFileSettings: Codable, Hashable, Sendable {
     public var folders: [ClaudeAllowedFolder] = []
     /// When results arrive (nil = the default: Claude looks and tells).
     public var results: ClaudeResultMode?
+    /// "Let Claude operate MUSE's screen" (nil = the default: on).
+    public var uiControl: Bool?
     public init(mode: ClaudeFileMode = .ask, folders: [ClaudeAllowedFolder] = []) {
         self.mode = mode
         self.folders = folders
     }
     public var resultMode: ClaudeResultMode { results ?? .look }
+    public var uiOn: Bool { uiControl ?? true }
 
     public func folders(chatId: String) -> [String] { folders.filter { $0.chatId == chatId }.map(\.folder) }
 

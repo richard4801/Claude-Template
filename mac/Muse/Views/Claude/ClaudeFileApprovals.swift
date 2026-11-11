@@ -72,6 +72,13 @@ struct ClaudeFileSettingsSection: View {
             }
             .labelsHidden().pickerStyle(.menu).fixedSize()
         }
+        SettingRow("Let Claude operate MUSE's screen", hint: s.uiOn
+                   ? "When no MUSE tool covers what you asked, Claude can press, type and pick in this window (never other apps). A ring shows what it touches; press Esc to stop it. Keys, prices, sign-out, payments and deletes stay yours."
+                   : "Claude uses MUSE's own tools only and tells you what to press") {
+            Toggle("Let Claude operate MUSE's screen", isOn: Binding(get: { s.uiOn }, set: { service.setUiControl($0) }))
+                .labelsHidden().toggleStyle(.switch)
+                .accessibilityIdentifier("settings.claude.uiControl")
+        }
         if !s.folders.isEmpty {
             Text("Always allowed").scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s3)
             ForEach(s.folders) { f in

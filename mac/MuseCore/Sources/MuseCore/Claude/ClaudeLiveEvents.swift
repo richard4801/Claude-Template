@@ -21,6 +21,9 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
     case permissionEnd(id: String)
     /// Something started from a chat finished (results arrive in the chat).
     case result(ClaudeJobResult)
+    /// Claude operates the MUSE window (ui_snapshot / ui_act / ui_wait), and the call ended (another Mac did it, or timed out).
+    case uiCall(UiCall)
+    case uiCallEnd(id: String)
 }
 
 /// SSE lines → `claude` live events; everything else on the stream is ignored.
@@ -49,8 +52,9 @@ public struct ClaudeLiveEventFilter: Sendable {
         var ask: ClaudePermissionAsk?
         var id: String?
         var result: ClaudeJobResult?
+        var call: UiCall?
 
-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result }
+        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: K.self)
             type = try c.decode(String.self, forKey: .type)
@@ -67,6 +71,7 @@ public struct ClaudeLiveEventFilter: Sendable {
             ask = try? c.decodeIfPresent(ClaudePermissionAsk.self, forKey: .ask)
             id = try? c.decodeIfPresent(String.self, forKey: .id)
             result = try? c.decodeIfPresent(ClaudeJobResult.self, forKey: .result)
+            call = try? c.decodeIfPresent(UiCall.self, forKey: .call)
         }
     }
 
@@ -91,6 +96,8 @@ public struct ClaudeLiveEventFilter: Sendable {
         case "permission": return e.ask.map { .permission($0) }
         case "permission_end": return e.id.map { .permissionEnd(id: $0) }
         case "result": return e.result.map { .result($0) }
+        case "uiCall": return e.call.map { .uiCall($0) }
+        case "uiCallEnd": return e.id.map { .uiCallEnd(id: $0) }
         default: return nil
         }
     }

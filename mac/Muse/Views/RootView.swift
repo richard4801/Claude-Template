@@ -202,6 +202,7 @@ struct TitleBar: View {
             }
             .buttonStyle(.plain)
             .help("Search or jump to a screen (⌘K)")
+            .accessibilityIdentifier("titlebar.search")
             .layoutPriority(1)
             Spacer(minLength: 12)
             HStack(spacing: 10) {
@@ -396,6 +397,7 @@ struct NavRow: View {
         .buttonStyle(.plain)
         .help(compact ? title : "")
         .accessibilityLabel(title)
+        .accessibilityIdentifier("nav.\(UiTree.slug(title))") // Claude finds the sidebar by these (ui_snapshot)
         .accessibilityAddTraits(on ? .isSelected : [])
         .onHover { hover = $0 }
     }
