@@ -52,6 +52,10 @@ public protocol ClaudeAPI: Sendable {
     func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule
     func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule
     func deleteMemory(_ id: String) async throws
+    /// Step 6b: the models, this person's default; a chat's model; this person's default.
+    func claudeModels() async throws -> ClaudeModelList
+    func setChatModel(_ id: String, model: String?) async throws
+    func setDefaultModel(_ model: String?) async throws
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -68,6 +72,9 @@ public extension ClaudeAPI {
     func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
     func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
     func deleteMemory(_ id: String) async throws { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func claudeModels() async throws -> ClaudeModelList { throw ApiError("not_found", "This server has no model choice yet") }
+    func setChatModel(_ id: String, model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
+    func setDefaultModel(_ model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
 }
 
 enum ClaudeIds {
@@ -179,6 +186,23 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
     public func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule {
         try await call("PATCH", "v1/claude/memory/\(try ClaudeIds.check(id))", MemoryPin(pinned: pinned))
+    }
+    private struct ModelPatch: Encodable {
+        var model: String?
+        func encode(to e: Encoder) throws { var c = e.container(keyedBy: K.self); try c.encode(model, forKey: .model) } // null clears
+        enum K: String, CodingKey { case model }
+    }
+    private struct PrefsPut: Encodable {
+        var defaultModel: String?
+        func encode(to e: Encoder) throws { var c = e.container(keyedBy: K.self); try c.encode(defaultModel, forKey: .defaultModel) }
+        enum K: String, CodingKey { case defaultModel }
+    }
+    public func claudeModels() async throws -> ClaudeModelList { try await call("GET", "v1/claude/models") }
+    public func setChatModel(_ id: String, model: String?) async throws {
+        _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(ModelPatch(model: model))))
+    }
+    public func setDefaultModel(_ model: String?) async throws {
+        _ = try await send(request("PUT", "v1/claude/prefs", body: try encoder.encode(PrefsPut(defaultModel: model))))
     }
     public func deleteMemory(_ id: String) async throws {
         _ = try await send(request("DELETE", "v1/claude/memory/\(try ClaudeIds.check(id))"))

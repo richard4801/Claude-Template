@@ -130,7 +130,15 @@ public actor ClaudeRelay {
     public func remember(threadId: String, claudeSessionId: String?, brief: ClaudeBrief? = nil) {
         if let s = claudeSessionId, !s.isEmpty { sessions[threadId] = s }
         if let p = brief?.systemPrompt { briefs[threadId] = p }
+        if let brief { models[threadId] = brief.model ?? "" }
     }
+
+    /// Step 6b: each chat's own model ("" = none: the person's default), and the person's default.
+    private var models: [String: String] = [:]
+    private var defaultModel: String?
+    public func setDefaultModel(_ m: String?) { defaultModel = m }
+    public func setModel(threadId: String, _ m: String?) { models[threadId] = m ?? "" }
+    func model(threadId: String) -> String? { models[threadId].flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel }
 
     /// The thread's brief as a system prompt (recreate and edit threads); "" = looked up, none.
     private var briefs: [String: String] = [:]
@@ -231,10 +239,12 @@ public actor ClaudeRelay {
         if sessions[tid] == nil || briefs[tid] == nil, let d = try? await api.threadDetail(tid) {
             if sessions[tid] == nil, let s = d.thread.claudeSessionId, !s.isEmpty { sessions[tid] = s }
             briefs[tid] = d.thread.brief?.systemPrompt ?? ""
+            models[tid] = d.thread.brief?.model ?? ""
         }
         var req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: ClaudeAttachmentPrompt.text(job.text, images), resume: sessions[tid],
                                    blender: await blender(), systemPrompt: systemPrompt(threadId: tid))
         req.shownText = job.text
+        req.model = model(threadId: tid)
         req.uploadIds = job.files.map(\.uploadId).filter { !$0.isEmpty }
         if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }
         let onEvent = self.onEvent

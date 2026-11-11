@@ -28,6 +28,8 @@ public struct ClaudeCommand: Hashable, Sendable {
     public var appendSystemPrompt: String?
     /// The folder of the turn's attached images: Claude Code may Read there (and nowhere else).
     public var readDirectory: String?
+    /// Step 6b: the Claude model for this chat (`--model`); nil = Claude Code's own default.
+    public var model: String?
 
     public init(mcpURL: String, token: String, blender: Blender? = nil, resume: String? = nil, appendSystemPrompt: String? = nil) {
         self.mcpURL = mcpURL
@@ -38,6 +40,11 @@ public struct ClaudeCommand: Hashable, Sendable {
     }
 
     public static let disallowed = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+
+    /// A model id as the server lists them (`claude-opus-5-5`): letters, digits and dashes only.
+    public static func validModel(_ m: String) -> Bool {
+        !m.isEmpty && m.count <= 60 && m.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+    }
 
     /// The arguments after the executable. `configPath` is the mcp config file written for this run.
     public func arguments(configPath: String) -> [String] {
@@ -51,6 +58,7 @@ public struct ClaudeCommand: Hashable, Sendable {
         a += ["--permission-mode", "dontAsk", "--setting-sources", "user"]
         if let p = appendSystemPrompt, !p.isEmpty { a += ["--append-system-prompt", p] }
         if let resume, !resume.isEmpty { a += ["--resume", resume] }
+        if let m = model, Self.validModel(m) { a += ["--model", m] }
         return a
     }
 
