@@ -71,6 +71,10 @@ struct ChatTranscriptState: Equatable {
     var busy = false
     var emptyTitle = "Chat with Claude"
     var emptyHint = ""
+    /// The last turn ran without Blender's tools (its server didn't start): Retry Blender.
+    var blenderFailed = false
+    /// uvx is fetching Blender's tools (the relay was just switched on).
+    var blenderWarming = false
 }
 
 struct ChatTranscriptView: View {
@@ -80,6 +84,7 @@ struct ChatTranscriptView: View {
     var accessory: AnyView?
     var resolve: (String) -> String = { $0 }
     var onRetry: () -> Void = {}
+    var onRetryBlender: () -> Void = {}
     var onReload: () -> Void = {}
 
     @State private var pinned = true
@@ -213,6 +218,23 @@ struct ChatTranscriptView: View {
                 Text("Claude is working…").scaled(t.scale.caption, t.roles.ink2)
             }
             .accessibilityElement(children: .combine)
+        }
+        if state.blenderWarming {
+            HStack(spacing: Space.s2) {
+                ProgressView().controlSize(.small)
+                Text("Getting Blender ready…").scaled(t.scale.caption, t.roles.ink2)
+            }
+            .accessibilityElement(children: .combine)
+        } else if state.blenderFailed, !state.busy {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Ph("warning", 14).foregroundStyle(t.roles.danger)
+                Text("Blender's tools didn't start, so Claude couldn't use Blender this time.")
+                    .scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Space.s2)
+                RButton("Retry Blender", kind: .quiet, small: true, action: onRetryBlender)
+                    .help("Get Blender's tools again, then send your last message again")
+            }
+            .accessibilityElement(children: .contain)
         }
         if let e = state.turnError, !state.busy {
             HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
