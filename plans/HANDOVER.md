@@ -118,6 +118,10 @@ should have full control anywhere on our app… provided I give it the go ahead"
    presets; model/provider choice and defaults (never keys); prompts library and playbook/memory of the owner's taste;
    budgets (a spend cap per session, a running total); batch jobs ("make 5 variants"); multi-step plans with
    checkpoints; reading its own results (video vision, outfit images) to self-check before showing the owner.
+6b. Claude model picker in chat (owner, 2026-11-11): the owner can switch which Claude model a chat uses (e.g.
+   faster/cheaper vs most capable), per chat, with a studio default; show speed and relative cost in plain words.
+   Owner only: members never see model names (standing rule) and run on the studio default. Check how the in-app
+   Claude is billed before building (a bigger model costs more per message). Build with the one-Claude work.
 7. Order suggested: (a) one tool registry + page context + navigation, (b) generation tools in Edit with background
    progress, (c) long-video chain, (d) Blender blocking, (e) the rest of 6.
 
