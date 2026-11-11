@@ -123,6 +123,10 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - Owner (14:55): remove the Camera/Blocking page's own "Direct with Claude" chat (one Claude replaces it); keep a
   compact status strip (Claude session / Blender / Renders); one Claude must have every camera-director tool first.
   → one-Claude session (with its held 4c/5A.3/video-attach app work).
+- Owner (15:20): Claude may access files on the person's Mac, but ONLY after asking each time (approval card in chat:
+  Allow once / Always in this folder / Deny; deletes, sudo, network always ask; never read credential files). Via
+  Claude Code --permission-prompt-tool. → one-Claude session (held camera branch). Also camera_render tool (guides via
+  the relay, like the Re-render button).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
