@@ -46,7 +46,7 @@ export const cameraSessions = pgTable('camera_sessions', {
 }, t => [index('camera_sessions_studio_idx').on(t.studioId, t.updatedAt)]);
 
 export type CameraAssetKind = 'greybox' | 'depth' | 'pose' | 'tracks' | 'keyframe_start' | 'keyframe_mid' | 'keyframe_end' | 'still' | 'preview'
-  | 'camera_json' | 'characters_json' | 'blend';
+  | 'camera_json' | 'characters_json' | 'set_json' | 'blend';
 
 export const cameraAssets = pgTable('camera_assets', {
   id: text('id').primaryKey(),

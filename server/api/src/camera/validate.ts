@@ -6,7 +6,7 @@ import type { CameraAssetKind } from './schema.js';
 export const ASPECTS = ['9:16', '16:9', '1:1', '4:5', '21:9'] as const;
 export const STATUSES = ['drafting', 'blocking', 'rendering', 'ready', 'generating', 'done', 'failed'] as const;
 export const ASSET_KINDS = ['greybox', 'depth', 'pose', 'tracks', 'keyframe_start', 'keyframe_mid', 'keyframe_end', 'still', 'preview',
-  'camera_json', 'characters_json', 'blend'] as const satisfies readonly CameraAssetKind[];
+  'camera_json', 'characters_json', 'set_json', 'blend'] as const satisfies readonly CameraAssetKind[];
 
 const finite = z.number().finite();
 const coord = finite.min(-1000).max(1000);
@@ -62,7 +62,7 @@ export const ASSET_RULES: Record<CameraAssetKind, { types: string[]; maxBytes: n
   const json = { types: ['application/json'], maxBytes: 20 * 1024 ** 2 };
   return {
     greybox: video, depth: video, pose: video, tracks: video, keyframe_start: image, keyframe_mid: image, keyframe_end: image, still: image, preview: image,
-    camera_json: json, characters_json: json, blend: { types: ['application/x-blender', 'application/octet-stream'], maxBytes: 500 * 1024 ** 2 },
+    camera_json: json, characters_json: json, set_json: json, blend: { types: ['application/x-blender', 'application/octet-stream'], maxBytes: 500 * 1024 ** 2 },
   };
 })();
 export const extOf = (contentType: string) => ({

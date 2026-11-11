@@ -1631,7 +1631,7 @@ CameraPath    { keyframes: CamKey[] /* 1–64, t ascending, ≤ durationSec */, 
 Blocking      { characters: { modelId: string, keyframes: CharKey[] /* 1–64 */, note?: string }[] }
 CastMember    { modelId, name, role?: string, heightM?: number /* 1.2–2.2, default 1.68 */ }
 AssetKind     "greybox" | "depth" | "pose" | "tracks" | "keyframe_start" | "keyframe_mid" | "keyframe_end" | "still" | "preview"
-            | "camera_json" | "characters_json" | "blend"
+            | "camera_json" | "characters_json" | "set_json" | "blend"
 CameraAsset   { id: "ca_…", kind: AssetKind, label?, state: "pending"|"ready", contentType, bytes?, source: "app"|"mcp"|"relay"|"chat",
                 url?: string /* presigned GET, 1 h, ready only */, createdAt }
 ShotDraft     { id: "sd_…", state: "draft", source: "suite"|"camera", prompt, targetModel, durationSec, aspect,
@@ -1692,7 +1692,7 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `blender_animate_character` | `{modelId, keyframes: CharKey[]}` | location/rotation keys on the proxy |
 | `blender_add_prop` | `{id, shape: "box"|"cylinder"|"sphere"|"plane", size: Vec3, position, rotationDeg?: Vec3}` | `MUSE_prop_<id>` |
 | `blender_set_camera` | `CameraPath` (`cuts` = hard cuts; two keys at the same `t` also cut) | camera `MUSE_camera` with keys (look-at via `target`), made the scene camera |
-| `blender_render_guides` | `{passes: ("greybox"|"keyframes"|"camera_json"|"characters_json")[], resolutionShort?}` | Workbench flat-grey playblast `greybox.mp4`, start/mid/end stills, per-frame `camera.json` and `characters.json`, written to `~/MUSE/CameraSessions/<sessionId>/out/`; the Mac uploads each as a session asset → `{assetIds}` |
+| `blender_render_guides` | `{passes: ("greybox"|"keyframes"|"camera_json"|"characters_json")[], resolutionShort?}` | Workbench flat-grey playblast `greybox.mp4`, start/mid/end stills, per-frame `camera.json` and `characters.json`, written to `~/MUSE/CameraSessions/<sessionId>/out/`; with `greybox` the Mac also writes `set.json` (kind `set_json`: the set blocks as boxes for the app's 3D preview, `{version, objects:[{name, shape, size, position, rotationDeg}]}`, Blender world, metres, Z up, position = bottom centre); the Mac uploads each as a session asset → `{assetIds}` |
 
 **MCP server** — `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, JSON responses, stateless; `GET`/`DELETE /mcp` → 405). Auth: `Authorization: Bearer muse_pat_…` (owner personal access token) — a missing or bad token gets 401 with `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource"`; a member's token is refused. Methods: `initialize` (protocol versions `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`), `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read` (`muse://camera-session/{id}`), notifications are accepted with 202. Tools: `list_characters`, `list_camera_sessions`, `create_camera_session`, `get_camera_session`, `update_camera_session`, `post_camera_message`, `attach_guide_media` (→ presigned PUT), `confirm_guide_media`, `set_camera_path`, `list_presets`, `create_shot_draft` (estimate only). Tool errors come back as `isError: true` results; protocol errors as JSON-RPC errors.
 

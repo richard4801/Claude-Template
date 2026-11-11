@@ -82,6 +82,10 @@ describe('camera sessions', () => {
     await put(j.upload.url, '{"frames":[]}', 'application/json');
     expect((await owner.req('POST', `/v1/camera-sessions/${s.id}/assets/${j.asset.id}/confirm`)).body.state).toBe('ready');
     expect((await owner.req('GET', `/v1/camera-sessions/${s.id}`)).body.camera.directed.trajectories.camera).toBe(j.asset.id);
+    // The set blocks for the app's 3D preview (the Mac writes set.json with every greybox render).
+    const sj = (await owner.req('POST', `/v1/camera-sessions/${s.id}/assets`, { kind: 'set_json', contentType: 'application/json' })).body;
+    await put(sj.upload.url, '{"version":1,"objects":[]}', 'application/json');
+    expect((await owner.req('POST', `/v1/camera-sessions/${s.id}/assets/${sj.asset.id}/confirm`)).body).toMatchObject({ kind: 'set_json', state: 'ready' });
 
     expect((await owner.req('DELETE', `/v1/camera-sessions/${s.id}/assets/${j.asset.id}`)).status).toBe(204);
     expect((await owner.req('DELETE', `/v1/camera-sessions/${s.id}`)).status).toBe(204);
