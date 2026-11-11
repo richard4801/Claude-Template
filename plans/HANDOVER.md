@@ -45,6 +45,20 @@ https://angelic-elegance-production-c42b.up.railway.app). Prod head when written
 - Claude in Edit: `detect_beats` returns beatTimes and strongTimes.
 - Check first: the Mac CI run for the last pushes (a Mac test fixture changed), and that Railway deployed.
 
+## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
+1. Bugs the owner hits today: Claude chat typing disturbs the Edit page (5A.6); Mac Edit oval (5A.1); Mac Export to
+   file (5A.2).
+2. Character consistency (the owner's top concern): matching body angle per outfit picture (server-only,
+   `plans/outfit-head-looks.md` §1); confirm the swap figure lock with the owner; Claude sees outfit/model images (5A.5);
+   body-notes box.
+3. Metadata cleanup + AI-label switch (5A.3).
+4. Claude made capable: ops reference, motion strip, loudness (5D first part); video flip book + video uploads (5C).
+5. One Claude with full control (section 6): design to the owner, then build in the order given there.
+6. Head looks + accessories (designs first); custom video models in Character swap (5B).
+7. Editor depth: on-preview dragging and free Mac timeline (5A.4), chroma on images, rounded masks, layer order, groups.
+8. The rest of 5E and 5F.
+The owner may reorder: ask at the start of the new session.
+
 ## 5. The queue, in order (owner-approved unless marked ASK)
 A. Owner bugs first (`plans/edit-xl-options.md`, "Owner bugs to fix FIRST"):
    1. Mac Edit oval bug: the clip's subject turns see-through and the background shows as an oval. Clue: the app applies
