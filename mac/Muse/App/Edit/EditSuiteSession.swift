@@ -1715,6 +1715,9 @@ final class EditSuiteSession {
                     self.notice = settings.labelAI ? "Saved · it will carry the AI label when you post" : t.parentTakeId == nil ? "Saved to the Library as a new video" : "Saved as a new version · the original is kept"
                 }
                 if let r = self.requestInExport { self.answerRequest(r, .done(versionId: t.id)) }
+                // Results arrive in the chat: an export the person started with a Claude chat open (Claude's own export
+                // request is answered in its turn already).
+                else { Self.exportResult(take: t.id, name: t.title, path: saveFileTo?.path, error: nil) }
                 self.requestInExport = nil
                 onSaved(t)
             } catch {
@@ -1723,6 +1726,8 @@ final class EditSuiteSession {
                 self.exportPhase = .idle
                 if let r = self.requestInExport {
                     self.answerRequest(r, .failed((error as? ApiError)?.message ?? (error is CancellationError ? "The owner cancelled the export" : "Couldn't export the edit")))
+                } else if !(error is CancellationError) && !Task.isCancelled {
+                    Self.exportResult(take: nil, name: nil, path: saveFileTo?.path, error: (error as? ApiError)?.message ?? "Couldn't export the edit")
                 }
                 self.requestInExport = nil
                 if !(error is CancellationError) && !Task.isCancelled {
@@ -1736,6 +1741,17 @@ final class EditSuiteSession {
                 }
             }
         }
+    }
+
+    /// Results arrive in the chat (owner, 2026-11-11): a finished export goes to the Claude chat that is open, made here
+    /// on this Mac (no server claim: only this Mac exported it).
+    static func exportResult(take: String?, name: String?, path: String?, error: String?) {
+        guard let chat = ClaudeChatLink.current else { return }
+        let r = ClaudeJobResult(chatId: chat, jobId: "export-\(take ?? UUID().uuidString.prefix(8).lowercased())", kind: "export", status: error == nil ? "done" : "failed",
+                                title: "Export · \(name ?? "edit")", takeIds: take.map { [$0] }, error: error)
+        var withPath = r
+        withPath.path = path
+        Task { @MainActor in ClaudeCodeService.shared.resultArrived(withPath) }
     }
 
     /// What the export makes now (the progress card's words).

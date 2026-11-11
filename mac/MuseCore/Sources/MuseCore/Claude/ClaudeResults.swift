@@ -14,6 +14,14 @@ public struct ClaudeJobResult: Codable, Hashable, Sendable {
     public var takeIds: [String]?
     public var error: String?
     public var finishedAt: Double?
+    /// The server's key for claiming it (one Mac answers); nil for a result made on this Mac (an export).
+    public var id: String?
+    public var modelId: String?
+    public var outfitId: String?
+    public var runId: String?
+    public var editorJobId: String?
+    /// A file this Mac wrote (an Edit export), shown in full to the person on their own Mac.
+    public var path: String?
 
     public init(chatId: String, jobId: String, kind: String, status: String, title: String? = nil, takeIds: [String]? = nil, error: String? = nil, finishedAt: Double? = nil) {
         self.chatId = chatId
@@ -24,6 +32,19 @@ public struct ClaudeJobResult: Codable, Hashable, Sendable {
         self.takeIds = takeIds
         self.error = error
         self.finishedAt = finishedAt
+    }
+
+    /// What Claude should look with.
+    var lookHint: String {
+        switch kind {
+        case "photo": return "see_photos with the take ids"
+        case "outfit", "dress up", "enhance", "character sheet":
+            return "suite_see\(modelId.map { " (modelId \($0)\(outfitId.map { ", outfitId \($0)" } ?? ""))" } ?? "")"
+        case "export": return "watch it if it's a video (it's a file on this Mac\(path.map { ": \($0)" } ?? ""))"
+        default:
+            if kind.hasPrefix("edit") { return "get_edit / watch the edited take" }
+            return "watch with each take id"
+        }
     }
 
     public var failed: Bool { status != "done" }
@@ -81,13 +102,13 @@ public struct ClaudeResultBatcher: Sendable {
                 lines.append("- \(r.title ?? r.kind) (job \(r.jobId)) failed: \(r.error ?? "no reason given").")
             } else {
                 let ids = (r.takeIds ?? []).joined(separator: ", ")
-                lines.append("- \(r.title ?? r.kind) (job \(r.jobId)) finished\(ids.isEmpty ? "" : ": takes \(ids)").")
+                lines.append("- \(r.title ?? r.kind) (job \(r.jobId)) finished\(ids.isEmpty ? "" : ": takes \(ids)"). Look with \(r.lookHint).")
             }
         }
         let anyFailed = results.contains(where: \.failed)
         let anyDone = results.contains { !$0.failed }
         var ask: [String] = []
-        if anyDone { ask.append("Look at what arrived now (watch each video take; see_photos for photos) and tell the person in a few lines what you see, whether it matches what they wanted, and what you'd do next.") }
+        if anyDone { ask.append("Look at what arrived now, as each line says, and tell the person in a few lines what you see, whether it matches what they wanted, and what you'd do next.") }
         if anyFailed { ask.append("For what failed, say plainly why and suggest a fix. Never retry or start anything that costs money on your own: ask first.") }
         return shown + "\n<instructions>\nThis message was written by MUSE, not the person: something started from this chat finished.\n" + lines.joined(separator: "\n") + "\n" + ask.joined(separator: " ") + "\n</instructions>"
     }

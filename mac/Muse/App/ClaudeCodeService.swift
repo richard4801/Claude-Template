@@ -510,8 +510,19 @@ final class ClaudeCodeService: ObservableObject {
 
     /// Something started from one of this person's chats finished. Only the Mac that runs this person's Claude Code acts
     /// (every Mac of theirs hears it); with "Just notify me", or Claude Code not ready, it only tells them.
-    private func resultArrived(_ r: ClaudeJobResult) {
+    func resultArrived(_ r: ClaudeJobResult) {
         if ClaudeChatLink.current == nil { unseenResults += 1 } // the panel is closed
+        // One of the person's Macs answers: the one showing that chat claims at once, any other after a pause.
+        guard let key = r.id, let api else { return accept(r) }
+        let here = ClaudeChatLink.current == r.chatId
+        Task { [weak self] in
+            if !here { try? await Task.sleep(nanoseconds: 3_000_000_000) }
+            guard (try? await api.claimResult(key)) ?? false else { return }
+            self?.accept(r)
+        }
+    }
+
+    private func accept(_ r: ClaudeJobResult) {
         let look = fileSettings.resultMode == .look && info.ready && relay != nil
         if !look {
             Notifier.shared.post(title: r.failed ? "Didn't finish" : "Result arrived", body: r.line)

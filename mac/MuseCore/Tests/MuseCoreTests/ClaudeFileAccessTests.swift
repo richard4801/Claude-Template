@@ -143,6 +143,17 @@ final class ClaudeResultsTests: XCTestCase {
         XCTAssertEqual(r("c", "j", kind: "photo", title: "Photo · 4 photos", takes: ["a", "b", "c", "d"]).line, "Photo · 4 photos")
     }
 
+    func testEachKindSaysHowToLook() {
+        var o = ClaudeJobResult(chatId: "c", jobId: "outfit-o_1", kind: "outfit", status: "done", title: "Outfit · Red dress")
+        o.modelId = "m_1"; o.outfitId = "o_1"
+        XCTAssertTrue(ClaudeResultBatcher.message([o]).contains("Look with suite_see (modelId m_1, outfitId o_1)."))
+        XCTAssertTrue(ClaudeResultBatcher.message([r("c", "j1", kind: "photo", title: "Photo · 2 photos", takes: ["s_1", "s_2"])]).contains("Look with see_photos"))
+        XCTAssertTrue(ClaudeResultBatcher.message([r("c", "j2")]).contains("Look with watch"))
+        var e = ClaudeJobResult(chatId: "c", jobId: "export-t_9", kind: "export", status: "done", title: "Export · Cut 3", takeIds: ["t_9"])
+        e.path = "/Users/me/Movies/Cut 3.mp4"
+        XCTAssertTrue(ClaudeResultBatcher.message([e]).contains("/Users/me/Movies/Cut 3.mp4"))
+    }
+
     func testResultLiveEventAndDefaultMode() throws {
         let e = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"result","result":{"chatId":"ct_1","jobId":"j1","kind":"shot","status":"done","title":"Shot","takeIds":["t_1"]}}"#.utf8))
         XCTAssertEqual(e, .result(ClaudeJobResult(chatId: "ct_1", jobId: "j1", kind: "shot", status: "done", title: "Shot", takeIds: ["t_1"])))
