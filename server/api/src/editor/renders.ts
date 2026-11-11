@@ -3,6 +3,7 @@
 // renders/ (served only by the authenticated routes), named by the session's revision, so a preview is made once per
 // revision and an edit after it makes a new one. A live `edit` event (op "render") says when it is ready.
 import fs from 'node:fs';
+import { cleanVideoFile } from '../storage/clean.js';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -66,6 +67,9 @@ export class EditRenders {
         const audio = o.guideKey ? { file: await this.local(o.guideKey, dir) } : o.audio;
         const out = path.join(dir, 'out.mp4');
         const r = await renderProject({ ffmpeg: this.ctx.config.FFMPEG_PATH, ffprobe: this.ctx.config.FFPROBE_PATH }, project, files, out, { ...o, ...(audio !== undefined ? { audio } : {}) });
+        // No metadata leaves MUSE (storage/clean.ts); the original render is kept if the remux can't read it.
+        const clean = (await cleanVideoFile(this.ctx.config.FFMPEG_PATH, out, 'video/mp4')) ?? out;
+        if (clean !== out) fs.renameSync(clean, out);
         await this.ctx.storage.putStream(key, fs.createReadStream(out), 'video/mp4', fs.statSync(out).size);
         Object.assign(st, { state: 'ready', durationSec: r.durationSec, width: r.width, height: r.height, unsupported: r.unsupported, at: Date.now() });
         await this.ctx.storage.put(`${key}.json`, Buffer.from(JSON.stringify(st)), 'application/json');

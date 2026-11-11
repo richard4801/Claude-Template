@@ -8,7 +8,8 @@ import { clips, jobs, loras, models, outfits, pods } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import { SOMETHING_WENT_WRONG } from '../services/jobs.js';
 import { sha256, uid } from '../lib/util.js';
-import { objectInfo } from '../storage/objects.js';
+import { contentTypeFor } from '../storage/index.js';
+import { cleanStored, objectInfo } from '../storage/objects.js';
 import * as P from '../pricing.js';
 import { workKindOf, type JobRow, type PodRow, type WorkKind } from '../gpu/controller.js';
 import type { PodPool } from '../gpu/pool.js';
@@ -169,6 +170,9 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
     const fixed = j.request.engine === 'upscale' && typeof j.request.usd === 'number' ? { actualCostUsd: j.request.usd, settleNote: `${P.upscaleLabel(j.request.size)} · ${j.request.seconds} s` } : {};
     await ctx.jobs.complete(j.id, { outputs: reported, gpuSeconds: b.gpuSeconds == null ? undefined : b.gpuSeconds - load, costPerHr: rate, stats: b.stats ?? null, ...fixed });
     await pool.jobEnded(pod.id, Date.now());
+    // The outputs arrived through presigned PUTs: their metadata goes in the background (storage/clean.ts).
+    for (const o of planned) if (reported.some(x => x.name === o.name) && /\.(mp4|mov|jpe?g|png|webp)$/.test(o.key))
+      void cleanStored(ctx, o.key, contentTypeFor(o.key)).catch(e => req.log.warn({ err: (e as Error).message, key: o.key }, 'output metadata cleanup failed'));
     return reply.status(204).send();
   });
 

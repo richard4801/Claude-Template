@@ -13,7 +13,7 @@ import { takes, uploads, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { takeView } from '../services/jobs.js';
-import { putObject } from '../storage/objects.js';
+import { cleanStored, putObject } from '../storage/objects.js';
 import { mediaToolsAvailable, thumbnail } from '../replicate/media.js';
 import { checkProject } from '../editor/versions.js';
 import { BLANK_SOURCE } from '../editor/model.js';
@@ -129,6 +129,20 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
     }
   }
 
+  /**
+   * The app's export (uploaded straight to storage) loses its metadata in the background, and carries MUSE's own
+   * label only when "Label as AI-generated" was on. Best effort: on failure the file stays as the app made it.
+   */
+  async function cleanExport(t: typeof takes.$inferSelect, contentType: string, label: boolean) {
+    if (!t.mediaKey) return;
+    try {
+      const bytes = await cleanStored(ctx, t.mediaKey, contentType, { label });
+      if (bytes != null) await db.update(takes).set({ media: { ...(t.media as object), bytes } as typeof t.media }).where(eq(takes.id, t.id));
+    } catch (e) {
+      ctx.log.warn({ err: (e as Error).message, take: t.id }, 'export metadata cleanup failed; keeping the file as uploaded');
+    }
+  }
+
   /** Saves an edit as a new take: a version of `srcId`, or (null) a blank project's first save as a new Library video. */
   async function saveEdit(u: { id: string; studioId: string }, srcId: string | null, body: unknown) {
     // Editor v2 (workstream 3): a v2 project is checked by editor/versions.ts (its own size limit and rules).
@@ -172,6 +186,7 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
     }).returning();
     emitTake(row!);
     if (!thumb) void serverThumb(row!);
+    void cleanExport(row!, up.contentType, b.aiLabel === true);
     return takeView(row!, pub, u.id);
   }
 

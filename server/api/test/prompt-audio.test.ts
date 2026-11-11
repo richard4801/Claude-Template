@@ -160,13 +160,13 @@ describe.skipIf(!hasFfmpeg)('lip-sync fix: speaking decides what the model hears
     expect(back.kind).toBe('music');                                 // the clip's own music, not the model's sound
   }, 60_000);
 
-  it('speaking: the model gets the sound and the lip-sync wording; the take is the model file as delivered', async () => {
+  it('speaking: the model gets the sound and the lip-sync wording; the take is the model’s video as delivered (metadata removed, never re-encoded)', async () => {
     const r = await run({ clipId: speechClip, direction: 'smiling' });
     expect(r.job.request).toMatchObject({ speaking: true, speakingSource: 'detected' });
     expect(hasAudio(r.padded)).toBe(true);
     expect(r.pred.input.prompt).toContain('the words being mouthed');
     expect(r.pred.input.prompt).toMatch(/\nDirection from the user: smiling\n$/);
-    expect(fs.readFileSync(r.take).equals(fs.readFileSync(fake.outVideo))).toBe(true);
+    expect(videoHash(r.take)).toBe(videoHash(fake.outVideo)); // same picture packets; only the tags are gone (storage/clean.ts)
   }, 60_000);
 
   it('the switch wins over the detection, both ways', async () => {

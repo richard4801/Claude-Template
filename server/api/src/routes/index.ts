@@ -380,7 +380,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const buf = await f.toBuffer();
     if (!(f.mimetype ?? '').startsWith('image/') && !/\.(jpe?g|png|webp)$/i.test(f.filename)) throw badRequest('Upload an image');
     const key = `u/${uid('img')}.${extFor(f.mimetype, f.filename)}`;
-    await putObject(ctx, { key, body: buf, studioId: req.user.studioId, kind: 'image', userId: req.user.id });
+    // A member's own upload (source material) is stored as sent; only what MUSE makes is cleaned (storage/clean.ts).
+    await putObject(ctx, { key, body: buf, studioId: req.user.studioId, kind: 'image', userId: req.user.id, keepMetadata: true });
     return { url: uploadUrl(key) };
   });
   app.post('/v1/uploads/clips', async req => {
@@ -393,7 +394,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       else if (part.type === 'file' && part.fieldname === 'file') {
         const buf = await part.toBuffer();
         key = `c/${uid('vid')}.${extFor(part.mimetype || 'video/mp4', part.filename)}`;
-        await putObject(ctx, { key, body: buf, studioId: req.user.studioId, kind: 'clip', userId: req.user.id });
+        await putObject(ctx, { key, body: buf, studioId: req.user.studioId, kind: 'clip', userId: req.user.id, keepMetadata: true }); // as sent (a reference stays untouched)
       } else if (part.type === 'file') await part.toBuffer();
     }
     if (!meta) throw badRequest('Missing meta part');
