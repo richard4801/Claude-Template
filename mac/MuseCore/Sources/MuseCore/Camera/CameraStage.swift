@@ -247,6 +247,11 @@ public struct OrbitFraming: Equatable, Sendable {
     public var target: Vec3
     public var eye: Vec3
 
+    public init(target: Vec3, eye: Vec3) {
+        self.target = target
+        self.eye = eye
+    }
+
     public static func of(_ s: CameraSession, set: CameraSetFile? = nil) -> OrbitFraming {
         var pts: [Vec3] = []
         if let keys = s.cameraPath?.keyframes { pts += keys.map(\.position) + keys.compactMap(\.target) }
