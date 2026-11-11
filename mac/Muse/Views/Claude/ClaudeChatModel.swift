@@ -330,6 +330,26 @@ final class ClaudeChatModel {
         deliver(text)
     }
 
+    /// The last turn ran without Blender's tools: Claude Code reported Blender's server as failed.
+    var blenderFailed: Bool {
+        guard !busy else { return false }
+        for item in transcript.items.reversed() {
+            if case .user = item { return false }
+            if case .tool(ClaudeCommand.Blender.failedChipId, _, _, .error) = item { return true }
+        }
+        return false
+    }
+
+    /// Retry Blender: fetch Blender's tools again, then send the last message again.
+    func retryBlender() {
+        guard !busy else { return }
+        let warm = BlenderRelayService.shared.warmTools(force: true)
+        Task { @MainActor in
+            await warm?.value
+            retry()
+        }
+    }
+
     /// Try again: the last message, sent again as it was typed.
     func retry() {
         guard !busy else { return }

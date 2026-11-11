@@ -10,6 +10,7 @@ struct ClaudeChatView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
+    @ObservedObject private var blender: BlenderRelayService = .shared
     @State private var model = ClaudeChatModel()
 
     let contextKind: String
@@ -234,10 +235,12 @@ struct ClaudeChatView: View {
         return ChatTranscriptView(
             rows: rows,
             state: ChatTranscriptState(loading: model.loading, loadError: model.loadError, offline: model.offline,
-                                       turnError: model.turnError, busy: model.busy, emptyHint: hint),
+                                       turnError: model.turnError, busy: model.busy, emptyHint: hint,
+                                       blenderFailed: model.blenderFailed, blenderWarming: blender.running && blender.toolsState == .warming),
             accessory: accessory,
             resolve: { service.resolve($0) },
             onRetry: { model.retry() },
+            onRetryBlender: { model.retryBlender() },
             onReload: { Task { await model.retryLoad() } })
     }
 
