@@ -80,7 +80,7 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   memory when asked, and ASKS first when it thinks something is important (no silent saves, no "save with Undo").
 - Delegated: Edit "New blank project" (no source video; shape from Edit's top picker; saves to the Library as a new
   video with its project; server + Mac, Android later) → session on branch claude/edit-blank.
-- 5A.1 oval RESULT (session archived): the Mac renderer is NOT the cause (pixel probe, CI run 514: B&W looks, stand-in
+- 5A.1 oval SOLVED (owner turned the clip setting off in Mask & green screen, 2026-11-11). Was: the Mac renderer is NOT the cause (pixel probe, CI run 514: B&W looks, stand-in
   matte, vignette all render correctly; Android/server apply mattes the same way). Most likely an inverted mask (default
   soft circle + Invert) or a chroma key on the owner's clip(s). Owner asked to check "Mask & green screen" on each clip.
   If not that, get the edit's project JSON through the app/API. Probe check lives on branch claude/mac-edit-oval
