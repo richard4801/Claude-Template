@@ -63,7 +63,9 @@ export function videoPurposes(m: ModelSpec): Purpose[] {
  * the MiniMax H3 family on Replicate (same input schema; services/replicateVideo.ts). Our GPU: Edit (H3 open weights,
  * the existing path the owner kept) and Fast · beta (Viggle), when the pods offer them.
  */
-export type SwapEngine = { id: string; name: string; runs: 'replicate' | 'higgsfield' | 'gpu'; ref?: string; gpuEngine?: 'h3' | 'viggle'; capability?: string; noResolution?: boolean; notice?: string };
+export type SwapEngine = { id: string; name: string; runs: 'replicate' | 'higgsfield' | 'gpu'; ref?: string; gpuEngine?: 'h3' | 'viggle'; capability?: string; noResolution?: boolean; notice?: string;
+  /** Higgsfield Genjutsu motion transfer: its own input (video_url, image_urls ≤ maxImages, prompt, resolution), source range and resolutions. */
+  genjutsu?: { minSec: number; maxSec: number; maxImages: number } };
 export const SWAP_ENGINES: SwapEngine[] = [
   { id: 'h3', name: 'MiniMax H3', runs: 'replicate', ref: 'minimax/h3' },
   { id: 'h3-lite', name: 'MiniMax H3 Lite', runs: 'replicate', ref: 'minimax/h3-lite' },
@@ -71,6 +73,11 @@ export const SWAP_ENGINES: SwapEngine[] = [
   // The owner's Higgsfield plan (half Replicate's 2K price): H3 reference-to-video with the clip as the reference video
   // (Higgsfield has no H3 edit endpoint); 2K only, 5–15 s. Out of credit or down at the start → Replicate H3.
   { id: 'h3-hf', name: 'MiniMax H3 (Higgsfield)', runs: 'higgsfield', ref: 'minimax/h3/reference-to-video' },
+  // Higgsfield Genjutsu motion transfer (owner 2026-11-11): her images (1–8) take over the person in the clip, keeping its
+  // motion. Source 4–30 s (shorter is padded to 4 s, longer cut to 30 s); 480p/720p/1080p by quality. No fallback to
+  // another model (a different look and price): a refusal is said plainly. Light keeps the first 15 s.
+  { id: 'genjutsu', name: 'Genjutsu (Higgsfield)', runs: 'higgsfield', ref: 'higgsfield/genjutsu/motion-transfer/v1.0', genjutsu: { minSec: 4, maxSec: 30, maxImages: 8 } },
+  { id: 'genjutsu-light', name: 'Genjutsu Light (Higgsfield)', runs: 'higgsfield', ref: 'higgsfield/genjutsu-light/motion-transfer/v1.0', genjutsu: { minSec: 4, maxSec: 15, maxImages: 8 } },
   { id: 'h3-open', name: 'Edit · MiniMax H3 open weights (own GPU)', runs: 'gpu', gpuEngine: 'h3', capability: 'h3',
     notice: 'Powered by MiniMax H3 · open-weights licence excludes the US, EU, UK and South Korea' },
   { id: 'viggle', name: 'Fast · beta · Viggle (own GPU)', runs: 'gpu', gpuEngine: 'viggle', capability: 'viggle' },
@@ -78,6 +85,10 @@ export const SWAP_ENGINES: SwapEngine[] = [
 /** Higgsfield's H3 takes 5–15 s (a shorter clip is padded to 5 s and the take is cut back). */
 export const HF_SWAP_MIN_SEC = 5;
 export const swapEngineById = (id: string) => SWAP_ENGINES.find(e => e.id === id);
+/** Said when the server's Higgsfield key has no access to Genjutsu (a 403/404 that isn't about credit). */
+export const GENJUTSU_NO_ACCESS = "Your Higgsfield plan doesn't include Genjutsu · you weren't charged. Pick another model, or add Genjutsu to the Higgsfield plan.";
+/** Genjutsu's resolution per MUSE quality (Draft 480p, Standard 720p, HD 1080p). */
+export const GENJUTSU_RES: Record<string, string> = { draft: '480p', standard: '720p', hd: '1080p' };
 
 /** Curated Replicate image models for the image purposes (any other "owner/name" is accepted too, checked when it runs). */
 export const IMAGE_CANDIDATES = ['black-forest-labs/flux-2-pro', 'black-forest-labs/flux-2-max', 'black-forest-labs/flux-2-flex', 'black-forest-labs/flux-2-dev'];

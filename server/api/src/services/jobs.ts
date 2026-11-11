@@ -23,6 +23,7 @@ import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
 import { draftOf } from '../suite/drafts.js';
 import { applySent, sentImagesOf } from '../images/sent.js';
 import { planRefSent, sentPlanRef } from '../suite/plan.js';
+import { swapEngineById } from '../engines/purposes.js';
 import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
 
 export const JobRequestSchema = z.object({
@@ -150,7 +151,11 @@ export class JobService {
       r.use = 'full';
       r.quality = r.quality ?? this.ctx.config.VIDEO_QUALITY_DEFAULT;
       const swapEngine = (r as Record<string, any>).swapEngine as string | undefined;
-      (r as P.RenderReq).pricePerSec = swapEngine ? (await modelChoice(this.ctx).swapQuote(user.studioId, swapEngine, r.quality, null)).perSec : this.qualityPrice(r.quality);
+      if (swapEngine) {
+        const q = await modelChoice(this.ctx).swapQuote(user.studioId, swapEngine, r.quality, null);
+        (r as P.RenderReq).pricePerSec = q.perSec;
+        if (q.rr.resolutionLabel) (r as P.RenderReq).resolutionLabel = q.rr.resolutionLabel; // Genjutsu: 480p / 720p / 1080p
+      } else (r as P.RenderReq).pricePerSec = this.qualityPrice(r.quality);
     } else delete r.quality;
     const [clip] = r.clipId ? await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, user.studioId))) : [];
     // Clip checks are advice only (owner decision): a clip that fails them can still be rendered; the apps show a
@@ -172,6 +177,9 @@ export class JobService {
     // front, ¾ and back if it has them, otherwise the body slots. Replicate: the five locked shots, then the outfit (≤ 9).
     // <Image n> in the prompt follows this order.
     const { references } = await this.swapReferences(user, r, replicate, { m, o }); // images/sent.ts: the choice, else MUSE's pick
+    // Genjutsu takes up to 8 images (face front and profile first, then the outfit set): the rest are left out.
+    const gj = swapEngineById(String((r as Record<string, unknown>).swapEngine ?? ''))?.genjutsu;
+    if (gj && references.length > gj.maxImages) references.splice(gj.maxImages);
     if (!replicate && r.background === 'photo' && r.backgroundImage && (r.backgroundImage.asset || r.backgroundImage.url))
       references.splice(5, references.length, { label: 'background', image: r.backgroundImage });
     const texts = await this.ctx.prompts.texts(user.studioId);
@@ -230,7 +238,7 @@ export class JobService {
   }
   private holdNote(row: { kind?: string; request?: Record<string, any> }) {
     if (row.kind === 'render' && row.request && isSuite(row as any)) return `Video · ${row.request.engineLabel} · ${row.request.seconds} s${(row.request.takes ?? 1) > 1 ? ` · ${row.request.takes} takes` : ''} · hold`;
-    return row.kind === 'render' && row.request && isRep(row as any) ? `${P.videoNote(row.request, [P.replicateSeconds(row.request.clipSeconds)])}${(row.request.takes ?? 1) > 1 ? ` · ${row.request.takes} takes` : ''} · hold` : undefined;
+    return row.kind === 'render' && row.request && isRep(row as any) ? `${P.videoNote(row.request, [P.hostedSeconds(row.request)])}${(row.request.takes ?? 1) > 1 ? ` · ${row.request.takes} takes` : ''} · hold` : undefined;
   }
 
   /** Holds the price, then puts the job in the GPU queue. Nothing is written if the hold is refused. */

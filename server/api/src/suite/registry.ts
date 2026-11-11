@@ -20,7 +20,7 @@ export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @v
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'mock' | 'byo';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'mock' | 'byo';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -153,6 +153,26 @@ export const MODELS: ModelSpec[] = [
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 via Higgsfield (hosted)'), status: 'active',
     notes: '50% max-discount price; each reference image beyond 5 adds $0.08.' },
+  // ---------------------------------------------------------------- Higgsfield Genjutsu motion transfer (swap only)
+  // docs.higgsfield.ai/docs/models/genjutsu/motion-transfer (read 2026-11-11): video_url (≥ 4 s, cut to 30 s), image_urls
+  // 1–8, prompt (optional), resolution 480p | 720p | 1080p. Billed per source second rounded up: $0.154 / $0.3446 /
+  // $0.8346 (standard self-serve rates; the launch offer has ended). Light (genjutsu-light): first 15 s, $0.05 / $0.10 /
+  // $0.20 per TOTAL second = output + input video seconds, so twice that per output second. Swap / Recast / Recreate
+  // only (modes off: it makes no shots of its own); priced × the owner's priceScale like every model.
+  { id: 'genjutsu', name: 'Genjutsu (Higgsfield)', provider: 'higgsfield', ref: 'higgsfield/genjutsu/motion-transfer/v1.0', adapter: 'hf-genjutsu',
+    modes: { text: false, image: false, reference: false }, frames: { start: false, end: false, middle: 0, withRefs: false },
+    refs: { images: 8, videos: 1, audios: 0, videoSecondsMin: 4, videoSecondsMax: 30 }, duration: { min: 4, max: 30 },
+    resolutions: [R('480p', '480p', 480, 0.154), R('720p', '720p', 720, 0.3446), R('1080p', '1080p', 1080, 0.8346)], aspectRatios: ['9:16'],
+    audio: 'none', negativePrompt: false, seed: false, camera: { vocab: 'generic', refStyle: 'none', referenceVideo: false }, lora: false,
+    licence: hosted('Genjutsu via Higgsfield (hosted)'), status: 'active',
+    notes: 'Motion transfer: her images onto the clip. Billed per source second (4–30 s). The clip’s own sound is put back.' },
+  { id: 'genjutsu-light', name: 'Genjutsu Light (Higgsfield)', provider: 'higgsfield', ref: 'higgsfield/genjutsu-light/motion-transfer/v1.0', adapter: 'hf-genjutsu',
+    modes: { text: false, image: false, reference: false }, frames: { start: false, end: false, middle: 0, withRefs: false },
+    refs: { images: 8, videos: 1, audios: 0, videoSecondsMin: 4, videoSecondsMax: 15 }, duration: { min: 4, max: 15 },
+    resolutions: [R('480p', '480p', 480, 0.1), R('720p', '720p', 720, 0.2), R('1080p', '1080p', 1080, 0.4)], aspectRatios: ['9:16'],
+    audio: 'none', negativePrompt: false, seed: false, camera: { vocab: 'generic', refStyle: 'none', referenceVideo: false }, lora: false,
+    licence: hosted('Genjutsu Light via Higgsfield (hosted)'), status: 'active',
+    notes: 'Cheaper, faster motion transfer; first 15 s. Higgsfield bills output + input seconds ($0.05/$0.10/$0.20 each).' },
   // ---------------------------------------------------------------- Veo (Replicate)
   { id: 'veo-3.1-lite', name: 'Veo 3.1 Lite', provider: 'replicate', ref: 'google/veo-3.1-lite', adapter: 'veo',
     modes: { text: true, image: true, reference: false }, frames: { start: true, end: true, middle: 0, withRefs: false },

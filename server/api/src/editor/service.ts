@@ -29,9 +29,11 @@ import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
 import { exportLanguages, exportNotice } from './scripts.js';
 import { CUTOUT_LIMITS, composeCutout, prepareStill } from './cutout.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
+import { GENJUTSU_HELPERS, GENJUTSU_LIMITS, genjutsuHelperInput, genjutsuSeconds, genjutsuUsd, isGenjutsuHelper, parseGenjutsuOptions, runGenjutsu, type GenjutsuImage, type GenjutsuOptions } from './genjutsu.js';
+import { GENJUTSU_NO_ACCESS } from '../engines/purposes.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate', 'cutout'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate', 'cutout', 'objectswap', 'restyle'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
@@ -40,13 +42,13 @@ export const GPU_SEC = {
   track: (d: number) => 15 + 3 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', separate: 'Splitting voice and music', cutout: 'Cutting out', briefs: 'Writing the briefs' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', separate: 'Splitting voice and music', cutout: 'Cutting out', briefs: 'Writing the briefs', objectswap: 'Swapping the object', restyle: 'Restyling' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
 export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
 export const MAX_KEEP_POINTS = 10;
-export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions;
+export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions & GenjutsuOptions;
 
 /** The languages translate offers: those the export draws today. */
 const translateTargets = () => { const ok = exportLanguages(); return Object.keys(TRANSLATE_LANGUAGES).filter(l => ok.has(l)); };
@@ -114,6 +116,7 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
     const len = out.endSec - out.startSec;
     if (len < SLOWMO_LIMITS.minRangeSec || len > SLOWMO_LIMITS.maxRangeSec) throw badRequest(`options.endSec: the range must be ${SLOWMO_LIMITS.minRangeSec} to ${SLOWMO_LIMITS.maxRangeSec} s long`);
   }
+  if (isGenjutsuHelper(kind)) Object.assign(out, parseGenjutsuOptions(kind, o));
   if (kind === 'denoise' && o.analyzeOnly !== undefined) { if (typeof o.analyzeOnly !== 'boolean') throw badRequest('options.analyzeOnly: true or false'); out.analyzeOnly = o.analyzeOnly; }
   return out;
 }
@@ -239,6 +242,13 @@ export class EditorAiService {
     const src = await this.source(u, body?.source);
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
+    // Genjutsu helpers (Higgsfield): object swap / restyle, priced per source second (first 30 s) × the editor markup.
+    if (isGenjutsuHelper(kind)) {
+      if (!this.ctx.suite.providers.higgsfield.configured()) throw badRequest('kind: Genjutsu is not available on this server');
+      genjutsuSeconds(d);
+      await this.genjutsuImages(u, opts.images ?? [], 60);
+      return { kind, opts, src, reuse: null, usd: Math.max(EDITOR_LIMITS.minChargeUsd, genjutsuUsd(kind, opts.resolution ?? '720p', d, this.markup)) };
+    }
     // 2026-11-08: background removal is "coming soon" while production runs the mock (nothing real to give yet).
     if (kind === 'matte' && !this.matteAvailable) throw badRequest('Background removal is coming soon');
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
@@ -298,7 +308,7 @@ export class EditorAiService {
     const e = await this.estimate(u, body);
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = e.kind === 'cutout' ? (e.usd > 0 ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : []) : e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
+    const models = isGenjutsuHelper(e.kind) ? [GENJUTSU_HELPERS[e.kind].ref] : e.kind === 'cutout' ? (e.usd > 0 ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : []) : e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     resultsOf(this.ctx).link(u, `editor-${id}`);
@@ -473,6 +483,19 @@ export class EditorAiService {
             result = { asset, width: info.width, height: info.height, hasAudio: !!info.audioCodec, durationSec: d, reused: false };
           } finally { this.localFree(); }
         }
+      } else if (isGenjutsuHelper(row.kind)) {
+        const out = path.join(os.tmpdir(), `${uid('gj')}.mp4`);
+        temps.push(out);
+        const images = await this.genjutsuImages(u, o.images ?? [], this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
+        await runGenjutsu(this.ctx.suite.providers.higgsfield, row.kind, genjutsuHelperInput(row.kind, url, images, o), out, {
+          cancelled: () => this.stopping.has(id), pollMs: this.genjutsuPollMs, timeoutMs: 30 * 60_000,
+          onProgress: f => this.patch(id, { progress: 5 + f * 85 }).then(() => undefined) });
+        const info = await probe(this.ctx.config.FFPROBE_PATH, out).catch(() => null);
+        const seconds = info?.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : Math.min(d, GENJUTSU_LIMITS.maxSec);
+        const asset = await this.store(u, src, out, 'video/mp4', 'video', seconds);
+        result = { asset, durationSec: seconds, width: info?.width ?? null, height: info?.height ?? null, hasAudio: !!info?.audioCodec, resolution: o.resolution ?? '720p',
+          ...(o.presetId ? { presetId: o.presetId } : {}), reused: false };
+        spentUsd = row.estimate; // Higgsfield bills the source seconds the estimate priced
       } else if (row.kind === 'slowmo') {
         const prev = await this.slowmoBefore(u.studioId, src.key, o);
         if (prev) { result = { ...(prev.result as Record<string, unknown>), reused: true }; spentUsd = 0; }
@@ -536,7 +559,7 @@ export class EditorAiService {
       const cancelled = e instanceof ReplicateError && e.kind === 'cancelled';
       if (row.holdTokens) await this.ctx.money.release(u.studioId, u.id, id, row.holdTokens, cancelled ? 'editor job cancelled' : 'editor job failed').catch(() => {});
       if (!cancelled) this.ctx.log.warn({ err: (e as Error).message, job: id, kind: row.kind }, 'editor job failed');
-      const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
+      const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.message === GENJUTSU_NO_ACCESS ? GENJUTSU_NO_ACCESS : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
         : e instanceof ReplicateError && e.kind === 'out_of_credit' ? 'The studio is out of AI credit · ask the owner'
         : e instanceof TranslateError ? (e.kind === 'refused' ? 'These captions couldn’t be translated · you weren’t charged' : 'Couldn’t translate these captions this time · you weren’t charged')
         : e instanceof ReplicateError && (row.kind === 'reverse' || row.kind === 'stabilize' || row.kind === 'slowmo') && /^(Reverse|Stabilise|Slow motion) works/.test(e.message) ? e.message : 'Something went wrong · try again';
@@ -608,6 +631,42 @@ export class EditorAiService {
       await pipeline(obj.body as NodeJS.ReadableStream, fs.createWriteStream(file));
       return await fn(file);
     } finally { rmQuiet(file); }
+  }
+
+  /** Tests: how often Higgsfield is polled for a Genjutsu helper. */
+  genjutsuPollMs = 3000;
+  private presetCache: { at: number; list: { id: string; name: string; preview?: string | null }[] } | null = null;
+  /** Restyle's presets from Higgsfield (free; cached 6 h; an empty list when it can't be read). */
+  async restylePresets() {
+    const hf = this.ctx.suite.providers.higgsfield as { genjutsuPresets?: () => Promise<{ access: string; presets: { id: string; name: string; preview?: string | null }[] }> };
+    if (!this.ctx.suite.providers.higgsfield.configured() || !hf.genjutsuPresets) return [];
+    if (this.presetCache && Date.now() - this.presetCache.at < 6 * 3600_000) return this.presetCache.list;
+    const r = await hf.genjutsuPresets().catch(() => null);
+    if (r?.access === 'yes') this.presetCache = { at: Date.now(), list: r.presets };
+    return r?.presets ?? [];
+  }
+  /** $ per source second as charged (× the editor markup), per resolution. */
+  private genjutsuRates(kind: 'objectswap' | 'restyle') {
+    return Object.fromEntries(Object.entries(GENJUTSU_HELPERS[kind].perSec).map(([k, v]) => [k, Math.round(v * this.markup * 10000) / 10000]));
+  }
+  /** The helper's pictures as short-lived URLs (uploads checked against the studio; no EXIF/GPS reaches Higgsfield). */
+  private async genjutsuImages(u: AuthUser, imgs: GenjutsuImage[], ttl: number) {
+    const out: string[] = [];
+    for (const [i, x] of imgs.entries()) {
+      if (x.uploadId) {
+        const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, x.uploadId), eq(uploads.studioId, u.studioId)));
+        if (!up || !/^image\//.test(up.contentType)) throw badRequest(`options.images[${i}]: an image upload of this studio`);
+        if (!(await this.ctx.storage.head(up.storageKey))) throw new ApiError(409, 'upload_missing', 'The picture has not arrived yet · upload it first');
+        if (up.state !== 'ready') await cleanUploadedPhoto(this.ctx, up);
+        out.push(await this.ctx.storage.presignGet(up.storageKey, ttl));
+        continue;
+      }
+      const key = await this.ctx.images.storedKey(x, u.studioId);
+      if (key) { out.push(await this.ctx.storage.presignGet(key, ttl)); continue; }
+      if (x.url && /^https:\/\//.test(x.url)) { out.push(x.url); continue; }
+      throw badRequest(`options.images[${i}]: a picture MUSE can read`);
+    }
+    return out;
   }
 
   /** Stores a produced file as an upload of the studio (bytes copied, never re-encoded); the mock points at the source. */
@@ -722,6 +781,10 @@ export class EditorAiService {
       cutout: { available: paid && this.matteAvailable, maxPoints: MAX_KEEP_POINTS },
       slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
       translate: { available: paid && !!this.translator(), languages: translateTargets(), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
+      objectswap: { available: paid && this.ctx.suite.providers.higgsfield.configured(), minSec: GENJUTSU_LIMITS.minSec, maxSec: GENJUTSU_LIMITS.maxSec, maxImages: GENJUTSU_HELPERS.objectswap.maxImages,
+        resolutions: [...GENJUTSU_LIMITS.resolutions], perSec: this.genjutsuRates('objectswap'), note: 'Swaps an object in the video for the one in your pictures (1–8); prompt optional. First 30 s only.' },
+      restyle: { available: paid && this.ctx.suite.providers.higgsfield.configured(), minSec: GENJUTSU_LIMITS.minSec, maxSec: GENJUTSU_LIMITS.maxSec, maxImages: GENJUTSU_HELPERS.restyle.maxImages,
+        resolutions: [...GENJUTSU_LIMITS.resolutions], perSec: this.genjutsuRates('restyle'), presets: paid ? await this.restylePresets() : [], note: 'The whole video in a preset look (options.presetId). First 30 s only.' },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }

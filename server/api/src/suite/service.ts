@@ -197,7 +197,7 @@ export class SuiteService {
     const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === id));
     const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
     const video = [...MODELS, ...customModelsOf(studioId)].filter(m => m.status !== 'removed' && !m.licence.blockNewFeatures && p.models?.[m.id]?.enabled !== false
-      && !(m.licence.requiresAck && !p.models?.[m.id]?.acknowledgedAt) && avail.has(m.provider) && (m.modes.text || m.modes.image || m.modes.reference))
+      && !(m.licence.requiresAck && !p.models?.[m.id]?.acknowledgedAt) && avail.has(m.provider) && (m.modes.text || m.modes.image || m.modes.reference || SWAP_ENGINES.some(e => e.id === m.id && e.genjutsu)))
       .map(m => {
         const scale = p.models?.[m.id]?.priceScale ?? 1, tiers = tiersOf(m.id);
         const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
@@ -514,7 +514,7 @@ export class SuiteService {
     const rr: P.RenderReq = !choice ? { engine: 'replicate', quality: req.quality, takes: req.takes, clipSeconds: clip?.durationSec, pricePerSec: this.ctx.jobs.qualityPrice(req.quality) }
       : (await modelChoice(this.ctx).swapQuote(u.studioId, choice.model, req.quality, clip.durationSec, req.takes)).rr;
     const est = P.totalCost(rr);
-    const seconds = hosted ? P.replicateSeconds(rr.clipSeconds) : Math.round(P.lengthSec(rr) * 10) / 10;
+    const seconds = hosted ? P.hostedSeconds(rr) : Math.round(P.lengthSec(rr) * 10) / 10;
     const sentImages = (await this.ctx.jobs.swapReferences(u, { ...req, draft: r.draft }, hosted)).view;
     const view = { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds, takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
       buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' && hosted ? ['Swap tops out at HD'] : [], rig: [], test: false, sentImages };

@@ -18,7 +18,7 @@ import { memberRules, providerLabel, saveMemberRules, type MemberRules } from '.
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
-import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, HF_SWAP_MIN_SEC, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
+import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, HF_SWAP_MIN_SEC, GENJUTSU_RES, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
 
 export type Price = { basis: 'per_second' | 'per_run' | 'per_output_second'; usd: number };
 export type Engine = {
@@ -63,10 +63,11 @@ export class ModelChoice {
       return { perSec: r4(P.estCost(rr) / Math.max(1, P.lengthSec(rr))), resolution: null, rr };
     }
     const m = modelById(e.id)!;
-    const want = P.QUALITY_INFO[q].resolution;
+    const want = e.genjutsu ? GENJUTSU_RES[q]! : P.QUALITY_INFO[q].resolution;
     const res = m.resolutions.find(r => r.id === want) ?? m.resolutions.at(-1)!;
     const perSec = r4(res.perSec * priceScale);
-    return { perSec, resolution: res.id, rr: { engine: 'replicate', quality: q, takes: 1, clipSeconds, pricePerSec: perSec } };
+    const range = e.genjutsu ? { minSec: e.genjutsu.minSec, maxSec: e.genjutsu.maxSec, resolutionLabel: res.label } : {};
+    return { perSec, resolution: res.id, rr: { engine: 'replicate', quality: q, takes: 1, clipSeconds, pricePerSec: perSec, ...range } };
   }
 
   /** The quote for a swap on a chosen engine: its `RenderReq` (priced like /v1/jobs prices it) for `takes` of a clip. */
@@ -109,7 +110,7 @@ export class ModelChoice {
         const m = modelById(e.id)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
         const base = cur ?? this.videoEntry(m, [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
         out.set(e.id, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
-          limits: { ...base.limits, minSeconds: e.runs === 'higgsfield' ? HF_SWAP_MIN_SEC : P.REPLICATE_MIN_SEC, maxInputSeconds: P.REPLICATE_MAX_SEC } });
+          limits: { ...base.limits, minSeconds: e.genjutsu?.minSec ?? (e.runs === 'higgsfield' ? HF_SWAP_MIN_SEC : P.REPLICATE_MIN_SEC), maxInputSeconds: e.genjutsu?.maxSec ?? P.REPLICATE_MAX_SEC } });
       } else {
         const sp = this.swapPrice(e.id, 'standard', P.SAMPLE_CLIP_SEC);
         out.set(e.id, { model: e.id, name: e.name, kind: 'video', purposes: ['swap', 'fill'], custom: false, provider: 'runpod', notice: e.notice ?? null,
@@ -267,7 +268,9 @@ export class ModelChoice {
   private memberView(e: Engine, rules: MemberRules): Engine | null {
     if (!ModelChoice.forMembers(e, rules)) return null;
     const { provider, notice: _n, members: _m, browsed: _b, providerName: _pn, ...rest } = e;
-    return rules.showProviderNames && provider ? { ...rest, provider, providerName: providerLabel(provider) } : rest;
+    // The provider goes in providerName (while shown), not in the name: "Genjutsu (Higgsfield)" → "Genjutsu".
+    const named = { ...rest, name: rest.name.replace(/\s*\((Higgsfield|Replicate|fal|Muapi)\)$/, '') };
+    return rules.showProviderNames && provider ? { ...named, provider, providerName: providerLabel(provider) } : named;
   }
   /** The owner's view of an entry: every field, `members` (shown to members) on video and image models. */
   private ownerView(e: Engine, rules: MemberRules): Engine {
@@ -403,7 +406,7 @@ export { VIDEO_PURPOSES };
  * swap. `pre`: a choice the caller already made (undefined: choose now). Returns the choice, or null (built-in behaviour).
  */
 export async function applySwapEngine(mc: ModelChoice, u: AuthUser, r: Record<string, any>, requested?: string | null, pre?: Choice | null): Promise<Choice | null> {
-  for (const k of ['swapEngine', 'videoModel', 'videoNoResolution']) delete r[k]; // never taken from the client
+  for (const k of ['swapEngine', 'videoModel', 'videoNoResolution', 'minSec', 'maxSec', 'resolutionLabel']) delete r[k]; // never taken from the client
   if (!requested && pre === undefined && r.engine && r.engine !== 'replicate') return null;
   const choice = pre !== undefined ? pre : await mc.choose(u, 'swap', requested);
   if (!choice) return null;
@@ -412,5 +415,6 @@ export async function applySwapEngine(mc: ModelChoice, u: AuthUser, r: Record<st
   if (e.runs === 'gpu') { r.engine = e.gpuEngine; r.use = 'full'; delete r.quality; }
   else { r.engine = 'replicate'; r.videoModel = e.ref; if (e.noResolution) r.videoNoResolution = true; } // Higgsfield runs on the hosted line too (swapEngine h3-hf)
   r.swapEngine = e.id;
+  if (e.genjutsu) { r.minSec = e.genjutsu.minSec; r.maxSec = e.genjutsu.maxSec; } // its 4–30 s range (the resolution label comes with the price)
   return choice;
 }

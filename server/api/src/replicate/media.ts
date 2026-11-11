@@ -92,9 +92,9 @@ export async function finishTake(ffmpeg: string, rendered: string, src: string, 
  * Puts the source clip's own sound on a delivered take: the video is stream-copied (no re-encode); the audio is copied
  * when it's AAC, else encoded to AAC (audio only, light). Used when the model was sent a silent clip.
  */
-export async function restoreAudio(ffmpeg: string, take: string, src: string, out: string, audioCodec: string | null) {
+export async function restoreAudio(ffmpeg: string, take: string, src: string, out: string, audioCodec: string | null, o: { shortest?: boolean } = {}) {
   await run(ffmpeg, ['-y', '-v', 'error', '-i', take, '-i', src, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy',
-    ...(audioCodec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k']), '-movflags', '+faststart', out]);
+    ...(audioCodec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k']), ...(o.shortest ? ['-shortest'] : []), '-movflags', '+faststart', out]);
 }
 
 /** The same video without its audio track (stream copy, no re-encode). */

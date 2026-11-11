@@ -10,6 +10,7 @@ import type { Ctx } from '../ctx.js';
 import { CREDIT_RE, errorText, outputUrl, ReplicateError, SAFETY_RE } from '../replicate/client.js';
 import { predictionError } from '../services/replicateVideo.js';
 import type { ProviderId } from './registry.js';
+import { GENJUTSU_NO_ACCESS } from '../engines/purposes.js';
 
 const run = promisify(execFile);
 
@@ -113,6 +114,8 @@ export class HiggsfieldProvider implements VideoProvider {
       .catch(e => { throw new ReplicateError(`Higgsfield unreachable (${(e as Error).name})`, 'unavailable'); });
     const text = await res.text().catch(() => '');
     if (res.status === 401) throw new ReplicateError("Higgsfield refused the server's key", 'unavailable', 401);
+    // Genjutsu: a 403/404 that isn't about credit means the key's plan has no access to the model (said plainly, no fallback).
+    if (/genjutsu/.test(ref) && (res.status === 403 || res.status === 404) && !CREDIT_RE.test(text) && !/credit|balance|insufficient/i.test(text)) throw new ReplicateError(GENJUTSU_NO_ACCESS, 'unavailable', 403);
     if (res.status === 402 || res.status === 403 || CREDIT_RE.test(text) || /not enough credits/i.test(text)) throw new ReplicateError('Higgsfield is out of credit', 'out_of_credit', res.status);
     if (res.status === 429) throw new ReplicateError('Higgsfield is busy', 'rate_limited', 429);
     if (res.status >= 500) throw new ReplicateError(`Higgsfield is having trouble (${res.status})`, 'unavailable', res.status);
@@ -134,6 +137,22 @@ export class HiggsfieldProvider implements VideoProvider {
     if (st.status === 'failed') { const t = errorText(st.error ?? 'failed'); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
     if (st.status === 'canceled') return { status: 'canceled' };
     return { status: 'running' };
+  }
+  /**
+   * Genjutsu restyle presets (GET /models/higgsfield/genjutsu/restyle/v1.0/presets): free, needs the key and access to
+   * Genjutsu. Also the no-spend access check. `access`: 'yes' | 'no' (401/403/404) | 'unknown' (down, unreachable).
+   */
+  async genjutsuPresets(): Promise<{ access: 'yes' | 'no' | 'unknown'; presets: { id: string; name: string; preview?: string | null }[]; detail?: string }> {
+    if (!this.configured()) return { access: 'unknown', presets: [], detail: "Higgsfield isn't set up on the server" };
+    const res = await this.fetchFn(`${this.base()}/models/higgsfield/genjutsu/restyle/v1.0/presets`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    if (!res) return { access: 'unknown', presets: [], detail: 'Higgsfield unreachable' };
+    if (res.status === 401) return { access: 'no', presets: [], detail: "Higgsfield refused the server's key" };
+    if (res.status === 403 || res.status === 404) return { access: 'no', presets: [], detail: GENJUTSU_NO_ACCESS };
+    if (!res.ok) return { access: 'unknown', presets: [], detail: `Higgsfield answered ${res.status}` };
+    const j = (await res.json().catch(() => ({}))) as { items?: { id?: unknown; name?: unknown; preview_url?: unknown }[] };
+    const presets = (j.items ?? []).filter(x => typeof x.id === 'string' && typeof x.name === 'string')
+      .map(x => ({ id: x.id as string, name: x.name as string, preview: typeof x.preview_url === 'string' ? x.preview_url : null }));
+    return { access: 'yes', presets };
   }
   async cancel(id: string) {
     try { await this.fetchFn(JSON.parse(id).c, { method: 'POST', headers: this.headers(), signal: AbortSignal.timeout(30_000) }); }
