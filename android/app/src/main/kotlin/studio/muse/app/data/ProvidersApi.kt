@@ -19,9 +19,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 // ---------------------------------------------------------------- types
 
-/** GET /v1/providers/kinds: a provider the studio can connect (replicate, fal). */
+/** GET /v1/providers/kinds: a provider the studio can connect (replicate, fal, muapi, higgsfield). [serverKey]: the server already
+ *  has an account for it (Higgsfield), so it connects with no key pasted. */
 @Serializable
-data class ProviderKind(val kind: String, val label: String = "", val keyHint: String = "", val keyUrl: String? = null)
+data class ProviderKind(val kind: String, val label: String = "", val keyHint: String = "", val keyUrl: String? = null, val serverKey: Boolean = false)
 
 @Serializable
 data class ProviderKinds(val kinds: List<ProviderKind> = emptyList(), val keysReady: Boolean = true)
@@ -41,6 +42,8 @@ data class Provider(
     val checkedAt: Long? = null,
     val createdAt: Long = 0,
     val models: ProviderModelCounts = ProviderModelCounts(),
+    /** Connected with the server's own account (no key stored for it). */
+    val serverKey: Boolean = false,
 ) {
     val invalid get() = status == "invalid"
 }
@@ -53,7 +56,8 @@ data class Providers(
 )
 
 @Serializable
-data class NewProvider(val kind: String, val apiKey: String, val label: String? = null)
+/** [apiKey] null: connect with the server's own account (kinds with serverKey). */
+data class NewProvider(val kind: String, val apiKey: String? = null, val label: String? = null)
 
 @Serializable
 data class ProviderPatch(val label: String? = null, val apiKey: String? = null)

@@ -86,10 +86,9 @@ fun ModelInitial(model: Model, modifier: Modifier = Modifier, size: Float = 42f)
  */
 @Composable
 fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = {}, onAccounts: () -> Unit = {},
-    onEnhance: () -> Unit = {}, onDressUp: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> = listOfNotNull(
+    onEnhance: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> = listOfNotNull(
     MenuItem("grid", "Character sheet", onClick = onSheet),
     MenuItem("quality", "Enhance character sheet", onClick = onEnhance),
-    MenuItem("outfit", "Dress up", onClick = onDressUp),
     MenuItem("outfit", "Add outfit", onClick = onOutfit),
     MenuItem("lock", "Identity LoRA", onClick = onLora),
     MenuItem("export", "Accounts", onClick = onAccounts),

@@ -159,7 +159,8 @@ class FakeMuseApi(
     override suspend fun listOutfits() = lock.withLock { outfits.filter { o -> models.none { it.id == o.modelId && it.archived } } }
 
     override suspend fun createOutfit(req: CreateOutfitRequest): Outfit {
-        val cost = if (req.mode == "own") 0.0 else PhotoPricing.outfitSet(photoPrices)
+        // Every outfit also gets its 3 face close-ups (plans/outfit-faces.md); "My own set" pays for those alone.
+        val cost = OutfitPictures.createEstimate(photoPrices, req.mode, req.base?.keeping == true)
         val o = lock.withLock {
             if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
             charge(cost)
@@ -177,7 +178,7 @@ class FakeMuseApi(
             val ready = lock.withLock {
                 val angles = if (req.mode == "own" && req.images.isNotEmpty()) (0 until 4).map { req.images.getOrNull(it) }
                 else listOf("c_front", "c_tq", "c_face", "c_front").map(ImageRef::asset)
-                val r = outfit(o.id).copy(angles = angles, state = "preview")
+                val r = outfit(o.id).copy(angles = angles, faces = DEMO_FACES, state = "preview")
                 replaceOutfit(r)
                 r
             }
@@ -225,6 +226,45 @@ class FakeMuseApi(
         }
         events.tryEmit(ApiEvent("outfit", outfit = o))
         return OutfitFill(o, cost)
+    }
+
+    /** Demo face close-ups (face front, face ¾, face side). */
+    private val DEMO_FACES = listOf("face", "c_face", "profile").map(ImageRef::asset)
+
+    /** Makes the given pictures of an outfit (indexes into [OutfitPictures.KEYS]) after a moment, then an outfit event. */
+    private suspend fun remakeOutfit(outfitId: String, pictures: (Outfit) -> List<Int>): OutfitFill {
+        val (o, cost, todo) = lock.withLock {
+            val o = outfit(outfitId)
+            if (o.state == "generating") throw ApiException("outfit_busy", "This outfit is still being made · try again when it finishes")
+            if (o.front == null) throw ApiException("bad_request", "Its front picture is missing · make a new outfit instead")
+            val todo = pictures(o)
+            val cost = todo.sumOf { OutfitPictures.redoEstimate(photoPrices, it) }
+            if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(cost)
+            Triple(o, cost, todo)
+        }
+        if (cost > 0) events.tryEmit(ApiEvent("balance", balance = balance))
+        if (todo.isNotEmpty()) scope.launch {
+            delay(genDelayMs + 100)
+            val done = lock.withLock {
+                val cur = outfits.firstOrNull { it.id == outfitId } ?: return@withLock null
+                val all = OutfitPictures.all(cur).toMutableList()
+                val body = listOf("c_front", "c_tq", "c_face", "c_front").map(ImageRef::asset)
+                todo.forEach { i -> all[i] = if (i < OutfitPictures.BODY) body[i] else DEMO_FACES[i - OutfitPictures.BODY] }
+                cur.copy(angles = all.take(OutfitPictures.BODY), faces = all.drop(OutfitPictures.BODY)).also { replaceOutfit(it) }
+            }
+            done?.let { events.emit(ApiEvent("outfit", outfit = it)) }
+        }
+        return OutfitFill(o, cost)
+    }
+
+    override suspend fun addOutfitFaces(outfitId: String): OutfitFill =
+        remakeOutfit(outfitId) { o -> (0 until OutfitPictures.FACES).filter { o.faces?.getOrNull(it) == null }.map { OutfitPictures.BODY + it } }
+
+    override suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill {
+        val i = OutfitPictures.KEYS.indexOf(angle)
+        if (i < 0) throw ApiException("bad_request", "Unknown picture")
+        return remakeOutfit(outfitId) { listOf(i) }
     }
 
     override suspend fun saveOutfit(outfitId: String, name: String?): Outfit {
@@ -513,6 +553,7 @@ class FakeMuseApi(
     suspend fun debugPutLora(l: Lora) = lock.withLock { loras[l.modelId] = l }
     suspend fun debugPutAccount(a: Account) = lock.withLock { accounts.getOrPut(a.modelId) { mutableMapOf() }[a.platform] = a }
     suspend fun debugPutTake(t: Take) = lock.withLock { takes.removeAll { it.id == t.id }; takes.add(0, t) }
+    suspend fun debugPutOutfit(o: Outfit) = lock.withLock { outfits.removeAll { it.id == o.id }; outfits.add(o) }
         suspend fun debugPutPost(p: Post) = lock.withLock { posts.removeAll { it.id == p.id }; posts.add(p) }
 
     private fun run(job: Job) {
@@ -563,6 +604,12 @@ class FakeMuseApi(
                 if (ev.job?.state != "running") break
             }
         }
+    }
+
+    override suspend fun clearFailedJobs(): List<String> = lock.withLock {
+        val ids = jobs.filter { it.state == "failed" }.map { it.id }
+        jobs.removeAll { it.id in ids }; hiddenJobs += ids
+        ids
     }
 
     override suspend fun removeJob(jobId: String) {

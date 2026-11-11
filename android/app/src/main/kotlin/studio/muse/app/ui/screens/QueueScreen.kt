@@ -69,6 +69,8 @@ data class QueueState(
     val running: List<Job> = emptyList(),
     val done: List<Job> = emptyList(),
     val failed: Job? = null,
+    /** How many failed jobs are still showing (for "Clear all failed"). */
+    val failedCount: Int = 0,
     val balance: Balance = Balance(0.0, 0.0),
     val loaded: Boolean = false,
 ) {
@@ -80,7 +82,8 @@ data class QueueState(
 class QueueViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<QueueState> = combine(c.repo.state, c.drafts.dismissedFails) { s, dismissed ->
         QueueState(
-            s.jobs.filter { it.running }, s.jobs.filter { it.done }, s.jobs.firstOrNull { it.failed && it.id !in dismissed }, s.balance, s.loaded,
+            s.jobs.filter { it.running }, s.jobs.filter { it.done }, s.jobs.firstOrNull { it.failed && it.id !in dismissed },
+            s.jobs.count { it.failed && it.id !in dismissed }, s.balance, s.loaded,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, QueueState())
 
@@ -95,6 +98,13 @@ class QueueViewModel(private val c: AppContainer) : ViewModel() {
         c.repo.toast("Retrying · settings loaded")
         nav.go(Routes.DIRECT)
     }
+
+    /** Dismiss is stored on the server (the job's hiddenAt), so it holds after a restart (owner bug 2026-11-11). */
+    fun dismiss(j: Job) = viewModelScope.launch {
+        c.drafts.dismissedFails.update { it + j.id }
+        if (c.repo.removeJob(j.id) == null) c.drafts.dismissedFails.update { it - j.id }
+    }
+    fun clearFailed() = viewModelScope.launch { c.repo.clearFailedJobs()?.let { c.repo.toast("Cleared ${it.size} failed") } }
 
     fun rerun(j: Job, nav: Nav) { c.drafts.loadJob(j); c.repo.toast("Settings loaded · tap Generate"); nav.go(Routes.DIRECT) }
     fun remove(j: Job) = viewModelScope.launch { if (c.repo.removeJob(j.id) != null) c.repo.toast("Removed") }
@@ -125,7 +135,7 @@ fun QueueScreen() {
                 EmptyState("Nothing rendering", "Videos you start show up here while they render, with their price and time left. You're not being charged.",
                     "New shot", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) })
             }
-            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
+            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f, s.failedCount) } }
             items(s.all, key = { it.id }, contentType = { "job" }) { j -> JobRow(vm, j) }
             if (!s.empty && s.loaded) item(key = "new", contentType = "cta") {
                 PrimaryButton("New shot", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) }, Modifier.fillMaxWidth().padding(top = MuseSpace.s5), icon = "plus")
@@ -149,15 +159,19 @@ private fun jobMenu(vm: QueueViewModel, j: Job): List<MenuItem> {
 
 /** Failed render: what happened, the refund, and one way to try again with the same settings. */
 @Composable
-private fun FailCard(vm: QueueViewModel, j: Job) {
+private fun FailCard(vm: QueueViewModel, j: Job, count: Int) {
     val m = muse
     val nav = LocalNav.current
-    Row(Modifier.fillMaxWidth().padding(vertical = MuseSpace.s3), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            T("${j.title} didn't render", m.scale.heading, m.roles.danger)
-            Caption(j.failLine())
+    Column {
+        Row(Modifier.fillMaxWidth().padding(vertical = MuseSpace.s3), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                T("${j.title} didn't render", m.scale.heading, m.roles.danger)
+                Caption(j.failLine())
+            }
+            SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
+            SecondaryButton("Dismiss", { vm.dismiss(j) }, height = 48.dp)
         }
-        SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
+        if (count > 1) Caption("Clear all $count failed", Modifier.press { vm.clearFailed() }.padding(vertical = MuseSpace.s2))
     }
 }
 

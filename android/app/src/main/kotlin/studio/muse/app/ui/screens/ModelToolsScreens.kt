@@ -51,8 +51,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.CatalogModel
-import studio.muse.app.data.DressUpDraft
-import studio.muse.app.data.DressUpRequest
 import studio.muse.app.data.EnhanceDraft
 import studio.muse.app.data.EnhanceRequest
 import studio.muse.app.data.ImageRef
@@ -75,7 +73,7 @@ import studio.muse.app.ui.theme.scale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 
-// Model tools (plans/api.md "Model tools"): Enhance and Dress up for the character sheet (everyone), the image model
+// Model tools (plans/api.md "Model tools"): Enhance for the character sheet (everyone), the image model
 // catalog and archived models (owner only). Members never see a model or provider name here.
 
 private fun isOwner(c: AppContainer) = c.repo.demo || c.prefs.value.owner
@@ -259,109 +257,10 @@ fun OwnerModelLine(steps: List<String>, chosen: Map<String, String>, defaults: M
     }
 }
 
-val STEP_NAMES = mapOf("shot" to "New shots", "edit" to "Edits", "realism" to "Realism", "upscale" to "Upscale", "dressA" to "Option A", "dressB" to "Option B")
+val STEP_NAMES = mapOf("shot" to "New shots", "edit" to "Edits", "realism" to "Realism", "upscale" to "Upscale")
 
-// ---------------------------------------------------------------- Dress up
-
-data class DressUpState(val model: Model? = null, val draft: DressUpDraft = DressUpDraft(), val run: ToolRun? = null, val tools: ToolsFeatures = ToolsFeatures(),
-    val estimate: ToolEstimate? = null)
-
-class DressUpViewModel(private val c: AppContainer) : ViewModel() {
-    private val est = MutableStateFlow<ToolEstimate?>(null)
-    val state: StateFlow<DressUpState> = combine(c.repo.state, c.drafts.modelId, c.drafts.dressUp, est) { s, mid, d, e ->
-        DressUpState(s.model(mid) ?: s.models.firstOrNull(), d, d.runId?.let { s.toolRuns[it] }, s.tools, e)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, DressUpState())
-
-    init { refreshEstimate() }
-    private fun req(d: DressUpDraft) = DressUpRequest(d.outfitImage, d.name.ifBlank { null }, d.engine, d.models.ifEmpty { null })
-    fun refreshEstimate() = viewModelScope.launch { est.value = c.repo.dressUpEstimate(c.drafts.modelId.value, req(c.drafts.dressUp.value)).first }
-    fun set(f: (DressUpDraft) -> DressUpDraft) { c.drafts.dressUp.update(f); refreshEstimate() }
-    fun upload(uri: Uri) = viewModelScope.launch {
-        val media = c.media ?: return@launch
-        val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that image")
-        val ref = c.repo.uploadImage(media.displayName(uri), bytes, media.mime(uri)) ?: return@launch
-        val name = media.displayName(uri).substringBeforeLast('.').replace(Regex("[_-]+"), " ").trim().take(40)
-        c.drafts.dressUp.update { it.copy(outfitImage = ref, name = it.name.ifBlank { name }) }
-    }
-    fun start() = viewModelScope.launch {
-        val d = c.drafts.dressUp.value
-        if (d.outfitImage == null) return@launch c.repo.toast("Add the outfit photo first")
-        val r = c.repo.startDressUp(c.drafts.modelId.value, req(d)) ?: return@launch
-        c.drafts.dressUp.update { it.copy(runId = r.id) }
-    }
-    fun decide(item: ToolItem, keep: Boolean) = viewModelScope.launch { state.value.run?.let { c.repo.decideTool(it.id, item.slot, keep) } }
-    fun pick(item: ToolItem, e: String) = viewModelScope.launch { state.value.run?.let { c.repo.decideTool(it.id, item.slot, true, e) } }
-    fun pickAll(e: String) = viewModelScope.launch { state.value.run?.let { c.repo.pickTool(it.id, e) } }
-    fun retry(item: ToolItem) = viewModelScope.launch { state.value.run?.let { c.repo.retryTool(it.id, item.slot, it.engines.first()) } }
-    fun apply(done: () -> Unit) = viewModelScope.launch {
-        val r = state.value.run ?: return@launch
-        val res = c.repo.applyTool(r.id, c.drafts.dressUp.value.name.ifBlank { null }) ?: return@launch
-        c.repo.toast("Saved as a new outfit · ${res.outfit?.name ?: "Dressed look"}")
-        res.outfit?.let { c.drafts.outfitId.value = it.id }
-        c.drafts.dressUp.value = DressUpDraft()
-        done()
-    }
-    fun discard() = viewModelScope.launch { state.value.run?.let { c.repo.discardTool(it.id) }; c.drafts.dressUp.update { it.copy(runId = null) } }
-}
-
-@Composable
-fun DressUpScreen() {
-    val c = LocalContainer.current
-    val vm: DressUpViewModel = viewModel { DressUpViewModel(c) }
-    val s by vm.state.collectAsState()
-    val nav = LocalNav.current
-    val run = s.run?.takeIf { it.state == "running" || it.state == "review" }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.upload(uri) }
-    ScreenBox(bg = muse.roles.canvas) {
-        Column(Modifier.fillMaxSize()) {
-            CalmTopBar("Dress up", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
-                if (run == null) DressUpSetup(s, vm, isOwner(c)) { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                else {
-                    if (run.both && run.state == "review") Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                        SecondaryButton("Use all A", { vm.pickAll("a") }, Modifier.weight(1f), height = 48.dp)
-                        SecondaryButton("Use all B", { vm.pickAll("b") }, Modifier.weight(1f), height = 48.dp)
-                    }
-                    ToolReview(run, s.model, onKeep = { i, k -> vm.decide(i, k) }, onRetry = { vm.retry(it) }, onPick = if (run.both) ({ i, e -> vm.pick(i, e) }) else null)
-                }
-            }
-        }
-        ActionDock {
-            when {
-                run == null -> PrimaryButton("Dress up · ${s.estimate?.label?.substringAfterLast("· ") ?: "7 images"}", vm::start, Modifier.weight(1f), off = s.draft.outfitImage == null)
-                run.state == "running" -> PrimaryButton(run.phase.ifBlank { "Dressing up…" }, {}, Modifier.weight(1f), busy = true)
-                else -> {
-                    SecondaryButton("Discard", vm::discard)
-                    PrimaryButton("Save outfit · ${run.kept}", { vm.apply { nav.back() } }, Modifier.weight(1f), off = run.kept == 0)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DressUpSetup(s: DressUpState, vm: DressUpViewModel, owner: Boolean, onPick: () -> Unit) {
-    val m = muse
-    val first = s.model?.name?.substringBefore(' ') ?: "her"
-    Body("Add one photo of an outfit (clothes and accessories). $first's whole character sheet is made again wearing it: the full-body photos get the outfit, the close-ups get the jewellery, glasses or hat and the neckline. Face, hair, pose and background stay the same.")
-    Box(Modifier.fillMaxWidth().height(220.dp).clip(containerShape()).background(m.roles.field).press(onClick = onPick)
-        .semantics { contentDescription = if (s.draft.outfitImage == null) "Add the outfit photo" else "Replace the outfit photo" }, contentAlignment = Alignment.Center) {
-        val img = s.draft.outfitImage
-        if (img != null) RefImage(img, Modifier.fillMaxSize(), 50)
-        else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-            Ic("upload", 24.dp, m.roles.ink2); T("Add the outfit photo", m.scale.label, m.roles.ink)
-        }
-    }
-    Labeled("Outfit name") { Input(s.draft.name, { v -> vm.set { it.copy(name = v.take(80)) } }, placeholder = "Named after the photo", calm = true) }
-    Labeled("Look") {
-        Segmented(s.tools.dressUp.options.map { it.id to it.label }, s.draft.engine, { v -> vm.set { it.copy(engine = v) } })
-        Caption(s.tools.dressUp.options.firstOrNull { it.id == s.draft.engine }?.detail ?: "")
-    }
-    if (owner) StepModels(if (s.draft.engine == "both") listOf("dressA", "dressB") else listOf(if (s.draft.engine == "b") "dressB" else "dressA"), s.draft.models,
-        s.tools.dressUp.models?.mapValues { it.value.name } ?: emptyMap())
-    Notice("${s.estimate?.label ?: "Working out the price…"}. Saved as a new outfit you can shoot and film. The character sheet itself never changes.")
-}
+/** Image-model steps still stored on the server but no longer used by any tool (Dress up, removed 2026-11-11). */
+val HIDDEN_STEPS = setOf("dressA", "dressB")
 
 // ---------------------------------------------------------------- Owner: image models and the catalog
 
@@ -395,7 +294,8 @@ fun ImageModelsScreen() {
                     steps.isEmpty() && err != null -> ErrorState("Can't load the image models", err ?: "", onAction = { vm.load() })
                     else -> err?.let { Notice(it, tone = NoticeTone.DANGER) }
                 }
-                steps.forEach { s ->
+                // Dress up was removed (plans/outfit-faces.md): its stored dressA / dressB steps are hidden.
+                steps.filter { it.step !in HIDDEN_STEPS }.forEach { s ->
                     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             T(s.label, m.scale.heading, m.roles.ink, Modifier.weight(1f))
@@ -437,7 +337,6 @@ class CatalogViewModel(private val c: AppContainer) : ViewModel() {
         if (c.drafts.catalogFor.value == "run") {
             val put: (Map<String, String>) -> Map<String, String> = { it + (step to m.id) }
             if (step == "realism" || step == "upscale") c.drafts.enhance.update { it.copy(models = put(it.models)) }
-            else if (step == "dressA" || step == "dressB") c.drafts.dressUp.update { it.copy(models = put(it.models)) }
             c.repo.toast("This run uses ${m.id}")
             return@launch done()
         }

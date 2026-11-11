@@ -227,10 +227,7 @@ fun CharacterSheetScreen() {
                         SecondaryButton("Fill $miss missing angle${if (miss > 1) "s" else ""} · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}",
                             { vm.fill() }, Modifier.fillMaxWidth())
                     }
-                    if (filled > 0) Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                        SecondaryButton("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.weight(1f))
-                        SecondaryButton("Dress up", { nav.go(Routes.DRESSUP) }, Modifier.weight(1f))
-                    }
+                    if (filled > 0) SecondaryButton("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.fillMaxWidth())
                 }
                 if (faces < 2) Notice("Two face close-ups keep her face sharp and consistent in videos. You can still save without them.", tone = NoticeTone.CAUTION)
                 else Notice("$filled of 7 shots. ${if (filled < 7) "More angles help when she turns." else "Full sheet: her identity is locked."}", tone = if (filled == 7) NoticeTone.POSITIVE else NoticeTone.NEUTRAL)

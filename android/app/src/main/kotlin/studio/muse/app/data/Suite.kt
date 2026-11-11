@@ -216,13 +216,20 @@ data class SuiteCatalogEngine(
     val inputs: SuiteInputs? = null,
     /** WS13: the purposes it serves (shot, talking, ugc…); empty = an older server (any). */
     val purposes: List<String> = emptyList(),
-)
+    /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
+    val label: String = "",
+) {
+    /** What to show for the model: the server's label, else its name. */
+    val shownName: String get() = label.ifBlank { name }
+}
 
 /** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */
 @Serializable
 data class SuiteCustomEngine(
     val id: String,
     val name: String = "",
+    /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
+    val label: String = "",
     /** image | video */
     val kind: String = "video",
     /** The composer's input slots (the server maps the model's schema). */

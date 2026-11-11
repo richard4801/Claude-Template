@@ -78,13 +78,15 @@ data class EngineEntry(
     val resolution: String? = null,
     val price: EnginePrice? = null,
     val inputs: SuiteInputs? = null,
+    /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
+    val label: String = "",
 ) {
     /** The picker's shape: one price, per second or per run. */
     fun asCatalogEngine(): SuiteCatalogEngine {
         val perSec = price?.takeIf { it.basis != "per_run" }?.usd
         return SuiteCatalogEngine(model, name.ifBlank { model }, if (kind == "image") "image" else "video", custom, null, emptyList(), resolution,
             limits.resolutions.map { SuiteResolution(it.id, it.label.ifBlank { it.id }, perSec = perSec ?: 0.0) }, perSec,
-            price?.takeIf { it.basis == "per_run" }?.usd, limits.minSeconds, limits.maxSeconds, limits.allowedSeconds, limits.aspectRatios, inputs, purposes)
+            price?.takeIf { it.basis == "per_run" }?.usd, limits.minSeconds, limits.maxSeconds, limits.allowedSeconds, limits.aspectRatios, inputs, purposes, label)
     }
 }
 

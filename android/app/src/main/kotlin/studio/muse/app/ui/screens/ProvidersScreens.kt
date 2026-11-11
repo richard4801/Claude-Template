@@ -85,7 +85,8 @@ class ProvidersViewModel(private val c: AppContainer) : ViewModel() {
     fun adding(v: Boolean) = state.update { it.copy(adding = v, error = null) }
 
     /** Checked with the provider before anything is stored (400 invalid_key: nothing saved). The key is never kept here. */
-    fun add(kind: String, key: String) = viewModelScope.launch {
+    /** [key] null: connect with the server's own account (kinds with serverKey). */
+    fun add(kind: String, key: String?) = viewModelScope.launch {
         state.update { it.copy(busy = true, error = null) }
         try {
             api.add(NewProvider(kind, key))
@@ -117,7 +118,7 @@ private fun providersVm(): ProvidersViewModel {
 /** "Key ending 4f2a, added 8 Nov. 9 of 48 models on." */
 fun Provider.line(): String {
     val added = if (createdAt > 0) ", added " + java.text.SimpleDateFormat("d MMM", java.util.Locale.UK).format(java.util.Date(createdAt)) else ""
-    return "Key ending $keyLast4$added. ${models.enabled} of ${models.added} models on." + if (invalid) " The key stopped working: replace it." else ""
+    return (if (serverKey) "The studio's account" else "Key ending $keyLast4") + "$added. ${models.enabled} of ${models.added} models on." + if (invalid) " The key stopped working: replace it." else ""
 }
 
 @Composable
@@ -179,6 +180,13 @@ private fun AddProviderForm(s: ProvidersState, vm: ProvidersViewModel?) {
     SettingsGroup("Add a provider") {
         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
             Labeled("Provider") { Segmented(kinds.map { it.kind to it.label.ifBlank { it.kind } }, kind, { kind = it }) }
+            if (k.serverKey) Labeled("Studio account") {
+                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                    PrimaryButton(if (s.busy) "Connecting…" else "Use the studio's ${k.label.ifBlank { k.kind }} account", { if (!s.busy) vm?.add(kind, null) }, Modifier.fillMaxWidth())
+                    T("MUSE's server is already set up with a ${k.label.ifBlank { k.kind }} account: no key to paste, and the key stays on the server. Or paste a different key below.",
+                        muse.scale.caption, muse.roles.ink2)
+                }
+            }
             Labeled("API key") {
                 SecureKeyField(null, k.keyHint.ifBlank { "Paste the key" }, s.busy, s.error, s.keysReady, { key -> vm?.add(kind, key) },
                     note = "Saved encrypted on the MUSE server, checked with ${k.label.ifBlank { k.kind }} first. Afterwards you only see its last 4 characters.",

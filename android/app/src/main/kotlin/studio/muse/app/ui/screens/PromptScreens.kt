@@ -247,5 +247,5 @@ fun PromptEditorBody(entry: PromptEntry, group: String?, text: String, preview: 
 
 private fun groupLabel(id: String) = when (id) {
     "photoshoot" -> "Photo"; "references" -> "References"; "sheet" -> "Character sheet"; "outfits" -> "Outfits"; "enhance" -> "Enhance"
-    "dressup" -> "Dress up"; "templates" -> "Templates"; "video" -> "Video"; "lora" -> "LoRA"; else -> id
+    "templates" -> "Templates"; "video" -> "Video"; "lora" -> "LoRA"; else -> id
 }

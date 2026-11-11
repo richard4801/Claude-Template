@@ -99,7 +99,7 @@ data class Outfit(
     val prompt: String = "",
     /** What the set really cost once made (exact, pass-through); null before, or from an older server. */
     val cost: Double? = null,
-    /** Dress up outfits: the face close-ups wearing its accessories (face, face ¾, profile). */
+    /** Its face close-ups with its hair, make-up and accessories (face front, face ¾, face side); null on older outfits. */
     val faces: List<ImageRef?>? = null,
     /** When it was made (ms; the folder's date) and who made it (they or the owner may rename/delete it). */
     val createdAt: Long? = null,
@@ -114,9 +114,13 @@ data class Outfit(
 @Serializable
 data class OutfitNameBody(val name: String? = null)
 
-/** POST /v1/outfits/{id}/fill: the outfit now and the estimate held for its missing angles. */
+/** POST /v1/outfits/{id}/fill, /faces, /redo: the outfit now and the estimate held for the pictures being made. */
 @Serializable
 data class OutfitFill(val outfit: Outfit, val cost: Double = 0.0)
+
+/** POST /v1/outfits/{id}/redo: which of the 7 pictures (front | tq | side | back | face | faceTq | profile). */
+@Serializable
+data class OutfitRedoRequest(val angle: String)
 
 @Serializable
 data class CreateOutfitRequest(
@@ -228,6 +232,10 @@ data class JobRequest(
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }
+
+/** POST /v1/jobs/clear-failed: the failed jobs it hid for good. */
+@Serializable
+data class ClearedJobs(val cleared: Int = 0, val ids: List<String> = emptyList())
 
 /**
  * A render job. state: queued | running | done | failed.

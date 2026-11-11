@@ -47,6 +47,7 @@ import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.OutfitDraft
 import studio.muse.app.data.OutfitBaseAngles
+import studio.muse.app.data.OutfitPictures
 import androidx.compose.foundation.layout.heightIn
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
@@ -161,10 +162,11 @@ fun OutfitScreen() {
     var ownFor by remember { mutableStateOf(0) }
     val pickAngle = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.setOwn(ownFor, u) }
     val name = s.model?.name?.substringBefore(' ') ?: "Her"
-    // The four angles as they show in the grid; a tap opens them full size (pinch to zoom, swipe between angles).
-    val angles: List<ImageRef?> = OutfitAngle.entries.indices.map { idx ->
-        if (s.done) s.preview?.angles?.getOrNull(idx) else if (s.draft.mode == "own") s.draft.own.getOrNull(idx) else null
-    }
+    // "My own set" before it's sent: the four angle boxes (each picks its photo). No face boxes: MUSE makes those.
+    val ownPicking = s.draft.mode == "own" && !s.done && !s.busy
+    val angles: List<ImageRef?> = OutfitAngle.entries.indices.map { idx -> if (ownPicking) s.draft.own.getOrNull(idx) else null }
+    // Otherwise the 7 pictures (4 body angles, 3 face close-ups) as they come back; a tap opens them full size.
+    val pictures: List<ImageRef?> = s.preview?.takeIf { s.done || s.busy }?.let { OutfitPictures.all(it) } ?: List(OutfitPictures.KEYS.size) { null }
     var viewing by remember { mutableStateOf<Int?>(null) }
     ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
@@ -175,7 +177,7 @@ fun OutfitScreen() {
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                     DisplayTitle("Outfit set")
-                    Body("$name in a new outfit, from four angles. Every shoot and video with this outfit uses them.")
+                    Body("$name in a new outfit: four angles and three face close-ups with its hair and make-up. Every shoot and video with this outfit uses them.")
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                     Segmented(listOf("describe" to "Describe", "photo" to "From a photo", "own" to "My own set"), s.draft.mode, vm::mode)
@@ -188,13 +190,17 @@ fun OutfitScreen() {
                         }
                         else -> {
                             Caption("Tap a box to add that view. Any you skip can be made later from the front.")
+                            Caption("MUSE makes her 3 face close-ups from your front")
                         }
                     }
                 }
                 Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v.take(OutfitNaming.MAX)) } }, placeholder = "Suggested when the set is made", calm = true) }
-                // WS7/WS13: the owner's model for the set (not for "My own set": nothing is generated).
+                // WS7/WS13: the owner's model for the set (not for "My own set": only its face close-ups are made, on the default).
                 if (s.draft.mode != "own") ModelChoiceRow(studio.muse.app.data.ModelPurpose.OUTFIT, ModelPick(s.draft.imageModel), { p -> vm.edit { it.copy(imageModel = p.model) } })
-                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                if (!ownPicking) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                    OutfitPictureGrid(pictures, emptyList(), busy = s.busy) { i -> viewing = OutfitPictures.pageOf(pictures, i) }
+                    Caption("Plain, unbranded clothes work best. Visible logos carry into the video.")
+                } else Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
                     OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                             row.forEachIndexed { i, a ->
@@ -202,8 +208,7 @@ fun OutfitScreen() {
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                                     val ref: ImageRef? = angles[idx]
                                     val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
-                                    if (s.busy && ref == null) Skeleton(tile, containerShape())
-                                    else if (s.draft.mode == "own" && !s.done) Box(
+                                    Box(
                                         tile.clip(containerShape()).background(m.roles.field).press { ownFor = idx; pickAngle.launch(img) }
                                             .semantics { contentDescription = if (ref == null) "Choose the ${a.label} photo" else "Replace the ${a.label} photo"; role = Role.Button },
                                         contentAlignment = androidx.compose.ui.Alignment.Center,
@@ -218,12 +223,6 @@ fun OutfitScreen() {
                                             }
                                         } else studio.muse.app.ui.theme.Ic("plus", 22.dp, m.roles.ink2)
                                     }
-                                    else Box(
-                                        tile.clip(containerShape()).background(m.roles.field).let { t ->
-                                            if (ref == null) t else t.press { viewing = angles.filterNotNull().indexOf(ref) }
-                                                .semantics { contentDescription = "${a.label}, view full size"; role = Role.Button }
-                                        },
-                                    ) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
                                     Caption(a.label)
                                 }
                             }
@@ -231,12 +230,10 @@ fun OutfitScreen() {
                     }
                     Caption("Plain, unbranded clothes work best. Visible logos carry into the video.")
                 }
-                RowItem("Dress up the whole character sheet", "One outfit photo: all 7 sheet photos made again wearing it, saved as a new outfit",
-                    onClick = { nav.go(studio.muse.app.ui.Routes.DRESSUP) }) { Chevron() }
             }
         }
         viewing?.let { start ->
-            val shown = OutfitAngle.entries.mapIndexedNotNull { i, a -> angles[i]?.let { ViewerImage(it, a.label) } }
+            val shown = OutfitPictures.shown(pictures).map { (i, r) -> ViewerImage(r, OutfitPictures.LABELS[i]) }
             if (shown.isNotEmpty()) ImageViewer(shown, start) { viewing = null }
         }
         ActionDock {
@@ -244,8 +241,10 @@ fun OutfitScreen() {
                 SecondaryButton("Generate again", { vm.generate() }, icon = "retry")
                 PrimaryButton("Add to her outfits", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
             } else {
+                // The full price: the body angles and the 3 face close-ups ("My own set": the faces alone).
+                val price = Pricing.money(OutfitPictures.createEstimate(photoPrices(), s.draft.mode, s.draft.base?.keeping == true))
                 PrimaryButton(
-                    if (s.busy) "Generating the outfit set…" else if (s.draft.mode == "own") (if (s.draft.own.firstOrNull() == null) "Add the front photo" else "Use my images") else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(photoPrices().let { p -> if (s.draft.base?.keeping == true) 4 * p.perEdit else studio.muse.core.PhotoPricing.outfitSet(p) })}",
+                    if (s.busy) "Making the 7 pictures…" else if (s.draft.mode == "own") (if (s.draft.own.firstOrNull() == null) "Add the front photo" else "Use my images · $price") else "Make 7 pictures · $price",
                     { if (!s.busy) vm.generate() }, Modifier.weight(1f), busy = s.busy,
                 )
             }

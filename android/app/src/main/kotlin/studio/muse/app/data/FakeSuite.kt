@@ -269,7 +269,7 @@ class FakeSuite {
             e.estimate, createdAt = createdAt, prompt = r.prompt, seed = (1000..99000).random().toLong(), serverEngineLabel = e.label)
     }
 
-    private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", "video", SuiteInputs(start = true), 5, 10, listOf("9:16", "16:9", "1:1"), MemberPrice("per_second", 0.07))
+    private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", kind = "video", inputs = SuiteInputs(start = true), minSeconds = 5, maxSeconds = 10, aspectRatios = listOf("9:16", "16:9", "1:1"), price = MemberPrice("per_second", 0.07))
 
     companion object {
         /** $ per output second per tier (the demo ladder's first steps, as the server prices them). */

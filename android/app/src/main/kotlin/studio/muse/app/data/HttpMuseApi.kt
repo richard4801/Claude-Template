@@ -60,6 +60,8 @@ interface MuseService {
     @PATCH("v1/outfits/{id}") suspend fun renameOutfit(@Path("id") id: String, @Body r: OutfitNameBody): Outfit
     @DELETE("v1/outfits/{id}") suspend fun deleteOutfit(@Path("id") id: String)
     @POST("v1/outfits/{id}/fill") suspend fun fillOutfit(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
+    @POST("v1/outfits/{id}/faces") suspend fun addOutfitFaces(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
+    @POST("v1/outfits/{id}/redo") suspend fun redoOutfit(@Path("id") id: String, @Body r: OutfitRedoRequest): OutfitFill
     @Multipart @POST("v1/uploads/images") suspend fun uploadImage(@Part file: MultipartBody.Part): ImageRef
     @Multipart @POST("v1/uploads/clips") suspend fun uploadClip(@Part("meta") meta: RequestBody, @Part file: MultipartBody.Part?): Clip
     @POST("v1/uploads/presign") suspend fun presign(@Body r: PresignRequest): PresignResponse
@@ -68,6 +70,7 @@ interface MuseService {
     @GET("v1/jobs") suspend fun jobs(): List<Job>
     @POST("v1/jobs") suspend fun createJob(@Body r: JobRequest): Job
     @DELETE("v1/jobs/{id}") suspend fun removeJob(@Path("id") id: String)
+    @POST("v1/jobs/clear-failed") suspend fun clearFailedJobs(@Body r: JsonObject): ClearedJobs
     @GET("v1/takes") suspend fun takes(): List<Take>
     @PATCH("v1/takes/{id}") suspend fun setTake(@Path("id") id: String, @Body r: SetTakeStatusRequest): Take
     @DELETE("v1/takes/{id}") suspend fun deleteTake(@Path("id") id: String)
@@ -377,6 +380,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun renameOutfit(outfitId: String, name: String) = call { renameOutfit(outfitId, OutfitNameBody(name)) }.abs()
     override suspend fun deleteOutfit(outfitId: String) = call { deleteOutfit(outfitId) }
     override suspend fun fillOutfit(outfitId: String, imageModel: String?) = call { fillOutfit(outfitId, FillAnglesRequest(imageModel)) }.let { it.copy(outfit = it.outfit.abs()) }
+    override suspend fun addOutfitFaces(outfitId: String) = call { addOutfitFaces(outfitId, FillAnglesRequest()) }.let { it.copy(outfit = it.outfit.abs()) }
+    override suspend fun redoOutfit(outfitId: String, angle: String) = call { redoOutfit(outfitId, OutfitRedoRequest(angle)) }.let { it.copy(outfit = it.outfit.abs()) }
 
     private suspend fun usePresigned(): Boolean = when (uploadMode) {
         UploadMode.PRESIGNED -> true
@@ -435,6 +440,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun listJobs() = shared("jobs") { call { jobs() }.map { it.abs() } }
     override suspend fun createJob(req: JobRequest) = call { createJob(req) }.abs()
     override suspend fun removeJob(jobId: String) = call { removeJob(jobId) }
+    override suspend fun clearFailedJobs() = call { clearFailedJobs(buildJsonObject {}) }.ids
 
     /** Edited version: the MP4 (streamed from disk) and its JPEG go up with presigned PUTs, then the take is created. */
     override suspend fun saveTakeVersion(takeId: String, video: EditedVideo, edits: EditListDto, onProgress: (Float) -> Unit): Take {

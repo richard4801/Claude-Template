@@ -115,7 +115,7 @@ object Routes {
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
     const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
-    const val ENHANCE = "enhance"; const val DRESSUP = "dressup"; const val IMAGE_MODELS = "imagemodels"; const val CATALOG = "catalog"; const val ARCHIVED = "archived"
+    const val ENHANCE = "enhance"; const val IMAGE_MODELS = "imagemodels"; const val CATALOG = "catalog"; const val ARCHIVED = "archived"
     const val PROMPTS = "prompts"; const val PROMPT = "prompt/{key}"
     /** Prompt scripts (workstream 4): one script's rules, inputs, blocks and preview. */
     const val PROMPT_SCRIPT = "promptscript/{id}"
@@ -296,7 +296,6 @@ fun MuseApp(
                     composable(Routes.STUDIO) { StudioSettingsScreen() }
                     composable(Routes.TEMPLATES) { TemplatesScreen() }
                     composable(Routes.ENHANCE) { EnhanceScreen() }
-                    composable(Routes.DRESSUP) { DressUpScreen() }
                     composable(Routes.IMAGE_MODELS) { ImageModelsScreen() }
                     composable(Routes.CATALOG) { CatalogScreen() }
                     composable(Routes.ARCHIVED) { ArchivedModelsScreen() }

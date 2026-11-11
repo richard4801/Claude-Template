@@ -34,9 +34,9 @@ data class StudioState(
     val video: VideoFeatures? = null,
     /** Photo prices for the estimates ("about $0.46"), from features.photo. */
     val photo: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices(),
-    /** Enhance and Dress up options (features.tools); the owner's copy also names the current models. */
+    /** Enhance options (features.tools); the owner's copy also names the current models. */
     val tools: ToolsFeatures = ToolsFeatures(),
-    /** Enhance and Dress up runs this session has seen, by id (kept live by `tool` events). */
+    /** Enhance runs this session has seen, by id (kept live by `tool` events). */
     val toolRuns: Map<String, ToolRun> = emptyMap(),
     /** The owner's studio balance card, kept live by `studio` events (null until loaded; never for members). */
     val studioBalance: StudioBalance? = null,
@@ -250,6 +250,7 @@ class MuseRepository(
         // gpu events only ever reach the owner who switched Keep add-on engine ready on; never shown to members.
         val apply = if (ev.type == "gpu" && !owner) ev.copy(gpu = null) else ev
         _state.update { LiveEvents.apply(it, apply, owner) }
+        if (ev.type == "outfit") (ev.outfit?.id ?: ev.id)?.let { id -> if (id in _outfitMaking.value) making(id, null) }
         ev.wallet?.let { w -> onWallet(w, prevWallet) }
         // Owner notices only (an engine's own account is out of credit): Settings → Engines says which.
         ev.notice?.let { n ->
@@ -340,13 +341,11 @@ class MuseRepository(
         toolToasts(prev, r)
     }
     private fun toolToasts(prev: ToolRun?, r: ToolRun) {
-        if (prev?.state == "running" && r.state == "review") toast("${if (r.kind == "enhance") "Enhance" else "Dress up"} is ready to review")
+        if (prev?.state == "running" && r.state == "review") toast("Enhance is ready to review")
         if (prev?.state == "running" && r.state == "failed") toast(r.error ?: "Something went wrong · you weren't charged")
     }
     suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest) = attemptInline { enhanceEstimate(modelId, req) }
-    suspend fun dressUpEstimate(modelId: String, req: DressUpRequest) = attemptInline { dressUpEstimate(modelId, req) }
     suspend fun startEnhance(modelId: String, req: EnhanceRequest) = attempt { startEnhance(modelId, req) }?.also { putTool(it); refreshBalance() }
-    suspend fun startDressUp(modelId: String, req: DressUpRequest) = attempt { startDressUp(modelId, req) }?.also { putTool(it); refreshBalance() }
     suspend fun loadToolRuns(modelId: String) = attempt { toolRuns(modelId) }?.also { list -> _state.update { s -> s.copy(toolRuns = s.toolRuns + list.associateBy { it.id }) } }
     suspend fun decideTool(id: String, slot: String, keep: Boolean, pick: String? = null) = attempt { decideTool(id, slot, DecideRequest(if (keep) "keep" else "reject", pick)) }?.also(::putTool)
     suspend fun pickTool(id: String, pick: String) = attempt { pickTool(id, pick) }?.also(::putTool)
@@ -414,6 +413,25 @@ class MuseRepository(
     suspend fun deleteOutfit(id: String) = attempt { deleteOutfit(id) }?.also { _state.update { s -> LiveEvents.dropOutfit(s, id) } }
     suspend fun fillOutfit(id: String, imageModel: String?) = attempt { fillOutfit(id, imageModel) }?.also { refreshBalance() }
 
+    /** The outfit pictures being made right now, by outfit id → [OutfitPictures] indexes (0–6); cleared by its next outfit event. */
+    private val _outfitMaking = MutableStateFlow<Map<String, Set<Int>>>(emptyMap())
+    val outfitMaking: StateFlow<Map<String, Set<Int>>> = _outfitMaking
+    private fun making(id: String, pictures: Set<Int>?) = _outfitMaking.update { m -> if (pictures.isNullOrEmpty()) m - id else m + (id to ((m[id] ?: emptySet()) + pictures)) }
+
+    /** "Add face close-ups" (plans/outfit-faces.md): the missing faces show as skeletons until the outfit event. */
+    suspend fun addOutfitFaces(id: String): OutfitFill? {
+        val missing = _state.value.outfit(id)?.let { o -> (0 until OutfitPictures.FACES).filter { o.faces?.getOrNull(it) == null }.map { OutfitPictures.BODY + it }.toSet() }
+        making(id, missing ?: (OutfitPictures.BODY until OutfitPictures.BODY + OutfitPictures.FACES).toSet())
+        return attempt { addOutfitFaces(id) }.also { r -> if (r == null || r.cost <= 0.0) making(id, null) else refreshBalance() }
+    }
+
+    /** Redo one of the 7 pictures ([index] into [OutfitPictures.KEYS]). */
+    suspend fun redoOutfit(id: String, index: Int): OutfitFill? {
+        val key = OutfitPictures.KEYS.getOrNull(index) ?: return null
+        making(id, setOf(index))
+        return attempt { redoOutfit(id, key) }.also { r -> if (r == null) making(id, null) else refreshBalance() }
+    }
+
     suspend fun saveOutfit(id: String, name: String? = null) = attempt { saveOutfit(id, name) }?.also { o ->
         _state.update { s ->
             s.copy(
@@ -443,6 +461,8 @@ class MuseRepository(
     }
 
     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
+
+    suspend fun clearFailedJobs() = attempt { clearFailedJobs() }?.also { ids -> _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id in ids }) } }
 
     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }
 

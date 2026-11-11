@@ -247,7 +247,8 @@ fun BoxScope.SuiteResultPane(
             Column(Modifier.align(Alignment.Center).padding(20.dp).widthIn(max = 300.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 T("This take didn't work", m.type.h2.copy(fontSize = 26.sp, lineHeight = 28.sp), Color.White, align = TextAlign.Center)
                 T(pane.failure ?: "We stopped early. You weren't charged.", m.type.tiny, Color.White.copy(alpha = .92f), align = TextAlign.Center, maxLines = 3)
-                StageButton("Retry free", onRetry, primary = true, icon = "retry")
+                // Not free: the failed run was refunded and a retry is a new run at the same price (owner bug 2026-11-11).
+                StageButton(if (pane.price.isBlank() || pane.price == "$0.00") "Retry" else "Retry · ${pane.price}", onRetry, primary = true, icon = "retry")
                 if (onTry != null && tryLabel != null) StageButton(tryLabel, onTry)
             }
         }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,7 +44,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Model
+import studio.muse.app.data.ImageRef
 import studio.muse.app.data.Outfit
+import studio.muse.app.data.OutfitPictures
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -53,6 +56,7 @@ import studio.muse.app.ui.components.MenuItem
 import studio.muse.app.ui.components.MuseMenu
 import studio.muse.app.ui.components.RefImage
 import studio.muse.app.ui.components.T
+import studio.muse.app.ui.components.ViewerAction
 import studio.muse.app.ui.components.ViewerImage
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.edit.learn.LearnConfirm
@@ -61,9 +65,9 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.radii
 import studio.muse.app.ui.theme.roles
 import studio.muse.app.ui.theme.scale
-import studio.muse.core.OutfitAngle
 import studio.muse.core.OutfitNaming
 import studio.muse.core.OutfitPages
+import studio.muse.core.Pricing
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -79,16 +83,18 @@ fun outfitDate(ms: Long?): String? {
     return if (year(ms) == year(System.currentTimeMillis())) outfitDay(ms) else SimpleDateFormat("d MMM yyyy", Locale.UK).format(Date(ms))
 }
 
-data class OutfitsState(val model: Model? = null, val folders: List<Outfit> = emptyList(), val page: Int = 0, val filling: Set<String> = emptySet())
+data class OutfitsState(val model: Model? = null, val folders: List<Outfit> = emptyList(), val page: Int = 0, val filling: Set<String> = emptySet(),
+    /** Pictures being made (Add face close-ups, Redo): outfit id → [OutfitPictures] indexes. */
+    val making: Map<String, Set<Int>> = emptyMap())
 
 /** Her outfits as folders and one outfit open (plans/outfit-head-looks.md §4/§5): paging, rename, delete, missing angles. */
 class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
     private val filling = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
-    val state: StateFlow<OutfitsState> = combine(c.repo.state, c.drafts.modelId, c.drafts.outfitPage, filling) { s, mid, page, f ->
+    val state: StateFlow<OutfitsState> = combine(c.repo.state, c.drafts.modelId, c.drafts.outfitPage, filling, c.repo.outfitMaking) { s, mid, page, f, making ->
         val model = s.model(mid) ?: s.models.firstOrNull()
         val folders = OutfitPages.newestFirst(s.outfitsOf(model?.id).filter { it.state == "ready" }) { it.createdAt }
         // An outfit that came back whole stops showing "Making angles".
-        OutfitsState(model, folders, OutfitPages.clamp(page, folders.size), f.filterTo(mutableSetOf()) { id -> s.outfit(id)?.let { it.madeAngles < 4 } ?: false })
+        OutfitsState(model, folders, OutfitPages.clamp(page, folders.size), f.filterTo(mutableSetOf()) { id -> s.outfit(id)?.let { it.madeAngles < 4 } ?: false }, making)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, OutfitsState())
 
     fun outfit(id: String): Outfit? = c.repo.state.value.outfit(id)
@@ -120,6 +126,20 @@ class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun fillEstimate(o: Outfit): Double = (4 - o.madeAngles) * photoPrices(c).perEdit
+
+    /** "Add face close-ups" (an older outfit, plans/outfit-faces.md): its missing face front, ¾ and side. */
+    fun addFaces(o: Outfit) = viewModelScope.launch {
+        if (o.front == null) { c.repo.toast("Its front picture is missing · make a new outfit instead"); return@launch }
+        c.repo.addOutfitFaces(o.id)
+    }
+    fun facesEstimate(o: Outfit): Double = OutfitPictures.facesEstimate(photoPrices(c), o)
+
+    /** Redo one of the 7 pictures ([index] into [OutfitPictures.KEYS]). */
+    fun redo(o: Outfit, index: Int) = viewModelScope.launch {
+        if (o.id in state.value.filling || state.value.making[o.id]?.contains(index) == true) return@launch
+        c.repo.redoOutfit(o.id, index)
+    }
+    fun redoEstimate(index: Int): Double = OutfitPictures.redoEstimate(photoPrices(c), index)
 }
 
 private fun photoPrices(c: AppContainer): studio.muse.core.PhotoPrices = c.repo.state.value.photo
@@ -148,7 +168,7 @@ fun OutfitFoldersScreen() {
                     OutfitPages.slice(s.folders, s.page).chunked(2).forEach { row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                             row.forEach { o ->
-                                OutfitFolder(o, o.id in s.filling, vm.canChange(o), Modifier.weight(1f),
+                                OutfitFolder(o, o.id in s.filling || o.id in s.making, vm.canChange(o), Modifier.weight(1f),
                                     open = { nav.go(Routes.outfitView(o.id)) }, rename = { renaming = o }, delete = { deleting = o })
                             }
                             if (row.size == 1) Spacer(Modifier.weight(1f))
@@ -224,7 +244,7 @@ fun RenameOutfit(current: String, onKeep: () -> Unit, onSave: (String) -> Unit) 
     }
 }
 
-/** One outfit open: its four angles large (tap one to view it full size and swipe between them) and its actions. */
+/** One outfit open: its 4 body angles and 3 face close-ups (tap one to view it full size and swipe between all 7) and its actions. */
 @Composable
 fun OutfitOpenScreen(id: String) {
     val c = LocalContainer.current
@@ -247,7 +267,20 @@ fun OutfitOpenScreen(id: String) {
     }
     val filling = o.id in s.filling
     val canChange = vm.canChange(o)
-    val shown = OutfitAngle.entries.mapIndexedNotNull { i, a -> o.angles.getOrNull(i)?.let { ViewerImage(it, a.label) } }
+    val making = s.making[o.id].orEmpty()
+    val pictures = OutfitPictures.all(o)
+    val shownAt = OutfitPictures.shown(pictures)
+    val shown = shownAt.map { (i, r) -> ViewerImage(r, OutfitPictures.LABELS[i]) }
+    // Full size: "Redo · $0.03" for the picture shown (the owner or whoever made the outfit).
+    val redoAction: ((Int) -> ViewerAction?)? = if (canChange) ({ page: Int ->
+        shownAt.getOrNull(page)?.let { (i, _) ->
+            ViewerAction("Redo · ${Pricing.money(vm.redoEstimate(i))}", { vm.redo(o, i); viewing = null }, enabled = i !in making && !filling)
+        }
+    }) else null
+    val facesMissing = OutfitPictures.FACES - OutfitPictures.madeFaces(o)
+    val makingFaces = (OutfitPictures.BODY until OutfitPictures.KEYS.size).any { it in making }
+    // "Make missing angles": the empty ¾ / side / back show as skeletons until they come back.
+    val fillingAt: List<Int> = if (filling) (1 until OutfitPictures.BODY).filter { pictures[it] == null } else emptyList()
     ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
             CalmTopBar(onBack = { nav.back() }, right = if (canChange) ({ BarButton("trash", "Delete outfit", { deleting = true }) }) else null)
@@ -262,36 +295,70 @@ fun OutfitOpenScreen(id: String) {
                     DisplayTitle(o.name)
                     Caption(listOfNotNull(s.model?.name?.substringBefore(' ')?.let { "For $it" }, outfitDate(o.createdAt)?.let { "made $it" }).joinToString(", "))
                 }
-                OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
-                        row.forEachIndexed { i, a ->
-                            val idx = r * 2 + i
-                            val ref = o.angles.getOrNull(idx)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                                val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
-                                if (ref == null && filling) Skeleton(tile, containerShape())
-                                else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
-                                    if (ref == null) t.semantics { contentDescription = "${a.label} missing" }
-                                    else t.press { viewing = shown.indexOfFirst { it.label == a.label }.coerceAtLeast(0) }.semantics { contentDescription = "${a.label}, view full size"; role = Role.Button }
-                                }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
-                                Caption(a.label)
-                            }
-                        }
-                    }
+                OutfitPictureGrid(pictures, making + fillingAt, busy = false) { i ->
+                    viewing = OutfitPictures.pageOf(pictures, i)
                 }
                 if (filling) Notice("Making the missing angles from the front.")
                 else if (o.madeAngles < 4 && o.front != null && canChange) {
                     Notice("${o.madeAngles} of 4 angles. The others came back empty.", tone = NoticeTone.CAUTION)
                     SecondaryButton("Make missing angles · ${studio.muse.core.PhotoPricing.about(vm.fillEstimate(o))}", { vm.fill(o) }, Modifier.fillMaxWidth())
                 }
-                RowItem("Dress up", "Her character sheet made again wearing an outfit photo", onClick = { nav.go(Routes.DRESSUP) }) { Chevron() }
+                // An older outfit (made before every outfit had face close-ups), or faces that came back empty.
+                if (facesMissing > 0 && !makingFaces) {
+                    Notice(
+                        if (facesMissing == OutfitPictures.FACES) "No face close-ups yet. Shots with this outfit use her base face."
+                        else "${OutfitPictures.FACES - facesMissing} of 3 face close-ups. The others came back empty.",
+                        tone = if (facesMissing == OutfitPictures.FACES) NoticeTone.NEUTRAL else NoticeTone.CAUTION,
+                    )
+                    if (canChange && o.front != null) SecondaryButton(
+                        "${if (facesMissing == OutfitPictures.FACES) "Add face close-ups" else "Make missing face close-ups"} · ${Pricing.money(vm.facesEstimate(o))}",
+                        { vm.addFaces(o) }, Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
-        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start) { viewing = null } }
+        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction) { viewing = null } }
         ActionDock {
             PrimaryButton("Use in Photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, o.modelId, o.id) }, Modifier.weight(1f))
         }
         if (renaming) RenameOutfit(o.name, { renaming = false }) { vm.rename(o, it); renaming = false }
         if (deleting) LearnConfirm("Delete this outfit?", "Takes and photos already made with it are kept.", "Delete", { deleting = false; vm.delete(o) { nav.back() } }, { deleting = false })
+    }
+}
+
+/**
+ * An outfit's 7 pictures (plans/outfit-faces.md): the 4 body angles, then the 3 face close-ups in the same columns, grouped
+ * by space with their captions ("Face front"). 2 columns on a phone, 4 when wide. A picture in [making] (or, while [busy],
+ * any not made yet) shows a skeleton; a tap opens [onOpen] with its index into [OutfitPictures.KEYS].
+ */
+@Composable
+fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onOpen: (Int) -> Unit) {
+    val m = muse
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cols = if (maxWidth >= 600.dp) 4 else 2
+        Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s6)) {
+            listOf((0 until OutfitPictures.BODY).toList(), (OutfitPictures.BODY until OutfitPictures.KEYS.size).toList()).forEach { group ->
+                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                    group.chunked(cols).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                            row.forEach { i ->
+                                val ref = pictures.getOrNull(i)
+                                val label = OutfitPictures.LABELS[i]
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                    val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+                                    if (i in making || (busy && ref == null)) Skeleton(tile.semantics { contentDescription = "$label, being made" }, containerShape())
+                                    else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
+                                        if (ref == null) t.semantics { contentDescription = "$label missing" }
+                                        else t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
+                                    }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
+                                    Caption(label, maxLines = 1)
+                                }
+                            }
+                            repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

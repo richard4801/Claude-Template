@@ -299,14 +299,13 @@ class RealApiContractTest {
         expectCode("upscale_unavailable") { owner.upscale("t_j1", "2k") }
     }
 
-    /** Model tools (plans/api.md "Model tools") on the real server with simulated images: Enhance, Dress up, review, apply, archive. */
+    /** Model tools (plans/api.md "Model tools") on the real server with simulated images: Enhance, review, apply, archive; Dress up is gone (410). */
     @Test fun modelTools(): Unit = runBlocking {
         val owner = HttpMuseApi(base)
         owner.setToken(owner.signIn(SignInRequest("jen@studio.com", "x")).token)
         val demo = owner.listModels().first { it.id == SampleData.DEMO }
         assertEquals(studio.muse.app.data.Sheet.KEYS, demo.slots.map { it.key })
-        val tools = owner.studioSettings().features.tools!!
-        assertEquals(listOf("Option A", "Option B", "Both"), tools.dressUp.options.map { it.label })
+        assertTrue(owner.studioSettings().features.tools != null)
         val est = owner.enhanceEstimate(demo.id, studio.muse.app.data.EnhanceRequest())
         assertEquals(7, est.images); assertEquals("7 images · about \$0.30", est.label)
         var run = owner.startEnhance(demo.id, studio.muse.app.data.EnhanceRequest(upscale = "off"))
@@ -317,12 +316,8 @@ class RealApiContractTest {
         val applied = owner.applyTool(run.id)
         assertEquals("applied", applied.run.state)
         assertEquals(1, owner.sheetVersions(demo.id).size)
-        var dress = owner.startDressUp(demo.id, studio.muse.app.data.DressUpRequest(studio.muse.app.data.ImageRef.asset("c_front"), "Silver night", "both"))
-        while (dress.state == "running") { check(System.currentTimeMillis() < deadline + 20_000); kotlinx.coroutines.delay(100); dress = owner.toolRun(dress.id) }
-        assertEquals(listOf("a", "b"), dress.engines)
-        owner.pickTool(dress.id, "b")
-        val outfit = owner.applyTool(dress.id).outfit!!
-        assertEquals("dressup", outfit.mode); assertEquals(3, outfit.faces!!.size)
+        // Dress up was removed (plans/outfit-faces.md): every outfit now has its own face close-ups.
+        expectCode("dress_up_removed") { owner.startDressUp(demo.id, studio.muse.app.data.DressUpRequest(studio.muse.app.data.ImageRef.asset("c_front"), "Silver night", "both")) }
         // Image models: the owner sees six steps (simulated server: no catalog).
         assertEquals(studio.muse.app.data.Sheet.STEPS, owner.imageModels().steps.map { it.step })
         // Archive: hidden from the list, listed as archived, back again.

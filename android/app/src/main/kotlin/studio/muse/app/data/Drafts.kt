@@ -138,9 +138,8 @@ class Drafts {
     val memberOpen = MutableStateFlow<String?>(null)
     val lastInvite = MutableStateFlow<InviteCreated?>(null)
     val outfit = MutableStateFlow(OutfitDraft())
-    /** Enhance and Dress up setup, and the run being reviewed (plans/api.md "Model tools"). */
+    /** Enhance setup, and the run being reviewed (plans/api.md "Model tools"). */
     val enhance = MutableStateFlow(EnhanceDraft())
-    val dressUp = MutableStateFlow(DressUpDraft())
     /** Owner Settings → Engines → Image models: the step whose catalog is open; the owner's per-run model choice ("Model" chooser). */
     val catalogStep = MutableStateFlow("shot")
     /** Where the catalog picker returns its choice: "settings" (the studio default) or "run" (this run only). */
@@ -182,5 +181,3 @@ class Drafts {
 /** Enhance setup: realism off | subtle | balanced | strong, upscale off | 2x | 4x; [runId] once started. models: the owner's per-run choice. */
 data class EnhanceDraft(val realism: String = "balanced", val upscale: String = "2x", val runId: String? = null, val models: Map<String, String> = emptyMap())
 
-/** Dress up setup: one outfit-sheet photo, a name, Option A / B / Both; [runId] once started. */
-data class DressUpDraft(val outfitImage: ImageRef? = null, val name: String = "", val engine: String = "a", val runId: String? = null, val models: Map<String, String> = emptyMap())

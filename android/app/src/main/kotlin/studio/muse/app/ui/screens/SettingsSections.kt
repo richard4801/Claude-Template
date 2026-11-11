@@ -206,7 +206,7 @@ private fun OwnerAiSpending() {
     SettingsGroup("Models and our own GPUs", "Status, GPU limits, the photo service and price corrections") {
         RowItem("Our own GPUs", st?.let { "${it.maxGpus} at once, off after ${it.engines?.keepReady?.idleMinutes ?: it.warmIdleMinutes} idle minutes" }, onClick = { nav.go(Routes.SETTINGS_GPUS) }) { Chevron() }
         RowItem("Price corrections", "Each model's price and the qualities that use it", onClick = { nav.go(Routes.SUITE_ENGINES) }) { Chevron() }
-        RowItem("Photo models by step", "The model behind each photo step: new shots, edits, Enhance and Dress up", onClick = { nav.go(Routes.IMAGE_MODELS) }) { Chevron() }
+        RowItem("Photo models by step", "The model behind each photo step: new shots, edits and Enhance", onClick = { nav.go(Routes.IMAGE_MODELS) }) { Chevron() }
         RowItem("Model status", modelStatusLine(st), onClick = { nav.go(Routes.SETTINGS_MODEL_STATUS) }) { Chevron() }
     }
 }

@@ -60,6 +60,9 @@ import studio.muse.app.ui.theme.scale
 /** One picture in [ImageViewer]: the image and what it is ("Front", "¾"…). A null image is a slot still being made. */
 data class ViewerImage(val ref: ImageRef?, val label: String)
 
+/** A text action in the viewer's top bar for the picture shown (the outfit's "Redo · $0.03"). */
+data class ViewerAction(val label: String, val onClick: () -> Unit, val enabled: Boolean = true)
+
 /** How far a pinch can zoom in, and where a double tap lands. */
 private const val MAX_ZOOM = 5f
 private const val DOUBLE_TAP_ZOOM = 2.5f
@@ -70,15 +73,15 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
  * pictures at 1×. Back or the close button leaves it. Shown in a full-screen [Dialog] so it covers the bars.
  */
 @Composable
-fun ImageViewer(images: List<ViewerImage>, start: Int, onClose: () -> Unit) {
+fun ImageViewer(images: List<ViewerImage>, start: Int, action: ((Int) -> ViewerAction?)? = null, onClose: () -> Unit) {
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        ImageViewerContent(images, start, onClose)
+        ImageViewerContent(images, start, onClose, action = action)
     }
 }
 
 /** [ImageViewer]'s content, without the window (screenshot tests render this directly). */
 @Composable
-fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier, action: ((Int) -> ViewerAction?)? = null) {
     val pager = rememberPagerState(initialPage = start.coerceIn(0, (images.size - 1).coerceAtLeast(0))) { images.size }
     // Each page's zoom; swiping between pictures only works at 1× (a zoomed picture pans instead).
     val zoomed = remember { mutableStateMapOf<Int, Boolean>() }
@@ -99,6 +102,14 @@ fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Uni
             Column(Modifier.padding(start = 4.dp).weight(1f)) {
                 T(current?.label.orEmpty(), muse.scale.title.copy(fontSize = muse.scale.body.fontSize), Color.White, maxLines = 1)
                 if (images.size > 1) T("${pager.currentPage + 1} of ${images.size}", muse.scale.caption, Color.White.copy(alpha = .72f), maxLines = 1)
+            }
+            // The action for the picture shown (one quiet text button, white on the black bar).
+            action?.invoke(pager.currentPage)?.let { a ->
+                Box(
+                    Modifier.height(48.dp).press(enabled = a.enabled, onClick = a.onClick).padding(horizontal = 12.dp)
+                        .semantics { contentDescription = a.label; role = Role.Button },
+                    contentAlignment = Alignment.Center,
+                ) { T(a.label, muse.scale.label, Color.White.copy(alpha = if (a.enabled) 1f else .5f), maxLines = 1) }
             }
         }
         // Where you are in the set, as dots along the bottom (only with more than one picture).
