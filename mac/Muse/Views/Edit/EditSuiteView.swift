@@ -371,14 +371,17 @@ struct EditSuiteEditor: View {
         if let e = session.lastError {
             message(e, warn: true) { session.lastError = nil }
         } else if let n = session.notice {
-            message(n, warn: false) { session.notice = nil }
+            message(n, warn: false, file: session.noticeFile) { session.notice = nil }
         }
     }
 
-    private func message(_ text: String, warn: Bool, dismiss: @escaping () -> Void) -> some View {
+    private func message(_ text: String, warn: Bool, file: URL? = nil, dismiss: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             Ph(warn ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(warn ? t.roles.caution : t.roles.positive)
             Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(2)
+            if let file {
+                MButton("Show in Finder", size: .small) { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+            }
             SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 28, action: dismiss)
         }
         .padding(.horizontal, 14)
@@ -387,7 +390,8 @@ struct EditSuiteEditor: View {
         .overlay(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).strokeBorder(t.roles.hairline))
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .task(id: text) {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            // A saved file's notice stays longer so there is time to press Show in Finder.
+            try? await Task.sleep(nanoseconds: file == nil ? 5_000_000_000 : 15_000_000_000)
             if !warn { dismiss() }
         }
     }

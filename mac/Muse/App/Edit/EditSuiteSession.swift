@@ -75,7 +75,9 @@ final class EditSuiteSession {
     /// The newest transcript job (fillers / silences reuse it for free).
     private(set) var transcriptJobId: String?
     var lastError: String?
-    var notice: String?
+    var notice: String? { didSet { if notice == nil { noticeFile = nil } } }
+    /// The file the current notice is about (an export saved on this Mac): the notice offers "Show in Finder".
+    var noticeFile: URL?
 
     private(set) var exportPhase: ExportPhase = .idle
     private(set) var savedAt: Date?
@@ -1678,7 +1680,13 @@ final class EditSuiteSession {
                 self.savedAt = Date()
                 self.state.markSaved()
                 self.versionNumber += 1
-                self.notice = settings.labelAI ? "Saved · it will carry the AI label when you post" : "Saved as a new version · the original is kept"
+                if let dest = saveFileTo {
+                    // Owner bug 2026-11-11: Export must say where the file went on this Mac, with Show in Finder.
+                    self.notice = "Saved \(dest.lastPathComponent) to this Mac and as a new version"
+                    self.noticeFile = dest
+                } else {
+                    self.notice = settings.labelAI ? "Saved · it will carry the AI label when you post" : "Saved as a new version · the original is kept"
+                }
                 if let r = self.requestInExport { self.answerRequest(r, .done(versionId: t.id)) }
                 self.requestInExport = nil
                 onSaved(t)
@@ -1691,7 +1699,13 @@ final class EditSuiteSession {
                 }
                 self.requestInExport = nil
                 if !(error is CancellationError) && !Task.isCancelled {
-                    self.lastError = (error as? ApiError)?.message ?? "Couldn't export the edit"
+                    let why = (error as? ApiError)?.message ?? "Couldn't export the edit"
+                    // The file may already be on this Mac when only the Library upload failed: say so.
+                    if let dest = saveFileTo, FileManager.default.fileExists(atPath: dest.path) {
+                        self.lastError = why + " · the file is saved on this Mac as \(dest.lastPathComponent)"
+                    } else {
+                        self.lastError = why
+                    }
                 }
             }
         }
@@ -1731,7 +1745,8 @@ final class EditSuiteSession {
                 self.exportPhase = .idle
                 self.exportFormat = .video
                 self.lastExport = dest
-                self.notice = settings.format == .gif ? "Saved the GIF" : "Saved the sound file"
+                self.notice = (settings.format == .gif ? "Saved the GIF" : "Saved the sound file") + " · \(dest.lastPathComponent)"
+                self.noticeFile = dest
             } catch {
                 guard let self else { return }
                 self.exportPhase = .idle

@@ -189,6 +189,16 @@ struct EditSuiteExportSheet: View {
         .overlay(Rectangle().strokeBorder(t.line))
     }
 
+    /// Where exports go by default: Movies/MUSE (made if missing), else Downloads.
+    static func exportFolder() -> URL? {
+        let fm = FileManager.default
+        if let movies = fm.urls(for: .moviesDirectory, in: .userDomainMask).first {
+            let dir = movies.appendingPathComponent("MUSE", isDirectory: true)
+            if (try? fm.createDirectory(at: dir, withIntermediateDirectories: true)) != nil { return dir }
+        }
+        return fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
+    }
+
     private func start(saveFile: Bool) {
         var dest: URL?
         if saveFile {
@@ -196,6 +206,8 @@ struct EditSuiteExportSheet: View {
             let ext = settings.format == .gif ? "gif" : settings.format == .sound ? "m4a" : "mp4"
             panel.allowedContentTypes = [settings.format == .gif ? .gif : settings.format == .sound ? .mpeg4Audio : .mpeg4Movie]
             panel.nameFieldStringValue = (session.title.isEmpty ? "Edit" : session.title) + "." + ext
+            panel.directoryURL = Self.exportFolder()
+            panel.canCreateDirectories = true
             guard panel.runModal() == .OK, let url = panel.url else { return }
             dest = url
         }
