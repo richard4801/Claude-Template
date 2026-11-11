@@ -70,6 +70,10 @@ E. Small items: body-notes box on the character page in both apps (server field 
    "Photos sent" row in a job's details (ASK); photo size picker 1K/2K/4K and relabel "7 shapes" as aspect ratios;
    Android Suite stage fix (`plans/suite-stage-fix.md`, "Android (later)"); download log and "Suggest caption and
    hashtags" helper (offered, saved); Railway Hobby upgrade (ASK: money).
+   Outfits (`plans/outfit-head-looks.md`, owner-decided 2026-11-11): (1) matching body angle per outfit picture
+   (server-only fix, do early); (2) Head looks inventory (hair, makeup, face accessories; 4 pictures incl. back of
+   head) chosen or generated when making an outfit; (3) accessories baked into the Head look or the Outfit, from
+   product photos, description optional. Designs to the owner before building 2 and 3.
 F. Unmerged work: branch `claude/muse-android-edit` has ONE commit not in prod (90dc3c11 "Cut to the music":
    cutToMusic / musicBeatTimes with fixture, Android Edit pace control). It touches the shared editor contract: run the
    server suite and the Mac CI before merging. The rest of that session's list is NOT built: pen mask, save as template,
