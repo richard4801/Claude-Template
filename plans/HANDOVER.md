@@ -59,7 +59,7 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - Mac CI run 513 (head 892e2062) GREEN; build 513 sent to the owner 2026-11-11 02:35 (typing fix, Export file, prompt default).
 - OWNER RULES (2026-11-11): (1) tests the owner can easily do by hand are left to the owner; automated tests only when
   really necessary. (2) Coordinator delegates jobs to new sessions that report back (send_message), not doing them itself.
-  (3) Send the Mac build when its CI is green, without asking.
+  (3) Send the Mac build when its CI is green, without asking. Same for Android builds (owner, 2026-11-11 ~10:55; Android CI being added on claude/android-ci, version 0.2.0).
 - Delegated: 5A.1 oval bug → session_01Py2rxn8a5F3AVgi5WFAKFc on branch claude/mac-edit-oval (not prod, so it can't
   cancel prod's Mac CI); merge after its Mac CI is green.
 - NEW owner request (approved, Mac + Android): outfit section as front-only folders, 8 per page, full width, pager
