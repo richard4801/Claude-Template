@@ -127,6 +127,11 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   Allow once / Always in this folder / Deny; deletes, sudo, network always ask; never read credential files). Via
   Claude Code --permission-prompt-tool. → one-Claude session (held camera branch). Also camera_render tool (guides via
   the relay, like the Re-render button).
+- OWNER RULE (16:15): the owner should not be the tester. Claude has TOTAL control of the app (every screen/action as
+  a tool; scripts via Bash with permission cards and Blender Python) and reports its own issues: report_issue tool +
+  auto-captured tool errors → GET /v1/claude/issues; an hourly fresh-session check polls it and messages the
+  coordinator, who delegates fixes (bugs and capability gaps = approved; spend/new features still ask the owner).
+  → session on claude/claude-issues (Part A issues, Part B full-control audit plans/claude-control-audit.md).
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
