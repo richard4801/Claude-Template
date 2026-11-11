@@ -232,8 +232,8 @@ public enum ChatLeakFilter {
     /// looks like a key stay hidden.
     static func showsPath(_ path: String) -> Bool {
         guard path.hasPrefix("~/") || path.hasPrefix("/Users/") || path.hasPrefix("/Volumes/") else { return false }
-        let internal = ["/Library/Caches/", "/MUSE/Claude/", "/MUSE/CameraSessions/", "/Library/Application Support/", "/Library/Containers/", "/.claude", "/.mcp-"]
-        if internal.contains(where: { path.contains($0) }) || ClaudeFilePolicy.isSecret(path) { return false }
+        let museFolders = ["/Library/Caches/", "/MUSE/Claude/", "/MUSE/CameraSessions/", "/Library/Application Support/", "/Library/Containers/", "/.claude", "/.mcp-"]
+        if museFolders.contains(where: { path.contains($0) }) || ClaudeFilePolicy.isSecret(path) { return false }
         return fileName(path) != "a file on this Mac"
     }
 

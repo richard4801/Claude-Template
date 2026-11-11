@@ -87,7 +87,7 @@ public struct ClaudeResultBatcher: Sendable {
     public mutating func due(now: Double) -> [(chatId: String, results: [ClaudeJobResult])] {
         let ready = waiting.filter { now - $0.value.last >= quiet }.sorted { $0.key < $1.key }
         for (k, _) in ready { waiting[k] = nil }
-        return ready.map { ($0.key, $0.value.results) }
+        return ready.map { (chatId: $0.key, results: $0.value.results) }
     }
 
     public var isEmpty: Bool { waiting.isEmpty }
