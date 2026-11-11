@@ -11,6 +11,7 @@ import { RunpodApi } from './gpu/runpodApi.js';
 import { RunpodGpu, SimulatedGpu } from './gpu/pool.js';
 import { ImageService } from './images/service.js';
 import { Money } from './money/money.js';
+import { bindAppCaller, grantUser } from './claude/appCall.js';
 import { authenticate, bootstrapOwnerInvite } from './auth/auth.js';
 import { JobService } from './services/jobs.js';
 import { LoraService } from './services/lora.js';
@@ -132,11 +133,12 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     errorResponseBuilder: (_req, c) => ({ statusCode: 429, error: `Too many tries · wait ${Math.ceil(c.ttl / 1000)}s`, code: 'rate_limited' }),
   });
 
+  bindAppCaller(ctx, app); // Claude's tools call the routes in-process as the person
   // Auth for everything under /v1 unless the route is public. Owner-only routes say so in their config.
   app.addHook('preHandler', async req => {
     const cfg = req.routeOptions.config;
     if (!req.url.startsWith('/v1/') || cfg?.public) return;
-    req.user = await authenticate(ctx, req);
+    req.user = grantUser(req) ?? await authenticate(ctx, req); // grantUser: Claude's in-process call as the person (claude/appCall.ts)
     if (cfg?.owner && req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can do that');
   });
 

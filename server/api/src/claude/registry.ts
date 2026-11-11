@@ -9,6 +9,7 @@ import { SUITE_TOOLS } from '../suite/mcpTools.js';
 import { CHAT_TOOLS } from './chatTools.js';
 import { WATCH_TOOLS } from './watch.js';
 import { ISSUE_TOOLS } from './issues.js';
+import { APP_TOOLS } from './appTools.js';
 import { PAGE_IDS, type PageName, type PageRef } from './page.js';
 
 /** What a gated tool would do. Gated tools never act on Claude's word: without confirm they give the price or summary;
@@ -32,6 +33,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(WATCH_TOOLS, ['any'], () => true),
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
+  // Full control B1 (claude/appTools.ts): the screens' free read/organise actions, as the person (routes decide what members may do).
+  ...tag(APP_TOOLS, ['any'], () => true),
   ...tag(SUITE_TOOLS, ['suite'], () => true),
   // Editing with Claude is the owner's (editor/sessions.ts owner()).
   ...tag(EDIT_TOOLS, ['edit', 'recreate'], () => false),
