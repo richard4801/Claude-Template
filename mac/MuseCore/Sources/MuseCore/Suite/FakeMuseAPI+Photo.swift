@@ -8,7 +8,6 @@ extension FakeMuseAPI {
     /// The shoot the Photo request runs on (the server's `photoPlan`): a template shoot with a preset, else a plain one.
     func photoShoot(_ r: PhotoRequest) throws -> ShootRequest {
         if let p = r.problem { throw ApiError("bad_request", p) }
-        // The owner's photo model (server suite/photo.ts): owners only.
         // 4c: members pick the photo model too (as the server).
         // No character (owner 2026-11-11): a reference image is needed and no preset; the demo renders on the sample model.
         if r.modelId == nil && r.presetId != nil { throw ApiError("bad_request", "Presets need a character · pick one with @") }

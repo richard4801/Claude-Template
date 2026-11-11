@@ -48,6 +48,8 @@ extension AppStore {
 
     /// The page as Claude sees it ("Sees: Edit, Beach reel"), with the ids it has open.
     var claudePage: ClaudePage {
+        // The Camera page (Directed blocking) reports itself with its camera session.
+        if let v = oneClaude.viewPage, v.name == "camera" { return v }
         if recreate.open {
             var ids: [String: String] = [:]
             if let r = recreate.reference?.id { ids["referenceId"] = r }
