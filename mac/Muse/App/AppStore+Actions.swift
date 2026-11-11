@@ -174,8 +174,37 @@ extension AppStore {
         }
     }
 
+    /// Dismiss is stored on the server (the job's hiddenAt), so it holds after a relaunch or a deploy. It used to hide the
+    /// row in memory only, and every failure came back on the next launch (owner bug 2026-11-11).
     func dismissFailure(_ j: Job) {
         withAnimation { _ = hiddenFailures.insert(j.id) }
+        Task { [self] in
+            do {
+                try await api.removeJob(id: j.id)
+                withAnimation { jobs.removeAll { $0.id == j.id } }
+            } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
+                withAnimation { jobs.removeAll { $0.id == j.id } } // already gone on the server
+            } catch {
+                withAnimation { _ = hiddenFailures.remove(j.id) }
+                showToast("Couldn't dismiss it · try again")
+            }
+        }
+    }
+
+    /// "Clear all failed": every failed job off the Queue for good, in one call.
+    func clearFailures() {
+        let ids = Set(visibleFailures.map(\.id))
+        guard !ids.isEmpty else { return }
+        withAnimation { hiddenFailures.formUnion(ids) }
+        perform { [self] in
+            do {
+                let cleared = Set(try await api.clearFailedJobs())
+                withAnimation { jobs.removeAll { cleared.contains($0.id) } } // a member's view of others' failures stays hidden here only
+            } catch {
+                withAnimation { hiddenFailures.subtract(ids) }
+                throw error
+            }
+        }
     }
 
     func runAgain(_ j: Job) {

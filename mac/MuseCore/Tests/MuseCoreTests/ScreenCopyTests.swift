@@ -29,4 +29,18 @@ final class ScreenCopyTests: XCTestCase {
         XCTAssertEqual(ScreenCopy.failure("The render stopped", charged: false), "The render stopped · you weren't charged")
         XCTAssertEqual(ScreenCopy.failure("", charged: true), "Something went wrong")
     }
+
+    /// Owner bug 2026-11-11: the Queue said "you weren't charged · you weren't charged".
+    func testFailureSaysNotChargedOnce() {
+        let server = "This clip was refused by the content filter · you weren't charged"
+        XCTAssertEqual(ScreenCopy.failure(server, charged: false), server)
+        XCTAssertEqual(ScreenCopy.failure("Busy right now · you weren't charged. Try again in a minute.", charged: false),
+                       "Busy right now · you weren't charged. Try again in a minute.")
+    }
+
+    /// Retry shows what the server held for the same request, not a local estimate, and is never "free".
+    func testRetryLabelUsesTheServerPrice() {
+        XCTAssertEqual(ScreenCopy.retryLabel(cost: 0.91, estimate: 0.67), "Retry · $0.91")
+        XCTAssertEqual(ScreenCopy.retryLabel(cost: 0, estimate: 0.67), "Retry · $0.67")
+    }
 }

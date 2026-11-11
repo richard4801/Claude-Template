@@ -83,6 +83,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func listJobs() async throws -> [Job]
     func createJob(_ req: JobRequest) async throws -> Job
     func removeJob(id: String) async throws
+    /// POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own).
+    func clearFailedJobs() async throws -> [String]
     /// POST /v1/queue/run: starts the GPU on queued jobs ("Run queue"). Servers that start jobs on their own treat it as a no-op.
     func runQueue() async throws
     func listTakes() async throws -> [Take]

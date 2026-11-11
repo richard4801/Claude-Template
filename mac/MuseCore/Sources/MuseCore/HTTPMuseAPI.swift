@@ -559,6 +559,11 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     public func createJob(_ req: JobRequest) async throws -> Job { absolutize(try await call("POST", "v1/jobs", req)) }
     public func removeJob(id: String) async throws { _ = try await send(request("DELETE", "v1/jobs/\(id)")) }
 
+    public func clearFailedJobs() async throws -> [String] {
+        struct Cleared: Decodable { let ids: [String] }
+        return try decoder.decode(Cleared.self, from: try await send(request("POST", "v1/jobs/clear-failed", body: try encoder.encode(Empty())))).ids
+    }
+
     public func runQueue() async throws {
         // In plans/api.md since 2026-11-04. Older servers start jobs on their own and answer 404, which is ignored.
         do { _ = try await send(request("POST", "v1/queue/run", body: try encoder.encode(Empty()))) } catch let e as ApiError where e.code == "http_404" || e.code == "not_found" {}

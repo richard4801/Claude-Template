@@ -771,6 +771,12 @@ public actor FakeMuseAPI: MuseAPI {
         pump()
     }
 
+    public func clearFailedJobs() -> [String] {
+        let ids = jobs.filter(\.isFailed).map(\.id)
+        jobs.removeAll { $0.isFailed }
+        return ids
+    }
+
     public func removeJob(id: String) {
         if runningId == id {
             runner?.cancel()

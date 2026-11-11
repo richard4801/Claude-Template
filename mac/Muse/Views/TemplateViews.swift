@@ -101,7 +101,7 @@ struct TemplateCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Button { store.openTemplate(tpl) } label: {
                 Media(ref: tpl.cover, ratio: 0.75, radius: t.imageRadius, symbol: "square.on.square.dashed") {
-                    Pill(tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
+                    Pill(tpl.starter != nil && tpl.isPublic ? "Starter" : tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
                 }
             }
             .buttonStyle(.plain)
@@ -194,7 +194,7 @@ struct TemplateDetailView: View {
                             }
                             // Wraps: a template with several tags overflowed the 460 px column in one row.
                             FlowLayout(spacing: 8) {
-                                Pill(tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
+                                Pill(tpl.starter != nil && tpl.isPublic ? "Starter" : tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
                                 Pill(tpl.usesLabel)
                                 if tpl.acceptsProduct { Pill("Takes a product photo", .acc) }
                                 ForEach(tpl.tags, id: \.self) { Pill($0) }
