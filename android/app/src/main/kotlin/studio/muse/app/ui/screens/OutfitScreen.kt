@@ -45,6 +45,7 @@ import studio.muse.app.data.ImageRef
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.OutfitDraft
+import studio.muse.app.data.OutfitBaseAngles
 import androidx.compose.foundation.layout.heightIn
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
@@ -70,6 +71,22 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, OutfitState())
 
     fun edit(f: (OutfitDraft) -> OutfitDraft) = c.drafts.outfit.update(f)
+    /** Keep-from-base (§6): the four base images that will be sent (the set's own, or the angle chosen instead). */
+    fun baseSet(s: OutfitState): List<ImageRef?> {
+        val st = c.repo.state.value
+        val own = s.draft.baseOutfitId?.let { st.outfit(it) }?.let { o -> (0 until 4).map { o.angles.getOrNull(it) } }
+            ?: OutfitBaseAngles.KEYS.map { k -> s.model?.slots?.firstOrNull { it.key == k }?.image }
+        return (0 until 4).map { s.draft.baseAngles[it] ?: own[it] }
+    }
+    fun herOutfits(s: OutfitState): List<Outfit> = c.repo.state.value.outfitsOf(s.model?.id).filter { it.state == "ready" }
+    fun setBaseSource(id: String?) = edit { it.copy(baseOutfitId = id, baseAngles = OutfitBaseAngles()) }
+    fun swapAngle(i: Int, r: ImageRef?) = edit { it.copy(baseAngles = it.baseAngles.with(i, r)) }
+    fun uploadAngle(i: Int, u: Uri) = viewModelScope.launch {
+        val media = c.media ?: return@launch
+        val r = media.bytes(u)?.let { c.repo.uploadImage(media.displayName(u), it, media.mime(u)) } ?: return@launch
+        swapAngle(i, r)
+    }
+
     fun mode(m: String) = edit { it.copy(mode = m, previewId = null, images = emptyList()) }
 
     fun addImages(uris: List<Uri>) = viewModelScope.launch {
@@ -147,7 +164,7 @@ fun OutfitScreen() {
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                     Segmented(listOf("describe" to "Describe", "photo" to "From a photo", "own" to "My own set"), s.draft.mode, vm::mode)
-                    if (s.draft.mode != "own") BaseKeep(s.draft, vm)
+                    if (s.draft.mode != "own") BaseKeep(s, vm)
                     when (s.draft.mode) {
                         "describe" -> Labeled(if (s.draft.fromBase) "What to change" else "Describe the outfit") { Input(s.draft.description, { v -> vm.edit { it.copy(description = v) } }, area = true, calm = true) }
                         "photo" -> {
@@ -207,12 +224,49 @@ fun OutfitScreen() {
     }
 }
 
-/** §6: start from her base photos and tick what to keep; the rest is replaced by the description or the photo. */
+/** §6: start from her base photos (her profile photos or one of her outfits), see and swap each angle, tick what to keep. */
 @Composable
-private fun BaseKeep(d: OutfitDraft, vm: OutfitViewModel) {
+private fun BaseKeep(st: OutfitState, vm: OutfitViewModel) {
+    val d = st.draft
+    val m = muse
+    var swapping by remember { mutableStateOf<Int?>(null) }
+    var uploadFor by remember { mutableStateOf(0) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.uploadAngle(uploadFor, u) }
     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
         Check("Start from her base photos", d.fromBase, { vm.edit { it.copy(fromBase = !it.fromBase) } }, Modifier.heightIn(min = 48.dp))
         if (d.fromBase) {
+            val fits = vm.herOutfits(st)
+            var sourceMenu by remember { mutableStateOf(false) }
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Caption("Start from", Modifier.padding(end = MuseSpace.s2))
+                Box {
+                    TextAction(fits.firstOrNull { it.id == d.baseOutfitId }?.name ?: "Her profile photos", { sourceMenu = true })
+                    MuseMenu(sourceMenu, { sourceMenu = false },
+                        listOf(MenuItem("user", "Her profile photos") { vm.setBaseSource(null) }) + fits.map { o -> MenuItem("outfit", o.name) { vm.setBaseSource(o.id) } })
+                }
+            }
+            val set = vm.baseSet(st)
+            val labels = listOf("Front", "¾", "Side", "Back")
+            Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                (0 until 4).forEach { i ->
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(containerShape()).background(m.roles.field).press { swapping = i }
+                            .semantics { contentDescription = "${labels[i]} base photo, swap"; role = Role.Button }) {
+                            set[i]?.let { RefImage(it, Modifier.fillMaxSize()) }
+                            if (swapping == i) {
+                                val items = buildList {
+                                    st.model?.let { md -> OutfitBaseAngles.KEYS.forEachIndexed { k, key -> md.slots.firstOrNull { it.key == key }?.image?.let { r -> add(MenuItem("user", "Her ${labels[k]}") { vm.swapAngle(i, r) }) } } }
+                                    fits.forEach { o -> (0 until 4).forEach { k -> o.angles.getOrNull(k)?.let { r -> add(MenuItem("outfit", "${o.name}, ${labels[k]}") { vm.swapAngle(i, r) }) } } }
+                                    add(MenuItem("upload", "Upload a photo of her") { uploadFor = i; pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                                    if (d.baseAngles[i] != null) add(MenuItem("retry", "Use the set's own") { vm.swapAngle(i, null) })
+                                }
+                                MuseMenu(true, { swapping = null }, items)
+                            }
+                        }
+                        Caption(if (set[i] == null && i > 0) "Uses the front" else labels[i], maxLines = 1)
+                    }
+                }
+            }
             val k = d.keep
             listOf(listOf("Top" to k.top, "Bottom" to k.bottom), listOf("Shoes" to k.shoes, "Accessories" to k.accessories)).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {

@@ -137,9 +137,21 @@ data class OutfitKeep(val top: Boolean = false, val bottom: Boolean = false, val
     val flags get() = listOf(top, bottom, shoes, accessories)
 }
 
-/** POST /v1/outfits `base`: start from her base photos, keeping the ticked pieces and the note. */
+/** A base set's chosen angles (null = the set's own; a missing one uses the front). */
 @Serializable
-data class OutfitBase(val source: String = "base", val keep: OutfitKeep = OutfitKeep(), val note: String? = null) {
+data class OutfitBaseAngles(val front: ImageRef? = null, val tq: ImageRef? = null, val side: ImageRef? = null, val back: ImageRef? = null) {
+    operator fun get(i: Int): ImageRef? = listOf(front, tq, side, back)[i]
+    fun with(i: Int, r: ImageRef?) = when (i) { 0 -> copy(front = r); 1 -> copy(tq = r); 2 -> copy(side = r); else -> copy(back = r) }
+    val isEmpty get() = front == null && tq == null && side == null && back == null
+    companion object { val KEYS = listOf("front", "tq", "side", "back") }
+}
+
+/**
+ * POST /v1/outfits `base`: start from her base photos (her profile photos, or one of her outfits: [outfitId]) with single
+ * angles swapped, keeping the ticked pieces and the note.
+ */
+@Serializable
+data class OutfitBase(val source: String = "base", val keep: OutfitKeep = OutfitKeep(), val note: String? = null, val outfitId: String? = null, val angles: OutfitBaseAngles? = null) {
     /** Anything kept: a tick or a note (else the outfit is made as before). */
     val keeping get() = keep.flags.any { it } || !note.isNullOrBlank()
 
