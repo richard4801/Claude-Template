@@ -1,61 +1,118 @@
 diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
-index 2a70197..1b985c5 100644
+index 2a70197..ea8a651 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
-@@ -369,6 +369,8 @@ data class SuiteShotRequest(
+@@ -369,6 +369,10 @@ data class SuiteShotRequest(
      val camera: JsonElement? = null,
      val clipId: String? = null,
      val keepAudio: Boolean? = null,
 +    /** Swap / Recast background: null = Keep; "describe" = the prompt's words set the new place (Auto then runs Genjutsu Light). */
 +    val background: String? = null,
++    /** background "photo": the new background picture (a studio location or an upload). */
++    val backgroundImage: ImageRef? = null,
      /** "Grade the take with this look" (default on at the server). */
      val gradeLook: Boolean? = null,
      /** Input slots (InputSlots.kt): start / middle / end frames and references, only those the tier takes. */
 diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
-index d19d2be..8507a24 100644
+index d19d2be..a7027f8 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
-@@ -69,7 +69,12 @@ data class RecastDraft(
+@@ -69,7 +69,16 @@ data class RecastDraft(
      val quality: String = "standard",
      val keepAudio: Boolean = true,
      val takes: Int = 1,
-+    /** Background: "keep" (the clip's place) or "describe" (one person only: [place] sets the new place). */
++    /** Background (one person only): "keep" (the clip's place), "photo" ([backgroundImage]) or "describe" ([place] sets the new place). */
 +    val background: String = "keep",
 +    val place: String = "",
++    val backgroundImage: studio.muse.app.data.ImageRef? = null,
++    val backgroundName: String = "",
  ) {
 +    /** Describe it applies to a one-person swap. */
 +    val describing: Boolean get() = background == "describe" && people.size == 1
++    /** New photo, with its picture chosen, on a one-person swap. */
++    val newPhoto: Boolean get() = background == "photo" && people.size == 1 && backgroundImage != null
      val canAdd: Boolean get() = people.size < SuiteRules.MAX_CAST
      /** Room for one more under the catalog's `recastMaxPeople`. */
      fun canAdd(max: Int): Boolean = people.size < max.coerceIn(1, SuiteRules.MAX_CAST)
-@@ -117,6 +122,7 @@ data class RecastDraft(
+@@ -117,6 +126,8 @@ data class RecastDraft(
              clipId == null -> "Choose the source clip"
              people.any { it.characterId == null } -> "Pick who each person becomes"
              people.any { it.cropping } -> "Waiting for the face upload"
 +            describing && place.isBlank() -> "Describe the new place"
++            background == "photo" && people.size == 1 && backgroundImage == null -> "Pick the new background"
              loose.map { it.hint }.toSet().size != loose.size -> "Two people point at the same spot"
              else -> null
          }
-@@ -124,6 +130,7 @@ data class RecastDraft(
+@@ -124,6 +135,8 @@ data class RecastDraft(
  
      fun request(): SuiteShotRequest = SuiteShotRequest(
          mode = "recast", clipId = clipId, quality = quality, keepAudio = keepAudio, takes = takes,
-+        background = if (describing) "describe" else null, prompt = if (describing) place.trim().take(500) else "",
++        background = when { describing -> "describe"; newPhoto -> "photo"; else -> null }, backgroundImage = if (newPhoto) backgroundImage else null,
++        prompt = if (describing) place.trim().take(500) else "",
          cast = people.mapNotNull { p ->
              p.characterId?.let { SuiteCastMember(it, p.outfitId, personHint = p.hint, speaking = if (people.size == 1 && p.speaking == null) null else p.speaking, faceCrop = p.faceCrop) }
          },
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index c85a8c6..e733a30 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -379,6 +379,16 @@ fun SuiteComposerScreen(toolId: String? = null) {
+                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
+                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
+                     onUploadVideo = { open(null); pickExtendUpload(ToolSlots.EXTEND_VIDEO) },
++                    locations = locations,
++                    onUploadBackground = { uri ->
++                        scope.launch {
++                            val media = c.media ?: return@launch c.repo.toast("Couldn't read that picture")
++                            val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that picture")
++                            val (ref, err) = c.repo.attemptInline { uploadImage("background.jpg", bytes, media.mime(uri).takeIf { it.startsWith("image/") } ?: "image/jpeg") }
++                            if (ref != null) store.recast.update { it.copy(background = "photo", backgroundImage = ref, backgroundName = "Uploaded picture") }
++                            if (err != null) c.repo.toast(err)
++                        }
++                    },
+                     onCreateLocation = { name, uri ->
+                         scope.launch {
+                             val media = c.media ?: return@launch c.repo.toast("Couldn't read that photo")
 diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
-index 995aa93..38689bf 100644
+index 995aa93..041d705 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
-@@ -615,6 +615,19 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
+@@ -99,6 +99,9 @@ class SheetContext(
+     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
+     /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
+     val onCreateLocation: (String, android.net.Uri) -> Unit = { _, _ -> },
++    /** Swap's Background → New photo: the studio's locations (the library) and an uploaded picture. */
++    val locations: List<studio.muse.app.data.SuiteLocation> = emptyList(),
++    val onUploadBackground: (android.net.Uri) -> Unit = {},
+     /** Extend's VIDEO picker: the studio's takes that can be extended, the key in the slot now, and the two ways to fill it. */
+     val takes: List<studio.muse.app.data.Take> = emptyList(),
+     val extendKey: String? = null,
+@@ -615,6 +618,37 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
          if (r.canAdd(max)) Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).border(1.dp, m.t.line, RoundedCornerShape(25.dp)).press { x.updateRecast { it.add() }; active = r.people.size }, contentAlignment = Alignment.Center) {
              T("Add a person", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
          }
 +        if (r.people.size == 1) {
 +            Row(verticalAlignment = Alignment.CenterVertically) {
 +                T("Background", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f))
-+                MiniSeg(listOf("keep" to "Keep", "describe" to "Describe it"), r.background) { k -> x.updateRecast { it.copy(background = k) } }
++                MiniSeg(listOf("keep" to "Keep", "photo" to "New photo", "describe" to "Describe it"), r.background) { k -> x.updateRecast { it.copy(background = k) } }
++            }
++            if (r.background == "photo") {
++                val upload = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { u -> if (u != null) x.onUploadBackground(u) }
++                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
++                    items(x.locations.size) { i ->
++                        val loc = x.locations[i]
++                        val on = r.backgroundImage == loc.image
++                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).border(if (on) 2.dp else 1.dp, if (on) m.t.accent else m.t.line, RoundedCornerShape(10.dp))
++                            .press { x.updateRecast { it.copy(backgroundImage = loc.image, backgroundName = loc.name) } }.semantics { role = Role.Button; contentDescription = "Background · ${loc.name}" }) {
++                            RefImage(loc.image, Modifier.size(72.dp))
++                        }
++                    }
++                    item {
++                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).background(m.t.surface2).press { upload.launch("image/*") }
++                            .semantics { role = Role.Button; contentDescription = "Upload a picture" }, contentAlignment = Alignment.Center) { SIc("image", 20.dp, m.t.muted) }
++                    }
++                }
++                T(if (r.backgroundImage == null) "Pick a saved location or upload a picture" else "New background: ${r.backgroundName.ifBlank { "your picture" }}", m.type.body.copy(fontSize = 12.sp), m.t.muted)
 +            }
 +            if (r.background == "describe") {
 +                Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface2).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
@@ -69,81 +126,159 @@ index 995aa93..38689bf 100644
              Column(Modifier.weight(1f)) {
                  T("Keep the clip's audio", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
 diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
-index 57960ce..e04f2e0 100644
+index 57960ce..9da9845 100644
 --- a/mac/Muse/App/AppStore+Suite.swift
 +++ b/mac/Muse/App/AppStore+Suite.swift
-@@ -91,6 +91,14 @@ extension ComposerTool {
+@@ -91,6 +91,25 @@ extension ComposerTool {
  
  enum SwapKind: String { case swap, recast }
  
-+/// Swap's Background pill. "New photo" waits for a picture picker (the server takes background "photo" + backgroundImage).
++/// Swap's Background pill: Keep (the clip's place), New photo (a studio location or an upload), Describe it (the prompt's words).
 +enum SwapBackground: String, CaseIterable, Equatable {
-+    case keep, describe
-+    var label: String { self == .keep ? "Keep" : "Describe it" }
++    case keep, photo, describe
++    var label: String {
++        switch self {
++        case .keep: return "Keep"
++        case .photo: return "New photo"
++        case .describe: return "Describe it"
++        }
++    }
 +    /// What the request sends (nil = the server's default, Keep).
 +    var value: String? { self == .keep ? nil : rawValue }
++}
++
++/// One choice of the Background pill's list.
++enum SwapBackgroundPick: Hashable {
++    case keep, describe, location(String), upload
 +}
 +
  /// Character swap and Recast (tools of the composer).
  struct SwapDraft: Equatable {
      var kind: SwapKind = .swap
-@@ -99,6 +107,8 @@ struct SwapDraft: Equatable {
+@@ -99,6 +118,11 @@ struct SwapDraft: Equatable {
      var quality = "standard"
      var keepAudio = true
      var speaking: ComposerSpeaking = .auto
 +    /// Background: keep (the clip's place) or describe (the prompt's words set the new place; Auto then runs Genjutsu Light).
 +    var background: SwapBackground = .keep
++    /// New photo: the picture and its name (a location's, or the uploaded file's).
++    var backgroundImage: ImageRef?
++    var backgroundName: String?
      /// The prompt sits behind a toggle (off by default).
      var promptOn = false
      /// Swap's add-ons (they stay add-ons: Edit, Fast · beta), off = the ladder.
-@@ -609,7 +619,8 @@ extension AppStore {
+@@ -609,7 +633,8 @@ extension AppStore {
          case .swap:
              guard let m = d.modelId else { return nil }
              var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
 -                                prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
 +                                prompt: d.promptOn || d.background == .describe ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
-+            r.background = d.background.value
++            applySwapBackground(&r, d)
              applyLook(&r)
              applyEnginePick(&r, .swap) // the owner's model (WS6)
              if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
-@@ -621,7 +632,9 @@ extension AppStore {
+@@ -621,13 +646,50 @@ extension AppStore {
          case .recast:
              guard !d.cast.isEmpty else { return nil }
              let cast = RecastFaces.resolveClashes(d.cast, faces: d.people.map(\.face))
 -            var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
 +            var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)",
 +                                       prompt: d.background == .describe ? suite.composer.tokens.promptText() : "")
-+            r.background = cast.count == 1 ? d.background.value : nil // Describe it is a one-person swap
++            if cast.count == 1 { applySwapBackground(&r, d) } // a new background is a one-person swap
              applyLook(&r)
              applyEnginePick(&r, .recast) // the owner's model (WS6)
              return r
+         }
+     }
+ 
++    /// Background: Keep sends nothing; New photo sends its picture (none picked yet = Keep); Describe it sends the words.
++    private func applySwapBackground(_ r: inout ShotRequest, _ d: SwapDraft) {
++        switch d.background {
++        case .keep: r.background = nil
++        case .describe: r.background = "describe"
++        case .photo:
++            guard let img = d.backgroundImage else { r.background = nil; return }
++            r.background = "photo"
++            r.backgroundImage = img
++        }
++    }
++
++    /// The Background pill's choice: a studio location or an uploaded picture makes it New photo.
++    func pickSwapBackground(_ p: SwapBackgroundPick) {
++        switch p {
++        case .keep: suite.swap.background = .keep
++        case .describe:
++            suite.swap.background = .describe
++            suite.swap.promptOn = true // the words set the new place
++        case .location(let id):
++            guard let loc = suite.locations.first(where: { $0.id == id }) else { return }
++            suite.swap.background = .photo
++            suite.swap.backgroundImage = loc.image
++            suite.swap.backgroundName = loc.name
++        case .upload:
++            guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use as the new background").first(where: MediaImport.isImage) else { return }
++            perform { [self] in
++                let ref = try await uploadImage(url)
++                suite.swap.background = .photo
++                suite.swap.backgroundImage = ref
++                suite.swap.backgroundName = url.deletingPathExtension().lastPathComponent
++            }
++        }
++    }
++
+     /// Swap and Recast show only the Look chip: camera and light come from the clip.
+     private func applyLook(_ r: inout ShotRequest) {
+         let look = suite.composer.settings
 diff --git a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
-index 557600f..924288e 100644
+index 557600f..19e6d6b 100644
 --- a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
 +++ b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
-@@ -105,6 +105,12 @@ struct ComposerBottomBar: View {
+@@ -98,6 +98,24 @@ struct ComposerBottomBar: View {
+             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pricing") } }
+     }
+ 
++    /// Background pill: Keep, the studio's locations and an upload (New photo), Describe it.
++    private var backgroundOptions: [(String, SwapBackgroundPick)] {
++        [("Keep", .keep)] + store.suite.locations.map { ("New photo · \($0.name)", .location($0.id)) } + [("New photo · Upload a picture…", .upload), ("Describe it", .describe)]
++    }
++    private var backgroundSelected: SwapBackgroundPick {
++        let d = store.suite.swap
++        switch d.background {
++        case .keep: return .keep
++        case .describe: return .describe
++        case .photo: return store.suite.locations.first(where: { $0.image == d.backgroundImage }).map { .location($0.id) } ?? .upload
++        }
++    }
++    private var backgroundValue: String {
++        let d = store.suite.swap
++        if d.background == .photo { return d.backgroundImage == nil ? "Keep" : (d.backgroundName ?? "New photo") }
++        return d.background.label
++    }
++
+     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
+     @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
+         HStack(spacing: spacing) {
+@@ -105,6 +123,8 @@ struct ComposerBottomBar: View {
              if isSwap {
                  listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
                           help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
-+                listPill("background", icon: "photo", value: store.suite.swap.background.label,
-+                         help: "Background: Keep the clip’s place, or Describe it in the prompt", options: SwapBackground.allCases.map { ($0.label, $0) },
-+                         selected: store.suite.swap.background) { b in
-+                    store.suite.swap.background = b
-+                    if b == .describe { store.suite.swap.promptOn = true } // the words set the new place
-+                }
++                listPill("background", icon: "photo", value: backgroundValue, help: "Background: keep the clip’s place, a new photo, or describe it in the prompt",
++                         options: backgroundOptions, selected: backgroundSelected) { store.pickSwapBackground($0) }
                  if tool == .swap {
                      listPill("speaking", icon: "text.bubble", value: store.suite.swap.speaking.label, help: "Speaking",
                               options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
 diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
-index b4834d2..553634a 100644
+index b4834d2..19ec3d4 100644
 --- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
 +++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
-@@ -770,6 +770,8 @@ public struct ShotRequest: Codable, Hashable, Sendable {
+@@ -770,6 +770,10 @@ public struct ShotRequest: Codable, Hashable, Sendable {
      public var dryRun: Bool?
      public var clipId: String?
      public var keepAudio: Bool?
 +    /// Swap / Recast background: nil = Keep (the clip's place); "describe" = the prompt's words set the new place; "photo" = a new picture.
 +    public var background: String?
++    /// Background "photo": the new background picture (a studio location or an upload).
++    public var backgroundImage: ImageRef?
      /// "Grade the take with this look" (nil = the server's default, on).
      public var gradeLook: Bool?
      /// Owner only (bypass the ladder). Members never send these.

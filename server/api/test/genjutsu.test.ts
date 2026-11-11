@@ -262,6 +262,12 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
       expect(keep.body.engine?.model).not.toBe('genjutsu-light');
       expect(keep.body.warnings).toContain('Background is set to Keep · your prompt describes a new place · switch to Describe it?');
       expect(keep.body.fixes).toEqual([{ fix: 'background:describe', label: 'Describe it' }]);
+      // Keep: the composer's prompt still reaches the swap model as the direction.
+      const kept = await owner.req('POST', '/v1/suite/shots', { ...base, prompt: 'she smiles more at the end', engineModel: 'genjutsu-light' });
+      expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+      await until(async () => { const x = (await owner.req('GET', '/v1/jobs')).body.find((y: any) => y.id === (kept.body.job?.id ?? kept.body.id)); return x && ['done', 'failed'].includes(x.state) ? x : null; }, 30_000);
+      expect(hf.at(-1)!.input.prompt).toMatch(/Direction from the user: she smiles more at the end/);
+      expect(hf.at(-1)!.input.prompt).not.toMatch(/replaced by the place described/);
       const plain = await owner.req('POST', '/v1/suite/shots/estimate', { ...base, direction: 'she smiles more' });
       expect(plain.body.warnings ?? []).not.toContain('Background is set to Keep · your prompt describes a new place · switch to Describe it?');
       // Describe it needs words; the job's prompt then says the place is new.

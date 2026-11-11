@@ -549,8 +549,8 @@ export class SuiteService {
     if (!r.modelId || !r.clipId) throw badRequest('Swap needs modelId and clipId');
     const quality = r.quality === 'cinema' ? 'hd' : r.quality;
     return { title: r.title, modelId: r.modelId, outfitId: r.outfitId ?? '', clipId: r.clipId, engine: 'replicate', quality, takes: r.takes, keepAudio: r.keepAudio ?? true,
-      // Describe it: the apps send the words as the prompt; they are the swap's direction (the new place).
-      direction: r.direction ?? (r.background === 'describe' && r.prompt?.trim() ? r.prompt.trim().slice(0, 500) : undefined),
+      // The apps send the swap's words as the prompt: they are its direction in every background mode (Describe it: the new place).
+      direction: r.direction ?? (r.prompt?.trim() ? r.prompt.trim().slice(0, 500) : undefined),
       ...(r.background ? { background: r.background } : {}), ...(r.backgroundImage ? { backgroundImage: r.backgroundImage } : {}),
       ...(sentOfBody(r) ? { sentImages: r.sentImages, addImages: r.addImages, excludeImages: r.excludeImages, sentImagesBy: r.sentImagesBy } : {}) };
   }
