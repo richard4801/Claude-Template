@@ -203,6 +203,25 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func archiveChat(_ id: String) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
     }
+    /// The person answers Claude's Approve card (only theirs, once). Approve runs the stored action as them.
+    public struct ActionAnswer: Decodable, Sendable { public var id: String; public var status: String; public var error: String? }
+    private struct ActionPost: Encodable { var approve: Bool }
+    public struct WaitingAction: Decodable, Sendable {
+        public var id: String; public var gate: String; public var summary: String; public var priceUsd: Double?; public var chatId: String?
+        /// The button, as the server's card names it.
+        public var label: String {
+            let verb = gate == "delete" ? "Delete" : gate == "post" ? "Post" : gate == "spend" ? "Approve" : "Change"
+            return priceUsd.map { "\(verb) · $\(String(format: "%.2f", $0))" } ?? verb
+        }
+    }
+    private struct WaitingList: Decodable { var actions: [WaitingAction] }
+    public func waitingActions() async throws -> [WaitingAction] {
+        let l: WaitingList = try await call("GET", "v1/claude/actions?status=waiting")
+        return l.actions
+    }
+    public func answerAction(_ id: String, approve: Bool) async throws -> ActionAnswer {
+        try await call("POST", "v1/claude/actions/\(try ClaudeIds.check(id))", ActionPost(approve: approve))
+    }
     public func memory() async throws -> ClaudeMemory { try await call("GET", "v1/claude/memory") }
     private struct MemoryNew: Encodable { var text: String; var area: String; var characterId: String? }
     private struct MemoryPin: Encodable { var pinned: Bool }

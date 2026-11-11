@@ -84,11 +84,22 @@ public struct ClaudeUI: Codable, Hashable, Sendable {
     public var suggest: String?
     public var area: String?
     public var characterId: String?
+    /// approve: a gated action Claude asked for (delete, post, spend, settings); nothing happens until the person presses
+    /// the button (POST v1/claude/actions/:id). `label` is the button ("Delete", "Approve · $1.30").
+    public var approve: String?
+    public var gate: String?
+    public var summary: String?
+    public var priceUsd: Double?
+    /// approve_result: the action it answers and how it ended (done, failed, declined).
+    public var action: String?
+    public var status: String?
 
     public init(page: String? = nil, id: String? = nil, tool: String? = nil, label: String? = nil, ask: Bool? = nil, from: ClaudePage? = nil,
-                remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil) {
+                remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil,
+                approve: String? = nil, gate: String? = nil, summary: String? = nil, priceUsd: Double? = nil, action: String? = nil, status: String? = nil) {
         self.page = page; self.id = id; self.tool = tool; self.label = label; self.ask = ask; self.from = from
         self.remembered = remembered; self.text = text; self.suggest = suggest; self.area = area; self.characterId = characterId
+        self.approve = approve; self.gate = gate; self.summary = summary; self.priceUsd = priceUsd; self.action = action; self.status = status
     }
 
     /// Where it goes, as the person reads it ("AI Suite, Shot", "Take, Sunset walk 3").
