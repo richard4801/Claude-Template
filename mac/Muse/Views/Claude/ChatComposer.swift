@@ -264,6 +264,10 @@ struct ChatComposerBar: View {
         let canSend = !empty && !held && !busy
         let font = Fonts.nsFont(t.scale.textFamily, t.scale.body.size, .regular) ?? NSFont.systemFont(ofSize: t.scale.body.size)
         let shape = RoundedRectangle(cornerRadius: t.radii.control, style: .continuous)
+        // One row height (owner, build 520: + sat low, send was short): the single-line field's height. + and send are
+        // squares of it, so on one line all three share a centre, and as the field grows they stay on its bottom line.
+        let lineH = ceil(font.boundingRectForFont.height) + 12
+        let rowH = lineH + 2 * Space.s1
         VStack(alignment: .leading, spacing: Space.s2) {
             if !suggestions.isEmpty {
                 FlowLayout(spacing: Space.s1) {
@@ -281,7 +285,7 @@ struct ChatComposerBar: View {
             if let attachNote { Text(attachNote).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
             HStack(alignment: .bottom, spacing: Space.s2) {
                 if let onAttach {
-                    Button(action: onAttach) { Ph("plus", 16).frame(width: 32, height: 32).contentShape(Rectangle()) }
+                    Button(action: onAttach) { Ph("plus", 16).frame(width: rowH, height: rowH).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
                         .foregroundStyle(t.roles.ink2)
                         .help("Attach images. You can also paste or drop them here.")
@@ -293,7 +297,7 @@ struct ChatComposerBar: View {
                                  onSubmit: { if canSend { onSend() } },
                                  onEscape: { if busy { onStop(); return true }; return false },
                                  onImages: onImages)
-                        .frame(height: max(height, ceil(font.boundingRectForFont.height) + 12))
+                        .frame(height: max(height, lineH))
                     if text.isEmpty {
                         Text(placeholder).font(t.scale.body.font).foregroundStyle(t.roles.ink2)
                             .lineLimit(1)
@@ -307,7 +311,7 @@ struct ChatComposerBar: View {
                 .background(shape.fill(t.roles.field))
                 .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
                 .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat field") } }
-                sendOrStop(canSend: canSend)
+                sendOrStop(canSend: canSend, side: rowH, shape: shape)
             }
             if !footer.isEmpty {
                 VStack(alignment: .leading, spacing: Space.s1) {
@@ -316,6 +320,8 @@ struct ChatComposerBar: View {
                     }
                 }
                 .help(footerHelp ?? "")
+                // Lines up with the field's text, not with the + button.
+                .padding(.leading, (onAttach != nil ? rowH + Space.s2 : 0) + Space.s3)
             }
             // ⌘K puts the caret in the field.
             Button("") { focus += 1 }
@@ -331,21 +337,29 @@ struct ChatComposerBar: View {
         .onChange(of: SnapshotRunner.state.chatFocusTick) { _, _ in focus += 1 }
     }
 
-    @ViewBuilder private func sendOrStop(canSend: Bool) -> some View {
+    /// Send (or Stop while Claude works): a square the height of the single-line field, with the field's corner radius.
+    @ViewBuilder private func sendOrStop(canSend: Bool, side: CGFloat, shape: RoundedRectangle) -> some View {
         if busy {
-            Button(action: onStop) { Ph("stop", 15).frame(width: 18, height: 18) }
-                .buttonStyle(RButtonStyle(kind: .quiet))
-                .frame(width: 40)
-                .help("Stop Claude (Esc)")
-                .accessibilityLabel("Stop Claude")
-                .keyboardShortcut(".", modifiers: .command)
+            Button(action: onStop) {
+                Ph("stop", 15).frame(width: side, height: side)
+                    .background(shape.fill(t.roles.field)).overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
+                    .contentShape(shape)
+            }
+            .buttonStyle(.plain).foregroundStyle(t.roles.ink)
+            .help("Stop Claude (Esc)")
+            .accessibilityLabel("Stop Claude")
+            .keyboardShortcut(".", modifiers: .command)
         } else {
-            Button(action: onSend) { Ph("paper-plane-right", 15).frame(width: 18, height: 18) }
-                .buttonStyle(RButtonStyle(kind: .action, off: !canSend))
-                .frame(width: 40)
-                .disabled(!canSend)
-                .help("Send (Return). Shift-Return starts a new line.")
-                .accessibilityLabel("Send to Claude")
+            Button(action: onSend) {
+                Ph("paper-plane-right", 15).frame(width: side, height: side)
+                    .background(shape.fill(canSend ? t.roles.action : t.roles.field))
+                    .overlay(shape.strokeBorder(canSend ? Color.clear : t.roles.hairline, lineWidth: 1))
+                    .contentShape(shape)
+            }
+            .buttonStyle(.plain).foregroundStyle(canSend ? t.roles.onAction : t.roles.ink2)
+            .disabled(!canSend)
+            .help("Send (Return). Shift-Return starts a new line.")
+            .accessibilityLabel("Send to Claude")
         }
     }
 
