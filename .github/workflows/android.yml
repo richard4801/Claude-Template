@@ -31,7 +31,10 @@ jobs:
         with:
           python-version: "3.13"
 
+      # The runner already has an SDK; only accept the licences and add platform-tools (the action's default "tools" package no longer exists).
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
 
