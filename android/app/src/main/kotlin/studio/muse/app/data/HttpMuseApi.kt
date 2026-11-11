@@ -68,6 +68,7 @@ interface MuseService {
     @GET("v1/jobs") suspend fun jobs(): List<Job>
     @POST("v1/jobs") suspend fun createJob(@Body r: JobRequest): Job
     @DELETE("v1/jobs/{id}") suspend fun removeJob(@Path("id") id: String)
+    @POST("v1/jobs/clear-failed") suspend fun clearFailedJobs(@Body r: JsonObject): ClearedJobs
     @GET("v1/takes") suspend fun takes(): List<Take>
     @PATCH("v1/takes/{id}") suspend fun setTake(@Path("id") id: String, @Body r: SetTakeStatusRequest): Take
     @DELETE("v1/takes/{id}") suspend fun deleteTake(@Path("id") id: String)
@@ -435,6 +436,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun listJobs() = shared("jobs") { call { jobs() }.map { it.abs() } }
     override suspend fun createJob(req: JobRequest) = call { createJob(req) }.abs()
     override suspend fun removeJob(jobId: String) = call { removeJob(jobId) }
+    override suspend fun clearFailedJobs() = call { clearFailedJobs(buildJsonObject {}) }.ids
 
     /** Edited version: the MP4 (streamed from disk) and its JPEG go up with presigned PUTs, then the take is created. */
     override suspend fun saveTakeVersion(takeId: String, video: EditedVideo, edits: EditListDto, onProgress: (Float) -> Unit): Take {

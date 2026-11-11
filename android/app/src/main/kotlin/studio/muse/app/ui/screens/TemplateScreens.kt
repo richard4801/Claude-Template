@@ -166,7 +166,7 @@ fun TemplateCard(t: Template, modifier: Modifier = Modifier, height: Dp = 200.dp
             }
         }
         T(t.name, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-        T("${if (t.isOwner) "You" else t.ownerName} · ${usesText(t.uses)}", m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
+        T("${t.byline()} · ${usesText(t.uses)}", m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
     }
 }
 
@@ -181,7 +181,7 @@ fun VisibilityBadge(t: Template, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (!t.public) Ic("lock", 11.dp, Color.White)
-        T(if (t.public) "Public" else "Private", m.type.pill, if (t.public) m.t.ink else Color.White, upper = m.isA, maxLines = 1)
+        T(if (t.starter != null && t.public) "Starter" else if (t.public) "Public" else "Private", m.type.pill, if (t.public) m.t.ink else Color.White, upper = m.isA, maxLines = 1)
     }
 }
 
@@ -267,7 +267,7 @@ fun TemplateDetailScreen(id: String) {
                     RowB(align = Alignment.Top) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             H2(t.name)
-                            Tiny("by ${if (t.isOwner) "you" else t.ownerName} · ${usesText(t.uses)}")
+                            Tiny("${t.byline(lower = true)} · ${usesText(t.uses)}")
                         }
                         Chip(if (t.favourite) "♥ Favourite" else "♡ Favourite", t.favourite, { vm.favourite() })
                     }
@@ -683,3 +683,13 @@ fun SaveTemplateScreen(shotId: String) {
     }
 }
 
+
+/**
+ * Who made it: built-in starters say "MUSE starter", not "You", even though the studio owner holds them (owner bug
+ * 2026-11-11: starters read "by You · Public" as if she had made and published them).
+ */
+fun Template.byline(lower: Boolean = false): String = when {
+    starter != null -> "MUSE starter"
+    isOwner -> if (lower) "by you" else "You"
+    else -> if (lower) "by $ownerName" else ownerName
+}
