@@ -65,6 +65,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func listOutfits() async throws -> [Outfit]
     /// Starts generating an outfit set preview (state=generating; an outfit event follows with state=preview).
     func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit
+    /// Images sent: the price and the images a new outfit's front would send (nothing made).
+    func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate
     /// Attaches a generated preview to the model, with the name chosen in the preview (nil keeps its name).
     func saveOutfit(outfitId: String, name: String?) async throws -> Outfit
     /// Renames an outfit (1–80 characters; the owner or whoever made it).

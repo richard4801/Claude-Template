@@ -296,6 +296,10 @@ public struct CreateOutfitRequest: Codable, Sendable {
     public var imageModel: String?
     /// §6: start from her base photos, keeping the ticked pieces (nil = a new outfit as before).
     public var base: OutfitBase?
+    /// Price and images only (`outfitEstimate`): nothing is held or made.
+    public var dryRun: Bool?
+    /// Images sent (server images/sent.ts): `.null` = MUSE's own pick, dropping a choice Claude made for this sheet.
+    public var sentImages: JSONValue?
 
     public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef?] = [], models: ModelOverrides? = nil) {
         self.models = (models?.isEmpty ?? true) ? nil : models
@@ -304,6 +308,22 @@ public struct CreateOutfitRequest: Codable, Sendable {
         self.mode = mode
         self.description = description
         self.images = images
+    }
+}
+
+/// `POST /v1/outfits` with dryRun: the price and the images the outfit's front would send.
+public struct OutfitEstimate: Codable, Hashable, Sendable {
+    public var cost: Double
+    public var sentImages: SentImages?
+    public init(cost: Double = 0, sentImages: SentImages? = nil) {
+        self.cost = cost
+        self.sentImages = sentImages
+    }
+    enum CodingKeys: String, CodingKey { case cost, sentImages }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        cost = c.v(.cost, 0)
+        sentImages = c.o(.sentImages)
     }
 }
 

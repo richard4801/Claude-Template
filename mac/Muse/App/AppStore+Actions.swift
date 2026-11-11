@@ -572,6 +572,19 @@ extension AppStore {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { outfitSheet = OutfitDraft(modelId: id) }
     }
 
+    /// Images sent: what the outfit's front would send now (her images, Claude's choice), plus the product photo to upload.
+    func refreshOutfitSent() async {
+        guard let d = outfitSheet, d.mode != .own, d.state != .busy else { return }
+        var req = CreateOutfitRequest(modelId: d.modelId, name: "", mode: d.mode.rawValue, description: d.description)
+        req.imageModel = enginePick(.outfit)?.model
+        if d.sentReset { req.sentImages = .null }
+        guard var s = (try? await api.outfitEstimate(req))?.sentImages else { return }
+        if !s.changed { // the product photos go after her images (uploaded when the angles are made)
+            s.images += d.images.map { SentImage(image: ImageRef(url: $0.absoluteString), role: "product", label: "product photo", why: "the product photo") }
+        }
+        if outfitSheet?.modelId == d.modelId { outfitSheet?.sent = s }
+    }
+
     func outfitGenerate() {
         guard var d = outfitSheet, d.state != .busy else { return }
         if d.mode == .describe && d.description.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -614,6 +627,7 @@ extension AppStore {
                                               description: draft.description, images: refs)
                 if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
                 if let base = draft.base, base.keeping { req.base = base } // §6: keep pieces from her base photos
+                if draft.sentReset { req.sentImages = .null } // images sent: the person reset Claude's choice
                 let o = try await api.createOutfit(req)
                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
                 outfitSheet?.outfitId = o.id

@@ -146,6 +146,9 @@ struct OutfitDraft {
     var baseOutfitId: String?
     var baseAngles = OutfitBaseAngles()
     var base: OutfitBase? { fromBase && mode != .own ? OutfitBase(keep: keep, note: keepNote, outfitId: baseOutfitId, angles: baseAngles) : nil }
+    /// Images sent (server images/sent.ts): what the front would send, and the person's "Reset to automatic".
+    var sent: SentImages?
+    var sentReset = false
 }
 
 enum Niches {
@@ -736,6 +739,8 @@ final class AppStore {
         if e.type == "queue" { Task { await loadQueue() } }
         // Claude in the Suite: Claude or another device changed the shared composer draft.
         if e.type == "suiteAssist", let a = e.assist { suiteAssistEvent(a) }
+        // Images sent: Claude changed what a page's generation sends (the outfit sheet reads it again).
+        if e.type == "sentImages", outfitSheet != nil { outfitSheet?.sentReset = false; Task { await refreshOutfitSent() } }
         if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
         if isOwner {
             if e.type == "member" { LiveEvents.applyMembers(&members, e) }

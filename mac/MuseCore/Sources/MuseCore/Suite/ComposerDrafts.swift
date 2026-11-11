@@ -49,6 +49,7 @@ public enum ComposerDrafts {
             extra["engineModel"] = .string(e)
             if let r = d.resolution { extra["resolution"] = .string(r) }
         }
+        if let s = d.sent { extra["sent"] = s } // images sent (the server reads the draft's choice)
         if d.tool == .photo {
             return SuiteDraft(tool: "photo", count: photo?.count, rig: SuiteRig(d.settings), tokens: encode(d.tokens), extra: extra)
         }
@@ -69,6 +70,7 @@ public enum ComposerDrafts {
         if let r = s.rig { out.settings = r.settings }
         if let toks = s.tokens { out.tokens = decode(toks) }
         if case .string(let o)? = s.extra["outfitId"] { out.outfitId = o }
+        out.sent = s.raw["sent"]
         out.collapsed = nil
         // Directed from a camera session (Claude's suite_set_draft directed) and the pinned model come back with the draft.
         if case .object(let dir)? = s.extra["directed"], let cam = dir["camera"] { out.directed = cam.decoded(CameraSpec.self) } else { out.directed = nil }

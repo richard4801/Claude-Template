@@ -597,6 +597,13 @@ public actor FakeMuseAPI: MuseAPI {
         return outfits.filter { !archived.contains($0.modelId) }
     }
 
+    public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
+        let m = try activeModel(req.modelId)
+        let pick: [SentImage] = [("face", "face"), ("faceTq", "face ¾"), ("front", "body")].compactMap { p in
+            m.slots.first(where: { $0.key == p.0 })?.image.map { SentImage(image: $0, role: "person", label: p.1, why: "") } }
+        return OutfitEstimate(cost: req.mode == "own" ? 0 : photoPricing.outfitSet(), sentImages: SentImages(images: pick, max: 8))
+    }
+
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit {
         try checkOverrides(req.models)
         let m = try activeModel(req.modelId)

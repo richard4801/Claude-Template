@@ -264,6 +264,11 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     }
     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
+    public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
+        var r = req
+        r.dryRun = true
+        return try await call("POST", "v1/outfits", r)
+    }
     public func saveOutfit(outfitId: String, name: String?) async throws -> Outfit { try await call("POST", "v1/outfits/\(Self.pathKey(outfitId))/save", OutfitName(name: name)) }
     public func renameOutfit(id: String, name: String) async throws -> Outfit { try await call("PATCH", "v1/outfits/\(Self.pathKey(id))", OutfitName(name: name)) }
     public func deleteOutfit(id: String) async throws { _ = try await send(request("DELETE", "v1/outfits/\(Self.pathKey(id))")) }

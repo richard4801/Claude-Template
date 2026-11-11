@@ -235,6 +235,12 @@ struct OutfitSheetView: View {
                                 .onSubmit { store.outfitSave() }
                         }
                     }
+                    if d.mode != .own && d.state != .done {
+                        SentImagesRow(sent: d.sent) {
+                            store.outfitSheet?.sentReset = true
+                            Task { await store.refreshOutfitSent() }
+                        }
+                    }
                     HStack(spacing: Space.s3) {
                         Text("All four angles use one seed, so the outfit matches from every side. Never add: logos.")
                             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
@@ -253,6 +259,7 @@ struct OutfitSheetView: View {
                 }
                 .padding(Space.s6)
                 .floatingPanel(width: 760)
+                .task(id: "\(d.mode.rawValue)|\(d.images.count)|\(d.modelId)") { await store.refreshOutfitSent() } // images sent
                 // The angles full size (owner 2026-11-08): zoom, ← →, Escape.
                 ImageLightbox(items: Self.lightboxItems(d),
                               index: Binding(get: { store.outfitSheet?.viewing }, set: { store.outfitSheet?.viewing = $0 }))
