@@ -36,8 +36,8 @@ describe('model choice · purposes (unit)', () => {
     expect(purposeOfShot({ draft: { tool: 'storyboard' } })).toBe('storyboard');
     expect(purposeOfShot({})).toBe('shot');
   });
-  it('swap engines: the hosted H3 family (registry prices) and Edit / Fast on our GPU', () => {
-    expect(SWAP_ENGINES.map(e => e.id)).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-hf', 'h3-open', 'viggle']);
+  it('swap engines: the hosted H3 family and Genjutsu (registry prices) and Edit / Fast on our GPU', () => {
+    expect(SWAP_ENGINES.map(e => e.id)).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-hf', 'genjutsu', 'genjutsu-light', 'h3-open', 'viggle']);
     for (const e of SWAP_ENGINES.filter(x => x.runs !== 'gpu')) { const ref = modelById(e.id)?.ref; expect(typeof ref === 'string' ? ref : (ref as { ref2v?: string })?.ref2v).toBe(e.ref); }
   });
 });
