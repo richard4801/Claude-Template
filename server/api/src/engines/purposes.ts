@@ -70,10 +70,10 @@ export const SWAP_ENGINES: SwapEngine[] = [
   { id: 'h3-highspeed', name: 'MiniMax H3 Highspeed', runs: 'replicate', ref: 'minimax/h3-highspeed', noResolution: true },
   // The owner's Higgsfield plan (half Replicate's 2K price): H3 reference-to-video with the clip as the reference video
   // (Higgsfield has no H3 edit endpoint); 2K only, 5–15 s. Out of credit or down at the start → Replicate H3.
-  { id: 'h3-hf', name: 'MiniMax H3 (Higgsfield)', runs: 'higgsfield', ref: 'minimax/h3/reference-to-video' },
-  { id: 'h3-open', name: 'Edit · MiniMax H3 open weights (own GPU)', runs: 'gpu', gpuEngine: 'h3', capability: 'h3',
+  { id: 'h3-hf', name: 'MiniMax H3', runs: 'higgsfield', ref: 'minimax/h3/reference-to-video' },
+  { id: 'h3-open', name: 'Edit · MiniMax H3 open weights', runs: 'gpu', gpuEngine: 'h3', capability: 'h3',
     notice: 'Powered by MiniMax H3 · open-weights licence excludes the US, EU, UK and South Korea' },
-  { id: 'viggle', name: 'Fast · beta · Viggle (own GPU)', runs: 'gpu', gpuEngine: 'viggle', capability: 'viggle' },
+  { id: 'viggle', name: 'Fast · beta · Viggle', runs: 'gpu', gpuEngine: 'viggle', capability: 'viggle' },
 ];
 /** Higgsfield's H3 takes 5–15 s (a shorter clip is padded to 5 s and the take is cut back). */
 export const HF_SWAP_MIN_SEC = 5;

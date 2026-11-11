@@ -74,14 +74,14 @@ describe('adapt, don\'t block (a picked model)', () => {
     const a = pick('h3-hf', req({ modelId: 'mia', duration: 20 }));
     if ('error' in a) throw new Error('refused');
     expect(a.pick.seconds).toBe(15);
-    expect(a.adapted.notes).toContain('made 15 s, MiniMax H3 (Higgsfield) max');
+    expect(a.adapted.notes).toContain('made 15 s, MiniMax H3 · Higgsfield max');
     expect(a.adapted.adapted).toContain('length:15');
   });
   it('an aspect the model doesn\'t make moves to the nearest one', () => {
     const a = pickAdapted('hd', req({ aspectRatio: '3:4' }), null, { providers: ALL, engineModel: 'ltx-2.3', resolution: '2k' });
     if ('error' in a) throw new Error('refused');
     expect(a.adapted.request.aspectRatio).toBe('9:16');
-    expect(a.adapted.notes[0]).toMatch(/made 9:16 \(LTX-2\.3 Pro doesn't make 3:4\)/);
+    expect(a.adapted.notes[0]).toMatch(/made 9:16 \(LTX-2\.3 Pro · Replicate doesn't make 3:4\)/);
   });
   it('too many reference images: the first ones are kept and the rest named as left out', () => {
     const m = modelById('wan-2.7')!; // 5 reference images
@@ -90,7 +90,7 @@ describe('adapt, don\'t block (a picked model)', () => {
     const a = adaptRequest(m, m.resolutions[0]!.id, r, CHAR);
     expect(a.why).toEqual([]);
     expect(a.adapted).toContain('refs_trimmed');
-    expect(a.notes.join(' ')).toBe('2 reference images left out (Wan 2.7 takes 5): bottle 5, bottle 6');
+    expect(a.notes.join(' ')).toBe('2 reference images left out (Wan 2.7 · Replicate takes 5): bottle 5, bottle 6');
   });
 });
 
@@ -100,11 +100,11 @@ describe('refusals say exactly why', () => {
     const a = pickAdapted('hd', r, null, { providers: ALL, engineModel: 'veo-3.1-lite', resolution: '720p' });
     expect('error' in a).toBe(true);
     if (!('error' in a)) return;
-    expect(refusalLine(a.refusals[0]!)).toBe("Veo 3.1 Lite: can't use an audio reference; needs an image or video with the audio reference");
+    expect(refusalLine(a.refusals[0]!)).toBe("Veo 3.1 Lite · Replicate: can't use an audio reference; needs an image or video with the audio reference");
   });
   it('a provider that isn\'t set up is said plainly', () => {
     const a = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'h3-hf' });
     if (!('error' in a)) throw new Error('should refuse');
-    expect(refusalLine(a.refusals[0]!)).toBe('MiniMax H3 (Higgsfield): is not set up in this studio yet');
+    expect(refusalLine(a.refusals[0]!)).toBe('MiniMax H3 · Higgsfield: is not set up in this studio yet');
   });
 });

@@ -21,7 +21,8 @@ import { adapters, KINDS, ProviderUnreachable, type Price, type ProviderAdapter,
 import type { Analysis, Inputs, Kind } from './classify.js';
 import { keyFromSecret, keysUnavailable, last4, openKey, sealKey } from './crypto.js';
 import { byoModels, byoProviders } from './schema.js';
-import { memberRules, providerLabel, saveMemberRules } from '../engines/members.js';
+import { memberRules, saveMemberRules } from '../engines/members.js';
+import { labelList, modelLabel } from '../engines/labels.js';
 
 type ProviderRow = typeof byoProviders.$inferSelect;
 type ModelRow = typeof byoModels.$inferSelect;
@@ -184,7 +185,7 @@ export class ByoService {
   modelView(r: ModelRow, p: Pick<ProviderRow, 'kind'> | undefined, shown: (id: string) => boolean) {
     const s = setupOf(r);
     return { id: r.id, providerId: r.providerId, providerKind: (p?.kind ?? null) as ProviderKind | null, ref: r.ref, providerName: r.providerName, displayName: r.displayName,
-      kind: r.kind, enabled: r.enabled, members: shown(r.id), status: s.ready ? 'ready' as const : 'needs_setup' as const, missing: s.missing, inputs: r.analysis.inputs,
+      label: modelLabel(r.displayName, p?.kind ?? null), kind: r.kind, enabled: r.enabled, members: shown(r.id), status: s.ready ? 'ready' as const : 'needs_setup' as const, missing: s.missing, inputs: r.analysis.inputs,
       fields: r.analysis.fields, fixedInputs: r.fixedInputs, price: r.price, priceScale: r.priceScale,
       memberPrice: r.price ? { basis: r.price.basis, usd: Math.round(r.price.costUsd * r.priceScale * 10000) / 10000 } : null, createdAt: r.createdAt, updatedAt: r.updatedAt };
   }
@@ -299,15 +300,15 @@ export class ByoService {
     await this.ensure(u.studioId);
     const rows = [...this.usable.values()].filter(r => r.studioId === u.studioId && (u.role === 'owner' || r.members));
     const names = u.role !== 'owner' && (await memberRules(this.ctx, u.studioId)).showProviderNames;
-    return rows.sort((a, b) => a.createdAt - b.createdAt).map(r => {
+    // Labels "<Model> · <Provider>" (engines/labels.ts); members while the studio hides providers: the bare name, distinct.
+    return labelList(rows.sort((a, b) => a.createdAt - b.createdAt).map(r => {
       const spec = r.kind === 'video' ? customModelsOf(u.studioId).find(m => m.id === r.id) : undefined;
       const price = { basis: r.price!.basis, usd: Math.round(r.price!.costUsd * r.priceScale * 10000) / 10000 };
       const base = { id: r.id, name: r.displayName, kind: r.kind as Kind, price,
         inputs: spec ? inputSlotsOf([spec]) : { start: false, end: false, middle: 0, images: Math.min(6, r.analysis.inputs.referenceImages), videos: 0, audio: false, framesWithRefs: false },
         minSeconds: spec?.duration.min ?? null, maxSeconds: spec?.duration.max ?? null, aspectRatios: spec?.aspectRatios ?? r.analysis.inputs.aspectRatios };
-      return u.role === 'owner' ? { ...base, members: r.members, provider: r.providerKind, providerName: providerLabel(r.providerKind) }
-        : names ? { ...base, provider: r.providerKind, providerName: providerLabel(r.providerKind) } : base;
-    });
+      return u.role === 'owner' ? { ...base, members: r.members, provider: r.providerKind } : names ? { ...base, provider: r.providerKind } : base;
+    }), { showProviders: u.role === 'owner' || names });
   }
   /** Whether this user may run this custom model now (throws otherwise). */
   async checkUse(u: AuthUser, id: string, kind: Kind) {

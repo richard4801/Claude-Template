@@ -29,7 +29,7 @@ import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
-import { providerLabel } from '../engines/members.js'; // WS13: model choice everywhere
+import { baseName, labelList, relabelText } from '../engines/labels.js'; // owner 2026-11-11: "<Model> · <Provider>" everywhere
 import { purposeOfShot, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
@@ -166,7 +166,7 @@ export class SuiteService {
         maxSeconds: usable.length ? Math.max(...usable.map(x => x.m!.duration.max)) : null,
         minSeconds: usable.length ? Math.min(...usable.map(x => x.m!.duration.min)) : null,
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
-      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
+      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, label: specName(x.m!), resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
     // Composer tools (plans/video-composer.md "Tools on the shell"): which the apps can offer now. Talking and UGC ad are
     // shots (audio / product references); Extend continues a finished take.
@@ -203,7 +203,7 @@ export class SuiteService {
         const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
         // WS13: what this model can be picked for (plans/model-choice.md); the hosted H3 family also swaps.
         const purposes = [...videoPurposes(m), ...(SWAP_ENGINES.some(e => e.id === m.id && (e.runs === 'replicate' ? this.ctx.replicate.configured : e.runs === 'higgsfield' && this.providers.higgsfield.configured())) ? ['swap' as const] : [])];
-        return { model: m.id, name: m.name, kind: 'video' as const, custom: !!m.byo, members: !rules.hidden.has(m.id), purposes, tier: tiers[0] ?? null, tiers, resolution,
+        return { model: m.id, name: m.byo?.displayName ?? m.name, provider: m.byo ? m.byo.providerKind : m.provider as string, kind: 'video' as const, custom: !!m.byo, members: !rules.hidden.has(m.id), purposes, tier: tiers[0] ?? null, tiers, resolution,
           resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
           perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
           perRun: m.byo?.perRunUsd ? Math.round(m.byo.perRunUsd * scale * 10000) / 10000 : null,
@@ -212,11 +212,12 @@ export class SuiteService {
     // Every image model the owner can pick (the same list as GET /v1/engines: the studio's photo model, the curated ones,
     // Replicate's popular image models, and the studio's own), so the Photo picker isn't limited to the default.
     const image: Record<string, unknown>[] = (await modelChoice(this.ctx).all({ studioId, role: 'owner' } as AuthUser, ['image']).catch(() => [])).map(e => ({
-      model: e.model, name: e.name, kind: 'image', custom: e.custom, purposes: e.purposes, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
+      model: e.model, name: e.name, provider: e.provider, kind: 'image', custom: e.custom, purposes: e.purposes, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null,
       perRun: e.price?.basis === 'per_run' ? e.price.usd : null, minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: e.limits.aspectRatios ?? [],
       inputs: e.inputs, members: ModelChoice.forMembers(e, rules) }));
-    // One price per entry for the picker: per run for per-run custom models and image models, else per second.
-    return [...video, ...image].map(e => ({ ...e, price: e.perRun != null ? { basis: 'per_run' as const, usd: e.perRun as number }
+    // One price per entry for the picker: per run for per-run custom models and image models, else per second. Labels
+    // "<Model> · <Provider>" (engines/labels.ts), distinct across the list.
+    return labelList([...video, ...image] as (Record<string, unknown> & { name: string; provider?: string })[], { showProviders: true }).map(e => ({ ...e, price: e.perRun != null ? { basis: 'per_run' as const, usd: e.perRun as number }
       : e.perSec != null ? { basis: 'per_second' as const, usd: e.perSec as number } : null }));
   }
 
@@ -225,12 +226,12 @@ export class SuiteService {
     const mc = modelChoice(this.ctx), rules = await mc.memberRules(studioId);
     const all = await mc.all({ studioId, role: 'owner' } as AuthUser, ['video', 'image']).catch(() => []);
     const ok = new Map(all.filter(e => ModelChoice.forMembers(e, rules)).map(e => [e.model, e]));
-    const list = (await this.ownerEngines(studioId, p, avail)) as (Record<string, unknown> & { model: string })[];
-    return list.filter(e => ok.has(e.model)).map(e => {
-      const { members: _m, ...rest } = e;
-      const prov = ok.get(e.model)!.provider;
-      return rules.showProviderNames && prov ? { ...rest, provider: prov, providerName: providerLabel(prov) } : rest;
-    });
+    const list = (await this.ownerEngines(studioId, p, avail)) as unknown as (Record<string, unknown> & { model: string; name: string; label: string; provider?: string })[];
+    // Relabelled for this list: with provider names hidden, the bare name (models that would look the same get "· Option n").
+    return labelList(list.filter(e => ok.has(e.model)).map(e => {
+      const { members: _m, label: _l, provider, ...rest } = e;
+      return rules.showProviderNames && provider ? { ...rest, provider } : rest;
+    }), { showProviders: rules.showProviderNames });
   }
 
   // ------------------------------------------------------------------ character
@@ -332,9 +333,10 @@ export class SuiteService {
       if (t === r.quality) continue;
       if (!('error' in pickAdapted(t, r, character, o))) fixes.push({ fix: `quality:${t}`, label: `Use ${TIER_INFO[t].label}` });
     }
-    const why = reasons.length ? reasons.map(refusalLine).join(' · ') : `${TIER_INFO[r.quality].label} has no model set up for this shot`;
-    const e = new ApiError(400, 'nothing_fits', `Can't make this shot · ${why}`);
-    Object.assign(e, { tried: fail.tried, extra: { reasons, fixes } });
+    const why = reasons.length ? reasons.map(refusalLine).join('. ') : `${TIER_INFO[r.quality].label} has no model set up for this shot`;
+    const words = await this.wordsFor(u);
+    const e = new ApiError(400, 'nothing_fits', words(`Can't make this shot · ${why}`));
+    Object.assign(e, { tried: fail.tried, extra: { reasons: reasons.map(x => ({ ...x, name: words(x.name), reasons: x.reasons.map(words) })), fixes: fixes.map(f => ({ ...f, label: words(f.label) })) } });
     return e;
   }
 
@@ -469,7 +471,24 @@ export class SuiteService {
     if (p.swap) return p.view;
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
-    return { ...this.estimateView(u, r, plan, caps, p.tried), speaking: p.talk };
+    const words = await this.wordsFor(u);
+    const view = this.estimateView(u, r, plan, caps, p.tried);
+    return { ...view, warnings: view.warnings.map(words), speaking: p.talk };
+  }
+
+  /**
+   * How this person reads model labels in text written for the owner (plan notes, refusals, fixes): unchanged for the
+   * owner and while the studio shows provider names (4c); else each "<Model> · <Provider>" becomes the label that member's
+   * picker shows (the bare name, or "· Option n" where two would look the same).
+   */
+  async wordsFor(u: AuthUser): Promise<(s: string) => string> {
+    if (u.role === 'owner') return s => s;
+    const rules = await modelChoice(this.ctx).memberRules(u.studioId);
+    if (rules.showProviderNames) return s => s;
+    const shown = await this.memberEngines(u.studioId, await this.prefs(u.studioId), this.available()).catch(() => []) as { model: string; label: string }[];
+    const byId = new Map(shown.map(e => [e.model, e.label]));
+    const swaps = [...MODELS, ...customModelsOf(u.studioId)].map(m => ({ from: specName(m), to: byId.get(m.id) ?? baseName(m.byo?.displayName ?? m.name) }));
+    return s => relabelText(s, swaps);
   }
   estimateView(u: AuthUser, r: ShotRequest, plan: ShotPlan, caps: Awaited<ReturnType<SuiteService['checkCaps']>>, tried: { model: string; resolution: string; why: string }[]) {
     const res = plan.resolution.replace(/P$/, 'p');
@@ -488,7 +507,7 @@ export class SuiteService {
     };
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
-    return { ...base, engine: { model: m.id, name: m.name, provider: m.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, billedPerTake: plan.billedPerTake,
+    return { ...base, engine: { model: m.id, name: m.name, label: specName(m), provider: m.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, billedPerTake: plan.billedPerTake,
       licence: m.licence, notice: m.licence.notice ?? null }, input: { negative: plan.negative ?? null, params: plan.params, images: plan.images, videos: plan.videos, audio: plan.audioRef ?? null }, tried };
   }
 
@@ -518,7 +537,7 @@ export class SuiteService {
     const sentImages = (await this.ctx.jobs.swapReferences(u, { ...req, draft: r.draft }, hosted)).view;
     const view = { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds, takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
       buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' && hosted ? ['Swap tops out at HD'] : [], rig: [], test: false, sentImages };
-    if (u.role === 'owner' && choice) Object.assign(view, { engine: { model: choice.model, name: choice.engine.name, provider: choice.engine.provider, source: choice.source, perSec: (rr as { pricePerSec?: number }).pricePerSec ?? null } });
+    if (u.role === 'owner' && choice) Object.assign(view, { engine: { model: choice.model, name: choice.engine.name, label: choice.engine.label, provider: choice.engine.provider, source: choice.source, perSec: (rr as { pricePerSec?: number }).pricePerSec ?? null } });
     return { req, choice, view };
   }
 
@@ -534,7 +553,7 @@ export class SuiteService {
     }
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
-    if (r.dryRun) return { dryRun: true, estimate: { ...this.estimateView(u, r, plan, caps, p.tried), speaking: p.talk } };
+    if (r.dryRun) { const words = await this.wordsFor(u), v = this.estimateView(u, r, plan, caps, p.tried); return { dryRun: true, estimate: { ...v, warnings: v.warnings.map(words), speaking: p.talk } }; }
     if (!caps.ok) throw new ApiError(402, caps.code!, caps.message!);
     if (!(await this.runner.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The AI suite isn't available right now");
     await this.checkMedia(u.studioId, plan);
@@ -585,10 +604,11 @@ export class SuiteService {
     const j = await this.ctx.jobs.get(id);
     if (!j || j.studioId !== u.studioId || !isSuiteJob(j) || j.hiddenAt) throw notFound('Shot');
     const plan = (j.stats as any)?.suite?.plan as ShotPlan | undefined;
-    const view = { job: this.ctx.jobs.view(j), warnings: plan ? [...plan.notes, ...plan.camera.notes] : [] };
+    const words = plan ? await this.wordsFor(u) : (s: string) => s;
+    const view = { job: this.ctx.jobs.view(j), warnings: plan ? [...plan.notes, ...plan.camera.notes].map(words) : [] };
     if (u.role !== 'owner' || !plan) return view;
     const m = modelById(plan.modelId);
-    return { ...view, engine: { model: plan.modelId, name: m?.name, provider: plan.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, test: (j.stats as any)?.suite?.mode === 'mock' },
+    return { ...view, engine: { model: plan.modelId, name: m?.name, label: m ? specName(m) : undefined, provider: plan.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, test: (j.stats as any)?.suite?.mode === 'mock' },
       runs: (j.stats as any)?.suite?.takes ?? [] };
   }
 
@@ -608,7 +628,7 @@ export class SuiteService {
       const base = { quality: t, label: TIER_INFO[t].label, available: true, minSeconds: m.duration.min, maxSeconds: m.duration.max,
         guideSeconds: { min: m.refs.videoSecondsMin ?? 1, max: m.refs.videoSecondsMax ?? m.duration.max }, aspectRatios: m.aspectRatios,
         shortSide: res.shortSide, fps: 24, keyframes: { start: m.frames.start, middle: m.frames.middle, end: m.frames.end } };
-      return u.role === 'owner' ? { ...base, model: m.id, name: m.name, resolution: res.id } : base;
+      return u.role === 'owner' ? { ...base, model: m.id, name: m.name, label: specName(m), resolution: res.id } : base;
     });
   }
 
@@ -628,7 +648,7 @@ export class SuiteService {
     if (!m) throw badRequest('Unknown model');
     const c = compileCamera(spec.data, m, { texts: await this.ctx.prompts.texts(u.studioId), durationS: typeof b.duration === 'number' ? b.duration : 5 });
     const base = { text: c.text, moves: c.moves, guideUsed: c.usesGuide, warnings: c.notes };
-    return u.role === 'owner' ? { ...base, engine: { model: m.id, name: m.name }, params: c.params, avoid: c.avoid } : base;
+    return u.role === 'owner' ? { ...base, engine: { model: m.id, name: m.name, label: specName(m) }, params: c.params, avoid: c.avoid } : base;
   }
 }
 

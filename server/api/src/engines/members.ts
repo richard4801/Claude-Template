@@ -47,6 +47,5 @@ export async function saveMemberRules(ctx: Pick<Ctx, 'db'>, u: AuthUser, change:
     .onConflictDoUpdate({ target: suiteSettings.studioId, set: { models: models as never, updatedBy: u.id, updatedAt: now } });
 }
 
-/** The provider company's name as members see it. */
-const LABELS: Record<string, string> = { replicate: 'Replicate', fal: 'fal', higgsfield: 'Higgsfield', muapi: 'Muapi', runpod: 'MUSE', byo: 'Custom' };
-export const providerLabel = (p: string) => LABELS[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
+/** The provider company's name (engines/labels.ts holds the one list and the model label format). */
+export { providerLabel } from './labels.js';

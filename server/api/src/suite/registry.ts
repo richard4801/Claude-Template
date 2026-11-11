@@ -4,6 +4,8 @@
 // 2026-11-05 (replicate.com/<owner>/<name>/api, fal.ai/models/<id>/llms.txt). Member-facing data never names any of this;
 // only owner views (Settings → Engines / the suite settings) do.
 
+import { modelLabel } from '../engines/labels.js';
+
 export type ProviderId = 'replicate' | 'fal' | 'higgsfield' | 'runpod' | 'mock' | 'byo';
 export type ShotMode = 'text' | 'image' | 'reference' | 'swap';
 export type Tier = 'draft' | 'standard' | 'hd' | 'cinema';
@@ -94,7 +96,7 @@ export const MODELS: ModelSpec[] = [
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 (hosted)', { notice: 'MiniMax H3' }), status: 'active', notes: 'No resolution field: always 768P.' },
   // The RunPod open-weights H3 ("Edit" path). Listed so the licence flag is explicit; never selected for suite shots.
-  { id: 'h3-open', name: 'MiniMax H3 open weights (own GPU)', provider: 'runpod', ref: 'pipeline/runpod/h3_ref2va_run.py', adapter: 'mock',
+  { id: 'h3-open', name: 'MiniMax H3 open weights', provider: 'runpod', ref: 'pipeline/runpod/h3_ref2va_run.py', adapter: 'mock',
     modes: { text: false, image: false, reference: true }, frames: { start: false, end: false, middle: 0, withRefs: false },
     refs: { images: 6, videos: 1, audios: 1 }, duration: { min: 1, max: 15 }, resolutions: [R('768x1344', '768×1344', 768, 0)], aspectRatios: ['9:16'],
     audio: 'none', negativePrompt: false, seed: true, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: true,
@@ -145,7 +147,7 @@ export const MODELS: ModelSpec[] = [
   // keyframes, so frame shots stay on Replicate H3 (modes.image false). 2K only, 5–15 s. $0.13/s list, 50% off on the
   // owner's claimed plan (verified with POST /estimate on 2026-11-06) = $0.065/s; each reference image beyond the 5
   // included costs $0.08 (extraPerTake). Out of credit / bad key at start → the shot moves to Replicate H3 (runner).
-  { id: 'h3-hf', name: 'MiniMax H3 (Higgsfield)', provider: 'higgsfield',
+  { id: 'h3-hf', name: 'MiniMax H3', provider: 'higgsfield',
     ref: { t2v: 'minimax/h3/text-to-video', ref2v: 'minimax/h3/reference-to-video' }, adapter: 'hf-h3',
     modes: { text: true, image: false, reference: true }, frames: { start: false, end: false, middle: 0, withRefs: false },
     refs: { images: 9, videos: 3, audios: 3 }, duration: { min: 5, max: 15 },
@@ -316,7 +318,7 @@ export function inputSlotsOf(ms: ModelSpec[]): InputSlots {
 export function modelView(m: ModelSpec, s?: { enabled?: boolean; acknowledgedAt?: number | null; priceScale?: number }, configured = true) {
   const blocked = m.status === 'removed' || !!m.licence.blockNewFeatures;
   return {
-    id: m.id, name: m.name, provider: m.provider, ref: m.ref, status: m.status, modes: m.modes, frames: m.frames, refs: m.refs, duration: m.duration,
+    id: m.id, name: m.name, label: modelLabel(m.byo?.displayName ?? m.name, m.byo ? m.byo.providerKind : m.provider), provider: m.provider, ref: m.ref, status: m.status, modes: m.modes, frames: m.frames, refs: m.refs, duration: m.duration,
     resolutions: m.resolutions, aspectRatios: m.aspectRatios, fps: m.fps ?? null, audio: m.audio, camera: m.camera, lora: m.lora, licence: m.licence, notes: m.notes ?? null,
     enabled: !blocked && (s?.enabled ?? true), blocked, blockedReason: m.status === 'removed' ? 'Removed by the provider' : m.licence.blockNewFeatures ? 'Licence: not for new features' : null,
     needsAck: !!m.licence.requiresAck && !s?.acknowledgedAt, configured, priceScale: s?.priceScale ?? 1,

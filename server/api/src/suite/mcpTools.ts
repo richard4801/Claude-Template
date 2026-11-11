@@ -4,6 +4,7 @@
 import { badRequest } from '../errors.js';
 import type { EditTool } from '../editor/mcpTools.js';
 import { assistOf, suiteOptions } from './assist.js';
+import { modelChoice } from '../engines/service.js';
 import { feed } from './feed.js';
 import { castOf, lookOf, withLook } from './vision.js';
 import { readFileSync } from 'node:fs';
@@ -30,6 +31,7 @@ The owner describes the shot in words. You:
 - read suite_options first and use only the ids it lists (they are the options the composer shows; others are refused);
 - set the composer with suite_set_draft: the model (modelId), the prompt (scene, action, wardrobe, mood in plain words; no camera words, those go in the rig), the rig (camera body, lens, focal length, aperture, angle, framing, lighting, palette or film look, style) and at most two moves, plus quality, shape, length and takes. Leave a row out for Auto when nothing calls for it;
 - explain your choices in a few short lines (why this lens, this light, this move), and mention any rig-check warnings it returns;
+- pin a model only by an id from suite_models, and name models by their label exactly as it gives them ("MiniMax H3 · Higgsfield"), never the bare name;
 - price it with suite_estimate when the owner is happy;
 - generate only with suite_request_shot: without confirm it gives the price; with confirm: true it asks the owner in the app, and nothing runs until they approve. Never say it is generating before they do;
 - suite_feed shows what they made recently, if they refer to it; to judge or compare takes, WATCH them first (watch with the take's id, then watch_closer on any moment): never judge a take from its title, prompt or the owner's description;
@@ -50,6 +52,15 @@ export const SUITE_TOOLS: EditTool[] = [
     description: 'Every option the Suite composer shows, with labels and what each does: camera bodies, lenses, focal lengths (visible steps), apertures, angles, framings, lighting, palettes, film looks, styles, moves and the bar\'s values. Use only these ids in suite_set_draft.',
     inputSchema: obj({}),
     run: async () => suiteOptions(),
+  },
+  {
+    name: 'suite_models', title: 'The models you can pick', scope: 'edit:read', readOnly: true, idempotent: true,
+    description: 'The video and image models this person can pick (engineModel in suite_set_draft), each with its id, its label ("<Model> · <Provider>": call a model by this label, never the bare name, since one model can run on several providers), what it is for and its price.',
+    inputSchema: obj({}),
+    run: async (env) => {
+      const l = await modelChoice(env.ctx).list(env.user);
+      return { models: l.engines.filter(e => e.kind !== 'tool').map(e => ({ id: e.model, label: e.label ?? e.name, kind: e.kind, purposes: e.purposes, price: e.price ?? null })) };
+    },
   },
   {
     name: 'suite_get_draft', title: 'Read the shot being set up', scope: 'edit:read', readOnly: true, idempotent: true,
