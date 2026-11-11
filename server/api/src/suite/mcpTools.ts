@@ -114,7 +114,7 @@ export const SUITE_TOOLS: EditTool[] = [
   },
   {
     name: 'suite_see', title: 'Look at the model, an outfit or what is on screen', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: 'Shows you pictures. By default the draft\'s @model reference images (face, ¾, profile, body front/¾/side/back) and its outfit\'s angles (front, ¾, side, back, and the face close-ups of a Dress up outfit) with the outfit\'s date and description. modelId / outfitId show others, on any page (the Character page included; no draft needed). input: n (or inputs: true for all) shows the pictures in the composer on screen: slot frames, references, Library stills (suite_get_draft onScreen numbers them). Videos: watch them.',
+    description: 'Shows you pictures. By default the draft\'s @model reference images (face, ¾, profile, body front/¾/side/back) and its outfit\'s angles (front, ¾, side, back, and the outfit\'s face close-ups) with the outfit\'s date and description. modelId / outfitId show others, on any page (the Character page included; no draft needed). input: n (or inputs: true for all) shows the pictures in the composer on screen: slot frames, references, Library stills (suite_get_draft onScreen numbers them). Videos: watch them.',
     inputSchema: obj({ assistId: AID, ...BOUND, modelId: str('A model (character)', 80), outfitId: str('An outfit', 80),
       input: { type: 'integer', minimum: 0, maximum: 23, description: 'One picture on screen (onScreen\'s input number)' }, inputs: { type: 'boolean', description: 'Every picture on screen' } }),
     run: async (env, a) => {

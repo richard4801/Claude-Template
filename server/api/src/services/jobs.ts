@@ -22,6 +22,7 @@ import { shotPromptFor } from '../templates/service.js';
 import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
 import { draftOf } from '../suite/drafts.js';
 import { applySent, sentImagesOf } from '../images/sent.js';
+import { outfitRefs } from '../images/identity.js';
 import { planRefSent, sentPlanRef } from '../suite/plan.js';
 import { swapEngineById } from '../engines/purposes.js';
 import { applySwapEngine, modelChoice, type Choice } from '../engines/service.js'; // WS13: model choice everywhere
@@ -570,42 +571,41 @@ export class JobService {
 
 const fifo = (a: JobRow, b: JobRow) => (a.queuedAt ?? a.createdAt) - (b.queuedAt ?? b.createdAt) || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
+/** A render reference: its sheet label ("face, front", "outfit, ¾" …), the image and, for an outfit's images, why. */
+export type RenderRef = { label: string; image: ImageRef; why?: string };
+const SHEET_LABEL: Record<string, string> = { face: 'face, front', 'face ¾': 'face, ¾', 'face profile': 'face, profile' };
+/**
+ * With an outfit (owner 2026-11-11): ONLY the outfit's images, i.e. its face close-ups and its body angles (an older
+ * outfit without face close-ups: her base face front only, plus the angles); never her base face or body. Most important
+ * first, cut to `max`.
+ */
+function outfitRenderRefs(m: typeof models.$inferSelect, o: typeof outfits.$inferSelect, max: number): RenderRef[] {
+  const face = m.slots.find(s => s.key === 'face' && s.image && !s.busy)?.image ?? null;
+  return outfitRefs(o, face).slice(0, max).map(r => ({ label: SHEET_LABEL[r.label] ?? r.label, image: r.image, ...(r.why ? { why: r.why } : {}) }));
+}
+const wornOutfit = (o?: typeof outfits.$inferSelect): o is typeof outfits.$inferSelect => !!o?.angles?.some(Boolean);
+
 /** References for a render (≤ 6, in the tested order). */
-export function referencesFor(m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect) {
+export function referencesFor(m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect): RenderRef[] {
+  if (wornOutfit(o)) return outfitRenderRefs(m, o, 6);
   const slot = (k: string) => m.slots.find(s => s.key === k && s.image && !s.busy)?.image ?? null;
-  const out: { label: string; image: ImageRef }[] = [];
+  const out: RenderRef[] = [];
   const push = (label: string, image: ImageRef | null | undefined) => { if (image && out.length < 6) out.push({ label, image }); };
-  // A Dress up outfit carries its own face close-ups (with its accessories): they go in place of the model's.
-  const faces = o?.faces ?? [];
-  push('face, front', faces[0] ?? slot('face'));
-  push('face, profile', faces[2] ?? slot('profile'));
-  const angles = o?.angles ?? [];
-  const outfitRefs = [[0, 'outfit, front'], [1, 'outfit, ¾'], [3, 'outfit, back']].filter(([i]) => angles[i as number]) as [number, string][];
-  if (outfitRefs.length) for (const [i, l] of outfitRefs) push(l, angles[i]);
-  else { push('body, front', slot('front')); push('body, ¾', slot('tq')); push('body, back', slot('back')); }
+  push('face, front', slot('face'));
+  push('face, profile', slot('profile'));
+  push('body, front', slot('front')); push('body, ¾', slot('tq')); push('body, back', slot('back'));
   return out;
 }
 
-/** References for a Replicate render (≤ 9, fixed order): the model's locked shots, then the outfit set's angles. */
-export function replicateReferencesFor(m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect) {
+/** References for a Replicate render (≤ 9, fixed order): her locked shots, or with an outfit only the outfit's images. */
+export function replicateReferencesFor(m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect): RenderRef[] {
+  if (wornOutfit(o)) return outfitRenderRefs(m, o, 9);
   const slot = (k: string) => m.slots.find(s => s.key === k && s.image && !s.busy)?.image ?? null;
-  const out: { label: string; image: ImageRef }[] = [];
+  const out: RenderRef[] = [];
   const push = (label: string, image: ImageRef | null | undefined) => { if (image && out.length < 9) out.push({ label, image }); };
-  const faces = o?.faces ?? [];
-  const angles = o?.angles ?? [];
-  if (faces.some(Boolean)) {
-    // A Dress up outfit: its own face close-ups (accessories).
-    push('face, front', faces[0] ?? slot('face'));
-    push('face, profile', faces[2] ?? slot('profile'));
-    push('face, ¾', faces[1]);
-  } else {
-    push('face, front', slot('face'));
-    push('face, profile', slot('profile'));
-  }
-  // Owner 2026-11-10: the outfit set shows her true figure in the clothes, so with an outfit its four angles are her body
-  // and the outfit (the base body shots wear other clothes and are left out); without one, the base body shots.
-  if (angles.some(Boolean)) { push('outfit, front', angles[0]); push('outfit, ¾', angles[1]); push('outfit, side', angles[2]); push('outfit, back', angles[3]); }
-  else { push('body, front', slot('front')); push('body, ¾', slot('tq')); push('body, back', slot('back')); }
+  push('face, front', slot('face'));
+  push('face, profile', slot('profile'));
+  push('body, front', slot('front')); push('body, ¾', slot('tq')); push('body, back', slot('back'));
   return out;
 }
 

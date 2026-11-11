@@ -8,7 +8,7 @@ import { ledger } from '../src/db/schema.js';
 import * as E from '../src/prompt/engine.js';
 import { DEFAULT_TEXTS, fill, PROMPT_DEFS, resolveTexts, validatePrompt } from '../src/prompt/library.js';
 import { SUITE_PROMPT_DEFS } from '../src/suite/prompts.js';
-import { dressPrompt, exampleFor, libraryDefaults } from '../src/prompt/service.js';
+import { exampleFor, libraryDefaults } from '../src/prompt/service.js';
 import { planShotImages } from '../src/images/service.js';
 import { buildTemplatePrompt } from '../src/templates/prompt.js';
 import { makeApp, people, demoModel, until, sse, type Client } from './helpers.js';
@@ -19,10 +19,10 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(75 + SUITE_PROMPT_DEFS.length); // 53 + 20 blocks + 2 outfit keep (§6) added with prompt scripts (workstream 4) + AI suite (workstream 1)
+    expect(PROMPT_DEFS.length).toBe(73 + SUITE_PROMPT_DEFS.length); // 53 + 20 blocks + 2 outfit keep (§6) + 1 outfit face − 3 Dress up (removed 2026-11-11) added with prompt scripts (workstream 4) + AI suite (workstream 1)
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
-    for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'dressup', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
+    for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
     for (const p of PROMPT_DEFS) expect(exampleFor(p).length, p.key).toBeGreaterThan(0);
   });
   it('validation: unknown placeholder, missing required, empty, too long; other braces are fine', () => {
@@ -82,12 +82,11 @@ describe('prompt library (unit)', () => {
   it('overrides reach every builder', () => {
     const id = { name: 'Demo model', look: 'x', neverAdd: ['rings'] };
     const t = { ...DEFAULT_TEXTS, 'style.house': 'HOUSE', 'never.base': 'aliens, hats', 'sheet.task': 'SHEET {angle}', 'outfit.edit': 'EDIT {angle}', 'enhance.prompt': 'ENH',
-      'dress.body': 'BODY{anchor}', 'dress.anchor': 'ANCHOR', 'video.replicate.summary': 'RSUM', 'video.edit.detailed': 'EDET {outfit}', 'lora.variation': 'VAR {variation}', 'lora.variations': 'one\ntwo',
+      'outfit.face': 'FACE {angle}', 'video.replicate.summary': 'RSUM', 'video.edit.detailed': 'EDET {outfit}', 'lora.variation': 'VAR {variation}', 'lora.variations': 'one\ntwo',
       'template.locked': 'LOCKED {name}' };
     expect(E.characterSheetShot(id, E.SHEET_ANGLES[0], t).text).toContain('SHEET face · front\nStyle: HOUSE.\nNever add: rings, aliens, hats.');
     expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[3], t)).toBe('EDIT full body back view');
-    expect(dressPrompt('front', true, t)).toBe('BODY ANCHOR');
-    expect(dressPrompt('front', false, t)).toBe('BODY');
+    expect(E.outfitFacePrompt(1, t)).toBe('FACE face close-up from three-quarter view');
     expect(E.replicateSwap({ identity: id, referenceLabels: ['face, front'] }, t).text).toContain('summary:\nRSUM\n');
     expect(E.videoSwap({ identity: id, outfit: { name: 'Knit' } }, t).detailedDescription).toBe("EDET knit <Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech.");
     expect(exampleFor(PROMPT_DEFS.find(p => p.key === 'lora.variation')!, t)).toMatch(/VAR one$/);
@@ -122,8 +121,8 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
       expect(r.status, u).toBe(403); expect(r.body.code).toBe('owner_only');
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
-    expect(l.groups.map((g: any) => g.label)).toEqual(['Photo', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
-    expect(l.prompts).toHaveLength(75 + SUITE_PROMPT_DEFS.length);
+    expect(l.groups.map((g: any) => g.label)).toEqual(['Photo', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
+    expect(l.prompts).toHaveLength(73 + SUITE_PROMPT_DEFS.length);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,
       placeholders: [{ name: 'refIndex', required: true }] });
@@ -240,15 +239,14 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(p.input.input_images).toHaveLength(4);
   });
 
-  it('a saved override changes what is sent: shoots, sheet fills, outfit sets, Enhance, Dress up, video', async () => {
+  it('a saved override changes what is sent: shoots, sheet fills, outfit sets and their face close-ups, Enhance, video', async () => {
     const put = async (key: string, text: string) => expect((await owner.req('PUT', `/v1/prompts/${key}`, { text })).status, key).toBe(200);
     await put('style.house', 'HOUSE STYLE X');
     await put('refs.pose', 'POSE FROM {refIndex}.');
     await put('sheet.task', 'SHEET TASK {angle}.');
     await put('outfit.edit', 'OUTFIT EDIT {angle}.');
     await put('enhance.prompt', 'ENHANCE X');
-    await put('dress.body', 'DRESS BODY X{anchor}');
-    await put('dress.closeup', 'DRESS CLOSE X');
+    await put('outfit.face', 'OUTFIT FACE {angle}.');
     await put('video.edit.detailed', 'EDIT DETAILS {outfit}.');
     // Shoot (a member's).
     await tess.req('POST', '/v1/shoots', { modelId, refs: refs3.slice(0, 1), count: 1 });
@@ -271,20 +269,14 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(set[0]!.input.prompt).toContain('Style: HOUSE STYLE X.');
     // The owner's text, then the body-angle line (her own body photo of that angle goes with each edit).
     const body = ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.';
-    expect(set.slice(1).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body));
+    expect(set.slice(1, 4).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body));
+    // Then its three face close-ups (owner 2026-11-11), each an edit of her base face photo of that angle.
+    expect(set.slice(4).map(p => p.input.prompt)).toEqual(['OUTFIT FACE face close-up from the front.', 'OUTFIT FACE face close-up from three-quarter view.', 'OUTFIT FACE face close-up in profile (side view).']);
     // Enhance.
     const n2 = fake.state.creates.length;
     const en = (await tess.req('POST', `/v1/models/${modelId}/enhance`, { realism: 'subtle', upscale: 'off', slots: ['face'] })).body;
     await until(async () => (await tess.req('GET', `/v1/tool-runs/${en.id}`)).body.state === 'review', 30_000);
     expect(fake.state.creates.slice(n2).map(p => p.input.prompt)).toEqual(['ENHANCE X']);
-    // Dress up.
-    const n3 = fake.state.creates.length;
-    const du = (await tess.req('POST', `/v1/models/${modelId}/dress-up`, { outfitImage: R('c_front') })).body;
-    await until(async () => (await tess.req('GET', `/v1/tool-runs/${du.id}`)).body.state === 'review', 30_000);
-    const dress = fake.state.creates.slice(n3).map(p => p.input.prompt);
-    expect(dress[0]).toBe('DRESS BODY X');
-    expect(dress).toContain('DRESS BODY X The last image shows the same outfit already worn: match its colours, prints and details exactly.');
-    expect(dress).toContain('DRESS CLOSE X');
     // Video (Edit): the job's exact prompt.
     const job = (await tess.req('POST', '/v1/jobs', { title: 't', modelId, outfitId: '', clipId: '', engine: 'h3', steps: 4, use: 'first', takes: 1, keepAudio: true, lipSync: false,
       background: 'keep', backgroundMotion: 'still', queue: true })).body;

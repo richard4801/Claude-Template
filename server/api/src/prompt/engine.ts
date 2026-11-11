@@ -187,6 +187,11 @@ export const outfitKeepFront = (k: OutfitKeep, outfit: string, t: PromptTexts = 
 };
 export const outfitKeepAngle = (k: OutfitKeep, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.keep.angle']!, { keep: outfitKeepParts(k).keep });
 
+/** The outfit's face close-ups, in the order stored on the outfit (`outfit.faces`): front, ¾, side. */
+export const OUTFIT_FACES = [{ key: 'face', label: 'Face · front', words: 'face close-up from the front' }, { key: 'faceTq', label: 'Face · ¾', words: 'face close-up from three-quarter view' },
+  { key: 'profile', label: 'Face · side', words: 'face close-up in profile (side view)' }] as const;
+export const outfitFacePrompt = (i: number, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.face']!, { angle: OUTFIT_FACES[i]!.words });
+
 export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS) => OUTFIT_ANGLES.map(a => outfitAngle(id, outfit, a, seed, t));
 
 

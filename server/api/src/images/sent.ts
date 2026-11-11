@@ -66,7 +66,7 @@ export function sameImage(a: ImageRef | null | undefined, b: ImageRef | null | u
   return ka && kb ? ka === kb : !!a.url && a.url === b.url;
 }
 
-export type SentPage = 'photo' | 'outfit' | 'fill_angles' | 'dress_up';
+export type SentPage = 'photo' | 'outfit' | 'fill_angles';
 type Estimator = (u: AuthUser, body: Record<string, unknown>) => Promise<SentView | null>;
 
 export class SentImages {
@@ -132,7 +132,7 @@ export class SentImages {
     return { add: await Promise.all((b.addImages ?? []).map(one)), exclude: await Promise.all((b.excludeImages ?? []).map(x => this.image(studioId, x))), by: who };
   }
 
-  // ---- Claude's choices for pages without a shared draft (outfit sheet, Fill angles, Dress up), per person and target.
+  // ---- Claude's choices for pages without a shared draft (outfit sheet, Fill angles), per person and target.
   // The Suite keeps its choice in the composer's draft. Kept in memory (a restart falls back to automatic, which the
   // estimate then shows); the app hears each change on the hub.
   private stored = new Map<string, { input: SentInput; at: number }>();

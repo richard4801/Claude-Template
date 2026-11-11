@@ -6,7 +6,7 @@ import { SUITE_PROMPT_DEFS } from '../suite/prompts.js';
 
 export const PROMPT_GROUPS = [
   { id: 'photoshoot', label: 'Photo' }, { id: 'references', label: 'References' }, { id: 'sheet', label: 'Character sheet' },
-  { id: 'outfits', label: 'Outfits' }, { id: 'enhance', label: 'Enhance' }, { id: 'dressup', label: 'Dress up' },
+  { id: 'outfits', label: 'Outfits' }, { id: 'enhance', label: 'Enhance' },
   { id: 'templates', label: 'Templates' }, { id: 'video', label: 'Video' }, { id: 'lora', label: 'LoRA' },
   // AI suite (workstream 1): suite/prompts.ts
   { id: 'suite', label: 'AI suite' },
@@ -82,18 +82,14 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('outfit.keep.angle', 'outfits', 'Keep from base (other angles)', 'Added to the ¾, side and back edits when pieces are kept: the last image is her base photo of that angle.',
     'The last image shows her from this angle in her base clothes: keep {keep} exactly as in the first image and in that image, and take her body shape and proportions from it.',
     [['keep', 'the kept pieces and the note', true]], { allowEmpty: false }),
+  // Outfit face close-ups (owner 2026-11-11): every outfit carries its own face front, ¾ and side with its hair, make-up
+  // and face accessories. Each is an edit of her base face photo of that angle, with the outfit's front as the last image.
+  d('outfit.face', 'outfits', 'Face close-ups', 'The outfit\'s three face close-ups: each edits her base face photo of that angle, the outfit\'s front picture sent last.',
+    'Make this {angle} match the person in the last image: the same hairstyle, hair colour and length, make-up, and every head and face accessory it shows (earrings, glasses, hat, hair pieces, piercings), with the neckline of the top where it shows. Keep her face, features, skin, expression, camera angle and framing exactly as in the first image, plain studio background. Realistic close-up photo, natural skin texture.',
+    [['angle', 'face close-up from the front / three-quarter / side', true]], { allowEmpty: false }),
   // ---------------------------------------------------------------- enhance
   d('enhance.prompt', 'enhance', 'Realism prompt', 'One prompt for every image of the sheet in Enhance step 1.',
     'candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter', [], { allowEmpty: false }),
-  // ---------------------------------------------------------------- dress up
-  d('dress.body', 'dressup', 'Full-body images', 'Dress up for the four full-body sheet images.',
-    'Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.',
-    [['anchor', 'a space and the anchor sentence when the new front is sent too, else empty']], { allowEmpty: false }),
-  d('dress.closeup', 'dressup', 'Face close-ups', 'Dress up for the three face close-ups: only what shows at that distance.',
-    'Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.',
-    [['anchor', 'a space and the anchor sentence when the new front is sent too, else empty']], { allowEmpty: false }),
-  d('dress.anchor', 'dressup', 'Anchor sentence', 'Added when the newly dressed front is sent as a third image.',
-    'The last image shows the same outfit already worn: match its colours, prints and details exactly.'),
   // ---------------------------------------------------------------- templates
   d('template.scene', 'templates', 'Scene line', 'Template scene plus the drawn background and time of day.', 'Scene: {scene}.', [['scene', 'the scene words', true]]),
   d('template.camera', 'templates', 'Camera line', 'Template camera plus the drawn framing.', 'Camera: {camera}.', [['camera', 'the camera words', true]]),

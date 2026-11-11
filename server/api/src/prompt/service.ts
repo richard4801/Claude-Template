@@ -7,7 +7,7 @@ import { allowEmpty, DEFAULT_TEXTS, fill, listOf, PROMPT_DEFS, PROMPT_GROUPS, pr
 import * as E from './engine.js';
 import { buildTemplatePrompt } from '../templates/prompt.js';
 import { suiteExample } from '../suite/example.js';
-import { dressPrompt, withRules } from './scripts/builders.js';
+import { withRules } from './scripts/builders.js';
 import { loadRules } from './scripts/service.js';
 
 export type PromptEntry = {
@@ -111,7 +111,6 @@ export class PromptLibrary {
     const t: PromptTexts = { ...saved, [def.key]: text };
     const sample: Record<string, string> = { ...SAMPLE, style: t['style.house']!, never: E.neverList(SAMPLE_ID, t).join(', ') };
     if (def.key === 'shoot.camera') sample.lensNote = '';
-    if (def.key.startsWith('dress.')) sample.anchor = ` ${t['dress.anchor']}`;
     const rendered = def.kind === 'text' ? fill(text, sample) : listOf(text, def.kind).join(def.kind === 'lines' ? '\n' : ', ');
     const used = Object.fromEntries(def.placeholders.map(([n]) => [n, sample[n] ?? '']));
     return { key: def.key, text: rendered, example: exampleFor(def, t), sample: used };
@@ -129,9 +128,8 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
         lockSeed: def.key === 'shoot.seed.locked', ...(def.key === 'shoot.outfit.described' ? { outfit: { name: 'Knit', description: 'a cream cable-knit sweater', source: 'described' } } : {}),
         ...(def.key === 'shoot.outfit.product' ? { outfit: { name: 'Green set', source: 'product-photo' } } : {}) }, t).text;
     case 'sheet': return E.characterSheetShot(SAMPLE_ID, E.SHEET_ANGLES[2], t).text;
-    case 'outfits': return def.key === 'outfit.edit' ? E.outfitEditPrompt(E.OUTFIT_ANGLES[1], t) : E.outfitSet(SAMPLE_ID, outfit, 421337, t)[0]!.text;
+    case 'outfits': return def.key === 'outfit.face' ? E.outfitFacePrompt(1, t) : def.key === 'outfit.edit' ? E.outfitEditPrompt(E.OUTFIT_ANGLES[1], t) : E.outfitSet(SAMPLE_ID, outfit, 421337, t)[0]!.text;
     case 'enhance': return t['enhance.prompt']!;
-    case 'dressup': return dressPrompt(def.key === 'dress.closeup' ? 'face' : 'tq', true, t);
     case 'templates': {
       const p = buildTemplatePrompt({ templateId: 't', templateName: 'Mirror selfie', layers: { scene: 'bedroom mirror', camera: 'phone in hand', light: 'window light', product: 'held up', style: 'casual' },
         pool: { pose: ['phone held low at the chest'], framing: ['full length in the mirror'] }, identity: SAMPLE_ID, outfit, shuffleSeed: 1, lockSeed: def.key === 'template.seed.locked',
@@ -148,8 +146,6 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
   return '';
 }
 
-/** The Dress up prompt for one sheet image (plans/api.md "Model tools" §5). */
-export { dressPrompt };
 /** The LoRA candidate variations and the line for candidate `n`. */
 export const loraVariations = (t: PromptTexts = DEFAULT_TEXTS) => { const l = listOf(t['lora.variations']!, 'lines'); return l.length ? l : listOf(DEFAULT_TEXTS['lora.variations']!, 'lines'); };
 /** The variation line of LoRA candidate n (the candidate's whole prompt: scripts' loraCandidate). */

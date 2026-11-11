@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import sharp from 'sharp';
-import { uploads, users } from '../src/db/schema.js';
+import { outfits, uploads, users } from '../src/db/schema.js';
 import { applySent, type SentImage } from '../src/images/sent.js';
 import { registryByName } from '../src/claude/registry.js';
 import { putObject } from '../src/storage/objects.js';
@@ -88,8 +88,20 @@ describe('images sent (routes, fake engines)', () => {
     expect((await owner.req('GET', '/v1/outfits')).body.some((x: any) => x.name === 'Red set')).toBe(false); // nothing made
     const f = (await owner.req('POST', `/v1/models/${model.id}/fill-angles`, { dryRun: true })).body;
     expect(f).toMatchObject({ dryRun: true, sentImages: { changed: false } });
-    const d = (await owner.req('POST', `/v1/models/${model.id}/dress-up/estimate`, { outfitImage: { asset: 'g_front' }, sentImages: [{ image: { asset: 'g_front' }, role: 'outfit' }, { image: { asset: 'g_tq' }, role: 'outfit', label: 'outfit ¾' }] })).body;
-    expect(d.sentImages).toMatchObject({ changed: true, images: [{ role: 'outfit' }, { role: 'outfit', label: 'outfit ¾' }] });
+    // With an outfit picked, only the outfit's images go (owner 2026-11-11): its face close-ups and body angles.
+    const withFaces = { id: 'o_faces', studioId, modelId: model.id, name: 'Faces set', mode: 'own', description: '', state: 'ready', prompt: '', createdAt: Date.now(),
+      angles: ['c_front', 'c_tq', 'g_side', 'g_back'].map(asset => ({ asset })), faces: ['c_face', 'face', 'g_front'].map(asset => ({ asset })) };
+    await a.ctx.db.insert(outfits).values([withFaces, { ...withFaces, id: 'o_nofaces', name: 'Old set', faces: null }]);
+    const shot = (outfitId: string) => owner.req('POST', '/v1/suite/shots/estimate', { ...body, outfitId }).then(r => r.body.sentImages.images as { image: { asset: string }; label: string; why: string }[]);
+    const mine = await shot('o_faces');
+    expect(mine.map(x => x.image.asset)).toEqual(['c_face', 'face', 'g_front', 'c_front', 'c_tq', 'g_side', 'g_back']); // the sheet's order: faces, then angles
+    expect(mine[0]!.why).toMatch(/the outfit's face, front/);
+    const old = await shot('o_nofaces');
+    expect(old.map(x => x.label)).toEqual(['face, front', 'outfit, front', 'outfit, ¾', 'outfit, side', 'outfit, back']);
+    expect(old[0]!.why).toMatch(/her base face, front · this outfit has no face close-ups yet/);
+    const photo = (await owner.req('POST', '/v1/shoots/preview', { modelId: model.id, outfitId: 'o_faces', count: 1 })).body;
+    expect(photo.sentImages.images.map((x: any) => x.image.asset).slice(0, 3)).toEqual(['c_face', 'c_front', 'face']);
+    expect((await owner.req('POST', `/v1/models/${model.id}/dress-up/estimate`, {})).status).toBe(410); // Dress up was removed
   });
 
   it('Claude: get_sent_images / set_sent_images on the Suite draft and on the outfit sheet; reset; limit refused and undone', async () => {

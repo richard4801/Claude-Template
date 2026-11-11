@@ -1,8 +1,8 @@
 // One Claude (owner, 2026-11-11): Claude can see and change the images a generation sends to the model ("It can change
 // what images go in when necessary"). get_sent_images shows what would go (MUSE's pick or a changed list, each with its
 // role and why); set_sent_images replaces the list, adds to it, drops from it, or resets it to automatic. The Suite keeps
-// the choice in the composer's draft (the app shows "Images sent · Changed by Claude"); the outfit sheet, Fill angles and
-// Dress up keep it per person and character until reset. Free: nothing is generated; Generate still needs the go-ahead.
+// the choice in the composer's draft (the app shows "Images sent · Changed by Claude"); the outfit sheet and Fill angles
+// keep it per person and character until reset. Free: nothing is generated; Generate still needs the go-ahead.
 import { and, desc, eq } from 'drizzle-orm';
 import { badRequest } from '../errors.js';
 import { claudeThreads } from '../camera/schema.js';
@@ -13,17 +13,17 @@ import { assistOf, sentOfDraft } from '../suite/assist.js';
 import { resolveAssist } from '../suite/screen.js';
 import type { Draft } from '../suite/drafts.js';
 
-const PAGES_ = ['suite', 'outfit', 'fill_angles', 'dress_up'] as const;
-const SCOPE: Record<Exclude<SentPage, 'photo'>, string> = { outfit: 'outfit', fill_angles: 'sheet', dress_up: 'dressup' };
+const PAGES_ = ['suite', 'outfit', 'fill_angles'] as const;
+const SCOPE: Record<Exclude<SentPage, 'photo'>, string> = { outfit: 'outfit', fill_angles: 'sheet' };
 const IMG = { description: 'An image of this studio: {url} or {asset} as MUSE gives it, an upload id (an attached image), or a take\'s frame {takeId, at (seconds)}' };
 const ITEM = { type: 'object', properties: { image: IMG, role: { type: 'string', enum: ['person', 'outfit', 'product', 'location', 'style', 'pose', 'other'] }, label: { type: 'string', maxLength: 60 } }, required: ['image', 'role'] };
 const TARGET = {
   chatId: { type: 'string', description: 'This chat (filled in for you in the app; Claude Code passes it): its page gives the draft or the character' },
-  page: { type: 'string', enum: [...PAGES_], description: 'suite (the open composer: Shot, Photo, Talking, UGC, Swap, Recast; default when a shot is open), outfit (the new-outfit sheet), fill_angles (Fill the character sheet), dress_up' },
+  page: { type: 'string', enum: [...PAGES_], description: 'suite (the open composer: Shot, Photo, Talking, UGC, Swap, Recast; default when a shot is open), outfit (the new-outfit sheet), fill_angles (Fill the character sheet)' },
   assistId: { type: 'string', description: 'Suite: the draft on screen (filled in for you); also a camera Shot draft (sd_…) or camera session (cs_…)' },
   cameraSessionId: { type: 'string', description: 'The camera session open on the Camera page (filled in for you): its Shot draft' },
-  modelId: { type: 'string', description: 'outfit / fill_angles / dress_up: the character (filled in on her page)' },
-  request: { type: 'object', description: 'outfit / dress_up: what the sheet is set to, as its request takes it (description, images, base, outfitImage, imageModel …), so the pick matches' },
+  modelId: { type: 'string', description: 'outfit / fill_angles: the character (filled in on her page)' },
+  request: { type: 'object', description: 'outfit: what the sheet is set to, as its request takes it (description, images, base, imageModel …), so the pick matches' },
 };
 
 /** The ids the person's page has open (the chat's page, else their latest chat's), for calls without them (MCP). */
@@ -46,7 +46,7 @@ async function withPage(env: ToolEnv, a: Record<string, unknown>) {
 /** Where the call points: the Suite's draft, or a page with a character. */
 function target(a: Record<string, unknown>) {
   const page = (typeof a.page === 'string' ? a.page : a.assistId ? 'suite' : '') as (typeof PAGES_)[number] | '';
-  if (!page) throw badRequest('page: suite, outfit, fill_angles or dress_up (open the Suite or a character first)');
+  if (!page) throw badRequest('page: suite, outfit or fill_angles (open the Suite or a character first)');
   if (page === 'suite') { if (typeof a.assistId !== 'string' || !a.assistId) throw badRequest('assistId: open the AI Suite first'); return { page, assistId: a.assistId }; }
   if (typeof a.modelId !== 'string' || !a.modelId) throw badRequest('modelId: open the character first, or pass modelId');
   return { page, modelId: a.modelId };
@@ -82,7 +82,7 @@ export const SENT_PROMPT = `Images sent: MUSE picks the images each generation s
 export const SENT_TOOLS: EditTool[] = [
   {
     name: 'get_sent_images', title: 'The images a generation sends', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: 'What the generation being set up would send to the model, in order: each image with its role (person, outfit, product, location, style, pose, other), label and why MUSE picked it; whether it was changed (and by whom) and the model\'s limit. On the Suite (the open composer) by default; page outfit / fill_angles / dress_up with the character for the others. Free.',
+    description: 'What the generation being set up would send to the model, in order: each image with its role (person, outfit, product, location, style, pose, other), label and why MUSE picked it; whether it was changed (and by whom) and the model\'s limit. On the Suite (the open composer) by default; page outfit / fill_angles with the character for the others. Free.',
     inputSchema: { type: 'object', properties: TARGET, additionalProperties: false },
     run: async (env, a) => current(env, await withPage(env, a)),
   },

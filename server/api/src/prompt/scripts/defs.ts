@@ -128,13 +128,6 @@ const single = (id: string, group: string, title: string, description: string, b
   ({ id, group, title, description, format: 'lines', inputs, sections: [sec('prompt', 'Prompt')], rules: [R('prompt', title, 'prompt', block)] });
 const outfitEdit = single('outfit.edit', 'outfits', 'Outfit set · other angles', 'The ¾, side and back of an outfit set, as edits of the front.', 'outfit.edit');
 const enhance = single('enhance', 'enhance', 'Enhance', 'Enhance step 1, for every image of the sheet.', 'enhance.prompt');
-const dressup: Script = {
-  id: 'dressup', group: 'dressup', title: 'Dress up', description: 'Dress up, one sheet image at a time.', format: 'lines',
-  inputs: [bool('closeup', 'Face close-up', 'The image is a face close-up (face front, profile or ¾).', false), bool('anchor', 'Dressed front sent', 'The newly dressed front is sent as a third image.')],
-  sections: [sec('prompt', 'Prompt')], values: [{ name: 'anchor', label: 'Anchor sentence', prefix: ' ' }],
-  rules: [R('anchor', 'Match the dressed front', '@anchor', 'dress.anchor', [is('anchor', true)]),
-    R('closeup', 'Face close-up', 'prompt', 'dress.closeup', [is('closeup', true)]), R('body', 'Full body', 'prompt', 'dress.body')],
-};
 
 // ---------------------------------------------------------------- video: character swap (motion from a source clip)
 const SPEAKING = bool('speaking', 'Performer is speaking', 'The performer speaks or sings in the clip (detected from its audio; the user can switch it). Off: the clip is sent without audio and its audio is put back afterwards.');
@@ -232,7 +225,7 @@ const collage: Script = {
   vars: [{ name: 'person', description: '"panel 1 shows" / "panels 1–3 show"', sample: 'panels 1–3 show' }],
 };
 
-export const SCRIPTS: Script[] = [collage, photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, dressup, loraCandidate, videoReplicate, videoEdit, audioLine];
+export const SCRIPTS: Script[] = [collage, photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, loraCandidate, videoReplicate, videoEdit, audioLine];
 const BY_ID = new Map(SCRIPTS.map(s => [s.id, s]));
 export const scriptDef = (id: string) => BY_ID.get(id);
 /**
