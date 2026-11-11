@@ -1,0 +1,582 @@
+From c379812cde0f043f603e1230e24b31c000f0036e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 20:06:19 +0000
+Subject: [PATCH 2/2] Mac Suite redesign (owner-approved): capped picture with
+ takes strip, folding Setup/Inputs, settings in the bar, compact Setup row
+
+- The picture is aspect-fit and capped at 50% of the page height, centred, with this tool's takes as a strip under it.
+- The right column (280/264 pt) folds Setup and Inputs with summaries; saved rigs move to the Setup header's menu.
+- Shape, Length and Takes are back in the prompt bar next to Generate (the Settings row is gone).
+- Below 900 pt of composer width, or with Setup hidden from the header, the column becomes a row of buttons above the
+  prompt plus an Inputs popover.
+- With Claude open on the Suite the sidebar is the icon rail.
+Plan and decisions: plans/studio-redesign.md; mocks: design/studio-redesign/.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxphub3JG9Gtsd3sf7U
+---
+ mac/Muse/Views/RootView.swift                 |   2 +-
+ .../Views/Suite/Composer/ComposerStage.swift  | 236 ++++++++++++++++++
+ .../Views/Suite/Composer/ComposerView.swift   | 151 ++++++++---
+ 3 files changed, 350 insertions(+), 39 deletions(-)
+ create mode 100644 mac/Muse/Views/Suite/Composer/ComposerStage.swift
+
+diff --git a/mac/Muse/Views/RootView.swift b/mac/Muse/Views/RootView.swift
+index ee3b499..8913aeb 100644
+--- a/mac/Muse/Views/RootView.swift
++++ b/mac/Muse/Views/RootView.swift
+@@ -118,7 +118,7 @@ struct Shell: View {
+                 TitleBar()
+                 HStack(spacing: 0) {
+                     // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
+-                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
++                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor || (store.screen == .suite && store.oneClaude.open))
+                     ScreenHost()
+                     // One Claude (plans/one-claude.md): the same Claude on every page, its chat following the person.
+                     if store.oneClaude.open && store.user != nil {
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerStage.swift b/mac/Muse/Views/Suite/Composer/ComposerStage.swift
+new file mode 100644
+index 0000000..3c88fc8
+--- /dev/null
++++ b/mac/Muse/Views/Suite/Composer/ComposerStage.swift
+@@ -0,0 +1,236 @@
++import MuseCore
++import SwiftUI
++
++// The Suite redesign (owner-approved 2026-11-11, plans/studio-redesign.md; mocks in design/studio-redesign/):
++// - The stage: the picture sized to its shape and capped at about half the page height, centred, with the strip of this
++//   tool's takes under it (click one to show it).
++// - Folding section headers for the right column (Setup, Inputs) with a one-line summary.
++// - On small windows (or with Setup hidden) the column becomes a row of buttons above the prompt: one per Setup row,
++//   each opening the same picker, and "Inputs", which opens the slots in a popover.
++
++/// The picture and the takes strip under it.
++struct ComposerStage: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @Binding var pinned: String?
++    var maxPictureHeight: CGFloat
++
++    /// The shape the tool renders ("16:9" → 16/9). Photo, Swap and Recast show their own media at its own shape.
++    private var ratio: CGFloat? {
++        switch store.suite.composer.tool {
++        case .photo, .swap, .recast: return nil
++        default:
++            let parts = store.suite.composer.aspect.split(separator: ":").compactMap { Double($0) }
++            guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return 16.0 / 9.0 }
++            return CGFloat(parts[0] / parts[1])
++        }
++    }
++
++    var body: some View {
++        let width = ratio.map { maxPictureHeight * $0 }
++        VStack(spacing: Space.s3) {
++            Spacer(minLength: 0)
++            Group {
++                if let r = ratio {
++                    ComposerMediaPane(pinned: pinned).aspectRatio(r, contentMode: .fit)
++                } else {
++                    ComposerMediaPane(pinned: pinned)
++                }
++            }
++            .frame(maxWidth: width ?? .infinity, maxHeight: maxPictureHeight)
++            ComposerTakesStrip(pinned: $pinned)
++                .frame(maxWidth: width ?? .infinity, alignment: .leading)
++            Spacer(minLength: 0)
++        }
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
++    }
++}
++
++/// This tool's latest takes as small thumbnails; the one on the stage is outlined. Shown once there are two or more.
++struct ComposerTakesStrip: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @Binding var pinned: String?
++
++    private var takes: [Job] {
++        let tool = store.suite.composer.tool.rawValue
++        let me = store.user?.id
++        let mine = store.jobs.filter { $0.suiteTool == tool && (me == nil || $0.userId == nil || $0.userId == me) }
++        return Array(mine.sorted { $0.createdAt > $1.createdAt }.prefix(8))
++    }
++
++    var body: some View {
++        let list = takes
++        let stage = store.stageJob(store.suite.composer.tool)?.id
++        let shown = pinned ?? stage
++        if list.count > 1 {
++            HStack(spacing: Space.s3) {
++                ScrollView(.horizontal, showsIndicators: false) {
++                    HStack(spacing: Space.s2) {
++                        ForEach(list) { j in tile(j, selected: j.id == shown, stage: stage) }
++                    }
++                    .padding(3)
++                }
++                Button {
++                    store.suite.feedOpen = true
++                    store.suite.claude.open = false
++                } label: {
++                    Text("All takes").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++                        .lineLimit(1).fixedSize()
++                        .frame(minHeight: 28).contentShape(Rectangle())
++                }
++                .buttonStyle(.plain)
++                .help("Everything you made with this tool, newest first")
++            }
++            .frame(height: 50)
++        }
++    }
++
++    private func tile(_ j: Job, selected: Bool, stage: String?) -> some View {
++        let shape = RoundedRectangle(cornerRadius: t.radii.chip)
++        return Button {
++            pinned = j.id == stage ? nil : j.id
++        } label: {
++            ZStack {
++                shape.fill(t.roles.field)
++                if let thumb = j.thumb { Color.clear.overlay(MuseImage(ref: thumb)).clipped() }
++                if j.isActive {
++                    Color.black.opacity(0.45)
++                    Text("\(Int(j.progress.rounded()))%").font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
++                } else if j.isFailed {
++                    Color.black.opacity(0.45)
++                    Ph("warning", 14).foregroundStyle(.white)
++                }
++            }
++            .frame(width: 72, height: 40)
++            .clipShape(shape)
++            .overlay(RoundedRectangle(cornerRadius: t.radii.chip + 3).strokeBorder(selected ? t.roles.selection : .clear, lineWidth: 2).padding(-3))
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .help(j.prompt.isEmpty ? "Show this take" : j.prompt)
++        .accessibilityLabel("Take\(j.isActive ? ", rendering" : j.isFailed ? ", failed" : "")\(selected ? ", shown" : "")")
++    }
++}
++
++/// A folding section header: caret, title, a quiet summary on the right and an optional trailing button.
++struct RailSection: View {
++    @Environment(\.theme) private var t
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    var title: String
++    var summary: String?
++    @Binding var open: Bool
++    var trailing: AnyView?
++
++    var body: some View {
++        HStack(spacing: Space.s2) {
++            Button {
++                if reduceMotion { open.toggle() } else { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } }
++            } label: {
++                HStack(spacing: 6) {
++                    Ph(open ? "caret-down" : "caret-right", 12).foregroundStyle(t.roles.ink2)
++                    Text(title).font(t.scale.heading.font).foregroundStyle(t.roles.ink)
++                    Spacer(minLength: Space.s2)
++                    if let summary {
++                        Text(summary).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++                    }
++                }
++                .frame(minHeight: 28)
++                .contentShape(Rectangle())
++            }
++            .buttonStyle(.plain)
++            .help(open ? "Fold \(title)" : "Show \(title)")
++            .accessibilityLabel("\(title), \(open ? "shown" : "folded")\(summary.map { ", \($0)" } ?? "")")
++            if let trailing { trailing }
++        }
++        .padding(.bottom, Space.s1)
++    }
++}
++
++/// Small windows: the Setup rows as buttons above the prompt, then "Inputs" (a popover with the slots and the tool's
++/// controls). Each Setup button opens the same picker as its row.
++struct ComposerSetupStrip: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @State private var inputsOpen = false
++
++    var body: some View {
++        let tool = store.suite.composer.tool
++        let chips = ComposerRail.order.filter { tool.chips.contains($0) }
++        HStack(spacing: 6) {
++            ScrollView(.horizontal, showsIndicators: false) {
++                HStack(spacing: 6) {
++                    ForEach(chips, id: \.self) { SetupStripButton(chip: $0) }
++                }
++            }
++            Button { inputsOpen = true } label: {
++                HStack(spacing: 6) {
++                    Ph("images", 14).foregroundStyle(t.roles.ink2)
++                    Text("Inputs").font(t.scale.caption.font).foregroundStyle(t.roles.ink)
++                    if let n = filled { Text(n).font(t.scale.caption.font).foregroundStyle(t.roles.ink2) }
++                }
++                .padding(.horizontal, 10).frame(height: 28)
++                .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++                .contentShape(Rectangle())
++            }
++            .buttonStyle(.plain)
++            .fixedSize()
++            .help("Character, frames and references")
++            .accessibilityLabel("Inputs\(filled.map { ", \($0)" } ?? "")")
++            .popover(isPresented: $inputsOpen, arrowEdge: .top) {
++                ScrollView(.vertical, showsIndicators: false) {
++                    ComposerRail(narrow: true, showSetup: false).padding(Space.s4)
++                }
++                .frame(width: 320)
++                .frame(maxHeight: 520)
++                .environment(store)
++                .environment(\.theme, t)
++            }
++        }
++        .frame(height: 32)
++    }
++
++    /// "1 of 3" filled input slots (Photo has its own count).
++    private var filled: String? {
++        guard store.suite.composer.tool != .photo else { return nil }
++        let slots = store.suite.composerSlots.slots
++        let ids = slots.visible(store.composerInputs)
++        guard !ids.isEmpty else { return nil }
++        return "\(ids.filter { slots[$0] != nil }.count) of \(ids.count)"
++    }
++}
++
++/// One Setup row as a compact button: "Camera  35 mm film ▾" (the value quiet while on Auto).
++struct SetupStripButton: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var chip: ComposerChip
++    @State private var refsOpen = false
++
++    var body: some View {
++        let name = SetupChipRow.name(chip)
++        // Photo tool (workstream 3): a Photo preset sets its own camera and light.
++        let locked = (chip == .camera || chip == .lighting) && store.suite.composer.tool == .photo && store.suite.photo.presetId != nil
++        let v = SetupChipRow.value(chip, store)
++        let text = locked ? "From preset" : v.text
++        Button {
++            if chip == .references { refsOpen = true } else if let p = ComposerPicker(chip: chip) { store.openPicker(p) }
++        } label: {
++            HStack(spacing: 5) {
++                Text(name).foregroundStyle(t.roles.ink2)
++                Text(text).foregroundStyle(v.auto || locked ? t.roles.ink2 : t.roles.ink).lineLimit(1)
++                Ph("caret-down", 10).foregroundStyle(t.roles.ink2)
++            }
++            .font(t.scale.caption.font)
++            .padding(.horizontal, 10).frame(height: 28)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .fixedSize()
++        .disabled(locked)
++        .help("\(name): \(text)")
++        .accessibilityLabel("\(name), \(text)")
++        .popover(isPresented: $refsOpen, arrowEdge: .top) { ReferencesPopover().environment(store).environment(\.theme, t) }
++    }
++}
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index a05715c..8cbae76 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -24,6 +24,13 @@ struct ComposerPriceKey: Equatable {
+ /// (compact sidebar) gives about 930; a 1280 one about 1050.
+ private let composerNarrowWidth: CGFloat = 1000
+ 
++/// Below this composer width the Setup and Inputs column turns into a row of buttons above the prompt (owner-approved
++/// redesign, plans/studio-redesign.md, mock 3: a 13" MacBook with Claude open leaves about 840 pt).
++let composerCompactWidth: CGFloat = 900
++
++/// The picture stops at about half the page height (owner, 2026-11-11), so the page doesn't feel crowded.
++let composerPictureShare: CGFloat = 0.5
++
+ /// The prompt box's smallest height: two lines of 16 pt text at 1.35 line height plus its insets, so a prompt with text
+ /// never reads as a one-line field.
+ let composerPromptMinHeight: CGFloat = 60
+@@ -36,6 +43,10 @@ struct ComposerView: View {
+     @Environment(\.theme) private var t
+     /// The presets strip under the header: shown by default while the draft is empty.
+     @State private var presetsOpen = false
++    /// The header's Setup button: the right column folds away and its rows sit above the prompt as buttons.
++    @AppStorage("suite.setupHidden") private var setupHidden = false
++    /// A take picked in the strip under the picture (nil: the stage's own, the newest).
++    @State private var pinnedTake: String?
+ 
+     var body: some View {
+         let s = store.suite
+@@ -45,7 +56,7 @@ struct ComposerView: View {
+             GeometryReader { g in
+                 let fits = g.size.height >= composerMinHeight
+                 ScrollView(.vertical, showsIndicators: !fits) {
+-                    page(narrow: g.size.width < composerNarrowWidth, height: max(g.size.height, composerMinHeight))
++                    page(width: g.size.width, height: max(g.size.height, composerMinHeight))
+                         .frame(width: g.size.width, height: max(g.size.height, composerMinHeight), alignment: .topLeading)
+                 }
+                 .scrollDisabled(fits)
+@@ -86,7 +97,8 @@ struct ComposerView: View {
+             }
+         }
+         .onAppear { presetsOpen = draftIsEmpty }
+-        .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; store.suiteClaudeToolChanged() }
++        .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; pinnedTake = nil; store.suiteClaudeToolChanged() }
++        .onChange(of: s.generating) { _, on in if on { pinnedTake = nil } } // a new take goes on the stage
+         // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.
+         .onChange(of: s.composer) { _, _ in store.suiteComposerChanged() }
+         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
+@@ -135,9 +147,12 @@ struct ComposerView: View {
+         }
+     }
+ 
+-    private func page(narrow: Bool, height: CGFloat) -> some View {
+-        VStack(alignment: .leading, spacing: Space.s3) {
+-            header
++    private func page(width: CGFloat, height: CGFloat) -> some View {
++        let narrow = width < composerNarrowWidth
++        // Small windows (or Setup hidden): no right column; its rows become buttons above the prompt.
++        let strip = width < composerCompactWidth || setupHidden
++        return VStack(alignment: .leading, spacing: Space.s3) {
++            header(width: width)
+                 .layoutPriority(1)
+             if presetsOpen && hasPresets {
+                 if store.suite.composer.tool == .photo {
+@@ -154,19 +169,26 @@ struct ComposerView: View {
+                 } else if store.suite.feedOpen {
+                     ComposerFeed()
+                 } else {
+-                    ComposerMediaPane()
++                    ComposerStage(pinned: $pinnedTake, maxPictureHeight: (height * composerPictureShare).rounded())
+                 }
+-                ScrollView(.vertical, showsIndicators: false) {
+-                    ComposerRail(narrow: narrow)
+-                        .frame(maxWidth: .infinity, alignment: .leading)
++                if !strip {
++                    ScrollView(.vertical, showsIndicators: false) {
++                        ComposerRail(narrow: narrow)
++                            .frame(maxWidth: .infinity, alignment: .leading)
++                    }
++                    .frame(width: narrow ? 264 : 280)
++                    .frame(maxHeight: .infinity, alignment: .top)
+                 }
+-                .frame(width: narrow ? 264 : 300)
+-                .frame(maxHeight: .infinity, alignment: .top)
+             }
+             .frame(minHeight: 0, maxHeight: .infinity)
+             .zIndex(0)
+             // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
+             // full height; the row above takes what is left.
++            if strip {
++                ComposerSetupStrip()
++                    .layoutPriority(1)
++                    .zIndex(1)
++            }
+             // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
+             ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
+                 .fixedSize(horizontal: false, vertical: true)
+@@ -179,7 +201,7 @@ struct ComposerView: View {
+         .padding(.bottom, 20)
+     }
+ 
+-    private var header: some View {
++    private func header(width: CGFloat) -> some View {
+         let d = store.suite.composer
+         let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
+         let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
+@@ -215,6 +237,14 @@ struct ComposerView: View {
+                 .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Engines")
+                 .accessibilityLabel("Engines (owner)")
+             }
++            if width >= composerCompactWidth {
++                Button { setupHidden.toggle() } label: {
++                    Ph("sidebar-simple", 16).frame(width: 32, height: 32).contentShape(Rectangle())
++                }
++                .buttonStyle(.plain).foregroundStyle(setupHidden ? t.roles.ink2 : t.roles.ink)
++                .help(setupHidden ? "Show Setup and Inputs on the right" : "Hide Setup and Inputs (they move above the prompt)")
++                .accessibilityLabel(setupHidden ? "Show Setup" : "Hide Setup")
++            }
+             if store.user != nil {
+                 // One Claude (plans/one-claude.md): the panel on the right shares this composer with Claude (members too).
+                 let on = store.oneClaude.open
+@@ -255,10 +285,14 @@ struct ComposerMediaPane: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+ 
++    /// A take picked in the strip under the picture; nil shows the stage's own.
++    var pinned: String? = nil
++
+     private var tool: ComposerTool { store.suite.composer.tool }
+ 
+-    /// This mode's latest generation, running or finished (WS19: kept per mode, back after leaving the page).
+-    private var job: Job? { store.stageJob(tool) }
++    /// This mode's latest generation, running or finished (WS19: kept per mode, back after leaving the page), unless a
++    /// take was picked in the strip.
++    private var job: Job? { pinned.flatMap { id in store.jobs.first { $0.id == id } } ?? store.stageJob(tool) }
+ 
+     /// The picture under the result pane's blur: the start frame, the clip or the video being extended.
+     private var art: ImageRef? {
+@@ -398,8 +432,13 @@ struct ComposerRail: View {
+     @Environment(\.theme) private var t
+     var narrow: Bool
+ 
++    /// The popover from the Setup strip shows only the inputs and the tool's controls.
++    var showSetup = true
++    @AppStorage("suite.rail.setupOpen") private var setupOpen = true
++    @AppStorage("suite.rail.inputsOpen") private var inputsOpen = true
++
+     /// The render's order: Camera, Light, Look, Style, References.
+-    private static let order: [ComposerChip] = [.camera, .lighting, .look, .style, .references]
++    static let order: [ComposerChip] = [.camera, .lighting, .look, .style, .references]
+ 
+     var body: some View {
+         let d = store.suite.composer
+@@ -408,18 +447,20 @@ struct ComposerRail: View {
+             if let pid = d.collapsed, d.tool == .shot {
+                 CollapsedComposer(presetId: pid, narrow: narrow)
+             } else {
+-                if hasSetup {
+-                    Text("Setup").font(t.scale.heading.font).foregroundStyle(t.roles.ink).padding(.bottom, Space.s1)
+-                    // Rows the tool uses; rows its input decides (the clip, the video) stay, greyed with the reason
+-                    // (plans/ai-suite-design.md principle 6, "Say why, not just no").
+-                    ForEach(Self.order.filter { d.tool.chips.contains($0) || Self.decidedBy($0, d.tool) != nil }, id: \.self) { chip in
+-                        SetupChipRow(chip: chip, decided: d.tool.chips.contains(chip) ? nil : Self.decidedBy(chip, d.tool))
++                if hasSetup && showSetup {
++                    RailSection(title: "Setup", summary: setupSummary, open: $setupOpen,
++                                trailing: hasRig ? AnyView(SetupRigsRow(asMenuButton: true)) : nil)
++                    if setupOpen {
++                        // Rows the tool uses; rows its input decides (the clip, the video) stay, greyed with the reason
++                        // (plans/ai-suite-design.md principle 6, "Say why, not just no").
++                        ForEach(Self.order.filter { d.tool.chips.contains($0) || Self.decidedBy($0, d.tool) != nil }, id: \.self) { chip in
++                            SetupChipRow(chip: chip, decided: d.tool.chips.contains(chip) ? nil : Self.decidedBy(chip, d.tool))
++                        }
+                     }
+-                    if hasSettingsRow { SetupSettingsRow() }
+-                    if hasRig { SetupRigsRow() }
+                 }
+-                Text("Inputs").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
+-                    .padding(.top, hasSetup ? Space.s5 : 0).padding(.bottom, Space.s2)
++                RailSection(title: "Inputs", summary: inputsSummary, open: $inputsOpen, trailing: nil)
++                    .padding(.top, hasSetup && showSetup ? Space.s5 : 0)
++                if inputsOpen || !showSetup {
+                 Group {
+                     if d.tool == .photo {
+                         PhotoSlotRow(size: narrow ? 56 : 64, spacing: narrow ? Space.s2 : 10) // Photo tool (workstream 3)
+@@ -429,18 +470,41 @@ struct ComposerRail: View {
+                 }
+                 .disabled(soon)
+                 .opacity(soon ? 0.55 : 1)
++                .padding(.top, Space.s1)
+                 if let note = store.suite.composerSlots.slots.note(store.composerInputs), d.tool == .shot {
+                     Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                         .fixedSize(horizontal: false, vertical: true)
+                         .padding(.top, Space.s2)
+                 }
++                }
+                 toolControls
+                     .padding(.top, Space.s4)
+             }
+         }
+     }
+ 
+-    private var hasSetup: Bool { !store.suite.composer.tool.chips.isEmpty || hasSettingsRow }
++    private var hasSetup: Bool {
++        let tool = store.suite.composer.tool
++        return Self.order.contains { tool.chips.contains($0) || Self.decidedBy($0, tool) != nil }
++    }
++
++    /// "2 set, 3 on Auto" over the rows the tool uses.
++    private var setupSummary: String? {
++        let chips = Self.order.filter { store.suite.composer.tool.chips.contains($0) }
++        guard !chips.isEmpty else { return nil }
++        let auto = chips.filter { SetupChipRow.value($0, store).auto }.count
++        if auto == chips.count { return "All on Auto" }
++        return auto == 0 ? "\(chips.count) set" : "\(chips.count - auto) set, \(auto) on Auto"
++    }
++
++    /// "1 of 3": the filled input slots (Photo counts its own).
++    private var inputsSummary: String? {
++        guard store.suite.composer.tool != .photo else { return nil }
++        let slots = store.suite.composerSlots.slots
++        let ids = slots.visible(store.composerInputs)
++        guard !ids.isEmpty else { return nil }
++        return "\(ids.filter { slots[$0] != nil }.count) of \(ids.count)"
++    }
+ 
+     /// Why a rig row the tool doesn't take is set anyway: Swap and Recast keep the clip's camera, light and style;
+     /// Extend continues the video's. nil: the tool simply doesn't use it (the row stays hidden).
+@@ -459,13 +523,6 @@ struct ComposerRail: View {
+         return chips.contains(.camera) || chips.contains(.lighting) || chips.contains(.look) || chips.contains(.style)
+     }
+ 
+-    /// Shape, length and takes: the tools that render a new video of their own length.
+-    private var hasSettingsRow: Bool {
+-        switch store.suite.composer.tool {
+-        case .shot, .talking, .ugc, .extend: return true
+-        default: return false
+-        }
+-    }
+ 
+     /// What the old card carried for each tool: Swap's prompt switch, Extend's direction and length, the rig check.
+     @ViewBuilder private var toolControls: some View {
+@@ -552,7 +609,9 @@ struct SetupChipRow: View {
+         .popover(isPresented: $refsOpen, arrowEdge: .leading) { ReferencesPopover().environment(store).environment(\.theme, t) }
+     }
+ 
+-    private var name: String {
++    private var name: String { Self.name(chip) }
++
++    static func name(_ chip: ComposerChip) -> String {
+         switch chip {
+         case .camera: return "Camera"
+         case .lighting: return "Light"
+@@ -572,7 +631,10 @@ struct SetupChipRow: View {
+         }
+     }
+ 
+-    private var value: (text: String, auto: Bool) {
++    private var value: (text: String, auto: Bool) { Self.value(chip, store) }
++
++    /// The row's value and whether it is still on Auto (the Setup strip and the section summary read it too).
++    @MainActor static func value(_ chip: ComposerChip, _ store: AppStore) -> (text: String, auto: Bool) {
+         let d = store.suite.composer
+         let s = d.settings
+         let cat = store.suite.camera
+@@ -621,12 +683,25 @@ struct SetupRigsRow: View {
+     @State private var open = false
+     @State private var naming = false
+     @State private var name = ""
++    /// The "…" button in the Setup header (the redesign); false keeps the old row.
++    var asMenuButton = false
+ 
+     var body: some View {
+         let rigs = store.suite.savedRigs
+         let value = rigs.isEmpty ? "None saved" : "\(rigs.count) saved"
+-        ComposerSetupRow(icon: "faders", name: "Rigs", value: value, auto: rigs.isEmpty, help: "Saved rigs") { open = true }
+-            .popover(isPresented: $open, arrowEdge: .leading) { panel.environment(store).environment(\.theme, t) }
++        Group {
++            if asMenuButton {
++                Button { open = true } label: {
++                    Ph("dots-three", 16).foregroundStyle(t.roles.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
++                }
++                .buttonStyle(.plain)
++                .help("Saved rigs: \(value.lowercased())")
++                .accessibilityLabel("Saved rigs, \(value)")
++            } else {
++                ComposerSetupRow(icon: "faders", name: "Rigs", value: value, auto: rigs.isEmpty, help: "Saved rigs") { open = true }
++            }
++        }
++        .popover(isPresented: $open, arrowEdge: .leading) { panel.environment(store).environment(\.theme, t) }
+     }
+ 
+     private var panel: some View {
+@@ -789,7 +864,7 @@ struct ComposerPromptBar: View {
+                     Label(p, ph: "exclamationmark.triangle").font(t.scale.caption.font).foregroundStyle(t.warn)
+                         .fixedSize(horizontal: false, vertical: true)
+                 }
+-                ComposerBottomBar(settingsInRail: true)
++                ComposerBottomBar() // Shape, Length and Takes sit here, next to Generate (owner, 2026-11-11)
+             }
+         }
+         .padding(.leading, Space.s4).padding(.trailing, Space.s3).padding(.top, Space.s3).padding(.bottom, Space.s2)
+-- 
+2.43.0
+

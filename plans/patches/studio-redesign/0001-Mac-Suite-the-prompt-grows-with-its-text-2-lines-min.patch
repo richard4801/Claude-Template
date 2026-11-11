@@ -1,8 +1,8 @@
-From 850561881af2d8d3cba9e74443a860d55cdc8b28 Mon Sep 17 00:00:00 2001
+From 622182053b24b06d147479167b8b525030cf9f38 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Wed, 11 Nov 2026 19:49:19 +0000
-Subject: [PATCH] Mac Suite: the prompt grows with its text (2 lines min, ~40%
- of the window, then scrolls), expand to a full editor
+Subject: [PATCH 1/2] Mac Suite: the prompt grows with its text (2 lines min,
+ ~40% of the window, then scrolls), expand to a full editor
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

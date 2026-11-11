@@ -1,6 +1,6 @@
 # Video Studio (Suite) redesign on the Mac — proposal for the owner (2026-11-11)
 
-Nothing here is built yet. It needs your yes first. The mockups are in `design/studio-redesign/` (dark theme, the app's
+APPROVED by the owner on 2026-11-11 (decisions below). Built on the Mac, waiting for the Mac build slot. The mockups are in `design/studio-redesign/` (dark theme, the app's
 own colours, type and icons, real preview stills). To redraw them: `NODE_PATH=$(npm root -g) node design/studio-redesign/render.mjs`.
 
 ## What you said
@@ -67,6 +67,28 @@ prompt shrinks to one line. That prompt fix is separate and already done (Part A
    the rest to the Takes page?
 5. **Android:** after the Mac is approved and built, should the tablet layout get the same treatment? The phone already
    follows the order shown here.
+
+## Owner's decisions (2026-11-11, relayed by the coordinator)
+1. The picture stops at about **50%** of the page height.
+2. **Shape, Length and Takes move into the prompt bar**, next to Generate.
+3. **Small windows:** Setup becomes a row of buttons above the prompt (mock 3).
+4. **Keep the takes strip** under the picture.
+5. **Android tablet later**, after the Mac.
+
+## What was built (Mac, held for the Mac build slot)
+- `ComposerStage.swift` (new):
+  - The stage: the picture is aspect-fit and capped at 50% of the page height, centred, with the takes strip under it
+    (this tool's last 8 takes; click one to show it, click the newest to go back; "All takes" opens the feed).
+  - `RailSection`: folding Setup and Inputs headers with their summaries.
+  - `ComposerSetupStrip` and `SetupStripButton`: the Setup row of buttons for small windows, plus an "Inputs" popover.
+- `ComposerView.swift`:
+  - The column is 280 pt (264 when narrow). Below 900 pt of composer width, or when the header's new Setup button hides
+    the column, the strip shows instead.
+  - The Settings row is gone (the bar shows Shape, Length and Takes again). Rigs moved into the "…" on the Setup header.
+  - A picked take is cleared when the tool changes or Generate is pressed.
+- `RootView.swift`: on the Suite page with Claude open, the sidebar becomes the icon rail.
+- Not built: the viewer's own action row from the mock. The result pane's existing actions stay.
+- Fold states and Setup hidden are remembered (UserDefaults).
 
 ## Part A (already done, waiting for the Mac build slot)
 The prompt box in every Suite tool now:
