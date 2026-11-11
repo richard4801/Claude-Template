@@ -9,7 +9,9 @@ import { compact, uid } from '../lib/util.js';
 import { claudeMessages, claudeSettings, claudeThreads, claudeTurns, type CameraAssetKind } from './schema.js';
 import type { CameraService } from './service.js';
 import { parse } from './validate.js';
-import { EDIT_PROMPT, RECREATE_PROMPT } from '../recreate/assistant.js';
+import { EDIT_PROMPT, onePrompt, RECREATE_PROMPT } from '../recreate/assistant.js';
+import { CHAT_REGISTRY } from '../claude/registry.js';
+import { pageOfContext } from '../claude/page.js';
 import { SUITE_PROMPT } from '../suite/mcpTools.js';
 import { attachmentViews, storeAttachments, type Attachment } from './claudeAttachments.js';
 
@@ -88,7 +90,7 @@ export class ClaudeService {
   // ------------------------------------------------------------------ threads
   private threadView = (t: ThreadRow) => compact({ id: t.id, contextKind: t.contextKind, contextId: t.contextId, claudeSessionId: t.claudeSessionId ?? undefined,
     contextKey: t.contextKey ?? undefined, title: t.title ?? undefined, // WS18: the chat's list and name
-    createdAt: t.createdAt, updatedAt: t.updatedAt, brief: threadBrief(t.contextKind, t.contextId) });
+    createdAt: t.createdAt, updatedAt: t.updatedAt, brief: threadBrief(t.contextKind, t.contextKind === 'chat' ? t.id : t.contextId) });
   private async messageView(m: MessageRow) {
     return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ?? undefined,
       image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, attachments: await attachmentViews(this.ctx, m.attachments), createdAt: m.createdAt });
@@ -108,7 +110,18 @@ export class ClaudeService {
    * or with `new: true` a new chat in the same list (WS18: each place keeps a list of chats the owner switches between).
    */
   async openThread(u: AuthUser, body: unknown) {
-    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit', 'recreate', 'suite']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+    // One Claude (plans/one-claude.md): {contextKind: 'chat', contextId: <one of the owner's chats>} opens that chat. An old
+    // per-place chat (Suite, Edit, Recreate) becomes a chat that follows the owner, starting on its own page; Camera
+    // chats keep their director.
+    const asChat = body as { contextKind?: unknown; contextId?: unknown } | null;
+    if (asChat?.contextKind === 'chat') {
+      const t = await this.thread(u, String(asChat.contextId ?? ''));
+      if (t.contextKind === 'chat' || t.contextKind === 'camera') return this.threadView(t);
+      const [n] = await this.db.update(claudeThreads).set({ contextKind: 'chat', page: t.page ?? pageOfContext(t.contextKind, t.contextId, t.contextKey) ?? null })
+        .where(eq(claudeThreads.id, t.id)).returning();
+      return this.threadView(n!);
+    }
+    const b = parse(z.object({ /* 'chat' threads: POST /v1/claude/chats */ contextKind: z.enum(['camera', 'edit', 'recreate', 'suite']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
       new: z.boolean().optional(), title: z.string().trim().max(TITLE_MAX).optional() }).strict(), body);
     if (b.contextKind === 'camera') await this.camera.row(u, b.contextId);
     // workstream 1: a Recreate thread is about one of the owner's references.
@@ -374,6 +387,8 @@ export function autoTitle(text: string): string | null {
  * (all on the MUSE MCP server) and the id they act on. Camera threads keep the Mac's own director prompt.
  */
 export function threadBrief(kind: string, contextId: string) {
+  // One Claude (plans/one-claude.md): a chat that follows the person; the Mac passes its chatId to the chat tools.
+  if (kind === 'chat') return { prompt: onePrompt(), tools: CHAT_REGISTRY.map(t => t.name), chatId: contextId };
   if (kind === 'recreate') return { prompt: RECREATE_PROMPT, tools: ['get_recipe', 'set_slot_briefs', 'match_slots', 'fill_slot', 'open_edit', 'apply_recipe', 'apply_edit_ops', 'playbook_read', 'playbook_add', 'report_gap'], referenceId: contextId };
   if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read'], sessionId: contextId };
   if (kind === 'suite') return { prompt: SUITE_PROMPT, tools: ['suite_options', 'suite_get_draft', 'suite_set_draft', 'suite_add_reference', 'suite_estimate', 'suite_request_shot', 'suite_feed', 'suite_cast', 'suite_see'], assistId: contextId };

@@ -7,7 +7,9 @@ import Foundation
 public enum Learn {
     /// The server's areas, in the order the playbook groups them (Captions, Text, Pacing, Transitions, Look, Motion,
     /// Speed, Timing, Sound, Shape, Other).
-    public static let areas = ["captions", "text", "pacing", "transition", "look", "motion", "speed", "timing", "audio", "ratio", "other"]
+    /// One Claude (plans/one-claude.md): the playbook is Claude's memory, so her figure, style, preferred models and the
+    /// things she said no to come first.
+    public static let areas = ["figure", "style", "models", "rejected", "captions", "text", "pacing", "transition", "look", "motion", "speed", "timing", "audio", "ratio", "other"]
     /// The most rules a studio keeps, and the longest rule (the server's limits).
     public static let maxRules = 200
     public static let maxRuleChars = 300
@@ -291,6 +293,10 @@ public enum LearnText {
     /// An area as a heading ("Transitions", "Sound").
     public static func area(_ a: String) -> String {
         switch a {
+        case "figure": return "Figure"
+        case "style": return "Style"
+        case "models": return "Models"
+        case "rejected": return "Said no"
         case "captions": return "Captions"
         case "text": return "Text"
         case "pacing": return "Pacing"
@@ -308,6 +314,10 @@ public enum LearnText {
     /// An area inside a sentence ("You changed Claude's look 4 times").
     public static func areaNoun(_ a: String) -> String {
         switch a {
+        case "figure": return "figure"
+        case "style": return "style"
+        case "models": return "model choices"
+        case "rejected": return "rejections"
         case "captions": return "captions"
         case "text": return "text"
         case "pacing": return "pacing"

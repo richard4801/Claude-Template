@@ -135,7 +135,7 @@ export const claudeThreads = pgTable('claude_threads', {
   id: text('id').primaryKey(),
   studioId: text('studio_id').notNull(),
   ownerId: text('owner_id').notNull(),
-  contextKind: text('context_kind').notNull().$type<'camera' | 'edit' | 'recreate' /* workstream 1: a Recreate reference */ | 'suite' /* workstream 1: a Suite shot Claude sets up */>(),
+  contextKind: text('context_kind').notNull().$type<'camera' | 'edit' | 'recreate' /* workstream 1: a Recreate reference */ | 'suite' /* workstream 1: a Suite shot Claude sets up */ | 'chat' /* one Claude (0029): a chat about a piece of work */>(),
   contextId: text('context_id').notNull(),
   claudeSessionId: text('claude_session_id'),
   /**
@@ -145,6 +145,12 @@ export const claudeThreads = pgTable('claude_threads', {
   contextKey: text('context_key'),
   /** The chat's name: set by the owner (rename), else taken from the first message. */
   title: text('title'),
+  /** One Claude (0029): the page the chat was last used on (the app reports it as the owner moves). */
+  page: jsonb('page').$type<import('../claude/page.js').PageRef>(),
+  /** One Claude (0029): the Claude model this chat uses (null = the studio default; the picker is the next step). */
+  model: text('model'),
+  /** One Claude (0029): hidden from the chat list (kept, not deleted). */
+  archivedAt: ms('archived_at'),
   createdAt: ms('created_at').notNull(),
   updatedAt: ms('updated_at').notNull(),
 }, t => [index('claude_threads_context_idx').on(t.ownerId, t.contextKind, t.contextId), index('claude_threads_key_idx').on(t.ownerId, t.contextKey, t.updatedAt)]);
@@ -156,7 +162,7 @@ export const claudeMessages = pgTable('claude_messages', {
   source: text('source').notNull().$type<'mac' | 'phone' | 'api'>(),
   text: text('text').notNull().default(''),
   turnId: text('turn_id'),
-  tool: jsonb('tool').$type<{ id: string; name: string; ok?: boolean; summary?: string }>(),
+  tool: jsonb('tool').$type<{ id: string; name: string; ok?: boolean; summary?: string; /** One Claude: what the app does with it (open a page, show "Remembered … Undo") */ ui?: Record<string, unknown> }>(),
   imageKey: text('image_key'),
   /** workstream 1: reference images the owner attached (camera/claudeAttachments.ts). */
   attachments: jsonb('attachments').$type<import('./claudeAttachments.js').Attachment[]>(),

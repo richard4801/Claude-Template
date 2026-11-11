@@ -77,12 +77,14 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
     public var sessionId: String?
     /// Suite threads: the shared composer draft (`sa_…`) Claude's suite tools act on.
     public var assistId: String?
+    /// One Claude: the chat itself (its chat tools take it as chatId).
+    public var chatId: String?
 
-    public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil, assistId: String? = nil) {
-        self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId; self.assistId = assistId
+    public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil, assistId: String? = nil, chatId: String? = nil) {
+        self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId; self.assistId = assistId; self.chatId = chatId
     }
 
-    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId }
+    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId, chatId }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         prompt = (try? c.decode(String.self, forKey: .prompt)) ?? ""
@@ -90,6 +92,7 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
         referenceId = try? c.decodeIfPresent(String.self, forKey: .referenceId)
         sessionId = try? c.decodeIfPresent(String.self, forKey: .sessionId)
         assistId = try? c.decodeIfPresent(String.self, forKey: .assistId)
+        chatId = try? c.decodeIfPresent(String.self, forKey: .chatId)
     }
 
     /// What Claude Code is started with (`--append-system-prompt`): the server's prompt plus the id it acts on.
@@ -100,6 +103,9 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
         if let r = referenceId, !r.isEmpty { lines.append("The reference: \(r).") }
         if let s = sessionId, !s.isEmpty { lines.append("The edit session: \(s).") }
         if let a = assistId, !a.isEmpty { lines.append("The Suite draft: \(a).") }
+        if let c = chatId, !c.isEmpty {
+            lines.append("This chat: \(c). Pass it as chatId to where_am_i, open_page, memory_add, chats_list and chat_read. Each message starts with a [Page: …] line: the page the person is on and the ids it has open; pass those ids to the tools that need them. Read the studio's memory (memory_read) at the start of a chat and follow its pinned rules.")
+        }
         return lines.joined(separator: "\n\n")
     }
 }
@@ -138,11 +144,14 @@ public struct ClaudeToolRef: Codable, Hashable, Sendable {
     public var name: String
     public var ok: Bool?
     public var summary: String?
-    public init(id: String, name: String, ok: Bool? = nil, summary: String? = nil) {
+    /// One Claude: a line Claude left for the app (open a page, "Remembered …").
+    public var ui: ClaudeUI?
+    public init(id: String, name: String, ok: Bool? = nil, summary: String? = nil, ui: ClaudeUI? = nil) {
         self.id = id
         self.name = name
         self.ok = ok
         self.summary = summary
+        self.ui = ui
     }
 }
 

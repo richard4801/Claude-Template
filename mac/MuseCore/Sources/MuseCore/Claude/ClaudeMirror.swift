@@ -17,6 +17,10 @@ public struct ClaudeEventMapper: Sendable {
             if let sid { sessionId = sid }
             if let model { self.model = model }
             mcpServers = servers
+            // Blender's server didn't start (uvx couldn't fetch it, or it timed out): say so in the chat, not only to Claude.
+            if servers.contains(where: { $0.name == "blender" && $0.status == "failed" }) {
+                return [.tool(id: ClaudeCommand.Blender.failedChipId, name: "Blender", status: .error, summary: ClaudeCommand.Blender.didntStart, input: nil)]
+            }
             return []
         case .textDelta(let t):
             return [.text(delta: t)]

@@ -12,6 +12,28 @@ import MuseCore
 /// While on: heartbeat every 20 s, catch up on waiting calls, take `blender` live events, run calls one at a time through
 /// BlenderRelay against the MCP for Blender add-on on 127.0.0.1:9876, and upload finished files that Claude Desktop / Code
 /// runs drop into ~/MUSE/CameraSessions/<id>/out/.
+enum BlenderToolsState: Equatable {
+    case warming, ready
+    case failed(String)
+}
+
+/// uvx's stderr while it runs (the last line explains a failure).
+private final class BlenderStderrBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    private var _timedOut = false
+    var timedOut: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _timedOut }
+        set { lock.lock(); _timedOut = newValue; lock.unlock() }
+    }
+    func append(_ d: Data) { lock.lock(); if data.count < 64_000 { data.append(d) }; lock.unlock() }
+    var lastLine: String? {
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.last(where: { !$0.isEmpty }).map { String($0.prefix(200)) }
+    }
+}
+
 @MainActor
 final class BlenderRelayService: ObservableObject {
     static let shared = BlenderRelayService()
@@ -29,6 +51,10 @@ final class BlenderRelayService: ObservableObject {
     @Published private(set) var lastCall: String?
     @Published private(set) var lastError: String?
     @Published private(set) var lastUpload: String?
+    /// Blender's MCP server for Claude (`uvx mcp-for-blender`), fetched once when the relay starts so a chat turn's start
+    /// doesn't wait on uvx's download. nil = not tried (or uv isn't installed).
+    @Published private(set) var toolsState: BlenderToolsState?
+    private var warmTask: Task<Void, Never>?
 
     private let defaults: UserDefaults
     private var baseURL: URL?
@@ -103,6 +129,7 @@ final class BlenderRelayService: ObservableObject {
         self.relay = relay
         running = true
         lastError = nil
+        warmTools()
         loops = [
             Task { [weak self] in await self?.heartbeatLoop(api, relay) },
             Task { [weak self] in await self?.listen(api, relay) },
@@ -111,6 +138,67 @@ final class BlenderRelayService: ObservableObject {
                 if let calls = try? await api.pendingCalls() { self?.enqueue(calls) }
             },
         ]
+    }
+
+    // MARK: Blender's tools for Claude
+
+    /// Runs `uvx mcp-for-blender --help` once (stdin closed, so a server that starts anyway ends at once): uvx downloads and
+    /// caches the package, and later starts inside a Claude turn are quick and offline. Again with `force` (Retry Blender).
+    @discardableResult
+    func warmTools(force: Bool = false) -> Task<Void, Never>? {
+        if let warmTask, toolsState == .warming { return warmTask }
+        if !force, toolsState == .ready { return nil }
+        let home = NSHomeDirectory()
+        let base = ProcessInfo.processInfo.environment
+        guard let uvx = ClaudeCodeLocator.findUvx(home: home, path: base["PATH"]) else {
+            toolsState = .failed("uv isn't installed (Settings → Connections shows how)")
+            return nil
+        }
+        var env = ClaudeCommand.environment(base, executable: uvx, home: home)
+        for (k, v) in ClaudeCommand.Blender.serverEnv { env[k] = v }
+        toolsState = .warming
+        let task = Task { [weak self] in
+            let result = await Self.runOnce(uvx, ["mcp-for-blender", "--help"], env: env, timeout: 300)
+            guard let self, !Task.isCancelled else { return }
+            self.toolsState = result
+            self.warmTask = nil
+        }
+        warmTask = task
+        return task
+    }
+
+    /// Exit 0, or 2 (an argument parser's usage error), means uvx got the package and it ran.
+    nonisolated private static func runOnce(_ exe: String, _ args: [String], env: [String: String], timeout: Double) async -> BlenderToolsState {
+        await withCheckedContinuation { cont in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: exe)
+            p.arguments = args
+            p.environment = env
+            p.standardInput = FileHandle.nullDevice
+            p.standardOutput = FileHandle.nullDevice
+            let err = Pipe()
+            p.standardError = err
+            let box = BlenderStderrBox()
+            err.fileHandleForReading.readabilityHandler = { h in box.append(h.availableData) }
+            p.terminationHandler = { proc in
+                err.fileHandleForReading.readabilityHandler = nil
+                box.append(err.fileHandleForReading.readDataToEndOfFile())
+                if box.timedOut {
+                    cont.resume(returning: .failed("Getting Blender's tools took over \(Int(timeout / 60)) min (check the internet)"))
+                } else if proc.terminationStatus == 0 || proc.terminationStatus == 2 {
+                    cont.resume(returning: .ready)
+                } else {
+                    cont.resume(returning: .failed(box.lastLine.map { "uvx: \($0)" } ?? "uvx stopped (exit \(proc.terminationStatus))"))
+                }
+            }
+            do { try p.run() } catch {
+                cont.resume(returning: .failed("Couldn't run uvx: \(error.localizedDescription)"))
+                return
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if p.isRunning { box.timedOut = true; p.terminate() }
+            }
+        }
     }
 
     // MARK: Heartbeat and calls

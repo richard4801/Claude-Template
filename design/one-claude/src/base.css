@@ -1,0 +1,33 @@
+@font-face{font-family:'Instrument Serif';src:url('../../../mac/Muse/Resources/Fonts/InstrumentSerif-Regular.ttf')}
+@font-face{font-family:'Archivo';src:url('../../../mac/Muse/Resources/Fonts/Archivo-VF.ttf');font-weight:100 900}
+@font-face{font-family:'Plex Mono';src:url('../../../mac/Muse/Resources/Fonts/IBMPlexMono-Regular.ttf')}
+:root{--canvas:#EFEBE3;--raised:#F8F5EF;--field:#E7E1D6;--ink:#141210;--ink2:#67605A;--hair:#CFC7BA;--accent:#B5121B;--action:#141210;--onAction:#F8F5EF;--pos:#2F6B3A;--caution:#8A5200}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Archivo;color:var(--ink);background:var(--canvas);font-size:13px;line-height:1.45;width:1280px;height:800px;overflow:hidden}
+.win{display:flex;height:800px}
+.side{width:200px;background:var(--raised);padding:44px 12px 12px;display:flex;flex-direction:column;gap:2px}
+.side .it{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:2px;color:var(--ink2)}
+.side .it.on{background:var(--field);color:var(--ink)}
+.side h6{font-size:11px;color:var(--ink2);font-weight:500;padding:14px 8px 4px}
+.ic{width:16px;height:16px;display:inline-block;background:currentColor;-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;flex:none}
+.ic20{width:20px;height:20px}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.bar{height:44px;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid var(--hair)}
+.title{font-family:'Instrument Serif';font-size:22px}
+.muted{color:var(--ink2)}
+.claude{width:380px;background:var(--raised);border-left:1px solid var(--hair);display:flex;flex-direction:column}
+.chead{padding:12px 16px 10px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--hair)}
+.row{display:flex;align-items:center;gap:8px}
+.grow{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:2px;font-size:12px;font-weight:500}
+.btn.pri{background:var(--action);color:var(--onAction)}
+.btn.sec{border:1px solid var(--hair)}
+.btn.ghost{color:var(--ink2)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:2px;background:var(--field);font-size:12px}
+.msgs{flex:1;padding:16px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.me{align-self:flex-end;background:var(--field);padding:8px 12px;border-radius:4px;max-width:280px}
+.cl{max-width:330px}
+.note{display:flex;align-items:center;gap:8px;color:var(--ink2);font-size:12px}
+.card{border:1px solid var(--hair);border-radius:4px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--canvas)}
+.input{margin:12px 16px 16px;border:1px solid var(--hair);border-radius:2px;padding:10px 12px;background:var(--canvas);display:flex;align-items:center;gap:8px;color:var(--ink2)}
+.mono{font-family:'Plex Mono';font-size:12px}

@@ -120,6 +120,13 @@ struct ConnectionsContent: View {
                 statusLine("Mac app", relay.running ? "Online" : relay.enabled ? "Starting… (owner, signed in to a MUSE server)" : "Off", relay.running ? .good : .off)
                 statusLine("Blender", relay.blenderConnected ? "Connected\(relay.addonVersion.map { ", add-on \($0)" } ?? ""), localhost:9876" : "Not connected (127.0.0.1:9876)",
                            relay.blenderConnected ? .good : relay.running ? .warn : .off)
+                if relay.running, let s = relay.toolsState {
+                    switch s {
+                    case .warming: statusLine("Claude's tools", "Getting Blender ready…", .warn)
+                    case .ready: statusLine("Claude's tools", "Ready", .good)
+                    case .failed(let why): statusLine("Claude's tools", why, .bad)
+                    }
+                }
                 statusLine("Last call", relay.lastCall ?? "None yet", .neutral)
                 if let u = relay.lastUpload { statusLine("Last upload", u, .neutral) }
                 if let e = relay.lastError { statusLine("Last error", e, .bad) }

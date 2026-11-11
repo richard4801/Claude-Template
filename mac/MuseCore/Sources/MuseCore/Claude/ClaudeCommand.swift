@@ -8,7 +8,17 @@ public struct ClaudeCommand: Hashable, Sendable {
     public struct Blender: Hashable, Sendable {
         public var uvx: String
         public init(uvx: String = "uvx") { self.uvx = uvx }
+
+        /// The chip a turn shows when Claude Code reports Blender's server as failed (the chat offers Retry Blender).
+        public static let failedChipId = "mcp_blender"
+        public static let didntStart = "Blender's tools didn't start"
+        /// What the server is given: no usage record, and no file, network or subprocess code from Claude.
+        public static let serverEnv = ["DISABLE_TELEMETRY": "true", "BLENDER_MCP_SAFE_MODE": "1"]
     }
+
+    /// Claude Code waits this long (ms) for an MCP server to start. Its default, 30 s, is shorter than uvx's first
+    /// download of mcp-for-blender (or any start with a cold uv cache), so Blender's tools silently went missing.
+    public static let mcpStartTimeoutMs = "120000"
 
     public var mcpURL: String
     public var token: String
@@ -53,7 +63,7 @@ public struct ClaudeCommand: Hashable, Sendable {
         if let blender {
             servers["blender"] = .object([
                 "type": .string("stdio"), "command": .string(blender.uvx), "args": .array([.string("mcp-for-blender")]),
-                "env": .object(["DISABLE_TELEMETRY": .string("true"), "BLENDER_MCP_SAFE_MODE": .string("1")]),
+                "env": .object(Blender.serverEnv.mapValues { .string($0) }),
             ])
         }
         let enc = JSONEncoder()
@@ -69,7 +79,7 @@ public struct ClaudeCommand: Hashable, Sendable {
         return String(decoding: (try? enc.encode(msg)) ?? Data(), as: UTF8.self) + "\n"
     }
 
-    /// The environment for the run: the app's own plus the usual bin folders, without anything that would bill the API
+    /// The environment for the run: the app's own plus the usual bin folders, a longer MCP start timeout (uvx's first run), without anything that would bill the API
     /// instead of the owner's plan (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN) or make Claude Code think it is nested.
     public static func environment(_ base: [String: String], executable: String, home: String) -> [String: String] {
         var env = base
@@ -79,6 +89,7 @@ public struct ClaudeCommand: Hashable, Sendable {
         for p in [dir, "\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] where !path.contains(p) { path.append(p) }
         env["PATH"] = path.joined(separator: ":")
         env["HOME"] = env["HOME"] ?? home
+        env["MCP_TIMEOUT"] = env["MCP_TIMEOUT"] ?? mcpStartTimeoutMs
         return env
     }
 }

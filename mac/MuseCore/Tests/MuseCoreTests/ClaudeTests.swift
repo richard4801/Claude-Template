@@ -146,6 +146,11 @@ final class ClaudeTests: XCTestCase {
         XCTAssertNil(env["CLAUDECODE"])
         XCTAssertEqual(env["LANG"], "en")
         XCTAssertTrue(env["PATH"]!.hasPrefix("/usr/bin:/Users/o/.local/bin:/opt/homebrew/bin"))
+        // Claude Code's 30 s MCP start timeout is too short for uvx's first fetch of mcp-for-blender.
+        XCTAssertEqual(env["MCP_TIMEOUT"], "120000")
+        XCTAssertEqual(ClaudeCommand.environment(["MCP_TIMEOUT": "300000"], executable: "/c", home: "/h")["MCP_TIMEOUT"], "300000")
+        let bj = String(decoding: b.mcpConfigJSON(), as: UTF8.self)
+        XCTAssertTrue(bj.contains(#""env":{"BLENDER_MCP_SAFE_MODE":"1","DISABLE_TELEMETRY":"true"}"#))
     }
 
     func testLocatorParsing() {

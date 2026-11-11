@@ -21,7 +21,10 @@ const thread = async (contextId = sessionId, contextKind = 'camera') => (await o
 
 describe('status, settings, threads', () => {
   it('owner only; the Mac is offline until it sends a heartbeat; the API fallback is off by default', async () => {
-    expect((await member.req('GET', '/v1/claude/status')).status).toBe(403);
+    // One Claude (owner, 2026-11-11): members run Claude on their own plan too, so they have their own status; the
+    // studio switch stays the owner's.
+    expect((await member.req('GET', '/v1/claude/status')).status).toBe(200);
+    expect((await member.req('PATCH', '/v1/claude/settings', { apiFallback: true })).status).toBe(403);
     const s = (await owner.req('GET', '/v1/claude/status')).body;
     expect(s).toMatchObject({ mac: { online: false, claudeCode: { installed: false, signedIn: false } }, apiFallback: { available: false, enabled: false },
       openInClaudeUrl: 'https://claude.ai/new' });
@@ -40,7 +43,10 @@ describe('status, settings, threads', () => {
     expect((await owner.req('POST', '/v1/claude/threads', { contextKind: 'camera', contextId: 'cs_nope' })).status).toBe(404);
     expect((await thread('es_123', 'edit')).contextKind).toBe('edit');
     expect((await owner.req('PATCH', `/v1/claude/threads/${t1.id}`, { claudeSessionId: '4f1c-session' })).body.claudeSessionId).toBe('4f1c-session');
-    expect((await member.req('POST', '/v1/claude/threads', { contextKind: 'edit', contextId: 'x' })).status).toBe(403);
+    // A member's thread is their own (one Claude); they never see the owner's.
+    const mt = (await member.req('POST', '/v1/claude/threads', { contextKind: 'edit', contextId: 'x' })).body;
+    expect(mt.id).not.toBe(t1.id);
+    expect((await member.req('GET', `/v1/claude/threads/${t1.id}`)).status).toBe(404);
   });
 });
 
@@ -135,7 +141,7 @@ describe('phone → Mac relay', () => {
     const t = await thread();
     expect((await owner.req('POST', `/v1/claude/threads/${t.id}/events`, { events: [{ type: 'nope' }] })).status).toBe(400);
     expect((await owner.req('POST', `/v1/claude/threads/${t.id}/events`, { events: [] })).status).toBe(400);
-    expect((await member.req('POST', `/v1/claude/threads/${t.id}/events`, { events: [{ type: 'text', delta: 'x' }] })).status).toBe(403);
+    expect((await member.req('POST', `/v1/claude/threads/${t.id}/events`, { events: [{ type: 'text', delta: 'x' }] })).status).toBe(404); // not theirs
   });
 });
 
