@@ -56,7 +56,7 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   lacked "body shape or proportions" (MuseCore PromptLibrary.swift). Keep Mac PromptLibraryDefaults in step with
   server/api/src/prompt/library.ts on every prompt-text change.
 - Pushed (server, live): outfit body angle per picture (`plans/outfit-head-looks.md` §1). Server suite 695 green.
-- Mac CI: run 513 (head 892e2062) holds all three Mac commits; confirm it is green before sending a Mac build.
+- Mac CI run 513 (head 892e2062) GREEN; build 513 sent to the owner 2026-11-11 02:35 (typing fix, Export file, prompt default).
 - OWNER RULES (2026-11-11): (1) tests the owner can easily do by hand are left to the owner; automated tests only when
   really necessary. (2) Coordinator delegates jobs to new sessions that report back (send_message), not doing them itself.
   (3) Send the Mac build when its CI is green, without asking.
