@@ -232,6 +232,7 @@ public enum BlenderAssetKinds {
         case "keyframe_end.png": return "keyframe_end"
         case "camera.json": return "camera_json"
         case "characters.json": return "characters_json"
+        case "set.json": return "set_json"
         default:
             let n = name.lowercased()
             return n.hasSuffix(".blend") && !n.hasPrefix(".") ? "blend" : nil

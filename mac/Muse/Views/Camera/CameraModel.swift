@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import MuseCore
 import Observation
+import SystemConfiguration
 
 /// State for the Directed (Blender) mode, Direct with Claude and Settings → Connections (plans/mcp-bridge.md "Phase 2 · UI").
 /// Owner only. It talks to the camera-session API itself (HTTPCameraAPI on the signed-in server, FakeCameraAPI in demo mode)
@@ -10,7 +11,7 @@ import Observation
 @Observable
 final class CameraModel {
     enum Tab: String, CaseIterable { case blocking = "Blocking", guides = "Guides", history = "History" }
-    enum ViewMode: String, CaseIterable { case plan = "Plan", camera = "Camera view", side = "Side" }
+    enum ViewMode: String, CaseIterable { case plan = "Plan", camera = "Camera view", side = "Side", orbit = "3D" }
 
     /// Demo mode shares one fake so the stage and the Shot builder see the same sessions.
     static let demoAPI = FakeCameraAPI()
@@ -50,9 +51,11 @@ final class CameraModel {
     /// Re-read every 30 s so "2 min ago" and the Claude app's 5-minute window move.
     var now = Date().timeIntervalSince1970 * 1000
 
-    /// This Mac's name for "Mac Studio · localhost" (read once: Host lookups can be slow).
+    /// This Mac's name for "Mac Studio · localhost". The computer name from System Configuration: a local read. (It was
+    /// `Host.current().localizedName`, which resolves the Mac's network names synchronously and could stall the main
+    /// thread for seconds the first time the Camera stage drew its status rows.)
     var machine: String? { Self.machineName }
-    private static let machineName: String? = Host.current().localizedName
+    private static let machineName: String? = SCDynamicStoreCopyComputerName(nil, nil) as String?
 
     init() {}
 

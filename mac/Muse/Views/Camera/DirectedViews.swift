@@ -22,7 +22,7 @@ struct DirectedBody: View {
                     .padding(.horizontal, 28)
                 Rectangle().fill(t.line).frame(height: 1)
                 switch model.tab {
-                case .blocking: blocking
+                case .blocking: CameraStageBlocking(model: model, session: session)
                 case .guides: CameraGuidesTab(session: session).padding(.horizontal, 28).padding(.vertical, 14)
                 case .history: CameraHistoryTab(session: session, now: model.now).padding(.horizontal, 28).padding(.vertical, 14)
                 }
@@ -108,29 +108,6 @@ struct DirectedBody: View {
         }
         .padding(.top, 10)
     }
-
-    private var blocking: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                SessionStrip(model: model, session: session)
-                Group {
-                    switch model.viewMode {
-                    case .plan: CameraPlanCanvas(session: session, playhead: model.playhead, projection: .top) { h, p in model.drag(h, to: p) }
-                    case .side: CameraPlanCanvas(session: session, playhead: model.playhead, projection: .side, editable: false)
-                    case .camera: CameraStillView(session: session, playhead: model.playhead)
-                    }
-                }
-                .frame(minHeight: 260, maxHeight: .infinity)
-                .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
-                CameraPlanLegend(session: session, editable: model.viewMode == .plan)
-                if let e = model.applyError, model.tab == .blocking { Text(e).font(t.body(12)).foregroundStyle(t.rec) }
-            }
-            .padding(.horizontal, 28)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
-            CameraTimelineView(session: session, playhead: $model.playhead)
-        }
-    }
 }
 
 /// `cs_7Q2M` · title · `9:16 · 24 fps · 6.0 s · rev 4` · Plan | Camera view | Side · Re-render.
@@ -203,6 +180,7 @@ struct CameraGuidesTab: View {
     @Environment(\.theme) private var t
     @Environment(\.openURL) private var openURL
     var session: CameraSession
+    @State private var playing: GuideItem?
 
     var body: some View {
         let items = CameraGuides.items(session.assets)
@@ -226,7 +204,9 @@ struct CameraGuidesTab: View {
                         }
                         Spacer()
                         if let u = g.asset.url, let url = URL(string: u) {
-                            MButton(g.isVideo ? "Play" : "Open", icon: g.isVideo ? "play.fill" : "arrow.up.right", size: .small) { openURL(url) }
+                            MButton(g.isVideo ? "Play" : "Open", icon: g.isVideo ? "play.fill" : "arrow.up.right", size: .small) {
+                                if g.isVideo { playing = g } else { openURL(url) }
+                            }
                         }
                     }
                     .padding(.vertical, 10)
@@ -234,6 +214,7 @@ struct CameraGuidesTab: View {
                 }
             }
         }
+        .sheet(item: $playing) { GuideVideoSheet(item: $0) }
     }
 }
 
