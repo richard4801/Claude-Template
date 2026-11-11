@@ -59,7 +59,8 @@ export function modelView(m: typeof models.$inferSelect) {
     defaultRig: m.defaultRig ?? undefined /* AI suite (workstream 1): filled into rows still on Auto when she's @-mentioned */ });
 }
 export const outfitView = (o: typeof outfits.$inferSelect) =>
-  compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
+  compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined,
+    /* outfit page (plans/outfit-head-looks.md §4/§5): the folder's date; who may rename/delete it */ createdAt: o.createdAt, createdBy: o.createdBy ?? undefined });
 setViews(modelView, outfitView);
 const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: P.wireFps(c.fps), checks: c.checks,
   /* prompt scripts: talking detection */ audio: audioView(c) ?? undefined });
@@ -317,14 +318,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
               const body = angleBody(BODY_SLOTS[i + 1]!);
               const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
               angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
-                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
+                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null);
             }
           } else {
             // New shots (a custom model): each angle with her body photo of that angle.
             angles = await Promise.all(set.map((p, i) => {
               const plan = anglePlans?.[i] ?? outfitPlan!;
               return ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
-                req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!);
+                req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0] ?? null);
             }));
           }
         } catch (e) {
@@ -340,11 +341,103 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }, mode === 'own' ? 300 : 0);
     return outfitView(o!);
   });
+  // Outfit page (plans/outfit-head-looks.md §4/§5): rename, delete, make the missing angles. Changing an outfit is for the
+  // studio owner or whoever made it; another studio's outfit is a 404.
+  const OutfitName = z.string().trim().min(1, 'Give the outfit a name').max(80, 'At most 80 characters');
+  /** Outfits whose missing angles are being made (refused for delete and a second fill until they finish). */
+  const filling = new Set<string>();
+  const outfitToChange = async (u: AuthUser, id: string, change = false) => {
+    const [o] = await db.select().from(outfits).where(and(eq(outfits.id, id), eq(outfits.studioId, u.studioId)));
+    if (!o) throw notFound('Outfit');
+    if (change && u.role !== 'owner' && o.createdBy !== u.id) throw new ApiError(403, 'owner_only', 'Only the studio owner or whoever made this outfit can change it');
+    return o;
+  };
+  const stillMaking = (o: typeof outfits.$inferSelect) => o.state === 'generating' || filling.has(o.id);
+  app.patch<{ Params: { id: string } }>('/v1/outfits/:id', async req => {
+    const b = parse(z.object({ name: OutfitName }).passthrough(), req.body ?? {});
+    const o = await outfitToChange(req.user, req.params.id, true);
+    const [u] = await db.update(outfits).set({ name: b.name }).where(eq(outfits.id, o.id)).returning();
+    emitOutfit(u!);
+    return outfitView(u!);
+  });
+  app.delete<{ Params: { id: string } }>('/v1/outfits/:id', async (req, reply) => {
+    const o = await outfitToChange(req.user, req.params.id, true);
+    if (stillMaking(o)) throw new ApiError(409, 'outfit_busy', 'This outfit is still being made · delete it when it finishes');
+    // Takes and photos made with it are kept (they carry their own pictures); her list drops it.
+    const [m] = await db.select().from(models).where(and(eq(models.id, o.modelId), eq(models.studioId, o.studioId)));
+    await db.delete(outfits).where(eq(outfits.id, o.id));
+    ctx.hub.emit(o.studioId, { type: 'outfit', op: 'delete', id: o.id });
+    if (m?.outfitIds.includes(o.id)) {
+      const [mm] = await db.update(models).set({ outfitIds: m.outfitIds.filter(x => x !== o.id) }).where(eq(models.id, m.id)).returning();
+      emitModel(mm!);
+    }
+    return reply.status(204).send();
+  });
+  /** Make an outfit's missing ¾/side/back pictures from its front (a set where some angles came back empty). */
+  app.post<{ Params: { id: string } }>('/v1/outfits/:id/fill', async req => {
+    const b = parse(z.object({ imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body ?? {});
+    const o = await outfitToChange(req.user, req.params.id, true);
+    if (stillMaking(o)) throw new ApiError(409, 'outfit_busy', 'This outfit is still being made');
+    const front = o.angles[0];
+    if (!front) throw badRequest('Its front picture is missing · make a new outfit instead');
+    const missing = [1, 2, 3].filter(i => !o.angles[i]);
+    if (!missing.length) return { outfit: outfitView(o), cost: 0 };
+    const m = await model(req.user, o.modelId, true);
+    const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'outfit', b);
+    const user = req.user, texts = await ctx.prompts.texts(user.studioId);
+    const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
+    const angleBody = (k: string) => { const img = slotOf(k); return img && img !== slotOf('front') ? img : null; };
+    const byoRun = !b.imageEngine?.provider && !!stepModels?.shot?.startsWith('c_');
+    // A custom model: new shots of the missing angles with her body photo of each and the outfit's front as a reference.
+    const frontRef = [{ image: front, label: 'outfit photo', role: 'product' as const }];
+    const plans = byoRun ? await Promise.all(missing.map(async i => {
+      const ids = await idRefs(user.studioId, { ...m, identityBodySlot: BODY_SLOTS[i]! }, null, { extra: frontRef });
+      return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels) };
+    })) : [];
+    const cost = byoRun ? plans.reduce((a, p) => a + p.plan.perShot, 0) : missing.length * await ctx.images.editCost(user.studioId, stepModels);
+    const bill = await new PhotoBill(ctx, whoOf(user), uid('of'), cost, 'Outfit angles').start();
+    filling.add(o.id);
+    ctx.later(async () => {
+      const made = new Map<number, ImageRef | null>();
+      try {
+        for (const [k, i] of missing.entries()) {
+          const a = OUTFIT_ANGLES[i]!, body = angleBody(BODY_SLOTS[i]!);
+          if (byoRun) {
+            const { ids, plan } = plans[k]!;
+            const spec = { name: o.name, description: o.description || undefined, source: 'reference-set' as const };
+            const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts)[i]!;
+            made.set(i, (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
+              req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } })).images[0] ?? null);
+          } else {
+            const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
+            made.set(i, (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, bill,
+              editOf: front, refs: [slotOf('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: o.seed ?? undefined } })).images[0] ?? null);
+          }
+        }
+      } catch {
+        await bill.fail();
+        filling.delete(o.id);
+        const [cur] = await db.select().from(outfits).where(eq(outfits.id, o.id));
+        if (cur) emitOutfit(cur);
+        return;
+      }
+      await bill.finish();
+      filling.delete(o.id);
+      const [cur] = await db.select().from(outfits).where(eq(outfits.id, o.id));
+      if (!cur) return; // deleted meanwhile (refused while filling, but a model delete takes her outfits)
+      const angles = cur.angles.map((x, i) => x ?? made.get(i) ?? null);
+      const [u] = await db.update(outfits).set({ angles, cost: (cur.cost ?? 0) + bill.spent }).where(eq(outfits.id, o.id)).returning();
+      if (u) emitOutfit(u);
+    }, 0);
+    return { outfit: outfitView(o), cost };
+  });
   app.post<{ Params: { id: string } }>('/v1/outfits/:id/save', async req => {
+    // §5: the name chosen in the preview (optional; the set keeps its name without one).
+    const b = parse(z.object({ name: OutfitName.optional() }).passthrough(), req.body ?? {});
     const [o] = await db.select().from(outfits).where(and(eq(outfits.id, req.params.id), eq(outfits.studioId, req.user.studioId)));
     if (!o) throw notFound('Outfit');
     const m = await model(req.user, o.modelId);
-    const [u] = await db.update(outfits).set({ state: 'ready' }).where(eq(outfits.id, o.id)).returning();
+    const [u] = await db.update(outfits).set({ state: 'ready', ...(b.name ? { name: b.name } : {}) }).where(eq(outfits.id, o.id)).returning();
     emitOutfit(u!);
     if (!m.outfitIds.includes(o.id)) {
       const [mm] = await db.update(models).set({ outfitIds: [...m.outfitIds, o.id] }).where(eq(models.id, m.id)).returning();

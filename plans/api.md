@@ -801,9 +801,12 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 ### Outfit sets
 | | |
 |---|---|
-| `GET /v1/outfits` | → `Outfit[]` (includes unsaved previews) |
+| `GET /v1/outfits` | → `Outfit[]` (includes unsaved previews), oldest first; each carries `createdAt` (ms) and `createdBy`. |
 | `POST /v1/outfits` `{modelId, name, mode, description, images: ImageRef[]}` | → `Outfit` (`state: "generating"`). An `outfit` event follows with `state: "preview"` and four angles on one seed. |
-| `POST /v1/outfits/{id}/save` | → `Outfit` (`state: "ready"`), attached to the model. Retake means another `POST /v1/outfits`. |
+| `POST /v1/outfits/{id}/save` `{name?}` | → `Outfit` (`state: "ready"`), attached to the model; `name` (trimmed, 1–80) is the one chosen in the preview. Retake means another `POST /v1/outfits`. |
+| `PATCH /v1/outfits/{id}` `{name}` | Rename (trimmed, 1–80). Owner or the outfit's maker (`createdBy`), else `403 owner_only`; another studio's → 404. → `Outfit` + `outfit` event. |
+| `DELETE /v1/outfits/{id}` | Same permissions. `409 outfit_busy` while it is generating or its missing angles are being made. Removed from her `outfitIds`; takes and photos are kept. → 204, `{type: "outfit", op: "delete", id}` + a `model` event. Apps drop it from pickers/drafts (no outfit). |
+| `POST /v1/outfits/{id}/fill` `{imageEngine?, imageModel?}` | Makes the missing ¾/side/back from the front (edits; a custom model makes new shots). Same permissions; 400 without a front; 409 while busy. → `{outfit, cost}` (estimate held); an `outfit` event with the filled angles follows (unchanged on failure, nothing charged). |
 
 ### Uploads
 | | |
