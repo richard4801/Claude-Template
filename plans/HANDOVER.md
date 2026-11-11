@@ -12,7 +12,9 @@ https://angelic-elegance-production-c42b.up.railway.app). Prod head when written
 - No half-working features. New jobs go to NEW sessions; finished sessions are archived. Ask clarifying questions.
 - Urgent server fixes are pushed alone; never make them wait behind a long Android/Mac run.
 - Security (verbatim): "Never ask me to paste it into chat, and never read, print, log, or commit it. Keep credentials
-  server-side." No production DB reads. Members never see provider or model names. Confirm spend. No @vvspolly.
+  server-side." No production DB reads. Confirm spend. No @vvspolly.
+  RULE CHANGED (owner, 2026-11-11): the old rule "members never see provider or model names" is LIFTED for models.
+  See 4c. Until 4c is built the code still hides them (tests such as byo-muapi "no provider or model words").
 - The owner is tight on weekly tokens: be economical, save requests to plans, fixes before features.
 - Declined for good (do not build): per-download unique hash, micro-scale/gamma shifts, audio perturbation (platform
   detection evasion). AI music is dropped.
@@ -58,6 +60,19 @@ https://angelic-elegance-production-c42b.up.railway.app). Prod head when written
 7. Editor depth: on-preview dragging and free Mac timeline (5A.4), chroma on images, rounded masks, layer order, groups.
 8. The rest of 5E and 5F.
 The owner may reorder: ask at the start of the new session.
+
+## 4c. Model choice for everyone (owner, 2026-11-11; priority 2–4, build early, it is mostly server)
+Owner: "Model picker should be a feature available to everyone… Provided a model has been added by me when I add a new
+provider, it should be seen by all, and users can select which one they need. It shouldn't be blocked."
+- Every member sees and can pick every enabled model: generative (video, image; built-in and owner-added) and the
+  Claude chat model. Today: `ModelChoice.check` throws 403 owner_only for members; custom models need the per-model
+  `members` flag; `imageModel` on photo routes is owner only; member views strip names.
+- Defaults: a newly added model is available to members at once (the `members` flag defaults on, or goes away).
+- Still owner only: adding providers and keys, prices/markup, switching a model off, studio defaults.
+- Keys never leave the server (unchanged).
+- ASK the owner: (1) do members see the provider company name (e.g. "Muapi") or only the model's name? (2) keep a
+  per-model "hide from members" switch for the owner? (3) members' runs are charged as today (confirm).
+- Update the member-safety tests to the new rule instead of deleting them (keys and prices-at-cost stay hidden).
 
 ## 5. The queue, in order (owner-approved unless marked ASK)
 A. Owner bugs first (`plans/edit-xl-options.md`, "Owner bugs to fix FIRST"):
@@ -120,7 +135,7 @@ should have full control anywhere on our app… provided I give it the go ahead"
    checkpoints; reading its own results (video vision, outfit images) to self-check before showing the owner.
 6b. Claude model picker in chat (owner, 2026-11-11): the owner can switch which Claude model a chat uses (e.g.
    faster/cheaper vs most capable), per chat, with a studio default; show speed and relative cost in plain words.
-   Owner only: members never see model names (standing rule) and run on the studio default. Check how the in-app
+   For EVERYONE, members included (owner corrected this 2026-11-11; see 4c). Check how the in-app
    Claude is billed before building (a bigger model costs more per message). Build with the one-Claude work.
 7. Order suggested: (a) one tool registry + page context + navigation, (b) generation tools in Edit with background
    progress, (c) long-video chain, (d) Blender blocking, (e) the rest of 6.
