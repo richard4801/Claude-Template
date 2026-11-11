@@ -128,4 +128,24 @@ describe('Photo tool · routes (fake image engine)', () => {
     const r = (await owner.req('POST', '/v1/suite/photos', { modelId: model.id, presetId: t.id, count: 1 })).body;
     expect(r.takes[0]).toMatchObject({ title: 'Photo · Laundrette', templateId: t.id });
   });
+  it('without a character (owner 2026-11-11): an image alone, or an image and words; never her identity, outfit or never-add lines', async () => {
+    const img = { image: { asset: 'g_front' }, guides: ['pose', 'look', 'scene'] };
+    const alone = await member.req('POST', '/v1/suite/photos/estimate', { references: [img], count: 1 });
+    expect(alone.status, JSON.stringify(alone.body)).toBe(200);
+    expect(alone.body).toMatchObject({ tool: 'photo', count: 1, ok: true });
+    expect(alone.body.prompt).toMatch(/^A new photograph made from image 1/);
+    const edit = (await member.req('POST', '/v1/suite/photos/estimate', { references: [img], prompt: 'Make it night with neon signs.', count: 1, camera: { lighting: { preset: 'golden_hour' } } })).body;
+    expect(edit.prompt).toMatch(/^Edit image 1: Make it night with neon signs\. Keep everything else/);
+    expect(edit.prompt).toContain('Light: ');
+    for (const p of [alone.body.prompt, edit.prompt]) {
+      expect(p).not.toMatch(/Identity from|Wearing|figure|locked reference|Seed:|rooftop|Do not take the face/);
+      expect(p).not.toContain(model.name);
+    }
+    const made = (await member.req('POST', '/v1/suite/photos', { references: [img], count: 1 })).body;
+    expect(made.takes).toHaveLength(1);
+    expect(made.takes[0]).toMatchObject({ kind: 'shot', title: expect.stringMatching(/^Photo · /) });
+    // Nothing to go on, or a preset / outfit without her, is still refused.
+    expect((await member.req('POST', '/v1/suite/photos/estimate', { prompt: 'A beach.' })).body.error).toBe('Pick a character or add an image');
+    expect((await member.req('POST', '/v1/suite/photos/estimate', {})).status).toBe(400);
+  });
 });

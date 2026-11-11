@@ -13,8 +13,8 @@ const PhotoRefSchema = z.object({ image: ImageRefSchema, guides: z.array(z.enum(
   .refine(r => new Set(r.guides).size === r.guides.length, { message: 'guides must not repeat' });
 
 export const PhotoRequestSchema = z.object({
-  /** The character (a MUSE model) and her outfit. */
-  modelId: z.string().min(1).max(80),
+  /** The character (a MUSE model) and her outfit. Optional (owner 2026-11-11): without one, an image is needed and is the photo to work from. */
+  modelId: z.string().min(1).max(80).optional(),
   outfitId: z.string().max(80).optional(),
   /** The scene and what she does, in the member's words. */
   prompt: z.string().max(2000).default(''),
@@ -114,3 +114,31 @@ export function photoFilter(r: Pick<PhotoRequest, 'camera' | 'gradeLook'>) {
 
 /** "Generate · 4 photos · $0.24". */
 export const photoButton = (count: number, money: string) => `Generate · ${count} photo${count === 1 ? '' : 's'} · ${money}`;
+
+// ------------------------------------------------------------------ Photo without a character (owner 2026-11-11)
+// "I should be able to generate even with just an image." No @character: the uploaded image is the photo to work from.
+// With words: an edit of image 1 (everything else kept). Without: a new still of the same people, clothes and place.
+// No identity, outfit, figure-lock or her never-add lines; only the rig rows the person set (no default scene or light).
+const GUIDE_WORDS: Record<'pose' | 'look' | 'scene', string> = { pose: 'the pose and framing', look: 'the light, colour grade and camera feel', scene: 'the place and background' };
+const andWords = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+export function freePhotoPrompt(o: { prompt: string; still: StillRig; refs: { index: number; guides: ('pose' | 'look' | 'scene')[] }[]; texts: Record<string, string | undefined> }) {
+  const t = o.texts, words = photoPrompt(o.prompt).replace(/[.\s]+$/, '');
+  const [base, ...rest] = [...o.refs].sort((a, b) => a.index - b.index);
+  const lines: string[] = [];
+  if (base) lines.push(words
+    ? `Edit image ${base.index}: ${words}. Keep everything else in image ${base.index} as it is (the same people, faces, bodies, hair and clothes, place and light) unless a line below changes it.`
+    : `A new photograph made from image ${base.index}: the same people, faces, bodies, hair and clothes, in the same place and light, at a fresh natural moment.`);
+  else if (words) lines.push(`${words}.`);
+  for (const r of rest) lines.push(`Copy ${andWords(r.guides.map(g => GUIDE_WORDS[g]))} from image ${r.index}. Do not take the people or clothes from image ${r.index}.`);
+  const s = o.still; // its scene is the prompt itself (stillRig), used above
+  if (s.camera) {
+    const note = s.camera.lensMm <= 24 ? t['shoot.camera.wide'] ?? '' : s.camera.lensMm >= 85 ? t['shoot.camera.tele'] ?? '' : '';
+    lines.push(`Camera: ${s.camera.shot.toLowerCase()} shot, ${s.camera.lensMm}mm lens, ${s.camera.aperture}${note}.`);
+  }
+  if (s.light || s.grade) lines.push([s.light && `Light: ${s.light.toLowerCase()}`, s.grade && `${s.light ? 'grade' : 'Grade'}: ${s.grade.toLowerCase()}`].filter(Boolean).join('; ') + '.');
+  if (s.direction) lines.push(s.direction);
+  if (t['style.house']) lines.push(`Style: ${t['style.house'].trim().replace(/[.\s]+$/, '')}.`);
+  const never = (t['never.base'] ?? '').split(',').map(x => x.trim()).filter(Boolean);
+  if (never.length) lines.push(`Never add: ${never.join(', ')}.`);
+  return lines.join('\n');
+}

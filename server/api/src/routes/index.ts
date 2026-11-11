@@ -33,7 +33,7 @@ import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
 import { CatalogError } from '../replicate/catalog.js';
 import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
-import { PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
+import { freePhotoPrompt, PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
 import { referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
@@ -652,7 +652,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   const ShootRefBody = z.object({ image: ImageRefSchema, guides: z.array(z.enum(['pose', 'look', 'scene'])).min(1).max(3) })
     .refine(r => !!(r.image.asset || r.image.url), { message: 'each reference needs an image' })
     .refine(r => new Set(r.guides).size === r.guides.length, { message: 'guides must not repeat' });
-  const ShootBody = z.object({ modelId: z.string(), outfitId: z.string().optional(), scene: z.string().max(200).optional(), prompt: z.string().max(4000).optional(),
+  const ShootBody = z.object({ modelId: z.string().optional(), outfitId: z.string().optional(), scene: z.string().max(200).optional(), prompt: z.string().max(4000).optional(),
     seed: z.number().int().nullable().optional(), count: z.number().int().optional(), direction: z.string().max(500).optional(), lockSeed: z.boolean().optional(),
     presets: z.boolean().optional(), camera: z.object({ shot: z.string().min(1).max(20), lens: z.number().int().min(8).max(400), aperture: z.string().min(1).max(10) }).optional(),
     light: z.string().max(80).optional(), grade: z.string().max(80).optional(), refs: z.array(ShootRefBody).max(3).optional(),
@@ -663,12 +663,21 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   async function planShoot(u: AuthUser, body: unknown, still?: StillRig, engine?: EngineSelection, models?: StepOverrides) {
     const b = parse(ShootBody, body);
     if (engine) (b as { imageEngine?: unknown }).imageEngine = engine; // WS5: a custom image model (checked by the caller)
-    const m = await model(u, b.modelId, true);
-    const o = await outfitOf(u, b.outfitId);
     const count = Math.min(4, Math.max(1, b.count ?? 4));
     const stepModels = models ?? ctx.imageModels.overridesFrom(u.role, b as { models?: unknown }); // WS13: `models` = already checked
     const texts = await ctx.prompts.texts(u.studioId);
     const refsIn = (b.refs ?? []) as ShootRefIn[];
+    // Photo without a character (owner 2026-11-11): the image(s) alone, or an image and words (suite/photo.ts freePhotoPrompt).
+    if (!b.modelId) {
+      if (b.templateId) throw badRequest('Presets need a character · pick one with @');
+      if (b.outfitId) throw badRequest('An outfit needs a character · pick one with @');
+      if (!refsIn.length) throw badRequest('Pick a character or add an image');
+      const plan = await ctx.images.shotPlan(u.studioId, [], refsIn, 2, b.imageEngine, stepModels);
+      const text = freePhotoPrompt({ prompt: b.prompt ?? still?.scene ?? '', still: still ?? { notes: [] }, refs: plan.sent, texts });
+      return { kind: 'free' as const, b, m: null, o: undefined, count, stepModels, texts, refsIn, plan, text };
+    }
+    const m = await model(u, b.modelId, true);
+    const o = await outfitOf(u, b.outfitId);
     if (b.templateId) {
       const t = await ctx.templates.visible(u, b.templateId);
       const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage as ImageRef : null;
@@ -702,6 +711,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const s = await planShoot(req.user, req.body);
     const estimate = s.count * s.plan.perShot;
     const money = { estimate, estimateLabel: P.aboutMoney(estimate) };
+    if (s.kind === 'free') return { slots: [...sheetSlot(s), { layer: 'direction', text: s.text }], text: withSheet(s, s.text), seed: s.b.seed ?? null, removed: [], ...previewRefs(s.plan), ...money, edited: false };
     if (s.kind === 'template') {
       const v = await ctx.templates.preview(req.user, s.t.id, { ...(req.body as object), modelId: s.m.id }, async () => ({ identity: s.identity, outfit: outfitSpec(s.o) }), { refs: s.plan.sent });
       const vv = v as { text?: string; slots?: unknown[] };
@@ -725,11 +735,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const noun = o2.noun ?? 'Photo', billNoun = o2.noun ?? 'Photo'; // Photoshoot is gone: legacy /v1/shoots takes are "Photo" too
     if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun, o2.draft, o2);
     const { b, m, o, count, plan } = s;
+    const free = s.kind === 'free'; // no character (owner 2026-11-11)
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
     o2.started?.();
-    const prompt = s.custom ?? s.built.text;
-    const seed = b.seed ?? s.built.seed ?? undefined;
+    const prompt = free ? s.text : s.custom ?? s.built.text;
+    const seed = b.seed ?? (free ? undefined : s.built.seed ?? undefined);
     let r;
     try {
       r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
@@ -740,13 +751,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     await bill.finish();
     if (filter) r.images = await Promise.all(r.images.map(async img => (await ctx.templates.postProcess(img, { afterEffects: { look: filter } }, { studioId: req.user.studioId, userId: req.user.id })).ref));
-    const ch = shootChoices(s.spec, s.texts);
-    const label = (b.scene?.trim() || ch.scene).split(' · ')[0]!.slice(0, 28);
-    const cv = cameraValues(ch.camera, s.texts);
-    // The shot's own layers (for "Save as template"), from the choices rather than the (owner-editable) prompt wording.
-    const layers = b.presets === false ? {} : { scene: ch.scene.toLowerCase(), camera: `${cv.shot} shot, ${cv.lens}mm lens, ${cv.aperture}${cv.lensNote}`, light: `${ch.light.toLowerCase()}; grade: ${ch.grade.toLowerCase()}` };
+    let label: string, layers: Record<string, string> = {};
+    if (s.kind === 'free') label = (b.scene?.trim() || b.prompt?.trim() || 'From your image').slice(0, 28);
+    else {
+      const ch = shootChoices(s.spec, s.texts);
+      label = (b.scene?.trim() || ch.scene).split(' · ')[0]!.slice(0, 28);
+      const cv = cameraValues(ch.camera, s.texts);
+      // The shot's own layers (for "Save as template"), from the choices rather than the (owner-editable) prompt wording.
+      if (b.presets !== false) layers = { scene: ch.scene.toLowerCase(), camera: `${cv.shot} shot, ${cv.lens}mm lens, ${cv.aperture}${cv.lensNote}`, light: `${ch.light.toLowerCase()}; grade: ${ch.grade.toLowerCase()}` };
+    }
     const rows = r.images.map((img, n) => ({
-      id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
+      id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m?.id ?? null, index: n + 1, of: r.images.length,
       title: `${noun} · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costs[n] ?? 0, seed: r.seed ?? seed ?? 0, status: 'test' as const,
       thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, refs: s.refsIn.length ? s.refsIn : null, createdAt: Date.now() + n, draft: o2.draft ?? null,
     }));
@@ -828,7 +843,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const estimate = s.count * s.plan.perShot, money = P.aboutMoney(estimate);
     return { tool: 'photo', count: s.count, perPhoto: s.plan.perShot, estimate, priceLine: `${money} · ${s.count} photo${s.count === 1 ? '' : 's'}`,
       buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null,
-      ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.custom ?? s.built.text }) };
+      ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.kind === 'free' ? s.text : s.custom ?? s.built.text }) };
   });
   // Every photo run is a job (WS19): a `render` row with request.engine 'photo', so the Queue, the hub and the Suite's
   // stage show it while it runs, like a video. The stills stay jobless takes (the Library's as before); the job lists
@@ -845,10 +860,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const { s, graded } = await photoPlan(req.user, body);
     const u = req.user, count = s.count, cost = count * s.plan.perShot, now = Date.now();
     const row: typeof jobs.$inferInsert = {
-      id: uid('j'), studioId: u.studioId, userId: u.id, kind: 'render', title: `Photo · ${count} photo${count === 1 ? '' : 's'}`, modelId: s.m.id, modelName: s.m.name,
+      id: uid('j'), studioId: u.studioId, userId: u.id, kind: 'render', title: `Photo · ${count} photo${count === 1 ? '' : 's'}`, modelId: s.m?.id ?? '', modelName: s.m?.name ?? '',
       outfitId: s.o?.id ?? '', request: { engine: 'photo', tool: 'photo', takes: count, count, engineLabel: 'Photo' }, state: 'running', progress: 2,
-      take: 1, totalSteps: count, phase: photoPhase(count), cost, prompt: s.kind === 'template' ? s.t.name : (s.custom ?? s.built.text), seed: 0,
-      thumb: s.o?.angles?.[0] ?? s.m.slots[0]?.image ?? null, createdAt: now, startedAt: now, ...(draft ? { draft } : {}),
+      take: 1, totalSteps: count, phase: photoPhase(count), cost, prompt: s.kind === 'template' ? s.t.name : s.kind === 'free' ? s.text : (s.custom ?? s.built.text), seed: 0,
+      thumb: s.o?.angles?.[0] ?? s.m?.slots[0]?.image ?? s.refsIn[0]?.image ?? null, createdAt: now, startedAt: now, ...(draft ? { draft } : {}),
     };
     const set = async (f: Partial<typeof jobs.$inferInsert>, extra: Record<string, unknown> = {}) => {
       const [j] = await db.update(jobs).set(f).where(and(eq(jobs.id, row.id!), eq(jobs.state, 'running'))).returning();
