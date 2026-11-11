@@ -53,13 +53,14 @@ final class ClaudeCodeService: ObservableObject {
 
     // MARK: Wiring
 
-    /// After sign-in / reconnect. A different server restarts it; a member stops it; no server + owner = demo mode.
+    /// After sign-in / reconnect. A different server restarts it; no server = demo mode.
     func configure(baseURL: URL?, isOwner: Bool, token: @escaping @Sendable () -> String?) {
         let demo = baseURL == nil
         if configured, baseURL == self.baseURL, isOwner == self.isOwner, demo == isDemo { return }
         stop()
         self.isOwner = isOwner
-        guard isOwner else { return }
+        // One Claude (owner, 2026-11-11): every member runs Claude Code on their own Claude plan too; the server gives
+        // their connection members' tools only.
         self.baseURL = baseURL
         isDemo = demo
         if let baseURL {

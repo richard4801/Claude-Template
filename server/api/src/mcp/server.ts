@@ -4,6 +4,7 @@ import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError } from '../errors.js';
 import type { CameraService } from '../camera/service.js';
 import { allowedBy, MUSE_TOOLS, toolByName, type ToolEnv } from './tools.js';
+import { registryByName } from '../claude/registry.js';
 
 export const PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26'];
 export const SERVER_INFO = { name: 'muse', title: 'MUSE', version: '0.1.0' };
@@ -21,7 +22,9 @@ type RpcReq = { jsonrpc?: string; id?: RpcId; method?: string; params?: Record<s
 export const rpcError = (id: RpcId, code: number, message: string, data?: unknown) => ({ jsonrpc: '2.0', id, error: { code, message, ...(data !== undefined ? { data } : {}) } });
 const ok = (id: RpcId, result: unknown) => ({ jsonrpc: '2.0', id, result });
 
-const toolList = (scopes?: string[]) => MUSE_TOOLS.filter(t => allowedBy(t, scopes)).map(t => ({
+/** One Claude: a member's connection sees and calls only the tools members may use (registry `members`). */
+const memberOk = (user: AuthUser, name: string) => user.role === 'owner' || !!registryByName.get(name)?.members;
+const toolList = (user: AuthUser, scopes?: string[]) => MUSE_TOOLS.filter(t => allowedBy(t, scopes) && memberOk(user, t.name)).map(t => ({
   name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
   annotations: { title: t.title, readOnlyHint: !!t.readOnly, destructiveHint: false, idempotentHint: !!t.idempotent, openWorldHint: false },
 }));
@@ -45,10 +48,10 @@ export async function handleRpc(ctx: Ctx, camera: CameraService, user: AuthUser,
       });
     }
     case 'ping': return ok(id, {});
-    case 'tools/list': return ok(id, { tools: toolList(scopes) });
+    case 'tools/list': return ok(id, { tools: toolList(user, scopes) });
     case 'tools/call': {
       const name = typeof p.name === 'string' ? p.name : '';
-      if (!toolByName.has(name)) return rpcError(id, -32602, `Unknown tool: ${name || '(none)'}`);
+      if (!toolByName.has(name) || !memberOk(user, name)) return rpcError(id, -32602, `Unknown tool: ${name || '(none)'}`);
       const tool = toolByName.get(name)!;
       if (!allowedBy(tool, scopes)) return ok(id, { content: [{ type: 'text', text: `insufficient_scope: this connection lacks ${tool.scope}` }], isError: true });
       const env: ToolEnv = { ctx, camera, user, source: 'mcp', scopes };
@@ -71,7 +74,7 @@ export async function handleRpc(ctx: Ctx, camera: CameraService, user: AuthUser,
       }
     }
     case 'resources/list': {
-      if (scopes && !scopes.includes('camera:read')) return ok(id, { resources: [] });
+      if ((scopes && !scopes.includes('camera:read')) || user.role !== 'owner') return ok(id, { resources: [] });
       const sessions = await camera.list(user, { limit: 50 });
       return ok(id, { resources: sessions.map(s => ({ uri: `muse://camera-session/${s.id}`, name: String(s.title), mimeType: 'application/json',
         description: `Camera session (${s.status}, rev ${s.revision})` })) });
@@ -79,7 +82,7 @@ export async function handleRpc(ctx: Ctx, camera: CameraService, user: AuthUser,
     case 'resources/templates/list':
       return ok(id, { resourceTemplates: [{ uriTemplate: 'muse://camera-session/{id}', name: 'Camera session', mimeType: 'application/json' }] });
     case 'resources/read': {
-      if (scopes && !scopes.includes('camera:read')) return rpcError(id, -32002, 'Resource not found');
+      if ((scopes && !scopes.includes('camera:read')) || user.role !== 'owner') return rpcError(id, -32002, 'Resource not found');
       const uri = typeof p.uri === 'string' ? p.uri : '';
       const sid = /^muse:\/\/camera-session\/(cs_[A-Za-z0-9]+)$/.exec(uri)?.[1];
       if (!sid) return rpcError(id, -32002, 'Resource not found', { uri });

@@ -259,6 +259,8 @@ final class AppStore {
     let suite = SuiteState()
     /// "Recreate this edit" in Edit (AppStore+Recreate.swift).
     let recreate = RecreateState()
+    /// One Claude (plans/one-claude.md, AppStore+OneClaude.swift): the panel on every page and its chats.
+    let oneClaude = OneClaudeState()
     /// "Import a video from a link" (WS6, AppStore+LinkImport.swift).
     let linkImport = LinkImportState()
     /// The owner's model picks per purpose and the engine catalog (WS6, AppStore+EngineChoice.swift).

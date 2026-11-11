@@ -36,6 +36,22 @@ public protocol ClaudeAPI: Sendable {
     func renameThread(_ id: String, title: String) async throws -> ClaudeThread
     /// DELETE: the chat and its messages.
     func deleteThread(_ id: String) async throws
+
+    // One Claude (plans/one-claude.md): the person's own chats, the page they are on, the studio's memory.
+    /// GET /v1/claude/chats: newest first (old per-place chats included).
+    func chats(query: String?) async throws -> [ClaudeChatSummary]
+    /// POST /v1/claude/chats: a new chat, starting on this page.
+    func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary
+    /// PUT …/page: where the person is now (Claude reads it each turn).
+    func setChatPage(_ id: String, page: ClaudePage) async throws
+    /// PATCH {archived: true}: out of the list, kept.
+    func archiveChat(_ id: String) async throws
+    /// GET /v1/claude/memory: this person's own memory (per person).
+    func memory() async throws -> ClaudeMemory
+    /// POST: Remember (on Claude's question), or added by hand.
+    func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule
+    func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule
+    func deleteMemory(_ id: String) async throws
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -44,6 +60,14 @@ public extension ClaudeAPI {
     func newThread(contextKind: String, contextId: String) async throws -> ClaudeThread { throw ApiError("not_found", "This server keeps one chat per place") }
     func renameThread(_ id: String, title: String) async throws -> ClaudeThread { throw ApiError("not_found", "This server keeps one chat per place") }
     func deleteThread(_ id: String) async throws { throw ApiError("not_found", "This server keeps one chat per place") }
+    func chats(query: String?) async throws -> [ClaudeChatSummary] { throw ApiError("not_found", "This server has one chat per place") }
+    func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary { throw ApiError("not_found", "This server has one chat per place") }
+    func setChatPage(_ id: String, page: ClaudePage) async throws {}
+    func archiveChat(_ id: String) async throws { throw ApiError("not_found", "This server has one chat per place") }
+    func memory() async throws -> ClaudeMemory { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func deleteMemory(_ id: String) async throws { throw ApiError("not_found", "This server has no Claude memory yet") }
 }
 
 enum ClaudeIds {
@@ -128,6 +152,37 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     private struct SessionPatch: Encodable { var claudeSessionId: String }
     private struct Text: Encodable { var text: String }
     private struct TokenReq: Encodable { var ttlMinutes: Int? }
+    private struct NewChat: Encodable { var page: ClaudePage? }
+    private struct PagePut: Encodable { var page: ClaudePage }
+    private struct Archive: Encodable { var archived: Bool }
+
+    // MARK: One Claude
+
+    public func chats(query: String?) async throws -> [ClaudeChatSummary] {
+        var path = "v1/claude/chats"
+        if let q = query?.trimmingCharacters(in: .whitespaces), !q.isEmpty, let e = q.addingPercentEncoding(withAllowedCharacters: .alphanumerics) { path += "?q=\(e)" }
+        let list: ClaudeChatList = try await call("GET", path)
+        return list.chats
+    }
+    public func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary { try await call("POST", "v1/claude/chats", NewChat(page: page)) }
+    public func setChatPage(_ id: String, page: ClaudePage) async throws {
+        _ = try await send(request("PUT", "v1/claude/chats/\(try ClaudeIds.check(id))/page", body: try encoder.encode(PagePut(page: page))))
+    }
+    public func archiveChat(_ id: String) async throws {
+        _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
+    }
+    public func memory() async throws -> ClaudeMemory { try await call("GET", "v1/claude/memory") }
+    private struct MemoryNew: Encodable { var text: String; var area: String; var characterId: String? }
+    private struct MemoryPin: Encodable { var pinned: Bool }
+    public func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule {
+        try await call("POST", "v1/claude/memory", MemoryNew(text: text, area: area, characterId: characterId))
+    }
+    public func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule {
+        try await call("PATCH", "v1/claude/memory/\(try ClaudeIds.check(id))", MemoryPin(pinned: pinned))
+    }
+    public func deleteMemory(_ id: String) async throws {
+        _ = try await send(request("DELETE", "v1/claude/memory/\(try ClaudeIds.check(id))"))
+    }
 
     // MARK: ClaudeAPI
 
@@ -167,11 +222,23 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func mcpSessionToken(ttlMinutes: Int?) async throws -> McpSessionToken { try await call("POST", "v1/mcp/session-token", TokenReq(ttlMinutes: ttlMinutes)) }
 
     public func apiTurn(threadId: String, text: String) -> AsyncThrowingStream<ChatEvent, Error> {
+        turnStream { ("v1/claude/threads/\(try ClaudeIds.check(threadId))/api-turn", try JSONEncoder().encode(Text(text: text))) }
+    }
+
+    private struct ChatTurn: Encodable { var text: String; var page: ClaudePage? }
+    /// One Claude: a turn on the studio's Claude key (members; the owner when her Mac's Claude Code isn't there).
+    /// The `ui` lines (open a page, "Remembered …") also arrive as live events.
+    public func chatTurn(chatId: String, text: String, page: ClaudePage?) -> AsyncThrowingStream<ChatEvent, Error> {
+        turnStream { ("v1/claude/chats/\(try ClaudeIds.check(chatId))/turn", try JSONEncoder().encode(ChatTurn(text: text, page: page))) }
+    }
+
+    private func turnStream(_ target: @escaping @Sendable () throws -> (String, Data)) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { cont in
             let task = Task { [weak self] in
                 guard let self else { cont.finish(); return }
                 do {
-                    var r = self.request("POST", "v1/claude/threads/\(try ClaudeIds.check(threadId))/api-turn", body: try self.encoder.encode(Text(text: text)), timeout: 600)
+                    let (path, body) = try target()
+                    var r = self.request("POST", path, body: body, timeout: 600)
                     r.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     #if canImport(FoundationNetworking)
                     let data = try await self.send(r)

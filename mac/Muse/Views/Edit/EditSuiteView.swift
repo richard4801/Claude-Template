@@ -256,7 +256,11 @@ struct EditSuiteEditor: View {
             focused = true
             // Review mode (SnapshotRunner.learnShots): the Claude panel up on its Playbook tab.
             if SnapshotRunner.state.claudeTab != nil { showClaude = true }
+            reportClaudePage()
         }
+        // One Claude: Claude sees this edit (its take and live session).
+        .onChange(of: session.liveConnected) { _, _ in reportClaudePage() }
+        .onDisappear { store.oneClaude.viewPage = nil }
         // Shortcuts are off while a text box has the cursor (owner bug 2026-11-11: typing in Claude chat played,
         // split or deleted clips). The table lives in MuseCore (EditShortcuts) with its tests.
         .onKeyPress(.space) { shortcut(.space) }
@@ -349,12 +353,21 @@ struct EditSuiteEditor: View {
         return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
     }
 
+    private func reportClaudePage() {
+        var ids = ["takeId": session.take.id]
+        if let s = session.live?.sessionId { ids["sessionId"] = s }
+        store.oneClaude.viewPage = ClaudePage(name: "edit", label: session.title, ids: ids)
+        store.oneClaudePageChanged()
+    }
+
     /// Claude (owner only), Templates, Hook ideas and, while the inspector is hidden, Show inspector.
     private func quietButtons(iconOnly: Bool) -> some View {
         HStack(spacing: Space.s1) {
             if session.isOwner {
-                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: showClaude, plain: !showClaude, iconOnly: iconOnly) { showClaude.toggle() }
-                    .accessibilityLabel(showClaude ? "Hide Claude" : "Show Claude")
+                // One Claude (plans/one-claude.md): the panel on the right of every page.
+                let on = store.oneClaude.open
+                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on, iconOnly: iconOnly) { store.toggleOneClaude() }
+                    .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
                     .help(session.liveConnected ? "This edit is shared live with Claude" : "Claude")
             }
             SuiteToolButton(title: "Templates", icon: "stack", plain: true, iconOnly: iconOnly) { setMedia(true); session.binTab = .templates }

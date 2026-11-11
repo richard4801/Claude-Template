@@ -156,7 +156,11 @@ describe('scopes, refresh, grants', () => {
     expect(t).toMatchObject({ token: expect.stringMatching(/^muse_oat_/), mcpUrl: RES });
     expect(t.expiresAt - Date.now()).toBeLessThanOrEqual(30 * 60_000 + 1000);
     expect((await mcp(t.token, 'tools/list')).body.result.tools.map((x: any) => x.name)).toContain('create_shot_draft');
-    expect((await member.req('POST', '/v1/mcp/session-token', {})).status).toBe(403);
+    // One Claude: a member's Mac gets one too (their own Claude plan), and sees members' tools only.
+    const mtok = (await member.req('POST', '/v1/mcp/session-token', {})).body;
+    const mtools = (await mcp(mtok.token, 'tools/list')).body.result.tools.map((x: any) => x.name);
+    expect(mtools).not.toContain('create_shot_draft');
+    expect(mtools).not.toContain('list_characters');
     expect((await owner.req('GET', '/v1/mcp/grants')).body.some((g: any) => g.clientId === 'muse-app')).toBe(false);
   });
 });

@@ -80,9 +80,9 @@ describe('chat sessions per place', () => {
     expect((await list('suite:photo')).threads.map((t: any) => t.id)).toEqual([p1.id]);
     expect((await owner.req('GET', '/v1/claude/threads?key=nope')).status).toBe(400);
 
-    // Owner only, as every Claude thread.
-    expect((await member.req('GET', '/v1/claude/threads?key=suite:photo')).status).toBe(403);
-    expect((await member.req('DELETE', `/v1/claude/threads/${p1.id}`)).status).toBe(403);
+    // Each person's own (one Claude): a member lists only theirs and can't delete the owner's.
+    expect((await member.req('GET', '/v1/claude/threads?key=suite:photo')).body.threads).toHaveLength(0);
+    expect((await member.req('DELETE', `/v1/claude/threads/${p1.id}`)).status).toBe(404);
   });
 
   it('messages are kept: closing and coming back (any device) reads the same chat with its messages, each stored once', async () => {

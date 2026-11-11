@@ -18,6 +18,8 @@ import Observation
 final class SuiteClaudeBridge {
     /// The panel beside the rail (in the picture's place).
     var open = false
+    /// One Claude: the panel on the right shares the composer with Claude (no Suite panel open).
+    var linked = false
     var assist: SuiteAssist?
     /// WS18: the mode's chat list the shared draft belongs to (`suite:photo`…). Each mode returns to its own latest chat.
     var key: String?
@@ -133,7 +135,7 @@ extension AppStore {
         let lines = c.demoLines
         c.reset(keepOpen: true)
         c.demoLines = lines
-        if c.open { Task { await ensureSuiteAssist() } }
+        if c.open { Task { await ensureSuiteAssist() } } else if c.linked { Task { await oneClaudeLinkSuite() } }
     }
 
     /// The mode's list of chats (the composer's tool).
@@ -246,7 +248,7 @@ extension AppStore {
 
     /// A `suiteAssist` live event.
     func suiteAssistEvent(_ a: SuiteAssist) {
-        guard isOwner, suite.claude.assist?.id == a.id else { return }
+        guard suite.claude.assist?.id == a.id else { return } // one Claude: members' own drafts too
         takeSuiteAssist(a)
     }
 
@@ -432,7 +434,7 @@ extension AppStore {
     /// The composer changed (by hand, Undo, a picker): send it after a short pause.
     func suiteComposerChanged(now: Bool = false) {
         let c = suite.claude
-        guard c.assist != nil, c.open || c.refsDirty, suite.composer != c.synced || c.refsDirty else { return }
+        guard c.assist != nil, c.open || c.linked || c.refsDirty, suite.composer != c.synced || c.refsDirty else { return }
         c.pushTask?.cancel()
         c.pushTask = Task { [weak self] in
             if !now { try? await Task.sleep(nanoseconds: 700_000_000) }

@@ -49,7 +49,7 @@ describe('Claude in Recreate · threads and the API fallback', () => {
     // The same thread again; a reference that isn't theirs is not found; members can't open threads.
     expect((await owner.req('POST', '/v1/claude/threads', { contextKind: 'recreate', contextId: refId })).body.id).toBe(t.id);
     expect((await owner.req('POST', '/v1/claude/threads', { contextKind: 'recreate', contextId: 'rx_nope' })).status).toBe(404);
-    expect((await member.req('POST', '/v1/claude/threads', { contextKind: 'recreate', contextId: refId })).status).toBe(403);
+    expect((await member.req('POST', '/v1/claude/threads', { contextKind: 'recreate', contextId: refId })).status).toBe(404); // one Claude: members have their own chats, never about the owner's reference
     const e = (await owner.req('POST', '/v1/claude/threads', { contextKind: 'edit', contextId: 'es_x' })).body;
     expect(e.brief).toMatchObject({ sessionId: 'es_x', tools: expect.arrayContaining(['get_edit', 'apply_edit_ops']) });
   });

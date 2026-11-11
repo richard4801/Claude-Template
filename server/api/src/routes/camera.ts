@@ -82,7 +82,8 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
   // OAuth connections (claude.ai connector, Claude Code) and the Mac app's own short-lived token for its local Claude Code.
   app.get('/v1/mcp/grants', owner, async req => listGrants(ctx, req.user));
   app.delete<P>('/v1/mcp/grants/:id', owner, async (req, reply) => { await revokeGrantOf(ctx, req.user, req.params.id); return reply.status(204).send(); });
-  app.post('/v1/mcp/session-token', owner, async req => {
+  // One Claude: members' Claude Code (their own plan) gets a token too; the MCP server gives them members' tools only.
+  app.post('/v1/mcp/session-token', async req => {
     const b = parse(z.object({ ttlMinutes: z.number().int().min(5).max(720).optional() }).strict(), req.body ?? {});
     const t = await sessionToken(ctx, req.user, b.ttlMinutes ?? 240);
     return { token: t.access_token, expiresAt: t.expiresAt, mcpUrl: resourceOf(ctx) };
