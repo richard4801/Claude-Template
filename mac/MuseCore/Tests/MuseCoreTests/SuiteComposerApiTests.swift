@@ -173,12 +173,12 @@ final class SuiteComposerApiTests: XCTestCase {
         let e = try await m.suiteEstimate(d.request(InputSlots(), d.inputs(c)))
         XCTAssertNil(e.engine)
         XCTAssertTrue(SuiteText.isMemberSafe(e.label + e.buttonLabel + e.priceLine))
+        // 4c (owner, 2026-11-11): model choice is for everyone, so a member's chosen model is no longer refused as owner-only.
         do {
             var pinned = d.request(InputSlots(), d.inputs(c))
             pinned.engineModel = "h3"
             _ = try await m.suiteEstimate(pinned)
-            XCTFail("members can't pin an engine")
-        } catch let e as ApiError { XCTAssertEqual(e.code, "owner_only") }
+        } catch let e as ApiError { XCTAssertNotEqual(e.code, "owner_only", "members may pick a model (4c)") }
     }
 
     // MARK: Extend and Upscale
