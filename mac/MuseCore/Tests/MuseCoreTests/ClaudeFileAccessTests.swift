@@ -89,6 +89,11 @@ final class ClaudeFileAccessTests: XCTestCase {
         XCTAssertNil(ClaudeFilePolicy.uploadType("a.txt"))
     }
 
+    func testTheAppSaysItCanAnswerFileQuestions() {
+        let api = HTTPClaudeAPI(baseURL: URL(string: "https://muse.example")!, token: { "t" })
+        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results")
+    }
+
     func testOffRefusesEverything() {
         XCTAssertEqual(ClaudeFilePolicy.verdict(ask("Read", ["file_path": .string("/Users/me/a.txt")]), mode: .off, folders: ["/"], cwd: cwd, home: home), .deny(ClaudeFilePolicy.offRefusal))
     }

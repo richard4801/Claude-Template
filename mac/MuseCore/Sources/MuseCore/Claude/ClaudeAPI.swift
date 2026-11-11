@@ -132,12 +132,15 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         r.timeoutInterval = timeout
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         if let t = token() { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        // This app shows file and upload cards and answers results (the server asks only apps that say so).
+        r.setValue(Self.capabilities, forHTTPHeaderField: "X-Muse-Caps")
         if let body {
             r.httpBody = body
             r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         return r
     }
+    public static let capabilities = "files,results"
 
     private func send(_ r: URLRequest) async throws -> Data {
         let (data, resp): (Data, URLResponse?)
