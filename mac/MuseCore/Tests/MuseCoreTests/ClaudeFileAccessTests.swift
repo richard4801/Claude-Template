@@ -166,3 +166,30 @@ final class ClaudeResultsTests: XCTestCase {
         XCTAssertEqual(old.resultMode, .look)
     }
 }
+
+/// Delete chats: what a chat leaves on this Mac, and nothing else.
+final class ClaudeLocalSessionsTests: XCTestCase {
+    func testTheChatsFoldersOnlyAndClaudeCodesProjectNaming() {
+        let home = URL(fileURLWithPath: "/Users/me"), run = URL(fileURLWithPath: "/Users/me/MUSE/Claude")
+        XCTAssertEqual(ClaudeLocalSessions.projectName("/Users/me/MUSE/Claude/ct_1a"), "-Users-me-MUSE-Claude-ct-1a")
+        let f = ClaudeLocalSessions.folders(chatId: "ct_1a", home: home, runRoot: run).map(\.path)
+        XCTAssertEqual(f[0], "/Users/me/MUSE/Claude/ct_1a")
+        XCTAssertEqual(f[1], "/Users/me/.claude/projects/-Users-me-MUSE-Claude-ct-1a")
+        XCTAssertTrue(f[2].hasSuffix("/claude/ct_1a"))
+        XCTAssertEqual(ClaudeLocalSessions.folders(chatId: "../x", home: home, runRoot: run), [])
+        XCTAssertEqual(ClaudeLocalSessions.folders(chatId: "", home: home, runRoot: run), [])
+    }
+
+    func testForgetRemovesThoseFolders() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("muse-forget-\(UUID().uuidString)")
+        let run = tmp.appendingPathComponent("MUSE/Claude")
+        let dirs = ClaudeLocalSessions.folders(chatId: "ct_9", home: tmp, runRoot: run).prefix(2)
+        for d in dirs { try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+        let other = run.appendingPathComponent("ct_8")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        ClaudeLocalSessions.forget(chatId: "ct_9", home: tmp, runRoot: run)
+        for d in dirs { XCTAssertFalse(FileManager.default.fileExists(atPath: d.path)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+        try? FileManager.default.removeItem(at: tmp)
+    }
+}

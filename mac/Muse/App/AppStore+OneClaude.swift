@@ -146,6 +146,33 @@ extension AppStore {
         }
     }
 
+    /// Delete chats (owner, 2026-11-11): by id and/or every chat not used for `olderThanDays` days. Their messages go;
+    /// memory and anything made stay. What each chat left on this Mac goes too (its Claude Code session included).
+    /// Deleting the open chat opens a new one. → an error to show, or nil.
+    @discardableResult
+    func deleteOneClaudeChats(_ ids: [String], olderThanDays: Int? = nil) async -> String? {
+        guard let api = oneClaudeAPI else { return "Sign in to your MUSE server first." }
+        do {
+            let gone = try await api.deleteChats(ids: ids, olderThanDays: olderThanDays)
+            oneClaudeForget(Set(gone))
+            if oneClaude.chatId == nil || !oneClaude.chats.contains(where: { $0.id == oneClaude.chatId }) { await newOneClaudeChat() }
+            return nil
+        } catch {
+            return (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+        }
+    }
+
+    /// Chats deleted here or on another device: off the list and off this Mac.
+    func oneClaudeForget(_ ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        oneClaude.chats.removeAll { ids.contains($0.id) }
+        for id in ids { ClaudeLocalSessions.forget(chatId: id) }
+        if let open = oneClaude.chatId, ids.contains(open) {
+            oneClaude.chatId = nil
+            UserDefaults.standard.removeObject(forKey: OneClaudeState.chatKey)
+        }
+    }
+
     // MARK: Following the person
 
     /// The page changed (screen, Suite tool, an edit or reference opened): tell the server after a moment.
@@ -186,6 +213,11 @@ extension AppStore {
             for await f in feed {
                 guard let self, !Task.isCancelled else { break }
                 if case .live(.ui(let tid, let name, let ui)) = f { self.oneClaudeUI(threadId: tid, name: name, ui) }
+                if case .live(.threadDeleted(let tid)) = f, self.oneClaude.chats.contains(where: { $0.id == tid }) {
+                    let wasOpen = self.oneClaude.chatId == tid
+                    self.oneClaudeForget([tid])
+                    if wasOpen { await self.newOneClaudeChat() }
+                }
             }
         }
     }

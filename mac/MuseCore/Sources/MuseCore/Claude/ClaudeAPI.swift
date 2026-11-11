@@ -46,6 +46,8 @@ public protocol ClaudeAPI: Sendable {
     func setChatPage(_ id: String, page: ClaudePage) async throws
     /// PATCH {archived: true}: out of the list, kept.
     func archiveChat(_ id: String) async throws
+    /// Deletes the person's own chats (by id and/or not used for olderThanDays days) → the ids deleted.
+    func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String]
     /// GET /v1/claude/memory: this person's own memory (per person).
     func memory() async throws -> ClaudeMemory
     /// POST: Remember (on Claude's question), or added by hand.
@@ -75,6 +77,7 @@ public extension ClaudeAPI {
     func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary { throw ApiError("not_found", "This server has one chat per place") }
     func setChatPage(_ id: String, page: ClaudePage) async throws {}
     func archiveChat(_ id: String) async throws { throw ApiError("not_found", "This server has one chat per place") }
+    func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String] { throw ApiError("not_found", "This server can't delete chats yet. Update the server.") }
     func memory() async throws -> ClaudeMemory { throw ApiError("not_found", "This server has no Claude memory yet") }
     func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
     func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
@@ -190,6 +193,12 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary { try await call("POST", "v1/claude/chats", NewChat(page: page)) }
     public func setChatPage(_ id: String, page: ClaudePage) async throws {
         _ = try await send(request("PUT", "v1/claude/chats/\(try ClaudeIds.check(id))/page", body: try encoder.encode(PagePut(page: page))))
+    }
+    private struct DeleteChats: Encodable { var ids: [String]?; var olderThanDays: Int? }
+    private struct Deleted: Decodable { var deleted: [String] }
+    public func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String] {
+        let r: Deleted = try await call("POST", "v1/claude/chats/delete", DeleteChats(ids: ids.isEmpty ? nil : ids, olderThanDays: olderThanDays))
+        return r.deleted
     }
     public func archiveChat(_ id: String) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
