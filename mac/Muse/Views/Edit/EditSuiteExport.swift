@@ -249,8 +249,10 @@ struct EditSuiteExportProgress: View {
                     MButton("Cancel", size: .small) { session.cancelExport() }.keyboardShortcut(.cancelAction)
                 }
             }
-            .frame(width: 340)
+            // card() stretches to the full width, so the width goes on after it (owner bug, build 530: a full-width strip).
             .card(18)
+            .frame(width: 340)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
