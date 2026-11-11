@@ -120,7 +120,7 @@ export function videoSwap(v: VideoSwapSpec & { speaking?: boolean }, t: PromptTe
   const clean = [perf.tattoos && "None of <Subject 1>'s tattoos remain.", perf.rings && "None of <Subject 1>'s rings remain."].filter(Boolean).join(' ');
   const { clean: dir, removed } = sanitizeDirection(v.direction, id, t);
   const r = run('video.edit', t, {
-    inputs: { speaking, keepAudio, keepBackground },
+    inputs: { speaking, keepAudio, keepBackground, describeBackground: !keepBackground && !!v.describeBackground },
     vars: { performer: perf.description + (extras.length ? ` with ${extras.join(' and ')}` : ''), setting: perf.setting, name: id.name, look: id.look, refs: refList,
       lora: id.lora ? `, with LoRA ${id.lora} video` : '', motion: v.backgroundMotion ? ` (${v.backgroundMotion})` : '',
       tattoos: perf.tattoos ? 'tattoos, ' : '', clean: clean ? ` ${clean}` : '', n, outfit: v.outfit.name.toLowerCase(), never: neverList(id, t).join(', no ') },
@@ -156,7 +156,7 @@ export function replicateSwap(v: ReplicateSwapSpec & { speaking?: boolean }, t: 
     outfit, `no ${never.join(', no ')}`];
   const speaking = v.speaking ?? true;
   const r = run('video.replicate', t, {
-    inputs: { speaking, audioSent: speaking },
+    inputs: { speaking, audioSent: speaking, newBackground: !!v.newBackground },
     vars: { subject: all.length ? `the person in ${imageRange(all)}: ${look}` : look, reference: parts.join('; '), faceRef: faces.length ? `<Image ${faces[0]}>` : 'the description' },
     direction: dir,
   });

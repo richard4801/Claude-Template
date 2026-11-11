@@ -2970,6 +2970,13 @@
      "description": "The clip is sent with its audio (only when the performer speaks).",
      "type": "bool",
      "sample": true
+    },
+    {
+     "name": "newBackground",
+     "label": "Background: Describe it",
+     "description": "The user’s direction describes a new place; the clip’s moves and timing are kept, not its background.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -3051,9 +3058,13 @@
    ],
    "blocks": [
     "video.replicate.subjects",
+    "video.replicate.summary.describe.silent",
+    "video.replicate.summary.describe",
     "video.replicate.summary.silent",
     "video.replicate.summary",
+    "video.replicate.retention.describe",
     "video.replicate.retention",
+    "video.replicate.detailed.describe",
     "video.replicate.detailed.silent",
     "video.replicate.detailed",
     "video.mouth.speaking",
@@ -3068,6 +3079,37 @@
      "when": [],
      "block": "video.replicate.subjects",
      "locked": true
+    },
+    {
+     "id": "summary.describe.silent",
+     "label": "New background, not speaking",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "video.replicate.summary.describe.silent"
+    },
+    {
+     "id": "summary.describe",
+     "label": "New background from the direction",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.summary.describe"
     },
     {
      "id": "summary.silent",
@@ -3090,6 +3132,20 @@
      "block": "video.replicate.summary"
     },
     {
+     "id": "retention.describe",
+     "label": "What is kept (new background)",
+     "target": "retention",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.retention.describe",
+     "locked": true
+    },
+    {
      "id": "retention",
      "label": "What is kept",
      "target": "retention",
@@ -3098,12 +3154,30 @@
      "locked": true
     },
     {
+     "id": "detailed.describe",
+     "label": "Details (new background)",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.detailed.describe"
+    },
+    {
      "id": "detailed.silent",
      "label": "Not speaking: no mouthed words",
      "target": "detailed",
      "when": [
       {
        "input": "speaking",
+       "op": "is",
+       "value": false
+      },
+      {
+       "input": "newBackground",
        "op": "is",
        "value": false
       }
@@ -3119,6 +3193,11 @@
        "input": "speaking",
        "op": "is",
        "value": true
+      },
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": false
       }
      ],
      "block": "video.replicate.detailed"
@@ -3168,6 +3247,37 @@
      "locked": true
     },
     {
+     "id": "summary.describe.silent",
+     "label": "New background, not speaking",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "video.replicate.summary.describe.silent"
+    },
+    {
+     "id": "summary.describe",
+     "label": "New background from the direction",
+     "target": "summary",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.summary.describe"
+    },
+    {
      "id": "summary.silent",
      "label": "Not speaking: no lip-sync",
      "target": "summary",
@@ -3188,6 +3298,20 @@
      "block": "video.replicate.summary"
     },
     {
+     "id": "retention.describe",
+     "label": "What is kept (new background)",
+     "target": "retention",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.retention.describe",
+     "locked": true
+    },
+    {
      "id": "retention",
      "label": "What is kept",
      "target": "retention",
@@ -3196,12 +3320,30 @@
      "locked": true
     },
     {
+     "id": "detailed.describe",
+     "label": "Details (new background)",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.replicate.detailed.describe"
+    },
+    {
      "id": "detailed.silent",
      "label": "Not speaking: no mouthed words",
      "target": "detailed",
      "when": [
       {
        "input": "speaking",
+       "op": "is",
+       "value": false
+      },
+      {
+       "input": "newBackground",
        "op": "is",
        "value": false
       }
@@ -3217,6 +3359,11 @@
        "input": "speaking",
        "op": "is",
        "value": true
+      },
+      {
+       "input": "newBackground",
+       "op": "is",
+       "value": false
       }
      ],
      "block": "video.replicate.detailed"
@@ -3288,6 +3435,13 @@
      "description": "The background of the clip is kept (else a background photo replaces it).",
      "type": "bool",
      "sample": true
+    },
+    {
+     "name": "describeBackground",
+     "label": "Background: Describe it",
+     "description": "The user’s direction describes the new place (no photo).",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -3455,8 +3609,10 @@
     "video.edit.audio.kept",
     "video.edit.audio.replaced",
     "video.edit.background.keep",
+    "video.edit.background.describe",
     "video.edit.background.photo",
     "video.edit.video.keep",
+    "video.edit.video.describe",
     "video.edit.video.photo",
     "video.edit.subjects",
     "video.edit.summary",
@@ -3540,6 +3696,19 @@
      "block": "video.edit.background.keep"
     },
     {
+     "id": "background.describe",
+     "label": "Background described",
+     "target": "@background",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.background.describe"
+    },
+    {
      "id": "background.photo",
      "label": "Background photo",
      "target": "@background",
@@ -3558,6 +3727,19 @@
       }
      ],
      "block": "video.edit.video.keep"
+    },
+    {
+     "id": "video.describe",
+     "label": "Source, background described",
+     "target": "@video",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.video.describe"
     },
     {
      "id": "video.photo",
@@ -3705,6 +3887,19 @@
      "block": "video.edit.background.keep"
     },
     {
+     "id": "background.describe",
+     "label": "Background described",
+     "target": "@background",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.background.describe"
+    },
+    {
      "id": "background.photo",
      "label": "Background photo",
      "target": "@background",
@@ -3723,6 +3918,19 @@
       }
      ],
      "block": "video.edit.video.keep"
+    },
+    {
+     "id": "video.describe",
+     "label": "Source, background described",
+     "target": "@video",
+     "when": [
+      {
+       "input": "describeBackground",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.edit.video.describe"
     },
     {
      "id": "video.photo",

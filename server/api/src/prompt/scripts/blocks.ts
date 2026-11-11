@@ -24,6 +24,28 @@ export const SCRIPT_BLOCK_DEFS: PromptDef[] = [
     + "<Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, "
     + 'eyebrow raise and head turn, at the same moments, and the same body motion. '
     + 'The camera, the exact framing and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.', [], { allowEmpty: false }),
+  // ---- Swap background "Describe it" (owner 2026-11-11): the moves and timing stay; the user's words set the new place.
+  b('video.replicate.summary.describe', 'Draft/Standard/HD · summary (new background described)', 'summary of the short prompt when the background is set to “Describe it” (the performer speaks).',
+    '[video editing + character replacement + new background] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies '
+    + "<Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, "
+    + 'eyebrow raise, mouth and lip movement and head turn, at the same moments, and the same body motion. The camera, the exact framing '
+    + 'and crop and the timing of <Video 1> stay unchanged; the background and setting are replaced by the place described in the direction '
+    + 'from the user, with lighting that matches it. Any caption or on-screen text is removed.', [], { allowEmpty: false }),
+  b('video.replicate.summary.describe.silent', 'Draft/Standard/HD · summary (new background described, not speaking)', 'summary of the short prompt when the background is set to “Describe it” and the performer does not speak or sing.',
+    '[video editing + character replacement + new background] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies '
+    + "<Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, "
+    + 'eyebrow raise and head turn, at the same moments, and the same body motion. The camera, the exact framing and crop and the timing '
+    + 'of <Video 1> stay unchanged; the background and setting are replaced by the place described in the direction from the user, with '
+    + 'lighting that matches it. Any caption or on-screen text is removed.', [], { allowEmpty: false }),
+  b('video.replicate.retention.describe', 'Draft/Standard/HD · retention (new background described)', 'retention_analysis of the short prompt when the background is set to “Describe it”.',
+    '<Video 1>: motion_preserved - camera motion, framing and crop and the full body motion and timing are kept; the background and setting are not kept, they are replaced by the place the user describes.\n'
+    + '<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery, clothes, body shape or proportions.\n'
+    + '<Subject 2>: reference - {reference}.', [['reference', 'face, body and outfit image ranges and the never-add list', true]], { allowEmpty: false }),
+  b('video.replicate.detailed.describe', 'Draft/Standard/HD · details (new background described)', 'detailed_description of the short prompt when the background is set to “Describe it”.',
+    'Casual phone video, realistic. [Shot 1] <Subject 2> in the new place the user describes, framed exactly like <Subject 1>: keep the exact '
+    + 'framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1>. '
+    + 'Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.',
+    [['faceRef', '<Image 1>, or "the description"']], { allowEmpty: false }),
   b('video.replicate.detailed.silent', 'Draft/Standard/HD · details (not speaking)', 'detailed_description of the short prompt when the performer does not speak or sing.',
     'Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact '
     + 'framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1>. '
@@ -44,6 +66,11 @@ export const SCRIPT_BLOCK_DEFS: PromptDef[] = [
   b('video.edit.background.photo', 'Edit · background photo', 'The summary’s background sentence with a new background photo.',
     'The camera, framing and timing of <Video 1> are unchanged; the background is replaced by the background reference photo{motion}.',
     [['motion', '" (subtly alive)" …, or empty']], { allowEmpty: false }),
+  b('video.edit.background.describe', 'Edit · background described', 'The summary’s background sentence when the background is set to “Describe it” (the user’s words set the new place).',
+    'The camera, framing and timing of <Video 1> are unchanged; the background is replaced by the place described in the direction from the user{motion}.',
+    [['motion', '" (subtly alive)" …, or empty']], { allowEmpty: false }),
+  b('video.edit.video.describe', 'Edit · source, background described', 'retention_analysis: <Video 1> when the background is set to “Describe it”.',
+    'motion_preserved - the full body motion and timing are maintained exactly; the background is not kept, it is replaced by the place the user describes.', [], { allowEmpty: false }),
   b('video.edit.video.keep', 'Edit · source kept', 'retention_analysis: <Video 1> when the background is kept.',
     'fully_preserved - the background, camera position, lighting and the full body motion and timing are maintained exactly.', [], { allowEmpty: false }),
   b('video.edit.video.photo', 'Edit · source, new background', 'retention_analysis: <Video 1> with a new background photo.',

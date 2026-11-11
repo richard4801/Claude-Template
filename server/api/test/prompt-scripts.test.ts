@@ -197,7 +197,7 @@ describe('Settings → Prompts → Scripts (API)', async () => {
     expect(r.scripts.map((s: any) => s.id)).toEqual(SCRIPTS.map(s => s.id));
     expect(r.ops.map((o: any) => o.id)).toContain('atLeast');
     const v = r.scripts.find((s: any) => s.id === 'video.replicate');
-    expect(v.inputs.map((i: any) => i.name)).toEqual(['speaking', 'audioSent']);
+    expect(v.inputs.map((i: any) => i.name)).toEqual(['speaking', 'audioSent', 'newBackground']);
     expect(v.sections.at(-1)).toEqual({ id: 'user', label: 'Direction from the user', kind: 'user', pick: 'first' });
     expect(v.sections.find((x: any) => x.id === 'detailed')).toMatchObject({ pick: 'all', join: ' ' });
     expect(v.targets.map((t: any) => t.id)).toEqual(['subjects', 'summary', 'retention', 'detailed', 'user']);

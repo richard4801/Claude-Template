@@ -71,6 +71,9 @@ export const ShotRequestSchema = z.object({
   clipId: z.string().max(80).optional(),
   keepAudio: z.boolean().optional(),
   direction: z.string().max(500).optional(),
+  /** Swap / one-person Recast background: keep the clip's place, a new photo, or "describe" (the direction's words set it). */
+  background: z.enum(['keep', 'photo', 'describe']).optional(),
+  backgroundImage: z.object({ asset: z.string().max(500).optional(), url: z.string().max(2000).optional() }).strict().optional(),
   /** Plan and price only: nothing is held or run (agents, previews). */
   dryRun: z.boolean().optional(),
   /** AI suite (workstream 1): the composer's draft, checked by suite/drafts.ts and stored with the job. */

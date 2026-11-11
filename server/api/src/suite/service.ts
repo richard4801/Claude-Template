@@ -30,7 +30,7 @@ import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
 import { baseName, labelList, relabelText } from '../engines/labels.js'; // owner 2026-11-11: "<Model> · <Provider>" everywhere
-import { purposeOfShot, recastIntent, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
+import { placeWords, purposeOfShot, recastIntent, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
 export const STUDIO_DEFAULT_SKIPPED = 'The studio’s chosen engine can’t make this shot · the quality’s usual engine is used';
@@ -267,7 +267,18 @@ export class SuiteService {
     // Auto (no model picked, no studio Recast default): "same moves, new look or scene" → Genjutsu Light (a swap of her
     // onto the clip, the new scene from the prompt); "same scene, new person" → the Recast models. The reason is shown.
     let autoNote: string | null = null;
-    if (r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && !r.engineModel && !(await modelChoice(this.ctx).studioDefaults(u.studioId)).recast) {
+    // Owner 2026-11-11: with the background set to "New photo" or "Describe it", Auto picks Genjutsu Light (same moves,
+    // new scene); Keep stays on the Recast / H3 models.
+    const newBg = r.background === 'photo' || r.background === 'describe';
+    const isSwap = (r.mode as string | undefined) === 'swap';
+    const oneSwap = !r.extend && (isSwap || r.cast?.length === 1);
+    if (newBg && oneSwap && !r.engineModel && !(await modelChoice(this.ctx).studioDefaults(u.studioId))[isSwap ? 'swap' : 'recast']
+      && (await modelChoice(this.ctx).candidates(u, 'swap')).some(e => e.model === 'genjutsu-light')) {
+      r.engineModel = 'genjutsu-light';
+      if (!r.direction && r.prompt?.trim()) r.direction = r.prompt.trim().slice(0, 500);
+      autoNote = `Auto chose Genjutsu Light: the background is set to ${r.background === 'photo' ? 'a new photo' : 'Describe it'} (same moves, new scene)`;
+    }
+    if (!autoNote && r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && !r.engineModel && !(await modelChoice(this.ctx).studioDefaults(u.studioId)).recast) {
       const intent = recastIntent([r.prompt, r.direction].filter(Boolean).join(' '));
       if (intent.kind === 'look' && (await modelChoice(this.ctx).candidates(u, 'swap')).some(e => e.model === 'genjutsu-light')) {
         r.engineModel = 'genjutsu-light';
@@ -287,6 +298,9 @@ export class SuiteService {
     if (r.mode === 'swap') {
       const sw = await this.swapEstimate(u, r, choice);
       if (autoNote) { sw.view.warnings = [autoNote, ...sw.view.warnings]; Object.assign(sw.view, { chosen: { model: choice?.model ?? null, reason: autoNote } }); }
+      const place = (r.background ?? 'keep') === 'keep' ? placeWords([r.prompt, r.direction].filter(Boolean).join(' ')) : null;
+      if (place) Object.assign(sw.view, { warnings: [...sw.view.warnings, 'Background is set to Keep · your prompt describes a new place · switch to Describe it?'],
+        fixes: [{ fix: 'background:describe', label: 'Describe it' }] });
       return { swap: true as const, ...sw };
     }
     if (r.mode === 'recast' || r.cast?.length) {
@@ -534,7 +548,10 @@ export class SuiteService {
   private swapRequest(r: ShotRequest) {
     if (!r.modelId || !r.clipId) throw badRequest('Swap needs modelId and clipId');
     const quality = r.quality === 'cinema' ? 'hd' : r.quality;
-    return { title: r.title, modelId: r.modelId, outfitId: r.outfitId ?? '', clipId: r.clipId, engine: 'replicate', quality, takes: r.takes, keepAudio: r.keepAudio ?? true, direction: r.direction,
+    return { title: r.title, modelId: r.modelId, outfitId: r.outfitId ?? '', clipId: r.clipId, engine: 'replicate', quality, takes: r.takes, keepAudio: r.keepAudio ?? true,
+      // Describe it: the apps send the words as the prompt; they are the swap's direction (the new place).
+      direction: r.direction ?? (r.background === 'describe' && r.prompt?.trim() ? r.prompt.trim().slice(0, 500) : undefined),
+      ...(r.background ? { background: r.background } : {}), ...(r.backgroundImage ? { backgroundImage: r.backgroundImage } : {}),
       ...(sentOfBody(r) ? { sentImages: r.sentImages, addImages: r.addImages, excludeImages: r.excludeImages, sentImagesBy: r.sentImagesBy } : {}) };
   }
   /**
