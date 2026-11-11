@@ -1,0 +1,1470 @@
+From 14a50b0b65758c2d62634ef10abea41a3cf1e59a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 20:51:54 +0000
+Subject: [PATCH] Mac: Claude operates the MUSE window (ui_snapshot / ui_act /
+ ui_wait), ring + pill + Esc, Settings toggle
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- MuseCore ClaudeUiControl: the call, the control list (stable ids from SwiftUI accessibility ids/labels), finding a
+  control, the refusal list (same as the server's + Claude's own chat box), action mapping, keys; tests
+- App MuseUiBridge: reads the app's own accessibility tree in-process (no Accessibility / Screen Recording permission),
+  acts on its own controls, menu-bar items and keys; a small JPEG of the MUSE window only (cacheDisplay)
+- ClaudeUiOverlay: soft ring on each control Claude touches, "Claude is using MUSE · Esc to stop" pill; Esc stops until
+  the person writes again
+- Settings → Claude: "Let Claude operate MUSE's screen" (per person, on by default); X-Muse-Caps adds ui
+- Identifiers: sidebar (nav.*), title-bar search, Claude's chat box (claude.chat.composer, never operated)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxndkVj5NxWZnKdbvoX
+---
+ mac/Muse/App/ClaudeCodeService.swift          |  57 ++
+ mac/Muse/App/ClaudeUiOverlay.swift            | 138 +++++
+ mac/Muse/App/MuseUiBridge.swift               | 360 +++++++++++++
+ mac/Muse/Views/Claude/ChatComposer.swift      |   5 +
+ .../Views/Claude/ClaudeFileApprovals.swift    |   7 +
+ mac/Muse/Views/RootView.swift                 |   2 +
+ .../Sources/MuseCore/Claude/ClaudeAPI.swift   |  25 +-
+ .../MuseCore/Claude/ClaudeFileAccess.swift    |   3 +
+ .../MuseCore/Claude/ClaudeLiveEvents.swift    |   9 +-
+ .../MuseCore/Claude/ClaudeUiControl.swift     | 498 ++++++++++++++++++
+ .../MuseCoreTests/ClaudeFileAccessTests.swift |   2 +-
+ .../MuseCoreTests/ClaudeUiControlTests.swift  | 133 +++++
+ 12 files changed, 1236 insertions(+), 3 deletions(-)
+ create mode 100644 mac/Muse/App/ClaudeUiOverlay.swift
+ create mode 100644 mac/Muse/App/MuseUiBridge.swift
+ create mode 100644 mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift
+ create mode 100644 mac/MuseCore/Tests/MuseCoreTests/ClaudeUiControlTests.swift
+
+diff --git a/mac/Muse/App/ClaudeCodeService.swift b/mac/Muse/App/ClaudeCodeService.swift
+index 8d99610..617a04b 100644
+--- a/mac/Muse/App/ClaudeCodeService.swift
++++ b/mac/Muse/App/ClaudeCodeService.swift
+@@ -231,6 +231,7 @@ final class ClaudeCodeService: ObservableObject {
+             case .connected:
+                 if let turns = try? await api.pendingTurns() { await relay.offer(turns) }
+                 if let asks = try? await api.pendingPermissions() { for a in asks { await handlePermission(a) } }
++                if let calls = try? await api.pendingUiCalls() { for c in calls { Task { await handleUiCall(c) } } }
+                 await refreshStatus()
+             case .permission(let a):
+                 await handlePermission(a)
+@@ -238,6 +239,8 @@ final class ClaudeCodeService: ObservableObject {
+                 fileAsks.removeAll { $0.id == id }
+             case .result(let r):
+                 resultArrived(r)
++            case .uiCall(let c):
++                Task { await handleUiCall(c) }
+             case .turn(let t):
+                 await relay.offer([t])
+             case .stop(let id):
+@@ -325,6 +328,7 @@ final class ClaudeCodeService: ObservableObject {
+     /// A turn typed on this Mac (queued behind the thread's running turn).
+     func send(threadId: String, text: String, files: [ClaudeAttachmentFile] = []) {
+         guard let relay else { return }
++        ClaudeUiOverlay.shared.reset() // the person wrote again: Claude may use MUSE's screen again after an Esc
+         Task { await relay.submit(threadId: threadId, text: text, files: files) }
+     }
+ 
+@@ -494,6 +498,59 @@ final class ClaudeCodeService: ObservableObject {
+         for a in mine { Task { try? await api.answerPermission(a.id, allow: false, message: message) } }
+     }
+ 
++    // MARK: Claude operates the MUSE window (ui_snapshot / ui_act / ui_wait)
++
++    private var uiCallsSeen: Set<String> = []
++    /// This Mac, for claiming a call (one of the person's Macs does it).
++    private static let deviceId: String = {
++        let k = "muse.deviceId"
++        if let id = UserDefaults.standard.string(forKey: k) { return id }
++        let id = UUID().uuidString
++        UserDefaults.standard.set(id, forKey: k)
++        return id
++    }()
++
++    var uiControlOn: Bool { fileSettings.uiOn }
++
++    /// Settings → Claude: "Let Claude operate MUSE's screen" (per person, on by default).
++    func setUiControl(_ on: Bool) {
++        fileSettings.uiControl = on
++        saveFileSettings()
++        if !on { ClaudeUiOverlay.shared.hide() }
++    }
++
++    private func handleUiCall(_ c: UiCall) async {
++        guard let api, uiCallsSeen.insert(c.id).inserted else { return }
++        // The Mac in front claims at once; another of the person's Macs waits a moment so the one they're using wins.
++        if !NSApp.isActive { try? await Task.sleep(nanoseconds: 1_500_000_000) }
++        guard (try? await api.claimUiCall(c.id, device: Self.deviceId)) == true else { return }
++        let answer: UiAnswer
++        do {
++            guard fileSettings.uiOn else { throw UiError.off }
++            try ClaudeUiOverlay.shared.checkNotStopped()
++            answer = try await runUi(c)
++        } catch let e as UiError {
++            answer = UiAnswer(error: e)
++        } catch {
++            answer = UiAnswer(error: UiError(.failed, "MUSE couldn't do that: \(error.localizedDescription)"))
++        }
++        try? await api.answerUiCall(c.id, answer)
++    }
++
++    private func runUi(_ c: UiCall) async throws -> UiAnswer {
++        let bridge = MuseUiBridge.shared
++        if let w = bridge.window() { ClaudeUiOverlay.shared.active(on: w) }
++        switch try UiRequest.parse(c) {
++        case .snapshot(let shot, let within):
++            let (json, image) = try bridge.snapshot(screenshot: shot, within: within, page: nil)
++            return UiAnswer(result: json, image: image)
++        case .act(let action, let target, let value):
++            return UiAnswer(result: try await bridge.act(action: action, target: target, value: value))
++        case .wait(let f, let target, let timeout):
++            return UiAnswer(result: try await bridge.wait(for: f, target: target, timeout: timeout))
++        }
++    }
++
+     // MARK: Results arrive in the chat
+ 
+     /// Results that came while the Claude panel was closed (the dot on the Claude button).
+diff --git a/mac/Muse/App/ClaudeUiOverlay.swift b/mac/Muse/App/ClaudeUiOverlay.swift
+new file mode 100644
+index 0000000..e0b285e
+--- /dev/null
++++ b/mac/Muse/App/ClaudeUiOverlay.swift
+@@ -0,0 +1,138 @@
++// What the person sees while Claude operates MUSE's window: a soft ring on each control Claude touches, and a small pill
++// "Claude is using MUSE · Esc to stop" at the top of the window. Esc stops at once: the call running now and every
++// ui_* call until the person writes to Claude again. Both are child windows of the MUSE window that ignore the mouse,
++// so they never get in the person's way and never appear in the window picture Claude sees.
++
++import AppKit
++import MuseCore
++import SwiftUI
++
++@MainActor
++final class ClaudeUiOverlay {
++    static let shared = ClaudeUiOverlay()
++
++    /// The person pressed Esc: no ui_* call runs until they write to Claude again.
++    private(set) var stopped = false
++    private var pill: NSWindow?
++    private var rings: [NSWindow] = []
++    private var hideTask: Task<Void, Never>?
++    private var escMonitor: Any?
++    /// Claude is working the window now (a call is running, or ran in the last few seconds).
++    private(set) var busy = false
++
++    func owns(_ w: NSWindow) -> Bool { w === pill || rings.contains { $0 === w } }
++
++    /// A new message from the person: Claude may use the screen again.
++    func reset() { stopped = false }
++
++    func checkNotStopped() throws { if stopped { throw UiError.stopped } }
++
++    /// Shows the pill (and listens for Esc) while Claude works; hides a few seconds after the last call.
++    func active(on w: NSWindow) {
++        busy = true
++        installEsc()
++        showPill(on: w)
++        hideTask?.cancel()
++        hideTask = Task { [weak self] in
++            try? await Task.sleep(nanoseconds: 4_000_000_000)
++            guard !Task.isCancelled else { return }
++            self?.hide()
++        }
++    }
++
++    func hide() {
++        busy = false
++        if let p = pill { p.parent?.removeChildWindow(p); p.orderOut(nil) }
++        pill = nil
++        if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
++    }
++
++    private func installEsc() {
++        guard escMonitor == nil else { return }
++        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
++            guard let self, e.keyCode == 53, self.busy, !MuseUiBridge.shared.synthesizing else { return e }
++            self.stopped = true
++            self.hide()
++            return nil // the person's Esc stops Claude; it doesn't also close what's open
++        }
++    }
++
++    private func showPill(on w: NSWindow) {
++        if let p = pill, p.parent === w { position(p, on: w); return }
++        if let p = pill { p.parent?.removeChildWindow(p); p.orderOut(nil) }
++        let host = NSHostingView(rootView: ClaudeUiPill())
++        host.frame.size = host.fittingSize
++        let p = Self.overlayWindow(size: host.fittingSize)
++        p.contentView = host
++        w.addChildWindow(p, ordered: .above)
++        position(p, on: w)
++        pill = p
++    }
++
++    private func position(_ p: NSWindow, on w: NSWindow) {
++        let s = p.frame.size
++        p.setFrameOrigin(NSPoint(x: w.frame.midX - s.width / 2, y: w.frame.maxY - s.height - 44))
++    }
++
++    /// A soft ring around a control (screen rect), fading out after a moment.
++    func ring(_ r: NSRect, on w: NSWindow) {
++        guard r.width > 0, r.height > 0 else { return }
++        let box = r.insetBy(dx: -4, dy: -4)
++        let win = Self.overlayWindow(size: box.size)
++        win.setFrame(box, display: false)
++        let v = NSView(frame: NSRect(origin: .zero, size: box.size))
++        v.wantsLayer = true
++        v.layer?.cornerRadius = 8
++        v.layer?.borderWidth = 2.5
++        v.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
++        v.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
++        win.contentView = v
++        w.addChildWindow(win, ordered: .above)
++        rings.append(win)
++        Task { [weak self] in
++            try? await Task.sleep(nanoseconds: 1_200_000_000)
++            NSAnimationContext.runAnimationGroup { ctx in
++                ctx.duration = 0.35
++                win.animator().alphaValue = 0
++            }
++            try? await Task.sleep(nanoseconds: 400_000_000)
++            win.parent?.removeChildWindow(win)
++            win.orderOut(nil)
++            self?.rings.removeAll { $0 === win }
++        }
++    }
++
++    private static func overlayWindow(size: NSSize) -> NSWindow {
++        let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
++        w.isOpaque = false
++        w.backgroundColor = .clear
++        w.hasShadow = false
++        w.ignoresMouseEvents = true
++        w.isReleasedWhenClosed = false
++        w.level = .floating
++        w.collectionBehavior = [.transient, .ignoresCycle]
++        return w
++    }
++}
++
++/// "Claude is using MUSE · Esc to stop".
++private struct ClaudeUiPill: View {
++    var body: some View {
++        HStack(spacing: 6) {
++            Circle().fill(Color.accentColor).frame(width: 6, height: 6)
++            Text("Claude is using MUSE")
++                .font(.system(size: 12, weight: .medium))
++            Text("·").foregroundStyle(.secondary)
++            Text("Esc to stop")
++                .font(.system(size: 12))
++                .foregroundStyle(.secondary)
++        }
++        .padding(.horizontal, 12)
++        .padding(.vertical, 6)
++        .background(Capsule().fill(.regularMaterial))
++        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
++        .padding(4)
++        .accessibilityElement(children: .combine)
++        .accessibilityLabel("Claude is using MUSE. Press Escape to stop.")
++    }
++}
+diff --git a/mac/Muse/App/MuseUiBridge.swift b/mac/Muse/App/MuseUiBridge.swift
+new file mode 100644
+index 0000000..35b54f3
+--- /dev/null
++++ b/mac/Muse/App/MuseUiBridge.swift
+@@ -0,0 +1,360 @@
++// Claude operates the MUSE window (owner, 2026-11-11: "MUSE window only"). The app reads its OWN accessibility tree
++// in-process (the SwiftUI ids and labels the screens already carry) and acts on its own controls, so it needs no macOS
++// Accessibility or Screen Recording permission and can't reach other apps. The window picture is drawn from MUSE's own
++// view (cacheDisplay), never a screen capture. MuseCore (ClaudeUiControl.swift) holds the pure parts: ids, finding a
++// control, the refusal list, what each action means.
++
++import AppKit
++import MuseCore
++
++@MainActor
++final class MuseUiBridge {
++    static let shared = MuseUiBridge()
++
++    /// True while the bridge itself sends a key (its own Escape must not count as the person's "stop").
++    private(set) var synthesizing = false
++
++    /// The live element behind each node, in the same shape as the UiElement tree.
++    private final class Live {
++        let obj: NSAccessibilityProtocol
++        var children: [Live] = []
++        init(_ obj: NSAccessibilityProtocol) { self.obj = obj }
++    }
++
++    private struct Read {
++        let window: NSWindow
++        let root: UiElement
++        let live: Live
++        let flat: UiFlat
++    }
++
++    /// The MUSE window Claude works in: the main window (never a panel, sheet or Claude's own overlays).
++    func window() -> NSWindow? {
++        if let w = NSApp.mainWindow, w.isVisible, !(w is NSPanel), !ClaudeUiOverlay.shared.owns(w) { return w }
++        return NSApp.windows.first { $0.isVisible && $0.canBecomeMain && !($0 is NSPanel) && !ClaudeUiOverlay.shared.owns($0) }
++    }
++
++    // MARK: Reading
++
++    private static let maxNodes = 6000
++    private static let maxDepth = 80
++
++    private func read(within: String? = nil) throws -> Read {
++        guard let w = window(), let content = w.contentView else { throw UiError(.failed, "MUSE has no window open right now.") }
++        // An open sheet (a confirmation, a picker) is what the person sees: read it instead of the window under it.
++        let top: NSView = w.attachedSheet?.contentView ?? content
++        let bounds = (w.attachedSheet ?? w).frame
++        var count = 0
++        func walk(_ obj: NSAccessibilityProtocol, depth: Int) -> (UiElement, Live)? {
++            count += 1
++            if count > Self.maxNodes || depth > Self.maxDepth { return nil }
++            let f = obj.accessibilityFrame()
++            let onScreen = f.width > 0 && f.height > 0 && f.intersects(bounds)
++            let role = UiRole.from(axRole: obj.accessibilityRole()?.rawValue ?? "", subrole: obj.accessibilitySubrole()?.rawValue)
++            let live = Live(obj)
++            var kids: [UiElement] = []
++            for c in obj.accessibilityChildren() ?? [] {
++                guard let a = c as? NSAccessibilityProtocol, let got = walk(a, depth: depth + 1) else { continue }
++                kids.append(got.0)
++                live.children.append(got.1)
++            }
++            // Off-screen leaves (rows scrolled away) are left out; containers stay for their visible children.
++            if !onScreen && kids.isEmpty && f.width > 0 { return nil }
++            let ident = obj.accessibilityIdentifier()
++            let label = obj.accessibilityLabel() ?? obj.accessibilityTitle() ?? obj.accessibilityPlaceholderValue()
++            let el = UiElement(identifier: ident.isEmpty ? nil : ident, role: role, label: label, value: Self.text(obj.accessibilityValue()),
++                               enabled: obj.isAccessibilityEnabled(), selected: role == .tab || role == .row ? obj.isAccessibilitySelected() : nil,
++                               frame: onScreen ? Self.windowRect(f, in: w) : nil, children: kids)
++            return (el, live)
++        }
++        guard let got = walk(top, depth: 0) else { throw UiError(.failed, "MUSE couldn't read its window.") }
++        return Read(window: w, root: got.0, live: got.1, flat: UiTree.flatten(got.0, within: within))
++    }
++
++    private static func text(_ v: Any?) -> String? {
++        switch v {
++        case let s as String: return s
++        case let a as NSAttributedString: return a.string
++        case let n as NSNumber: return n.stringValue
++        default: return nil
++        }
++    }
++
++    /// Screen rect → window points, top-left origin.
++    private static func windowRect(_ r: NSRect, in w: NSWindow) -> UiRect {
++        let local = w.convertFromScreen(r)
++        let h = w.contentView?.bounds.height ?? w.frame.height
++        return UiRect(x: local.minX.rounded(), y: (h - local.maxY).rounded(), w: local.width.rounded(), h: local.height.rounded())
++    }
++
++    private func live(_ r: Read, _ id: String) -> NSAccessibilityProtocol? {
++        guard let path = r.flat.paths[id] else { return nil }
++        var l = r.live
++        for i in path {
++            guard i < l.children.count else { return nil }
++            l = l.children[i]
++        }
++        return l.obj
++    }
++
++    // MARK: Snapshot
++
++    func snapshot(screenshot: Bool, within: String?, page: String?) throws -> (JSONValue, String?) {
++        let r = try read(within: within)
++        var o: [String: JSONValue] = [
++            "window": .object(["title": .string(r.window.title), "width": .number(r.window.frame.width.rounded()), "height": .number(r.window.frame.height.rounded())]),
++            "controls": .array(r.flat.controls.map(\.json)),
++        ]
++        if let page { o["page"] = .string(page) }
++        if r.window.attachedSheet != nil { o["sheet"] = .bool(true) }
++        if r.flat.truncated { o["truncated"] = .bool(true) }
++        if r.flat.controls.isEmpty { o["note"] = .string("No controls could be read on this screen. Try screenshot: true, and report_issue so it gets fixed.") }
++        return (.object(o), screenshot ? picture(r.window) : nil)
++    }
++
++    /// A small JPEG of the MUSE window only, drawn from its own views (the overlay windows aren't in it).
++    func picture(_ w: NSWindow) -> String? {
++        guard let view = w.contentView?.superview ?? w.contentView, view.bounds.width > 0,
++              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
++        view.cacheDisplay(in: view.bounds, to: rep)
++        let (pw, ph) = UiShot.size(width: view.bounds.width, height: view.bounds.height)
++        guard pw > 0, let small = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pw, pixelsHigh: ph, bitsPerSample: 8, samplesPerPixel: 4,
++                                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
++        NSGraphicsContext.saveGraphicsState()
++        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: small)
++        NSGraphicsContext.current?.imageInterpolation = .high
++        rep.draw(in: NSRect(x: 0, y: 0, width: pw, height: ph))
++        NSGraphicsContext.restoreGraphicsState()
++        return small.representation(using: .jpeg, properties: [.compressionFactor: 0.6])?.base64EncodedString()
++    }
++
++    // MARK: Acting
++
++    func act(action: UiAction, target: String?, value: String?) async throws -> JSONValue {
++        let r = try read()
++        let control = try target.flatMap { t -> UiControl? in
++            if action == .menu || action == .key { return nil }
++            return try UiTree.resolve(t, in: r.flat.controls)
++        }
++        let op = try UiActionPlan.plan(action, value: value, target: target, control: control)
++        var obj: NSAccessibilityProtocol?
++        if op.needsControl {
++            guard let c = control, let o = live(r, c.id) else { throw UiError(.notFound, "That control is gone. Take a fresh ui_snapshot.") }
++            obj = o
++            ClaudeUiOverlay.shared.ring(o.accessibilityFrame(), on: r.window)
++        }
++        ClaudeUiOverlay.shared.active(on: r.window)
++        try await perform(op, obj, control, r)
++        try? await Task.sleep(nanoseconds: 250_000_000) // let SwiftUI update before reading the result
++        var out: [String: JSONValue] = ["done": .bool(true), "action": .string(action.rawValue)]
++        if let c = control, let after = try? read(), let now = (try? UiTree.resolve(c.id, in: after.flat.controls)) ?? after.flat.controls.first(where: { $0.label == c.label && $0.role == c.role }) {
++            out["control"] = now.json
++        }
++        return .object(out)
++    }
++
++    private func perform(_ op: UiOp, _ obj: NSAccessibilityProtocol?, _ c: UiControl?, _ r: Read) async throws {
++        switch op {
++        case .press:
++            guard let obj else { return }
++            if !obj.accessibilityPerformPress() { try click(obj, r.window) }
++        case .focus:
++            guard let obj else { return }
++            focus(obj, r.window)
++        case .setText(let text):
++            guard let obj else { return }
++            focus(obj, r.window)
++            try await Task.sleep(nanoseconds: 80_000_000)
++            if let tv = (r.window.attachedSheet ?? r.window).firstResponder as? NSTextView {
++                tv.selectAll(nil)
++                tv.insertText(text, replacementRange: tv.selectedRange())
++            } else {
++                obj.setAccessibilityValue(text)
++            }
++        case .setValue(let n):
++            guard let obj else { return }
++            obj.setAccessibilityValue(NSNumber(value: n))
++            // Sliders that ignore a set value move step by step towards it.
++            for _ in 0..<200 {
++                guard let now = Double(Self.text(obj.accessibilityValue()) ?? ""), abs(now - n) > 1e-6 else { break }
++                let moved = now < n ? obj.accessibilityPerformIncrement() : obj.accessibilityPerformDecrement()
++                guard moved, let after = Double(Self.text(obj.accessibilityValue()) ?? ""), after != now else { break }
++                if (now < n && after > n) || (now > n && after < n) { break }
++            }
++        case .toggle(let want):
++            guard let obj, let c else { return }
++            if let want, UiActionPlan.isOn(c) == want { return }
++            if !obj.accessibilityPerformPress() { try click(obj, r.window) }
++        case .select(let option):
++            guard let obj else { return }
++            try select(obj, option: option, c, r)
++        case .scroll(let dir):
++            guard let obj else { return }
++            scroll(obj, dir, r.window)
++        case .menu(let path):
++            try menu(path)
++        case .key(let k):
++            key(k, r.window)
++        }
++    }
++
++    private func focus(_ obj: NSAccessibilityProtocol, _ w: NSWindow) {
++        let win = w.attachedSheet ?? w
++        if let v = obj as? NSView, v.acceptsFirstResponder, win.makeFirstResponder(v) { return }
++        obj.setAccessibilityFocused(true)
++        if win.firstResponder is NSTextView { return }
++        try? click(obj, w) // SwiftUI fields take focus from a click
++    }
++
++    /// A click in the middle of the control, inside MUSE's own window (the up event is queued first, so a control that
++    /// tracks the mouse returns at once instead of waiting).
++    private func click(_ obj: NSAccessibilityProtocol, _ w: NSWindow) throws {
++        let target = w.attachedSheet ?? w
++        let f = obj.accessibilityFrame()
++        guard f.width > 0, f.height > 0 else { throw UiError(.failed, "That control isn't on screen. Scroll to it first.") }
++        let p = target.convertPoint(fromScreen: NSPoint(x: f.midX, y: f.midY))
++        let t = ProcessInfo.processInfo.systemUptime
++        guard let down = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: t, windowNumber: target.windowNumber,
++                                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1),
++              let up = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: t + 0.05, windowNumber: target.windowNumber,
++                                          context: nil, eventNumber: 0, clickCount: 1, pressure: 0) else { throw UiError(.failed, "MUSE couldn't press that.") }
++        NSApp.postEvent(up, atStart: false)
++        target.sendEvent(down)
++    }
++
++    private func select(_ obj: NSAccessibilityProtocol, option: String?, _ c: UiControl?, _ r: Read) throws {
++        guard let option else {
++            obj.setAccessibilitySelected(true)
++            if !obj.isAccessibilitySelected(), !obj.accessibilityPerformPress() { try click(obj, r.window) }
++            return
++        }
++        // A pop-up menu (a menu-style Picker): choose the item directly, without opening the menu.
++        if let pop = obj as? NSPopUpButton {
++            guard let item = pop.itemArray.first(where: { $0.title.caseInsensitiveCompare(option) == .orderedSame }) ?? pop.itemArray.first(where: { $0.title.localizedCaseInsensitiveContains(option) }) else {
++                throw UiError(.notFound, "“\(option)” isn't an option here. Options: \(pop.itemTitles.prefix(20).joined(separator: ", ")).")
++            }
++            if let why = UiRefusal.reason(text: item.title) { throw UiRefusal.refusal(why) }
++            pop.select(item)
++            if let action = pop.action { _ = NSApp.sendAction(action, to: pop.target, from: pop) }
++            return
++        }
++        // Segments, tabs, list rows: the child with that label.
++        func find(_ o: NSAccessibilityProtocol, depth: Int) -> NSAccessibilityProtocol? {
++            if depth > 6 { return nil }
++            for ch in o.accessibilityChildren() ?? [] {
++                guard let a = ch as? NSAccessibilityProtocol else { continue }
++                let l = a.accessibilityLabel() ?? a.accessibilityTitle() ?? Self.text(a.accessibilityValue()) ?? ""
++                if l.caseInsensitiveCompare(option) == .orderedSame { return a }
++                if let hit = find(a, depth: depth + 1) { return hit }
++            }
++            return nil
++        }
++        guard let opt = find(obj, depth: 0) else {
++            if c?.role == .picker || c?.role == .menuButton {
++                throw UiError(.failed, "This menu can't be opened by Claude yet (it would hold the app until it closes). Tell the person which option to pick, and report_issue.")
++            }
++            throw UiError(.notFound, "“\(option)” isn't an option of that control. Take a ui_snapshot with within: its id.")
++        }
++        if let why = UiRefusal.reason(text: option) { throw UiRefusal.refusal(why) }
++        opt.setAccessibilitySelected(true)
++        if !opt.isAccessibilitySelected(), !opt.accessibilityPerformPress() { try click(opt, r.window) }
++    }
++
++    private func scroll(_ obj: NSAccessibilityProtocol, _ dir: UiScroll, _ w: NSWindow) {
++        // The nearest scroll view, when AppKit's own is reachable; else a scroll-wheel event over the control.
++        var cur: Any? = obj
++        for _ in 0..<12 {
++            if let sv = cur as? NSScrollView, let doc = sv.documentView {
++                let clip = sv.contentView
++                var y = clip.bounds.origin.y
++                let page = clip.bounds.height * 0.85
++                let maxY = max(0, doc.frame.height - clip.bounds.height)
++                let flipped = doc.isFlipped
++                switch dir {
++                case .down: y += flipped ? page : -page
++                case .up: y += flipped ? -page : page
++                case .top: y = flipped ? 0 : maxY
++                case .bottom: y = flipped ? maxY : 0
++                }
++                clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(maxY, max(0, y))))
++                sv.reflectScrolledClipView(clip)
++                return
++            }
++            cur = (cur as? NSAccessibilityProtocol)?.accessibilityParent()
++            if cur == nil { break }
++        }
++        let f = obj.accessibilityFrame()
++        let p = w.convertPoint(fromScreen: NSPoint(x: f.midX, y: f.midY))
++        let lines: Int32 = dir == .top ? 400 : dir == .bottom ? -400 : dir == .up ? 8 : -8
++        // Straight to the view under the control (its scroll view takes the wheel through the responder chain).
++        guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0),
++              let e = NSEvent(cgEvent: cg), let cv = w.contentView,
++              let hit = cv.hitTest(cv.superview?.convert(p, from: nil) ?? p) else { return }
++        hit.scrollWheel(with: e)
++    }
++
++    private func menu(_ path: [String]) throws {
++        guard var menu = NSApp.mainMenu else { throw UiError(.failed, "MUSE has no menu bar.") }
++        func norm(_ s: String) -> String { s.replacingOccurrences(of: "…", with: "").replacingOccurrences(of: "...", with: "").trimmingCharacters(in: .whitespaces).lowercased() }
++        for (i, name) in path.enumerated() {
++            menu.update()
++            guard let idx = menu.items.firstIndex(where: { norm($0.title) == norm(name) && !$0.isHidden }) else {
++                let have = menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map(\.title).prefix(25).joined(separator: ", ")
++                throw UiError(.notFound, "No menu item “\(name)”. There: \(have).")
++            }
++            let item = menu.items[idx]
++            if i == path.count - 1 {
++                guard item.isEnabled else { throw UiError(.failed, "“\(item.title)” is greyed out right now.") }
++                if let why = UiRefusal.menuReason([item.title]) { throw UiRefusal.refusal(why) }
++                menu.performActionForItem(at: idx)
++                return
++            }
++            guard let sub = item.submenu else { throw UiError(.notFound, "“\(item.title)” has no submenu.") }
++            menu = sub
++        }
++    }
++
++    private func key(_ k: UiKey, _ w: NSWindow) {
++        let target = w.attachedSheet ?? w
++        var flags: NSEvent.ModifierFlags = []
++        if k.command { flags.insert(.command) }
++        if k.shift { flags.insert(.shift) }
++        let plain = k.characters
++        let chars = k.shift && k.command ? k.characters.uppercased() : k.characters
++        synthesizing = true
++        defer { synthesizing = false }
++        for type in [NSEvent.EventType.keyDown, .keyUp] {
++            guard let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
++                                           windowNumber: target.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: plain,
++                                           isARepeat: false, keyCode: k.keyCode) else { continue }
++            NSApp.sendEvent(e)
++        }
++    }
++
++    // MARK: Waiting
++
++    func wait(for f: UiWaitFor, target: String?, timeout: Double) async throws -> JSONValue {
++        let start = Date()
++        var last: String?
++        var steady = 0
++        while true {
++            let r = try read()
++            if f == .idle {
++                let sig = UiTree.signature(r.flat.controls)
++                steady = sig == last ? steady + 1 : 0
++                last = sig
++                if steady >= 2 { return .object(["met": .bool(true), "waitedMs": .number((Date().timeIntervalSince(start) * 1000).rounded())]) }
++            } else {
++                let m = UiTree.met(f, target: target, controls: r.flat.controls)
++                if m.met {
++                    var o: [String: JSONValue] = ["met": .bool(true), "waitedMs": .number((Date().timeIntervalSince(start) * 1000).rounded())]
++                    if let c = m.control { o["control"] = c.json }
++                    return .object(o)
++                }
++            }
++            if Date().timeIntervalSince(start) >= timeout { return .object(["met": .bool(false), "waitedMs": .number((timeout * 1000).rounded())]) }
++            try await Task.sleep(nanoseconds: 300_000_000)
++            try ClaudeUiOverlay.shared.checkNotStopped()
++        }
++    }
++}
+diff --git a/mac/Muse/Views/Claude/ChatComposer.swift b/mac/Muse/Views/Claude/ChatComposer.swift
+index 8131e9e..a4a7448 100644
+--- a/mac/Muse/Views/Claude/ChatComposer.swift
++++ b/mac/Muse/Views/Claude/ChatComposer.swift
+@@ -305,7 +305,12 @@ struct ChatComposerBar: View {
+     @State private var focus = 0
+     @State private var focused = false
+ 
++    /// Claude's own chat box: Claude never types or sends here through the window (MuseCore UiRefusal "claude.chat").
+     var body: some View {
++        content.accessibilityElement(children: .contain).accessibilityIdentifier("claude.chat.composer")
++    }
++
++    private var content: some View {
+         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+         let canSend = !empty && !held && !busy
+         let font = Fonts.nsFont(t.scale.textFamily, t.scale.body.size, .regular) ?? NSFont.systemFont(ofSize: t.scale.body.size)
+diff --git a/mac/Muse/Views/Claude/ClaudeFileApprovals.swift b/mac/Muse/Views/Claude/ClaudeFileApprovals.swift
+index c41d7e7..2ddd92e 100644
+--- a/mac/Muse/Views/Claude/ClaudeFileApprovals.swift
++++ b/mac/Muse/Views/Claude/ClaudeFileApprovals.swift
+@@ -72,6 +72,13 @@ struct ClaudeFileSettingsSection: View {
+             }
+             .labelsHidden().pickerStyle(.menu).fixedSize()
+         }
++        SettingRow("Let Claude operate MUSE's screen", hint: s.uiOn
++                   ? "When no MUSE tool covers what you asked, Claude can press, type and pick in this window (never other apps). A ring shows what it touches; press Esc to stop it. Keys, prices, sign-out, payments and deletes stay yours."
++                   : "Claude uses MUSE's own tools only and tells you what to press") {
++            Toggle("Let Claude operate MUSE's screen", isOn: Binding(get: { s.uiOn }, set: { service.setUiControl($0) }))
++                .labelsHidden().toggleStyle(.switch)
++                .accessibilityIdentifier("settings.claude.uiControl")
++        }
+         if !s.folders.isEmpty {
+             Text("Always allowed").scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s3)
+             ForEach(s.folders) { f in
+diff --git a/mac/Muse/Views/RootView.swift b/mac/Muse/Views/RootView.swift
+index 93d6de8..308ec2f 100644
+--- a/mac/Muse/Views/RootView.swift
++++ b/mac/Muse/Views/RootView.swift
+@@ -202,6 +202,7 @@ struct TitleBar: View {
+             }
+             .buttonStyle(.plain)
+             .help("Search or jump to a screen (⌘K)")
++            .accessibilityIdentifier("titlebar.search")
+             .layoutPriority(1)
+             Spacer(minLength: 12)
+             HStack(spacing: 10) {
+@@ -396,6 +397,7 @@ struct NavRow: View {
+         .buttonStyle(.plain)
+         .help(compact ? title : "")
+         .accessibilityLabel(title)
++        .accessibilityIdentifier("nav.\(UiTree.slug(title))") // Claude finds the sidebar by these (ui_snapshot)
+         .accessibilityAddTraits(on ? .isSelected : [])
+         .onHover { hover = $0 }
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+index 2fcdcae..26ad555 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+@@ -65,6 +65,10 @@ public protocol ClaudeAPI: Sendable {
+     func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws
+     /// Results arrive in the chat: this Mac answers it (false: another Mac of the person already does).
+     func claimResult(_ id: String) async throws -> Bool
++    /// Claude operating the MUSE window: calls waiting for this person; claim one (false: another Mac does it); answer it.
++    func pendingUiCalls() async throws -> [UiCall]
++    func claimUiCall(_ id: String, device: String) async throws -> Bool
++    func answerUiCall(_ id: String, _ answer: UiAnswer) async throws
+ }
+ 
+ /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
+@@ -89,6 +93,9 @@ public extension ClaudeAPI {
+     func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
+     func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws { throw ApiError("not_found", "This server can't take uploads from Claude yet") }
+     func claimResult(_ id: String) async throws -> Bool { true }
++    func pendingUiCalls() async throws -> [UiCall] { [] }
++    func claimUiCall(_ id: String, device: String) async throws -> Bool { false }
++    func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {}
+ }
+ 
+ enum ClaudeIds {
+@@ -143,7 +150,7 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+         }
+         return r
+     }
+-    public static let capabilities = "files,results"
++    public static let capabilities = "files,results,ui"
+ 
+     private func send(_ r: URLRequest) async throws -> Data {
+         let (data, resp): (Data, URLResponse?)
+@@ -245,6 +252,22 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+             return true // an older server without claims
+         }
+     }
++    private struct UiClaim: Encodable { var device: String }
++    public func pendingUiCalls() async throws -> [UiCall] {
++        let list: UiCallList = try await call("GET", "v1/claude/ui")
++        return list.calls
++    }
++    public func claimUiCall(_ id: String, device: String) async throws -> Bool {
++        do {
++            _ = try await send(request("POST", "v1/claude/ui/\(try ClaudeIds.check(id))/claim", body: try encoder.encode(UiClaim(device: String(device.prefix(120))))))
++            return true
++        } catch let e as ApiError where e.code == "ui_claimed" || e.code == "ui_expired" {
++            return false
++        }
++    }
++    public func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {
++        _ = try await send(request("POST", "v1/claude/ui/\(try ClaudeIds.check(id))", body: try encoder.encode(answer), timeout: 60))
++    }
+     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
+         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift
+index d1d0abc..f405619 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift
+@@ -33,11 +33,14 @@ public struct ClaudeFileSettings: Codable, Hashable, Sendable {
+     public var folders: [ClaudeAllowedFolder] = []
+     /// When results arrive (nil = the default: Claude looks and tells).
+     public var results: ClaudeResultMode?
++    /// "Let Claude operate MUSE's screen" (nil = the default: on).
++    public var uiControl: Bool?
+     public init(mode: ClaudeFileMode = .ask, folders: [ClaudeAllowedFolder] = []) {
+         self.mode = mode
+         self.folders = folders
+     }
+     public var resultMode: ClaudeResultMode { results ?? .look }
++    public var uiOn: Bool { uiControl ?? true }
+ 
+     public func folders(chatId: String) -> [String] { folders.filter { $0.chatId == chatId }.map(\.folder) }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
+index 4a247df..52a35ca 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
+@@ -21,6 +21,9 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
+     case permissionEnd(id: String)
+     /// Something started from a chat finished (results arrive in the chat).
+     case result(ClaudeJobResult)
++    /// Claude operates the MUSE window (ui_snapshot / ui_act / ui_wait), and the call ended (another Mac did it, or timed out).
++    case uiCall(UiCall)
++    case uiCallEnd(id: String)
+ }
+ 
+ /// SSE lines → `claude` live events; everything else on the stream is ignored.
+@@ -49,8 +52,9 @@ public struct ClaudeLiveEventFilter: Sendable {
+         var ask: ClaudePermissionAsk?
+         var id: String?
+         var result: ClaudeJobResult?
++        var call: UiCall?
+ 
+-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result }
++        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call }
+         init(from d: Decoder) throws {
+             let c = try d.container(keyedBy: K.self)
+             type = try c.decode(String.self, forKey: .type)
+@@ -67,6 +71,7 @@ public struct ClaudeLiveEventFilter: Sendable {
+             ask = try? c.decodeIfPresent(ClaudePermissionAsk.self, forKey: .ask)
+             id = try? c.decodeIfPresent(String.self, forKey: .id)
+             result = try? c.decodeIfPresent(ClaudeJobResult.self, forKey: .result)
++            call = try? c.decodeIfPresent(UiCall.self, forKey: .call)
+         }
+     }
+ 
+@@ -91,6 +96,8 @@ public struct ClaudeLiveEventFilter: Sendable {
+         case "permission": return e.ask.map { .permission($0) }
+         case "permission_end": return e.id.map { .permissionEnd(id: $0) }
+         case "result": return e.result.map { .result($0) }
++        case "uiCall": return e.call.map { .uiCall($0) }
++        case "uiCallEnd": return e.id.map { .uiCallEnd(id: $0) }
+         default: return nil
+         }
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift
+new file mode 100644
+index 0000000..166df3c
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift
+@@ -0,0 +1,498 @@
++import Foundation
++
++// Claude operates the MUSE window (owner, 2026-11-11: "Claude cursor control: MUSE window only"). A fallback for anything
++// no dedicated tool covers. The app reads its OWN accessibility tree in-process (SwiftUI ids and labels) and acts on its
++// own controls, so it needs no macOS Accessibility or Screen Recording permission and never reaches other apps. The
++// server relays Claude's ui_snapshot / ui_act / ui_wait as `{type: "claude", op: "uiCall", call}`; one of the person's
++// Macs claims the call, does it and posts the answer (server/api/src/claude/uiControl.ts). This file is the pure part:
++// the call, the control list Claude sees, finding a control again, the refusal list and what each action means.
++
++/// One call from Claude, as the server relays it.
++public struct UiCall: Codable, Hashable, Sendable, Identifiable {
++    public var id: String
++    public var kind: String
++    public var args: JSONValue
++    public var expiresAt: Double?
++    public init(id: String, kind: String, args: JSONValue = .object([:]), expiresAt: Double? = nil) {
++        self.id = id
++        self.kind = kind
++        self.args = args
++        self.expiresAt = expiresAt
++    }
++}
++
++public struct UiCallList: Codable, Hashable, Sendable {
++    public var calls: [UiCall]
++}
++
++/// The reason codes the server understands (and keeps out of Claude's auto-reported issues for stopped/off/protected).
++public enum UiErrorCode: String, Codable, Sendable {
++    case stopped, off, protected
++    case notFound = "not_found"
++    case failed
++}
++
++public struct UiError: Error, Hashable, Sendable {
++    public var code: UiErrorCode
++    public var message: String
++    public init(_ code: UiErrorCode, _ message: String) {
++        self.code = code
++        self.message = message
++    }
++
++    public static let stopped = UiError(.stopped, "The person pressed Esc to stop Claude using MUSE's screen. Don't try again this turn: ask them what they want.")
++    public static let off = UiError(.off, "The person turned off “Let Claude operate MUSE's screen” (Settings → Claude). Tell them what to press instead, or ask them to turn it on.")
++}
++
++public enum UiAction: String, CaseIterable, Codable, Sendable {
++    case press, focus, select, toggle, scroll, menu, key
++    case setText = "set_text"
++    case setValue = "set_value"
++}
++
++public enum UiWaitFor: String, CaseIterable, Codable, Sendable {
++    case appears, disappears, enabled, idle
++}
++
++/// What Claude asked for, checked.
++public enum UiRequest: Hashable, Sendable {
++    case snapshot(screenshot: Bool, within: String?)
++    case act(action: UiAction, target: String?, value: String?)
++    case wait(for: UiWaitFor, target: String?, timeout: Double)
++
++    public static func parse(_ c: UiCall) throws -> UiRequest {
++        let o: [String: JSONValue]
++        if case .object(let x) = c.args { o = x } else { o = [:] }
++        func s(_ k: String) -> String? {
++            if case .string(let v)? = o[k] { let t = v.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : v }
++            return nil
++        }
++        switch c.kind {
++        case "snapshot":
++            var shot = false
++            if case .bool(let b)? = o["screenshot"] { shot = b }
++            return .snapshot(screenshot: shot, within: s("within"))
++        case "act":
++            guard let a = s("action").flatMap(UiAction.init(rawValue:)) else { throw UiError(.failed, "Unknown action") }
++            return .act(action: a, target: s("target")?.trimmingCharacters(in: .whitespacesAndNewlines), value: s("value"))
++        case "wait":
++            guard let f = s("for").flatMap(UiWaitFor.init(rawValue:)) else { throw UiError(.failed, "Unknown wait") }
++            var t = 10.0
++            if case .number(let n)? = o["timeout"] { t = min(30, max(1, n)) }
++            return .wait(for: f, target: s("target")?.trimmingCharacters(in: .whitespacesAndNewlines), timeout: t)
++        default:
++            throw UiError(.failed, "This MUSE app doesn't know “\(c.kind)”. Update MUSE.")
++        }
++    }
++}
++
++// MARK: The control tree
++
++/// The kinds of control Claude is told about (from the AppKit accessibility role and subrole).
++public enum UiRole: String, Codable, Sendable {
++    case button, link, textField, textArea, secureField, slider, stepper, toggle, picker, tab, row, menuButton, comboBox
++    case scrollArea, list, group, image, text, other
++
++    /// AppKit's role/subrole strings (NSAccessibility.Role / .Subrole raw values) → a role.
++    public static func from(axRole: String, subrole: String? = nil) -> UiRole {
++        if subrole == "AXSecureTextField" { return .secureField }
++        if subrole == "AXSwitch" || subrole == "AXToggle" { return .toggle }
++        if subrole == "AXTabButton" { return .tab }
++        switch axRole {
++        case "AXButton": return .button
++        case "AXLink": return .link
++        case "AXTextField", "AXSearchField": return .textField
++        case "AXTextArea": return .textArea
++        case "AXSlider": return .slider
++        case "AXIncrementor", "AXStepper": return .stepper
++        case "AXCheckBox", "AXSwitch", "AXDisclosureTriangle": return .toggle
++        case "AXPopUpButton": return .picker
++        case "AXRadioButton", "AXTab": return .tab
++        case "AXRow", "AXCell", "AXOutlineRow": return .row
++        case "AXMenuButton": return .menuButton
++        case "AXComboBox": return .comboBox
++        case "AXScrollArea": return .scrollArea
++        case "AXList", "AXTable", "AXOutline", "AXTabGroup", "AXRadioGroup", "AXSegmentedControl": return .list
++        case "AXGroup", "AXSplitGroup", "AXToolbar", "AXLayoutArea": return .group
++        case "AXImage": return .image
++        case "AXStaticText", "AXHeading": return .text
++        default: return .other
++        }
++    }
++
++    /// Something a person can operate.
++    public var interactive: Bool {
++        switch self {
++        case .button, .link, .textField, .textArea, .secureField, .slider, .stepper, .toggle, .picker, .tab, .row, .menuButton, .comboBox, .scrollArea: return true
++        default: return false
++        }
++    }
++    public var takesText: Bool { self == .textField || self == .textArea || self == .comboBox }
++}
++
++public struct UiRect: Codable, Hashable, Sendable {
++    public var x: Double, y: Double, w: Double, h: Double
++    public init(x: Double, y: Double, w: Double, h: Double) { self.x = x; self.y = y; self.w = w; self.h = h }
++}
++
++/// One element the app read from its own accessibility tree (the app fills it; MuseCore turns it into controls).
++public struct UiElement: Hashable, Sendable {
++    public var identifier: String?
++    public var role: UiRole
++    public var label: String?
++    public var value: String?
++    public var enabled: Bool
++    public var selected: Bool?
++    /// In window points, top-left origin (nil: not on screen).
++    public var frame: UiRect?
++    public var children: [UiElement]
++    public init(identifier: String? = nil, role: UiRole, label: String? = nil, value: String? = nil, enabled: Bool = true, selected: Bool? = nil,
++                frame: UiRect? = nil, children: [UiElement] = []) {
++        self.identifier = identifier
++        self.role = role
++        self.label = label
++        self.value = value
++        self.enabled = enabled
++        self.selected = selected
++        self.frame = frame
++        self.children = children
++    }
++}
++
++/// What Claude sees for one control.
++public struct UiControl: Codable, Hashable, Sendable {
++    public var id: String
++    public var role: UiRole
++    public var label: String?
++    public var value: String?
++    public var enabled: Bool
++    public var selected: Bool?
++    /// The person's own: Claude must not operate it (keys, prices, sign-out, payments, deletes, passwords).
++    public var protected: Bool?
++    public var frame: UiRect?
++    public init(id: String, role: UiRole, label: String? = nil, value: String? = nil, enabled: Bool = true, selected: Bool? = nil, protected: Bool? = nil, frame: UiRect? = nil) {
++        self.id = id
++        self.role = role
++        self.label = label
++        self.value = value
++        self.enabled = enabled
++        self.selected = selected
++        self.protected = protected
++        self.frame = frame
++    }
++}
++
++public struct UiFlat: Hashable, Sendable {
++    public var controls: [UiControl]
++    /// Each control's place in the tree (child indexes from the root), so the app finds the element again.
++    public var paths: [String: [Int]]
++    public var truncated: Bool
++}
++
++public enum UiTree {
++    public static let maxControls = 400
++    static let maxText = 200
++
++    static func clean(_ s: String?, _ max: Int = maxText) -> String? {
++        guard let s else { return nil }
++        let t = s.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
++        guard !t.isEmpty else { return nil }
++        return t.count > max ? String(t.prefix(max)) + "…" : t
++    }
++
++    /// A short, stable word from a label: "Add to queue" → "add-to-queue".
++    public static func slug(_ s: String) -> String {
++        var out = ""
++        var dash = false
++        for ch in s.lowercased() {
++            if ch.isLetter || ch.isNumber { out.append(ch); dash = false } else if !dash && !out.isEmpty { out.append("-"); dash = true }
++            if out.count >= 32 { break }
++        }
++        while out.hasSuffix("-") { out.removeLast() }
++        return out
++    }
++
++    /// The tree → the flat list Claude sees. Ids: the SwiftUI accessibility identifier when there is one; otherwise the
++    /// nearest identified container + role + label ("suite.composer/button:generate"); repeats get "#2", "#3". Only
++    /// controls, labelled text and images, and identified containers are listed. `within`: only inside that container.
++    public static func flatten(_ root: UiElement, within: String? = nil, limit: Int = maxControls) -> UiFlat {
++        var controls: [UiControl] = []
++        var paths: [String: [Int]] = [:]
++        var seen: [String: Int] = [:]
++        var truncated = false
++
++        func unique(_ base: String) -> String {
++            let n = (seen[base] ?? 0) + 1
++            seen[base] = n
++            return n == 1 ? base : "\(base)#\(n)"
++        }
++
++        func walk(_ e: UiElement, path: [Int], scope: String?, inside: Bool) {
++            let ident = clean(e.identifier, 120)
++            let label = clean(e.label)
++            let nowInside = inside || (within != nil && ident == within)
++            var childScope = scope
++            let listed = e.role.interactive || ((e.role == .text || e.role == .image) && label != nil) || (ident != nil && (e.role == .group || e.role == .list || e.role == .other))
++            if listed && nowInside {
++                if controls.count >= limit { truncated = true; return }
++                let base: String
++                if let ident { base = ident } else {
++                    let word = slug(label ?? clean(e.value, 40) ?? "")
++                    base = "\(scope.map { "\($0)/" } ?? "")\(e.role.rawValue)\(word.isEmpty ? "" : ":\(word)")"
++                }
++                let id = unique(base)
++                var c = UiControl(id: id, role: e.role, label: label, value: e.role == .secureField ? nil : clean(e.value), enabled: e.enabled, selected: e.selected, frame: e.frame)
++                if UiRefusal.reason(c) != nil { c.protected = true }
++                controls.append(c)
++                paths[id] = path
++            }
++            if ident != nil, e.role == .group || e.role == .list || e.role == .scrollArea || e.role == .other { childScope = ident }
++            for (i, ch) in e.children.enumerated() {
++                if truncated { return }
++                walk(ch, path: path + [i], scope: childScope, inside: nowInside)
++            }
++        }
++        walk(root, path: [], scope: nil, inside: within == nil)
++        return UiFlat(controls: controls, paths: paths, truncated: truncated)
++    }
++
++    /// The element at a path (nil when the screen changed under it).
++    public static func element(_ root: UiElement, at path: [Int]) -> UiElement? {
++        var e = root
++        for i in path {
++            guard i < e.children.count else { return nil }
++            e = e.children[i]
++        }
++        return e
++    }
++
++    /// Finds Claude's target: an exact id, else a unique label (exact, then contained), preferring enabled controls.
++    public static func resolve(_ target: String, in controls: [UiControl]) throws -> UiControl {
++        let t = target.trimmingCharacters(in: .whitespacesAndNewlines)
++        if let c = controls.first(where: { $0.id == t }) { return c }
++        let low = t.lowercased()
++        func pick(_ list: [UiControl]) throws -> UiControl? {
++            guard !list.isEmpty else { return nil }
++            if list.count == 1 { return list[0] }
++            let live = list.filter { $0.enabled && $0.role.interactive }
++            if live.count == 1 { return live[0] }
++            let ids = list.prefix(6).map(\.id).joined(separator: ", ")
++            throw UiError(.notFound, "“\(t)” matches \(list.count) controls (\(ids)\(list.count > 6 ? ", …" : "")). Use one id from ui_snapshot.")
++        }
++        if let c = try pick(controls.filter { $0.label?.lowercased() == low }) { return c }
++        if let c = try pick(controls.filter { ($0.label?.lowercased().contains(low) ?? false) || $0.id.lowercased().hasSuffix(low) }) { return c }
++        throw UiError(.notFound, "No control “\(t)” on the MUSE window now. Take a fresh ui_snapshot (the screen may have changed).")
++    }
++
++    /// A short fingerprint of what the window shows (ui_wait idle: unchanged twice in a row).
++    public static func signature(_ controls: [UiControl]) -> String {
++        controls.map { "\($0.id)|\($0.label ?? "")|\($0.value ?? "")|\($0.enabled)|\($0.selected ?? false)" }.joined(separator: "\n")
++    }
++
++    /// ui_wait: is the condition met in this list?
++    public static func met(_ f: UiWaitFor, target: String?, controls: [UiControl]) -> (met: Bool, control: UiControl?) {
++        guard let target else { return (false, nil) }
++        let c = try? resolve(target, in: controls)
++        switch f {
++        case .appears: return (c != nil, c)
++        case .disappears: return (c == nil, nil)
++        case .enabled: return ((c?.enabled ?? false), c)
++        case .idle: return (false, nil)
++        }
++    }
++}
++
++// MARK: Never Claude's
++
++/// Controls Claude never operates (the server's claude/uiControl.ts keeps the same list): keys, providers, prices,
++/// sign-out, account deletion, payments, delete confirmations, passwords. Claude can open these screens; the person presses.
++public enum UiRefusal {
++    static let rules: [(String, String)] = [
++        (#"\b(api[\s_-]?key|secret|token|password|passcode|credential)s?\b"#, "keys, tokens and passwords"),
++        (#"\bprovider(s)?\b|\bproviders?[._-]"#, "provider settings"),
++        (#"\b(price|prices|pricing|markup|margin|per[\s_-]?second rate)\b"#, "prices"),
++        (#"\b(sign|log)[\s_-]?out\b|\bsignout\b|\blogout\b"#, "signing out"),
++        (#"\b(delete|close|remove)[\s_-]?(my[\s_-]?)?account\b|\baccount[._\s-]?delet"#, "deleting the account"),
++        (#"\b(top[\s_-]?up|topup|payment|pay now|checkout|buy credits|add credits|add funds|billing|card number|transfer credits)\b"#, "payments and top-ups"),
++        (#"(^|[._\s-])(confirm[\s_-]?)?(delete|discard|erase)\b"#, "deleting"),
++        (#"\$\s?\d|\b\d+(\.\d+)?\s?credits?\b|\b(generate|regenerate|run queue|run again|retry|upscale|train|retrain|post now|post|publish|schedule post)\b"#, "spending or posting"),
++        (#"\b(approve|allow once|always allow|allow)\b"#, "go-ahead cards"),
++    ]
++    static let compiled: [(NSRegularExpression, String)] = rules.compactMap { r in
++        (try? NSRegularExpression(pattern: r.0, options: [.caseInsensitive])).map { ($0, r.1) }
++    }
++    /// Menu items that would quit, close or hide MUSE (Claude stays inside the window).
++    static let menuWords: Set<String> = ["quit", "close", "close window", "close all", "hide", "hide muse", "hide others", "minimize", "minimise", "zoom", "enter full screen"]
++
++    public static func reason(text: String) -> String? {
++        let r = NSRange(text.startIndex..., in: text)
++        for (re, why) in compiled where re.firstMatch(in: text, range: r) != nil { return why }
++        return nil
++    }
++
++    public static func reason(_ c: UiControl) -> String? {
++        if c.role == .secureField { return "keys, tokens and passwords" }
++        if c.id.hasPrefix("claude.chat") { return "the person's own chat box" }
++        return reason(text: c.id) ?? c.label.flatMap { reason(text: $0) }
++    }
++
++    public static func menuReason(_ path: [String]) -> String? {
++        for p in path {
++            let w = p.lowercased().replacingOccurrences(of: "…", with: "").trimmingCharacters(in: .whitespaces)
++            if menuWords.contains(w) || w.hasPrefix("quit ") || w.hasPrefix("hide ") { return "quitting, closing or hiding MUSE" }
++            if let why = reason(text: p) { return why }
++        }
++        return nil
++    }
++
++    public static func refusal(_ why: String) -> UiError {
++        UiError(.protected, "That control is for the person, not Claude (\(why)). Use the dedicated tool, which asks them with a go-ahead card, or open the screen and tell them what to press.")
++    }
++}
++
++// MARK: What each action does
++
++public enum UiScroll: String, Sendable { case up, down, top, bottom }
++
++/// A key Claude may press in the MUSE window (the server allows the same list).
++public struct UiKey: Hashable, Sendable {
++    public var keyCode: UInt16
++    public var characters: String
++    public var command: Bool
++    public var shift: Bool
++
++    public static let table: [String: UiKey] = [
++        "return": UiKey(keyCode: 36, characters: "\r", command: false, shift: false),
++        "escape": UiKey(keyCode: 53, characters: "\u{1b}", command: false, shift: false),
++        "tab": UiKey(keyCode: 48, characters: "\t", command: false, shift: false),
++        "shift+tab": UiKey(keyCode: 48, characters: "\t", command: false, shift: true),
++        "space": UiKey(keyCode: 49, characters: " ", command: false, shift: false),
++        "up": UiKey(keyCode: 126, characters: "\u{F700}", command: false, shift: false),
++        "down": UiKey(keyCode: 125, characters: "\u{F701}", command: false, shift: false),
++        "left": UiKey(keyCode: 123, characters: "\u{F702}", command: false, shift: false),
++        "right": UiKey(keyCode: 124, characters: "\u{F703}", command: false, shift: false),
++        "delete": UiKey(keyCode: 51, characters: "\u{7f}", command: false, shift: false),
++        "cmd+z": UiKey(keyCode: 6, characters: "z", command: true, shift: false),
++        "cmd+shift+z": UiKey(keyCode: 6, characters: "z", command: true, shift: true),
++        "cmd+a": UiKey(keyCode: 0, characters: "a", command: true, shift: false),
++        "cmd+c": UiKey(keyCode: 8, characters: "c", command: true, shift: false),
++        "cmd+v": UiKey(keyCode: 9, characters: "v", command: true, shift: false),
++        "cmd+f": UiKey(keyCode: 3, characters: "f", command: true, shift: false),
++    ]
++    public static func parse(_ s: String) -> UiKey? { table[s.trimmingCharacters(in: .whitespaces).lowercased()] }
++}
++
++/// One concrete operation the app performs.
++public enum UiOp: Hashable, Sendable {
++    case press
++    case setText(String)
++    case setValue(Double)
++    case select(String?)
++    case toggle(Bool?)
++    case scroll(UiScroll)
++    case menu([String])
++    case focus
++    case key(UiKey)
++
++    /// Does this act need a control on the window? (menu and key don't.)
++    public var needsControl: Bool {
++        switch self { case .menu, .key: return false; default: return true }
++    }
++}
++
++public enum UiActionPlan {
++    /// Claude's action + the control it named → the operation, or a plain error Claude can correct.
++    public static func plan(_ action: UiAction, value: String?, target: String?, control: UiControl?) throws -> UiOp {
++        let v = value?.trimmingCharacters(in: .whitespacesAndNewlines)
++        switch action {
++        case .key:
++            guard let k = v.flatMap(UiKey.parse) else { throw UiError(.failed, "Unknown key “\(v ?? "")”.") }
++            return .key(k)
++        case .menu:
++            let path = (target ?? "").components(separatedBy: ">").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
++            guard path.count >= 2 else { throw UiError(.failed, "menu: give the path, like “File > Export”.") }
++            if let why = UiRefusal.menuReason(path) { throw UiRefusal.refusal(why) }
++            return .menu(path)
++        default: break
++        }
++        guard let c = control else { throw UiError(.notFound, "No control named.") }
++        if let why = UiRefusal.reason(c) { throw UiRefusal.refusal(why) }
++        let name = c.label.map { "“\($0)”" } ?? c.id
++        if !c.enabled, action != .scroll, action != .focus { throw UiError(.failed, "\(name) is greyed out right now (something else is needed first).") }
++        switch action {
++        case .press:
++            if c.role.takesText { throw UiError(.failed, "\(name) is a text field: use set_text.") }
++            if c.role == .slider { throw UiError(.failed, "\(name) is a slider: use set_value.") }
++            // Opening a pop-up menu would hold the app until it closes: pick the option directly instead.
++            if c.role == .picker || c.role == .menuButton { throw UiError(.failed, "\(name) opens a menu: use select with the option's label as value.") }
++            return .press
++        case .setText:
++            guard c.role.takesText else { throw UiError(.failed, "\(name) is a \(c.role.rawValue), not a text field.") }
++            return .setText(value ?? "")
++        case .setValue:
++            guard c.role == .slider || c.role == .stepper else { throw UiError(.failed, "\(name) is a \(c.role.rawValue): set_value is for sliders and steppers.") }
++            guard let s = v, let n = Double(s.replacingOccurrences(of: ",", with: ".")), n.isFinite else { throw UiError(.failed, "set_value needs a number.") }
++            return .setValue(n)
++        case .select:
++            guard [.picker, .tab, .row, .comboBox, .menuButton, .list, .button].contains(c.role) else { throw UiError(.failed, "\(name) is a \(c.role.rawValue): nothing to select.") }
++            if let v, let why = UiRefusal.reason(text: v) { throw UiRefusal.refusal(why) }
++            return .select(v?.isEmpty == true ? nil : v)
++        case .toggle:
++            guard c.role == .toggle else { throw UiError(.failed, "\(name) is a \(c.role.rawValue), not a switch or checkbox.") }
++            switch v?.lowercased() {
++            case nil, "": return .toggle(nil)
++            case "on", "true", "yes", "1": return .toggle(true)
++            case "off", "false", "no", "0": return .toggle(false)
++            default: throw UiError(.failed, "toggle: value “on” or “off” (or leave it out to flip).")
++            }
++        case .scroll:
++            guard let d = UiScroll(rawValue: (v ?? "down").lowercased()) else { throw UiError(.failed, "scroll: up, down, top or bottom.") }
++            return .scroll(d)
++        case .focus: return .focus
++        case .menu, .key: fatalError("handled above")
++        }
++    }
++
++    /// Is a toggle in the state asked for already? (on/off is read from its value "1"/"0".)
++    public static func isOn(_ c: UiControl) -> Bool? {
++        switch c.value?.lowercased() {
++        case "1", "on", "true": return true
++        case "0", "off", "false": return false
++        default: return c.selected
++        }
++    }
++}
++
++// MARK: The picture
++
++public enum UiShot {
++    /// The window picture's size: at most `maxSide` on its long side, never upscaled.
++    public static func size(width: Double, height: Double, maxSide: Double = 1280) -> (Int, Int) {
++        guard width > 0, height > 0 else { return (0, 0) }
++        let s = min(1, maxSide / max(width, height))
++        return (max(1, Int((width * s).rounded())), max(1, Int((height * s).rounded())))
++    }
++}
++
++/// The answer the Mac posts to POST /v1/claude/ui/:id.
++public struct UiAnswer: Encodable, Sendable {
++    public var result: JSONValue?
++    public var image: String?
++    public var error: String?
++    public var code: UiErrorCode?
++    public init(result: JSONValue) { self.result = result }
++    public init(result: JSONValue, image: String?) { self.result = result; self.image = image }
++    public init(error: UiError) { self.error = error.message; self.code = error.code }
++}
++
++public extension UiControl {
++    /// As JSON for Claude (no frame: it's for the app's ring; Claude reads ids, labels and values).
++    var json: JSONValue {
++        var o: [String: JSONValue] = ["id": .string(id), "role": .string(role.rawValue), "enabled": .bool(enabled)]
++        if let label { o["label"] = .string(label) }
++        if let value { o["value"] = .string(value) }
++        if let selected { o["selected"] = .bool(selected) }
++        if protected == true { o["protected"] = .bool(true) }
++        return .object(o)
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeFileAccessTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeFileAccessTests.swift
+index fb92542..0b03bc8 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ClaudeFileAccessTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeFileAccessTests.swift
+@@ -91,7 +91,7 @@ final class ClaudeFileAccessTests: XCTestCase {
+ 
+     func testTheAppSaysItCanAnswerFileQuestions() {
+         let api = HTTPClaudeAPI(baseURL: URL(string: "https://muse.example")!, token: { "t" })
+-        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results")
++        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results,ui")
+     }
+ 
+     func testOffRefusesEverything() {
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeUiControlTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeUiControlTests.swift
+new file mode 100644
+index 0000000..c058d87
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeUiControlTests.swift
+@@ -0,0 +1,133 @@
++import XCTest
++@testable import MuseCore
++
++/// Claude operating the MUSE window: the control list, finding a control again, the refusal list, action mapping, calls.
++final class ClaudeUiControlTests: XCTestCase {
++    private var tree: UiElement {
++        UiElement(role: .group, children: [
++            UiElement(identifier: "suite.composer", role: .group, children: [
++                UiElement(role: .textArea, label: "Prompt", value: "a beach at dusk"),
++                UiElement(role: .button, label: "Shuffle", enabled: false),
++                UiElement(role: .button, label: "Add to queue"),
++                UiElement(role: .button, label: "Add to queue"),
++                UiElement(role: .slider, label: "Length", value: "5"),
++                UiElement(role: .toggle, label: "Audio", value: "1"),
++                UiElement(role: .group, children: [UiElement(role: .text)]), // unlabelled: not listed
++            ]),
++            UiElement(identifier: "settings.providers.apiKey", role: .secureField, label: "Replicate key", value: "r8_secret"),
++            UiElement(role: .button, label: "Sign out"),
++            UiElement(role: .text, label: "Library"),
++            UiElement(identifier: "claude.chat.composer", role: .group, children: [UiElement(role: .button, label: "Send")]),
++        ])
++    }
++
++    func testFlattenGivesStableIdsAndMarksProtected() {
++        let f = UiTree.flatten(tree)
++        XCTAssertEqual(f.controls.map(\.id), [
++            "suite.composer", "suite.composer/textArea:prompt", "suite.composer/button:shuffle",
++            "suite.composer/button:add-to-queue", "suite.composer/button:add-to-queue#2",
++            "suite.composer/slider:length", "suite.composer/toggle:audio",
++            "settings.providers.apiKey", "button:sign-out", "text:library",
++            "claude.chat.composer", "claude.chat.composer/button:send",
++        ])
++        XCTAssertEqual(f.controls.last?.protected, true) // Claude never sends in its own chat box
++        XCTAssertEqual(f.paths["suite.composer/button:add-to-queue#2"], [0, 3])
++        let key = f.controls.first { $0.id == "settings.providers.apiKey" }!
++        XCTAssertEqual(key.protected, true)
++        XCTAssertNil(key.value) // a password field's text never goes to Claude
++        XCTAssertEqual(f.controls.first { $0.id == "button:sign-out" }?.protected, true)
++        XCTAssertNil(f.controls.first { $0.label == "Shuffle" }?.protected)
++        XCTAssertEqual(UiTree.element(tree, at: f.paths["suite.composer/slider:length"]!)?.label, "Length")
++        XCTAssertFalse(f.truncated)
++    }
++
++    func testWithinAndLimit() {
++        let inside = UiTree.flatten(tree, within: "suite.composer")
++        XCTAssertTrue(inside.controls.allSatisfy { $0.id.hasPrefix("suite.composer") })
++        XCTAssertEqual(inside.controls.count, 7)
++        let few = UiTree.flatten(tree, limit: 3)
++        XCTAssertEqual(few.controls.count, 3)
++        XCTAssertTrue(few.truncated)
++    }
++
++    func testResolve() throws {
++        let c = UiTree.flatten(tree).controls
++        XCTAssertEqual(try UiTree.resolve("suite.composer/slider:length", in: c).label, "Length")
++        XCTAssertEqual(try UiTree.resolve("shuffle", in: c).id, "suite.composer/button:shuffle")
++        XCTAssertEqual(try UiTree.resolve("Prompt", in: c).role, .textArea)
++        XCTAssertThrowsError(try UiTree.resolve("Add to queue", in: c)) { e in
++            XCTAssertEqual((e as? UiError)?.code, .notFound)
++            XCTAssertTrue((e as? UiError)?.message.contains("add-to-queue#2") ?? false)
++        }
++        XCTAssertThrowsError(try UiTree.resolve("Export", in: c))
++        XCTAssertTrue(UiTree.met(.appears, target: "Shuffle", controls: c).met)
++        XCTAssertFalse(UiTree.met(.enabled, target: "Shuffle", controls: c).met)
++        XCTAssertTrue(UiTree.met(.disappears, target: "Export", controls: c).met)
++    }
++
++    func testRefusalListMatchesTheServer() {
++        for t in ["API key", "settings.engines.token", "Log out", "Buy credits", "Payment", "Discard", "edit.clip.delete", "Show provider names", "Delete account", "Markup", "Generate", "Generate · $0.40", "Run queue", "Approve", "Allow once", "Post now", "Upscale", "Spend 12 credits"] {
++            XCTAssertNotNil(UiRefusal.reason(text: t), t)
++        }
++        for t in ["library.search", "Remove from collection", "Export", "suite.prompt", "Deliver", "Add to queue", "Posts", "Deny", "Shuffle"] {
++            XCTAssertNil(UiRefusal.reason(text: t), t)
++        }
++        XCTAssertNotNil(UiRefusal.menuReason(["MUSE", "Quit MUSE"]))
++        XCTAssertNotNil(UiRefusal.menuReason(["File", "Close Window"]))
++        XCTAssertNil(UiRefusal.menuReason(["File", "Export…"]))
++    }
++
++    func testActionMapping() throws {
++        let c = UiTree.flatten(tree).controls
++        func ctl(_ id: String) -> UiControl { c.first { $0.id == id }! }
++        XCTAssertEqual(try UiActionPlan.plan(.setText, value: "rain", target: nil, control: ctl("suite.composer/textArea:prompt")), .setText("rain"))
++        XCTAssertEqual(try UiActionPlan.plan(.setValue, value: "7,5", target: nil, control: ctl("suite.composer/slider:length")), .setValue(7.5))
++        XCTAssertEqual(try UiActionPlan.plan(.toggle, value: "off", target: nil, control: ctl("suite.composer/toggle:audio")), .toggle(false))
++        XCTAssertEqual(try UiActionPlan.plan(.toggle, value: nil, target: nil, control: ctl("suite.composer/toggle:audio")), .toggle(nil))
++        XCTAssertEqual(try UiActionPlan.plan(.press, value: nil, target: nil, control: ctl("suite.composer/button:add-to-queue")), .press)
++        XCTAssertEqual(try UiActionPlan.plan(.scroll, value: nil, target: nil, control: ctl("suite.composer")), .scroll(.down))
++        XCTAssertEqual(try UiActionPlan.plan(.menu, value: nil, target: "File > Export…", control: nil), .menu(["File", "Export…"]))
++        XCTAssertEqual(try UiActionPlan.plan(.key, value: "Cmd+Z", target: nil, control: nil), .key(UiKey.table["cmd+z"]!))
++        XCTAssertEqual(UiActionPlan.isOn(ctl("suite.composer/toggle:audio")), true)
++
++        func fails(_ a: UiAction, _ v: String?, _ id: String?, _ target: String? = nil, code: UiErrorCode = .failed) {
++            XCTAssertThrowsError(try UiActionPlan.plan(a, value: v, target: target, control: id.map(ctl))) { XCTAssertEqual(($0 as? UiError)?.code, code, "\(a) \(id ?? "")") }
++        }
++        fails(.press, nil, "suite.composer/button:shuffle") // greyed out
++        fails(.press, nil, "suite.composer/textArea:prompt") // use set_text
++        fails(.setText, "x", "suite.composer/slider:length")
++        fails(.setValue, "loud", "suite.composer/slider:length")
++        fails(.toggle, "maybe", "suite.composer/toggle:audio")
++        fails(.setText, "x", "settings.providers.apiKey", code: .protected)
++        fails(.press, nil, "button:sign-out", code: .protected)
++        fails(.menu, nil, nil, "MUSE > Quit MUSE", code: .protected)
++        fails(.menu, nil, nil, "Export")
++        fails(.key, "cmd+q", nil)
++        XCTAssertThrowsError(try UiActionPlan.plan(.press, value: nil, target: nil, control: UiControl(id: "p", role: .picker, label: "Model"))) {
++            XCTAssertTrue(($0 as? UiError)?.message.contains("use select") ?? false)
++        }
++    }
++
++    func testCallsEventsAndAnswers() throws {
++        let ev = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"uiCall","call":{"id":"ui_1","kind":"act","args":{"action":"set_text","target":"library.search","value":"beach"},"createdAt":1,"expiresAt":2}}"#.utf8))
++        guard case .uiCall(let call)? = ev else { return XCTFail("no uiCall") }
++        XCTAssertEqual(try UiRequest.parse(call), .act(action: .setText, target: "library.search", value: "beach"))
++        XCTAssertEqual(ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"uiCallEnd","id":"ui_1"}"#.utf8)), .uiCallEnd(id: "ui_1"))
++        XCTAssertEqual(try UiRequest.parse(UiCall(id: "u", kind: "snapshot", args: .object(["screenshot": .bool(true)]))), .snapshot(screenshot: true, within: nil))
++        XCTAssertEqual(try UiRequest.parse(UiCall(id: "u", kind: "wait", args: .object(["for": .string("idle"), "timeout": .number(99)]))), .wait(for: .idle, target: nil, timeout: 30))
++        XCTAssertThrowsError(try UiRequest.parse(UiCall(id: "u", kind: "drag")))
++
++        let enc = JSONEncoder()
++        enc.outputFormatting = .sortedKeys
++        XCTAssertEqual(String(data: try enc.encode(UiAnswer(error: .stopped)), encoding: .utf8)!.prefix(30), #"{"code":"stopped","error":"The"#)
++        XCTAssertEqual(String(data: try enc.encode(UiAnswer(result: .object(["done": .bool(true)]))), encoding: .utf8), #"{"result":{"done":true}}"#)
++        XCTAssertTrue(UiShot.size(width: 2560, height: 1600) == (1280, 800))
++        XCTAssertTrue(UiShot.size(width: 800, height: 600) == (800, 600))
++
++        var s = ClaudeFileSettings()
++        XCTAssertTrue(s.uiOn)
++        s.uiControl = false
++        XCTAssertFalse(try JSONDecoder().decode(ClaudeFileSettings.self, from: enc.encode(s)).uiOn)
++        XCTAssertTrue(try JSONDecoder().decode(ClaudeFileSettings.self, from: Data(#"{"mode":"ask","folders":[]}"#.utf8)).uiOn)
++    }
++}
+-- 
+2.43.0
+
