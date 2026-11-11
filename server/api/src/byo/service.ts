@@ -30,7 +30,10 @@ const AR_ALL = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'];
 const MAX_PROVIDERS = 10, MAX_MODELS = 100, CACHE_MS = 10 * 60_000, CACHE_MAX = 200, LOAD_MS = 15_000;
 const newId = (p: string) => `${p}_${crypto.randomBytes(9).toString('base64url')}`;
 
-const AddBody = z.object({ kind: z.enum(KINDS), apiKey: z.string().trim().min(8).max(500), label: z.string().trim().min(1).max(60).optional() }).strict();
+// apiKey left out: the provider runs on the key the server already has (Higgsfield: HF_CREDENTIALS), when it has one.
+const AddBody = z.object({ kind: z.enum(KINDS), apiKey: z.string().trim().min(8).max(500).optional(), label: z.string().trim().min(1).max(60).optional() }).strict();
+/** keyEnc of a provider that runs on the server's own key (nothing stored; the key stays in the server's settings). */
+const SERVER_KEY = 'server';
 const PatchBody = z.object({ apiKey: z.string().trim().min(8).max(500).optional(), label: z.string().trim().min(1).max(60).optional() }).strict();
 const AddModelBody = z.object({ ref: z.string().trim().min(3).max(200), displayName: z.string().trim().min(1).max(60).optional() }).strict();
 const PriceBody = z.object({ basis: z.enum(['per_run', 'per_second']), costUsd: z.number().min(0).max(50) }).strict();
@@ -62,17 +65,23 @@ export class ByoService {
   readonly image: ImageEngine;
   constructor(private ctx: Ctx, private fetchFn: typeof fetch = fetch) {
     const c = ctx.config;
-    this.adapters = adapters(() => ({ replicate: c.REPLICATE_API_URL, falPlatform: c.FAL_PLATFORM_URL, falQueue: c.FAL_QUEUE_URL, muapi: c.MUAPI_API_URL }), fetchFn);
+    this.adapters = adapters(() => ({ replicate: c.REPLICATE_API_URL, falPlatform: c.FAL_PLATFORM_URL, falQueue: c.FAL_QUEUE_URL, muapi: c.MUAPI_API_URL, higgsfield: c.HIGGSFIELD_API_URL }), fetchFn);
     this.video = this.videoProvider();
     this.image = this.imageEngine();
   }
   private get secret() { return keyFromSecret(this.ctx.config.PROVIDER_KEYS_SECRET); }
   /** Keys can be stored (and used). */
   get ready() { return !!this.secret; }
+  /** The key the server already holds for this provider kind (never returned or logged), if any. */
+  private serverKey(kind: ProviderKind): string | null {
+    return kind === 'higgsfield' ? this.ctx.config.HF_CREDENTIALS ?? null : null;
+  }
 
   // ------------------------------------------------------------------------------------------- providers (owner)
   kinds() {
-    return { kinds: KINDS.map(k => ({ kind: k, label: this.adapters[k].label, keyHint: this.adapters[k].keyHint, keyUrl: this.adapters[k].keyUrl })), keysReady: this.ready };
+    // serverKey: this provider can be connected with no key pasted (it uses the account the server is already set up with).
+    return { kinds: KINDS.map(k => ({ kind: k, label: this.adapters[k].label, keyHint: this.adapters[k].keyHint, keyUrl: this.adapters[k].keyUrl,
+      ...(this.serverKey(k) ? { serverKey: true } : {}) })), keysReady: this.ready };
   }
   private async providerRow(u: AuthUser, id: string) {
     const [p] = await this.ctx.db.select().from(byoProviders).where(and(eq(byoProviders.id, id), eq(byoProviders.studioId, u.studioId)));
@@ -81,7 +90,7 @@ export class ByoService {
   }
   private async providerView(p: ProviderRow) {
     const ms = await this.ctx.db.select({ enabled: byoModels.enabled }).from(byoModels).where(eq(byoModels.providerId, p.id));
-    return { id: p.id, kind: p.kind as ProviderKind, label: p.label, keyLast4: p.keyLast4, status: p.status as 'ok' | 'invalid', checkedAt: p.checkedAt, createdAt: p.createdAt,
+    return { id: p.id, kind: p.kind as ProviderKind, label: p.label, keyLast4: p.keyLast4, serverKey: p.keyEnc === SERVER_KEY, status: p.status as 'ok' | 'invalid', checkedAt: p.checkedAt, createdAt: p.createdAt,
       models: { added: ms.length, enabled: ms.filter(m => m.enabled).length } };
   }
   async list(u: AuthUser) {
@@ -100,15 +109,21 @@ export class ByoService {
   }
   async add(u: AuthUser, body: unknown) {
     const b = parse(AddBody, body);
-    if (!this.secret) throw keysUnavailable();
+    const server = b.apiKey ? null : this.serverKey(b.kind);
+    if (!b.apiKey && !server) throw badRequest(`Paste a ${this.adapters[b.kind].label} API key`);
+    if (b.apiKey && !this.secret) throw keysUnavailable();
     const n = (await this.ctx.db.select({ id: byoProviders.id }).from(byoProviders).where(eq(byoProviders.studioId, u.studioId))).length;
     if (n >= MAX_PROVIDERS) throw badRequest(`At most ${MAX_PROVIDERS} providers`);
-    await this.check(b.kind, b.apiKey);
+    if (server && (await this.ctx.db.select({ id: byoProviders.id }).from(byoProviders)
+      .where(and(eq(byoProviders.studioId, u.studioId), eq(byoProviders.kind, b.kind), eq(byoProviders.keyEnc, SERVER_KEY)))).length) {
+      throw badRequest(`${this.adapters[b.kind].label} is already connected with the server's account`);
+    }
+    await this.check(b.kind, b.apiKey ?? server!);
     const id = newId('prv'), now = Date.now();
-    const row: ProviderRow = { id, studioId: u.studioId, kind: b.kind, label: b.label ?? this.adapters[b.kind].label, keyEnc: sealKey(this.secret, b.apiKey, id),
-      keyLast4: last4(b.apiKey), status: 'ok', checkedAt: now, createdBy: u.id, createdAt: now, updatedAt: now };
+    const row: ProviderRow = { id, studioId: u.studioId, kind: b.kind, label: b.label ?? (server ? `${this.adapters[b.kind].label} (studio account)` : this.adapters[b.kind].label),
+      keyEnc: b.apiKey ? sealKey(this.secret!, b.apiKey, id) : SERVER_KEY, keyLast4: b.apiKey ? last4(b.apiKey) : 'server key', status: 'ok', checkedAt: now, createdBy: u.id, createdAt: now, updatedAt: now };
     await this.ctx.db.insert(byoProviders).values(row);
-    this.ctx.log.info({ provider: id, kind: b.kind }, 'byo provider added'); // never the key
+    this.ctx.log.info({ provider: id, kind: b.kind, serverKey: !!server }, 'byo provider added'); // never the key
     return this.providerView(row);
   }
   async patch(u: AuthUser, id: string, body: unknown) {
@@ -136,6 +151,11 @@ export class ByoService {
   private async keyOf(providerId: string): Promise<{ key: string; p: ProviderRow }> {
     const [p] = await this.ctx.db.select().from(byoProviders).where(eq(byoProviders.id, providerId));
     if (!p) throw new ReplicateError('the provider was removed', 'unavailable');
+    if (p.keyEnc === SERVER_KEY) {
+      const k = this.serverKey(p.kind as ProviderKind);
+      if (!k) throw new ReplicateError(`the server has no ${p.kind} account set up any more`, 'unavailable');
+      return { key: k, p };
+    }
     if (!this.secret) throw new ReplicateError("provider keys can't be read on this server", 'unavailable');
     try { return { key: openKey(this.secret, p.keyEnc, p.id), p }; }
     catch { throw new ReplicateError("the provider's key can't be read", 'unavailable'); }

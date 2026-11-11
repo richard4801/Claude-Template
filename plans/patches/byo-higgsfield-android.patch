@@ -1,0 +1,142 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeProvidersApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeProvidersApi.kt
+index f92c5495..7337b232 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakeProvidersApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeProvidersApi.kt
+@@ -12,6 +12,7 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long =
+         ProviderKind("replicate", "Replicate", "Starts with r8_", "https://replicate.com/account/api-tokens"),
+         ProviderKind("fal", "fal", "A key id and secret, joined with a colon", "https://fal.ai/dashboard/keys"),
+         ProviderKind("muapi", "Muapi", "Your Muapi API key", "https://muapi.ai/dashboard"),
++        ProviderKind("higgsfield", "Higgsfield", "An API key from console.higgsfield.ai, as KEY_ID:KEY_SECRET", "https://console.higgsfield.ai", serverKey = true),
+     )
+     private val list = mutableListOf(
+         Provider("p_demo", "replicate", "Studio Replicate", "7Q2k", "ok", 1_762_600_000_000, 1_762_000_000_000),
+@@ -47,7 +48,7 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long =
+     private fun view(p: Provider) = p.copy(models = counts(p.id))
+     private fun provider(id: String) = list.firstOrNull { it.id == id } ?: throw ApiException("not_found", "That provider isn't connected any more")
+     private fun check(kind: String, key: String) {
+-        val ok = when (kind) { "replicate" -> key.startsWith("r8_") && key.length >= 12; "fal" -> ':' in key && key.length >= 12; "muapi" -> key.length >= 12; else -> false }
++        val ok = when (kind) { "replicate" -> key.startsWith("r8_") && key.length >= 12; "fal", "higgsfield" -> ':' in key && key.length >= 12; "muapi" -> key.length >= 12; else -> false }
+         if (!ok) throw ApiException("invalid_key", "That key didn't work with ${kindList.firstOrNull { it.kind == kind }?.label ?: kind}. Nothing was saved.")
+     }
+ 
+@@ -55,9 +56,16 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long =
+     override suspend fun providers(): Providers { pause(); return Providers(list.map(::view), keysReady) }
+     override suspend fun add(req: NewProvider): Provider {
+         pause()
++        val kind = kindList.firstOrNull { it.kind == req.kind } ?: throw ApiException("bad_request", "Unknown provider")
++        val key = req.apiKey?.trim().orEmpty()
++        if (key.isEmpty() && kind.serverKey) {
++            val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: "${kind.label} (studio account)", "server key", serverKey = true, status = "ok", checkedAt = now(), createdAt = now())
++            list += p
++            return view(p)
++        }
+         if (!keysReady) throw ApiException("provider_keys_unavailable", "Provider keys aren't set up on the server yet")
+-        check(req.kind, req.apiKey.trim())
+-        val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: kindList.first { it.kind == req.kind }.label, req.apiKey.trim().takeLast(4), "ok", now(), now())
++        check(req.kind, key)
++        val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: kind.label, key.takeLast(4), status = "ok", checkedAt = now(), createdAt = now())
+         list += p
+         return view(p)
+     }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/ProvidersApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/ProvidersApi.kt
+index ff3ca78a..96a838eb 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/ProvidersApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/ProvidersApi.kt
+@@ -19,9 +19,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
+ 
+ // ---------------------------------------------------------------- types
+ 
+-/** GET /v1/providers/kinds: a provider the studio can connect (replicate, fal). */
++/** GET /v1/providers/kinds: a provider the studio can connect (replicate, fal, muapi, higgsfield). [serverKey]: the server already
++ *  has an account for it (Higgsfield), so it connects with no key pasted. */
+ @Serializable
+-data class ProviderKind(val kind: String, val label: String = "", val keyHint: String = "", val keyUrl: String? = null)
++data class ProviderKind(val kind: String, val label: String = "", val keyHint: String = "", val keyUrl: String? = null, val serverKey: Boolean = false)
+ 
+ @Serializable
+ data class ProviderKinds(val kinds: List<ProviderKind> = emptyList(), val keysReady: Boolean = true)
+@@ -41,6 +42,8 @@ data class Provider(
+     val checkedAt: Long? = null,
+     val createdAt: Long = 0,
+     val models: ProviderModelCounts = ProviderModelCounts(),
++    /** Connected with the server's own account (no key stored for it). */
++    val serverKey: Boolean = false,
+ ) {
+     val invalid get() = status == "invalid"
+ }
+@@ -53,7 +56,8 @@ data class Providers(
+ )
+ 
+ @Serializable
+-data class NewProvider(val kind: String, val apiKey: String, val label: String? = null)
++/** [apiKey] null: connect with the server's own account (kinds with serverKey). */
++data class NewProvider(val kind: String, val apiKey: String? = null, val label: String? = null)
+ 
+ @Serializable
+ data class ProviderPatch(val label: String? = null, val apiKey: String? = null)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProvidersScreens.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProvidersScreens.kt
+index 38bfc871..6ccffdb9 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProvidersScreens.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/ProvidersScreens.kt
+@@ -85,7 +85,8 @@ class ProvidersViewModel(private val c: AppContainer) : ViewModel() {
+     fun adding(v: Boolean) = state.update { it.copy(adding = v, error = null) }
+ 
+     /** Checked with the provider before anything is stored (400 invalid_key: nothing saved). The key is never kept here. */
+-    fun add(kind: String, key: String) = viewModelScope.launch {
++    /** [key] null: connect with the server's own account (kinds with serverKey). */
++    fun add(kind: String, key: String?) = viewModelScope.launch {
+         state.update { it.copy(busy = true, error = null) }
+         try {
+             api.add(NewProvider(kind, key))
+@@ -117,7 +118,7 @@ private fun providersVm(): ProvidersViewModel {
+ /** "Key ending 4f2a, added 8 Nov. 9 of 48 models on." */
+ fun Provider.line(): String {
+     val added = if (createdAt > 0) ", added " + java.text.SimpleDateFormat("d MMM", java.util.Locale.UK).format(java.util.Date(createdAt)) else ""
+-    return "Key ending $keyLast4$added. ${models.enabled} of ${models.added} models on." + if (invalid) " The key stopped working: replace it." else ""
++    return (if (serverKey) "The studio's account" else "Key ending $keyLast4") + "$added. ${models.enabled} of ${models.added} models on." + if (invalid) " The key stopped working: replace it." else ""
+ }
+ 
+ @Composable
+@@ -179,6 +180,13 @@ private fun AddProviderForm(s: ProvidersState, vm: ProvidersViewModel?) {
+     SettingsGroup("Add a provider") {
+         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+             Labeled("Provider") { Segmented(kinds.map { it.kind to it.label.ifBlank { it.kind } }, kind, { kind = it }) }
++            if (k.serverKey) Labeled("Studio account") {
++                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
++                    PrimaryButton(if (s.busy) "Connecting…" else "Use the studio's ${k.label.ifBlank { k.kind }} account", { if (!s.busy) vm?.add(kind, null) }, Modifier.fillMaxWidth())
++                    T("MUSE's server is already set up with a ${k.label.ifBlank { k.kind }} account: no key to paste, and the key stays on the server. Or paste a different key below.",
++                        muse.scale.caption, muse.roles.ink2)
++                }
++            }
+             Labeled("API key") {
+                 SecureKeyField(null, k.keyHint.ifBlank { "Paste the key" }, s.busy, s.error, s.keysReady, { key -> vm?.add(kind, key) },
+                     note = "Saved encrypted on the MUSE server, checked with ${k.label.ifBlank { k.kind }} first. Afterwards you only see its last 4 characters.",
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ProvidersApiTest.kt b/android/app/src/test/kotlin/studio/muse/app/ProvidersApiTest.kt
+index a6086c9c..2fe1add8 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ProvidersApiTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ProvidersApiTest.kt
+@@ -13,6 +13,7 @@ import studio.muse.app.data.AddProviderModel
+ import studio.muse.app.data.CustomModelPatch
+ import studio.muse.app.data.FakeProvidersApi
+ import studio.muse.app.data.NewProvider
++import studio.muse.app.ui.screens.line
+ import studio.muse.app.data.ProviderCatalogPage
+ import studio.muse.app.data.ProviderPatch
+ import studio.muse.app.data.Providers
+@@ -35,6 +36,16 @@ class ProvidersApiTest {
+         assertEquals("1234", rotated.keyLast4)
+     }
+ 
++    /** Higgsfield (2026-11-11): the server already has its account, so it connects with no key pasted. */
++    @Test fun serverKeyProviderConnectsWithoutAKey() = runBlocking {
++        val hf = api.kinds().first { it.kind == "higgsfield" }
++        assertTrue(hf.serverKey)
++        val p = api.add(NewProvider("higgsfield"))
++        assertTrue(p.serverKey)
++        assertTrue(p.line().startsWith("The studio's account"))
++        expectCode("invalid_key") { runBlocking { api.add(NewProvider("muapi")) } }
++    }
++
+     @Test fun badKeyIsRefusedAndNothingStored() = runBlocking {
+         val before = api.providers().providers.size
+         expectCode("invalid_key") { runBlocking { api.add(NewProvider("replicate", "not-a-key")) } }
