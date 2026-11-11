@@ -24,7 +24,7 @@ const planOn = (id: string, res: string, r: ReturnType<typeof req>) => {
 };
 
 describe('guide keyframes are hints, not hard frames', () => {
-  it('a directed blocking draft with stills estimates on Seedance 2.0, Seedance 2.5, H3 and H3 (Higgsfield) at Cinema', () => {
+  it('a directed blocking draft with stills estimates on Seedance 2.0, Seedance 2.5, H3 and H3 · Higgsfield at Cinema', () => {
     const r = directed();
     expect(needOf(r, CHAR)).toMatchObject({ mode: 'reference', start: false, end: false, middle: 0, guide: true, directed: true });
     for (const [id, res] of [['seedance-2.0', '1080p'], ['seedance-2.5', '720p'], ['h3', '2K'], ['h3-hf', '2K']] as const) {
@@ -33,7 +33,7 @@ describe('guide keyframes are hints, not hard frames', () => {
       expect(plan.images.refs.filter(x => x.role === 'character').length, id).toBeGreaterThan(0); // her look is kept
     }
   });
-  it('H3 (Higgsfield): reference-to-video, the stills as reference images after hers, the prompt opens and ends on them', () => {
+  it('H3 · Higgsfield: reference-to-video, the stills as reference images after hers, the prompt opens and ends on them', () => {
     const plan = planOn('h3-hf', '2K', directed());
     expect(plan.kind).toBe('ref2v');
     expect(plan.ref).toBe('minimax/h3/reference-to-video');
@@ -47,7 +47,7 @@ describe('guide keyframes are hints, not hard frames', () => {
     expect(plan.images.start).toBeUndefined();
     expect(plan.images.refs.some(x => x.label === 'opening frame')).toBe(true);
   });
-  it('directed with only the guide clip (no character) on H3 (Higgsfield) uses reference-to-video', () => {
+  it('directed with only the guide clip (no character) on H3 · Higgsfield uses reference-to-video', () => {
     const r = directed({ modelId: undefined });
     const p = pickModel('cinema', needOf(r, null), { providers: ALL, engineModel: 'h3-hf', resolution: '2K' });
     expect('error' in p).toBe(false);
@@ -59,7 +59,7 @@ describe('guide keyframes are hints, not hard frames', () => {
 
 describe('adapt, don\'t block (a picked model)', () => {
   const pick = (id: string, r: ReturnType<typeof req>, res?: string) => pickAdapted('cinema', r, CHAR, { providers: ALL, engineModel: id, resolution: res });
-  it('the person\'s own frames on H3 (Higgsfield) go as reference images, the opening frame first, and it says so', () => {
+  it('the person\'s own frames on H3 · Higgsfield go as reference images, the opening frame first, and it says so', () => {
     const r = req({ modelId: 'mia', frames: { start: { url: 'https://x/a.png' }, end: { url: 'https://x/b.png' } } });
     expect(fit(modelById('h3-hf')!, '2K', needOf(r, CHAR)).why).toBe('no keyframes');
     const a = pick('h3-hf', r);

@@ -227,11 +227,12 @@ describe('Bring your own provider · Higgsfield against a FAKE Higgsfield (no mo
       expect((await owner.req('POST', `/v1/providers/${pid}/models`, { ref: '../requests/x' })).status).toBe(400);
 
       const vm = await owner.req('POST', `/v1/providers/${pid}/models`, { ref: 'kling-video/v2.6/pro/text-to-video', displayName: 'House Kling' });
+      expect(vm.body.label).toBe('House Kling · Higgsfield');
       expect(vm.body).toMatchObject({ status: 'ready', price: { basis: 'per_second', costUsd: 0.07, source: 'provider' } });
       expect((await owner.req('PATCH', `/v1/providers/models/${vm.body.id}`, { enabled: true, priceScale: 2 })).body).toMatchObject({ enabled: true, memberPrice: { basis: 'per_second', usd: 0.14 } });
       const e = (await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'A dog runs on the beach', duration: 10, quality: 'draft', aspectRatio: '9:16', engineModel: vm.body.id })).body;
       expect(e.estimate).toBeCloseTo(1.4, 6); // 10 s × $0.07 × 2
-      expect((await member!.req('GET', '/v1/suite/catalog')).body.custom.map((c: any) => [c.name, c.providerName])).toEqual([['House Kling', 'Higgsfield']]);
+      expect((await member!.req('GET', '/v1/suite/catalog')).body.custom.map((c: any) => [c.name, c.label, c.providerName])).toEqual([['House Kling', 'House Kling · Higgsfield', 'Higgsfield']]);
       expect(calls.some(c => c.method === 'POST' && !c.url.startsWith('/hf/estimate/'))).toBe(false); // nothing ran
 
       // The owner can still use their own key instead (stored encrypted, like the other providers).
