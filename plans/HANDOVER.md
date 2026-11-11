@@ -82,7 +82,9 @@ should have full control anywhere on our app… provided I give it the go ahead"
 1. One Claude everywhere: the same assistant, tools and memory on every page, aware of the page the owner is on, able to
    navigate the app itself (open a page, a take, a character, the editor). Today: separate tool sets and a thread per
    mode (`0028_claude_thread_sessions`, suite/mcpTools.ts, editor/mcpTools.ts, recreate/mcpTools.ts, routes/mcp.ts).
-   Open question for the owner: one continuous conversation, or one Claude with several chats it can all see?
+   DECIDED (owner, 2026-11-11): one Claude with several chats. Chats are per piece of work (not per page/mode) and
+   follow the owner across pages; one shared memory (her figure rules, style, preferred models, rejections) in every
+   chat; Claude can look into other chats when asked.
 2. Full capability inside Edit: everything the app offers (Shot, Photo, Talking, UGC, Storyboard, Recast, Swap, Extend,
    Upscale, Recreate, outfits, characters) without leaving the edit. Runs in the background; Claude reports progress and
    drops the result on the timeline or in the Library.
