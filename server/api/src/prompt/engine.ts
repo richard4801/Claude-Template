@@ -21,6 +21,10 @@ export type ShootSpec = {
   presets?: boolean;
   /** Reference images that were sent (plans/api.md "Shoot references"). */
   refs?: SentRef[];
+  /** The shot has a camera of its own: the AI suite Photo rig (or its camera preset) sets a camera body, lens character,
+   *  look or grade. Then the house style's Camera feel and the default grade are left out. The old Photo tool's grade
+   *  picker doesn't count (it isn't a rig). */
+  ownCamera?: boolean;
 };
 export type PromptSlot = { layer: LayerKey; text: string };
 export type BuiltPrompt = { slots: PromptSlot[]; seed: number | null; removed: string[]; text: string };
@@ -55,7 +59,8 @@ export const OUTFIT_ANGLES = [
   { label: 'Back', words: 'full body back view' },
 ] as const;
 
-export const HOUSE_STYLE = DEFAULT_TEXTS['style.house']!;
+/** The house style at its defaults with no camera of the shot's own: Camera feel, then Realism. */
+export const HOUSE_STYLE = `${DEFAULT_TEXTS['style.camera']}, ${DEFAULT_TEXTS['style.realism']}`;
 export const GLOBAL_NEVER = listOf(DEFAULT_TEXTS['never.base']!);
 export const DEFAULT_SCENE = DEFAULT_TEXTS['shoot.default.scene']!;
 export const DEFAULT_GRADE = DEFAULT_TEXTS['shoot.default.grade']!;
@@ -159,12 +164,15 @@ function javaHash(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h =
 /** Deterministic seed from a name, used when Lock look is on. */
 export const seedFor = (key: string) => (javaHash(key) & 0x7fffffff) % 1_000_000;
 
-/** The scene, light and grade a shoot really used (defaults from the library). */
+/**
+ * The scene, light and grade a shoot really used (defaults from the library). The default grade yields to the shot's own
+ * camera, lens or look: then `grade` is empty and the light line goes without one.
+ */
 export function shootChoices(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS) {
   const scene = s.scene && s.scene.trim() ? s.scene.trim() : t['shoot.default.scene']!;
   const light = s.light && s.light.trim() ? s.light.trim() : t['shoot.default.light']!;
-  const grade = s.grade && s.grade.trim() ? s.grade.trim() : t['shoot.default.grade']!;
-  return { scene, light, grade, camera: s.camera ?? DEFAULT_CAMERA };
+  const grade = s.grade && s.grade.trim() ? s.grade.trim() : s.ownCamera ? '' : t['shoot.default.grade']!;
+  return { scene, light, grade, camera: s.camera ?? DEFAULT_CAMERA, ownCamera: !!s.ownCamera };
 }
 
 
@@ -217,5 +225,5 @@ export function imageRange(ns: number[]): string {
 
 // ---- Prompt scripts (plans/prompt-scripts.md): every builder runs its script. Same signatures and, at default
 // settings, the same prompts as before (test/prompt-scripts.test.ts checks them against test/legacy/).
-import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine } from './scripts/builders.js';
-export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine };
+import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine, houseStyle } from './scripts/builders.js';
+export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine, houseStyle };

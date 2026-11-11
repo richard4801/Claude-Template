@@ -57,7 +57,9 @@ export const OUTFIT_ANGLES = [
   { label: 'Back', words: 'full body back view' },
 ] as const;
 
-export const HOUSE_STYLE = DEFAULT_TEXTS['style.house']!;
+/** The old single house style: since the split (2026-11-11), Camera feel then Realism (the same words at their defaults). */
+export const houseText = (t: PromptTexts) => [t['style.camera'], t['style.realism']].map(x => (x ?? '').trim()).filter(Boolean).join(', ');
+export const HOUSE_STYLE = houseText(DEFAULT_TEXTS);
 export const GLOBAL_NEVER = listOf(DEFAULT_TEXTS['never.base']!);
 export const DEFAULT_SCENE = DEFAULT_TEXTS['shoot.default.scene']!;
 export const DEFAULT_GRADE = DEFAULT_TEXTS['shoot.default.grade']!;
@@ -124,7 +126,7 @@ export const identityLine = (id: Identity, t: PromptTexts = DEFAULT_TEXTS) =>
 const identitySlot = (id: Identity, t: PromptTexts): PromptSlot => ({ layer: 'identity', text: identityLine(id, t) });
 export const neverLine = (items: string[], t: PromptTexts = DEFAULT_TEXTS) => fill(t['shoot.never']!, { never: items.join(', ') });
 const negativeSlot = (id: Identity, t: PromptTexts): PromptSlot => ({ layer: 'negative', text: neverLine(neverList(id, t), t) });
-const styleSlot = (t: PromptTexts): PromptSlot => ({ layer: 'style', text: fill(t['shoot.style']!, { style: t['style.house'] }) });
+const styleSlot = (t: PromptTexts): PromptSlot => ({ layer: 'style', text: fill(t['shoot.style']!, { style: houseText(t) }) });
 
 /** The camera words without the "Camera: " label (a shot's stored layer). */
 export function cameraValues(c: CameraSpec, t: PromptTexts = DEFAULT_TEXTS) {
