@@ -18,7 +18,7 @@ import { memberRules, providerLabel, saveMemberRules, type MemberRules } from '.
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
-import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, HF_SWAP_MIN_SEC, GENJUTSU_RES, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
+import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, HF_SWAP_MIN_SEC, GENJUTSU_KEEPS, GENJUTSU_RES, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
 
 export type Price = { basis: 'per_second' | 'per_run' | 'per_output_second'; usd: number };
 export type Engine = {
@@ -31,6 +31,8 @@ export type Engine = {
   browsed?: boolean;
   limits: { minSeconds: number | null; maxSeconds: number | null; allowedSeconds: number[] | null; aspectRatios: string[]; resolutions: { id: string; label: string }[]; maxInputSeconds: number | null };
   resolution: string | null; price: Price | null; inputs: InputSlots;
+  /** Genjutsu: what it keeps from the clip and what it changes (plain words for the picker), and when Auto picks it. */
+  keeps?: typeof GENJUTSU_KEEPS; bestFor?: string;
 };
 export type Choice = { model: string; source: 'request' | 'studio'; engine: Engine };
 
@@ -110,6 +112,7 @@ export class ModelChoice {
         const m = modelById(e.id)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
         const base = cur ?? this.videoEntry(m, [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
         out.set(e.id, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
+          ...(e.genjutsu ? { keeps: GENJUTSU_KEEPS, bestFor: 'Same moves, new look or scene: a new outfit or background, added characters or products' } : {}),
           limits: { ...base.limits, minSeconds: e.genjutsu?.minSec ?? (e.runs === 'higgsfield' ? HF_SWAP_MIN_SEC : P.REPLICATE_MIN_SEC), maxInputSeconds: e.genjutsu?.maxSec ?? P.REPLICATE_MAX_SEC } });
       } else {
         const sp = this.swapPrice(e.id, 'standard', P.SAMPLE_CLIP_SEC);

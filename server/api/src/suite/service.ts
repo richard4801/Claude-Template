@@ -30,7 +30,7 @@ import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
 import { providerLabel } from '../engines/members.js'; // WS13: model choice everywhere
-import { purposeOfShot, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
+import { purposeOfShot, recastIntent, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
 export const STUDIO_DEFAULT_SKIPPED = 'The studio’s chosen engine can’t make this shot · the quality’s usual engine is used';
@@ -263,6 +263,17 @@ export class SuiteService {
       if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
       await this.byo.checkUse(u, r.engineModel, 'video');
     }
+    // Auto (no model picked, no studio Recast default): "same moves, new look or scene" → Genjutsu Light (a swap of her
+    // onto the clip, the new scene from the prompt); "same scene, new person" → the Recast models. The reason is shown.
+    let autoNote: string | null = null;
+    if (r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && !r.engineModel && !(await modelChoice(this.ctx).studioDefaults(u.studioId)).recast) {
+      const intent = recastIntent([r.prompt, r.direction].filter(Boolean).join(' '));
+      if (intent.kind === 'look' && (await modelChoice(this.ctx).candidates(u, 'swap')).some(e => e.model === 'genjutsu-light')) {
+        r.engineModel = 'genjutsu-light';
+        if (!r.direction && r.prompt?.trim()) r.direction = r.prompt.trim().slice(0, 500);
+        autoNote = `Auto chose Genjutsu Light: ${intent.reason}`;
+      } else autoNote = `Auto chose a Recast model: ${intent.kind === 'person' ? intent.reason : 'same scene, new person (Genjutsu isn’t available)'}`;
+    }
     // The apps send Character swap as a one-person Recast (mode "recast", cast[0] = who she becomes). With a swap model
     // picked (H3, H3 Lite, Highspeed, Higgsfield, Edit, Fast) that isn't a Recast model, it IS a swap: run it as one.
     if (r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && r.engineModel && swapEngineById(r.engineModel)
@@ -272,8 +283,16 @@ export class SuiteService {
     }
     // WS13: the owner's override for this purpose (checked: a candidate, owner only), else the studio's default for it.
     const choice = await modelChoice(this.ctx).choose(u, purposeOfShot(r), r.engineModel);
-    if (r.mode === 'swap') return { swap: true as const, ...(await this.swapEstimate(u, r, choice)) };
-    if (r.mode === 'recast' || r.cast?.length) return this.recastPlan(u, r, choice);
+    if (r.mode === 'swap') {
+      const sw = await this.swapEstimate(u, r, choice);
+      if (autoNote) { sw.view.warnings = [autoNote, ...sw.view.warnings]; Object.assign(sw.view, { chosen: { model: choice?.model ?? null, reason: autoNote } }); }
+      return { swap: true as const, ...sw };
+    }
+    if (r.mode === 'recast' || r.cast?.length) {
+      const rp = await this.recastPlan(u, r, choice);
+      if (autoNote && Array.isArray((rp.plan as { notes?: string[] }).notes)) (rp.plan as { notes: string[] }).notes.unshift(autoNote);
+      return rp;
+    }
     if (r.mode === 'extend' || r.extend) return this.extendPlan(u, r, choice);
     const prefs = await this.prefs(u.studioId);
     const character = await this.character(u.studioId, r.modelId, r.outfitId);

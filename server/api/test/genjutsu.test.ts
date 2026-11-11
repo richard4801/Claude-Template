@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { ledger, takes, users } from '../src/db/schema.js';
-import { GENJUTSU_NO_ACCESS, SWAP_ENGINES } from '../src/engines/purposes.js';
+import { GENJUTSU_KEEPS, GENJUTSU_NO_ACCESS, recastIntent, SWAP_ENGINES } from '../src/engines/purposes.js';
 import { genjutsuSeconds, genjutsuUsd, parseGenjutsuOptions } from '../src/editor/genjutsu.js';
 import * as P from '../src/pricing.js';
 import { genjutsuInput } from '../src/services/replicateVideo.js';
@@ -43,6 +43,15 @@ describe('Genjutsu · registry, pricing and inputs', () => {
     const i = genjutsuInput('https://x/v.mp4', imgs, 'Replace the person in <Video 1> with <Image 1>; figure from <Image 4>.', '1080p');
     expect(i).toEqual({ video_url: 'https://x/v.mp4', image_urls: imgs.slice(0, 8), prompt: 'Replace the person in the source video with image 1; figure from image 4.', resolution: '1080p' });
     expect(genjutsuInput('u', ['a'], '', '720p')).toEqual({ video_url: 'u', image_urls: ['a'], resolution: '720p' });
+  });
+  it('Auto: "same moves, new look or scene" → Genjutsu Light; "same scene, new person" → Recast', () => {
+    expect(recastIntent('Same dance on a beach at sunset').kind).toBe('look');
+    expect(recastIntent('She wears the red dress').kind).toBe('look');
+    expect(recastIntent('adding a friend next to her').kind).toBe('look');
+    expect(recastIntent('her holding the perfume bottle').kind).toBe('look');
+    expect(recastIntent('Replace the dancer with Mia')).toEqual({ kind: 'person', reason: 'same scene, new person' });
+    expect(recastIntent(undefined).kind).toBe('person');
+    expect(GENJUTSU_KEEPS.notStated).toContain('cuts');
   });
   it('helpers: options checked, ≥ 4 s, first 30 s priced × markup', () => {
     expect(() => parseGenjutsuOptions('objectswap', {})).toThrow(/at least one picture/);
@@ -183,6 +192,24 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
       expect(settle).toBeUndefined();
       expect((await owner.req('GET', '/v1/engines/genjutsu/access')).body).toMatchObject({ access: 'no', detail: GENJUTSU_NO_ACCESS });
     } finally { await a.close(); mode = 'ok'; }
+  });
+
+  it('a one-person Recast on Auto asking for a new scene runs on Genjutsu Light, and says why; a plain recast does not', async () => {
+    const a = await makeApp(env());
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const m = await demoModel(owner), clipId = await clipOf(a, owner);
+      const look = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId, cast: [{ characterId: m.id }], prompt: 'Same moves, now on a rooftop at night in a black outfit', quality: 'standard' });
+      expect(look.status, JSON.stringify(look.body)).toBe(200);
+      expect(look.body.mode).toBe('swap');
+      expect(look.body.warnings[0]).toMatch(/^Auto chose Genjutsu Light: you asked for a new look or scene/);
+      expect(look.body.engine).toMatchObject({ model: 'genjutsu-light', perSec: 0.2 });
+      const list = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
+      expect((list.engines ?? list).find((e: any) => e.model === 'genjutsu-light').keeps).toEqual(GENJUTSU_KEEPS);
+      const plain = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId, cast: [{ characterId: m.id }], prompt: 'Replace the dancer', quality: 'standard' });
+      expect(plain.body.engine?.model).not.toBe('genjutsu-light');
+      expect(plain.body.mode).not.toBe('swap');
+    } finally { await a.close(); }
   });
 
   it('access check is free (preset list only), owner only; without the key it is unknown and Genjutsu is not offered', async () => {

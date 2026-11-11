@@ -85,6 +85,31 @@ export const SWAP_ENGINES: SwapEngine[] = [
 /** Higgsfield's H3 takes 5–15 s (a shorter clip is padded to 5 s and the take is cut back). */
 export const HF_SWAP_MIN_SEC = 5;
 export const swapEngineById = (id: string) => SWAP_ENGINES.find(e => e.id === id);
+/**
+ * What Genjutsu keeps from the source clip, from Higgsfield's docs (read 2026-11-11), for the pickers to explain. Docs say:
+ * the motion and timing follow the source (output length = the prepared source); Light keeps the source audio and the
+ * first 15 s; full Genjutsu takes up to 30 s. They say nothing about cuts, camera moves or the background: shown as
+ * "not stated" (the new scene comes from the prompt and pictures). MUSE puts the clip's sound back on either way.
+ */
+export const GENJUTSU_KEEPS = {
+  keeps: ['the moves and timing of the clip', 'the clip’s sound (MUSE puts it back)'],
+  changes: ['the person, outfit, products and scene, from your pictures (up to 8) and the prompt'],
+  notStated: ['cuts', 'camera moves', 'the background (describe it in the prompt to change or keep it)'],
+  limits: 'Genjutsu: first 30 s (shorter than 4 s is padded). Light: first 15 s; billed on output + input seconds.',
+} as const;
+
+/**
+ * Owner 2026-11-11: Auto picks between the two jobs a one-person Recast can be. "Same moves, new look or scene" (a new
+ * outfit, background or scene, added characters or products) → Genjutsu Light; "same scene, new person" → the Recast
+ * models. Reads the request's words; null reason = nothing points to a new look.
+ */
+const LOOK_RE = /\b(outfit|wear(?:s|ing)?|dress(?:ed)?|clothes|clothing|costume|background|backdrop|scene|setting|location|set in|beach|street|studio|room|product|holding|holds|bottle|bag|add(?:s|ing)?\s+(?:a|an|another|her|his|two|three)?\s*(?:character|person|people|friend|girl|guy|woman|man|product)|new look|restyle|style it)\b/i;
+export function recastIntent(text: string | null | undefined): { kind: 'look' | 'person'; reason: string } {
+  const m = LOOK_RE.exec(text ?? '');
+  return m ? { kind: 'look', reason: `you asked for a new look or scene (“${m[0]}”) with the same moves` }
+    : { kind: 'person', reason: 'same scene, new person' };
+}
+
 /** Said when the server's Higgsfield key has no access to Genjutsu (a 403/404 that isn't about credit). */
 export const GENJUTSU_NO_ACCESS = "Your Higgsfield plan doesn't include Genjutsu · you weren't charged. Pick another model, or add Genjutsu to the Higgsfield plan.";
 /** Genjutsu's resolution per MUSE quality (Draft 480p, Standard 720p, HD 1080p). */
