@@ -3,11 +3,11 @@
 // sees a member's, a member never sees the owner's). Old per-place chats (Suite, Edit, Recreate, Camera) are listed
 // here too, each starting on the page it belonged to. The owner's Mac still runs her turns on Claude Code through the
 // thread routes (camera/claudeRoutes.ts); members (and the owner when her Mac is away) use the in-app turn below.
-import { and, desc, eq, ilike, isNull, isNotNull, ne, sql, inArray } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, isNotNull, lt, ne, sql, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { ApiError } from '../errors.js';
+import { ApiError, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { claudeMessages, claudeThreads } from '../camera/schema.js';
 import { uploads } from '../db/schema.js';
@@ -22,6 +22,7 @@ import { memoryAdd, memoryRead, memoryRemove, memoryUpdate } from './memory.js';
 import { pageLine, PageSchema } from './page.js';
 import { permissionsOf } from './permissions.js';
 import { resultsOf } from './results.js';
+import { claudeActions } from './schema.js';
 import { checkModel, CLAUDE_MODELS, personDefault, setPersonDefault } from './models.js';
 
 type Row = typeof claudeThreads.$inferSelect;
@@ -78,6 +79,37 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     void ctx.hub.emitTo(req.user.id, { type: 'claude', op: 'chat', chat: view });
     return view;
   });
+  /**
+   * Delete chats (owner, 2026-11-11: "messages are piling up"): the person's OWN chats only (anyone else's is 404). The
+   * chat, its messages and turns go (a running turn is stopped), with its waiting approvals and result links; their
+   * memory and anything they made (takes, outfits, …) stay.
+   */
+  app.delete<P>('/v1/claude/chats/:id', async req => {
+    const t = await ownChat(ctx, req.user, req.params.id);
+    await deleteChats(ctx, claude, req.user, [t.id]);
+    return { ok: true, deleted: [t.id] };
+  });
+  /** Several at once: {ids} and/or {olderThanDays} (chats not used for that long). */
+  app.post('/v1/claude/chats/delete', async req => {
+    const b = parse(z.object({ ids: z.array(z.string().min(1).max(80)).max(200).optional(), olderThanDays: z.number().int().min(1).max(3650).optional() }).strict()
+      .refine(x => (x.ids?.length ?? 0) > 0 || x.olderThanDays !== undefined, 'ids or olderThanDays'), req.body);
+    const ids = new Set<string>();
+    if (b.ids?.length) {
+      const rows = await ctx.db.select({ id: claudeThreads.id }).from(claudeThreads)
+        .where(and(inArray(claudeThreads.id, b.ids), eq(claudeThreads.ownerId, req.user.id), eq(claudeThreads.studioId, req.user.studioId)));
+      if (rows.length !== new Set(b.ids).size) throw notFound('Chat');
+      rows.forEach(r => ids.add(r.id));
+    }
+    if (b.olderThanDays !== undefined) {
+      const before = Date.now() - b.olderThanDays * 86_400_000;
+      const rows = await ctx.db.select({ id: claudeThreads.id }).from(claudeThreads)
+        .where(and(eq(claudeThreads.ownerId, req.user.id), eq(claudeThreads.studioId, req.user.studioId), lt(claudeThreads.updatedAt, before)));
+      rows.forEach(r => ids.add(r.id));
+    }
+    await deleteChats(ctx, claude, req.user, [...ids]);
+    return { ok: true, deleted: [...ids] };
+  });
+
   /** Step 6b: the Claude models anyone can pick (plain-words speed and cost) and this person's default. */
   app.get('/v1/claude/models', async req => ({ models: CLAUDE_MODELS, default: await personDefault(ctx, req.user), studioDefault: ctx.config.DIRECTOR_MODEL }));
   app.put('/v1/claude/prefs', async req => {
@@ -175,3 +207,13 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
   });
 }
 
+
+/** Deletes the person's own chats (already checked): each through the thread delete (stops a running turn, tells
+ * their apps), plus the chat's waiting approvals and result links. Memory and made things are kept. */
+export async function deleteChats(ctx: Ctx, claude: ClaudeService, u: AuthUser, ids: string[]) {
+  for (const id of ids) {
+    await claude.deleteThread(u, id);
+    await ctx.db.delete(claudeActions).where(and(eq(claudeActions.chatId, id), eq(claudeActions.userId, u.id)));
+    resultsOf(ctx).forgetChat(id);
+  }
+}

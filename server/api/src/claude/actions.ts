@@ -110,6 +110,19 @@ export async function registerActionRoutes(app: FastifyInstance, ctx: Ctx) {
 
 /** What Claude can ask to do (each mirrors a screen's button). */
 export const ACTION_TOOLS: GatedTool[] = [
+  gated({ name: 'chats_delete', title: 'Delete chats', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes some of the person\'s own Claude chats for good (their messages go; their memory and anything they made stay): by id (chats_list gives them) and/or every chat not used for olderThanDays days. Needs the person\'s go-ahead.',
+    props: { ids: { type: 'array', maxItems: 200, items: { type: 'string', maxLength: 80 }, description: 'The chats to delete' },
+      olderThanDays: { type: 'integer', minimum: 1, maximum: 3650, description: 'Also every chat not used for this many days' } }, required: [],
+    plan: async (env, a) => {
+      const ids = Array.isArray(a.ids) ? a.ids.map(x => id(x, 'ids')) : [];
+      const days = typeof a.olderThanDays === 'number' ? Math.floor(a.olderThanDays) : undefined;
+      if (!ids.length && days === undefined) throw badRequest('ids or olderThanDays');
+      for (const c of ids) await ownChat(env.ctx, env.user, c);
+      const what = [ids.length ? `${ids.length} chat${ids.length === 1 ? '' : 's'}` : '', days !== undefined ? `every chat not used for ${days} days` : ''].filter(Boolean).join(' and ');
+      return { summary: `Delete ${what} (messages only; memory and anything made are kept)`, method: 'POST', url: '/v1/claude/chats/delete',
+        body: compact({ ids: ids.length ? ids : undefined, olderThanDays: days }) };
+    } }),
   gated({ name: 'take_discard', title: 'Discard a take', scope: 'edit:write', gate: 'delete',
     description: 'Deletes a take or edited version from the Library for good (as Discard on its screen). Needs the person\'s go-ahead.',
     props: { takeId: str('The take', 80) }, required: ['takeId'],
