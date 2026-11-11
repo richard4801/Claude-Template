@@ -83,6 +83,14 @@ jobs:
           codesign --force --deep --sign - "$APP"
           ditto -c -k --keepParent "$APP" MUSE-mac.zip
 
+      # The app goes up as soon as it is built and signed, so the owner can hand-test it while the checks below still run.
+      - name: Upload MUSE-mac
+        uses: actions/upload-artifact@v4
+        with:
+          name: MUSE-mac
+          path: mac/MUSE-mac.zip
+          if-no-files-found: error
+
       # Review screenshots of the key screens in the four themes (SnapshotRunner, demo mode, no server). Never fails the build.
       # The app gets up to 1800 s; it prints its own log even when it had to be stopped.
       - name: Review screenshots
@@ -207,12 +215,6 @@ jobs:
           name: mac-screenshots
           path: mac/snapshots
           if-no-files-found: ignore
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MUSE-mac
-          path: mac/MUSE-mac.zip
-          if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         if: failure()
