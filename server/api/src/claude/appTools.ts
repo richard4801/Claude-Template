@@ -133,4 +133,64 @@ export const APP_TOOLS: EditTool[] = [
     inputSchema: obj({}),
     run: async env => slim({ references: await appCall(env.ctx, env.user, 'GET', '/v1/recreate/references') }, 50),
   },
+  // B3b
+  {
+    name: 'templates_manage', title: 'Make or change a template', scope: 'edit:write',
+    description: 'Templates (photo presets), as the Templates screen: create (fields as the screen sends them; templates_list shows existing ones to copy), update one (only the fields to change), duplicate, favourite or unfavourite. Free. Deleting is a separate tool with the person\'s go-ahead.',
+    inputSchema: obj({ action: { type: 'string', enum: ['create', 'update', 'duplicate', 'favourite', 'unfavourite'] }, templateId: str('The template (all but create)', 80),
+      fields: { type: 'object', description: 'create/update: the template fields' } }, ['action']),
+    run: async (env, a) => {
+      const f = (a.fields && typeof a.fields === 'object' ? a.fields : {}) as object;
+      if (a.action === 'create') return slim(await appCall(env.ctx, env.user, 'POST', '/v1/templates', f));
+      const t = enc(id(a.templateId, 'templateId'));
+      if (a.action === 'update') return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/templates/${t}`, f));
+      if (a.action === 'duplicate') return slim(await appCall(env.ctx, env.user, 'POST', `/v1/templates/${t}/duplicate`, {}));
+      if (a.action === 'favourite') return slim(await appCall(env.ctx, env.user, 'POST', `/v1/templates/${t}/favourite`, {}));
+      if (a.action === 'unfavourite') return slim(await appCall(env.ctx, env.user, 'DELETE', `/v1/templates/${t}/favourite`));
+      throw badRequest('action: create, update, duplicate, favourite or unfavourite');
+    },
+  },
+  {
+    name: 'recipes', title: 'Learn: edit recipes', scope: 'edit:write',
+    description: 'The studio\'s edit recipes (Learn → Recipes: the edits learned from references and posts): list (query/tag), open one (recipeId), or rename / retag one (name, tags). Free. Deleting needs the person\'s go-ahead (recipe_delete).',
+    inputSchema: obj({ action: { type: 'string', enum: ['list', 'get', 'update'] }, recipeId: str('The recipe (get, update)', 80), query: str('Words to find', 80), tag: str('Only this tag', 40),
+      name: str('New name (update)', 120), tags: { type: 'array', items: { type: 'string', maxLength: 40 }, maxItems: 20, description: 'The tags it should have (update)' } }, ['action']),
+    run: async (env, a) => {
+      if (a.action === 'list') {
+        const qs = new URLSearchParams();
+        if (typeof a.query === 'string' && a.query) qs.set('q', a.query);
+        if (typeof a.tag === 'string' && a.tag) qs.set('tag', a.tag);
+        return slim(await appCall(env.ctx, env.user, 'GET', `/v1/learn/recipes${qs.size ? `?${qs}` : ''}`), 40);
+      }
+      const r = enc(id(a.recipeId, 'recipeId'));
+      if (a.action === 'get') return slim(await appCall(env.ctx, env.user, 'GET', `/v1/learn/recipes/${r}`), 40);
+      if (a.action === 'update') return slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/learn/recipes/${r}`, { ...(typeof a.name === 'string' ? { name: a.name } : {}), ...(Array.isArray(a.tags) ? { tags: a.tags } : {}) }));
+      throw badRequest('action: list, get or update');
+    },
+  },
+  {
+    name: 'import_link', title: 'Import a video link', scope: 'edit:write',
+    description: 'Imports a public video link (TikTok, Instagram Reel, YouTube Shorts…) into the studio as a clip, as Link import does; check: true only checks it can be fetched. Free (server download). A link that is private or blocked is refused with a reason: ask the person to save the video and drop the file in. Lists earlier imports when no url is given.',
+    inputSchema: obj({ url: str('The link', 500), name: str('A name for it', 120), check: { type: 'boolean', description: 'Only check the link' } }),
+    run: async (env, a) => {
+      if (typeof a.url !== 'string' || !a.url) return slim({ imports: await appCall(env.ctx, env.user, 'GET', '/v1/imports') }, 40);
+      if (a.check === true) return slim(await appCall(env.ctx, env.user, 'POST', '/v1/links/check', { url: a.url }));
+      return slim(await appCall(env.ctx, env.user, 'POST', '/v1/imports', { url: a.url, ...(typeof a.name === 'string' && a.name ? { name: a.name } : {}) }));
+    },
+  },
+  {
+    name: 'edit_jobs', title: 'Edit helper jobs', ...read,
+    description: 'The Edit AI helper jobs (captions, cuts, cut-out, denoise, reverse, stabilize, slow motion, translate, separate…): their state and results, optionally for one take; or which helpers exist and what they cost (features: true).',
+    inputSchema: obj({ takeId: str('Only this take\'s', 80), features: { type: 'boolean', description: 'List the helpers instead' } }),
+    run: async (env, a) => {
+      if (a.features === true) return slim(await appCall(env.ctx, env.user, 'GET', '/v1/editor/features'), 40);
+      return slim(await appCall(env.ctx, env.user, 'GET', `/v1/editor/jobs${typeof a.takeId === 'string' && a.takeId ? `?takeId=${enc(a.takeId)}` : ''}`), 30);
+    },
+  },
+  {
+    name: 'character_archive', title: 'Archive a character (owner)', scope: 'edit:write',
+    description: 'Archives a character (hidden from every list and picker, nothing deleted) or restores one (archived: false), as Archive on her page. Owner only. Free.',
+    inputSchema: obj({ modelId: str('The character', 80), archived: { type: 'boolean' } }, ['modelId', 'archived']),
+    run: async (env, a) => slim(await appCall(env.ctx, env.user, 'POST', `/v1/models/${enc(id(a.modelId, 'modelId'))}/${a.archived === false ? 'unarchive' : 'archive'}`, {})),
+  },
 ];

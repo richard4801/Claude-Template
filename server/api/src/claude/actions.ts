@@ -237,6 +237,44 @@ export const ACTION_TOOLS: GatedTool[] = [
       const total = q.reduce((s, j) => s + (typeof j.cost === 'number' ? j.cost : typeof j.estimate === 'number' ? j.estimate : 0), 0);
       return { summary: `Run ${q.length} queued job${q.length === 1 ? '' : 's'}`, method: 'POST', url: '/v1/queue/run', body: {}, priceUsd: total || null };
     } }),
+  // B3b
+  gated({ name: 'template_delete', title: 'Delete a template', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes a template (as on the Templates screen). Needs the person\'s go-ahead.',
+    props: { templateId: str('The template', 80) }, required: ['templateId'],
+    plan: async (env, a) => {
+      const t = await appCall(env.ctx, env.user, 'GET', `/v1/templates/${enc(id(a.templateId, 'templateId'))}`);
+      return { summary: `Delete the template “${t?.name ?? a.templateId}”`, method: 'DELETE', url: `/v1/templates/${enc(a.templateId as string)}` };
+    } }),
+  gated({ name: 'recipe_delete', title: 'Delete an edit recipe', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes an edit recipe from Learn. Needs the person\'s go-ahead.',
+    props: { recipeId: str('The recipe', 80) }, required: ['recipeId'],
+    plan: async (env, a) => {
+      const r = await appCall(env.ctx, env.user, 'GET', `/v1/learn/recipes/${enc(id(a.recipeId, 'recipeId'))}`);
+      return { summary: `Delete the recipe “${r?.name ?? r?.recipe?.name ?? a.recipeId}”`, method: 'DELETE', url: `/v1/learn/recipes/${enc(a.recipeId as string)}` };
+    } }),
+  gated({ name: 'import_delete', title: 'Delete an imported clip', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes a clip imported from a link. Needs the person\'s go-ahead.',
+    props: { importId: str('The import', 80) }, required: ['importId'],
+    plan: async (env, a) => {
+      const c = await appCall(env.ctx, env.user, 'GET', `/v1/imports/${enc(id(a.importId, 'importId'))}`);
+      return { summary: `Delete the imported clip “${c?.name ?? a.importId}”`, method: 'DELETE', url: `/v1/imports/${enc(a.importId as string)}` };
+    } }),
+  gated({ name: 'camera_session_delete', title: 'Delete a camera session (owner)', scope: 'edit:write', gate: 'delete',
+    description: 'Deletes a Camera (blocking) session. Owner only; needs her go-ahead.',
+    props: { cameraSessionId: str('The camera session', 80) }, required: ['cameraSessionId'],
+    plan: async (env, a) => {
+      const c = await appCall(env.ctx, env.user, 'GET', `/v1/camera-sessions/${enc(id(a.cameraSessionId, 'cameraSessionId'))}`);
+      return { summary: `Delete the camera session “${c?.title ?? a.cameraSessionId}”`, method: 'DELETE', url: `/v1/camera-sessions/${enc(a.cameraSessionId as string)}` };
+    } }),
+  gated({ name: 'edit_helper', title: 'Run an Edit AI helper', scope: 'edit:write', gate: 'spend',
+    description: 'Runs one of Edit\'s AI helpers on a take or upload (kind from edit_jobs {features: true}: reverse, stabilize, slowmo, translate, separate, captions, cuts, matte, denoise…, with its options), as the helper buttons do. The result arrives as a helper job (edit_jobs). Paid or free: without confirm it gives the price.',
+    props: { kind: str('The helper', 30), takeId: str('The take', 80), uploadId: str('Or an upload', 80), options: { type: 'object', description: 'The helper\'s options' } }, required: ['kind'],
+    plan: async (env, a) => {
+      const body = compact({ kind: a.kind, takeId: typeof a.takeId === 'string' ? a.takeId : undefined, uploadId: typeof a.uploadId === 'string' ? a.uploadId : undefined,
+        options: a.options && typeof a.options === 'object' ? a.options : undefined });
+      const e = await appCall(env.ctx, env.user, 'POST', '/v1/editor/estimate', body);
+      return { summary: `Run ${String(a.kind)} on ${String(body.takeId ?? body.uploadId ?? 'the clip')}`, method: 'POST', url: '/v1/editor/jobs', body, priceUsd: priceOf(e) };
+    } }),
 ];
 
 /** Studio settings Claude may read and (with the owner's go-ahead) change. Never keys, providers or prices. */

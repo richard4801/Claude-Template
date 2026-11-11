@@ -105,5 +105,12 @@ tool also says "Approve it in …" with the page to open, and the existing scree
   Mac Approve card HELD (no mac/ push): `plans/patches/mac-claude-approve-card.patch` (git apply; ClaudeUI approve
   fields, OneClaudePanel card, answerAction/waitingActions, reload on chat switch). Until it ships, old apps show the
   "Waiting for your go-ahead" line without a button; Claude is told to send the person to the screen instead.
-- Not yet (B3): outfit generate/fill, character fill-angles, take upscale, queue retry/run (no server estimate route
-  for some: add estimates first), templates CRUD, kits, recipes, settings set (owner), LoRA, warm GPU, link import.
+- Delete ownership fix live da798e70 (takes, characters, jobs, posts, tool runs: owner or maker only).
+- B3a live 07a276b6: character_fill_angles, outfit_make, outfit_fill, take_upscale, queue_run (spend, priced via the
+  routes' dryRun); settings_read / settings_change (owner; studio limits, image engine, editor helpers, recreate,
+  Suite models, default models, models members see; never keys/providers/prices; settings gate).
+- B3b: templates_manage, recipes, import_link, edit_jobs, character_archive (owner); template_delete, recipe_delete,
+  import_delete, camera_session_delete (owner), edit_helper (any Edit AI helper, priced by /v1/editor/estimate).
+- Left (B3c): Suite add-to-queue, saved rigs/locations, style kits, queue retry (photo retry reopens the composer),
+  character create/slots/duplicate/"never" list, Dress up/Enhance run keep/apply/retry, Recreate retry/export/delete,
+  LoRA (build/train: spend), Warm GPU (spend). Playbook pin/delete stay the owner's by design.

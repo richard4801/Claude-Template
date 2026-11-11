@@ -24,7 +24,9 @@ export const GATES: Record<string, Gate> = {
   suite_request_shot: 'spend', fill_slot: 'spend', auto_captions: 'spend', cut_fillers: 'spend', remove_background: 'spend', denoise: 'spend',
 };
 /** Recreate tools a member can't use: they act on edit sessions or the editing playbook, which are the owner's. */
-const OWNER_ONLY = new Set(['apply_recipe', 'replace_slot', 'playbook_read', 'playbook_add', 'report_gap']);
+const OWNER_ONLY = new Set(['apply_recipe', 'replace_slot', 'playbook_read', 'playbook_add', 'report_gap',
+  // Full control: owner-only screens (archive, camera).
+  'character_archive', 'camera_session_delete']);
 
 const tag = (tools: EditTool[], pages: ChatTool['pages'], members: (t: EditTool) => boolean): ChatTool[] =>
   tools.map(t => ({ ...t, pages, gate: GATES[t.name] ?? (t as { gate?: Gate }).gate ?? 'none', members: members(t) }));
@@ -36,9 +38,9 @@ export const CHAT_REGISTRY: ChatTool[] = [
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
   // Full control B1 (claude/appTools.ts): the screens' free read/organise actions, as the person (routes decide what members may do).
-  ...tag(APP_TOOLS, ['any'], () => true),
+  ...tag(APP_TOOLS, ['any'], t => !OWNER_ONLY.has(t.name)),
   // Full control B2 (claude/actions.ts): spend/delete/post actions behind the person's Approve card.
-  ...tag(ACTION_TOOLS, ['any'], () => true),
+  ...tag(ACTION_TOOLS, ['any'], t => !OWNER_ONLY.has(t.name)),
   // Studio settings (never keys, providers or prices): the owner's, behind her go-ahead to change.
   ...tag(SETTINGS_TOOLS, ['any', 'settings'], () => false),
   // Images sent (images/sent.ts): see and change what a generation sends; free, own studio, everyone.

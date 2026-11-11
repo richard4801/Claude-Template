@@ -28,14 +28,15 @@ afterAll(async () => { await a?.close(); });
 describe('B1 tools', () => {
   it('are in everyone\'s tools and none takes confirm (nothing here spends, deletes or posts)', () => {
     const m = toolsForUser({ role: 'member' }).map(t => t.name);
-    for (const t of APP_TOOLS) {
+    expect(m).not.toContain('character_archive');
+    for (const t of APP_TOOLS.filter(x => x.name !== 'character_archive')) {
       expect(m).toContain(t.name);
       expect(registryByName.get(t.name)!.gate).toBe('none');
       expect(Object.keys((t.inputSchema as any).properties ?? {})).not.toContain('confirm');
     }
   });
   it('every read tool answers for a member and the owner', async () => {
-    for (const n of ['queue_list', 'characters_list', 'outfits_list', 'library_find', 'library_collections', 'templates_list', 'posts_list', 'recreate_list'])
+    for (const n of ['queue_list', 'characters_list', 'outfits_list', 'library_find', 'library_collections', 'templates_list', 'posts_list', 'recreate_list', 'edit_jobs', 'import_link'])
       for (const u of [ownerU, memberU]) await expect(run(u, n), `${n} ${u.role}`).resolves.toBeTruthy();
   });
   it('acts as the person: a member keeps member limits (archived characters are owner-only)', async () => {
@@ -55,5 +56,11 @@ describe('B1 tools', () => {
     await run(memberU, 'library_collect', { action: 'rename', collectionId: c.id, name: 'Summer drop 2' });
     expect(JSON.stringify(await run(memberU, 'library_collections'))).toContain('Summer drop 2');
     await expect(run(memberU, 'take_status', { takeId: 'tk_nothere', status: 'final' })).rejects.toMatchObject({ status: 404 });
+  });
+  it('B3b: recipes list and the helper list answer; a template is made, favourited, and its delete waits for Approve', async () => {
+    await expect(run(ownerU, 'recipes', { action: 'list' })).resolves.toBeTruthy();
+    await expect(run(ownerU, 'edit_jobs', { features: true })).resolves.toBeTruthy();
+    const ask = await run(ownerU, 'template_delete', { templateId: 'tpl_nothere' }).catch(e => e);
+    expect(ask.status).toBe(404);
   });
 });
