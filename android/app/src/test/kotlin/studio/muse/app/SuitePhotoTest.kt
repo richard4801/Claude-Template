@@ -68,11 +68,17 @@ class SuitePhotoTest {
         val tabs = cameraTabs(ComposerSettings(), owner = true, directed = false).filter { it.key in PhotoComposer.CAMERA_TABS }
         assertEquals(listOf("setup", "angle"), tabs.map { it.key })
         assertEquals(setOf("genre", "era"), PhotoComposer.STYLE_TABS)
-        // Generate needs a character or an image (owner 2026-11-11); a preset still needs a character.
+        // Generate needs a character, an image or words (owner 2026-11-11); a preset still needs a character.
         assertNull(draft().copy(modelId = null).problem(studio.muse.app.ui.screens.suite.InputSlots(), studio.muse.app.ui.screens.suite.RecastDraft()))
-        val noOne = draft().copy(modelId = null)
+        val noOne = draft(text = "").copy(modelId = null)
         val img = listOf(ShootRef(ImageRef.asset("a"), listOf("look")))
-        assertEquals("Pick a character or add an image", PhotoComposer.problem(noOne, PhotoDraft()))
+        assertEquals("Describe the photo or add an image", PhotoComposer.problem(noOne, PhotoDraft()))
+        assertNull(PhotoComposer.request(noOne, PhotoDraft()))
+        val wordsOnly = draft().copy(modelId = null) // words alone: text-to-image
+        assertNull(PhotoComposer.problem(wordsOnly, PhotoDraft()))
+        val w = PhotoComposer.request(wordsOnly, PhotoDraft())!!
+        assertNull(w.modelId)
+        assertNull(w.references)
         assertNull(PhotoComposer.problem(noOne, PhotoDraft(refs = img)))
         assertEquals("Presets need a character · pick one with @", PhotoComposer.problem(noOne, PhotoDraft(presetId = "t", refs = img)))
         val free = PhotoComposer.request(noOne, PhotoDraft(refs = img, product = ImageRef.asset("p")))!!
