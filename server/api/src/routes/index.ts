@@ -271,10 +271,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const mode = b.mode ?? 'describe';
     const id = uid('o');
     const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
-    // Her identity images (face, face ¾, one body image), then the product photos.
-    const outfitIds = await idRefs(req.user.studioId, m, null, { extra: ((b.images ?? []) as ImageRef[]).filter(i => i && (i.asset || i.url)).map(image => ({ image, label: 'outfit photo', role: 'product' as const })) });
+    /** Her body photo of one angle for the ¾/side/back edits; none (only the front is sent already) when it's missing. */
+    const angleBody = (k: string) => { const img = slotOf(k); return img && img !== slotOf('front') ? img : null; };
+    // Her identity images (face, face ¾, one body image), then the product photos. Each outfit picture gets the body
+    // photo of ITS angle (front→front, ¾→tq, side→side, back→back; a missing one falls back to the front), so her
+    // figure matches from every side (plans/outfit-head-looks.md §1, owner 2026-11-11).
+    const productIds = ((b.images ?? []) as ImageRef[]).filter(i => i && (i.asset || i.url)).map(image => ({ image, label: 'outfit photo', role: 'product' as const }));
+    const angleIds = await Promise.all(BODY_SLOTS.map(slot => idRefs(req.user.studioId, { ...m, identityBodySlot: slot }, null, { extra: productIds })));
+    const outfitIds = angleIds[0]!;
     // Planned like a shoot's images: within the shot model's limit, the face front never dropped.
-    const outfitPlan = mode === 'own' ? null : await ctx.images.shotPlan(req.user.studioId, outfitIds, [], 1, b.imageEngine, stepModels);
+    const anglePlans = mode === 'own' ? null : await Promise.all(angleIds.map(ids => ctx.images.shotPlan(req.user.studioId, ids, [], 1, b.imageEngine, stepModels)));
+    const outfitPlan = anglePlans?.[0] ?? null;
     const outfitRefs = outfitPlan?.images ?? [], outfitPanels = outfitPlan?.panels ?? [];
     // A custom model makes all four angles as new shots (no edits); else a front shot and three edits of it.
     const byoRun = !b.imageEngine?.provider && !!stepModels?.shot?.startsWith('c_');
@@ -305,14 +312,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!;
             angles = [front];
-            for (const a of OUTFIT_ANGLES.slice(1)) {
-              const prompt = outfitEditPrompt(a, texts);
+            for (const [i, a] of OUTFIT_ANGLES.slice(1).entries()) {
+              // Her face, then her own body photo from this angle: the edit takes her figure from it, never its clothes.
+              const body = angleBody(BODY_SLOTS[i + 1]!);
+              const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
               angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
-                editOf: front, refs: [slot('face')], req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
+                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
             }
           } else {
-            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
-              req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!)));
+            // New shots (a custom model): each angle with her body photo of that angle.
+            angles = await Promise.all(set.map((p, i) => {
+              const plan = anglePlans?.[i] ?? outfitPlan!;
+              return ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
+                req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!);
+            }));
           }
         } catch (e) {
           await bill.fail();

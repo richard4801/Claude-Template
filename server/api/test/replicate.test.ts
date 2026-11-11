@@ -457,6 +457,11 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(ps[1]!.input).toMatchObject({ aspect_ratio: 'match_input_image', output_format: 'jpg' });
     expect(ps[1]!.input.image[0]).toMatch(/rx\//);
     expect(ps[1]!.input.prompt).toMatch(/three-quarter/);
+    // Body angle per picture (owner 2026-11-11): each edit gets the front, her face and her own body photo of ITS angle.
+    const edits = ps.slice(1).map(p => p.input.image as string[]);
+    expect(edits.map(e => e.length)).toEqual([3, 3, 3]);
+    expect(new Set(edits.map(e => e[2])).size).toBe(3);
+    for (const p of ps.slice(1)) expect(p.input.prompt).toMatch(/figure from this angle/);
     // Exact: the FLUX.2 front + 3 × $0.03 edits.
     expect(done.cost).toBeGreaterThan(0.09 + 0.015);
     const imgs = (await a.ctx.db.select().from(generatedImages).where(eq(generatedImages.refId, o.id)));

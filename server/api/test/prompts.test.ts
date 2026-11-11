@@ -269,7 +269,9 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     await until(async () => (await tess.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id)?.state === 'preview', 30_000);
     const set = fake.state.creates.slice(n1);
     expect(set[0]!.input.prompt).toContain('Style: HOUSE STYLE X.');
-    expect(set.slice(1).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.']);
+    // The owner's text, then the body-angle line (her own body photo of that angle goes with each edit).
+    const body = ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.';
+    expect(set.slice(1).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body));
     // Enhance.
     const n2 = fake.state.creates.length;
     const en = (await tess.req('POST', `/v1/models/${modelId}/enhance`, { realism: 'subtle', upscale: 'off', slots: ['face'] })).body;
