@@ -58,6 +58,9 @@ import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.edit.learn.LearnConfirm
 import studio.muse.app.ui.theme.MuseSpace
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.radii
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.OutfitAngle
 import studio.muse.core.OutfitNaming
 import studio.muse.core.OutfitPages
