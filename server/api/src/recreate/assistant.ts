@@ -14,6 +14,7 @@ import { claudeMessages } from '../camera/schema.js';
 import { EDIT_TOOLS, type EditTool } from '../editor/mcpTools.js';
 import { RECREATE_TOOLS } from './mcpTools.js';
 import { SUITE_PROMPT, SUITE_TOOLS } from '../suite/mcpTools.js';
+import { lookOf } from '../suite/vision.js';
 import { assistOf } from '../suite/assist.js';
 import { recreateOf } from './references.js';
 import { editSessionsOf } from '../editor/sessions.js';
@@ -117,13 +118,25 @@ export class EditAssistant {
     try {
       const client = this.getClient();
       const history = await this.history(threadId, o.skipMessageId ? undefined : message, o.skipMessageId);
+      const castImgs: BetaContentBlockParam[] = [];
+      let castLine = '';
       const facts = kind === 'recreate'
         ? await (async () => { const r = await recreateOf(this.ctx).row(u, contextId); return `[Reference ${r.id} “${r.name}” · ${r.state}${r.recipe ? ` · ${r.recipe.slots.length} shots, ${r.recipe.source.durationSec} s` : ''}]`; })()
         : kind === 'suite'
-          ? await (async () => { const v = await assistOf(this.ctx).get(u, contextId); return `[Suite shot ${v.id} · revision ${v.revision} · the prompt now: “${v.request.prompt.slice(0, 200)}”${v.pending.some(p => p.status === 'waiting') ? ' · waiting for the owner\'s approval' : ''}]`; })()
+          ? await (async () => {
+            const v = await assistOf(this.ctx).get(u, contextId), r = v.request as { modelId?: string; outfitId?: string };
+            // Claude sees the draft's model and outfit each turn (her face, the outfit's front; suite_see shows every angle).
+            if (r.modelId || r.outfitId) {
+              const look = await lookOf(this.ctx, u, { modelId: r.modelId, outfitId: r.outfitId }).catch(() => null);
+              const o = look?.meta.outfit as { name?: string; created?: string } | undefined;
+              for (const b of look?.blocks ?? []) castImgs.push(b.type === 'image' ? { type: 'image', source: { type: 'base64', media_type: b.mimeType, data: b.data } } : { type: 'text', text: b.text });
+              if (o?.name) castLine = ` · outfit “${o.name}” (${o.created})`;
+            }
+            return `[Suite shot ${v.id} · revision ${v.revision}${castLine} · the prompt now: “${v.request.prompt.slice(0, 200)}”${v.pending.some(p => p.status === 'waiting') ? ' · waiting for the owner\'s approval' : ''}]`;
+          })()
           : await (async () => { const s = await editSessionsOf(this.ctx).row(u, contextId); return `[Edit session ${s.id} · revision ${s.revision}]`; })();
       const imgs = o.attachments ?? [];
-      const turnBlocks: BetaContentBlockParam[] = [...(await imageBlocks(this.ctx, imgs)) as BetaContentBlockParam[],
+      const turnBlocks: BetaContentBlockParam[] = [...(await imageBlocks(this.ctx, imgs)) as BetaContentBlockParam[], ...castImgs,
         { type: 'text', text: [facts, attachmentLine(imgs), message.trim()].filter(Boolean).join('\n\n') }];
       const prev = history.at(-1);
       if (prev?.role === 'user') (prev.content as BetaContentBlockParam[]).push(...turnBlocks); else history.push({ role: 'user', content: turnBlocks });

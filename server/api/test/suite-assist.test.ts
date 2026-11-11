@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/ctx.js';
-import { users } from '../src/db/schema.js';
+import { outfits, users } from '../src/db/schema.js';
 import { assistantOf } from '../src/recreate/assistant.js';
 import { cameraOf, checkVisibleRig, promptText, requestOf, suiteOptions } from '../src/suite/assist.js';
 import { APERTURES, FOCAL_STEPS, FOCALS } from '../src/suite/camera.js';
@@ -113,6 +113,21 @@ describe.skipIf(!hasFfmpeg)('Claude in the AI Suite (mock provider, fake Claude)
     expect(((await tool('suite_get_draft').run(env(), { assistId })) as any).request.duration).toBe(6);
   });
 
+  it('Claude sees the cast: outfit angles and her references as images; same-named outfits told apart by date', async () => {
+    const mk = (id: string, at: number) => ({ id, studioId: ownerUser.studioId, modelId: model.id, name: 'Product look', mode: 'describe', description: 'A red silk slip dress', angles: [{ asset: 'g_front' }, { asset: 'g_tq' }, null, { asset: 'g_back' }], state: 'ready', createdAt: at });
+    await a.ctx.db.insert(outfits).values([mk('of_old', Date.UTC(2026, 9, 1)), mk('of_new', Date.UTC(2026, 10, 10))]);
+    const c = await tool('suite_cast').run(env(), {}) as any;
+    expect(c.cast[0].outfits.map((o: any) => [o.id, o.created, o.sameNameAsAnother])).toEqual([['of_new', '2026-11-10 00:00 UTC', true], ['of_old', '2026-10-01 00:00 UTC', true]]);
+    expect(c.mcpContent.filter((b: any) => b.type === 'image')).toHaveLength(3); // her face + each outfit's front
+    const set = await tool('suite_set_draft').run(env(), { assistId, outfitId: 'of_old' }) as any;
+    expect(set.request.outfitId).toBe('of_old');
+    expect(set.mcpContent.filter((b: any) => b.type === 'image')).toHaveLength(3); // front, ¾, back
+    expect(set.mcpContent.some((b: any) => b.type === 'text' && /outfit “Product look” \(2026-10-01 00:00 UTC\) · back/.test(b.text))).toBe(true);
+    const see = await tool('suite_see').run(env(), { assistId }) as any;
+    expect(see.structuredContent).toMatchObject({ model: { id: model.id }, outfit: { id: 'of_old', created: '2026-10-01 00:00 UTC' }, images: 10 }); // 7 references + 3 angles
+    await tool('suite_set_draft').run(env(), { assistId, outfitId: null });
+  });
+
   it('generating waits for the owner: the price first, then an approval in the app; yes runs it, never above that price', async () => {
     const e = await tool('suite_estimate').run(env(), { assistId }) as any;
     expect(e.estimate.ok).toBe(true);
@@ -160,10 +175,11 @@ describe.skipIf(!hasFfmpeg)('Claude in the AI Suite (mock provider, fake Claude)
     expect(r.status).toBe(200);
     expect(String(r.body)).toContain('"name":"suite_set_draft","status":"done"');
     const tools = calls[0].tools as { name: string; input_schema: { properties: Record<string, unknown> } }[];
-    expect(tools.map(x => x.name).sort()).toEqual(['suite_add_reference', 'suite_estimate', 'suite_feed', 'suite_get_draft', 'suite_options', 'suite_request_shot', 'suite_set_draft']);
+    expect(tools.map(x => x.name).sort()).toEqual(['suite_add_reference', 'suite_cast', 'suite_estimate', 'suite_feed', 'suite_get_draft', 'suite_options', 'suite_request_shot', 'suite_see', 'suite_set_draft']);
     expect(tools.find(x => x.name === 'suite_set_draft')!.input_schema.properties.assistId).toBeUndefined(); // the server fills it
     expect(calls[0].system[0].text).toMatch(/shot designer/);
-    expect(calls[0].messages.at(-1).content[0].text).toMatch(/^\[Suite shot sa_/);
+    expect(calls[0].messages.at(-1).content.at(-1).text).toMatch(/^\[Suite shot sa_/);
+    expect(calls[0].messages.at(-1).content.some((b: any) => b.type === 'image' && b.source.media_type === 'image/jpeg')).toBe(true); // her face, each turn
     expect((await owner.req('GET', `/v1/suite/assist/${assistId}`)).body.request).toMatchObject({ takes: 2, prompt: `${model.name} A slow turn to camera.` });
   });
 });
