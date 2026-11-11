@@ -52,16 +52,18 @@ object PhotoComposer {
     /**
      * POST /v1/suite/photos[/estimate] from the composer: the character and outfit (an @character in the prompt wins),
      * the prompt's words (tokens' labels, no #moves), the rig for a still, the count, the product and the references.
-     * With a preset, the camera isn't sent: the preset carries its own camera and light. Null without a character.
+     * With a preset, the camera isn't sent: the preset carries its own camera and light. Without a character (owner
+     * 2026-11-11) only with a reference image and no preset: the image is the photo to work from. Null otherwise.
      */
     fun request(d: ComposerDraft, p: PhotoDraft): PhotoRequest? {
-        val who = d.characterId ?: return null
+        val who = d.characterId
+        if (who == null && (p.presetId != null || p.refs.isEmpty())) return null
         val s = d.settings
         return PhotoRequest(
-            modelId = who, outfitId = d.characterOutfit, prompt = d.tokens.promptText().take(2000),
+            modelId = who, outfitId = who?.let { d.characterOutfit }, prompt = d.tokens.promptText().take(2000),
             camera = if (p.presetId != null) null else camera(s),
             gradeLook = if (!s.gradeLook && (s.palette != null || s.stock != null)) false else null,
-            count = p.count.coerceIn(1, PhotoRules.MAX_COUNT), presetId = p.presetId, productImage = p.product,
+            count = p.count.coerceIn(1, PhotoRules.MAX_COUNT), presetId = p.presetId, productImage = p.product?.takeIf { who != null },
             references = p.refs.take(ShootRef.MAX).ifEmpty { null }, title = d.title.trim().ifBlank { null },
             // Reuse settings: the composer as it was, stored on every still.
             draft = ComposerDrafts.draft(d, photoCount = p.count, presetId = p.presetId),
@@ -72,7 +74,8 @@ object PhotoComposer {
     /** What stops Generate on Photo (null = ready). */
     fun problem(d: ComposerDraft, p: PhotoDraft, busy: Boolean = false): String? = when {
         busy -> "Making the photos…"
-        d.characterId == null -> "Pick a character"
+        d.characterId == null && p.presetId != null -> "Presets need a character · pick one with @"
+        d.characterId == null && p.refs.isEmpty() && p.uploading == null -> "Pick a character or add an image"
         p.uploading != null -> "Waiting for the upload"
         else -> null
     }

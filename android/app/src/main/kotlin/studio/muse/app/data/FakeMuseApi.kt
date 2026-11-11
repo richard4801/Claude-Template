@@ -1591,7 +1591,10 @@ class FakeMuseApi(
         if (count !in 1..PhotoRules.MAX_COUNT) throw ApiException("bad_request", "Invalid photo: count must be 1–${PhotoRules.MAX_COUNT}")
         if ((req.references?.size ?: 0) > ShootRef.MAX) throw ApiException("bad_request", "Up to ${ShootRef.MAX} reference images")
         ShootRef.problem(req.references)?.let { throw ApiException("bad_request", it) }
-        return ShootRequest(req.modelId, req.outfitId.orEmpty(), scene = req.prompt.trim().ifBlank { null }?.take(200), seed = req.seed, count = count,
+        // No character (owner 2026-11-11): an image is needed and no preset; the demo renders on the sample model.
+        if (req.modelId == null && req.presetId != null) throw ApiException("bad_request", "Presets need a character · pick one with @")
+        if (req.modelId == null && req.references.isNullOrEmpty()) throw ApiException("bad_request", "Pick a character or add an image")
+        return ShootRequest(req.modelId ?: SampleData.DEMO, req.outfitId.orEmpty(), scene = req.prompt.trim().ifBlank { null }?.take(200), seed = req.seed, count = count,
             templateId = req.presetId, shuffleSeed = req.shuffleSeed, lockSeed = req.lockSeed, productImage = req.productImage, refs = req.references?.ifEmpty { null })
     }
 

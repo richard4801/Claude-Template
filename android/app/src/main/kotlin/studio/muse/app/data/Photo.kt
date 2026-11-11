@@ -13,7 +13,8 @@ import kotlinx.serialization.json.JsonElement
  */
 @Serializable
 data class PhotoRequest(
-    val modelId: String,
+    /** The character; null = none (owner 2026-11-11): a reference image is then the photo to work from (server suite/photo.ts). */
+    val modelId: String? = null,
     val outfitId: String? = null,
     /** The scene and what she does (the composer's prompt text; #move tokens are never in it). */
     val prompt: String = "",

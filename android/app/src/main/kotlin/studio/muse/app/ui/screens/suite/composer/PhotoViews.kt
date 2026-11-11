@@ -107,7 +107,7 @@ fun rememberPhotoTool(d: ComposerDraft): PhotoUi? {
         delay(300)
         value = store.estimate(req)
     }.value
-    val problem = PhotoComposer.problem(d, p, busy).takeIf { d.characterId != null }
+    val problem = PhotoComposer.problem(d, p, busy) // ComposerModel.problem no longer asks for a character on Photo
     return PhotoUi(p, req, est.first?.let { PhotoComposer.asEstimate(it) }, est.first, problem ?: est.second, busy, store::setCount, store::setImageModel) {
         val r = req ?: return@PhotoUi
         scope.launch { store.generate(r)?.firstOrNull()?.let { nav.go(Routes.result(it.id)) } }

@@ -63,13 +63,23 @@ class SuitePhotoTest {
         assertFalse("no # moves on a still", t.placeholder.contains("#"))
         val slots = ToolSlots.of(ComposerTool.PHOTO, studio.muse.app.data.SuiteInputs.NONE, studio.muse.app.ui.screens.suite.InputSlots())
         assertEquals(listOf("Character", "Outfit", "Product", "References"), slots.map { it.label })
-        assertEquals(listOf(false, false, true, true), slots.map { it.optional })
+        assertEquals(listOf(true, true, true, true), slots.map { it.optional }) // a character OR an image (owner 2026-11-11)
         // Camera: Setup and Angle only (no Movement, no Directed even for the owner); Style: no Tempo.
         val tabs = cameraTabs(ComposerSettings(), owner = true, directed = false).filter { it.key in PhotoComposer.CAMERA_TABS }
         assertEquals(listOf("setup", "angle"), tabs.map { it.key })
         assertEquals(setOf("genre", "era"), PhotoComposer.STYLE_TABS)
-        // Generate needs a character.
-        assertEquals("Pick a character", draft().copy(modelId = null).problem(studio.muse.app.ui.screens.suite.InputSlots(), studio.muse.app.ui.screens.suite.RecastDraft()))
+        // Generate needs a character or an image (owner 2026-11-11); a preset still needs a character.
+        assertNull(draft().copy(modelId = null).problem(studio.muse.app.ui.screens.suite.InputSlots(), studio.muse.app.ui.screens.suite.RecastDraft()))
+        val noOne = draft().copy(modelId = null)
+        val img = listOf(ShootRef(ImageRef.asset("a"), listOf("look")))
+        assertEquals("Pick a character or add an image", PhotoComposer.problem(noOne, PhotoDraft()))
+        assertNull(PhotoComposer.problem(noOne, PhotoDraft(refs = img)))
+        assertEquals("Presets need a character · pick one with @", PhotoComposer.problem(noOne, PhotoDraft(presetId = "t", refs = img)))
+        val free = PhotoComposer.request(noOne, PhotoDraft(refs = img, product = ImageRef.asset("p")))!!
+        assertNull(free.modelId)
+        assertNull(free.outfitId)
+        assertNull(free.productImage)
+        assertNull(PhotoComposer.request(noOne, PhotoDraft(presetId = "t", refs = img)))
         assertEquals("Waiting for the upload", PhotoComposer.problem(draft(), PhotoDraft(uploading = "ref")))
         assertEquals("Making the photos…", PhotoComposer.problem(draft(), PhotoDraft(), busy = true))
         assertNull(PhotoComposer.problem(draft(), PhotoDraft()))

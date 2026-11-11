@@ -221,7 +221,7 @@ data class ComposerDraft(
         }
         ComposerTool.SWAP -> when { recast.clipId == null -> "Choose the source clip"; characterId == null -> "Pick who she becomes"; else -> null }
         // Photo tool (workstream 3): the uploads and the run are checked by PhotoComposer.problem.
-        ComposerTool.PHOTO -> if (characterId == null) "Pick a character" else null
+        ComposerTool.PHOTO -> null // a character OR an image (owner 2026-11-11): PhotoComposer.problem decides
         ComposerTool.RECAST -> recast.problem()
         ComposerTool.EXTEND -> {
             val v = own[ToolSlots.EXTEND_VIDEO]
@@ -421,7 +421,8 @@ object ToolSlots {
             ToolSlot("refad", "Reference ad", "A video ad to follow", optional = true))
         ComposerTool.EXTEND -> listOf(ToolSlot("video", "Video", "A take or a video"))
         // Photo tool (workstream 3): drawn by PhotoSlotRow (PhotoViews.kt), with sentence-case labels.
-        ComposerTool.PHOTO -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("outfit", "Outfit", "Her outfits"),
+        // A character OR an image (owner 2026-11-11): Character and Outfit are optional too.
+        ComposerTool.PHOTO -> listOf(ToolSlot("character", "Character", "Your models", optional = true), ToolSlot("outfit", "Outfit", "Her outfits", optional = true),
             ToolSlot("product", "Product", "A photo of it", optional = true), ToolSlot("refs", "References", "Pose, look or scene", optional = true))
     }
 
