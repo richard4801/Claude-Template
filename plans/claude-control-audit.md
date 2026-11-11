@@ -35,7 +35,7 @@ what would happen (and the price); with `confirm: true` it puts an approval card
 | Cast | archive / unarchive / duplicate / "never" list | GAP | none / settings | B3 |
 | Cast | delete character | GAP | delete | B3 `character_delete` |
 | Outfits | list / see | `suite_cast`, `suite_see` (in a Suite draft) | none | B1 `outfits_list` anywhere |
-| Outfits | generate an outfit | GAP | spend | B2 `outfit_generate` |
+| Outfits | generate an outfit | GAP | spend | B2 `outfit_make` |
 | Outfits | save with a name / rename | GAP | none | B1 `outfit_rename` |
 | Outfits | fill angles | GAP | spend | B2 `outfit_fill` |
 | Outfits | delete | GAP | delete | B2 `outfit_delete` |
@@ -94,7 +94,7 @@ tool also says "Approve it in …" with the page to open, and the existing scree
 - **B1 (no gate, server):** queue_list, characters_list, outfits_list, outfit_rename, library_find,
   library_collections, library_collect, take_status, templates_list, posts_list, recreate_list.
 - **B2 (gated, server + held Mac card):** claude_actions + approve route; queue_run/cancel/retry, take_upscale,
-  suite_queue_add, character_fill_angles, character_dress_up, character_enhance, outfit_generate, outfit_fill,
+  suite_queue_add, character_fill_angles, character_dress_up, character_enhance, outfit_make, outfit_fill,
   outfit_delete, take_discard, collection delete, post_schedule, post_cancel.
 - **B3:** the rest of the GAP rows above.
 

@@ -450,6 +450,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels, fillSent) };
     })) : [];
     const cost = byoRun ? plans.reduce((a, p) => a + p.plan.perShot, 0) : missing.length * await ctx.images.editCost(user.studioId, stepModels);
+    // Estimate only (Claude's go-ahead shows the price): nothing held or made.
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, angles: missing.length, cost };
     const bill = await new PhotoBill(ctx, whoOf(user), uid('of'), cost, 'Outfit angles').start();
     filling.add(o.id);
     ctx.later(async () => {
@@ -654,6 +656,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const seconds = Math.round((Number(t.media?.durationSec) || 0) * 1000) / 1000;
     if (!(seconds > 0)) throw badRequest('This take has no length on record · it can’t be upscaled');
     const request = { ...P.upscaleRequest(b.size, seconds, price), takeId: t.id, sourceKey: t.mediaKey };
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, size: b.size, cost: request.usd }; // estimate only
     const job = await ctx.jobs.createInternal(req.user, {
       kind: 'render', title: `${t.title} · ${P.upscaleLabel(b.size)}`, modelId: t.modelId ?? '', modelName: '', outfitId: '', request,
       cost: request.usd, prompt: t.prompt ?? '', seed: t.seed, thumb: t.thumb ?? null, totalSeconds: P.totalSeconds(request), totalSteps: 1, phase: 'Queued',

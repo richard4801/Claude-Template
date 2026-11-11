@@ -5,7 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/ctx.js';
 import { users } from '../src/db/schema.js';
 import { CHAT_REGISTRY, registryByName } from '../src/claude/registry.js';
-import { ACTION_TOOLS, priceOf } from '../src/claude/actions.js';
+import { ACTION_TOOLS, SETTINGS_TOOLS, priceOf } from '../src/claude/actions.js';
+import { toolsForUser } from '../src/claude/registry.js';
 import { makeApp, people, type Client } from './helpers.js';
 
 type App = Awaited<ReturnType<typeof makeApp>>;
@@ -51,5 +52,27 @@ describe('gated actions', () => {
     const ask = await run(ownerU, 'collection_delete', { collectionId: c.id, confirm: true });
     expect((await owner.req('POST', `/v1/claude/actions/${ask.actionId}`, { approve: false })).body.status).toBe('declined');
     expect(await names(owner)).toContain('Keep me');
+  });
+});
+
+describe('B3: priced makes and settings', () => {
+  it('a paid make only prices without confirm (fill-angles of a character with an empty sheet)', async () => {
+    const m = await owner.req('POST', '/v1/models', { name: 'Ivy' });
+    const look = await run(ownerU, 'character_fill_angles', { modelId: m.body.id });
+    expect(look.needsConfirmation).toBe(true);
+    expect(look.would).toMatch(/Fill \d+ missing angle/);
+    expect(typeof look.estimateUsd).toBe('number');
+    const after = await owner.req('GET', '/v1/models');
+    expect(after.body.find((x: any) => x.id === m.body.id).slots.every((sl: any) => !sl.busy)).toBe(true);
+  });
+  it('settings: owner only, never keys or prices, changed only after her Approve', async () => {
+    const mine = toolsForUser({ role: 'member' }).map(t => t.name);
+    for (const t of SETTINGS_TOOLS) expect(mine).not.toContain(t.name);
+    await expect(run(ownerU, 'settings_change', { area: 'studio', changes: { apiKey: 'x' } })).rejects.toMatchObject({ code: 'not_through_claude' });
+    const before = await run(ownerU, 'settings_read', { area: 'recreate' });
+    const ask = await run(ownerU, 'settings_change', { area: 'recreate', changes: { strictLinks: !before.strictLinks }, confirm: true });
+    expect((await run(ownerU, 'settings_read', { area: 'recreate' })).strictLinks).toBe(before.strictLinks);
+    expect((await owner.req('POST', `/v1/claude/actions/${ask.actionId}`, { approve: true })).body.status).toBe('done');
+    expect((await run(ownerU, 'settings_read', { area: 'recreate' })).strictLinks).toBe(!before.strictLinks);
   });
 });
