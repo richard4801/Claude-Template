@@ -177,7 +177,7 @@ struct ExtendPromptField: View {
                   axis: .vertical)
             .textFieldStyle(.plain)
             .font(t.body(16))
-            .lineLimit(2...3)
+            .lineLimit(2...12) // grows with the text like the other tools' prompt, then scrolls
             .padding(.vertical, Space.s1)
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
             .accessibilityLabel(d.direction.promptTitle)

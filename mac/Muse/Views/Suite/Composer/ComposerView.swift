@@ -24,6 +24,10 @@ struct ComposerPriceKey: Equatable {
 /// (compact sidebar) gives about 930; a 1280 one about 1050.
 private let composerNarrowWidth: CGFloat = 1000
 
+/// The prompt box's smallest height: two lines of 16 pt text at 1.35 line height plus its insets, so a prompt with text
+/// never reads as a one-line field.
+let composerPromptMinHeight: CGFloat = 60
+
 /// Below this window height the composer page scrolls as a whole (header, a short picture, the prompt bar).
 let composerMinHeight: CGFloat = 520
 
@@ -41,7 +45,7 @@ struct ComposerView: View {
             GeometryReader { g in
                 let fits = g.size.height >= composerMinHeight
                 ScrollView(.vertical, showsIndicators: !fits) {
-                    page(narrow: g.size.width < composerNarrowWidth)
+                    page(narrow: g.size.width < composerNarrowWidth, height: max(g.size.height, composerMinHeight))
                         .frame(width: g.size.width, height: max(g.size.height, composerMinHeight), alignment: .topLeading)
                 }
                 .scrollDisabled(fits)
@@ -135,7 +139,7 @@ struct ComposerView: View {
         }
     }
 
-    private func page(narrow: Bool) -> some View {
+    private func page(narrow: Bool, height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: Space.s3) {
             header
                 .layoutPriority(1)
@@ -167,7 +171,8 @@ struct ComposerView: View {
             .zIndex(0)
             // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
             // full height; the row above takes what is left.
-            ComposerPromptBar()
+            // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
+            ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
                 .zIndex(1)
@@ -772,6 +777,8 @@ struct ComposerSettingsPanel: View {
 struct ComposerPromptBar: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// The tallest the prompt grows before it scrolls.
+    var promptMaxHeight: CGFloat = 240
 
     private var draft: ComposerDraft { store.suite.composer }
 
@@ -829,7 +836,8 @@ struct ComposerPromptBar: View {
     }
 
     private var promptBox: some View {
-        ComposerPromptBox(placeholder: draft.tool.promptPlaceholder, minHeight: 48, maxHeight: 72, suggestionsAbove: true)
+        ComposerPromptBox(placeholder: draft.tool.promptPlaceholder, minHeight: composerPromptMinHeight, maxHeight: promptMaxHeight,
+                          suggestions: .above, expandable: true)
             .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
