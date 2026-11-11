@@ -117,6 +117,9 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
 - DONE video vision Stage 1 server (abd6e3a, live): tools watch / watch_closer for everyone (own studio), free.
   APP WORK (queue): chat attach button for videos (Mac+Android) and Mac Claude Code path sends video attachments as
   "Attached video … call watch first" (plans/claude-video-vision.md).
+- MERGED 09:15 one-claude @98825b0 → prod e7f0cebd (model picker 6b, single header, composer, open edit session,
+  early MUSE-mac upload in mac.yml; migration 0030 live). Build 530 sent early. Next Mac runs: one-claude export-card
+  fix → outfit page → mask badge → layers → 4c app switches + 5A.3 device strip + video attach button.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
