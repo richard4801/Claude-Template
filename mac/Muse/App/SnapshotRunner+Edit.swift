@@ -44,6 +44,7 @@ extension SnapshotRunner {
             else { note("DONE waveform_\(name) (\(w.count) peaks)") }
         }
         await matteRenderCheck(short, media: media, note: note)
+        await lookOvalCheck(media: media, note: note)
         let lut = store.suite.camera.palettes.first { ($0.lut ?? "").isEmpty == false }
         let look: [String: Any] = ["id": lut?.id ?? "teal_orange", "kind": "palette", "label": lut?.label ?? "Teal & orange", "lut": lut?.lut ?? "pack:teal-orange"]
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -144,7 +145,7 @@ extension SnapshotRunner {
         try file.write(from: buf)
     }
 
-    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool, split: Bool = false) async throws {
+    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool, split: Bool = false, solid: Int32? = nil) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h])
@@ -169,7 +170,7 @@ extension SnapshotRunner {
                     // A matte: the left half white (keep), the right half black.
                     for y in 0..<h { memset(base + y * row, 255, w / 2 * 4); memset(base + y * row + w / 2 * 4, 0, row - w / 2 * 4) }
                 } else {
-                    memset(base, Int32(40 + (i * 7) % 180), row * h)
+                    memset(base, solid ?? Int32(40 + (i * 7) % 180), row * h)
                 }
             }
             CVPixelBufferUnlockBaseAddress(pb, [])
@@ -249,6 +250,75 @@ extension SnapshotRunner {
         } catch {
             note("FAIL matte_render: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: The owner's oval (5A.1, 2026-11-11): looks, vignettes and mattes must never make a soft oval
+
+    /// A flat grey clip on a RED canvas through the real engine, with each B&W look (as a suite take opens: lut + strength 1),
+    /// a vignette, and a low-res stand-in matte. Nine points are read: a flat look must stay flat, a vignette must keep the
+    /// centre bright and darken the corners, and red anywhere means the clip went see-through (the canvas showing).
+    static func lookOvalCheck(media: URL, note: (String) -> Void) async {
+        note("START look_oval")
+        let clip = media.appendingPathComponent("oval-grey.mp4"), lowMatte = media.appendingPathComponent("oval-matte.mp4")
+        do {
+            try await writeFrames(clip, seconds: 3, fps: 24, width: 360, height: 640, rotated: false, solid: 150)
+            try await writeFrames(lowMatte, seconds: 3, fps: 1, width: 64, height: 64, rotated: false, solid: 255)
+        } catch { note("FAIL look_oval: couldn't make the videos (\(error.localizedDescription))"); return }
+        typealias L = EditV2.Look
+        let cases: [(String, L?, Bool, Bool)] = [   // name, look, stand-in matte, vignette expected
+            ("plain", nil, false, false),
+            ("bw-classic", L(lut: "pack:bw-classic", strength: 1), false, false),
+            ("bw-contrast", L(lut: "pack:bw-contrast", strength: 1), false, false),
+            ("bw-soft", L(lut: "pack:bw-soft", strength: 1), false, false),
+            ("bw-sepia", L(lut: "pack:bw-sepia", strength: 1), false, false),
+            ("bw-classic+lowres-matte", L(lut: "pack:bw-classic", strength: 1), true, false),
+            ("vignette", L(vignette: EditV2.Vignette(amount: 0.6)), false, true),
+            ("bw-classic+vignette", L(lut: "pack:bw-classic", strength: 1, vignette: EditV2.Vignette(amount: 0.45, size: 0.35, softness: 0.5)), false, true),
+        ]
+        let points: [(String, Double, Double)] = [("c", 0.5, 0.5), ("tl", 0.04, 0.04), ("tr", 0.96, 0.04), ("bl", 0.04, 0.96), ("br", 0.96, 0.96),
+                                                  ("t", 0.5, 0.04), ("b", 0.5, 0.96), ("l", 0.04, 0.5), ("r", 0.96, 0.5)]
+        var failed = false
+        for (name, look, matte, vignette) in cases {
+            var p = EditV2.fromV1(EditList(sourceTakeId: "rx_oval", sourceDurationSec: 3), EditV2.SourceFacts(width: 360, height: 640, fps: 24))
+            p.canvas.background = "#FF0000"
+            if matte { p = p.addingAsset(EditV2.Asset(id: "bg2", kind: .video, upload: "up_oval", durationSec: 3, width: 64, height: 64, hasAudio: false)) }
+            guard let q = p.updating("c1", { it in
+                guard case .video(var v) = it else { return }
+                v.look = look
+                if matte { v.alphaMatte = EditV2.AlphaMatte(asset: "bg2") }
+                it = .video(v)
+            }) else { note("FAIL look_oval \(name): couldn't set the look"); failed = true; continue }
+            do {
+                let sources = try await EditV2Engine.load(q, files: matte ? ["src": clip, "bg2": lowMatte] : ["src": clip])
+                let built = try EditV2Engine.build(q, sources: sources)
+                let gen = AVAssetImageGenerator(asset: built.composition)
+                gen.videoComposition = built.videoComposition
+                gen.requestedTimeToleranceBefore = .zero
+                gen.requestedTimeToleranceAfter = .zero
+                let cg = try await gen.image(at: CMTime(seconds: 1, preferredTimescale: 600)).image
+                var px: [String: (r: Int, g: Int, b: Int)] = [:]
+                for (k, x, y) in points { if let v = pixel(cg, x, y) { px[k] = v } }
+                guard px.count == points.count, let c = px["c"] else { note("FAIL look_oval \(name): couldn't read the frame"); failed = true; continue }
+                let line = points.map { k, _, _ in "\(k)=\(px[k].map { "\($0.r),\($0.g),\($0.b)" } ?? "?")" }.joined(separator: " ")
+                let seeThrough = px.filter { $0.value.r - $0.value.g > 40 }.map(\.key).sorted()
+                let corners = ["tl", "tr", "bl", "br"].compactMap { px[$0]?.g }
+                let lum = px.values.map(\.g)
+                var why: [String] = []
+                if !seeThrough.isEmpty { why.append("canvas red shows through at \(seeThrough.joined(separator: ","))") }
+                if vignette {
+                    if corners.contains(where: { $0 + 30 > c.g }) { why.append("the corners are not darker than the centre (vignette inverted or missing)") }
+                } else if (lum.max() ?? 0) - (lum.min() ?? 0) > 45 {
+                    why.append("a flat clip came out uneven (spread \((lum.max() ?? 0) - (lum.min() ?? 0)))")
+                }
+                if c.g < 30 { why.append("the centre is black") }
+                if why.isEmpty { note("DONE look_oval \(name): \(line)") }
+                else { failed = true; note("FAIL look_oval \(name): \(why.joined(separator: "; ")) | \(line)") }
+            } catch {
+                failed = true
+                note("FAIL look_oval \(name): \(error.localizedDescription)")
+            }
+        }
+        note(failed ? "FAIL look_oval: see the lines above" : "DONE look_oval")
     }
 
     /// The colour at (x, y), 0–1 from the top left, as 0–255 sRGB.
