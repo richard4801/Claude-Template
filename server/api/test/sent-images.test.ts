@@ -99,6 +99,10 @@ describe('images sent (routes, fake engines)', () => {
     const assistId = (await owner.req('POST', '/v1/suite/assist', {})).body.id;
     await tool('suite_set_draft').run(env, { assistId, modelId: model.id, prompt: 'She turns and walks away.' });
     expect(((await tool('get_sent_images').run(env, { assistId })) as any).sentImages.changed).toBe(false);
+    // Over MCP (no page filled in): the chat's page gives the draft; without a chatId, the person's latest chat.
+    const chat = (await owner.req('POST', '/v1/claude/chats', { page: { name: 'suite', tool: 'shot', ids: { assistId } } })).body;
+    expect(((await tool('get_sent_images').run(env, { chatId: chat.id })) as any).page).toBe('suite');
+    expect(((await tool('get_sent_images').run(env, {})) as any).sentImages.changed).toBe(false);
     const set = await tool('set_sent_images').run(env, { assistId, list: [{ image: { asset: 'g_back' }, role: 'person', label: 'body, back' }, { image: { asset: 'face' }, role: 'person' }] }) as any;
     expect(set.sentImages).toMatchObject({ changed: true, changedBy: 'claude' });
     // Generate sends the draft's choice.
