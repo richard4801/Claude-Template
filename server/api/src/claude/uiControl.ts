@@ -46,6 +46,10 @@ const PROTECTED: { re: RegExp; why: string }[] = [
   { re: /\b(delete|close|remove)[\s_-]?(my[\s_-]?)?account\b|\baccount[._\s-]?delet/i, why: 'deleting the account' },
   { re: /\b(top[\s_-]?up|topup|payment|pay now|checkout|buy credits|add credits|add funds|billing|card number|transfer credits)\b/i, why: 'payments and top-ups' },
   { re: /(^|[._\s-])(confirm[\s_-]?)?(delete|discard|erase)\b/i, why: 'deleting' },
+  // The go-ahead rule: spending and posting happen only on the person's press (Claude's gated tools put a card up).
+  { re: /\$\s?\d|\b\d+(\.\d+)?\s?credits?\b|\b(generate|regenerate|run queue|run again|retry|upscale|train|retrain|post now|post|publish|schedule post)\b/i, why: 'spending or posting' },
+  // The go-ahead and file cards themselves.
+  { re: /\b(approve|allow once|always allow|allow)\b/i, why: 'go-ahead cards' },
 ];
 
 /** Why Claude may not touch this control, or null. */
@@ -148,7 +152,7 @@ export const UI_TOOLS: EditTool[] = [
       + 'press (a button or link), set_text (replace a text field\'s text with value), set_value (a slider/stepper to the number in value), select (a picker/tab/list row: value is the option\'s label, or omit to select the row itself), '
       + 'toggle (value "on"/"off", or omit to flip), scroll (value "up"/"down"/"top"/"bottom"), menu (a menu-bar item: target like "File > Export"), focus, key (value: one of '
       + UI_KEYS.join(', ') + '; no target needed). The person sees a soft ring on the control and can press Esc to stop you; if they stopped you, do not try again this turn. '
-      + 'Never for keys, providers, prices, sign-out, account deletion, payments or delete confirmations: those always go through the dedicated tools\' go-ahead cards (you can open the screen; the person presses). '
+      + 'Never for keys, providers, prices, sign-out, account deletion, payments, delete confirmations, Generate/Run/Post (anything that spends or posts) or the Approve/Allow cards: those always go through the dedicated tools\' go-ahead cards (you can open the screen; the person presses). '
       + 'Returns what changed and the control\'s new state; take a fresh ui_snapshot before acting on a changed screen.',
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: [...UI_ACTIONS] },

@@ -55,7 +55,7 @@ describe('ui_* tools (Claude operates the MUSE window)', () => {
   });
 
   it('act: protected controls refused before the Mac is asked; Esc stop comes back as the person\'s choice', async () => {
-    for (const target of ['settings.providers.apiKey', 'Sign out', 'Top up', 'Delete account', 'Confirm delete', 'settings.prices.markup']) {
+    for (const target of ['settings.providers.apiKey', 'Sign out', 'Top up', 'Delete account', 'Confirm delete', 'settings.prices.markup', 'Generate', 'Approve']) {
       const r = await rpc(token, 'ui_act', { action: 'press', target });
       expect(r.isError).toBe(true);
       expect(r.content[0].text).toMatch(/^ui_protected: .*for the person/);
@@ -94,8 +94,8 @@ describe('ui_* tools (Claude operates the MUSE window)', () => {
   });
 
   it('refusal list', () => {
-    for (const t of ['API key', 'settings.engines.token', 'Log out', 'Buy credits', 'Payment', 'Discard', 'edit.clip.delete', 'Show provider names'])
+    for (const t of ['API key', 'settings.engines.token', 'Log out', 'Buy credits', 'Payment', 'Discard', 'edit.clip.delete', 'Show provider names', 'Generate', 'Generate · $0.40', 'Run queue', 'Approve', 'Allow once', 'Post now', 'Spend 12 credits'])
       expect(protectedReason(t), t).not.toBeNull();
-    for (const t of ['Generate', 'library.search', 'Remove from collection', 'Export', 'suite.prompt', 'Deliver']) expect(protectedReason(t), t).toBeNull();
+    for (const t of ['library.search', 'Remove from collection', 'Export', 'suite.prompt', 'Deliver', 'Add to queue', 'Posts', 'Deny']) expect(protectedReason(t), t).toBeNull();
   });
 });
