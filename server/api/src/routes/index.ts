@@ -279,7 +279,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   const createOutfit = async (req: { user: AuthUser; body: unknown }) => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
-      description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional(),
+      description: z.string().max(1000).optional(), /* "My own set": one per angle, in order front, ¾, side, back (null = skipped, made later from the front) */
+      images: z.array(ImageRefSchema.nullable()).max(4).optional(), imageEngine: ImageEngineOverride.optional(),
       /* §6: start from her base photos, keeping the ticked pieces */
       base: z.object({ source: z.enum(['base', 'outfit']), outfitId: z.string().max(80).optional(),
         /* chosen per angle (another body shot, an outfit's angle, an upload); a missing one uses the front */
@@ -289,6 +290,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const m = await model(req.user, b.modelId, true);
     const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'outfit', b); // WS13: `imageModel`, else the Outfits default
     const mode = b.mode ?? 'describe';
+    if (mode === 'own' && !b.images?.[0]) throw badRequest('Add the front photo first');
     const id = uid('o');
     const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
     /** Her body photo of one angle for the ¾/side/back edits; none (only the front is sent already) when it's missing. */

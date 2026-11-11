@@ -28,6 +28,13 @@ describe('outfit page · rename, delete, fill', () => {
     expect(typeof saved.createdAt).toBe('number');
   });
 
+  it('my own set: each image lands on its own angle (front, ¾, side, back), a skipped one stays empty; no front is refused', async () => {
+    expect((await owner.req('POST', '/v1/outfits', { modelId: m.id, mode: 'own', images: [null, { asset: 'g_tq' }] })).status).toBe(400);
+    const o = (await owner.req('POST', '/v1/outfits', { modelId: m.id, mode: 'own', images: [{ asset: 'g_front' }, null, { asset: 'g_side' }, null] })).body;
+    const done = await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === o.id && x.state === 'preview'));
+    expect(done.angles).toEqual([{ asset: 'g_front' }, null, { asset: 'g_side' }, null]);
+  });
+
   it('rename: the owner or the maker; another member is refused; empty or over 80 characters is refused', async () => {
     await row('o_ren');
     expect((await other.req('PATCH', '/v1/outfits/o_ren', { name: 'Mine' })).status).toBe(403);
