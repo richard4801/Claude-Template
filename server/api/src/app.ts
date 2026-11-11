@@ -113,7 +113,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   }
   if (config.DEV_SEED) await seedDev(ctx, { onlyIfEmpty: true });
   await bootstrapOwnerInvite(ctx);
-  // Starter templates: add any missing ones to every studio that has an owner (idempotent, keyed by slug).
+  // Starter templates: give each studio with an owner the starters it has never had (once each; deletes stick, studio_seeds).
   try {
     ctx.boot.starters = await ctx.templates.seedAllStarters();
     app.log.info({ ...ctx.boot.starters, migrations: ctx.boot.migrations }, 'starter templates checked');

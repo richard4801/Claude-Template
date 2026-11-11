@@ -293,6 +293,17 @@ export class JobService {
     if (j.state === 'running') await this.cancel(j, 'Removed');
   }
 
+  /**
+   * "Clear all failed" on the Queue: hides every failed job at once (the owner's: the whole studio's; a member's: their
+   * own). Like Dismiss, it is stored on the job (hiddenAt), so it holds after a restart or a deploy. Returns the ids.
+   */
+  async clearFailed(user: AuthUser) {
+    const conds = [eq(jobs.studioId, user.studioId), eq(jobs.kind, 'render'), eq(jobs.state, 'failed'), isNull(jobs.hiddenAt)];
+    if (user.role !== 'owner') conds.push(eq(jobs.userId, user.id));
+    const rows = await this.ctx.db.update(jobs).set({ hiddenAt: Date.now() }).where(and(...conds)).returning({ id: jobs.id });
+    return rows.map(r => r.id);
+  }
+
   /** Stops a running job and returns its hold. */
   async cancel(j: JobRow, why: string) {
     const [u] = await this.ctx.db.update(jobs).set({ state: 'failed', gpuState: 'cancelled', error: why, refunded: j.cost, finishedAt: Date.now(), phase: why })

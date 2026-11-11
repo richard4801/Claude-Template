@@ -640,6 +640,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     ctx.hub.emit(req.user.studioId, { type: 'job', op: 'delete', id: req.params.id });
     return reply.status(204).send();
   });
+  // "Clear all failed" (owner bug 2026-11-11): hides every failed job for good, like Dismiss on each one.
+  app.post('/v1/jobs/clear-failed', async req => {
+    const ids = await ctx.jobs.clearFailed(req.user);
+    for (const id of ids) ctx.hub.emit(req.user.studioId, { type: 'job', op: 'delete', id });
+    return { cleared: ids.length, ids };
+  });
   app.post('/v1/queue/run', async req => ctx.jobs.runQueue(req.user));
 
   app.get('/v1/takes', async req => (await db.select().from(takes).where(eq(takes.studioId, req.user.studioId)).orderBy(desc(takes.createdAt))).map(t => takeView(t, pub, req.user.id)));

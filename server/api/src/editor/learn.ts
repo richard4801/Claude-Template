@@ -9,7 +9,7 @@
 // Owner only (like edit sessions). No money, no model calls.
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { posts, takes } from '../db/schema.js';
+import { posts, studioSeeds, takes } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { recreateReferences } from '../recreate/schema.js';
@@ -299,11 +299,14 @@ export class Learning {
       .from(editRecipes).where(eq(editRecipes.studioId, studioId));
     const byRef = new Map(have.filter(h => h.referenceId).map(h => [h.referenceId!, h]));
     const byTake = new Set(have.filter(h => h.takeId).map(h => h.takeId!));
+    // Recipes the owner deleted: their reference or edit is never copied back.
+    const deleted = new Set((await this.db.select({ slug: studioSeeds.slug }).from(studioSeeds)
+      .where(and(eq(studioSeeds.studioId, studioId), eq(studioSeeds.kind, 'recipe-deleted')))).map(r => r.slug));
     const refs = await this.db.select().from(recreateReferences).where(and(eq(recreateReferences.studioId, studioId), isNull(recreateReferences.deletedAt),
       inArray(recreateReferences.state, ['ready', 'expired'])));
     const now = Date.now();
     for (const r of refs) {
-      if (!r.recipe) continue;
+      if (!r.recipe || deleted.has(`ref:${r.id}`)) continue;
       const rec = { ...(r.recipe as Recipe), origin: 'reference' as const, referenceId: r.id };
       const cur = byRef.get(r.id);
       if (cur) {
@@ -320,7 +323,7 @@ export class Learning {
     }
     const edits = await this.db.select().from(takes).where(and(eq(takes.studioId, studioId), sql`${takes.kind} = 'edit'`));
     for (const t of edits) {
-      if (byTake.has(t.id)) continue;
+      if (byTake.has(t.id) || deleted.has(`take:${t.id}`)) continue;
       const media = (t.media ?? {}) as { edits?: { version?: number }; parentTakeId?: string };
       if (media.edits?.version !== 2) continue;
       const rec = recipeFromProject(media.edits as unknown as M.EditProject, { takeId: t.id, versionId: media.parentTakeId, name: t.title });
@@ -413,8 +416,12 @@ export class Learning {
   }
   async removeRecipe(u: AuthUser, id: string) {
     owner(u);
-    const gone = await this.db.delete(editRecipes).where(and(eq(editRecipes.id, id), eq(editRecipes.studioId, u.studioId))).returning({ id: editRecipes.id });
+    const gone = await this.db.delete(editRecipes).where(and(eq(editRecipes.id, id), eq(editRecipes.studioId, u.studioId)))
+      .returning({ id: editRecipes.id, referenceId: editRecipes.referenceId, takeId: editRecipes.takeId });
     if (!gone.length) throw notFound('Recipe');
+    // Remember it, or the next sync() copies the same reference or edit straight back (deletes must stick).
+    const src = gone[0]!.referenceId ? `ref:${gone[0]!.referenceId}` : gone[0]!.takeId ? `take:${gone[0]!.takeId}` : null;
+    if (src) await this.db.insert(studioSeeds).values({ studioId: u.studioId, kind: 'recipe-deleted', slug: src, seededAt: Date.now() }).onConflictDoNothing();
   }
   /** The closest recipes to a recipe, a reference or an edited take (not itself), with how close and how they did. */
   async nearest(u: AuthUser, o: { recipeId?: string; referenceId?: string; takeId?: string; k?: number; origin?: string }) {

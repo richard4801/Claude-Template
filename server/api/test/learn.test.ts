@@ -251,4 +251,17 @@ describe('learning editor · API', () => {
     for (const [m, p] of [['GET', '/v1/learn/recipes'], ['GET', '/v1/learn/playbook'], ['POST', '/v1/learn/playbook'], ['GET', '/v1/learn/gaps'], ['GET', '/v1/learn/context'], ['GET', '/v1/learn/corrections'], ['GET', '/v1/learn/tags']] as const)
       expect((await member.req(m, p, m === 'POST' ? { text: 'x' } : undefined)).status, `${m} ${p}`).toBe(403);
   });
+
+  it('a deleted recipe stays deleted: the next sync does not copy its reference or edit back (owner bug 2026-11-11)', async () => {
+    const all = (await owner.req('GET', '/v1/learn/recipes')).body as any[];
+    const flip = all.find(r => r.name === 'Outfit flip'), edit = all.find(r => r.origin === 'edit');
+    expect((await owner.req('DELETE', `/v1/learn/recipes/${flip.id}`)).status).toBe(204);
+    expect((await owner.req('DELETE', `/v1/learn/recipes/${edit.id}`)).status).toBe(204);
+    for (let i = 0; i < 2; i++) { // every list syncs first
+      const names = ((await owner.req('GET', '/v1/learn/recipes')).body as any[]).map(r => r.name);
+      expect(names).not.toContain('Outfit flip');
+      expect(names).not.toContain('Café cut');
+      expect(names).toContain('Street dance');
+    }
+  });
 });
