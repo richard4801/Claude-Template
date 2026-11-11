@@ -54,6 +54,9 @@ class Results {
       result: compact({ id: key, chatId: l.chatId, jobId: key, ...info, takeIds: info.takeIds?.length ? info.takeIds : undefined, finishedAt: Date.now() }) });
   }
 
+  /** A deleted chat: nothing reports to it any more. */
+  forgetChat(chatId: string) { for (const [k, l] of this.links) if (l.chatId === chatId) this.links.delete(k); }
+
   /** One Mac answers: the first to claim (the Mac where the chat was last active claims at once, others after a pause). */
   claim(u: AuthUser, key: string) {
     const s = this.sent.get(key);
