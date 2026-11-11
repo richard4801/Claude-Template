@@ -70,6 +70,10 @@ struct ClaudeChatView: View {
         return c
     }
 
+    /// One Claude (owner bug, build 520: two headers stacked): inside the one-Claude panel ("chat") the panel's own header
+    /// is the only chat switcher, New chat and close, on every page; only the older per-place chats show their own.
+    static func ownChatSwitcher(contextKind: String) -> Bool { contextKind != "chat" }
+
     init(contextKind: String, contextId: String, title: String) {
         self.contextKind = contextKind
         self.contextId = contextId
@@ -163,7 +167,7 @@ struct ClaudeChatView: View {
         } else if !service.info.signedIn {
             setup(installed: true)
         } else {
-            if model.sessionsAvailable, model.thread != nil {
+            if model.sessionsAvailable, model.thread != nil, Self.ownChatSwitcher(contextKind: contextKind) {
                 ChatSessionsBar(model: model)
                 Rectangle().fill(t.roles.hairline).frame(height: 1)
             }

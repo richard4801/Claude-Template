@@ -33,6 +33,8 @@ extension SnapshotRunner {
             m.transcript.items.filter { if case .user(_, let t, _) = $0 { return ClaudeSessions.typedText(t) == words }; return false }.count
         }
         lines.append("START claude chat check")
+        // One Claude: the panel has a single header (its own switcher, New chat and close); the chat inside adds none.
+        line(!ClaudeChatView.ownChatSwitcher(contextKind: "chat"), "one-Claude panel has one header", "the embedded chat shows no chat switcher of its own")
         write()
 
         let svc = ClaudeCodeService.shared
