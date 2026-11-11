@@ -112,6 +112,9 @@ public enum SuiteAssistDraft {
         if case .string(let o)? = draft.extra["outfitId"], o != current.outfitId {
             if options.outfits[o] != nil { out.outfitId = o } else { refuse("Outfit", o, "isn't one of this character's outfits") }
         }
+        // Images sent: Claude's choice (or none) as the draft has it.
+        let sent = draft.raw["sent"]
+        if !(sent == nil && current.sent == .null) { out.sent = sent } // a reset the server already applied stays a reset
         // A preset's collapsed composer opens up once Claude changes its rig or prompt.
         if out.settings != current.settings || out.tokens != current.tokens { out.collapsed = nil }
         return SuiteDraftApplied(composer: out, changed: changedRows(current, out), rejected: rejected)
@@ -261,6 +264,7 @@ public enum SuiteAssistDraft {
         if a.takes != b.takes { out.append("Takes") }
         if a.sound != b.sound { out.append("Sound") }
         if a.speaking != b.speaking { out.append("Speaking") }
+        if (a.sent == .null ? nil : a.sent) != (b.sent == .null ? nil : b.sent) { out.append("Images sent") }
         return out
     }
 
@@ -290,6 +294,7 @@ public enum SuiteAssistDraft {
         take(\.takes)
         take(\.sound)
         take(\.speaking)
+        take(\.sent)
         take(\.settings.body)
         take(\.settings.lens)
         take(\.settings.focalMm)

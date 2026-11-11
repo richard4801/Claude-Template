@@ -146,10 +146,13 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
 
     /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
     public var providerName: String?
-    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
-    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
+    /// The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts: one format everywhere;
+    /// for members while the studio hides providers, the bare name or "· Option n").
+    public var label: String?
+    /// What to show for the model: the server's label; older servers: the name with its provider.
+    public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
 
-    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName }
+    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName, label }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         model = try c.decode(String.self, forKey: .model)
@@ -160,6 +163,7 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
         isDefault = c.v(.default, false)
         notice = c.o(.notice)
         providerName = c.o(.providerName)
+        label = c.o(.label)
         limits = c.v(.limits, Limits())
         resolution = c.o(.resolution)
         price = c.o(.price)
@@ -210,11 +214,11 @@ public struct EngineCatalog: Decodable, Sendable {
     public func label(_ p: EnginePurpose, model: String?, resolution: String? = nil) -> String {
         guard let model else {
             let d = purpose(p)?.default
-            let name = d.flatMap { id in engines.first { $0.model == id }?.name }
+            let name = d.flatMap { id in engines.first { $0.model == id }?.shownName }
             return name.map { "Auto (\($0))" } ?? "Auto"
         }
         let e = engines.first { $0.model == model }
-        let name = e?.name ?? model
+        let name = e?.shownName ?? model
         let res = resolution.flatMap { r in e?.limits.resolutions.first { $0.id == r }?.label }
         return res.map { "\(name), \(ComposerModelPicker.resLabel($0))" } ?? name
     }
@@ -271,7 +275,10 @@ public struct EngineMembers: Codable, Hashable, Sendable {
         public var provider: String?
         /// Shown to members (not hidden).
         public var members: Bool
+        /// "MiniMax H3 · Higgsfield" (the owner always sees the provider; server/api/src/engines/labels.ts).
+        public var label: String?
         public var id: String { model }
+        public var shownName: String { label ?? name }
     }
     public var showProviderNames: Bool
     public var models: [Model]

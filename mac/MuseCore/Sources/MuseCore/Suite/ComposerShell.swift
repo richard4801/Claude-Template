@@ -535,6 +535,10 @@ public struct ComposerDraft: Hashable, Sendable {
     public var resolution: String?
     /// Extend: the video, After / Before and what happens (ComposerExtend.swift).
     public var extend: ExtendDraft
+    /// Images sent (server images/sent.ts): Claude's or the person's choice of the images the model gets, as the draft's
+    /// `sent` ({sentImages | addImages, excludeImages, sentImagesBy}). nil = automatic; `.null` = reset to automatic (the
+    /// server then drops a choice it kept).
+    public var sent: JSONValue? = nil
 
     public init(tool: ComposerTool = .shot, tokens: PromptTokens = PromptTokens(), settings: ComposerSettings = ComposerSettings(), outfitId: String? = nil,
                 quality: String = "draft", aspect: String = "9:16", duration: Int = 8, sound: Bool = true, speaking: ComposerSpeaking = .auto, takes: Int = 1,

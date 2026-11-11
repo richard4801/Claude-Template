@@ -181,7 +181,7 @@ struct SuiteHubView: View {
         case .ready: Ph("play.circle.fill", 30).foregroundStyle(.white.opacity(0.9))
         case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(24)).foregroundStyle(.white)
         case .queued: Text(s.queueLine).font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
-        case .failed: Text("Retry free").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
+        case .failed: Text("Not charged").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
         case .empty: EmptyView()
         }
     }

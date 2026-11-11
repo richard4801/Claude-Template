@@ -21,10 +21,19 @@ public enum ScreenCopy {
         return (title, "\(verb) \(n == 1 ? noun : many)")
     }
 
-    /// The last-resort error line, with "you weren't charged" when that's true.
+    /// The last-resort error line, with "you weren't charged" when that's true, said once: the server's own failure
+    /// lines often already say it ("… · you weren't charged"), and the Queue showed it twice (owner bug 2026-11-11).
     public static func failure(_ what: String, charged: Bool) -> String {
         let base = what.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = base.isEmpty ? "Something went wrong" : base
-        return charged ? line : "\(line) · you weren't charged"
+        if charged || line.lowercased().contains("charged") { return line }
+        return "\(line) · you weren't charged"
+    }
+
+    /// The price on a failed job's Retry: what the server held for this same request (`cost`; the refund doesn't change
+    /// it), so the button says what the retry will charge. Retrying is never free: the failed run was refunded, and the
+    /// retry is a new run at the same price. Falls back to the local estimate for jobs without a server price.
+    public static func retryLabel(cost: Double, estimate: Double) -> String {
+        "Retry · \(Pricing.money(cost > 0 ? cost : estimate))"
     }
 }

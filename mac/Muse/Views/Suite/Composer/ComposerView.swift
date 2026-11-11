@@ -481,6 +481,7 @@ struct ComposerRail: View {
                 }
             }
             if tool == .extend { ExtendDirectionControl() }
+            ComposerSentImagesRow() // images sent (server images/sent.ts)
             RigCheckRow()
         }
     }

@@ -36,6 +36,14 @@ struct QueueView: View {
             }
             .padding(.bottom, Space.s5)
 
+            if store.visibleFailures.count > 1 {
+                HStack {
+                    Text(ScreenCopy.count(store.visibleFailures.count, "failed job")).scaled(t.scale.caption, t.roles.ink2)
+                    Spacer(minLength: 0)
+                    RButton("Clear all failed", kind: .plain, small: true) { store.clearFailures() }
+                }
+                .padding(.bottom, Space.s2)
+            }
             ForEach(store.visibleFailures) { f in
                 HStack(alignment: .center, spacing: Space.s3) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -43,7 +51,7 @@ struct QueueView: View {
                         Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: Space.s3)
-                    RButton(f.isPhoto ? "Make again" : "Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", small: true) { store.retry(f) }
+                    RButton(f.isPhoto ? "Make again" : ScreenCopy.retryLabel(cost: f.cost, estimate: Pricing.totalCost(f.request.spec)), small: true) { store.retry(f) }
                     RButton("Dismiss", kind: .plain, small: true) { store.dismissFailure(f) }
                 }
                 .padding(.horizontal, Space.s4)

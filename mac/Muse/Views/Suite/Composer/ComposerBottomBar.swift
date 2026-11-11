@@ -182,9 +182,11 @@ struct ComposerBottomBar: View {
 
     private var qualityPill: some View {
         let q = store.suite.toolQuality
+        // A pinned model shows its own resolution ("2K"), never a quality it doesn't make.
+        let pinnedRes: String? = isSwap ? nil : ComposerModelPicker.qualityLabel(store.suite.composer, catalog: store.suite.catalog, settings: store.suite.settings)
         return pill("quality", help: "Quality") {
             Ph("gauge.with.dots.needle.33percent", 13)
-            Text(isSwap && store.suite.swap.addOn != nil ? store.suite.swap.addOn!.label : SuiteText.tierLabel(q)).font(t.body(12.5, .medium))
+            Text(isSwap && store.suite.swap.addOn != nil ? store.suite.swap.addOn!.label : pinnedRes ?? SuiteText.tierLabel(q)).font(t.body(12.5, .medium))
             Ph("chevron.down", 9)
         } popover: {
             QualityPopover(onPick: { open = nil })
@@ -429,6 +431,32 @@ struct QualityPopover: View {
                         .buttonStyle(.plain)
                         .help("Back to Auto: the quality's ladder picks the engine")
                     }
+                    // The pinned model's own resolutions (owner bug 2026-11-11: a 2K-only model left the choice blank).
+                    if let m = ComposerModelPicker.pinned(store.suite.composer, store.suite.catalog, store.suite.settings), !m.resolutions.isEmpty {
+                        let current = ComposerModelPicker.snapResolution(m, store.suite.composer.resolution)
+                        HStack(spacing: 6) {
+                            ForEach(m.resolutions, id: \.id) { r in
+                                let picked = r.id == current
+                                let label = "\(ComposerModelPicker.resLabel(r.label))  \(ComposerModelPicker.price(m, resolution: r.id))"
+                                Button {
+                                    store.pinComposerModel(m, resolution: r.id)
+                                    onPick()
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        if picked { Ph("checkmark", 10).foregroundStyle(t.accent) }
+                                        Text(label).font(t.scale.caption.font).monospacedDigit().lineLimit(1).fixedSize()
+                                    }
+                                    .padding(.horizontal, 8).frame(height: 24)
+                                    .background(picked ? t.bg : Color.clear)
+                                    .overlay(Rectangle().strokeBorder(picked ? t.ink : t.line, lineWidth: picked ? 2 : 1))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Use \(m.name) at \(ComposerModelPicker.resLabel(r.label))")
+                                .accessibilityLabel("\(m.name) at \(ComposerModelPicker.resLabel(r.label))\(picked ? ", selected" : "")")
+                            }
+                        }
+                    }
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -456,7 +484,9 @@ struct QualityPopover: View {
                                 Text(tier.label).font(t.body(13, .bold))
                                 if on { Ph("checkmark", 11).foregroundStyle(t.accent) }
                                 Spacer(minLength: 4)
-                                Text(pinned ? "" : e.map { Pricing.money($0.estimate / Double(max(1, $0.takes))) } ?? "—")
+                                // Pinned: the pinned model's price on the quality it runs at, no price on the others.
+                                Text(pinned ? (on ? store.suite.estimate.map { Pricing.money($0.estimate / Double(max(1, $0.takes))) } ?? "" : "")
+                                     : e.map { Pricing.money($0.estimate / Double(max(1, $0.takes))) } ?? "—")
                                     .font(t.isA ? Fonts.font("Instrument Serif", 23, .regular) : t.mono(15, .medium))
                             }
                             Text(tier.available ? tier.detail : "Not available right now").font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)

@@ -222,6 +222,23 @@ struct OutfitSheetView: View {
                             }
                         }
                     }
+                    // Its face close-ups (owner 2026-11-11): made with every outfit, under the first three angles.
+                    if d.state != .idle {
+                        HStack(alignment: .top, spacing: Space.s4) {
+                            ForEach(4..<7, id: \.self) { k in
+                                VStack(alignment: .leading, spacing: Space.s2) {
+                                    if d.state == .busy {
+                                        SkeletonBlock(ratio: 0.75, radius: t.radii.container)
+                                    } else {
+                                        viewable(d, k) { MediaFrame(ref: d.faces[k - 4], ratio: 0.75) { StateTag("AI", .onMedia) } }
+                                    }
+                                    Text(OutfitPictures.captions[k]).scaled(t.scale.caption, t.roles.ink2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                        }
+                    }
                     if d.state == .done {
                         // §5: named before it's added (a suggestion, never "Product look"); renamable later.
                         VStack(alignment: .leading, spacing: Space.s2) {
@@ -235,8 +252,15 @@ struct OutfitSheetView: View {
                                 .onSubmit { store.outfitSave() }
                         }
                     }
+                    if d.mode != .own && d.state != .done {
+                        SentImagesRow(sent: d.sent) {
+                            store.outfitSheet?.sentReset = true
+                            Task { await store.refreshOutfitSent() }
+                        }
+                    }
                     HStack(spacing: Space.s3) {
-                        Text("All four angles use one seed, so the outfit matches from every side. Never add: logos.")
+                        Text(d.mode == .own ? "MUSE makes her 3 face close-ups from your front and her face photos, with the outfit's hair and make-up."
+                             : "7 pictures on one seed: 4 angles and 3 face close-ups with the outfit's own hair and make-up. Never add: logos.")
                             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Space.s4)
                         if d.state == .done {
@@ -245,7 +269,7 @@ struct OutfitSheetView: View {
                                 .keyboardShortcut(d.viewing == nil ? .defaultAction : nil)
                         } else {
                             if d.mode != .own { OwnerModelPill(purpose: .outfit) } // the owner's outfit model (WS6)
-                            RButton(d.mode == .own ? "Use my images" : "Make 4 angles · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy || (d.mode == .own && d.own[0] == nil)) {
+                            RButton(d.mode == .own ? "Use my images · \(Pricing.money(store.outfitSetEstimate))" : "Make 7 pictures · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy || (d.mode == .own && d.own[0] == nil)) {
                                 store.outfitGenerate()
                             }
                         }
@@ -253,6 +277,7 @@ struct OutfitSheetView: View {
                 }
                 .padding(Space.s6)
                 .floatingPanel(width: 760)
+                .task(id: "\(d.mode.rawValue)|\(d.images.count)|\(d.modelId)") { await store.refreshOutfitSent() } // images sent
                 // The angles full size (owner 2026-11-08): zoom, ← →, Escape.
                 ImageLightbox(items: Self.lightboxItems(d),
                               index: Binding(get: { store.outfitSheet?.viewing }, set: { store.outfitSheet?.viewing = $0 }))
@@ -264,6 +289,12 @@ struct OutfitSheetView: View {
 
     /// The angles that have an image, in order: generated ones once done, your own images before that.
     static func lightboxItems(_ d: OutfitDraft) -> [LightboxItem] {
+        let faces = d.state == .done ? (0..<3).compactMap { i -> LightboxItem? in
+            d.faces.indices.contains(i) ? d.faces[i].map { LightboxItem(label: OutfitPictures.viewerLabels[4 + i], ref: $0) } : nil
+        } : []
+        return angleItems(d) + faces
+    }
+    private static func angleItems(_ d: OutfitDraft) -> [LightboxItem] {
         (0..<4).compactMap { i -> LightboxItem? in
             let ref: ImageRef?
             if d.state == .done {
@@ -280,7 +311,7 @@ struct OutfitSheetView: View {
     /// An angle tile that opens the full view when it has an image.
     @ViewBuilder private func viewable<Content: View>(_ d: OutfitDraft, _ i: Int, @ViewBuilder _ tile: () -> Content) -> some View {
         let items = Self.lightboxItems(d)
-        let label = Self.angleLabels[i] == "¾" ? "Three-quarter" : Self.angleLabels[i]
+        let label = OutfitPictures.viewerLabels[i]
         if let at = items.firstIndex(where: { $0.label == label }) {
             Button { withAnimation(.easeOut(duration: 0.15)) { store.outfitSheet?.viewing = at } } label: { tile() }
                 .buttonStyle(.plain)

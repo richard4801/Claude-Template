@@ -42,6 +42,14 @@ public enum ComposerDrafts {
         var extra: [String: JSONValue] = [:]
         if let o = d.outfitId { extra["outfitId"] = .string(o) }
         if let p = photo?.presetId { extra["presetId"] = .string(p) }
+        // Movement → Directed and the pinned model travel with the draft, so Claude's choices and the composer's agree
+        // (server suite/assist.ts requestOf reads directed.camera, engineModel and resolution).
+        if let dir = d.directed, let cam = JSONValue.encoding(dir) { extra["directed"] = .object(["camera": cam]) }
+        if let e = d.engineModel {
+            extra["engineModel"] = .string(e)
+            if let r = d.resolution { extra["resolution"] = .string(r) }
+        }
+        if let s = d.sent { extra["sent"] = s } // images sent (the server reads the draft's choice)
         if d.tool == .photo {
             return SuiteDraft(tool: "photo", count: photo?.count, rig: SuiteRig(d.settings), tokens: encode(d.tokens), extra: extra)
         }
@@ -62,8 +70,11 @@ public enum ComposerDrafts {
         if let r = s.rig { out.settings = r.settings }
         if let toks = s.tokens { out.tokens = decode(toks) }
         if case .string(let o)? = s.extra["outfitId"] { out.outfitId = o }
+        out.sent = s.raw["sent"]
         out.collapsed = nil
-        out.directed = nil
+        // Directed from a camera session (Claude's suite_set_draft directed) and the pinned model come back with the draft.
+        if case .object(let dir)? = s.extra["directed"], let cam = dir["camera"] { out.directed = cam.decoded(CameraSpec.self) } else { out.directed = nil }
+        if case .string(let e)? = s.extra["engineModel"] { out.engineModel = e; if case .string(let r)? = s.extra["resolution"] { out.resolution = r } }
         return out
     }
 }

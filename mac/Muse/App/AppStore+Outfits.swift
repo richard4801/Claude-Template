@@ -104,6 +104,45 @@ extension AppStore {
 
     /// The outfit's missing-angle estimate (edits of its front).
     func outfitFillEstimate(_ o: Outfit) -> Double { Double(4 - o.madeAngles) * photoPricing.perEdit }
+
+    /// "Add face close-ups" for an older outfit: its missing faces, from her base faces and its front (3 edits).
+    func addOutfitFaces(_ o: Outfit) {
+        guard o.front != nil else {
+            showToast("Its front picture is missing · make a new outfit instead")
+            return
+        }
+        remake(o, Set((4..<7).filter { OutfitPictures.refs(o)[$0] == nil })) { [self] in
+            try await api.addOutfitFaces(id: o.id, imageModel: enginePick(.outfit)?.model)
+        }
+    }
+    func outfitFacesEstimate(_ o: Outfit) -> Double { Double(3 - o.madeFaces) * photoPricing.perEdit }
+
+    /// Redo one of its 7 pictures (0–3 angles, 4–6 faces).
+    func redoOutfitPicture(_ o: Outfit, _ k: Int) {
+        guard OutfitPictures.keys.indices.contains(k) else { return }
+        remake(o, [k]) { [self] in
+            try await api.redoOutfit(id: o.id, picture: OutfitPictures.keys[k], imageModel: enginePick(.outfit)?.model)
+        }
+    }
+    /// One edit; the front is a new shot (its price as one new outfit picture).
+    func outfitRedoEstimate(_ k: Int) -> Double { k == 0 ? photoPricing.outfitSet() - 3 * photoPricing.perEdit : photoPricing.perEdit }
+
+    private func remake(_ o: Outfit, _ pictures: Set<Int>, _ call: @escaping () async throws -> OutfitFill) {
+        guard remakingOutfit[o.id] == nil, !fillingOutfits.contains(o.id), o.state != "generating" else {
+            showToast("This outfit is still being made")
+            return
+        }
+        remakingOutfit[o.id] = pictures
+        perform { [self] in
+            do {
+                _ = try await call()
+                balance = try await api.balance()
+            } catch {
+                remakingOutfit[o.id] = nil
+                throw error
+            }
+        }
+    }
 }
 
 /// Keep-from-base (plans/outfit-head-looks.md §6): the base set the new outfit starts from, and swapping one angle.

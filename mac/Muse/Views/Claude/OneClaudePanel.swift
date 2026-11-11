@@ -212,6 +212,21 @@ struct OneClaudePanel: View {
             .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
             .padding(.horizontal, Space.s4).padding(.top, Space.s3)
         }
+        ForEach(o.approvals, id: \.self) { a in
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Claude needs your go-ahead").scaled(t.scale.label, r.ink)
+                Text(a.summary ?? "").scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: a.label ?? "Approve", filled: true) { Task { await store.answerClaudeAction(a, approve: true) } }
+                    SuiteToolButton(title: "Decline", plain: true) { Task { await store.answerClaudeAction(a, approve: false) } }
+                }
+            }
+            .padding(Space.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
+            .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+        }
+        ClaudeEditNoticeLine()
         if let m = o.remembered, let text = m.text {
             HStack(alignment: .top, spacing: Space.s1) {
                 Ph("push-pin", 13)

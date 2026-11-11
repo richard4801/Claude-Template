@@ -147,6 +147,12 @@ struct ProviderKeyForm: View {
                         .frame(width: max(160, CGFloat(s.kinds.count) * 110))
                 }
             }
+            if s.replacing == nil, kind?.serverKey == true {
+                RField("Studio account", hint: "MUSE's server is already set up with a \(label) account. Connect it with no key to paste; the key stays on the server.") {
+                    RButton(s.saving ? "Connecting…" : "Use the studio's \(label) account", kind: .action, off: s.saving) { store.saveProviderKey(useServerKey: true) }
+                }
+                Text("Or paste a different \(label) key:").scaled(t.scale.caption, t.roles.ink2)
+            }
             RField("API key", hint: "Saved encrypted on the MUSE server, checked with \(label) first. Afterwards you only see its last 4 characters.") {
                 SecureField(kind?.keyHint ?? "Paste the key", text: Binding(get: { s.keyText }, set: { s.keyText = $0; s.formError = nil }))
                     .textContentType(.password)
@@ -248,8 +254,8 @@ struct MemberModelsSettings: View {
                 RSwitch(label: "Show provider names to members", isOn: Binding(get: { v.showProviderNames }, set: { on in save(showProviderNames: on, hidden: [:]) }))
             }
             ForEach(v.models) { m in
-                SettingRow(m.name, hint: [m.kind == "image" ? "Image" : "Video", v.showProviderNames ? m.provider?.capitalized : nil].compactMap { $0 }.joined(separator: " · ")) {
-                    RSwitch(label: "Hide \(m.name) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
+                SettingRow(m.shownName, hint: m.kind == "image" ? "Image" : "Video") {
+                    RSwitch(label: "Hide \(m.shownName) from members", isOn: Binding(get: { !m.members }, set: { hide in save(showProviderNames: nil, hidden: [m.model: hide]) }))
                 }
             }
             Text("The switch hides a model from members. You always see every model.")

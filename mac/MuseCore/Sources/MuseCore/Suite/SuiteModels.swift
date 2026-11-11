@@ -975,6 +975,8 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
     public var look: SuiteLook?
     /// The rig check (workstream 3): clashes between the choices, or with the prompt. Empty when nothing clashes; never changes `ok`.
     public var rig: [RigWarning]
+    /// The images the model gets (server images/sent.ts); nil from an older server.
+    public var sentImages: SentImages? = nil
 
     public init(quality: String, label: String, resolution: String, seconds: Double, takes: Int, mode: String, estimate: Double, priceLine: String, buttonLabel: String,
                 ok: Bool = true, code: String? = nil, message: String? = nil, caps: SuiteCaps? = nil, warnings: [String] = [], camera: SuiteEstimateCamera = SuiteEstimateCamera(),
@@ -1006,7 +1008,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case quality, label, resolution, seconds, takes, mode, estimate, priceLine, buttonLabel, ok, code, message, caps, warnings, camera, prompt, test, speaking
-        case cast, keepAudio, engine, tried, look, rig
+        case cast, keepAudio, engine, tried, look, rig, sentImages
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -1034,6 +1036,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
         tried = c.o(.tried)
         look = c.o(.look)
         rig = c.v(.rig, RigWarnings()).list
+        sentImages = c.o(.sentImages)
     }
 
     /// The line to show when it can't be made as is (a cap), or nil.

@@ -149,8 +149,11 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
     /// 4c: the provider's company name, while the studio shows it to members (always for the owner).
     public var providerName: String?
     public var id: String { model }
-    /// "Kling 4.0 · Replicate": the name with its provider when the server sends one.
-    public var shownName: String { providerName.map { "\(name) · \($0)" } ?? name }
+    /// The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts: one format everywhere;
+    /// for members while the studio hides providers, the bare name or "· Option n").
+    public var label: String?
+    /// What to show for the model: the server's label; older servers: the name with its provider.
+    public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
 
     public init(model: String, name: String, kind: String = "video", custom: Bool = false, tier: String? = nil, tiers: [String] = [], resolution: String? = nil,
                 resolutions: [SuiteResolution] = [], perSec: Double? = nil, perRun: Double? = nil, minSeconds: Double? = nil, maxSeconds: Double? = nil,
@@ -174,7 +177,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName
+        case model, name, kind, custom, tier, tiers, resolution, resolutions, perSec, perRun, minSeconds, maxSeconds, allowedSeconds, aspectRatios, inputs, price, providerName, label
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -183,6 +186,7 @@ public struct SuiteModelOption: Codable, Hashable, Sendable, Identifiable {
         kind = c.v(.kind, "video")
         custom = c.v(.custom, false)
         providerName = c.o(.providerName)
+        label = c.o(.label)
         tier = c.o(.tier)
         tiers = c.v(.tiers, [])
         resolution = c.o(.resolution)
@@ -301,16 +305,53 @@ public enum ComposerModelPicker {
         }
         let shapes = aspects(d, catalog: catalog, settings: settings)
         if !shapes.isEmpty, !shapes.contains(x.aspect) { x.aspect = shapes.contains("9:16") ? "9:16" : shapes[0] }
+        // The resolution is always one the model makes (a restored draft or an older pin may carry another model's).
+        if let e = pinned(d, catalog, settings), !e.resolutions.isEmpty { x.resolution = snapResolution(e, x.resolution) }
         return x
+    }
+
+    /// Pixels on the short side a resolution id stands for ("768P" 768, "1080p" 1080, "2K" 1440, "4k" 2160), for snapping.
+    static func pixels(_ id: String) -> Int? {
+        let s = id.lowercased()
+        if s.hasSuffix("k"), let k = Double(s.dropLast()) { return k >= 4 ? 2160 : k >= 2 ? 1440 : Int(k * 1080) }
+        let digits = s.prefix { $0.isNumber }
+        return Int(digits)
+    }
+
+    /// One of the model's own resolutions: `wanted` when it makes it (any letter case), else the one its ladder runs it at,
+    /// else the nearest in pixels, else its best. MiniMax H3 (Higgsfield) makes 2K only: every pick lands on 2K.
+    public static func snapResolution(_ e: SuiteModelOption, _ wanted: String?) -> String? {
+        let ids = e.resolutions.map(\.id)
+        guard !ids.isEmpty else { return wanted ?? e.resolution }
+        if let w = wanted {
+            if ids.contains(w) { return w }
+            if let same = ids.first(where: { $0.caseInsensitiveCompare(w) == .orderedSame }) { return same }
+        }
+        if let r = e.resolution, ids.contains(r) { return r }
+        if let px = wanted.flatMap({ pixels($0) }) {
+            let near = ids.compactMap { id in pixels(id).map { (id, abs($0 - px)) } }.min { $0.1 < $1.1 }
+            if let near { return near.0 }
+        }
+        return ids.last
     }
 
     /// Pins a video model at a resolution (nil = Auto, the quality's ladder), then fits the draft to it. Without a
     /// resolution: the one its ladder runs it at, else its best.
+    /// The quality follows a ladder model (as on Android): kept when this quality's ladder runs it, else its first quality,
+    /// so the Quality pill and the price agree; a custom model keeps the quality.
     public static func pin(_ d: ComposerDraft, _ e: SuiteModelOption?, resolution: String? = nil, catalog: SuiteCatalog?, settings: SuiteSettings?) -> ComposerDraft {
         var x = d
         x.engineModel = e?.model
-        x.resolution = e.flatMap { e in resolution.flatMap { r in e.resolutions.contains { $0.id == r } ? r : nil } ?? e.resolution ?? e.resolutions.last?.id }
+        x.resolution = e.flatMap { e in snapResolution(e, resolution ?? e.resolution) }
+        if let e, !e.tiers.isEmpty, !e.tiers.contains(d.quality), let q = e.tiers.first { x.quality = q }
         return fitted(x, catalog: catalog, settings: settings)
+    }
+
+    /// The Quality pill's words while a model is pinned: its resolution ("2K"), never an empty pill.
+    public static func qualityLabel(_ d: ComposerDraft, catalog: SuiteCatalog?, settings: SuiteSettings?) -> String? {
+        guard let e = pinned(d, catalog, settings) else { return nil }
+        let r = snapResolution(e, d.resolution)
+        return r.map { id in resLabel(e.resolutions.first { $0.id == id }?.label ?? id) }
     }
 
     /// A pin survives a quality change or a reload while the owner's list still offers it for this tool. Without the
@@ -353,14 +394,14 @@ public enum ComposerModelPicker {
     public static func label(_ d: ComposerDraft, catalog: SuiteCatalog?, settings: SuiteSettings?) -> String {
         guard let id = d.engineModel else { return "Auto" }
         let e = pinned(d, catalog, settings)
-        let name = e?.name ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
+        let name = e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
         let res = e?.resolutions.first { $0.id == d.resolution }?.label ?? d.resolution
         return res.map { "\(name), \(resLabel($0))" } ?? name
     }
 
     public static func imageLabel(_ photo: PhotoDraft, catalog: SuiteCatalog?) -> String {
         guard let id = photo.imageModel else { return "Auto" }
-        return pinnedImage(photo, catalog)?.name ?? id
+        return pinnedImage(photo, catalog)?.shownName ?? id
     }
 
     /// "720p · standard" → "720p": the first word of the provider's label.

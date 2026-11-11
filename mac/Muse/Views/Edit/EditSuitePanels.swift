@@ -37,7 +37,7 @@ struct VideoPanels: View {
             if session.state.selectedItem?.textItem == nil {
                 LooksPanel(session: session, visual: v)
                 AdjustPanel(session: session, visual: v)
-                MaskPanel(session: session, visual: v)
+                MaskPanel(session: session, visual: v).id(MaskBadge.panelId)
             }
             // The effects library (WS8 f7226f2) on clips and pictures.
             if session.state.canHaveEffect { EffectsPanel(session: session) }

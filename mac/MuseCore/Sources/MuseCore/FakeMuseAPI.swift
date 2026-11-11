@@ -597,10 +597,18 @@ public actor FakeMuseAPI: MuseAPI {
         return outfits.filter { !archived.contains($0.modelId) }
     }
 
+    public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
+        let m = try activeModel(req.modelId)
+        let pick: [SentImage] = [("face", "face"), ("faceTq", "face ¾"), ("front", "body")].compactMap { p in
+            m.slots.first(where: { $0.key == p.0 })?.image.map { SentImage(image: $0, role: "person", label: p.1, why: "") } }
+        return OutfitEstimate(cost: req.mode == "own" ? 0 : photoPricing.outfitSet(), sentImages: SentImages(images: pick, max: 8))
+    }
+
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit {
         try checkOverrides(req.models)
         let m = try activeModel(req.modelId)
-        let cost = req.mode == "own" ? 0 : photoPricing.outfitSet()
+        // Every outfit comes with its 3 face close-ups (3 edits); "My own set" pays only for those.
+        let cost = (req.mode == "own" ? 0 : photoPricing.outfitSet()) + 3 * photoPricing.perEdit
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
         charge(cost)
         let name = req.name.trimmingCharacters(in: .whitespaces)
@@ -627,6 +635,7 @@ public actor FakeMuseAPI: MuseAPI {
         } else {
             outfits[i].angles = ["c_front", "c_tq", "c_face", "c_front"].map { ImageRef.asset($0) }
         }
+        outfits[i].faces = outfits[i].front == nil ? nil : ["c_face", "face", "c_face"].map { ImageRef.asset($0) }
         outfits[i].state = "preview"
         hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
     }
@@ -681,6 +690,36 @@ public actor FakeMuseAPI: MuseAPI {
         for a in missing {
             while outfits[i].angles.count <= a { outfits[i].angles.append(nil) }
             outfits[i].angles[a] = .asset(fill[a - 1])
+        }
+        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
+        return OutfitFill(outfit: outfits[i], cost: cost)
+    }
+
+    public func addOutfitFaces(id: String, imageModel: String?) throws -> OutfitFill {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        guard outfits[i].front != nil else { throw ApiError("bad_request", "Its front picture is missing · make a new outfit instead") }
+        var faces = (0..<3).map { k in (outfits[i].faces ?? []).indices.contains(k) ? outfits[i].faces![k] : nil }
+        let missing = (0..<3).filter { faces[$0] == nil }
+        let cost = Double(missing.count) * photoPricing.perEdit
+        charge(cost)
+        for k in missing { faces[k] = .asset(["c_face", "face", "c_face"][k]) }
+        outfits[i].faces = faces
+        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
+        return OutfitFill(outfit: outfits[i], cost: cost)
+    }
+
+    public func redoOutfit(id: String, picture: String, imageModel: String?) throws -> OutfitFill {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        guard let k = OutfitPictures.keys.firstIndex(of: picture) else { throw ApiError("bad_request", "angle: front, tq, side, back, face, faceTq or profile") }
+        let cost = photoPricing.perEdit
+        charge(cost)
+        if k < 4 {
+            while outfits[i].angles.count <= k { outfits[i].angles.append(nil) }
+            outfits[i].angles[k] = .asset(["c_front", "c_tq", "c_face", "c_front"][k])
+        } else {
+            var faces = (0..<3).map { j in (outfits[i].faces ?? []).indices.contains(j) ? outfits[i].faces![j] : nil }
+            faces[k - 4] = .asset(["c_face", "face", "c_face"][k - 4])
+            outfits[i].faces = faces
         }
         hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
         return OutfitFill(outfit: outfits[i], cost: cost)
@@ -769,6 +808,12 @@ public actor FakeMuseAPI: MuseAPI {
     public func runQueue() {
         held = false
         pump()
+    }
+
+    public func clearFailedJobs() -> [String] {
+        let ids = jobs.filter(\.isFailed).map(\.id)
+        jobs.removeAll { $0.isFailed }
+        return ids
     }
 
     public func removeJob(id: String) {

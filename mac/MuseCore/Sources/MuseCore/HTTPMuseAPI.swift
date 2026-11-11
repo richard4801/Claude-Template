@@ -264,6 +264,11 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     }
     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
+    public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
+        var r = req
+        r.dryRun = true
+        return try await call("POST", "v1/outfits", r)
+    }
     public func saveOutfit(outfitId: String, name: String?) async throws -> Outfit { try await call("POST", "v1/outfits/\(Self.pathKey(outfitId))/save", OutfitName(name: name)) }
     public func renameOutfit(id: String, name: String) async throws -> Outfit { try await call("PATCH", "v1/outfits/\(Self.pathKey(id))", OutfitName(name: name)) }
     public func deleteOutfit(id: String) async throws { _ = try await send(request("DELETE", "v1/outfits/\(Self.pathKey(id))")) }
@@ -272,6 +277,13 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     }
     private struct OutfitName: Encodable { var name: String? }
     private struct OutfitFillBody: Encodable { var imageModel: String? }
+    public func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill {
+        try await call("POST", "v1/outfits/\(Self.pathKey(id))/faces", OutfitFillBody(imageModel: imageModel))
+    }
+    public func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill {
+        try await call("POST", "v1/outfits/\(Self.pathKey(id))/redo", OutfitRedoBody(angle: picture, imageModel: imageModel))
+    }
+    private struct OutfitRedoBody: Encodable { var angle: String; var imageModel: String? }
 
     /// Images: presign → PUT → confirm. A server without presigned uploads (server/mock), or a PUT that can't reach storage, falls back to multipart.
     public func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef {
@@ -558,6 +570,11 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     public func listJobs() async throws -> [Job] { (try await call("GET", "v1/jobs") as [Job]).map(absolutize) }
     public func createJob(_ req: JobRequest) async throws -> Job { absolutize(try await call("POST", "v1/jobs", req)) }
     public func removeJob(id: String) async throws { _ = try await send(request("DELETE", "v1/jobs/\(id)")) }
+
+    public func clearFailedJobs() async throws -> [String] {
+        struct Cleared: Decodable { let ids: [String] }
+        return try decoder.decode(Cleared.self, from: try await send(request("POST", "v1/jobs/clear-failed", body: try encoder.encode(Empty())))).ids
+    }
 
     public func runQueue() async throws {
         // In plans/api.md since 2026-11-04. Older servers start jobs on their own and answer 404, which is ignored.

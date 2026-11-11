@@ -91,6 +91,8 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
     /// The still's prompt (absent with a preset).
     public var prompt: String?
     public var preset: PhotoPresetRef?
+    /// The images the model gets (server images/sent.ts); nil from an older server.
+    public var sentImages: SentImages? = nil
 
     public init(count: Int, perPhoto: Double, estimate: Double? = nil, priceLine: String? = nil, buttonLabel: String? = nil, ok: Bool = true, warnings: [String] = [],
                 rig: [RigWarning] = [], look: SuiteLook? = nil, prompt: String? = nil, preset: PhotoPresetRef? = nil) {
@@ -109,7 +111,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
         self.preset = preset
     }
 
-    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset }
+    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset, sentImages }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         tool = c.v(.tool, "photo")
@@ -124,6 +126,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
         look = c.o(.look)
         prompt = c.o(.prompt)
         preset = c.o(.preset)
+        sentImages = c.o(.sentImages)
     }
 
     public static func photos(_ n: Int) -> String { "\(n) photo\(n == 1 ? "" : "s")" }
@@ -137,6 +140,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
         var e = ShotEstimate(quality: "photo", label: "Photo · \(PhotoEstimate.photos(count))", resolution: "", seconds: 0, takes: count, mode: "photo",
                              estimate: estimate, priceLine: priceLine, buttonLabel: buttonLabel, ok: ok, warnings: warnings, prompt: prompt, rig: rig)
         e.look = look
+        e.sentImages = sentImages
         return e
     }
 }

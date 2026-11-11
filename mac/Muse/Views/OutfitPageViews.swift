@@ -75,8 +75,8 @@ struct OutfitFolderTile: View {
         Button { store.openOutfit(o) } label: {
             VStack(alignment: .leading, spacing: Space.s2) {
                 MediaFrame(ref: o.front, ratio: 0.75) {
-                    if store.fillingOutfits.contains(o.id) {
-                        StateTag("Making angles", .onMedia)
+                    if store.fillingOutfits.contains(o.id) || store.remakingOutfit[o.id] != nil {
+                        StateTag("Making pictures", .onMedia)
                     } else if o.madeAngles < 4 {
                         StateTag("\(o.madeAngles) of 4 angles", .onMedia)
                     }
@@ -103,8 +103,9 @@ struct OutfitFolderTile: View {
     }
 }
 
-/// An outfit open: its four angles large and its actions. Click the name to rename it (Enter saves, Escape cancels);
-/// click an angle to view it full size and slide between the angles. Close returns to the same page of folders.
+/// An outfit open: its 7 pictures (the four angles, then its three face close-ups with its own hair, make-up and face
+/// accessories; plans/outfit-faces.md) and its actions. Click the name to rename it (Enter saves, Escape cancels); click a
+/// picture to view it full size and slide between all 7; hover one to Redo it. Close returns to the same page of folders.
 struct OutfitOpenView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -112,8 +113,6 @@ struct OutfitOpenView: View {
     @State private var name = ""
     @FocusState private var nameFocused: Bool
 
-    static let labels = ["Front", "¾", "Side", "Back"]
-    static let viewerLabels = ["Front", "Three-quarter", "Side", "Back"]
 
     var body: some View {
         if let o = store.openedOutfit {
@@ -132,37 +131,38 @@ struct OutfitOpenView: View {
                         RIconButton(systemName: "xmark", help: "Close (Esc)") { store.closeOutfit() }
                             .keyboardShortcut(store.openOutfitViewing == nil && !editing ? .cancelAction : nil)
                     }
-                    HStack(alignment: .top, spacing: Space.s4) {
-                        ForEach(0..<4, id: \.self) { i in
-                            VStack(alignment: .leading, spacing: Space.s2) {
-                                angle(o, i, items: items, filling: filling)
-                                Text(Self.labels[i]).scaled(t.scale.caption, t.roles.ink2)
+                    // Body angles, then its face close-ups under the first three columns (grouped by space, no boxes).
+                    ForEach([Array(0..<4), Array(4..<7)], id: \.self) { row in
+                        HStack(alignment: .top, spacing: Space.s4) {
+                            ForEach(row, id: \.self) { k in
+                                VStack(alignment: .leading, spacing: Space.s2) {
+                                    picture(o, k, items: items, filling: filling)
+                                    Text(OutfitPictures.captions[k]).scaled(t.scale.caption, t.roles.ink2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            if row.count < 4 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                         }
                     }
-                    if let faces = o.faces, faces.contains(where: { $0 != nil }) {
-                        HStack(spacing: Space.s2) {
-                            ForEach(0..<faces.count, id: \.self) { i in MediaFrame(ref: faces[i], ratio: 0.75) }
-                        }
-                        .frame(maxWidth: 260)
-                    }
-                    if o.madeAngles < 4 && !filling && o.front != nil && store.canChange(o) {
+                    let remaking = store.remakingOutfit[o.id] != nil
+                    if o.madeAngles < 4 && !filling && !remaking && o.front != nil && store.canChange(o) {
                         InlineNotice("\(o.madeAngles) of 4 angles. The others came back empty.", tone: .caution,
                                      actionTitle: "Make missing angles · \(Pricing.money(store.outfitFillEstimate(o)))") { store.fillOutfit(o) }
                     } else if filling {
                         InlineNotice("Making the missing angles from the front.")
+                    } else if o.madeFaces < 3 && !remaking && o.front != nil {
+                        if store.canChange(o) {
+                            InlineNotice(o.madeFaces == 0 ? "No face close-ups yet. Shots with this outfit use her base face." : "\(3 - o.madeFaces) of its face close-ups came back empty.",
+                                         tone: .caution, actionTitle: "Add face close-ups · \(Pricing.money(store.outfitFacesEstimate(o)))") { store.addOutfitFaces(o) }
+                        } else if o.madeFaces == 0 {
+                            InlineNotice("No face close-ups yet. Shots with this outfit use her base face.")
+                        }
                     }
                     HStack(spacing: Space.s3) {
                         if store.canChange(o) {
-                            RButton("Delete…", kind: .danger, off: filling) { store.deleteOutfit(o) }
+                            RButton("Delete…", kind: .danger, off: filling || remaking) { store.deleteOutfit(o) }
                         }
                         Spacer(minLength: Space.s3)
-                        if let m = model, store.toolsFeatures?.dressUp.available ?? false {
-                            RButton("Dress up") {
-                                store.closeOutfit()
-                                store.openDressUp(m)
-                            }
-                        }
                         RButton("Use in Photo", kind: .action) {
                             store.closeOutfit()
                             store.openPhoto(model: o.modelId, outfit: o.id)
@@ -215,29 +215,54 @@ struct OutfitOpenView: View {
         return "\(who), made \(d)"
     }
 
-    @ViewBuilder private func angle(_ o: Outfit, _ i: Int, items: [LightboxItem], filling: Bool) -> some View {
-        let ref = o.angles.indices.contains(i) ? o.angles[i] : nil
-        if let ref, let at = items.firstIndex(where: { $0.ref == ref && $0.label == Self.viewerLabels[i] }) {
-            Button { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } } label: {
-                MediaFrame(ref: ref, ratio: 0.75)
-            }
-            .buttonStyle(.plain)
-            .help("View \(Self.viewerLabels[i].lowercased()) full size")
-            .accessibilityLabel("View \(Self.viewerLabels[i].lowercased()) full size")
-        } else if filling {
+    /// One of its 7 pictures (0–3 angles, 4–6 faces): click views it full size; hover (or right-click) to Redo.
+    @ViewBuilder private func picture(_ o: Outfit, _ k: Int, items: [LightboxItem], filling: Bool) -> some View {
+        let ref = OutfitPictures.refs(o)[k]
+        let label = OutfitPictures.viewerLabels[k]
+        let busy = store.remakingOutfit[o.id]?.contains(k) == true || (filling && k < 4 && ref == nil)
+        if busy {
             SkeletonBlock(ratio: 0.75, radius: t.radii.container)
+        } else if let ref, let at = items.firstIndex(where: { $0.ref == ref && $0.label == label }) {
+            OutfitPictureTile(ref: ref, label: label,
+                              redo: store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
+                              open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
+                              onRedo: { store.redoOutfitPicture(o, k) })
         } else {
             Color.clear.aspectRatio(0.75, contentMode: .fit)
                 .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
-                .accessibilityLabel("\(Self.viewerLabels[i]) missing")
+                .accessibilityLabel("\(label) missing")
         }
     }
 
-    /// The angles that have a picture, in order, for the full-size viewer ("Front  1 of 4").
+    /// The pictures that exist, in order, for the full-size viewer ("Face side  7 of 7").
     static func items(_ o: Outfit) -> [LightboxItem] {
-        (0..<4).compactMap { i in
-            guard o.angles.indices.contains(i), let r = o.angles[i] else { return nil }
-            return LightboxItem(label: viewerLabels[i], ref: r)
-        }
+        OutfitPictures.shown(o).map { LightboxItem(label: $0.label, ref: $0.ref) }
+    }
+}
+
+/// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), the same in its menu.
+struct OutfitPictureTile: View {
+    var ref: ImageRef
+    var label: String
+    /// "Redo · $0.03", or nil when this person can't change the outfit.
+    var redo: String?
+    var open: () -> Void
+    var onRedo: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
+            .buttonStyle(.plain)
+            .help("View \(label.lowercased()) full size")
+            .accessibilityLabel("View \(label.lowercased()) full size")
+            .overlay(alignment: .topTrailing) {
+                if let redo, hover {
+                    RIconButton(systemName: "arrow.clockwise", help: redo, action: onRedo).padding(Space.s2)
+                }
+            }
+            .onHover { hover = $0 }
+            .contextMenu {
+                if let redo { Button(redo, action: onRedo) }
+            }
     }
 }

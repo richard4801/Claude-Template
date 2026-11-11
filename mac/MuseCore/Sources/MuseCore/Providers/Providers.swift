@@ -10,22 +10,26 @@ public struct ProviderKind: Decodable, Hashable, Sendable, Identifiable {
     public var label: String
     public var keyHint: String?
     public var keyUrl: String?
+    /// The server already has an account for this provider (Higgsfield): it connects with no key to paste.
+    public var serverKey: Bool
     public var id: String { kind }
 
-    public init(kind: String, label: String, keyHint: String? = nil, keyUrl: String? = nil) {
+    public init(kind: String, label: String, keyHint: String? = nil, keyUrl: String? = nil, serverKey: Bool = false) {
         self.kind = kind
         self.label = label
         self.keyHint = keyHint
         self.keyUrl = keyUrl
+        self.serverKey = serverKey
     }
 
-    enum CodingKeys: String, CodingKey { case kind, label, keyHint, keyUrl }
+    enum CodingKeys: String, CodingKey { case kind, label, keyHint, keyUrl, serverKey }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         kind = try c.decode(String.self, forKey: .kind)
         label = c.v(.label, kind)
         keyHint = c.o(.keyHint)
         keyUrl = c.o(.keyUrl)
+        serverKey = c.v(.serverKey, false)
     }
 }
 
@@ -50,6 +54,8 @@ public struct ProviderAccount: Decodable, Hashable, Sendable, Identifiable {
     public var label: String
     /// "…a1b2": all the app ever sees of the key.
     public var keyLast4: String
+    /// Connected with the server's own account (no key stored for it).
+    public var serverKey: Bool = false
     /// "ok" | "invalid" (the provider refused the key during a run).
     public var status: String
     public var checkedAt: Int64?
@@ -68,12 +74,13 @@ public struct ProviderAccount: Decodable, Hashable, Sendable, Identifiable {
         self.models = models
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, label, keyLast4, status, checkedAt, createdAt, models }
+    enum CodingKeys: String, CodingKey { case id, kind, label, keyLast4, serverKey, status, checkedAt, createdAt, models }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         kind = c.v(.kind, "")
         label = c.v(.label, kind)
+        serverKey = c.v(.serverKey, false)
         keyLast4 = c.v(.keyLast4, "")
         status = c.v(.status, "ok")
         checkedAt = c.o(.checkedAt)
@@ -268,7 +275,7 @@ public enum ProviderText {
     /// "Key ending a1b2, added 8 Nov. 9 of 48 models on." (the owner's words in the approved mock).
     public static func line(_ p: ProviderAccount, now: Date = Date()) -> String {
         let last4 = p.keyLast4.replacingOccurrences(of: "…", with: "")
-        var s = "Key ending \(last4)"
+        var s = p.serverKey ? "The studio's account" : "Key ending \(last4)"
         if let c = p.createdAt {
             let f = DateFormatter()
             f.setLocalizedDateFormatFromTemplate("dMMM")
@@ -303,7 +310,8 @@ public enum ProviderText {
 // MARK: HTTP
 
 extension HTTPMuseAPI: ProvidersAPI {
-    private struct AddBody: Encodable { var kind: String; var apiKey: String; var label: String? }
+    /// apiKey nil: connect with the server's own account (kinds with serverKey).
+    private struct AddBody: Encodable { var kind: String; var apiKey: String?; var label: String? }
     private struct KeyBody: Encodable { var apiKey: String }
     private struct RefBody: Encodable { var ref: String; var displayName: String? }
     private struct ModelPatch: Encodable { var enabled: Bool?; var displayName: String? }
@@ -311,7 +319,7 @@ extension HTTPMuseAPI: ProvidersAPI {
     public func providerKinds() async throws -> ProviderKindsList { try await suiteCall("GET", "v1/providers/kinds") }
     public func providers() async throws -> ProviderAccountsList { try await suiteCall("GET", "v1/providers") }
     public func addProvider(kind: String, apiKey: String, label: String?) async throws -> ProviderAccount {
-        try await suiteCall("POST", "v1/providers", body: try JSONEncoder().encode(AddBody(kind: kind, apiKey: apiKey, label: label)))
+        try await suiteCall("POST", "v1/providers", body: try JSONEncoder().encode(AddBody(kind: kind, apiKey: apiKey.isEmpty ? nil : apiKey, label: label)))
     }
     public func replaceProviderKey(_ id: String, apiKey: String) async throws -> ProviderAccount {
         try await suiteCall("PATCH", "v1/providers/\(Self.pathId(id))", body: try JSONEncoder().encode(KeyBody(apiKey: apiKey)))
@@ -347,7 +355,9 @@ extension HTTPMuseAPI: ProvidersAPI {
 public enum DemoProviders {
     public static let kinds = [ProviderKind(kind: "replicate", label: "Replicate", keyHint: "r8_…", keyUrl: "https://replicate.com/account/api-tokens"),
                                ProviderKind(kind: "fal", label: "fal", keyHint: "Key ID:Secret", keyUrl: "https://fal.ai/dashboard/keys"),
-                               ProviderKind(kind: "muapi", label: "Muapi", keyHint: "An API key from muapi.ai → Access keys", keyUrl: "https://muapi.ai/access-keys")]
+                               ProviderKind(kind: "muapi", label: "Muapi", keyHint: "An API key from muapi.ai → Access keys", keyUrl: "https://muapi.ai/access-keys"),
+                               ProviderKind(kind: "higgsfield", label: "Higgsfield", keyHint: "An API key from console.higgsfield.ai, as KEY_ID:KEY_SECRET",
+                                            keyUrl: "https://console.higgsfield.ai", serverKey: true)]
 
     public static func catalog(_ kind: String) -> [ProviderCatalogModel] {
         kind == "fal" ? [
@@ -387,7 +397,14 @@ extension FakeMuseAPI: ProvidersAPI {
     public func addProvider(kind: String, apiKey: String, label: String?) async throws -> ProviderAccount {
         try ownerOnly()
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard DemoProviders.kinds.contains(where: { $0.kind == kind }) else { throw ApiError("bad_request", "Unknown provider") }
+        guard let k = DemoProviders.kinds.first(where: { $0.kind == kind }) else { throw ApiError("bad_request", "Unknown provider") }
+        if key.isEmpty, k.serverKey {
+            var p = ProviderAccount(id: "prov_" + shortId(), kind: kind, label: label ?? "\(k.label) (studio account)", keyLast4: "server key",
+                                    createdAt: Int64(Date().timeIntervalSince1970 * 1000))
+            p.serverKey = true
+            demoProviders.append(p)
+            return p
+        }
         guard key.count >= 8 else { throw ApiError("invalid_key", "The provider didn't accept that key") }
         let p = ProviderAccount(id: "prov_" + shortId(), kind: kind, label: label ?? DemoProviders.kinds.first { $0.kind == kind }!.label,
                                 keyLast4: "…" + String(key.suffix(4)), createdAt: Int64(Date().timeIntervalSince1970 * 1000))

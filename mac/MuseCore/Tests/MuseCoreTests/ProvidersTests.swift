@@ -34,4 +34,17 @@ final class ProvidersTests: XCTestCase {
         let customs = try await api.customModels()
         XCTAssertTrue(customs.isEmpty)
     }
+
+    /// Higgsfield (2026-11-11): a provider the server already has an account for connects with no key pasted.
+    func testServerKeyProvider() async throws {
+        let kinds = try JSONDecoder().decode(ProviderKindsList.self, from: Data(#"{"kinds":[{"kind":"muapi","label":"Muapi"},{"kind":"higgsfield","label":"Higgsfield","keyHint":"x","keyUrl":"https://console.higgsfield.ai","serverKey":true}],"keysReady":true}"#.utf8))
+        XCTAssertEqual(kinds.kinds.map(\.serverKey), [false, true])
+        let acc = try JSONDecoder().decode(ProviderAccountsList.self, from: Data(#"{"providers":[{"id":"p1","kind":"higgsfield","label":"Higgsfield (studio account)","keyLast4":"server key","serverKey":true,"status":"ok","createdAt":1793952000000,"models":{"added":2,"enabled":1}}],"keysReady":true}"#.utf8))
+        XCTAssertTrue(ProviderText.line(acc.providers[0]).hasPrefix("The studio's account, added "))
+        let api = FakeMuseAPI()
+        let p = try await api.addProvider(kind: "higgsfield", apiKey: "", label: nil)
+        XCTAssertTrue(p.serverKey)
+        XCTAssertEqual(p.label, "Higgsfield (studio account)")
+        do { _ = try await api.addProvider(kind: "muapi", apiKey: "", label: nil); XCTFail("a key is needed for the others") } catch let e as ApiError { XCTAssertEqual(e.code, "invalid_key") }
+    }
 }

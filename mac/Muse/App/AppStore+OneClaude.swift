@@ -29,6 +29,8 @@ final class OneClaudeState {
     var remembered: ClaudeUI?
     /// "Shall I remember: …?" (Remember / No): nothing is saved until Remember.
     var suggestion: ClaudeUI?
+    /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
+    var approvals: [ClaudeUI] = []
     var memory: ClaudeMemory?
     var memoryError: String?
     /// Step 6b: the models and this person's default.
@@ -133,6 +135,8 @@ extension AppStore {
         oneClaude.askOpen = nil
         oneClaude.remembered = nil
         oneClaude.suggestion = nil
+        oneClaude.approvals = []
+        Task { await loadClaudeApprovals(id) }
         oneClaude.lastSentChat = nil
         oneClaudePageChanged(now: true)
     }
@@ -232,6 +236,10 @@ extension AppStore {
             oneClaude.suggestion = nil
         case "memory_suggest":
             oneClaude.suggestion = ui
+        case "approve":
+            if let id = ui.approve, !oneClaude.approvals.contains(where: { $0.approve == id }) { oneClaude.approvals.append(ui) }
+        case "approve_result":
+            oneClaude.approvals.removeAll { $0.approve == ui.action }
         default:
             break
         }
@@ -285,6 +293,27 @@ extension AppStore {
             oneClaude.remembered = ClaudeUI(remembered: r.id, text: r.text)
         } catch {
             showToast("Couldn't remember that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
+    }
+
+    /// The chat's cards still waiting (after a restart or a chat switch).
+    func loadClaudeApprovals(_ chatId: String) async {
+        guard let api = oneClaudeAPI, let list = try? await api.waitingActions() else { return }
+        guard oneClaude.chatId == chatId else { return }
+        oneClaude.approvals = list.filter { $0.chatId == chatId }.map {
+            ClaudeUI(label: $0.label, approve: $0.id, gate: $0.gate, summary: $0.summary, priceUsd: $0.priceUsd)
+        }
+    }
+
+    /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.
+    func answerClaudeAction(_ ui: ClaudeUI, approve: Bool) async {
+        guard let id = ui.approve, let api = oneClaudeAPI else { return }
+        oneClaude.approvals.removeAll { $0.approve == id }
+        do {
+            let r = try await api.answerAction(id, approve: approve)
+            if r.status == "failed" { showToast("That didn't work. \(r.error ?? "")") }
+        } catch {
+            showToast("Couldn't answer that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
         }
     }
 

@@ -134,6 +134,8 @@ struct OutfitDraft {
     var state: ShootState = .idle
     var outfitId: String?
     var angles: [ImageRef?] = [nil, nil, nil, nil]
+    /// Its face close-ups (front, ¾, side), made with every outfit (plans/outfit-faces.md).
+    var faces: [ImageRef?] = [nil, nil, nil]
     /// The angle open full size (ImageLightbox), an index into `lightboxItems`.
     var viewing: Int?
     /// "My own set": one file per angle (front, ¾, side, back), set box by box; nil = skipped.
@@ -146,6 +148,9 @@ struct OutfitDraft {
     var baseOutfitId: String?
     var baseAngles = OutfitBaseAngles()
     var base: OutfitBase? { fromBase && mode != .own ? OutfitBase(keep: keep, note: keepNote, outfitId: baseOutfitId, angles: baseAngles) : nil }
+    /// Images sent (server images/sent.ts): what the front would send, and the person's "Reset to automatic".
+    var sent: SentImages?
+    var sentReset = false
 }
 
 enum Niches {
@@ -389,6 +394,8 @@ final class AppStore {
     var openOutfitId: String?
     var openOutfitViewing: Int?
     var fillingOutfits: Set<String> = []
+    /// Outfit pictures being made again (Redo, Add face close-ups): outfit id → picture indices (0–3 angles, 4–6 faces).
+    var remakingOutfit: [String: Set<Int>] = [:]
 
     // MARK: Model tools (plans/api.md "Model tools")
 
@@ -736,6 +743,8 @@ final class AppStore {
         if e.type == "queue" { Task { await loadQueue() } }
         // Claude in the Suite: Claude or another device changed the shared composer draft.
         if e.type == "suiteAssist", let a = e.assist { suiteAssistEvent(a) }
+        // Images sent: Claude changed what a page's generation sends (the outfit sheet reads it again).
+        if e.type == "sentImages", outfitSheet != nil { outfitSheet?.sentReset = false; Task { await refreshOutfitSent() } }
         if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
         if isOwner {
             if e.type == "member" { LiveEvents.applyMembers(&members, e) }
@@ -777,9 +786,11 @@ final class AppStore {
         if let o = e.outfit {
             LiveEvents.applyOutfit(&outfits, &models, o)
             if fillingOutfits.contains(o.id) && o.madeAngles == 4 { fillingOutfits.remove(o.id) }
+            remakingOutfit[o.id] = nil // its Redo / Add face close-ups finished (or failed: the pictures stay as they were)
             if outfitSheet?.outfitId == o.id && o.state == "preview" {
                 outfitSheet?.state = .done
                 outfitSheet?.angles = o.angles
+                outfitSheet?.faces = OutfitPictures.refs(o).suffix(3).map { $0 }
             }
         }
     }
@@ -1026,11 +1037,16 @@ final class AppStore {
     var videoFeatures: VideoFeatures { studioSettings?.features.video ?? .fallback }
     /// `features.photo` from the server, or the contract's prices: photo estimates ("about $0.46").
     var photoPricing: PhotoPricing { studioSettings?.features.photo ?? .standard }
+    /// A new outfit's price: its 4 angles and its 3 face close-ups (owner 2026-11-11). Kept pieces: 4 edits + the faces;
+    /// "My own set": only the faces (MUSE makes them from the uploaded front and her base faces).
     var outfitSetEstimate: Double {
-        // Kept pieces: four edits (the front edits her base front photo).
-        if outfitSheet?.base?.keeping == true { return 4 * photoPricing.perEdit }
-        return photoPricing.estimates?.outfitSet ?? photoPricing.outfitSet()
+        if outfitSheet?.mode == .own { return outfitFacesEstimate }
+        if outfitSheet?.base?.keeping == true { return 4 * photoPricing.perEdit + outfitFacesEstimate }
+        // The server's figure already includes the faces; the contract's formula is the 4 angles alone.
+        return photoPricing.estimates?.outfitSet ?? (photoPricing.outfitSet() + outfitFacesEstimate)
     }
+    /// The 3 face close-ups: three edits of her base face photos with the outfit's front.
+    var outfitFacesEstimate: Double { 3 * photoPricing.perEdit }
     func sheetAnglesEstimate(_ missing: Int) -> Double { photoPricing.estimates?.sheetAngle.map { $0 * Double(missing) } ?? photoPricing.sheetAngles(missing) }
     var loraSetEstimate: Double { photoPricing.estimates?.loraSet ?? photoPricing.loraSet() }
     /// Edit is picked: lip sync and a new background photo apply.

@@ -5,6 +5,18 @@ import FoundationNetworking
 
 /// The `/v1/claude/*` endpoints and the Mac's MCP session token (plans/api.md "Claude on the owner's plan"). Owner only.
 /// Kept apart from MuseAPI so the shared client files stay untouched.
+/// Claude's gated action answered by the person (POST v1/claude/actions/:id): done, failed or declined.
+public struct ClaudeActionAnswer: Decodable, Sendable { public var id: String; public var status: String; public var error: String? }
+/// An Approve card still waiting (GET v1/claude/actions?status=waiting).
+public struct ClaudeWaitingAction: Decodable, Sendable {
+    public var id: String; public var gate: String; public var summary: String; public var priceUsd: Double?; public var chatId: String?
+    /// The button, as the server's card names it.
+    public var label: String {
+        let verb = gate == "delete" ? "Delete" : gate == "post" ? "Post" : gate == "spend" ? "Approve" : "Change"
+        return priceUsd.map { "\(verb) · $\(String(format: "%.2f", $0))" } ?? verb
+    }
+}
+
 public protocol ClaudeAPI: Sendable {
     func status() async throws -> ClaudeStatus
     /// PATCH /v1/claude/settings. Off by default; billed per use.
@@ -50,6 +62,8 @@ public protocol ClaudeAPI: Sendable {
     func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String]
     /// GET /v1/claude/memory: this person's own memory (per person).
     func memory() async throws -> ClaudeMemory
+    func waitingActions() async throws -> [ClaudeWaitingAction]
+    func answerAction(_ id: String, approve: Bool) async throws -> ClaudeActionAnswer
     /// POST: Remember (on Claude's question), or added by hand.
     func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule
     func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule
@@ -79,6 +93,8 @@ public extension ClaudeAPI {
     func archiveChat(_ id: String) async throws { throw ApiError("not_found", "This server has one chat per place") }
     func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String] { throw ApiError("not_found", "This server can't delete chats yet. Update the server.") }
     func memory() async throws -> ClaudeMemory { throw ApiError("not_found", "This server has no Claude memory yet") }
+    func waitingActions() async throws -> [ClaudeWaitingAction] { [] }
+    func answerAction(_ id: String, approve: Bool) async throws -> ClaudeActionAnswer { throw ApiError("not_found", "This server can't answer Claude's actions yet") }
     func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
     func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
     func deleteMemory(_ id: String) async throws { throw ApiError("not_found", "This server has no Claude memory yet") }
@@ -202,6 +218,16 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
     public func archiveChat(_ id: String) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
+    }
+    /// The person answers Claude's Approve card (only theirs, once). Approve runs the stored action as them.
+    private struct ActionPost: Encodable { var approve: Bool }
+    private struct WaitingList: Decodable { var actions: [ClaudeWaitingAction] }
+    public func waitingActions() async throws -> [ClaudeWaitingAction] {
+        let l: WaitingList = try await call("GET", "v1/claude/actions?status=waiting")
+        return l.actions
+    }
+    public func answerAction(_ id: String, approve: Bool) async throws -> ClaudeActionAnswer {
+        try await call("POST", "v1/claude/actions/\(try ClaudeIds.check(id))", ActionPost(approve: approve))
     }
     public func memory() async throws -> ClaudeMemory { try await call("GET", "v1/claude/memory") }
     private struct MemoryNew: Encodable { var text: String; var area: String; var characterId: String? }

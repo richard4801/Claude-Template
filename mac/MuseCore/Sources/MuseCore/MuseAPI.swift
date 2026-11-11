@@ -65,6 +65,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func listOutfits() async throws -> [Outfit]
     /// Starts generating an outfit set preview (state=generating; an outfit event follows with state=preview).
     func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit
+    /// Images sent: the price and the images a new outfit's front would send (nothing made).
+    func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate
     /// Attaches a generated preview to the model, with the name chosen in the preview (nil keeps its name).
     func saveOutfit(outfitId: String, name: String?) async throws -> Outfit
     /// Renames an outfit (1–80 characters; the owner or whoever made it).
@@ -73,6 +75,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     func deleteOutfit(id: String) async throws
     /// Makes an outfit's missing ¾/side/back from its front; an outfit event with the filled angles follows.
     func fillOutfit(id: String, imageModel: String?) async throws -> OutfitFill
+    /// "Add face close-ups": an older outfit's missing face close-ups, from her base faces and its front (paid).
+    func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill
+    /// Redo one of its 7 pictures (`OutfitPictures.keys`: front, tq, side, back, face, faceTq, profile; paid).
+    func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill
 
     // Uploads (HTTP: presign → PUT → confirm, falling back to a multipart upload). `progress` reports 0…1.
     func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef
@@ -83,6 +89,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func listJobs() async throws -> [Job]
     func createJob(_ req: JobRequest) async throws -> Job
     func removeJob(id: String) async throws
+    /// POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own).
+    func clearFailedJobs() async throws -> [String]
     /// POST /v1/queue/run: starts the GPU on queued jobs ("Run queue"). Servers that start jobs on their own treat it as a no-op.
     func runQueue() async throws
     func listTakes() async throws -> [Take]

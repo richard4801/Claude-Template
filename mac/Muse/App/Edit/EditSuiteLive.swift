@@ -50,6 +50,7 @@ extension EditSuiteSession {
         liveTasks = []
         flushTask?.cancel()
         flushTask = nil
+        ClaudeEditNotice.shared.clear(if: self)
         guard let sync = live else { return }
         live = nil
         liveConnected = false
@@ -164,7 +165,10 @@ extension EditSuiteSession {
         switch u {
         case .project(let p, let entry):
             showRemote(p)
-            if let e = entry, e.byClaude { claudeToast = e.claudeToast }
+            if let e = entry, e.byClaude {
+                claudeToast = e.notice.map { "Claude · \($0)" } ?? e.claudeToast
+                if e.notice != nil { ClaudeEditNotice.shared.post(e, from: self) }
+            }
         case .history:
             break
         case .pending(let p):

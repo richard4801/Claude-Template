@@ -397,8 +397,9 @@ extension AppStore {
     func estimateShot() async {
         if suite.composer.tool == .extend { return await estimateExtend() }
         guard suite.enabled, suite.catalog != nil else { return }
-        let req = shotRequest
+        var req = shotRequest
         suite.rigDismissals.sync(RigChoices(req))
+        if suite.composer.sent != nil { req.draft = ComposerDrafts.draft(suite.composer) } // images sent: the draft carries the choice
         do {
             let e = try await api.suiteEstimate(req)
             suite.estimate = e
@@ -637,10 +638,11 @@ extension AppStore {
     }
 
     func estimateSwap() async {
-        guard suite.enabled, suite.catalog != nil, let req = swapRequest else {
+        guard suite.enabled, suite.catalog != nil, var req = swapRequest else {
             suite.swapEstimate = nil
             return
         }
+        if suite.composer.sent != nil, req.draft == nil { req.draft = ComposerDrafts.draft(suite.composer) } // images sent
         do {
             suite.swapEstimate = try await api.suiteEstimate(req)
             suite.swapError = nil
@@ -662,7 +664,7 @@ extension AppStore {
             suite.swapUsesStage = true
             return
         }
-        guard let req = swapRequest else {
+        guard var req = swapRequest else {
             showToast(clip == nil ? "Choose a clip first" : "Pick who to replace")
             return
         }
@@ -671,6 +673,7 @@ extension AppStore {
             return
         }
         guard !suite.generating else { return }
+        if suite.composer.sent != nil, req.draft == nil { req.draft = ComposerDrafts.draft(suite.composer) } // images sent
         suite.generating = true
         perform { [self] in
             defer { suite.generating = false }

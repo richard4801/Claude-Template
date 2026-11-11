@@ -51,13 +51,14 @@ extension AppStore {
 
     /// The price, the still rig check and the Look (debounced by the composer's `.task(id:)`). Holds nothing.
     func estimatePhoto() async {
-        guard let req = photoRequest else {
+        guard var req = photoRequest else {
             suite.photoEstimate = nil
             suite.photoError = nil
             suite.rig = []
             return
         }
         suite.rigDismissals.sync(RigChoices(req))
+        if suite.composer.sent != nil { req.draft = ComposerDrafts.draft(suite.composer, photo: suite.photo) } // images sent
         do {
             let e = try await api.suitePhotoEstimate(req)
             guard !Task.isCancelled else { return }

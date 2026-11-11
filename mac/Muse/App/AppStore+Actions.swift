@@ -174,8 +174,37 @@ extension AppStore {
         }
     }
 
+    /// Dismiss is stored on the server (the job's hiddenAt), so it holds after a relaunch or a deploy. It used to hide the
+    /// row in memory only, and every failure came back on the next launch (owner bug 2026-11-11).
     func dismissFailure(_ j: Job) {
         withAnimation { _ = hiddenFailures.insert(j.id) }
+        Task { [self] in
+            do {
+                try await api.removeJob(id: j.id)
+                withAnimation { jobs.removeAll { $0.id == j.id } }
+            } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
+                withAnimation { jobs.removeAll { $0.id == j.id } } // already gone on the server
+            } catch {
+                withAnimation { _ = hiddenFailures.remove(j.id) }
+                showToast("Couldn't dismiss it · try again")
+            }
+        }
+    }
+
+    /// "Clear all failed": every failed job off the Queue for good, in one call.
+    func clearFailures() {
+        let ids = Set(visibleFailures.map(\.id))
+        guard !ids.isEmpty else { return }
+        withAnimation { hiddenFailures.formUnion(ids) }
+        perform { [self] in
+            do {
+                let cleared = Set(try await api.clearFailedJobs())
+                withAnimation { jobs.removeAll { cleared.contains($0.id) } } // a member's view of others' failures stays hidden here only
+            } catch {
+                withAnimation { hiddenFailures.subtract(ids) }
+                throw error
+            }
+        }
     }
 
     func runAgain(_ j: Job) {
@@ -543,6 +572,19 @@ extension AppStore {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { outfitSheet = OutfitDraft(modelId: id) }
     }
 
+    /// Images sent: what the outfit's front would send now (her images, Claude's choice), plus the product photo to upload.
+    func refreshOutfitSent() async {
+        guard let d = outfitSheet, d.mode != .own, d.state != .busy else { return }
+        var req = CreateOutfitRequest(modelId: d.modelId, name: "", mode: d.mode.rawValue, description: d.description)
+        req.imageModel = enginePick(.outfit)?.model
+        if d.sentReset { req.sentImages = .null }
+        guard var s = (try? await api.outfitEstimate(req))?.sentImages else { return }
+        if !s.changed { // the product photos go after her images (uploaded when the angles are made)
+            s.images += d.images.map { SentImage(image: ImageRef(url: $0.absoluteString), role: "product", label: "product photo", why: "the product photo") }
+        }
+        if outfitSheet?.modelId == d.modelId { outfitSheet?.sent = s }
+    }
+
     func outfitGenerate() {
         guard var d = outfitSheet, d.state != .busy else { return }
         if d.mode == .describe && d.description.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -557,7 +599,7 @@ extension AppStore {
             showToast("Add the front photo first")
             return
         }
-        if d.mode != .own && outfitSetEstimate > balance.balance {
+        if outfitSetEstimate > balance.balance { // My own set pays for its face close-ups too
             notEnough("")
             return
         }
@@ -583,13 +625,15 @@ extension AppStore {
                 if outfitSheet?.modelId == draft.modelId { outfitSheet?.name = name }
                 var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(OutfitNaming.maxLength)), mode: draft.mode.rawValue,
                                               description: draft.description, images: refs)
-                if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
+                req.imageModel = enginePick(.outfit)?.model // the owner's model (WS6); My own set uses it for the face close-ups
                 if let base = draft.base, base.keeping { req.base = base } // §6: keep pieces from her base photos
+                if draft.sentReset { req.sentImages = .null } // images sent: the person reset Claude's choice
                 let o = try await api.createOutfit(req)
                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
                 outfitSheet?.outfitId = o.id
                 if o.state == "preview" || o.state == "ready" {
                     outfitSheet?.angles = o.angles
+                    outfitSheet?.faces = OutfitPictures.refs(o).suffix(3).map { $0 }
                     outfitSheet?.state = .done
                 }
                 balance = try await api.balance()

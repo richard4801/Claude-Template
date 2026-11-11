@@ -309,7 +309,8 @@ struct SuiteResultPane: View {
                 Text(message).font(t.body(12)).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 if let j = job {
                     Button { store.retakeShot(j) } label: {
-                        Text("Retry free").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
+                        // Not free: the failed run was refunded and the retry is a new run (owner bug 2026-11-11).
+                        Text(j.isPhoto ? "Make again" : j.cost > 0 ? ScreenCopy.retryLabel(cost: j.cost, estimate: 0) : "Retry").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
                     }
                     .buttonStyle(.plain)
                     if let lower, !j.isPhoto {

@@ -37,8 +37,12 @@ extension AppStore {
 
     func isMine(_ t: MuseTemplate) -> Bool { t.isOwner }
 
-    /// "You" for my own templates, else the owner's name.
-    func ownerLabel(_ t: MuseTemplate) -> String { t.isOwner ? "You" : (t.ownerName.isEmpty ? "Studio" : t.ownerName) }
+    /// "You" for my own templates, else the owner's name. Built-in starters say "MUSE": the owner holds them, but she didn't
+    /// make them (owner bug 2026-11-11: they read "by You · Public").
+    func ownerLabel(_ t: MuseTemplate) -> String {
+        if t.starter != nil { return "MUSE" }
+        return t.isOwner ? "You" : (t.ownerName.isEmpty ? "Studio" : t.ownerName)
+    }
 
     private func replaceTemplate(_ t: MuseTemplate) {
         if let i = templates.firstIndex(where: { $0.id == t.id }) { templates[i] = t } else { templates.insert(t, at: 0) }
