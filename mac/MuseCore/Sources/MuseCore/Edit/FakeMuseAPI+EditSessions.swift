@@ -63,7 +63,8 @@ extension FakeMuseAPI {
     private func checked(_ doc: JSONValue, takeId: String) throws -> EditV2.Project {
         let p: EditV2.Project
         do { p = try JSONPatch.decode(EditV2.Project.self, doc) } catch { throw ApiError("bad_request", "project: not an edit project") }
-        if let problem = EditV2.problem(p, paletteIds: Self.palettes(p)) { throw ApiError("bad_request", "project.\(problem.description)") }
+        // A blank project still being built may be empty (the server's validate draft mode).
+        if !(p.isBlank && p.mainClips.isEmpty), let problem = EditV2.problem(p, paletteIds: Self.palettes(p)) { throw ApiError("bad_request", "project.\(problem.description)") }
         if p.sourceTakeId != takeId { throw ApiError("bad_request", "project.sourceTakeId: must be the session's take") }
         return p
     }
@@ -100,15 +101,18 @@ extension FakeMuseAPI {
 
     public func openEditSession(_ req: EditSessionOpenRequest) throws -> EditSession {
         try editOwner()
-        if req.fresh != true, let cur = editSessions.values.filter({ $0.session.takeId == req.takeId && $0.session.status == "open" })
+        if req.fresh != true, req.takeId != EditV2.blankSourceId, let cur = editSessions.values.filter({ $0.session.takeId == req.takeId && $0.session.status == "open" })
             .max(by: { ($0.session.updatedAt ?? 0) < ($1.session.updatedAt ?? 0) }) {
             return view(cur)
         }
         let project: EditV2.Project
         if let p = req.project {
-            if let problem = EditV2.problem(p, paletteIds: Self.palettes(p)) { throw ApiError("bad_request", "project.\(problem.description)") }
+            // A blank project still being built may be empty (the server's validate draft mode).
+        if !(p.isBlank && p.mainClips.isEmpty), let problem = EditV2.problem(p, paletteIds: Self.palettes(p)) { throw ApiError("bad_request", "project.\(problem.description)") }
             if p.sourceTakeId != req.takeId { throw ApiError("bad_request", "project.sourceTakeId: must be the session's take") }
             project = p
+        } else if req.takeId == EditV2.blankSourceId {
+            project = .blank()
         } else {
             guard let t = takes.first(where: { $0.id == req.takeId }) else { throw ApiError("not_found", "Take not found") }
             guard t.isVideo else { throw ApiError("bad_request", "takeId: must be a video take") }

@@ -142,6 +142,10 @@ final class EditSuiteSession {
     }
 
     var project: E.Project { state.project }
+    /// Opened with "New blank project" (no source take; the take is a stand-in named "blank").
+    var isBlankStart: Bool { take.id == E.blankSourceId }
+    /// A blank project's first save made this Library video; later saves are its versions.
+    @ObservationIgnored private var blankSavedId: String?
     /// The preview's player item shows the current project (review mode's Edit operations check waits for it).
     var previewIsCurrent: Bool { builtProject == project && player.currentItem != nil }
     var duration: Double { state.duration }
@@ -154,29 +158,39 @@ final class EditSuiteSession {
     /// Opens the take: a v2 version re-opens its project on its source, a v1 version its edit list (fromV1), anything else
     /// starts fresh on the take's own video.
     func load() async {
-        phase = .loading("Opening the video…")
+        phase = .loading(isBlankStart ? "Starting a blank project…" : "Opening the video…")
         do {
-            let srcTake = lookupTake(sourceTakeId) ?? take
-            guard let v = srcTake.videoUrl, let url = URL(string: v) else { throw ApiError("edit_no_video", "This take has no video to edit") }
-            let local = try await EditSuiteMedia.localCopy(url, key: srcTake.id)
-            let info = try await VideoEditEngine.info(AVURLAsset(url: local))
-            guard info.duration > 0 else { throw ApiError("edit_no_video", "This take has no video to edit") }
-            let facts = E.SourceFacts(width: info.width, height: info.height, fps: info.fps > 0 ? info.fps : 30, hasAudio: true)
             var project: E.Project
-            if let p2 = take.editsV2, take.parentTakeId == sourceTakeId {
+            var local: URL?
+            if isBlankStart {
+                // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
+                project = E.Project.blank()
+            } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
+                // A saved blank project: its own project again; this video is the source its next saves are versions of.
                 project = p2
-            } else if let v1 = take.edits, take.parentTakeId == sourceTakeId {
-                project = E.fromV1(v1.fitted(to: info.duration, sourceTakeId: sourceTakeId), facts)
             } else {
-                // A take graded with a suite look starts with it on the main clip (reversible like any look).
-                project = E.withTakeLook(E.fromV1(EditList(sourceTakeId: sourceTakeId, sourceDurationSec: info.duration), facts), take: srcTake)
+                let srcTake = lookupTake(sourceTakeId) ?? take
+                guard let v = srcTake.videoUrl, let url = URL(string: v) else { throw ApiError("edit_no_video", "This take has no video to edit") }
+                let copy = try await EditSuiteMedia.localCopy(url, key: srcTake.id)
+                local = copy
+                let info = try await VideoEditEngine.info(AVURLAsset(url: copy))
+                guard info.duration > 0 else { throw ApiError("edit_no_video", "This take has no video to edit") }
+                let facts = E.SourceFacts(width: info.width, height: info.height, fps: info.fps > 0 ? info.fps : 30, hasAudio: true)
+                if let p2 = take.editsV2, take.parentTakeId == sourceTakeId {
+                    project = p2
+                } else if let v1 = take.edits, take.parentTakeId == sourceTakeId {
+                    project = E.fromV1(v1.fitted(to: info.duration, sourceTakeId: sourceTakeId), facts)
+                } else {
+                    // A take graded with a suite look starts with it on the main clip (reversible like any look).
+                    project = E.withTakeLook(E.fromV1(EditList(sourceTakeId: sourceTakeId, sourceDurationSec: info.duration), facts), take: srcTake)
+                }
             }
             project.sourceTakeId = sourceTakeId
             state = EditSuiteState(project)
             state.paletteIds = EditV2LookLibrary.shared.paletteIds
             state.markSaved()
             for a in project.assets {
-                if a.take == sourceTakeId { files[a.id] = local }
+                if a.take == sourceTakeId, let local { files[a.id] = local }
                 state.assetNames[a.id] = name(of: a)
             }
             phase = .ready
@@ -187,7 +201,7 @@ final class EditSuiteSession {
             rebuild(immediately: true)
             refreshMedia()
             refreshLookThumbs()
-            if let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
+            if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
             if isOwner { await startLive() }
         } catch {
             phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
@@ -336,6 +350,13 @@ final class EditSuiteSession {
                     self.sources.luts.merge(more.luts) { a, _ in a }
                 }
                 guard !Task.isCancelled else { return }
+                if p.mainClips.isEmpty {
+                    // A blank project before its first clip: nothing to play (the viewer shows its empty state).
+                    self.player.replaceCurrentItem(with: nil)
+                    self.builtProject = p
+                    self.playhead = 0
+                    return
+                }
                 let b = try EditV2Engine.build(p, sources: self.sources)
                 let wasPlaying = self.player.rate != 0
                 self.player.replaceCurrentItem(with: EditV2Engine.playerItem(b))
@@ -1607,6 +1628,7 @@ final class EditSuiteSession {
 
     /// Problems that stop an export (shown on the sheet).
     var exportProblem: String? {
+        if project.mainClips.isEmpty { return "Add a video from the media panel first · the main track is empty" }
         if let p = E.problem(project, paletteIds: EditV2LookLibrary.shared.paletteIds) { return p.message.prefix(1).uppercased() + p.message.dropFirst() }
         return nil
     }
@@ -1632,7 +1654,9 @@ final class EditSuiteSession {
         p.canvas.height = size.height
         p.canvas.fps = Double(settings.fps)
         let files = self.files
-        let sourceId = sourceTakeId
+        // A blank project: its first save is a new Library video (POST /v1/edits), later ones versions of that video.
+        let sourceId = blankSavedId ?? sourceTakeId
+        p.sourceTakeId = sourceId
         lastError = nil
         exportPhase = .rendering(0)
         exportTask = Task { [weak self] in
@@ -1676,16 +1700,17 @@ final class EditSuiteSession {
                 // Claude's save request may name the version.
                 let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p, name: request?.name, aiLabel: settings.labelAI))
                 try? FileManager.default.removeItem(at: file)
+                if sourceId == E.blankSourceId { self.blankSavedId = t.id }
                 self.exportPhase = .idle
                 self.savedAt = Date()
                 self.state.markSaved()
                 self.versionNumber += 1
                 if let dest = saveFileTo {
                     // Owner bug 2026-11-11: Export must say where the file went on this Mac, with Show in Finder.
-                    self.notice = "Saved \(dest.lastPathComponent) to this Mac and as a new version"
+                    self.notice = "Saved \(dest.lastPathComponent) to this Mac and \(t.parentTakeId == nil ? "to the Library" : "as a new version")"
                     self.noticeFile = dest
                 } else {
-                    self.notice = settings.labelAI ? "Saved · it will carry the AI label when you post" : "Saved as a new version · the original is kept"
+                    self.notice = settings.labelAI ? "Saved · it will carry the AI label when you post" : t.parentTakeId == nil ? "Saved to the Library as a new video" : "Saved as a new version · the original is kept"
                 }
                 if let r = self.requestInExport { self.answerRequest(r, .done(versionId: t.id)) }
                 self.requestInExport = nil

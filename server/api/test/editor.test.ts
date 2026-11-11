@@ -674,3 +674,59 @@ describe('editor wave 1', () => {
     expect(flipped[0]).toEqual(plain[1]); expect(flipped[1]).toEqual(plain[0]);
   });
 });
+
+// "New blank project" (owner request 2026-11-11): no source take. Empty while being built (sessions), a clip to save,
+// saved as a new Library video with no parentTakeId; re-opening it edits its project with that video as the source.
+describe('blank projects', () => {
+  let a: A, owner: Client, studioId: string, clipTake: string;
+  beforeAll(async () => {
+    a = await makeApp();
+    ({ owner } = await people(a, 0) as any);
+    studioId = await studioOf(a);
+    clipTake = await videoTake(a, studioId, { durationSec: 6 });
+  });
+  afterAll(async () => { await a.close(); });
+  const withClip = (): M.EditProject => {
+    const p = M.blankProject();
+    p.assets.push({ id: 'a1', kind: 'video', take: clipTake, durationSec: 6, width: 1080, height: 1920, hasAudio: true });
+    p.tracks[0]!.items.push({ id: 'c1', asset: 'a1', inSec: 0, outSec: 4, speed: 1 } as M.VideoClip);
+    return p;
+  };
+
+  it('an empty blank project is fine while editing (draft) but not to save', () => {
+    expect(M.validate(M.blankProject(), FILTERS, LOOK_IDS, new Set(), { draft: true })).toEqual({ durationSec: 0 });
+    expect(() => M.validate(M.blankProject(), FILTERS, LOOK_IDS)).toThrow(/main track needs at least one clip/);
+    // Only a blank project may be empty: a take's project still needs its clip in a session.
+    expect(() => M.validate({ ...M.blankProject(), sourceTakeId: clipTake }, FILTERS, LOOK_IDS, new Set(), { draft: true })).toThrow(/at least one clip/);
+  });
+
+  it('POST /v1/edits saves it as a new Library video; a refusal names the reason', async () => {
+    const up = await upload(a, owner, 'clip', Buffer.from('blank render'));
+    const empty = M.blankProject();
+    expect((await owner.req('POST', '/v1/edits', { uploadId: up, edits: empty, durationSec: 1, width: 1080, height: 1920 })).body.error).toMatch(/at least one clip/);
+    const notBlank = { ...withClip(), sourceTakeId: clipTake };
+    expect((await owner.req('POST', '/v1/edits', { uploadId: up, edits: notBlank, durationSec: 4, width: 1080, height: 1920 })).body.error).toMatch(/sourceTakeId/);
+    const r = await owner.req('POST', '/v1/edits', { uploadId: up, edits: withClip(), durationSec: 4, width: 1080, height: 1920, fps: 30, name: 'Fresh idea' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ kind: 'edit', title: 'Fresh idea', edits: { version: 2, sourceTakeId: 'blank' } });
+    expect(r.body.parentTakeId).toBeUndefined();
+    // Re-opened (Claude or an app without a project): the saved video is the session's source; later saves are its versions.
+    const s = (await owner.req('POST', '/v1/edit-sessions', { takeId: r.body.id })).body;
+    expect(s.project.sourceTakeId).toBe(r.body.id);
+    const up2 = await upload(a, owner, 'clip', Buffer.from('blank render v2'));
+    const v = await owner.req('POST', `/v1/takes/${r.body.id}/versions`, { uploadId: up2, edits: s.project, durationSec: 4, width: 1080, height: 1920 });
+    expect(v.body).toMatchObject({ kind: 'edit', parentTakeId: r.body.id });
+  });
+
+  it('a blank edit session: always new, empty until a clip is added, the clip added by a patch', async () => {
+    const s1 = (await owner.req('POST', '/v1/edit-sessions', { takeId: 'blank' })).body;
+    const s2 = (await owner.req('POST', '/v1/edit-sessions', { takeId: 'blank' })).body;
+    expect(s1.id).not.toBe(s2.id);
+    expect(s1).toMatchObject({ takeId: 'blank', durationSec: 0, project: { sourceTakeId: 'blank', tracks: [{ kind: 'main', items: [] }] } });
+    const frame = await a.app.inject({ method: 'GET', url: `/v1/edit-sessions/${s1.id}/frame?t=0`, headers: { authorization: `Bearer ${owner.token}` } });
+    expect(frame.statusCode).toBe(200);
+    const r = await owner.req('POST', `/v1/edit-sessions/${s1.id}/reset`, { project: withClip(), baseRevision: s1.revision });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await owner.req('GET', `/v1/edit-sessions/${s1.id}`)).body.durationSec).toBe(4);
+  });
+});
