@@ -12,7 +12,9 @@ extension FakeMuseAPI {
         if r.imageModel != nil, !suiteIsOwner { throw ApiError("owner_only", "Only the studio owner can pick the photo model") }
         // No character (owner 2026-11-11): a reference image is needed and no preset; the demo renders on the sample model.
         if r.modelId == nil && r.presetId != nil { throw ApiError("bad_request", "Presets need a character · pick one with @") }
-        if r.modelId == nil && (r.references ?? []).isEmpty { throw ApiError("bad_request", "Pick a character or add an image") }
+        if r.modelId == nil && (r.references ?? []).isEmpty && r.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ApiError("bad_request", "Describe the photo or add an image")
+        }
         let m = try activeModel(r.modelId ?? SampleData.demo)
         let outfit = r.outfitId ?? m.outfitIds.first ?? ""
         if let pid = r.presetId {

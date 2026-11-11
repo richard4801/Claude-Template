@@ -219,10 +219,11 @@ extension PromptTokens {
 extension ComposerDraft {
     /// The Photo request for this draft: the character and outfit, the prompt (no #moves), the chips as a still's camera
     /// (no movement, no tempo), the photo count, the preset and the slots. Without a character (owner 2026-11-11) only
-    /// with a reference image and no preset (the image is the photo to work from); nil otherwise.
+    /// with a reference image or words, and no preset (an image is the photo to work from; words alone, text-to-image).
+    /// nil otherwise.
     public func photoRequest(_ photo: PhotoDraft, product: ImageRef? = nil) -> PhotoRequest? {
         let model = tokens.characterId
-        if model == nil && (photo.presetId != nil || !photo.references.contains(where: \.isValid)) { return nil }
+        if model == nil && (photo.presetId != nil || (!photo.references.contains(where: \.isValid) && !hasPhotoWords)) { return nil }
         let preset = photo.presetId
         let s = settings
         // With a preset only the Look rides along; otherwise the owner's Directed camera (as a still) or the chips.
@@ -242,11 +243,16 @@ extension ComposerDraft {
     public func photoMissing(_ photo: PhotoDraft, uploading: Bool = false) -> String? {
         if tokens.characterId == nil {
             if photo.presetId != nil { return "Presets need a character · pick one with @" }
-            if !photo.references.contains(where: \.isValid) && !uploading { return "Pick a character or add an image" }
+            if !photo.references.contains(where: \.isValid) && !hasPhotoWords && !uploading { return "Describe the photo or add an image" }
         }
         if uploading { return "Wait for the upload to finish" }
         return nil
     }
+}
+
+extension ComposerDraft {
+    /// The prompt has words (no #moves): enough for a Photo without a character (owner 2026-11-11).
+    var hasPhotoWords: Bool { !tokens.withoutMoves.promptText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
 extension PhotoRequest {
