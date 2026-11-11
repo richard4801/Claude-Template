@@ -10,6 +10,7 @@ import { storeAttachments } from './claudeAttachments.js';
 import { registerChatRoutes } from '../claude/chatRoutes.js';
 import { CHAT_TOOLS } from '../claude/chatTools.js';
 import { APP_TOOLS } from '../claude/appTools.js';
+import { ACTION_TOOLS, registerActionRoutes } from '../claude/actions.js';
 import { ISSUE_ADMIN_TOOLS, ISSUE_TOOLS, registerIssueRoutes } from '../claude/issues.js';
 import * as mcpTools from '../mcp/tools.js';
 
@@ -83,6 +84,7 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   await registerChatRoutes(app, ctx, claude, director);
   // Claude's own reports and captured tool errors (owner reads them; plans/HANDOVER.md 4a, 16:15).
   await registerIssueRoutes(app, ctx);
-  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools([...CHAT_TOOLS, ...ISSUE_TOOLS, ...ISSUE_ADMIN_TOOLS, ...APP_TOOLS]);
+  await registerActionRoutes(app, ctx); // the person's Approve cards for Claude's gated actions
+  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools([...CHAT_TOOLS, ...ISSUE_TOOLS, ...ISSUE_ADMIN_TOOLS, ...APP_TOOLS, ...ACTION_TOOLS]);
   return claude;
 }

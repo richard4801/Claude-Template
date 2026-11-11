@@ -1,0 +1,144 @@
+diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
+index 3eaeead0..4c60344f 100644
+--- a/mac/Muse/App/AppStore+OneClaude.swift
++++ b/mac/Muse/App/AppStore+OneClaude.swift
+@@ -27,6 +27,8 @@ final class OneClaudeState {
+     var remembered: ClaudeUI?
+     /// "Shall I remember: …?" (Remember / No): nothing is saved until Remember.
+     var suggestion: ClaudeUI?
++    /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
++    var approvals: [ClaudeUI] = []
+     var memory: ClaudeMemory?
+     var memoryError: String?
+     /// Step 6b: the models and this person's default.
+@@ -125,6 +127,8 @@ extension AppStore {
+         oneClaude.askOpen = nil
+         oneClaude.remembered = nil
+         oneClaude.suggestion = nil
++        oneClaude.approvals = []
++        Task { await loadClaudeApprovals(id) }
+         oneClaude.lastSentChat = nil
+         oneClaudePageChanged(now: true)
+     }
+@@ -192,6 +196,10 @@ extension AppStore {
+             oneClaude.suggestion = nil
+         case "memory_suggest":
+             oneClaude.suggestion = ui
++        case "approve":
++            if let id = ui.approve, !oneClaude.approvals.contains(where: { $0.approve == id }) { oneClaude.approvals.append(ui) }
++        case "approve_result":
++            oneClaude.approvals.removeAll { $0.approve == ui.action }
+         default:
+             break
+         }
+@@ -248,6 +256,27 @@ extension AppStore {
+         }
+     }
+ 
++    /// The chat's cards still waiting (after a restart or a chat switch).
++    func loadClaudeApprovals(_ chatId: String) async {
++        guard let api = oneClaudeAPI, let list = try? await api.waitingActions() else { return }
++        guard oneClaude.chatId == chatId else { return }
++        oneClaude.approvals = list.filter { $0.chatId == chatId }.map {
++            ClaudeUI(label: $0.label, approve: $0.id, gate: $0.gate, summary: $0.summary, priceUsd: $0.priceUsd)
++        }
++    }
++
++    /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.
++    func answerClaudeAction(_ ui: ClaudeUI, approve: Bool) async {
++        guard let id = ui.approve, let api = oneClaudeAPI else { return }
++        oneClaude.approvals.removeAll { $0.approve == id }
++        do {
++            let r = try await api.answerAction(id, approve: approve)
++            if r.status == "failed" { showToast("That didn't work. \(r.error ?? "")") }
++        } catch {
++            showToast("Couldn't answer that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
++        }
++    }
++
+     func loadOneClaudeMemory() async {
+         guard let api = oneClaudeAPI else { oneClaude.memoryError = "Sign in to your MUSE server first."; return }
+         do { oneClaude.memory = try await api.memory(); oneClaude.memoryError = nil } catch {
+diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
+index 8e35c9a4..40185d47 100644
+--- a/mac/Muse/Views/Claude/OneClaudePanel.swift
++++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
+@@ -200,6 +200,20 @@ struct OneClaudePanel: View {
+             .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
+             .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+         }
++        ForEach(o.approvals, id: \.self) { a in
++            VStack(alignment: .leading, spacing: Space.s2) {
++                Text("Claude needs your go-ahead").scaled(t.scale.label, r.ink)
++                Text(a.summary ?? "").scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
++                HStack(spacing: Space.s2) {
++                    SuiteToolButton(title: a.label ?? "Approve", filled: true) { Task { await store.answerClaudeAction(a, approve: true) } }
++                    SuiteToolButton(title: "Decline", plain: true) { Task { await store.answerClaudeAction(a, approve: false) } }
++                }
++            }
++            .padding(Space.s3)
++            .frame(maxWidth: .infinity, alignment: .leading)
++            .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
++            .padding(.horizontal, Space.s4).padding(.top, Space.s3)
++        }
+         if let m = o.remembered, let text = m.text {
+             HStack(alignment: .top, spacing: Space.s1) {
+                 Ph("push-pin", 13)
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+index e5ce9242..06832a82 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+@@ -178,6 +178,25 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+     public func archiveChat(_ id: String) async throws {
+         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
+     }
++    /// The person answers Claude's Approve card (only theirs, once). Approve runs the stored action as them.
++    public struct ActionAnswer: Decodable, Sendable { public var id: String; public var status: String; public var error: String? }
++    private struct ActionPost: Encodable { var approve: Bool }
++    public struct WaitingAction: Decodable, Sendable {
++        public var id: String; public var gate: String; public var summary: String; public var priceUsd: Double?; public var chatId: String?
++        /// The button, as the server's card names it.
++        public var label: String {
++            let verb = gate == "delete" ? "Delete" : gate == "post" ? "Post" : gate == "spend" ? "Approve" : "Change"
++            return priceUsd.map { "\(verb) · $\(String(format: "%.2f", $0))" } ?? verb
++        }
++    }
++    private struct WaitingList: Decodable { var actions: [WaitingAction] }
++    public func waitingActions() async throws -> [WaitingAction] {
++        let l: WaitingList = try await call("GET", "v1/claude/actions?status=waiting")
++        return l.actions
++    }
++    public func answerAction(_ id: String, approve: Bool) async throws -> ActionAnswer {
++        try await call("POST", "v1/claude/actions/\(try ClaudeIds.check(id))", ActionPost(approve: approve))
++    }
+     public func memory() async throws -> ClaudeMemory { try await call("GET", "v1/claude/memory") }
+     private struct MemoryNew: Encodable { var text: String; var area: String; var characterId: String? }
+     private struct MemoryPin: Encodable { var pinned: Bool }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift b/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
+index 0675c386..0b884740 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
+@@ -84,11 +84,22 @@ public struct ClaudeUI: Codable, Hashable, Sendable {
+     public var suggest: String?
+     public var area: String?
+     public var characterId: String?
++    /// approve: a gated action Claude asked for (delete, post, spend, settings); nothing happens until the person presses
++    /// the button (POST v1/claude/actions/:id). `label` is the button ("Delete", "Approve · $1.30").
++    public var approve: String?
++    public var gate: String?
++    public var summary: String?
++    public var priceUsd: Double?
++    /// approve_result: the action it answers and how it ended (done, failed, declined).
++    public var action: String?
++    public var status: String?
+ 
+     public init(page: String? = nil, id: String? = nil, tool: String? = nil, label: String? = nil, ask: Bool? = nil, from: ClaudePage? = nil,
+-                remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil) {
++                remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil,
++                approve: String? = nil, gate: String? = nil, summary: String? = nil, priceUsd: Double? = nil, action: String? = nil, status: String? = nil) {
+         self.page = page; self.id = id; self.tool = tool; self.label = label; self.ask = ask; self.from = from
+         self.remembered = remembered; self.text = text; self.suggest = suggest; self.area = area; self.characterId = characterId
++        self.approve = approve; self.gate = gate; self.summary = summary; self.priceUsd = priceUsd; self.action = action; self.status = status
+     }
+ 
+     /// Where it goes, as the person reads it ("AI Suite, Shot", "Take, Sunset walk 3").

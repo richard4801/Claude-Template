@@ -1,5 +1,5 @@
 // One Claude (plans/one-claude.md) tables.
-import { bigint, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, doublePrecision, index, integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /** Each person's Claude preferences (migration 0030, step 6b): their default model for new and unset chats. */
 export const claudePrefs = pgTable('claude_prefs', {
@@ -34,3 +34,23 @@ export const claudeIssues = pgTable('claude_issues', {
   note: text('note'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 }, t => [uniqueIndex('claude_issues_key_idx').on(t.studioId, t.dedupeKey), index('claude_issues_seen_idx').on(t.studioId, t.lastSeen)]);
+
+/** Claude's gated actions waiting for the person's go-ahead (migration 0032, claude/actions.ts): the exact call to run
+ * as them when they press Approve. Claude can't approve. */
+export const claudeActions = pgTable('claude_actions', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  userId: text('user_id').notNull(),
+  chatId: text('chat_id'),
+  tool: text('tool').notNull(),
+  gate: text('gate').notNull(), // spend | delete | post | settings
+  summary: text('summary').notNull(),
+  priceUsd: doublePrecision('price_usd'),
+  call: jsonb('call').notNull(), // {method, url, body}
+  status: text('status').notNull(), // waiting | running | done | failed | declined | expired
+  result: jsonb('result'),
+  error: text('error'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+}, t => [index('claude_actions_user_idx').on(t.userId, t.status, t.createdAt)]);

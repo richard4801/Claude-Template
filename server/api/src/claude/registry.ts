@@ -10,6 +10,7 @@ import { CHAT_TOOLS } from './chatTools.js';
 import { WATCH_TOOLS } from './watch.js';
 import { ISSUE_TOOLS } from './issues.js';
 import { APP_TOOLS } from './appTools.js';
+import { ACTION_TOOLS } from './actions.js';
 import { PAGE_IDS, type PageName, type PageRef } from './page.js';
 
 /** What a gated tool would do. Gated tools never act on Claude's word: without confirm they give the price or summary;
@@ -25,7 +26,7 @@ export const GATES: Record<string, Gate> = {
 const OWNER_ONLY = new Set(['apply_recipe', 'replace_slot', 'playbook_read', 'playbook_add', 'report_gap']);
 
 const tag = (tools: EditTool[], pages: ChatTool['pages'], members: (t: EditTool) => boolean): ChatTool[] =>
-  tools.map(t => ({ ...t, pages, gate: GATES[t.name] ?? 'none', members: members(t) }));
+  tools.map(t => ({ ...t, pages, gate: GATES[t.name] ?? (t as { gate?: Gate }).gate ?? 'none', members: members(t) }));
 
 export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(CHAT_TOOLS, ['any'], () => true),
@@ -35,6 +36,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(ISSUE_TOOLS, ['any'], () => true),
   // Full control B1 (claude/appTools.ts): the screens' free read/organise actions, as the person (routes decide what members may do).
   ...tag(APP_TOOLS, ['any'], () => true),
+  // Full control B2 (claude/actions.ts): spend/delete/post actions behind the person's Approve card.
+  ...tag(ACTION_TOOLS, ['any'], () => true),
   ...tag(SUITE_TOOLS, ['suite'], () => true),
   // Editing with Claude is the owner's (editor/sessions.ts owner()).
   ...tag(EDIT_TOOLS, ['edit', 'recreate'], () => false),

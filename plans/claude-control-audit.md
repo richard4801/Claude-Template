@@ -97,3 +97,13 @@ tool also says "Approve it in …" with the page to open, and the existing scree
   suite_queue_add, character_fill_angles, character_dress_up, character_enhance, outfit_generate, outfit_fill,
   outfit_delete, take_discard, collection delete, post_schedule, post_cancel.
 - **B3:** the rest of the GAP rows above.
+
+## Progress
+- Part A (issues) live e6c9ba3e. B1 live ff2d1bd8 (appCall: tools call the app's own routes in-process as the person).
+- B2 server: claude_actions (0032), GET/POST /v1/claude/actions[/:id], tools take_discard, collection_delete, outfit_delete,
+  queue_cancel, suite_queue_remove, suite_queue_run, post_schedule, post_cancel, character_dress_up, character_enhance.
+  Mac Approve card HELD (no mac/ push): `plans/patches/mac-claude-approve-card.patch` (git apply; ClaudeUI approve
+  fields, OneClaudePanel card, answerAction/waitingActions, reload on chat switch). Until it ships, old apps show the
+  "Waiting for your go-ahead" line without a button; Claude is told to send the person to the screen instead.
+- Not yet (B3): outfit generate/fill, character fill-angles, take upscale, queue retry/run (no server estimate route
+  for some: add estimates first), templates CRUD, kits, recipes, settings set (owner), LoRA, warm GPU, link import.
