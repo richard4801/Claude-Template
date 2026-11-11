@@ -91,8 +91,7 @@ export function needOf(r: ShotRequest, character: Character | null): Need {
   const f = r.frames ?? {};
   const keyframes = r.camera?.guide?.keyframes;
   const start = !!(f.start || keyframes?.start), end = !!(f.end || keyframes?.end), middle = (f.middle?.length ?? 0) || (keyframes?.middle?.length ?? 0);
-  // No mode sent: frames → image-to-video; her sheet or uploaded reference images (no character needed) → reference; else text.
-  const mode = (r.mode as Need['mode'] | undefined) ?? (start || end ? 'image' : character?.images.length || r.references?.images?.length ? 'reference' : 'text');
+  const mode = (r.mode as Need['mode'] | undefined) ?? (start || end ? 'image' : character?.images.length ? 'reference' : 'text');
   return { mode, start, end, middle, characterImages: mode === 'text' ? 0 : character?.images.length ?? 0, extraImages: r.references?.images?.length ?? 0,
     videos: r.references?.videos?.length ?? 0, guide: !!r.camera?.guide, directed: r.camera?.mode === 'directed', duration: r.duration, aspect: r.aspectRatio, withAudio: r.audio, audioRef: !!r.references?.audio };
 }
@@ -119,7 +118,7 @@ export function fit(m: ModelSpec, resolution: string, n: Need): { why: string | 
   // Reference audio rides with an image or video reference (Seedance and H3 Lite require it; safest everywhere).
   if (n.audioRef && n.mode === 'text' && !n.extraImages && !n.videos && !n.guide) return no('audio needs an image or video reference');
   if (n.audioRef && n.mode === 'image' && !m.frames.withRefs) return no('no audio with keyframes');
-  if (n.extraImages > 0 && m.refs.images < n.extraImages + (n.mode === 'reference' && n.characterImages > 0 ? 1 : 0) && !(n.mode === 'image' && !m.frames.withRefs)) return no('too many reference images');
+  if (n.extraImages > 0 && m.refs.images < n.extraImages + (n.mode === 'reference' ? 1 : 0) && !(n.mode === 'image' && !m.frames.withRefs)) return no('too many reference images');
   if (m.id === 'veo-3.1-lite' && resolution === '1080p' && seconds !== 8) return no('1080p only at 8 s');
   return { why: null, seconds };
 }
