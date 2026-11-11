@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { POOL_SLOTS, takes, templateFavourites, templates, users, type ImageRef, type TemplateLayers, type VariationPool } from '../db/schema.js';
+import { POOL_SLOTS, studioSeeds, takes, templateFavourites, templates, users, type ImageRef, type TemplateLayers, type VariationPool } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { ASSET_DIR, ASSET_KEYS } from '../images/service.js';
@@ -288,16 +288,32 @@ export class TemplateService {
   }
 
   // ---------------------------------------------------------------------------------------------- starter pack
-  /** Adds any missing starter templates to one studio (keyed by slug). Needs a studio owner. Idempotent. */
+  /**
+   * Gives one studio the starter templates it hasn't been given yet. Each starter is given ONCE: `studio_seeds` remembers
+   * every slug handed out, so one the owner deleted is not re-added on the next start or deploy (owner bug 2026-11-11:
+   * deleted starters came back after every redeploy, because this used to re-add any slug that was missing).
+   * A studio seeded before `studio_seeds` existed (it has starter rows but no record) counts as having been given every
+   * current starter: the missing ones were deleted by the owner. Needs a studio owner. Idempotent.
+   */
   async ensureStarters(studioId: string, force = false) {
     if (this.seeded.has(studioId) && !force) return 0;
     const [owner] = await this.ctx.db.select({ id: users.id }).from(users).where(and(eq(users.studioId, studioId), eq(users.role, 'owner'))).orderBy(users.createdAt).limit(1);
     if (!owner) return 0;
-    const have = new Set((await this.ctx.db.select({ slug: templates.slug }).from(templates).where(and(eq(templates.studioId, studioId), isNotNull(templates.slug)))).map(r => r.slug));
-    let added = 0;
     const now = Date.now();
+    const record = (slugs: string[]) => slugs.length
+      ? this.ctx.db.insert(studioSeeds).values(slugs.map(slug => ({ studioId, kind: 'template', slug, seededAt: now }))).onConflictDoNothing()
+      : Promise.resolve();
+    let given = new Set((await this.ctx.db.select({ slug: studioSeeds.slug }).from(studioSeeds)
+      .where(and(eq(studioSeeds.studioId, studioId), eq(studioSeeds.kind, 'template')))).map(r => r.slug));
+    const have = new Set((await this.ctx.db.select({ slug: templates.slug }).from(templates).where(and(eq(templates.studioId, studioId), isNotNull(templates.slug)))).map(r => r.slug!));
+    if (!given.size && have.size) { // seeded before the record existed: never re-add what's gone
+      given = new Set(STARTERS.map(s => s.slug));
+      await record([...given]);
+    }
+    let added = 0;
     for (const [i, s] of STARTERS.entries()) {
-      if (have.has(s.slug)) continue;
+      if (given.has(s.slug)) continue;
+      if (have.has(s.slug)) { await record([s.slug]); continue; }
       const coverKey = `t/${studioId}/starter-${s.slug}.jpg`;
       try {
         if (!(await this.ctx.storage.head(coverKey))) {
@@ -310,6 +326,7 @@ export class TemplateService {
         id: uid('tpl'), studioId, ownerId: owner.id, visibility: 'public', name: s.name, tags: s.tags, layers: s.layers, variationPool: s.variationPool,
         coverKey, slug: s.slug, createdAt: now - i, updatedAt: now - i,
       }).onConflictDoNothing().returning({ id: templates.id });
+      await record([s.slug]);
       added += r.length;
     }
     this.seeded.add(studioId);

@@ -470,6 +470,17 @@ export const templates = pgTable('templates', {
 }, t => [index('templates_studio_idx').on(t.studioId, t.updatedAt), uniqueIndex('templates_slug_idx').on(t.studioId, t.slug)]);
 
 /**
+ * Built-in content a studio has already been given (starter templates, …), one row per item ever seeded. Seeding skips
+ * anything listed here, so an item the owner deleted stays deleted across restarts and deploys (owner bug 2026-11-11).
+ */
+export const studioSeeds = pgTable('studio_seeds', {
+  studioId: text('studio_id').notNull(),
+  kind: text('kind').notNull(),
+  slug: text('slug').notNull(),
+  seededAt: ms('seeded_at').notNull(),
+}, t => [primaryKey({ columns: [t.studioId, t.kind, t.slug] })]);
+
+/**
  * Edit style kits (plans/edit-parity.md, M): an edit's look, colour, transition, caption and text styles and background
  * (editor/kit.ts StyleKit), saved by name. Members see their own; the owner sees the studio's.
  */

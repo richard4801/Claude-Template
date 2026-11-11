@@ -59,17 +59,17 @@ describe('photo templates', () => {
     expect((await sharp(cover.rawPayload).metadata()).format).toBe('jpeg');
   });
 
-  it('the starter seed is idempotent and puts back a missing starter', async () => {
+  it('the starter seed is idempotent and never puts back a starter the owner deleted', async () => {
     const count = async () => (await a.ctx.db.select().from(templates)).length;
     const before = await count();
     expect((await a.ctx.templates.seedAllStarters()).added).toBe(0);
     expect(await count()).toBe(before);
-    const mirror = (await owner.req('GET', '/v1/templates?scope=mine&q=mirror')).body[0];
-    expect((await owner.req('DELETE', `/v1/templates/${mirror.id}`)).status).toBe(204);
+    const candid = (await owner.req('GET', '/v1/templates?scope=mine&q=candid')).body[0];
+    expect((await owner.req('DELETE', `/v1/templates/${candid.id}`)).status).toBe(204);
     expect(await count()).toBe(before - 1);
-    expect((await a.ctx.templates.seedAllStarters()).added).toBe(1);
+    a.ctx.templates.forget(); // as after a restart
     expect((await a.ctx.templates.seedAllStarters()).added).toBe(0);
-    expect(await count()).toBe(before);
+    expect(await count()).toBe(before - 1);
   });
 
   let tpl: any;

@@ -239,6 +239,13 @@
       "when": 1794419405486,
       "tag": "0033_chat_tools_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794430329353,
+      "tag": "0034_seeded_content",
+      "breakpoints": true
     }
   ]
 }
