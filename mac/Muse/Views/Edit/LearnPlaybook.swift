@@ -369,7 +369,7 @@ struct LearnRuleEditor: View {
     }
 }
 
-/// The eleven areas as one segmented control on two rows (a segmented control, not a menu: the click-through reaches each).
+/// The areas as one segmented control on rows of six (a segmented control, not a menu: the click-through reaches each).
 struct LearnAreaSeg: View {
     @Environment(\.theme) private var t
     var selection: String

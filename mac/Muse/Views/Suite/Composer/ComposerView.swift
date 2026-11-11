@@ -211,8 +211,9 @@ struct ComposerView: View {
                 .accessibilityLabel("Engines (owner)")
             }
             if store.isOwner {
-                let on = store.suite.claude.open
-                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on) { store.toggleSuiteClaude() }
+                // One Claude (plans/one-claude.md): the panel on the right shares this composer with Claude.
+                let on = store.oneClaude.open
+                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on) { store.toggleOneClaude() }
                     .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
                     .help(on ? "Hide Claude" : "Claude fills in the composer from your idea. Nothing is generated until you confirm the price.")
             }

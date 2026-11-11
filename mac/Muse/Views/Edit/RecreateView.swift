@@ -266,8 +266,12 @@ struct RecreateTopBar: View {
     /// Claude (owner only): opens the chat beside the Recreate screens, as in the editor.
     @ViewBuilder private func claudeButton(iconOnly: Bool) -> some View {
         if store.isOwner {
-            let on = store.recreate.claudeOpen
-            SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on, iconOnly: iconOnly) { store.toggleRecreateClaude() }
+            // One Claude (plans/one-claude.md): the panel on the right, with this reference's edit session on its page.
+            let on = store.oneClaude.open
+            SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on, iconOnly: iconOnly) {
+                store.toggleOneClaude()
+                if store.oneClaude.open, !store.isDemo { Task { await store.ensureRecreateClaudeSession(); store.oneClaudePageChanged() } }
+            }
                 .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
                 .help("Claude can analyse a video, explain a shot or fix one")
         }

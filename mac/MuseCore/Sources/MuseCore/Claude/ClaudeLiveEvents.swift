@@ -14,6 +14,8 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
     case turn(ClaudeTurn)
     case stop(turnId: String)
     case status(ClaudeStatus)
+    /// One Claude: a line Claude left for the app (open a page, "Remembered … Undo").
+    case ui(threadId: String, name: String, ClaudeUI)
 }
 
 /// SSE lines → `claude` live events; everything else on the stream is ignored.
@@ -37,8 +39,10 @@ public struct ClaudeLiveEventFilter: Sendable {
         var turn: ClaudeTurn?
         var status: ClaudeStatus?
         var event: ClaudeEvent?
+        var name: String?
+        var ui: ClaudeUI?
 
-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event }
+        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: K.self)
             type = try c.decode(String.self, forKey: .type)
@@ -50,6 +54,8 @@ public struct ClaudeLiveEventFilter: Sendable {
             turn = try? c.decodeIfPresent(ClaudeTurn.self, forKey: .turn)
             status = try? c.decodeIfPresent(ClaudeStatus.self, forKey: .status)
             event = try? c.decodeIfPresent(ClaudeEvent.self, forKey: .event)
+            name = try? c.decodeIfPresent(String.self, forKey: .name)
+            ui = try? c.decodeIfPresent(ClaudeUI.self, forKey: .ui)
         }
     }
 
@@ -68,6 +74,9 @@ public struct ClaudeLiveEventFilter: Sendable {
         case "turn": return e.turn.map { .turn($0) }
         case "stop": return (e.turnId ?? e.turn?.id).map { .stop(turnId: $0) }
         case "status": return e.status.map { .status($0) }
+        case "ui":
+            guard let tid = e.threadId, let name = e.name, let ui = e.ui else { return nil }
+            return .ui(threadId: tid, name: name, ui)
         default: return nil
         }
     }

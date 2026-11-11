@@ -119,6 +119,11 @@ struct Shell: View {
                     // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
                     Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
                     ScreenHost()
+                    // One Claude (plans/one-claude.md): the same Claude on every page, its chat following the person.
+                    if store.oneClaude.open && store.user != nil {
+                        Rectangle().fill(t.roles.hairline).frame(width: 1)
+                        OneClaudePanel()
+                    }
                 }
             }
         }
@@ -199,6 +204,17 @@ struct TitleBar: View {
             .layoutPriority(1)
             Spacer(minLength: 12)
             HStack(spacing: 10) {
+                if store.user != nil {
+                    let on = store.oneClaude.open
+                    Button { store.toggleOneClaude() } label: {
+                        Ph("chat-circle-text", 16).frame(width: 28, height: 28).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .help(on ? "Hide Claude (⌘⇧C)" : "Claude, on every page (⌘⇧C)")
+                    .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
+                }
                 if let p = store.uploadProgress {
                     HStack(spacing: 8) {
                         Text("Uploading \(Int((p * 100).rounded()))%").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
