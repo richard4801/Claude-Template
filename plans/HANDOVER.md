@@ -75,6 +75,11 @@ Owner answers at the start: keep the 4b order; the typing bug is on the Mac; pus
   OWNER YES 2026-11-11 02:40 (sent): Claude opens pages itself (asks only if busy); memory saves with Undo (pins
   owner-only); all old chats into one list; model picker (6b) as the very next small step; MEMBERS get one Claude now
   (own chats only, own wallet, read memory, no owner tools).
+  CORRECTION (owner, same day, sent): every member has their OWN Claude plan on their own computer; Claude isn't part of
+  the app or billed through MUSE. Memory is PER PERSON (the owner's is hers only; no studio memory). Claude saves to
+  memory when asked, and ASKS first when it thinks something is important (no silent saves, no "save with Undo").
+- Delegated: Edit "New blank project" (no source video; shape from Edit's top picker; saves to the Library as a new
+  video with its project; server + Mac, Android later) → session on branch claude/edit-blank.
 - Next in order: 5A.1 Mac Edit oval (needs the pixel probe), then 5A.5, then 4c model choice for everyone.
 
 ## 4b. PRIORITY ORDER (read this before section 5; it overrides the lettering there)
