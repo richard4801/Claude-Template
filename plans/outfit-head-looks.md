@@ -34,8 +34,17 @@ to how many can stay on the section. Add the navigation like < X of X >." (Scree
 two columns of four-angle rows, five of them named "Product look".)
 - Each outfit is ONE folder tile: its front picture, its name, and its date (so same-named outfits can be told apart).
   No ¾/side/back on the page.
-- Clicking (Mac) / tapping (Android) a folder opens the outfit: all four angles large, plus the actions it has today
-  (rename, use, delete, Dress up). Close returns to the same page of folders.
+- Clicking (Mac) / tapping (Android) a folder opens the outfit: all four angles large, plus its actions (rename, use,
+  Dress up, Delete). Close returns to the same page of folders.
+- Viewer (owner, 2026-11-11: "click an outfit to view … slide to the next image"): clicking any angle opens it full
+  size; slide to the next/previous angle (swipe on Android and Mac trackpad, ‹ › buttons and ←/→ keys on the Mac),
+  with "Front · 1 of 4" shown. Reuse the Mac ImageLightbox (it already has arrows) and Android's image viewer.
+- Delete (owner, 2026-11-11; NEW: no delete exists today, server or apps): Delete in the open outfit and on the
+  folder's menu (right-click on the Mac, long-press on Android) asks first: "Delete this outfit? Takes and photos already
+  made with it are kept." Server: DELETE /v1/outfits/:id (owner and the outfit's maker; studio-scoped; 404 for another
+  studio's), removes the outfit from drafts/templates that point at it (they fall back to no outfit) and keeps takes.
+  A deleted outfit's generating job: refuse with "still being made" until it finishes. The page refills from the next
+  page; if the last page empties, step back one page. Server test for the route (permissions, studio scope).
 - 8 folders per page on the Mac (two rows of four). The grid fills the page's full width (tiles grow with the window;
   no empty right-hand side). Android: the same, fewer per row on a phone (2 per row, 8 per page).
 - Pager under the grid: "‹  1 of 3  ›". Arrows disabled at the ends; hidden when there is only one page. Newest first;
