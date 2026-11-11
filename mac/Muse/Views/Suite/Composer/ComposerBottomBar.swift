@@ -110,20 +110,20 @@ struct ComposerBottomBar: View {
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
                     addOnPills(compact: compact)
                 }
-                OwnerModelPill(purpose: tool == .recast ? .recast : .swap, compact: compact) // the owner's model (WS6); members see nothing
+                OwnerModelPill(purpose: tool == .recast ? .recast : .swap, compact: compact) // the model (WS6; 4c: everyone)
             } else if tool == .extend {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
                 if !settingsInRail {
                     lengthPill
                     takesPill
                 }
-                OwnerModelPill(purpose: .extend, compact: compact) // the owner's model (WS6); members see nothing
+                OwnerModelPill(purpose: .extend, compact: compact) // the model (WS6; 4c: everyone)
             } else if tool == .photo {
                 // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
                 let n = store.suite.photo.count
                 listPill("photos", icon: "photo.on.rectangle", value: "\(n)", help: "Photos",
                          options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
-                if store.isOwner { enginePill(compact: compact) } // the owner's photo model (WS6)
+                enginePill(compact: compact) // the photo model (WS6; 4c: everyone)
             } else {
                 if !settingsInRail {
                     shapePill
@@ -134,7 +134,7 @@ struct ComposerBottomBar: View {
                 listPill("speaking", icon: "text.bubble", value: store.suite.composer.speaking.label, help: "Speaking",
                          options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.composer.speaking) { store.suite.composer.speaking = $0 }
                 if !settingsInRail { takesPill }
-                if store.isOwner { enginePill(compact: compact) }
+                enginePill(compact: compact) // 4c: everyone
             }
         }
         .fixedSize(horizontal: true, vertical: false)

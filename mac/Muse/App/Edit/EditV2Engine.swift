@@ -332,7 +332,7 @@ enum EditV2Engine {
 
     /// Exports H.264/AAC .mp4 at the canvas size and frame rate. `progress` reports 0…1; cancelling the task cancels the
     /// export, and a cancelled or failed export deletes the half-made file.
-    static func export(_ built: Built, to url: URL, hevc: Bool = false, progress: @escaping @MainActor (Double) -> Void) async throws {
+    static func export(_ built: Built, to url: URL, hevc: Bool = false, aiLabel: Bool = false, progress: @escaping @MainActor (Double) -> Void) async throws {
         try? FileManager.default.removeItem(at: url)
         // Edit suite: MP4 · H.264 (default) or HEVC.
         let preset = hevc ? AVAssetExportPresetHEVCHighestQuality : AVAssetExportPresetHighestQuality
@@ -343,6 +343,9 @@ enum EditV2Engine {
         session.outputURL = url
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
+        // 5A.3: no metadata from the sources (device, place, software); MUSE's label only when the switch is on.
+        session.metadata = fileMetadata(aiLabel: aiLabel)
+        session.metadataItemFilter = .forSharing()
         session.videoComposition = built.videoComposition
         session.audioMix = built.audioMix
         session.audioTimePitchAlgorithm = .spectral

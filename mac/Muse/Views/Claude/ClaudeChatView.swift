@@ -173,6 +173,8 @@ struct ClaudeChatView: View {
             }
             transcript
             if model.answeringPhone { phoneStrip }
+            // Files on this Mac: Claude's questions before a file or command call wait here.
+            if let tid = model.thread?.id { ClaudeFileApprovals(threadId: tid, chatTitle: model.thread?.title) }
             composer
         }
     }
@@ -225,7 +227,10 @@ struct ClaudeChatView: View {
         return ChatRow.build(tr.items, audience: store.isOwner ? .owner : .member, unwrap: unwrapShown) { item in
             guard case .user(let id, let text, _) = item else { return [] }
             let stored = tr.attachmentURLs(id)
-            if !stored.isEmpty { return stored.map { ChatImage(ref: ImageRef(url: $0)) } }
+            let shownLocal = model.sentLocal[ChatLeakFilter.userText(unwrapShown?(text) ?? text)] ?? []
+            // Videos without a poster on this Mac (from the phone, or after a restart): a "Video" chip each.
+            let videos = shownLocal.isEmpty ? Array(repeating: ChatImage(video: true), count: tr.videoCount(id)) : []
+            if !stored.isEmpty || !videos.isEmpty { return stored.map { ChatImage(ref: ImageRef(url: $0)) } + videos }
             if let urls = userImages?(text), !urls.isEmpty { return urls.map { ChatImage(ref: ImageRef(url: $0)) } }
             let shown = ChatLeakFilter.userText(unwrapShown?(text) ?? text)
             return (model.sentLocal[shown] ?? []).map { ChatImage(data: $0) }

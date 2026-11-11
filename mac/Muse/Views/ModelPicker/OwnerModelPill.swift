@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The owner's Model pill for any purpose (owner requirement 2026-11-08: "anywhere I generate images or video, let me
 /// pick the model"). "Model" with the pick under it ("Auto (Kling 4.0)" / "Kling 4.0, 1080p"); its list shows each
-/// model's limits and price, Auto first. Members see nothing (it draws nothing for them), so it can be placed anywhere.
+/// model's limits and price, Auto first. 4c: everyone sees it (members the models the owner hasn't hidden).
 ///
 /// `selection` is the model id (nil = Auto, the studio's default for the purpose). Without a binding it uses this
 /// session's pick for the purpose (store.enginePick), which the requests read (AppStore+EngineChoice.swift).
@@ -25,7 +25,8 @@ struct OwnerModelPill: View {
     }
 
     var body: some View {
-        if store.isOwner {
+        // 4c (owner, 2026-11-11): model choice is for everyone; members see the models the owner hasn't hidden.
+        if store.user != nil {
             let label = pickLabel
             Button { open.toggle() } label: {
                 HStack(spacing: 6) {
@@ -93,7 +94,7 @@ struct EngineList: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Model for \(label.lowercased())").scaled(t.scale.label, t.roles.ink)
                 Spacer(minLength: Space.s3)
-                Text("Only you see models").scaled(t.scale.caption, t.roles.ink2)
+                Text(store.isOwner ? "Members see these too, unless you hide them in Settings" : "Models the studio offers").scaled(t.scale.caption, t.roles.ink2)
             }
             .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s2)
             if all.count > 6 {
@@ -158,7 +159,7 @@ struct EngineList: View {
         return HStack(alignment: .top, spacing: Space.s2) {
             check(on)
             VStack(alignment: .leading, spacing: Space.s1) {
-                Text(e.name).scaled(t.scale.body, t.roles.ink).lineLimit(1)
+                Text(e.shownName).scaled(t.scale.body, t.roles.ink).lineLimit(1)
                 if let n = e.notice, !n.isEmpty { Text(n).scaled(t.scale.caption, t.roles.caution).lineLimit(2) }
                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
                 if o.resolutions.count < 2 {

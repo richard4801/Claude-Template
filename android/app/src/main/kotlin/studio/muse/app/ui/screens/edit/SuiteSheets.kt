@@ -1544,7 +1544,7 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
             }
             SuiteLabel("Bitrate")
             SuiteSeg(ExportBitrate.entries.map { it.name to it.label }, s.bitrate.name, { set(s.copy(bitrate = ExportBitrate.valueOf(it))) }, Modifier.fillMaxWidth(), fill = true)
-            OptRow("Label as AI-generated", "Your choice, per export", s.aiLabel, { set(s.copy(aiLabel = !s.aiLabel)) })
+            OptRow("Label as AI-generated", "Adds the AI label when you post from MUSE. Off: the file carries no label", s.aiLabel, { set(s.copy(aiLabel = !s.aiLabel)) })
         }
         ExportFormat.GIF -> T("Loops, $GIF_FPS frames a second, $GIF_SHORT_SIDE\u00A0px on the short side. Up to ${GIF_MAX_SEC.roundToInt()}\u00A0s; captions are burned in.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
         ExportFormat.SOUND -> T("The edit's mix on its own, as an .m4a file (AAC, ${SOUND_BITRATE / 1000}\u00A0kbit/s).", m.type.body.copy(fontSize = 13.sp), m.t.muted)

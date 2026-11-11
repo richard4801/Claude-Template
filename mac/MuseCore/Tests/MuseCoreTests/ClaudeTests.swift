@@ -331,4 +331,27 @@ final class ClaudeTests: XCTestCase {
         XCTAssertEqual(q.next("b")?.id, "l2")
         XCTAssertEqual(q.runningThread(turnId: "nope"), nil)
     }
+
+    // MARK: Videos (plans/claude-video-vision.md)
+
+    func testAttachedVideoIsWatchedNotRead() throws {
+        let files = [ClaudeAttachmentFile(path: "/c/MUSE/claude/ct_1/ca_1.png", uploadId: "up_1"),
+                     ClaudeAttachmentFile.video(uploadId: "up_v", name: "walk.mov", seconds: 12.2)]
+        let text = ClaudeAttachmentPrompt.text("Judge the walk", files)
+        XCTAssertTrue(text.contains("Attached video: uploadId up_v (walk.mov, 0:12). Call watch {id: \"up_v\"} first to see it."))
+        XCTAssertTrue(text.contains("Attached images (Read each one):\n- /c/MUSE/claude/ct_1/ca_1.png (uploadId up_1)"))
+        XCTAssertFalse(text.contains("- (uploadId up_v)"), "a video is never in the Read list")
+        XCTAssertEqual(text.components(separatedBy: "\n- ").count, 2, "one image to Read")
+        XCTAssertEqual(ChatLeakFilter.userText(text), "Judge the walk")
+        // A video alone: no image header.
+        let only = ClaudeAttachmentPrompt.text("Look", [.video(uploadId: "up_v")])
+        XCTAssertEqual(only, "Look\n\nAttached video: uploadId up_v. Call watch {id: \"up_v\"} first to see it.")
+        XCTAssertEqual(ChatLeakFilter.userText(only), "Look")
+        XCTAssertEqual(ClaudeAttachmentPrompt.length(185), "3:05")
+        // A stored video attachment: marked, its link kept apart (a bubble never loads it as an image).
+        let a = try JSONDecoder().decode(ClaudeAttachment.self, from: Data(#"{"id":"att_1","uploadId":"up_v","mimeType":"video/mp4","video":true,"url":"https://s3/v.mp4"}"#.utf8))
+        XCTAssertTrue(a.isVideo)
+        XCTAssertNil(a.url)
+        XCTAssertEqual(a.videoURL, "https://s3/v.mp4")
+    }
 }

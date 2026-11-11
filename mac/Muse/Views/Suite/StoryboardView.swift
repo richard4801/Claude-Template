@@ -254,7 +254,7 @@ private struct StoryShotEditor: View {
                     Text("Quality").font(t.scale.label.font).frame(width: 64, alignment: .leading)
                     SuiteSeg(options: SuiteText.tierIds.map { ($0, $0 == "standard" ? "Std" : SuiteText.tierLabel($0)) }, selection: suite.board.quality) { suite.board.quality = $0 }
                 }
-                OwnerModelPill(purpose: .storyboard) // the owner's model for every shot here (WS6); members see nothing
+                OwnerModelPill(purpose: .storyboard) // the model for every shot here (WS6; 4c: everyone)
                 Rectangle().fill(t.line).frame(height: 1)
                 Text("Camera").font(t.body(15, .semibold))
                 BoardLookChips()

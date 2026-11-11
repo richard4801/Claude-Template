@@ -3,22 +3,47 @@ import MuseCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// An image waiting to go with the next message (Edit, Recreate and Camera keep them on this Mac; the Suite uploads its own).
+/// An image (or a video) waiting to go with the next message (Edit, Recreate and Camera keep images on this Mac; the Suite
+/// uploads its own). A video's `data` is its poster frame (PNG), empty until it is read.
 struct ChatPendingImage: Identifiable, Equatable {
     let id = UUID()
     var name: String
     var data: Data
     var mime: String
+    var video: ChatPendingVideo? = nil
 }
 
-/// What the composer does with images pasted or dropped on it.
+/// A video waiting to go: uploaded to the MUSE server as soon as it is picked (Claude watches it there, by its upload id).
+struct ChatPendingVideo: Equatable {
+    enum State: Equatable {
+        case uploading
+        case ready(uploadId: String)
+        case failed(String)
+    }
+    var file: URL
+    /// Its length in seconds (0 until read).
+    var seconds: Double = 0
+    var state: State = .uploading
+
+    var uploading: Bool { state == .uploading }
+    var uploadId: String? { if case .ready(let id) = state { return id }; return nil }
+    var error: String? { if case .failed(let e) = state { return e }; return nil }
+}
+
+/// What the composer does with images (and videos) pasted or dropped on it.
 enum ChatImageInput {
     static let types: [UTType] = [.jpeg, .png, .webP, .heic, .heif, .tiff, .gif]
+    /// Videos Claude can watch: MP4 and MOV, 500 MB at most.
+    static let videoTypes: [UTType] = [.mpeg4Movie, .quickTimeMovie]
+    static let maxVideoBytes = 500 * 1024 * 1024
+    static let videoTooLarge = "That video is too large (500 MB at most)."
+    static let videoUnsupported = "Only MP4 or MOV videos."
 
-    /// Image files and image data on a pasteboard. Empty when it holds none (then text pastes as usual).
-    static func read(_ pb: NSPasteboard) -> (urls: [URL], data: [(name: String, data: Data, mime: String)]) {
+    /// Image files and image data on a pasteboard (and, with `videos`, movie files). Empty when it holds none (then text
+    /// pastes as usual).
+    static func read(_ pb: NSPasteboard, videos: Bool = false) -> (urls: [URL], data: [(name: String, data: Data, mime: String)]) {
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
-            let images = urls.filter(isImage)
+            let images = urls.filter { isImage($0) || (videos && isMovie($0)) }
             if !images.isEmpty { return (images, []) }
         }
         // Image data only when there's no text: a rich-text copy carries both, and then it's a text paste.
@@ -33,6 +58,21 @@ enum ChatImageInput {
     static func isImage(_ url: URL) -> Bool {
         guard url.isFileURL, let type = UTType(filenameExtension: url.pathExtension.lowercased()) else { return false }
         return type.conforms(to: .image)
+    }
+
+    /// Any movie file (one that isn't MP4 or MOV is refused in plain words).
+    static func isMovie(_ url: URL) -> Bool {
+        guard url.isFileURL, let type = UTType(filenameExtension: url.pathExtension.lowercased()) else { return false }
+        return type.conforms(to: .movie)
+    }
+
+    /// An MP4 or MOV file.
+    static func isVideo(_ url: URL) -> Bool {
+        url.isFileURL && ["mp4", "mov"].contains(url.pathExtension.lowercased())
+    }
+
+    static func videoMime(_ url: URL) -> String {
+        url.pathExtension.lowercased() == "mov" ? "video/quicktime" : "video/mp4"
     }
 
     static func mime(_ url: URL) -> String {
@@ -57,6 +97,8 @@ struct ChatTextArea: NSViewRepresentable {
     var onSubmit: () -> Void
     var onEscape: () -> Bool
     var onImages: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)?
+    /// Pasted or dropped movie files go to `onImages` too (the chats that take videos).
+    var acceptsVideo = false
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ChatTextArea
@@ -168,6 +210,7 @@ struct ChatTextArea: NSViewRepresentable {
         tv.onSubmit = onSubmit
         tv.onEscape = onEscape
         tv.onImages = onImages
+        tv.acceptsVideo = acceptsVideo
     }
 }
 
@@ -176,6 +219,7 @@ final class ComposerTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onEscape: (() -> Bool)?
     var onImages: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)?
+    var acceptsVideo = false
 
     override func keyDown(with e: NSEvent) {
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -208,7 +252,7 @@ final class ComposerTextView: NSTextView {
 
     override func paste(_ sender: Any?) {
         if let onImages {
-            let found = ChatImageInput.read(.general)
+            let found = ChatImageInput.read(.general, videos: acceptsVideo)
             if !found.urls.isEmpty || !found.data.isEmpty {
                 onImages(found.urls, found.data)
                 return
@@ -218,13 +262,13 @@ final class ComposerTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if onImages != nil, !ChatImageInput.read(sender.draggingPasteboard).urls.isEmpty { return .copy }
+        if onImages != nil, !ChatImageInput.read(sender.draggingPasteboard, videos: acceptsVideo).urls.isEmpty { return .copy }
         return super.draggingEntered(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         if let onImages {
-            let found = ChatImageInput.read(sender.draggingPasteboard)
+            let found = ChatImageInput.read(sender.draggingPasteboard, videos: acceptsVideo)
             if !found.urls.isEmpty || !found.data.isEmpty {
                 onImages(found.urls, found.data)
                 return true
@@ -290,15 +334,16 @@ struct ChatComposerBar: View {
                     Button(action: onAttach) { Ph("plus", 16).frame(width: rowH, height: rowH).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
                         .foregroundStyle(t.roles.ink2)
-                        .help("Attach images. You can also paste or drop them here.")
-                        .accessibilityLabel("Attach images")
+                        .help(takesVideo ? "Attach images or videos (MP4 or MOV). You can also paste or drop them here."
+                                         : "Attach images. You can also paste or drop them here.")
+                        .accessibilityLabel(takesVideo ? "Attach images or videos" : "Attach images")
                 }
                 ZStack(alignment: .topLeading) {
                     ChatTextArea(text: $text, height: $height, font: font, textColor: NSColor(t.roles.ink), caretColor: NSColor(t.roles.ink),
                                  placeholder: placeholder, focusToken: focus, commandReturnSends: commandReturnSends,
                                  onSubmit: { if canSend { onSend() } },
                                  onEscape: { if busy { onStop(); return true }; return false },
-                                 onImages: onImages)
+                                 onImages: onImages, acceptsVideo: takesVideo)
                         .frame(height: max(height, lineH))
                     if text.isEmpty {
                         Text(placeholder).font(t.scale.body.font).foregroundStyle(t.roles.ink2)
@@ -339,6 +384,9 @@ struct ChatComposerBar: View {
         .onChange(of: SnapshotRunner.state.chatFocusTick) { _, _ in focus += 1 }
     }
 
+    /// The chats whose own attach takes videos too (the Suite's attachment row, `top`, takes images only).
+    private var takesVideo: Bool { top == nil && onAttach != nil }
+
     /// Send (or Stop while Claude works): a square the height of the single-line field, with the field's corner radius.
     @ViewBuilder private func sendOrStop(canSend: Bool, side: CGFloat, shape: RoundedRectangle) -> some View {
         if busy {
@@ -370,7 +418,13 @@ struct ChatComposerBar: View {
             ForEach(localImages) { img in
                 ZStack(alignment: .topTrailing) {
                     Group {
-                        if let ns = NSImage(data: img.data) { Image(nsImage: ns).resizable().aspectRatio(contentMode: .fill) } else { Rectangle().fill(t.roles.field) }
+                        if let v = img.video {
+                            videoTile(img, v)
+                        } else if let ns = NSImage(data: img.data) {
+                            Image(nsImage: ns).resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            Rectangle().fill(t.roles.field)
+                        }
                     }
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous))   // an image, never a pill
@@ -386,10 +440,51 @@ struct ChatComposerBar: View {
                     .help("Remove \(img.name)")
                     .accessibilityLabel("Remove \(img.name)")
                 }
-                .help(img.name)
+                .help(tileHelp(img))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(tileHelp(img))
             }
             Spacer(minLength: 0)
         }
         .padding(.top, Space.s1)
+    }
+
+    /// A video waiting to go: its poster frame (or a film mark) with its length; a spinner while it uploads, a warning
+    /// mark when it didn't.
+    @ViewBuilder private func videoTile(_ img: ChatPendingImage, _ v: ChatPendingVideo) -> some View {
+        ZStack {
+            if let ns = NSImage(data: img.data) {
+                Image(nsImage: ns).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle().fill(t.roles.field)
+                Ph("film-strip", 16).foregroundStyle(t.roles.ink2)
+            }
+            if v.uploading {
+                Rectangle().fill(Color.black.opacity(0.35))
+                ProgressView().controlSize(.small)
+            } else if v.error != nil {
+                Rectangle().fill(Color.black.opacity(0.45))
+                Ph("warning", 14).foregroundStyle(Color.white)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if v.seconds > 0 {
+                Text(ClaudeAttachmentPrompt.length(v.seconds))
+                    .monospacedDigit()
+                    .scaled(t.scale.micro, Color.white)
+                    .padding(.horizontal, 3)
+                    .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(Color.black.opacity(0.6)))
+                    .padding(2)
+            }
+        }
+    }
+
+    /// What a tile is, in plain words (hover and VoiceOver).
+    private func tileHelp(_ img: ChatPendingImage) -> String {
+        guard let v = img.video else { return img.name }
+        let len = v.seconds > 0 ? ", \(ClaudeAttachmentPrompt.length(v.seconds))" : ""
+        if let e = v.error { return "Video \(img.name)\(len). \(e)" }
+        if v.uploading { return "Video \(img.name)\(len). Uploading." }
+        return "Video \(img.name)\(len)"
     }
 }

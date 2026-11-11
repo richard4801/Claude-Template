@@ -46,6 +46,8 @@ public protocol ClaudeAPI: Sendable {
     func setChatPage(_ id: String, page: ClaudePage) async throws
     /// PATCH {archived: true}: out of the list, kept.
     func archiveChat(_ id: String) async throws
+    /// Deletes the person's own chats (by id and/or not used for olderThanDays days) → the ids deleted.
+    func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String]
     /// GET /v1/claude/memory: this person's own memory (per person).
     func memory() async throws -> ClaudeMemory
     /// POST: Remember (on Claude's question), or added by hand.
@@ -56,6 +58,13 @@ public protocol ClaudeAPI: Sendable {
     func claudeModels() async throws -> ClaudeModelList
     func setChatModel(_ id: String, model: String?) async throws
     func setDefaultModel(_ model: String?) async throws
+    /// Files on this Mac: Claude Code's questions waiting for this person, and their answer.
+    func pendingPermissions() async throws -> [ClaudePermissionAsk]
+    func answerPermission(_ id: String, allow: Bool, message: String?) async throws
+    /// upload_local_file: the person said yes and the Mac uploaded the file.
+    func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws
+    /// Results arrive in the chat: this Mac answers it (false: another Mac of the person already does).
+    func claimResult(_ id: String) async throws -> Bool
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -68,6 +77,7 @@ public extension ClaudeAPI {
     func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary { throw ApiError("not_found", "This server has one chat per place") }
     func setChatPage(_ id: String, page: ClaudePage) async throws {}
     func archiveChat(_ id: String) async throws { throw ApiError("not_found", "This server has one chat per place") }
+    func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String] { throw ApiError("not_found", "This server can't delete chats yet. Update the server.") }
     func memory() async throws -> ClaudeMemory { throw ApiError("not_found", "This server has no Claude memory yet") }
     func saveMemory(text: String, area: String, characterId: String?) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
     func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule { throw ApiError("not_found", "This server has no Claude memory yet") }
@@ -75,6 +85,10 @@ public extension ClaudeAPI {
     func claudeModels() async throws -> ClaudeModelList { throw ApiError("not_found", "This server has no model choice yet") }
     func setChatModel(_ id: String, model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
     func setDefaultModel(_ model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
+    func pendingPermissions() async throws -> [ClaudePermissionAsk] { [] }
+    func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
+    func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws { throw ApiError("not_found", "This server can't take uploads from Claude yet") }
+    func claimResult(_ id: String) async throws -> Bool { true }
 }
 
 enum ClaudeIds {
@@ -91,6 +105,8 @@ enum ClaudeIds {
 public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public let baseURL: URL
     private let token: @Sendable () -> String?
+    /// The signed-in token, for the chat's video upload through HTTPMuseAPI (same module only).
+    var currentToken: String? { token() }
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -119,12 +135,15 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         r.timeoutInterval = timeout
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         if let t = token() { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        // This app shows file and upload cards and answers results (the server asks only apps that say so).
+        r.setValue(Self.capabilities, forHTTPHeaderField: "X-Muse-Caps")
         if let body {
             r.httpBody = body
             r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         return r
     }
+    public static let capabilities = "files,results"
 
     private func send(_ r: URLRequest) async throws -> Data {
         let (data, resp): (Data, URLResponse?)
@@ -175,6 +194,12 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func setChatPage(_ id: String, page: ClaudePage) async throws {
         _ = try await send(request("PUT", "v1/claude/chats/\(try ClaudeIds.check(id))/page", body: try encoder.encode(PagePut(page: page))))
     }
+    private struct DeleteChats: Encodable { var ids: [String]?; var olderThanDays: Int? }
+    private struct Deleted: Decodable { var deleted: [String] }
+    public func deleteChats(ids: [String], olderThanDays: Int?) async throws -> [String] {
+        let r: Deleted = try await call("POST", "v1/claude/chats/delete", DeleteChats(ids: ids.isEmpty ? nil : ids, olderThanDays: olderThanDays))
+        return r.deleted
+    }
     public func archiveChat(_ id: String) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(Archive(archived: true))))
     }
@@ -200,6 +225,28 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func claudeModels() async throws -> ClaudeModelList { try await call("GET", "v1/claude/models") }
     public func setChatModel(_ id: String, model: String?) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(ModelPatch(model: model))))
+    }
+    public func pendingPermissions() async throws -> [ClaudePermissionAsk] {
+        let list: ClaudePermissionList = try await call("GET", "v1/claude/permissions")
+        return list.asks
+    }
+    private struct PermissionAnswer: Encodable { var allow: Bool; var message: String? }
+    private struct UploadAnswer: Encodable { var allow = true; var result: ClaudeLocalUpload }
+    public func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws {
+        _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(UploadAnswer(result: result))))
+    }
+    public func claimResult(_ id: String) async throws -> Bool {
+        do {
+            _ = try await send(request("POST", "v1/claude/results/\(try ClaudeIds.check(id))/claim"))
+            return true
+        } catch let e as ApiError where e.code == "already_claimed" || e.code == "result_gone" {
+            return false
+        } catch let e as ApiError where e.code == "not_found" {
+            return true // an older server without claims
+        }
+    }
+    public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
+        _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))
     }
     public func setDefaultModel(_ model: String?) async throws {
         _ = try await send(request("PUT", "v1/claude/prefs", body: try encoder.encode(PrefsPut(defaultModel: model))))

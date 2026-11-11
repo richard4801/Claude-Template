@@ -11,6 +11,8 @@ struct OneClaudePanel: View {
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
     @State private var showMemory = false
+    @State private var showManage = false
+    @State private var deleteAsk: OneClaudeDeleteAsk?
 
     static let width: CGFloat = 380
 
@@ -42,6 +44,14 @@ struct OneClaudePanel: View {
         .frame(maxHeight: .infinity)
         .background(r.raised)
         .sheet(isPresented: $showMemory) { OneClaudeMemorySheet() }
+        .sheet(isPresented: $showManage) { OneClaudeManageChats() }
+        .alert(OneClaudeDeleteAsk.title(deleteAsk), isPresented: Binding(get: { deleteAsk != nil }, set: { if !$0 { deleteAsk = nil } })) {
+            Button("Delete", role: .destructive) {
+                guard case .one(let id)? = deleteAsk else { return }
+                Task { await store.deleteOneClaudeChats([id]) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(OneClaudeDeleteAsk.keeps) }
         .onChange(of: store.claudePage) { _, _ in store.oneClaudePageChanged() }
     }
 
@@ -65,7 +75,9 @@ struct OneClaudePanel: View {
                     Button("Your memory…") { showMemory = true }
                     if let id = o.chatId {
                         Button("Hide this chat") { Task { await store.archiveOneClaudeChat(id) } }
+                        Button("Delete this chat…", role: .destructive) { deleteAsk = .one(id) }
                     }
+                    Button("Manage chats…") { showManage = true }
                 } label: {
                     HStack(spacing: Space.s1) {
                         Text(o.current?.shownTitle ?? "Claude").scaled(t.scale.label, r.ink).lineLimit(1).truncationMode(.tail)
@@ -265,5 +277,113 @@ struct OneClaudeMemorySheet: View {
         .frame(width: 620, height: 560)
         .background(r.canvas)
         .task { await store.loadOneClaudeMemory() }
+    }
+}
+
+/// Delete chats: what the confirmation asks.
+enum OneClaudeDeleteAsk: Hashable {
+    case one(String)
+    case selected([String])
+    case olderThan(Int)
+
+    static let keeps = "Its messages are removed; your memory and anything you made are kept."
+    static func title(_ a: OneClaudeDeleteAsk?) -> String {
+        switch a {
+        case .one?: return "Delete this chat?"
+        case .selected(let ids)?: return ids.count == 1 ? "Delete this chat?" : "Delete \(ids.count) chats?"
+        case .olderThan(let d)?: return "Delete every chat not used for \(d) days?"
+        case nil: return ""
+        }
+    }
+}
+
+/// Manage chats (owner, 2026-11-11: "messages are piling up"): pick several and delete them, delete one from its row
+/// (right-click), or delete every chat not used for 30 days. Each asks first.
+struct OneClaudeManageChats: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @Environment(\.dismiss) private var dismiss
+    @State private var picked: Set<String> = []
+    @State private var ask: OneClaudeDeleteAsk?
+    @State private var error: String?
+    @State private var busy = false
+
+    var body: some View {
+        let r = t.roles
+        let chats = store.oneClaude.chats
+        VStack(alignment: .leading, spacing: Space.s4) {
+            HStack {
+                Text("Your chats").scaled(t.scale.title, r.ink)
+                Spacer()
+                SuiteToolButton(title: "Done", filled: true) { dismiss() }
+            }
+            Text("Deleting a chat removes its messages. Your memory and anything you made stay.").scaled(t.scale.caption, r.ink2)
+            if let e = error { Text(e).scaled(t.scale.caption, r.danger) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if chats.isEmpty { Text("No chats yet.").scaled(t.scale.body, r.ink2) }
+                    ForEach(chats) { c in
+                        HStack(spacing: Space.s3) {
+                            Toggle("", isOn: Binding(get: { picked.contains(c.id) }, set: { on in if on { picked.insert(c.id) } else { picked.remove(c.id) } }))
+                                .toggleStyle(.checkbox).labelsHidden().accessibilityLabel("Select \(c.shownTitle)")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.shownTitle).scaled(t.scale.body, r.ink).lineLimit(1)
+                                Text("Last on \(c.lastOn ?? "—") · \(Self.when(c.updatedAt))\(c.messageCount.map { " · \($0) message\($0 == 1 ? "" : "s")" } ?? "")")
+                                    .scaled(t.scale.caption, r.ink2).lineLimit(1)
+                            }
+                            Spacer(minLength: Space.s2)
+                            if c.id == store.oneClaude.chatId { Text("Open").scaled(t.scale.caption, r.ink2) }
+                            Button { ask = .one(c.id) } label: { Ph("trash", 14).frame(width: 24, height: 24).contentShape(Rectangle()) }
+                                .buttonStyle(.plain).foregroundStyle(r.ink2).help("Delete this chat…").accessibilityLabel("Delete \(c.shownTitle)")
+                        }
+                        .padding(.vertical, Space.s2)
+                        .contentShape(Rectangle())
+                        .contextMenu { Button("Delete…", role: .destructive) { ask = .one(c.id) } }
+                        .overlay(alignment: .top) { Rectangle().fill(r.hairline).frame(height: 1) }
+                    }
+                }
+            }
+            HStack(spacing: Space.s3) {
+                SuiteToolButton(title: picked.isEmpty ? "Delete selected" : "Delete selected (\(picked.count))", disabled: picked.isEmpty || busy, plain: true) {
+                    if !picked.isEmpty && !busy { ask = .selected(Array(picked)) }
+                }
+                SuiteToolButton(title: "Delete chats older than 30 days…", disabled: busy, plain: true) { if !busy { ask = .olderThan(30) } }
+                Spacer()
+            }
+        }
+        .padding(Space.s5)
+        .frame(width: 620, height: 560)
+        .background(r.canvas)
+        .task { await store.refreshOneClaudeChats() }
+        .alert(OneClaudeDeleteAsk.title(ask), isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })) {
+            Button("Delete", role: .destructive) { if let a = ask { run(a) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(OneClaudeDeleteAsk.keeps) }
+    }
+
+    private func run(_ a: OneClaudeDeleteAsk) {
+        busy = true
+        Task {
+            let e: String?
+            switch a {
+            case .one(let id): e = await store.deleteOneClaudeChats([id])
+            case .selected(let ids): e = await store.deleteOneClaudeChats(ids)
+            case .olderThan(let d): e = await store.deleteOneClaudeChats([], olderThanDays: d)
+            }
+            error = e
+            if e == nil { picked = picked.filter { id in store.oneClaude.chats.contains { $0.id == id } } }
+            busy = false
+        }
+    }
+
+    /// "today", "3 days ago", "12 Oct".
+    static func when(_ ms: Double) -> String {
+        guard ms > 0 else { return "—" }
+        let d = Date(timeIntervalSince1970: ms / 1000)
+        let days = Int(Date().timeIntervalSince(d) / 86_400)
+        if days <= 0 { return "today" }
+        if days == 1 { return "yesterday" }
+        if days < 30 { return "\(days) days ago" }
+        return d.formatted(.dateTime.day().month(.abbreviated))
     }
 }

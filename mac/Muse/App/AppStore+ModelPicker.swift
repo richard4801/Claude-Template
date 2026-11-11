@@ -11,7 +11,7 @@ extension AppStore {
 
     /// Pins a video model at a resolution (nil = Auto, the quality's ladder); Length and Shape move inside its limits.
     func pinComposerModel(_ m: SuiteModelOption?, resolution: String? = nil) {
-        guard isOwner else { return }
+        // 4c: members pin a model too (the server checks it is one they may use).
         if suite.composer.tool == .photo {
             suite.photo.imageModel = m?.model
             return
@@ -45,7 +45,7 @@ extension AppStore {
 
     /// "on Standard" or "on Veo 3.1 Lite" under the Length slider.
     var composerLengthSource: String {
-        ComposerModelPicker.pinned(suite.composer, suite.catalog, suite.settings)?.name ?? SuiteText.tierLabel(suite.composer.quality)
+        ComposerModelPicker.pinned(suite.composer, suite.catalog, suite.settings)?.shownName ?? SuiteText.tierLabel(suite.composer.quality)
     }
 
     /// After the catalog reloads: pins the list no longer offers go back to Auto.

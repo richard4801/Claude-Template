@@ -37,7 +37,7 @@ public struct SSEParser: Sendable {
 }
 
 /// MuseAPI over HTTP (plans/api.md): JSON over REST with a bearer token, and progress from the SSE stream at GET /v1/events.
-public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
+public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendable {
     public let baseURL: URL
     private let session: URLSession
     private let lock = NSLock()
@@ -134,6 +134,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         r.timeoutInterval = long ? 360 : 30
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         if let t = currentToken { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        // Results arrive in the chat: a job started while a Claude chat is open reports back to it.
+        if method == "POST", let chat = ClaudeChatLink.current { r.setValue(chat, forHTTPHeaderField: ClaudeChatLink.header) }
         if let body {
             r.httpBody = body
             r.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -350,6 +352,19 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         }
         return ticket.uploadId
     }
+
+    /// A video for a Claude chat message (plans/claude-video-vision.md): an upload of kind "clip", presigned, PUT and
+    /// confirmed with its meta. → its upload id, marked as a video. Confirm also lists it among the studio's clips.
+    public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment {
+        let body = UploadBody.file(file)
+        guard let id = try await presignAndPut(kind: "clip", contentType: contentType, body: body, progress: progress) else {
+            throw ApiError("upload_failed", "Couldn't upload the video. Try again.")
+        }
+        let _: ClaudeVideoConfirmed = try await call("POST", "v1/uploads/\(Self.pathKey(id))/confirm", ConfirmBody(meta: meta))
+        return ClaudeAttachment(uploadId: id, mimeType: contentType, bytes: body.size, video: true)
+    }
+    /// Confirm's reply (a clip) is not needed here: any JSON object reads.
+    private struct ClaudeVideoConfirmed: Decodable {}
 
     // MARK: Edit suite (workstream 3): Editor v2 jobs, uploads, LUT check, v2 versions
 

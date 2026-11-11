@@ -95,7 +95,8 @@ final class ClaudeCodeService: ObservableObject {
         let (states, stateSink) = AsyncStream<ClaudeRelayState>.makeStream(bufferingPolicy: .bufferingNewest(8))
         let relay = ClaudeRelay(api: api, makeRunner: { [weak self] in await self?.makeRunner() },
                                 blender: { [weak self] in await self?.blenderServer() },
-                                onEvent: { sink.yield(($0, $1, $2)) }, onState: { stateSink.yield($0) })
+                                onEvent: { sink.yield(($0, $1, $2)) }, onState: { stateSink.yield($0) },
+                                files: { [weak self] in await self?.filesOn ?? false })
         self.relay = relay
         let base = baseURL
         Task { await relay.setAssetBase(base) } // phone turns' image links, when relative
@@ -104,6 +105,8 @@ final class ClaudeCodeService: ObservableObject {
                 for await (tid, turn, e) in events {
                     guard let self else { break }
                     if let turn { self.ranTurns.insert(turn) }
+                    if case .tool(let id, _, _, _, _) = e { self.toolThreads[id] = tid }
+                    if case .done = e { self.endFileAsks(threadId: tid, message: "The turn ended before you answered.") }
                     if case .done(_, _, let model?) = e, model != self.info.model { self.info.model = model }
                     self.broadcast(.local(threadId: tid, turnId: turn, e))
                 }
@@ -227,7 +230,14 @@ final class ClaudeCodeService: ObservableObject {
             switch e {
             case .connected:
                 if let turns = try? await api.pendingTurns() { await relay.offer(turns) }
+                if let asks = try? await api.pendingPermissions() { for a in asks { await handlePermission(a) } }
                 await refreshStatus()
+            case .permission(let a):
+                await handlePermission(a)
+            case .permissionEnd(let id):
+                fileAsks.removeAll { $0.id == id }
+            case .result(let r):
+                resultArrived(r)
             case .turn(let t):
                 await relay.offer([t])
             case .stop(let id):
@@ -320,6 +330,7 @@ final class ClaudeCodeService: ObservableObject {
 
     /// Stop: this Mac's run of the thread, or (a turn running elsewhere) ask the server to stop it.
     func stop(threadId: String, remoteTurnId: String?) {
+        endFileAsks(threadId: threadId, message: "Stopped.")
         if relayState.running[threadId] != nil {
             Task { await relay?.stop(threadId: threadId) }
         } else if let id = remoteTurnId, let api {
@@ -344,6 +355,199 @@ final class ClaudeCodeService: ObservableObject {
         var s = base.absoluteString
         if s.hasSuffix("/") { s.removeLast() }
         return s + url
+    }
+
+    // MARK: Files on this Mac (ask every time)
+
+    /// One approval card: Claude Code's question, the chat it belongs to and what the card says.
+    struct FileAsk: Identifiable, Hashable {
+        let ask: ClaudePermissionAsk
+        let threadId: String?
+        let card: ClaudeFileCard
+        var id: String { ask.id }
+    }
+
+    @Published private(set) var fileSettings = ClaudeFileSettings()
+    @Published private(set) var fileAsks: [FileAsk] = []
+    private var personId: String?
+    /// Claude Code's tool_use id → the chat whose run made it (the question names the tool_use id).
+    private var toolThreads: [String: String] = [:]
+
+    var filesOn: Bool { fileSettings.mode == .ask }
+
+    /// The signed-in person: their own file settings on this Mac.
+    func setPerson(_ id: String?) {
+        guard id != personId else { return }
+        personId = id
+        fileAsks = []
+        guard let id, let d = UserDefaults.standard.data(forKey: ClaudeFileSettings.key(userId: id)),
+              let s = try? JSONDecoder().decode(ClaudeFileSettings.self, from: d) else {
+            fileSettings = ClaudeFileSettings()
+            return
+        }
+        fileSettings = s
+    }
+
+    private func saveFileSettings() {
+        guard let personId, let d = try? JSONEncoder().encode(fileSettings) else { return }
+        UserDefaults.standard.set(d, forKey: ClaudeFileSettings.key(userId: personId))
+    }
+
+    func setFileMode(_ m: ClaudeFileMode) {
+        fileSettings.mode = m
+        saveFileSettings()
+        if m == .off { for a in fileAsks { answerFile(a.id, .deny) } }
+    }
+
+    func removeAllowedFolder(_ id: String) {
+        fileSettings.remove(id)
+        saveFileSettings()
+    }
+
+    /// The cards of one chat (a question this Mac can't place goes to the chat running here).
+    func fileAsks(threadId: String) -> [FileAsk] { fileAsks.filter { $0.threadId == threadId } }
+
+    private func handlePermission(_ a: ClaudePermissionAsk) async {
+        guard let api, !fileAsks.contains(where: { $0.id == a.id }) else { return }
+        // Only the Mac running that turn answers (each of the person's Macs hears the question).
+        let tid = a.toolUseId.flatMap { toolThreads[$0] } ?? relayState.running.first { !$0.value.fromPhone }?.key
+        guard let tid else {
+            // A phone turn running here has nobody at the Mac to answer: say so at once instead of waiting.
+            if relayState.running.values.contains(where: { $0.fromPhone }) {
+                try? await api.answerPermission(a.id, allow: false, message: "Files on the Mac need you at the Mac: ask again from MUSE on your Mac.")
+            }
+            return
+        }
+        let cwd = ClaudeTurnRunner.defaultRoot.appendingPathComponent(tid, isDirectory: true).path
+        switch ClaudeFilePolicy.verdict(a, mode: fileSettings.mode, folders: fileSettings.folders(chatId: tid), cwd: cwd, home: NSHomeDirectory()) {
+        case .allow where a.toolName == "Upload":
+            await uploadLocal(a, cwd: cwd)
+        case .allow:
+            try? await api.answerPermission(a.id, allow: true, message: nil)
+        case .deny(let why):
+            try? await api.answerPermission(a.id, allow: false, message: why)
+        case .ask(let card):
+            fileAsks.append(FileAsk(ask: a, threadId: tid, card: card))
+        }
+    }
+
+    /// The person's answer on a card. "Always" saves the folder for this chat (Settings → Claude lists it).
+    func answerFile(_ id: String, _ answer: ClaudePermissionAnswer, chatTitle: String? = nil) {
+        guard let a = fileAsks.first(where: { $0.id == id }) else { return }
+        fileAsks.removeAll { $0.id == id }
+        if case .alwaysFolder(let folder) = answer, let tid = a.threadId, a.card.folder != nil {
+            fileSettings.allow(folder, chatId: tid, chatTitle: chatTitle)
+            saveFileSettings()
+            // Other questions of this chat in the same folder go through too.
+            for other in fileAsks where other.threadId == tid {
+                if let f = other.card.folder, ClaudeFilePolicy.inside(f, folder) || ClaudeFilePolicy.inside(other.card.detail, folder) { answerFile(other.id, .allowOnce) }
+            }
+        }
+        let allow: Bool
+        if case .deny = answer { allow = false } else { allow = true }
+        guard let api else { return }
+        if allow, a.ask.toolName == "Upload" {
+            let cwd = ClaudeTurnRunner.defaultRoot.appendingPathComponent(a.threadId ?? "", isDirectory: true).path
+            Task { await uploadLocal(a.ask, cwd: cwd) }
+            return
+        }
+        Task { try? await api.answerPermission(id, allow: allow, message: allow ? nil : "The person said no.") }
+    }
+
+    /// upload_local_file, after the yes: the file goes up the chat's way (an image: presign, PUT, confirm, so the server
+    /// strips its metadata; a video as a clip with its length and size), and the upload goes back to Claude.
+    private func uploadLocal(_ a: ClaudePermissionAsk, cwd: String) async {
+        guard let api else { return }
+        var raw = ""
+        if case .object(let o)? = a.input, case .string(let p)? = o["file_path"] { raw = p }
+        let path = ClaudeFilePolicy.resolve(raw, cwd: cwd, home: NSHomeDirectory())
+        let url = URL(fileURLWithPath: path)
+        let name = url.lastPathComponent
+        func fail(_ why: String) async { try? await api.answerPermission(a.id, allow: false, message: why) }
+        guard !ClaudeFilePolicy.isSecret(path) else { return await fail(ClaudeFilePolicy.credentialRefusal) }
+        guard let type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue
+        guard let size else { return await fail("There's no file at \(path).") }
+        do {
+            let att: ClaudeAttachment
+            if type.video {
+                guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(url) else { return await fail("That video can't be read.") }
+                att = try await up.uploadClaudeVideo(url, meta: info.meta(name: name), contentType: type.mime, progress: nil)
+            } else {
+                guard size <= SuiteClaudeAttachments.maxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard let up = api as? any ClaudeImageUploading else { return await fail("This server can't take images from Claude yet.") }
+                att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
+            }
+            try await api.finishUpload(a.id, ClaudeLocalUpload(uploadId: att.uploadId, kind: type.video ? "clip" : "image", url: att.url, name: name))
+        } catch {
+            await fail("Couldn't upload \(name): \((error as? ApiError)?.message ?? error.localizedDescription)")
+        }
+    }
+
+    /// A stopped or finished turn: its open cards end as a no (nothing is done without an answer).
+    private func endFileAsks(threadId: String, message: String) {
+        let mine = fileAsks.filter { $0.threadId == threadId }
+        guard !mine.isEmpty else { return }
+        fileAsks.removeAll { $0.threadId == threadId }
+        guard let api else { return }
+        for a in mine { Task { try? await api.answerPermission(a.id, allow: false, message: message) } }
+    }
+
+    // MARK: Results arrive in the chat
+
+    /// Results that came while the Claude panel was closed (the dot on the Claude button).
+    @Published private(set) var unseenResults = 0
+    private var results = ClaudeResultBatcher()
+    private var resultTimer: Task<Void, Never>?
+
+    func clearUnseenResults() { unseenResults = 0 }
+
+    func setResultMode(_ m: ClaudeResultMode) {
+        fileSettings.results = m
+        saveFileSettings()
+    }
+
+    /// Something started from one of this person's chats finished. Only the Mac that runs this person's Claude Code acts
+    /// (every Mac of theirs hears it); with "Just notify me", or Claude Code not ready, it only tells them.
+    func resultArrived(_ r: ClaudeJobResult) {
+        if ClaudeChatLink.current == nil { unseenResults += 1 } // the panel is closed
+        // One of the person's Macs answers: the one showing that chat claims at once, any other after a pause.
+        guard let key = r.id, let api else { return accept(r) }
+        let here = ClaudeChatLink.current == r.chatId
+        Task { [weak self] in
+            if !here { try? await Task.sleep(nanoseconds: 3_000_000_000) }
+            guard (try? await api.claimResult(key)) ?? false else { return }
+            self?.accept(r)
+        }
+    }
+
+    private func accept(_ r: ClaudeJobResult) {
+        let look = fileSettings.resultMode == .look && info.ready && relay != nil
+        if !look {
+            Notifier.shared.post(title: r.failed ? "Didn't finish" : "Result arrived", body: r.line)
+            return
+        }
+        results.add(r, now: Date().timeIntervalSince1970)
+        guard resultTimer == nil else { return }
+        resultTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                for b in self.results.due(now: Date().timeIntervalSince1970) { self.lookAt(b.chatId, b.results) }
+                if self.results.isEmpty { self.resultTimer = nil; return }
+            }
+        }
+    }
+
+    /// One follow-up turn per chat and batch: queued behind a turn that is running; it never takes the person's focus.
+    private func lookAt(_ chatId: String, _ batch: [ClaudeJobResult]) {
+        guard let relay else { return }
+        let text = ClaudeResultBatcher.message(batch)
+        Task { await relay.submit(threadId: chatId, text: text) }
+        let first = batch[0]
+        Notifier.shared.post(title: batch.allSatisfy(\.failed) ? "Claude is looking at what went wrong" : "Claude looked at your \(first.isPhoto ? "photos" : first.kind)",
+                             body: batch.map(\.line).joined(separator: " · "))
     }
 
     // MARK: Feed

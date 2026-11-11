@@ -2,8 +2,10 @@ import MuseCore
 import SwiftUI
 
 /// The D6 body under the Camera control's header: tabs Blocking · Guides · History, the session strip, the plan / camera view /
-/// side view, the legend and the timeline on the left, and Direct with Claude on the right.
+/// side view, the legend and the timeline. One Claude (owner, 2026-11-11) replaced the "Direct with Claude" column: the
+/// one-Claude panel works on this camera session (its page line names it), and its status rows are a strip up top.
 struct DirectedBody: View {
+    @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @Bindable var model: CameraModel
     var session: CameraSession
@@ -14,6 +16,8 @@ struct DirectedBody: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
+                statusStrip
+                    .padding(.horizontal, 28)
                 tabs
                     .padding(.horizontal, 28)
                 Rectangle().fill(t.line).frame(height: 1)
@@ -23,10 +27,13 @@ struct DirectedBody: View {
                 case .history: CameraHistoryTab(session: session, now: model.now).padding(.horizontal, 28).padding(.vertical, 14)
                 }
             }
-            // 340, not 560: with the chat beside it, 560 overflowed the Camera picker (663 px) and 1100–1280 px windows.
+            // The whole width now (the chat column is gone): the plan and camera views grow with it.
             .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
-            DirectChatPanel(model: model, session: session, useLabel: useLabel, onUse: onUse) { showConnections = true }
         }
+        // One Claude sees this camera session ("Sees: Camera, <title>") and passes its id to the camera tools.
+        .onAppear { reportPage() }
+        .onChange(of: session.id) { _, _ in reportPage() }
+        .onDisappear { if store.oneClaude.viewPage?.name == "camera" { store.oneClaude.viewPage = nil } }
         .sheet(isPresented: $showConnections) {
             VStack(spacing: 0) {
                 HStack {
@@ -38,6 +45,48 @@ struct DirectedBody: View {
             }
             .frame(width: 720, height: 640)
             .background(t.bg)
+        }
+    }
+
+    private func reportPage() {
+        store.oneClaude.viewPage = ClaudePage(name: "camera", label: session.title, ids: ["cameraSessionId": session.id])
+        store.oneClaudePageChanged()
+    }
+
+    /// What the old chat column said, as one compact line: Claude, Blender, renders (each a dot and a word), Connections,
+    /// and Ask Claude (the one-Claude panel, on this session).
+    private var statusStrip: some View {
+        HStack(spacing: 14) {
+            ForEach(CameraStatus.rows(session, inAppChat: model.connections?.inAppChat, busy: model.busy, now: model.now, machine: model.machine, thisMac: true), id: \.title) { row in
+                HStack(spacing: 6) {
+                    Circle().fill(color(row.tone)).frame(width: 7, height: 7)
+                    Text(row.title).font(t.body(12, .semibold)).foregroundStyle(t.ink)
+                    Text(row.detail).font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
+                }
+                .help("\(row.title): \(row.detail)")
+                .accessibilityElement(children: .combine)
+            }
+            Spacer(minLength: 8)
+            // The old chat's "Guides ready" card action: use the rendered guides for the shot.
+            if CameraGuides.card(session) != nil, let useLabel, let onUse {
+                Text("Guides ready · rev \(session.revision)").font(t.body(12, .semibold)).foregroundStyle(t.ink).lineLimit(1)
+                MButton(useLabel, kind: .primary, size: .small, off: model.applying) { onUse() }
+                if let e = model.applyError { Text(e).font(t.body(12)).foregroundStyle(t.rec).lineLimit(1).help(e) }
+            }
+            LinkText("Connections") { showConnections = true }
+            MButton("Ask Claude", size: .small) { store.showOneClaude() }
+                .help("Claude blocks this shot with you: who moves where, the camera, the guides. It never spends; Generate waits for you.")
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func color(_ tone: CameraTone) -> Color {
+        switch tone {
+        case .good: return t.good
+        case .warn: return t.warn
+        case .bad: return t.rec
+        case .neutral: return t.ink
+        case .off: return t.muted
         }
     }
 

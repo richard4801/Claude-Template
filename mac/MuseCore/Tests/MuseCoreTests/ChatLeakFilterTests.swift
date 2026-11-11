@@ -49,8 +49,12 @@ final class ChatLeakFilterTests: XCTestCase {
     func testIdsAndPathsGo() {
         XCTAssertEqual(ChatLeakFilter.reply("Saved take tk_8f3a2c to /Users/ann/Library/Caches/MUSE/claude/ct_1/ca_1.png for you."),
                        "Saved take to a file on this Mac for you.")
-        XCTAssertEqual(ChatLeakFilter.reply("Exported to ~/Movies/final_cut.mp4, ready."), "Exported to final_cut.mp4, ready.")
-        XCTAssertEqual(ChatLeakFilter.reply("Wrote /Users/ann/Desktop/trailer.mp4."), "Wrote trailer.mp4.")
+        XCTAssertEqual(ChatLeakFilter.reply("Exported to ~/Movies/final_cut.mp4, ready."), "Exported to ~/Movies/final_cut.mp4, ready.")
+        XCTAssertEqual(ChatLeakFilter.reply("Wrote /Users/ann/Desktop/trailer.mp4."), "Wrote /Users/ann/Desktop/trailer.mp4.")
+        // The person's own files show as real paths; MUSE's own folders, id-named files and keys don't.
+        XCTAssertEqual(ChatLeakFilter.reply("Found /Volumes/Shoot/layout_A_house.png here."), "Found /Volumes/Shoot/layout_A_house.png here.")
+        XCTAssertEqual(ChatLeakFilter.reply("Config in /Users/ann/MUSE/Claude/ct_1/.mcp-ab12.json."), "Config in a file on this Mac.")
+        XCTAssertEqual(ChatLeakFilter.reply("Key at /Users/ann/.ssh/id_ed25519 now."), "Key at a file on this Mac now.")
         XCTAssertEqual(ChatLeakFilter.reply("Thread 3f2b8c1e-1d2a-4c5b-9e8f-0a1b2c3d4e5f is open (id: es_42)."), "Thread is open.")
         XCTAssertEqual(ChatLeakFilter.reply("Used mcp__muse__apply_edit_ops."), "Used apply edit ops.")
         // A link keeps its path; words like "turn left" stay.
