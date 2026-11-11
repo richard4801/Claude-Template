@@ -65,14 +65,26 @@ public actor BlenderRelay {
     // MARK: Heartbeat
 
     /// Is the add-on there, and which version (for POST /v1/blender/relay).
-    public func link() async -> BlenderLink {
+    public func link() async -> BlenderLink { await probe().link }
+
+    public static let silentPortText = "Something is listening on port 9876 but didn't answer a ping in 15 s: Blender may be busy, "
+        + "or another MCP server (such as Blender's official MCP add-on) holds the port."
+
+    /// The link plus why it's down, when that's worth showing (e.g. another MCP server holds port 9876).
+    /// The ping waits 15 s: Blender's official MCP add-on only answers a foreign request when it evicts the client
+    /// after 10 s, and that answer is how we tell it apart from "Blender is busy".
+    public func probe() async -> (link: BlenderLink, problem: String?) {
         do {
-            _ = try await transport.send("ping", [:], timeout: 5)
+            _ = try await transport.send("ping", [:], timeout: 15)
+        } catch BlenderError.notConnected {
+            return (BlenderLink(connected: false), nil)
+        } catch BlenderError.timedOut {
+            return (BlenderLink(connected: false), BlenderRelay.silentPortText)
         } catch {
-            return BlenderLink(connected: false)
+            return (BlenderLink(connected: false), (error as? LocalizedError)?.errorDescription ?? "\(error)")
         }
-        guard let info = try? await transport.send("get_addon_info", [:], timeout: 5) else { return BlenderLink(connected: true) }
-        return BlenderRelay.link(fromAddonInfo: info)
+        guard let info = try? await transport.send("get_addon_info", [:], timeout: 5) else { return (BlenderLink(connected: true), nil) }
+        return (BlenderRelay.link(fromAddonInfo: info), nil)
     }
 
     static func link(fromAddonInfo info: JSONValue) -> BlenderLink {
@@ -148,8 +160,9 @@ public actor BlenderRelay {
         do {
             switch prepared {
             case .status:
-                let link = await self.link()
+                let (link, problem) = await self.probe()
                 var o: [String: JSONValue] = ["connected": .bool(link.connected)]
+                if let problem { o["problem"] = .string(problem) }
                 if let v = link.addonVersion { o["addonVersion"] = .string(v) }
                 if let p = link.protocol { o["protocol"] = .number(Double(p)) }
                 if link.connected { o["scene"] = try await transport.send("get_scene_info", [:], timeout: timeout) }

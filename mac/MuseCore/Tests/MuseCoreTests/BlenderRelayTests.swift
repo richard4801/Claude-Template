@@ -474,6 +474,68 @@ final class BlenderRelayTests: XCTestCase {
         }
     }
 
+    // MARK: Reply reader (the add-on sends one JSON object with no framing)
+
+    private func feedAll(_ chunks: [Data], max: Int = 32 * 1024 * 1024) throws -> Data? {
+        var r = ReplyReader(maxReply: max)
+        for c in chunks { if case .done(let d) = try r.feed(c) { return d } }
+        return nil
+    }
+
+    private func chunks(_ d: Data, size: Int) -> [Data] {
+        stride(from: 0, to: d.count, by: size).map { d.subdata(in: $0..<min($0 + size, d.count)) }
+    }
+
+    func testReaderWaitsForTheWholeObjectAcrossChunks() throws {
+        // Braces and quotes inside strings don't close the object; a split "é" doesn't either.
+        let reply = Data(#"{"status":"success","result":{"name":"Caf\#u{e9} {x} \"}\" ]","list":[1,{"a":[]}]}}"#.utf8)
+        for size in [1, 2, 3, 7, 64] {
+            XCTAssertEqual(try feedAll(chunks(reply, size: size)), reply, "chunk size \(size)")
+        }
+        XCTAssertNil(try feedAll([reply.prefix(reply.count - 1)]))
+    }
+
+    func testReaderHandlesALargeReply() throws {
+        let items = (0..<40_000).map { #"{"name":"MUSE_obj_\#($0)","location":[1.25,-2.5,0.0]}"# }.joined(separator: ",")
+        let reply = Data(#"{"status":"success","result":{"objects":["#.utf8 + Data(items.utf8) + Data("]}}".utf8)
+        XCTAssertGreaterThan(reply.count, 1_500_000)
+        XCTAssertEqual(try feedAll(chunks(reply, size: 64 * 1024)), reply)
+        XCTAssertThrowsError(try feedAll(chunks(reply, size: 64 * 1024), max: 1_048_576)) {
+            guard case .badReply? = $0 as? BlenderError else { return XCTFail("\($0)") }
+        }
+    }
+
+    func testReaderRecognisesBlenderLabsServer() throws {
+        // Blender's official MCP add-on (same port) answers a foreign request after 10 s with a NUL-terminated object.
+        let lab = Data("{\"status\": \"error\", \"message\": \"Client timed out\"}\0".utf8)
+        XCTAssertThrowsError(try feedAll([lab])) { XCTAssertEqual($0 as? BlenderError, .otherServer) }
+        XCTAssertThrowsError(try feedAll(chunks(lab, size: 7))) { XCTAssertEqual($0 as? BlenderError, .otherServer) }
+        // NUL in a later packet: the object is read, and its words give it away.
+        let first = try XCTUnwrap(try feedAll(chunks(lab, size: 5)))
+        XCTAssertThrowsError(try BlenderSocket.unwrap(first)) { XCTAssertEqual($0 as? BlenderError, .otherServer) }
+        XCTAssertThrowsError(try BlenderSocket.unwrap(Data(#"{"status":"error","message":"Unknown request type: 'ping'"}"#.utf8))) {
+            XCTAssertEqual($0 as? BlenderError, .otherServer)
+        }
+    }
+
+    func testReaderEndOfStream() {
+        XCTAssertThrowsError(try ReplyReader(maxReply: 100).finish()) { XCTAssertEqual($0 as? BlenderError, .notConnected) }
+        var r = ReplyReader(maxReply: 100)
+        XCTAssertEqual(try r.feed(Data(#"{"status":"succ"#.utf8)), .needMore)
+        XCTAssertThrowsError(try r.finish()) { XCTAssertEqual($0 as? BlenderError, .badReply("connection closed mid-reply after 15 bytes")) }
+        var http = ReplyReader(maxReply: 100)
+        XCTAssertThrowsError(try http.feed(Data("HTTP/1.1 400 Bad Request\r\n".utf8))) {
+            guard case .badReply(let m)? = $0 as? BlenderError else { return XCTFail("\($0)") }
+            XCTAssertTrue(m.hasPrefix("not a JSON object"))
+        }
+    }
+
+    func testStatusExplainsAnotherServerOnThePort() async {
+        let t = FakeTransport { _, _ in throw BlenderError.otherServer }
+        let r = posted(await relay(t, FakeAPI()).handle(call("blender_status")))
+        XCTAssertEqual(r?.result, .object(["connected": .bool(false), "problem": .string(BlenderError.otherServerText)]))
+    }
+
     /// Against a closed port: notConnected, quickly.
     func testSocketWithNoBlender() async throws {
         let s = try BlenderSocket(port: 1)
