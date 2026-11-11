@@ -244,7 +244,7 @@ final class FakeAPITests: XCTestCase {
         }
         XCTAssertEqual(preview?.state, "preview")
         XCTAssertEqual(preview?.angles.compactMap { $0 }.count, 4)
-        let saved = try await api.saveOutfit(outfitId: o.id)
+        let saved = try await api.saveOutfit(outfitId: o.id, name: nil)
         XCTAssertEqual(saved.state, "ready")
         let demoModel = try await api.listModels().first { $0.id == SampleData.demo }
         XCTAssertEqual(demoModel?.outfitIds.last, o.id)

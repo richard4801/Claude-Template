@@ -241,10 +241,15 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     public var prompt: String
     /// Dress up outfits: face, face ¾ and profile close-ups with the accessories (nil where rejected or missing).
     public var faces: [ImageRef?]?
+    /// When it was made (ms; the folder's date on the outfit page) and who made it (they or the owner may rename/delete it).
+    public var createdAt: Int64?
+    public var createdBy: String?
 
     public init(id: String, modelId: String, name: String, mode: String = "describe", description: String = "", angles: [ImageRef?] = [nil, nil, nil, nil],
-                state: String = "ready", prompt: String = "", faces: [ImageRef?]? = nil) {
+                state: String = "ready", prompt: String = "", faces: [ImageRef?]? = nil, createdAt: Int64? = nil, createdBy: String? = nil) {
         self.faces = faces
+        self.createdAt = createdAt
+        self.createdBy = createdBy
         self.id = id
         self.modelId = modelId
         self.name = name
@@ -255,7 +260,7 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         self.prompt = prompt
     }
 
-    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces }
+    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -267,9 +272,13 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         state = c.v(.state, "ready")
         prompt = c.v(.prompt, "")
         faces = c.o(.faces)
+        createdAt = c.o(.createdAt)
+        createdBy = c.o(.createdBy)
     }
 
     public var front: ImageRef? { angles.first ?? nil }
+    /// How many of the four angles have a picture (a set can come back with some empty).
+    public var madeAngles: Int { (0..<4).filter { angles.indices.contains($0) && angles[$0] != nil }.count }
     /// Made with Dress up (plans/api.md "Model tools" §6).
     public var isDressUp: Bool { mode == "dressup" }
 }

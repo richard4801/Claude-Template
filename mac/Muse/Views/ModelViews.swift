@@ -115,7 +115,7 @@ struct ProfileView: View {
                 Crumb(parent: "Models", title: m.name) { store.go(.models) }
                 HStack(alignment: .top, spacing: Space.s6) {
                     left(m).frame(width: 280)
-                    right(m)
+                    right(m).frame(maxWidth: .infinity, alignment: .leading) // the outfit folders fill the width (§4)
                 }
             }
         } else if store.loading {
@@ -226,27 +226,8 @@ struct ProfileView: View {
             if fits.isEmpty {
                 Text("No outfits yet. Describe one, use a product photo, or upload your own four angles.").scaled(t.scale.body, t.roles.ink2)
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s6), GridItem(.flexible(), spacing: Space.s6)], alignment: .leading, spacing: Space.s5) {
-                ForEach(fits) { o in
-                    VStack(alignment: .leading, spacing: Space.s2) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(o.name).scaled(t.scale.label, t.roles.ink).lineLimit(1)
-                            Spacer()
-                            Text(o.isDressUp ? "Dress up: body, then faces" : "Front, ¾, side, back").scaled(t.scale.caption, t.roles.ink2)
-                        }
-                        HStack(spacing: Space.s2) {
-                            ForEach(0..<4, id: \.self) { i in MediaFrame(ref: o.angles.indices.contains(i) ? o.angles[i] : nil, ratio: 0.75) }
-                        }
-                        if let faces = o.faces, faces.contains(where: { $0 != nil }) {
-                            HStack(spacing: Space.s2) {
-                                ForEach(0..<faces.count, id: \.self) { i in MediaFrame(ref: faces[i], ratio: 0.75) }
-                                Spacer()
-                            }
-                            .frame(maxWidth: 220)
-                        }
-                    }
-                }
-            }
+            // Folders (plans/outfit-head-looks.md §4): the front only, 8 per page across the full width, "‹ 1 of 3 ›".
+            if !fits.isEmpty { OutfitFolders(model: m) }
 
             SectionTitle("Never add") { Text("Removed from every render").scaled(t.scale.caption, t.roles.ink2) }
             FlowLayout(spacing: Space.s2) {

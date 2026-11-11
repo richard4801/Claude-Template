@@ -373,6 +373,12 @@ final class AppStore {
     var profileModelId = SampleData.demo
     var create = CreateDraft()
     var outfitSheet: OutfitDraft?
+    /// Outfit page (plans/outfit-head-looks.md §4): the folder page shown per model (0-based), the outfit open, the
+    /// angle open full size in it, and the outfits whose missing angles are being made.
+    var outfitPage: [String: Int] = [:]
+    var openOutfitId: String?
+    var openOutfitViewing: Int?
+    var fillingOutfits: Set<String> = []
 
     // MARK: Model tools (plans/api.md "Model tools")
 
@@ -756,8 +762,10 @@ final class AppStore {
         }
         if let r = e.tool { applyToolRun(r) }
         if let l = e.lora { applyLora(l) }
+        if e.type == "outfit", e.op == "delete", let id = e.id { outfitGone(id) }
         if let o = e.outfit {
             LiveEvents.applyOutfit(&outfits, &models, o)
+            if fillingOutfits.contains(o.id) && o.madeAngles == 4 { fillingOutfits.remove(o.id) }
             if outfitSheet?.outfitId == o.id && o.state == "preview" {
                 outfitSheet?.state = .done
                 outfitSheet?.angles = o.angles

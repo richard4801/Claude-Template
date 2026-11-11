@@ -607,7 +607,8 @@ public actor FakeMuseAPI: MuseAPI {
         let label = name.isEmpty ? (req.description.isEmpty ? "New outfit" : String(req.description.prefix(28))) : name
         let prompt = PromptEngine.outfitAngle(identity: m.promptIdentity(lora: loras[m.id]), outfit: req.description.isEmpty ? label : req.description,
                                               mode: OutfitMode(rawValue: req.mode) ?? .describe, angle: "Front")
-        let o = Outfit(id: "o_" + shortId(), modelId: req.modelId, name: label, mode: req.mode, description: req.description, state: "generating", prompt: prompt)
+        let o = Outfit(id: "o_" + shortId(), modelId: req.modelId, name: label, mode: req.mode, description: req.description, state: "generating", prompt: prompt,
+                       createdAt: Int64(Date().timeIntervalSince1970 * 1000))
         outfits.append(o)
         if cost > 0 { hub.emit(ApiEvent(type: "balance", balance: bal)) }
         let images = req.images
@@ -630,14 +631,59 @@ public actor FakeMuseAPI: MuseAPI {
         hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
     }
 
-    public func saveOutfit(outfitId: String) throws -> Outfit {
+    public func saveOutfit(outfitId: String, name: String?) throws -> Outfit {
         guard let i = outfits.firstIndex(where: { $0.id == outfitId }) else { throw ApiError("not_found", "Outfit not found") }
+        if let name { outfits[i].name = try outfitName(name) }
         outfits[i].state = "ready"
         var m = try model(outfits[i].modelId)
         if !m.outfitIds.contains(outfitId) { m.outfitIds.append(outfitId) }
         replace(m)
         hub.emit(ApiEvent(type: "model", model: m))
         return outfits[i]
+    }
+
+    private func outfitName(_ name: String) throws -> String {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if n.isEmpty { throw ApiError("bad_request", "Give the outfit a name") }
+        if n.count > 80 { throw ApiError("bad_request", "At most 80 characters") }
+        return n
+    }
+
+    public func renameOutfit(id: String, name: String) throws -> Outfit {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        outfits[i].name = try outfitName(name)
+        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
+        return outfits[i]
+    }
+
+    public func deleteOutfit(id: String) throws {
+        guard let o = outfits.first(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        if o.state == "generating" { throw ApiError("outfit_busy", "This outfit is still being made · delete it when it finishes") }
+        outfits.removeAll { $0.id == id }
+        var e = ApiEvent(type: "outfit")
+        e.op = "delete"
+        e.id = id
+        hub.emit(e)
+        if var m = try? model(o.modelId), m.outfitIds.contains(id) {
+            m.outfitIds.removeAll { $0 == id }
+            replace(m)
+            hub.emit(ApiEvent(type: "model", model: m))
+        }
+    }
+
+    public func fillOutfit(id: String, imageModel: String?) throws -> OutfitFill {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        guard outfits[i].front != nil else { throw ApiError("bad_request", "Its front picture is missing · make a new outfit instead") }
+        let missing = (1..<4).filter { !(outfits[i].angles.indices.contains($0) && outfits[i].angles[$0] != nil) }
+        let cost = Double(missing.count) * photoPricing.perEdit
+        charge(cost)
+        let fill = ["c_tq", "c_face", "c_front"]
+        for a in missing {
+            while outfits[i].angles.count <= a { outfits[i].angles.append(nil) }
+            outfits[i].angles[a] = .asset(fill[a - 1])
+        }
+        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
+        return OutfitFill(outfit: outfits[i], cost: cost)
     }
 
     // MARK: Uploads

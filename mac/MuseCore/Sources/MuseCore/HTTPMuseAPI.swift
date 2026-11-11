@@ -262,7 +262,14 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     }
     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
-    public func saveOutfit(outfitId: String) async throws -> Outfit { try await call("POST", "v1/outfits/\(outfitId)/save", Empty()) }
+    public func saveOutfit(outfitId: String, name: String?) async throws -> Outfit { try await call("POST", "v1/outfits/\(Self.pathKey(outfitId))/save", OutfitName(name: name)) }
+    public func renameOutfit(id: String, name: String) async throws -> Outfit { try await call("PATCH", "v1/outfits/\(Self.pathKey(id))", OutfitName(name: name)) }
+    public func deleteOutfit(id: String) async throws { _ = try await send(request("DELETE", "v1/outfits/\(Self.pathKey(id))")) }
+    public func fillOutfit(id: String, imageModel: String?) async throws -> OutfitFill {
+        try await call("POST", "v1/outfits/\(Self.pathKey(id))/fill", OutfitFillBody(imageModel: imageModel))
+    }
+    private struct OutfitName: Encodable { var name: String? }
+    private struct OutfitFillBody: Encodable { var imageModel: String? }
 
     /// Images: presign → PUT → confirm. A server without presigned uploads (server/mock), or a PUT that can't reach storage, falls back to multipart.
     public func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef {
