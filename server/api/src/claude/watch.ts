@@ -9,7 +9,8 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
+import { cameraAssets } from '../camera/schema.js';
 import sharp from 'sharp';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, takes, uploads } from '../db/schema.js';
@@ -31,7 +32,18 @@ export type Picked = { t: number; why: 'start' | 'end' | 'cut' | 'motion peak' |
 /** The stored video an id names, in the person's studio only: a take (Suite, Library, edited version), a Suite job with
  * one take, an uploaded video (chat attachment, Edit upload) or an imported clip. */
 export async function videoOf(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: unknown): Promise<Video> {
-  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw badRequest('id: a take, job, Library item, clip or uploaded video id');
+  // A stored file as the composer names it (/uploads/<key>, or the key itself): a swap source, guide or reference video.
+  if (typeof id === 'string' && (id.includes('/') || /\.(mp4|mov|m4v|webm)$/i.test(id))) return videoByKey(ctx, u, id);
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw badRequest('id: a take, job, Library item, clip, uploaded video, camera session or /uploads/… link');
+  // A camera session: its newest Blender guide clip (the greybox blocking); a camera asset: that file.
+  if (id.startsWith('cs_') || id.startsWith('ca_')) {
+    const rows = id.startsWith('cs_')
+      ? await ctx.db.select().from(cameraAssets).where(and(eq(cameraAssets.sessionId, id), eq(cameraAssets.studioId, u.studioId), eq(cameraAssets.state, 'ready'))).orderBy(desc(cameraAssets.createdAt))
+      : await ctx.db.select().from(cameraAssets).where(and(eq(cameraAssets.id, id), eq(cameraAssets.studioId, u.studioId)));
+    const v = rows.find(r => /^video\//i.test(r.contentType) && (id.startsWith('ca_') || r.kind === 'greybox')) ?? rows.find(r => /^video\//i.test(r.contentType));
+    if (v) return { id, kind: 'upload', key: v.storageKey, title: v.label ?? (v.kind === 'greybox' ? 'Blender guide (greybox)' : v.kind) };
+    if (id.startsWith('cs_')) throw new ApiError(409, 'not_ready', `${id} has no rendered guide clip yet (render_camera_guides)`);
+  }
   const [t] = await ctx.db.select().from(takes).where(and(eq(takes.id, id), eq(takes.studioId, u.studioId)));
   if (t) {
     if (t.kind === 'shot') throw badRequest(`${id} is a photo, not a video: look at it in the app or with the photo tools`);
@@ -53,6 +65,21 @@ export async function videoOf(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: unkno
   }
   const [c] = await ctx.db.select().from(clips).where(and(eq(clips.id, id), eq(clips.studioId, u.studioId)));
   if (c?.storageKey) return { id, kind: 'clip', key: c.storageKey, title: c.name };
+  throw notFound('Video');
+}
+
+/** A video named by its stored key or /uploads/ link, in the person's studio (an upload, clip, take or camera asset). */
+async function videoByKey(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, raw: string): Promise<Video> {
+  const key = (/\/uploads\/([A-Za-z0-9][A-Za-z0-9._/-]*)/.exec(raw)?.[1] ?? raw).replace(/^\/+/, '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,299}$/.test(key) || key.includes('..')) throw badRequest('id: a studio video link (/uploads/…)');
+  const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, u.studioId)));
+  if (up) { if (!/^video\//i.test(up.contentType)) throw badRequest(`${raw} is not a video (${up.contentType})`); return { id: up.id, kind: 'upload', key }; }
+  const [c] = await ctx.db.select().from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, u.studioId)));
+  if (c) return { id: c.id, kind: 'clip', key, title: c.name };
+  const [t] = await ctx.db.select().from(takes).where(and(eq(takes.mediaKey, key), eq(takes.studioId, u.studioId)));
+  if (t && t.kind !== 'shot') return { id: t.id, kind: 'take', key, title: t.title };
+  const [ca] = await ctx.db.select().from(cameraAssets).where(and(eq(cameraAssets.storageKey, key), eq(cameraAssets.studioId, u.studioId)));
+  if (ca && /^video\//i.test(ca.contentType)) return { id: ca.id, kind: 'upload', key, title: ca.label ?? ca.kind };
   throw notFound('Video');
 }
 
@@ -264,7 +291,7 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const num = (d: string, min?: number, max?: number) => ({ type: 'number', description: d, ...(min !== undefined ? { minimum: min } : {}), ...(max !== undefined ? { maximum: max } : {}) });
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
-const ID = str('A take id (Suite feed, Library, list_takes, an edited version), a Suite job id with one take, an imported clip id, or the uploadId of a video attached to the chat', 80);
+const ID = str('A take id (Suite feed, Library, list_takes, an edited version), a Suite job id with one take, an imported clip id (a Swap/Recast source, uploaded or attached by link), the uploadId of a video attached to the chat, a camera session (cs_…: its Blender guide clip), or a video on screen by its /uploads/… link (suite_get_draft onScreen gives each one\'s id)', 300);
 const result = (o: Overview) => ({ ...o.meta, mcpContent: o.blocks, structuredContent: o.meta });
 
 const PHOTOS_MAX = 6;
@@ -284,22 +311,43 @@ export const WATCH_TOOLS: EditTool[] = [
   },
   {
     name: 'see_photos', title: 'See photos (free)', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: `Look at photos yourself: the stills a Photo run made (their take ids, e.g. from a "Result arrived" message), up to ${PHOTOS_MAX} at once, each sized to about 1024 px with its id and title. Free. Videos: use watch.`,
-    inputSchema: obj({ ids: { type: 'array', minItems: 1, maxItems: PHOTOS_MAX, items: { type: 'string', maxLength: 80 }, description: 'Photo take ids' } }, ['ids']),
+    description: `Look at photos yourself: the stills a Photo run made and Library photos (their take ids), images attached to the chat or uploaded (upload ids) and any studio picture link (/uploads/…), up to ${PHOTOS_MAX} at once, each sized to about 1024 px with its id and title. Free. Videos: use watch.`,
+    inputSchema: obj({ ids: { type: 'array', minItems: 1, maxItems: PHOTOS_MAX, items: { type: 'string', maxLength: 300 }, description: 'Photo take ids, image upload ids or /uploads/ links' } }, ['ids']),
     run: async (env, a) => seePhotos(env.ctx, env.user, a.ids),
   },
 ];
 
+/** An uploaded image or a /uploads/ link of the studio, as a JPEG ≤ 1024 px. */
+async function otherPhoto(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: string): Promise<Buffer> {
+  const key = /\/uploads\/([A-Za-z0-9][A-Za-z0-9._/-]*)/.exec(id)?.[1];
+  const [up] = key
+    ? await ctx.db.select().from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, u.studioId)))
+    : await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
+  if (!up) throw new ApiError(404, 'not_found', `Photo ${id} not found in this studio (deleted, or not a take or upload id) · suite_feed or library lists the ids`);
+  if (!/^image\//i.test(up.contentType)) throw badRequest(`${id} is not a picture (${up.contentType})${/^video\//i.test(up.contentType) ? ': watch it instead' : ''}`);
+  const obj = await ctx.storage.get(up.storageKey);
+  if (!obj) throw new ApiError(409, 'not_ready', `${id}: the image hasn't arrived yet`);
+  const parts: Buffer[] = [];
+  for await (const ch of obj.body) parts.push(ch as Buffer);
+  return sharp(Buffer.concat(parts)).rotate().resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+}
+
 /** Photo takes (kind "shot") of the person's studio as image blocks, small enough for Claude to read. */
 export async function seePhotos(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, ids: unknown) {
-  if (!Array.isArray(ids) || !ids.length || ids.length > PHOTOS_MAX || !ids.every(x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(x))) {
-    throw badRequest(`ids: 1 to ${PHOTOS_MAX} photo take ids`);
+  if (!Array.isArray(ids) || !ids.length || ids.length > PHOTOS_MAX || !ids.every(x => typeof x === 'string' && (/^[A-Za-z0-9_-]{1,80}$/.test(x) || /\/uploads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,299}$/.test(x)))) {
+    throw badRequest(`ids: 1 to ${PHOTOS_MAX} photo take ids, image upload ids or /uploads/ links`);
   }
   const blocks: Block[] = [];
   const seen: { id: string; title?: string }[] = [];
   for (const id of ids as string[]) {
     const [t] = await ctx.db.select().from(takes).where(and(eq(takes.id, id), eq(takes.studioId, u.studioId)));
-    if (!t) throw notFound(`Photo ${id}`);
+    if (!t) {
+      // Not a take: an uploaded image (a chat attachment, a reference) or a studio picture link.
+      const up = await otherPhoto(ctx, u, id);
+      blocks.push({ type: 'text', text: id }, { type: 'image', data: up.toString('base64'), mimeType: 'image/jpeg' });
+      seen.push({ id });
+      continue;
+    }
     if (t.kind !== 'shot') throw badRequest(`${id} is a video: watch it instead`);
     if (!t.mediaKey) throw new ApiError(409, 'not_ready', `${id} has no image yet`);
     const obj = await ctx.storage.get(t.mediaKey);

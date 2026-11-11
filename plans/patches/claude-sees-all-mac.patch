@@ -1,0 +1,422 @@
+From ea4ca6ce80ee8c55d351ab4e63146172327e7b90 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 22:55:44 +0000
+Subject: [PATCH] Mac: the composer sends its whole screen to Claude (clip,
+ guides, slot pictures, request), syncs without a chat open, takes Claude's
+ Directed and model picks, opens a shared draft; chat images get upload ids
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxqqzHAyqv2n7nzz6wv
+---
+ mac/Muse/App/AppStore+OneClaude.swift         |  4 +-
+ mac/Muse/App/SuiteClaudeBridge.swift          | 61 +++++++++++-
+ mac/Muse/Views/Claude/ChatComposer.swift      |  3 +
+ mac/Muse/Views/Claude/ClaudeChatModel.swift   | 20 +++-
+ .../Views/Suite/Composer/ComposerView.swift   |  4 +
+ .../MuseCore/Suite/SuiteAssistDraft.swift     | 11 +++
+ .../Sources/MuseCore/Suite/SuiteScreen.swift  | 97 +++++++++++++++++++
+ .../MuseCoreTests/SuiteScreenTests.swift      | 48 +++++++++
+ 8 files changed, 241 insertions(+), 7 deletions(-)
+ create mode 100644 mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift
+ create mode 100644 mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift
+
+diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
+index dc4a7361..cd325802 100644
+--- a/mac/Muse/App/AppStore+OneClaude.swift
++++ b/mac/Muse/App/AppStore+OneClaude.swift
+@@ -255,7 +255,9 @@ extension AppStore {
+         case "cast": go(.models)
+         case "character": if let id = ui.id { openProfile(id) } else { go(.models) }
+         case "suite":
+-            if let t = ui.tool, let tool = ComposerTool(rawValue: t) { openTool(tool) } else { openSuite() }
++            if let t = ui.tool, let tool = ComposerTool(rawValue: t) { openTool(tool) } else if ui.id?.hasPrefix("sa_") == true { openTool(.shot) } else { openSuite() }
++            // A shared draft (a camera session's Shot draft opens as one): the composer takes it, Directed camera and guides included.
++            if let id = ui.id, id.hasPrefix("sa_") { Task { await openSuiteAssist(id) } }
+         case "edit":
+             // An edit session (es_…, a blank project included) opens the editor on it; a take id opens that take.
+             if let id = ui.id, id.hasPrefix("es_") { Task { await openEditSession(id) } } else { openEdit(takeId: ui.id) }
+diff --git a/mac/Muse/App/SuiteClaudeBridge.swift b/mac/Muse/App/SuiteClaudeBridge.swift
+index 81da94b1..e2a04eb5 100644
+--- a/mac/Muse/App/SuiteClaudeBridge.swift
++++ b/mac/Muse/App/SuiteClaudeBridge.swift
+@@ -30,6 +30,8 @@ final class SuiteClaudeBridge {
+     var revision = 0
+     /// The composer as the shared draft last had it (nil: not synced yet). The owner's edits are what differs from it.
+     var synced: ComposerDraft?
++    /// The screen (SuiteScreen: the request Generate would send and every input) as last sent, without its time.
++    var syncedScreen: JSONValue?
+     /// What the composer couldn't take from Claude's last draft, with the reasons.
+     var rejected: [SuiteDraftRejection] = []
+     /// Claude's paid ask, shown as the Generate confirmation. Nothing runs without the owner's press.
+@@ -87,6 +89,7 @@ final class SuiteClaudeBridge {
+         error = nil
+         revision = 0
+         synced = nil
++        syncedScreen = nil
+         rejected = []
+         ask = nil
+         confirmOpen = false
+@@ -180,6 +183,25 @@ extension AppStore {
+         return true
+     }
+ 
++    /// Claude opened a shared draft (open_page suite with an sa_ id, e.g. a camera session's Shot draft): it becomes the
++    /// composer's, laid over it with Undo, and the composer's edits go back to it.
++    func openSuiteAssist(_ id: String) async {
++        guard let api = suiteAssistAPI, let a = try? await api.suiteAssist(id: id) else {
++            showToast("That shot couldn't be opened")
++            return
++        }
++        let c = suite.claude
++        let lines = c.demoLines
++        c.reset(keepOpen: true)
++        c.demoLines = lines
++        c.key = suiteClaudeKey
++        c.assist = a
++        c.revision = 0
++        c.synced = nil
++        c.syncedScreen = nil
++        takeSuiteAssist(a, force: true)
++    }
++
+     /// A new chat in this mode: a new shared draft from the composer as it is now (the composer stays).
+     func newSuiteAssist(api: any SuiteAssistAPI, key: String) async {
+         let c = suite.claude
+@@ -276,6 +298,9 @@ extension AppStore {
+         if r.composer != before {
+             // A character Claude picked keeps Claude's rig: no default rig is laid on top (as Reuse settings).
+             if r.composer.tokens.characterId != before.tokens.characterId { suite.restoredCharacterId = r.composer.tokens.characterId }
++            // Swap / Recast keep their character in their own panel: Claude's pick goes there too.
++            if before.tool == .swap, r.composer.tokens.characterId != before.tokens.characterId, let m = r.composer.tokens.characterId { suite.swap.modelId = m }
++            if before.tool == .swap, r.composer.outfitId != before.outfitId, let o = r.composer.outfitId { suite.swap.outfitId = o }
+             suite.composer = r.composer
+         }
+         if let text = SuiteAssistDraft.toast(changed) {
+@@ -434,7 +459,9 @@ extension AppStore {
+     /// The composer changed (by hand, Undo, a picker): send it after a short pause.
+     func suiteComposerChanged(now: Bool = false) {
+         let c = suite.claude
+-        guard c.assist != nil, c.open || c.linked || c.refsDirty, suite.composer != c.synced || c.refsDirty else { return }
++        // One source of truth (owner, 2026-11-11): the shared draft follows the screen whether or not a chat is open, so
++        // Claude never reads a composer that isn't the one on screen.
++        guard c.assist != nil, suite.composer != c.synced || c.refsDirty || suiteScreen(at: nil) != c.syncedScreen else { return }
+         c.pushTask?.cancel()
+         c.pushTask = Task { [weak self] in
+             if !now { try? await Task.sleep(nanoseconds: 700_000_000) }
+@@ -448,14 +475,18 @@ extension AppStore {
+         let c = suite.claude
+         guard let api = suiteAssistAPI, let a = c.assist else { return }
+         let mine = suite.composer
+-        guard mine != c.synced || c.refsDirty else { return }
++        let screenKey = suiteScreen(at: nil)
++        guard mine != c.synced || c.refsDirty || screenKey != c.syncedScreen else { return }
+         // The draft's references ride along (the composer doesn't hold them); a removed one is left out.
+-        let draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
++        var draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
++        // Everything on screen: the clip, guides and slot pictures, the request Generate would send (server suite/screen.ts).
++        draft.raw["screen"] = suiteScreen(at: Date())
+         do {
+             let n = try await api.patchSuiteAssist(id: a.id, SuiteAssistPatch(draft: draft, baseRevision: c.revision))
+             c.assist = n
+             c.revision = max(c.revision, n.revision)
+             c.synced = mine
++            c.syncedScreen = screenKey
+             c.refsDirty = false
+             updateSuiteAsk(n)
+         } catch let e as ApiError where e.code == "stale" && attempt < 2 {
+@@ -482,6 +513,30 @@ extension AppStore {
+                                          characterName: d.tokens.characterId.flatMap { character($0)?.shortName }, rejected: c.rejected)
+     }
+ 
++    /// The draft's `screen` (SuiteScreen): the request Generate would send now and every input on screen. `at` nil leaves
++    /// the time out (to compare with what was sent).
++    func suiteScreen(at: Date?) -> JSONValue {
++        let tool = suite.composer.tool
++        var inputs: [SuiteScreen.Input] = []
++        let request: ShotRequest?
++        switch tool {
++        case .swap, .recast:
++            if let c = clip { inputs.append(SuiteScreen.clip(c, slot: "\(tool.rawValue).clip")) }
++            request = swapRequest
++        case .photo:
++            inputs = SuiteScreen.inputs(suite.composerSlots.slots)
++            request = nil
++        default:
++            if let g = SuiteScreen.guide(suite.composer.directed) { inputs.append(g) }
++            if tool == .extend, let src = suite.composer.extend.source {
++                inputs.append(SuiteScreen.Input(slot: "extend.video", kind: "video", label: src.name, takeId: src.takeId, key: src.key, seconds: src.seconds))
++            }
++            inputs += SuiteScreen.inputs(suite.composerSlots.slots)
++            request = shotRequest
++        }
++        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, at: at)
++    }
++
+     // MARK: Generate (only with the owner's press)
+ 
+     /// The owner's answer in the Generate confirmation. Approve runs the shot at the price shown; a changed price asks again.
+diff --git a/mac/Muse/Views/Claude/ChatComposer.swift b/mac/Muse/Views/Claude/ChatComposer.swift
+index 8131e9ec..a0ab98f8 100644
+--- a/mac/Muse/Views/Claude/ChatComposer.swift
++++ b/mac/Muse/Views/Claude/ChatComposer.swift
+@@ -11,6 +11,9 @@ struct ChatPendingImage: Identifiable, Equatable {
+     var data: Data
+     var mime: String
+     var video: ChatPendingVideo? = nil
++    /// An image's upload on the MUSE server (started when it is attached), so Claude can use it in a shot by its id
++    /// (suite_add_reference, set_sent_images). nil until it lands; the image still goes to Claude as a file without it.
++    var uploadId: String? = nil
+ }
+ 
+ /// A video waiting to go: uploaded to the MUSE server as soon as it is picked (Claude watches it there, by its upload id).
+diff --git a/mac/Muse/Views/Claude/ClaudeChatModel.swift b/mac/Muse/Views/Claude/ClaudeChatModel.swift
+index 76dcad75..da37112d 100644
+--- a/mac/Muse/Views/Claude/ClaudeChatModel.swift
++++ b/mac/Muse/Views/Claude/ClaudeChatModel.swift
+@@ -410,7 +410,9 @@ final class ClaudeChatModel {
+         var full = false
+         for f in list where NSImage(data: f.data) != nil {
+             guard room > 0 else { full = true; break }
+-            localImages.append(ChatPendingImage(name: f.name, data: f.data, mime: f.mime))
++            let img = ChatPendingImage(name: f.name, data: f.data, mime: f.mime)
++            localImages.append(img)
++            uploadImage(img)
+             room -= 1
+         }
+         for v in videos {
+@@ -462,6 +464,17 @@ final class ClaudeChatModel {
+         }
+     }
+ 
++    /// An image is uploaded as soon as it is attached (owner, 2026-11-11: Claude got only a local path and couldn't put the
++    /// picture in a shot). Quietly: if it fails or isn't done when the message goes, Claude still sees the image itself.
++    private func uploadImage(_ img: ChatPendingImage) {
++        guard !SnapshotRunner.probing, let uploader = service?.api as? any ClaudeImageUploading else { return }
++        let id = img.id
++        Task { [weak self] in
++            guard let a = try? await uploader.uploadClaudeImage(name: img.name, data: img.data, mime: img.mime), !a.uploadId.isEmpty else { return }
++            self?.setVideo(id) { $0.uploadId = a.uploadId }
++        }
++    }
++
+     /// Changes a pending row, if it is still there.
+     private func setVideo(_ id: UUID, _ change: (inout ChatPendingImage) -> Void) {
+         guard let i = localImages.firstIndex(where: { $0.id == id }) else { return }
+@@ -497,10 +510,11 @@ final class ClaudeChatModel {
+ 
+     private func save(_ img: ChatPendingImage, threadId: String) -> ClaudeAttachmentFile? {
+         let ext = ClaudeAttachmentCache.ext(mime: img.mime, url: nil)
+-        let a = ClaudeAttachment(id: "local-\(img.id.uuidString.prefix(8).lowercased())", uploadId: "", mimeType: img.mime)
++        let a = ClaudeAttachment(id: "local-\(img.id.uuidString.prefix(8).lowercased())", uploadId: img.uploadId ?? "", mimeType: img.mime)
+         guard var f = ClaudeAttachmentCache.save(img.data, attachment: a, threadId: threadId) else { return nil }
+         if !f.path.hasSuffix(".\(ext)") { f.path += ".\(ext)" }
+-        f.uploadId = ""
++        // Its upload id goes in Claude's line ("(uploadId up_…)"), so Claude can use the picture in a shot.
++        f.uploadId = img.uploadId ?? ""
+         return f
+     }
+ 
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index 3c468c9a..4d991083 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -85,6 +85,10 @@ struct ComposerView: View {
+         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; store.suiteClaudeToolChanged() }
+         // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.
+         .onChange(of: s.composer) { _, _ in store.suiteComposerChanged() }
++        // …and what else is on screen: Swap/Recast's panel and clip, the input slots (Claude watches and sees them).
++        .onChange(of: s.swap) { _, _ in store.suiteComposerChanged() }
++        .onChange(of: store.clip?.id) { _, _ in store.suiteComposerChanged() }
++        .onChange(of: s.composerSlots.slots) { _, _ in store.suiteComposerChanged() }
+         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
+         .task(id: store.serverKey) { await store.loadSavedRigs() }
+         .onChange(of: s.composer.tokens.characterId) { _, new in
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift
+index d0e3690d..fd82150c 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteAssistDraft.swift
+@@ -112,6 +112,15 @@ public enum SuiteAssistDraft {
+         if case .string(let o)? = draft.extra["outfitId"], o != current.outfitId {
+             if options.outfits[o] != nil { out.outfitId = o } else { refuse("Outfit", o, "isn't one of this character's outfits") }
+         }
++        // Movement → Directed (Claude's suite_set_draft directed: a camera session's camera and Blender guides) and the
++        // pinned model. The app sends both whenever it has them, so a newer draft without them means Claude took them out.
++        if tool != .photo, tool != .swap, tool != .recast {
++            let dir: CameraSpec? = { if case .object(let o)? = draft.extra["directed"] { return o["camera"]?.decoded(CameraSpec.self) }; return nil }()
++            if dir != current.directed { out.directed = dir.map { var c = $0; c.mode = "directed"; return c } }
++            let e: String? = { if case .string(let v)? = draft.extra["engineModel"] { return v }; return nil }()
++            let res: String? = { if case .string(let v)? = draft.extra["resolution"] { return v }; return nil }()
++            if e != current.engineModel || (e != nil && res != current.resolution) { out.engineModel = e; out.resolution = e == nil ? nil : res }
++        }
+         // A preset's collapsed composer opens up once Claude changes its rig or prompt.
+         if out.settings != current.settings || out.tokens != current.tokens { out.collapsed = nil }
+         return SuiteDraftApplied(composer: out, changed: changedRows(current, out), rejected: rejected)
+@@ -261,6 +270,8 @@ public enum SuiteAssistDraft {
+         if a.takes != b.takes { out.append("Takes") }
+         if a.sound != b.sound { out.append("Sound") }
+         if a.speaking != b.speaking { out.append("Speaking") }
++        if a.directed != b.directed { out.append("Movement") }
++        if a.engineModel != b.engineModel || a.resolution != b.resolution { out.append("Model") }
+         return out
+     }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift
+new file mode 100644
+index 00000000..b514be8d
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift
+@@ -0,0 +1,97 @@
++import Foundation
++
++// Claude sees what is on screen (owner, 2026-11-11: "Claude still can't see clips added to swap or anywhere"). The shared
++// draft the composer syncs to the server (SuiteClaudeBridge, PATCH /v1/suite/assist) carries `screen` next to the chips
++// and rig: the request Generate would send right now (Swap's clip, Recast's cast, Extend's video, the slots' frames and
++// references, a Directed camera with its Blender guides, the pinned model) and every input on screen in words, each with
++// the id Claude watches or sees it by. Server: suite/screen.ts (requestOf takes the media from here). Pure, so it is tested.
++public enum SuiteScreen {
++    /// One input on screen, as the server's ScreenInputSchema names it.
++    public struct Input: Hashable, Sendable {
++        public var slot: String
++        public var kind: String // video | image | audio
++        public var label: String?
++        public var role: String?
++        public var clipId: String?
++        public var uploadId: String?
++        public var takeId: String?
++        public var cameraSessionId: String?
++        public var key: String?
++        public var url: String?
++        public var seconds: Double?
++        public var state: String? // uploading | failed (nil = ready)
++
++        public init(slot: String, kind: String, label: String? = nil, role: String? = nil, clipId: String? = nil, uploadId: String? = nil, takeId: String? = nil,
++                    cameraSessionId: String? = nil, key: String? = nil, url: String? = nil, seconds: Double? = nil, state: String? = nil) {
++            self.slot = slot; self.kind = kind; self.label = label; self.role = role; self.clipId = clipId; self.uploadId = uploadId; self.takeId = takeId
++            self.cameraSessionId = cameraSessionId; self.key = key; self.url = url; self.seconds = seconds; self.state = state
++        }
++
++        var json: JSONValue {
++            var o: [String: JSONValue] = ["slot": .string(String(slot.prefix(40))), "kind": .string(kind)]
++            func put(_ k: String, _ v: String?, max: Int = 80) { if let v, !v.isEmpty { o[k] = .string(String(v.prefix(max))) } }
++            put("label", label, max: 120); put("role", role, max: 20); put("clipId", clipId); put("uploadId", uploadId); put("takeId", takeId)
++            put("cameraSessionId", cameraSessionId); put("key", key, max: 300); put("url", url, max: 2000); put("state", state, max: 20)
++            if let s = seconds, s > 0, s.isFinite { o["seconds"] = .number(min(s, 3600)) }
++            return .object(o)
++        }
++    }
++
++    /// The filled slots, in the order the composer shows them ("start", "middle 1", "reference 2", "video 1", "audio").
++    public static func inputs(_ slots: InputSlots) -> [Input] {
++        let order = SlotKind.allCases
++        let ids = slots.values.keys.sorted { a, b in
++            let x = order.firstIndex(of: a.kind)!, y = order.firstIndex(of: b.kind)!
++            return x == y ? a.index < b.index : x < y
++        }
++        return ids.compactMap { id -> Input? in
++            guard let v = slots[id] else { return nil }
++            let slot: String
++            switch id.kind {
++            case .start, .end, .audio: slot = id.kind.rawValue
++            case .middle: slot = "middle \(id.index + 1)"
++            case .image: slot = "reference \(id.index + 1)"
++            case .video: slot = "video \(id.index + 1)"
++            }
++            let state = v.uploading ? "uploading" : v.error != nil ? "failed" : nil
++            let name = (v.name as NSString).deletingPathExtension
++            if id.kind.isImage {
++                return Input(slot: slot, kind: "image", label: name.isEmpty ? nil : name, role: id.kind == .image ? v.role : nil, url: v.image?.url, state: state)
++            }
++            return Input(slot: slot, kind: id.kind == .audio ? "audio" : "video", label: name.isEmpty ? nil : name, role: id.kind == .video ? v.use : nil,
++                         key: v.media?.key, url: v.media?.url, seconds: v.media?.seconds, state: state)
++        }
++    }
++
++    /// Swap / Recast's source clip (uploaded or attached by link: both are a clip of the studio).
++    public static func clip(_ c: Clip, slot: String) -> Input {
++        Input(slot: slot, kind: "video", label: c.name, clipId: c.id, seconds: c.durationSec)
++    }
++
++    /// The Blender guide clip of a Directed camera (Rig → Movement → Directed), when it has one.
++    public static func guide(_ camera: CameraSpec?) -> Input? {
++        guard let cam = camera, cam.mode == "directed", case .object(let g)? = cam.guide else { return nil }
++        var key: String?, url: String?, seconds: Double?, session: String?, use: String?
++        if case .object(let v)? = g["video"] {
++            if case .string(let k)? = v["key"] { key = k }
++            if case .string(let u)? = v["url"] { url = u }
++            if case .number(let s)? = v["seconds"] { seconds = s }
++        }
++        if case .string(let s)? = g["cameraSessionId"] { session = s }
++        if case .string(let u)? = g["use"] { use = u }
++        guard key != nil || url != nil || session != nil else { return nil }
++        return Input(slot: "guide", kind: "video", label: "Blender guide", role: use ?? "blocking", cameraSessionId: session, key: key, url: url, seconds: seconds)
++    }
++
++    /// The draft's `screen`: the tool, the request Generate would send now (nil when it can't be built yet) and the inputs.
++    /// `at` nil leaves the time out (to compare a screen with the one last sent).
++    public static func json(tool: String, request: ShotRequest?, inputs: [Input], at: Date? = Date()) -> JSONValue {
++        var o: [String: JSONValue] = ["tool": .string(tool), "inputs": .array(inputs.prefix(24).map(\.json))]
++        if let at { o["at"] = .number((at.timeIntervalSince1970 * 1000).rounded()) }
++        if var r = request {
++            r.draft = nil // the draft itself is not repeated inside it
++            if let j = JSONValue.encoding(r) { o["request"] = j }
++        }
++        return .object(o)
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift b/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift
+new file mode 100644
+index 00000000..72a23f4e
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift
+@@ -0,0 +1,48 @@
++import XCTest
++@testable import MuseCore
++
++/// Claude sees what is on screen (owner, 2026-11-11): the shared draft's `screen` (server suite/screen.ts) names every
++/// input with the id Claude watches or sees it by, and carries the request Generate would send.
++final class SuiteScreenTests: XCTestCase {
++    func testSlotsBecomeInputsInOrder() {
++        let slots = InputSlots()
++            .put(SlotId(.image, 0), SlotValue(name: "beach.jpg", image: ImageRef(url: "/uploads/u/beach.jpg"), role: "location"))
++            .put(SlotId(.start), SlotValue(name: "open.png", image: ImageRef(url: "/uploads/u/open.png")))
++            .put(SlotId(.video), SlotValue(name: "walk.mov", media: SuiteVideoRef(key: "u/walk.mov", seconds: 4), use: "motion"))
++            .put(SlotId(.image, 1), SlotValue(name: "late.jpg", progress: 0.4))
++        let i = SuiteScreen.inputs(slots)
++        XCTAssertEqual(i.map(\.slot), ["start", "reference 1", "reference 2", "video 1"])
++        let beach = i.first { $0.label == "beach" }, late = i.first { $0.label == "late" }
++        XCTAssertEqual(beach?.role, "location")
++        XCTAssertEqual(beach?.url, "/uploads/u/beach.jpg")
++        XCTAssertNil(beach?.state)
++        XCTAssertEqual(late?.state, "uploading")
++        XCTAssertEqual(i[3].key, "u/walk.mov")
++        XCTAssertEqual(i[3].kind, "video")
++    }
++
++    func testDirectedGuideAndSwapClip() {
++        let cam = CameraSpec(mode: "directed", guide: .object(["video": .object(["key": .string("c/grey.mp4"), "seconds": .number(6)]),
++                                                               "use": .string("blocking"), "cameraSessionId": .string("cs_1")]))
++        let g = SuiteScreen.guide(cam)
++        XCTAssertEqual(g?.slot, "guide")
++        XCTAssertEqual(g?.cameraSessionId, "cs_1")
++        XCTAssertEqual(g?.key, "c/grey.mp4")
++        XCTAssertNil(SuiteScreen.guide(CameraSpec(mode: "preset")))
++        let c = Clip(id: "cl_1", name: "Dance from a link", durationSec: 6, width: 720, height: 1280, fps: 30, checks: [])
++        XCTAssertEqual(SuiteScreen.clip(c, slot: "swap.clip").clipId, "cl_1")
++    }
++
++    func testJsonCarriesTheRequestWithoutTheDraftAndTimeOnlyWhenAsked() {
++        var r = ShotRequest(mode: "swap", modelId: "m_1", prompt: "", quality: "hd", clipId: "cl_1")
++        r.draft = SuiteDraft(tool: "swap")
++        let j = SuiteScreen.json(tool: "swap", request: r, inputs: [SuiteScreen.Input(slot: "swap.clip", kind: "video", clipId: "cl_1")], at: nil)
++        guard case .object(let o) = j, case .object(let req)? = o["request"] else { return XCTFail("no request") }
++        XCTAssertNil(o["at"])
++        XCTAssertEqual(req["clipId"], .string("cl_1"))
++        XCTAssertNil(req["draft"])
++        guard case .object(let t) = SuiteScreen.json(tool: "shot", request: nil, inputs: []) else { return XCTFail() }
++        XCTAssertNotNil(t["at"])
++        XCTAssertNil(t["request"])
++    }
++}
+-- 
+2.43.0
+

@@ -1,0 +1,249 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
+index a6b92beb..3c43eb96 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
+@@ -52,7 +52,7 @@ suspend fun SuiteStore.newClaudeChat(): String? {
+     val (a, err) = app.repo.attemptInline { createSuiteAssist(ComposerDrafts.draft(composer.value)) }
+     if (a == null) { app.repo.toast(err ?: "Claude in the Suite isn't available on this server yet"); return null }
+     assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey)
+-    assistSynced = ComposerDrafts.draft(composer.value).json.toString()
++    assistSynced = null // the screen goes up with the next sync
+     return a.id
+ }
+ 
+@@ -78,7 +78,7 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
+         val before = composer.value
+         // The composer keeps its mode (WS18): a draft an older server set to Shot doesn't switch Photo or Talking to Shot.
+         composer.value = ComposerDrafts.restore(a.draft, before).copy(tool = before.tool)
+-        assistSynced = ComposerDrafts.draft(composer.value).json.toString()
++        assistSynced = null // the composer as Claude left it goes back up with its screen
+         // "Claude set Camera and Light", with Undo (the Rigs row's Undo; undoing goes back to Claude as the owner's edit).
+         SuiteClaudeWords.claudeSet(SuiteClaudeWords.changed(before, composer.value))?.let { rigUndo.value = it to before }
+     }
+@@ -86,15 +86,18 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
+ }
+ 
+ /** The owner's own edit in the composer: sent so Claude sees it. When Claude changed the draft meanwhile, Claude's wins. */
+-suspend fun SuiteStore.pushComposerToAssist() {
++suspend fun SuiteStore.pushComposerToAssist(screen: ((Long?) -> kotlinx.serialization.json.JsonObject)? = null) {
+     val cur = assist.value ?: return
+     // Another mode's draft (WS18): the composer switched tools; that mode's chat is bound when Claude opens there.
+     if (cur.key != null && cur.key != claudeKey) return
+-    val d = ComposerDrafts.draft(composer.value)
+-    if (d.json.toString() == assistSynced) return
++    val base = ComposerDrafts.draft(composer.value)
++    // Everything on screen (owner, 2026-11-11): the clip, guides and slot pictures and the request Generate would send.
++    val key = screen?.let { kotlinx.serialization.json.JsonObject(base.json + ("screen" to it(null))) } ?: base.json
++    if (key.toString() == assistSynced) return
++    val d = screen?.let { studio.muse.app.data.SuiteDraft(kotlinx.serialization.json.JsonObject(base.json + ("screen" to it(System.currentTimeMillis())))) } ?: base
+     try {
+         val a = app.repo.api.patchSuiteAssist(cur.id, d, cur.revision)
+-        assistSynced = d.json.toString()
++        assistSynced = key.toString()
+         assist.update { it?.copy(revision = a.revision, pending = a.waiting) }
+     } catch (e: ApiException) {
+         if (e.code == "stale") runCatching { app.repo.api.suiteAssist(cur.id) }.getOrNull()?.let { applyAssist(it) }
+@@ -147,6 +150,8 @@ object SuiteClaudeWords {
+         val x = a.settings; val y = b.settings
+         if (a.tokens.character?.id != b.tokens.character?.id) add("Character")
+         if (a.tokens != b.tokens) add("Prompt")
++        if (a.directed != b.directed) add("Movement")
++        if (a.engineModel != b.engineModel || a.resolution != b.resolution) add("Model")
+         if (listOf(x.body, x.lens, x.focalMm, x.aperture, x.height, x.shotSize) != listOf(y.body, y.lens, y.focalMm, y.aperture, y.height, y.shotSize)) add("Camera")
+         if (x.lighting != y.lighting) add("Light")
+         if (listOf(x.palette, x.stock, x.gradeLook) != listOf(y.palette, y.stock, y.gradeLook)) add("Look")
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt
+new file mode 100644
+index 00000000..dc00a227
+--- /dev/null
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt
+@@ -0,0 +1,69 @@
++package studio.muse.app.ui.screens.suite
++
++import kotlinx.serialization.json.JsonArray
++import kotlinx.serialization.json.JsonElement
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import studio.muse.app.data.SuiteShotRequest
++import studio.muse.app.data.SuiteWireJson
++
++/**
++ * Claude sees what is on screen (owner, 2026-11-11: "Claude still can't see clips added to swap or anywhere"). The shared
++ * draft the composer syncs (PATCH /v1/suite/assist) carries `screen`: the request Generate would send now (Swap/Recast's
++ * clip, Extend's video, the slots' frames and references, a Directed camera with its Blender guides, the pinned model)
++ * and every input in words, each with the id Claude watches or sees it by. Server: suite/screen.ts. Same as the Mac's
++ * SuiteScreen.swift.
++ */
++object SuiteScreen {
++    data class Input(
++        val slot: String, val kind: String, val label: String? = null, val role: String? = null, val clipId: String? = null, val uploadId: String? = null,
++        val takeId: String? = null, val cameraSessionId: String? = null, val key: String? = null, val url: String? = null, val seconds: Double? = null,
++        val state: String? = null,
++    ) {
++        fun json(): JsonObject = JsonObject(buildMap<String, JsonElement> {
++            put("slot", JsonPrimitive(slot.take(40))); put("kind", JsonPrimitive(kind))
++            fun s(k: String, v: String?, max: Int = 80) { if (!v.isNullOrEmpty()) put(k, JsonPrimitive(v.take(max))) }
++            s("label", label, 120); s("role", role, 20); s("clipId", clipId); s("uploadId", uploadId); s("takeId", takeId)
++            s("cameraSessionId", cameraSessionId); s("key", key, 300); s("url", url, 2000); s("state", state, 20)
++            seconds?.takeIf { it > 0 && it.isFinite() }?.let { put("seconds", JsonPrimitive(minOf(it, 3600.0))) }
++        })
++    }
++
++    /** The filled slots in the composer's order ("start", "middle 1", "reference 2", "video 1", "audio"). */
++    fun inputs(slots: InputSlots): List<Input> =
++        slots.values.entries.sortedWith(compareBy({ it.key.kind.ordinal }, { it.key.index })).map { (id, v) ->
++            val slot = when (id.kind) {
++                SlotKind.START -> "start"; SlotKind.END -> "end"; SlotKind.AUDIO -> "audio"
++                SlotKind.MIDDLE -> "middle ${id.index + 1}"; SlotKind.IMAGE -> "reference ${id.index + 1}"; SlotKind.VIDEO -> "video ${id.index + 1}"
++            }
++            val state = when { v.progress != null -> "uploading"; v.error != null -> "failed"; else -> null }
++            val name = v.name.substringBeforeLast('.').ifBlank { null }
++            if (id.kind.isImage) Input(slot, "image", name, if (id.kind == SlotKind.IMAGE) v.role else null, url = v.image?.url, state = state)
++            else Input(slot, if (id.kind == SlotKind.AUDIO) "audio" else "video", name, if (id.kind == SlotKind.VIDEO) v.use else null,
++                key = v.media?.key, url = v.media?.url, seconds = v.media?.seconds, state = state)
++        }
++
++    /** The Blender guide clip of a Directed camera (the camera JSON the camera stage applied), when it has one. */
++    fun guide(directed: String?): Input? {
++        val cam = directed?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) as? JsonObject }.getOrNull() } ?: return null
++        if ((cam["mode"] as? JsonPrimitive)?.content != "directed") return null
++        val g = cam["guide"] as? JsonObject ?: return null
++        val v = g["video"] as? JsonObject
++        fun str(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.takeIf { it.isString }?.content
++        val key = str(v, "key"); val url = str(v, "url"); val session = str(g, "cameraSessionId")
++        if (key == null && url == null && session == null) return null
++        return Input("guide", "video", "Blender guide", str(g, "use") ?: "blocking", cameraSessionId = session, key = key, url = url,
++            seconds = (v?.get("seconds") as? JsonPrimitive)?.content?.toDoubleOrNull())
++    }
++
++    /** The draft's `screen`. [at] null leaves the time out (to compare with what was sent). */
++    fun json(tool: String, request: SuiteShotRequest?, inputs: List<Input>, at: Long? = System.currentTimeMillis()): JsonObject = JsonObject(buildMap {
++        put("tool", JsonPrimitive(tool))
++        put("inputs", JsonArray(inputs.take(24).map { it.json() }))
++        at?.let { put("at", JsonPrimitive(it)) }
++        request?.let { r ->
++            val o = SuiteWireJson.encodeToJsonElement(SuiteShotRequest.serializer(), r) as? JsonObject
++            if (o != null) put("request", JsonObject(o - "draft"))
++        }
++    })
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerDrafts.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerDrafts.kt
+index 52d25fdc..94c91c27 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerDrafts.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerDrafts.kt
+@@ -65,6 +65,10 @@ object ComposerDrafts {
+             presetId?.let { put("presetId", JsonPrimitive(it)) }
+             // Speaking: on or off; Auto is left out (the strict server refuses nulls), and reads back as Auto.
+             if (d.tool != ComposerTool.PHOTO) d.speaking?.let { put("speaking", JsonPrimitive(it)) }
++            // Movement → Directed and the pinned model travel with the draft, so Claude's choices and the composer's agree
++            // (server suite/assist.ts requestOf reads directed.camera, engineModel and resolution).
++            d.directed?.let { j -> runCatching { kotlinx.serialization.json.Json.parseToJsonElement(j) as? JsonObject }.getOrNull()?.let { put("directed", JsonObject(mapOf("camera" to it))) } }
++            d.engineModel?.let { e -> put("engineModel", JsonPrimitive(e)); d.resolution?.let { put("resolution", JsonPrimitive(it)) } }
+         }
+         val rig = SuiteRig.from(d.settings)
+         return if (d.tool == ComposerTool.PHOTO) SuiteDrafts.of("photo", count = photoCount, rig = rig, extra = extra)
+@@ -91,7 +95,11 @@ object ComposerDrafts {
+             val url = str("url") ?: return@mapNotNull null
+             studio.muse.app.data.DraftReference(str("uploadId").orEmpty(), url, str("use") ?: "style", str("label"))
+         })
+-        return out.copy(collapsed = false, directed = null)
++        // Directed (Claude's suite_set_draft directed: a camera session's camera and guides) and the pinned model come back.
++        val dir = ((s["directed"] as? JsonObject)?.get("camera") as? JsonObject)?.let { JsonObject(it + ("mode" to JsonPrimitive("directed"))).toString() }
++        val e = (s["engineModel"] as? JsonPrimitive)?.takeIf { it.isString }?.content
++        val r = (s["resolution"] as? JsonPrimitive)?.takeIf { it.isString }?.content
++        return out.copy(collapsed = false, directed = dir, engineModel = e, resolution = if (e == null) null else r)
+     }
+ 
+     /** The characters @-mentioned in the prompt, in order (a model's default rig applies only when there is exactly one). */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index c85a8c6b..9aa5cae1 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -343,7 +343,20 @@ fun SuiteComposerScreen(toolId: String? = null) {
+             else if (ev.type == studio.muse.app.data.ApiEvent.CONNECTED) store.assist.value?.let { a -> runCatching { c.repo.api.suiteAssist(a.id) }.getOrNull()?.let { store.applyAssist(it) } }
+         }
+     }
+-    LaunchedEffect(d, assist?.id) { if (assist != null) { delay(600); store.pushComposerToAssist() } }
++    // One source of truth (owner, 2026-11-11): the shared draft carries the whole screen, so Claude watches the clip and
++    // sees the pictures that are on it (server suite/screen.ts).
++    val screenInputs = buildList {
++        if (d.tool == ComposerTool.SWAP || d.tool == ComposerTool.RECAST) recast.clipId?.let { id ->
++            add(studio.muse.app.ui.screens.suite.SuiteScreen.Input("${d.tool.id}.clip", "video", video.clip?.takeIf { it.id == id }?.name, clipId = id,
++                seconds = video.clip?.takeIf { it.id == id }?.durationSec))
++        }
++        studio.muse.app.ui.screens.suite.SuiteScreen.guide(d.directed)?.let { add(it) }
++        addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(own))
++        if (d.tool != ComposerTool.SWAP && d.tool != ComposerTool.RECAST) addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(slots))
++    }
++    LaunchedEffect(d, req, screenInputs, assist?.id) {
++        if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at) } }
++    }
+     ScreenBox {
+         BoxWithConstraints(Modifier.fillMaxSize()) {
+             val wide = ComposerLayout.wide(maxWidth.value.toInt())
+diff --git a/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt b/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt
+new file mode 100644
+index 00000000..99f46490
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt
+@@ -0,0 +1,60 @@
++package studio.muse.app
++
++import kotlinx.serialization.json.JsonArray
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Test
++import studio.muse.app.data.ImageRef
++import studio.muse.app.data.SuiteMediaRef
++import studio.muse.app.data.SuiteShotRequest
++import studio.muse.app.ui.screens.suite.InputSlots
++import studio.muse.app.ui.screens.suite.SlotId
++import studio.muse.app.ui.screens.suite.SlotKind
++import studio.muse.app.ui.screens.suite.SlotValue
++import studio.muse.app.ui.screens.suite.SuiteScreen
++import studio.muse.app.ui.screens.suite.composer.ComposerDraft
++import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
++
++/** Claude sees what is on screen (owner, 2026-11-11): the shared draft's `screen` (server suite/screen.ts). */
++class SuiteScreenTest {
++    @Test fun slotsBecomeInputsInOrder() {
++        val slots = InputSlots(mapOf(
++            SlotId(SlotKind.IMAGE, 0) to SlotValue("beach.jpg", image = ImageRef(url = "/uploads/u/beach.jpg"), role = "location"),
++            SlotId(SlotKind.START) to SlotValue("open.png", image = ImageRef(url = "/uploads/u/open.png")),
++            SlotId(SlotKind.VIDEO) to SlotValue("walk.mov", media = SuiteMediaRef(key = "u/walk.mov", seconds = 4.0)),
++            SlotId(SlotKind.IMAGE, 1) to SlotValue("late.jpg", progress = 0.4f),
++        ))
++        val i = SuiteScreen.inputs(slots)
++        assertEquals(listOf("start", "reference 1", "reference 2", "video 1"), i.map { it.slot })
++        assertEquals("location", i[1].role)
++        assertEquals("uploading", i[2].state)
++        assertEquals("u/walk.mov", i[3].key)
++    }
++
++    @Test fun directedGuideAndJson() {
++        val cam = """{"mode":"directed","guide":{"video":{"key":"c/grey.mp4","seconds":6},"use":"blocking","cameraSessionId":"cs_1"}}"""
++        val g = SuiteScreen.guide(cam)!!
++        assertEquals("cs_1", g.cameraSessionId)
++        assertEquals("c/grey.mp4", g.key)
++        assertNull(SuiteScreen.guide("""{"mode":"preset"}"""))
++        val j = SuiteScreen.json("swap", SuiteShotRequest(mode = "swap", clipId = "cl_1", prompt = ""), listOf(SuiteScreen.Input("swap.clip", "video", clipId = "cl_1")), at = null)
++        assertNull(j["at"])
++        assertEquals(JsonPrimitive("cl_1"), (j["request"] as JsonObject)["clipId"])
++        assertEquals(1, (j["inputs"] as JsonArray).size)
++        assertNotNull(SuiteScreen.json("shot", null, emptyList())["at"])
++    }
++
++    @Test fun directedAndPinnedModelTravelWithTheDraft() {
++        val cam = """{"mode":"directed","guide":{"video":{"key":"c/grey.mp4"},"use":"blocking"}}"""
++        val d = ComposerDraft(directed = cam, engineModel = "kling", resolution = "1080p")
++        val s = ComposerDrafts.draft(d)
++        val back = ComposerDrafts.restore(s, ComposerDraft())
++        assertEquals("kling", back.engineModel)
++        assertEquals("1080p", back.resolution)
++        assertNotNull(SuiteScreen.guide(back.directed))
++        assertNull(ComposerDrafts.restore(ComposerDrafts.draft(ComposerDraft()), d).directed)
++    }
++}

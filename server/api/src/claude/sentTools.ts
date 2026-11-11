@@ -10,6 +10,7 @@ import { ownChat, pageOf } from './chatTools.js';
 import type { EditTool, ToolEnv } from '../editor/mcpTools.js';
 import { ImageInSchema, SentImageInSchema, sentImagesOf, type SentInput, type SentPage, type SentView } from '../images/sent.js';
 import { assistOf, sentOfDraft } from '../suite/assist.js';
+import { resolveAssist } from '../suite/screen.js';
 import type { Draft } from '../suite/drafts.js';
 
 const PAGES_ = ['suite', 'outfit', 'fill_angles', 'dress_up'] as const;
@@ -19,20 +20,25 @@ const ITEM = { type: 'object', properties: { image: IMG, role: { type: 'string',
 const TARGET = {
   chatId: { type: 'string', description: 'This chat (filled in for you in the app; Claude Code passes it): its page gives the draft or the character' },
   page: { type: 'string', enum: [...PAGES_], description: 'suite (the open composer: Shot, Photo, Talking, UGC, Swap, Recast; default when a shot is open), outfit (the new-outfit sheet), fill_angles (Fill the character sheet), dress_up' },
-  assistId: { type: 'string', description: 'Suite: the shared draft (filled in for you)' },
+  assistId: { type: 'string', description: 'Suite: the draft on screen (filled in for you); also a camera Shot draft (sd_…) or camera session (cs_…)' },
+  cameraSessionId: { type: 'string', description: 'The camera session open on the Camera page (filled in for you): its Shot draft' },
   modelId: { type: 'string', description: 'outfit / fill_angles / dress_up: the character (filled in on her page)' },
   request: { type: 'object', description: 'outfit / dress_up: what the sheet is set to, as its request takes it (description, images, base, outfitImage, imageModel …), so the pick matches' },
 };
 
 /** The ids the person's page has open (the chat's page, else their latest chat's), for calls without them (MCP). */
 async function withPage(env: ToolEnv, a: Record<string, unknown>) {
-  if ((typeof a.assistId === 'string' && a.assistId) || (typeof a.modelId === 'string' && a.modelId)) return a;
+  const page0 = typeof a.page === 'string' ? a.page : undefined;
+  // Any draft id (sa_, a camera Shot draft sd_, a camera session cs_) reaches the draft on screen.
+  if (typeof a.assistId === 'string' && a.assistId) return { ...a, assistId: await resolveAssist(env, { assistId: a.assistId }) };
+  if (typeof a.modelId === 'string' && a.modelId) return a;
+  if ((!page0 || page0 === 'suite') && typeof a.cameraSessionId === 'string' && a.cameraSessionId) return { ...a, assistId: await resolveAssist(env, { assistId: a.cameraSessionId }) };
   const [t] = typeof a.chatId === 'string' && a.chatId
     ? [await ownChat(env.ctx, env.user, a.chatId).catch(() => null)]
     : await env.ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.ownerId, env.user.id), eq(claudeThreads.studioId, env.user.studioId))).orderBy(desc(claudeThreads.updatedAt)).limit(1);
   const ids = (t ? pageOf(t)?.ids : undefined) ?? {};
   const page = typeof a.page === 'string' ? a.page : undefined;
-  if ((!page || page === 'suite') && ids.assistId) return { ...a, assistId: ids.assistId };
+  if ((!page || page === 'suite') && (ids.assistId || ids.cameraSessionId)) return { ...a, assistId: await resolveAssist(env, { assistId: ids.assistId ?? ids.cameraSessionId }) };
   if (ids.modelId) return { ...a, modelId: ids.modelId };
   return a;
 }
