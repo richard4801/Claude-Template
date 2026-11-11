@@ -81,3 +81,68 @@ public enum OutfitNaming {
 
     static func clip(_ s: String) -> String { String(s.prefix(maxLength)).trimmingCharacters(in: .whitespaces) }
 }
+
+/// Which pieces of her base photos an outfit keeps (plans/outfit-head-looks.md §6).
+public struct OutfitKeep: Codable, Hashable, Sendable {
+    public var top = false
+    public var bottom = false
+    public var shoes = false
+    public var accessories = false
+    public init(top: Bool = false, bottom: Bool = false, shoes: Bool = false, accessories: Bool = false) {
+        self.top = top; self.bottom = bottom; self.shoes = shoes; self.accessories = accessories
+    }
+
+    static let names = ["top", "bottom", "shoes", "accessories"]
+    var flags: [Bool] { [top, bottom, shoes, accessories] }
+}
+
+/// A base set's chosen angles (nil = the set's own; a missing one uses the front).
+public struct OutfitBaseAngles: Codable, Hashable, Sendable {
+    public var front: ImageRef?
+    public var tq: ImageRef?
+    public var side: ImageRef?
+    public var back: ImageRef?
+    public init() {}
+    public static let keys = ["front", "tq", "side", "back"]
+    public subscript(i: Int) -> ImageRef? {
+        get { [front, tq, side, back][i] }
+        set { switch i { case 0: front = newValue; case 1: tq = newValue; case 2: side = newValue; default: back = newValue } }
+    }
+    public var isEmpty: Bool { front == nil && tq == nil && side == nil && back == nil }
+}
+
+/// `POST /v1/outfits` `base`: start from her base photos (her profile photos, or one of her outfits), with single angles
+/// swapped, keeping the ticked pieces and the note.
+public struct OutfitBase: Codable, Hashable, Sendable {
+    /// "base" (her profile body photos) or "outfit" (one of her outfits as the base set).
+    public var source = "base"
+    public var outfitId: String?
+    public var angles: OutfitBaseAngles?
+    public var keep: OutfitKeep
+    public var note: String?
+    public init(keep: OutfitKeep, note: String?, outfitId: String? = nil, angles: OutfitBaseAngles? = nil) {
+        self.source = outfitId == nil ? "base" : "outfit"
+        self.outfitId = outfitId
+        self.angles = (angles?.isEmpty ?? true) ? nil : angles
+        self.keep = keep
+        let n = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.note = n.isEmpty ? nil : n
+    }
+
+    /// Anything kept: a tick or a note (else the outfit is made as before).
+    public var keeping: Bool { keep.flags.contains(true) || note != nil }
+
+    /// The sheet's preview line: "Keeps the top (the black lace bra). Changes the bottom, the shoes and the accessories."
+    public var summary: String {
+        let kept = zip(OutfitKeep.names, keep.flags).filter { $0.1 }.map { "the \($0.0)" }
+        let rest = zip(OutfitKeep.names, keep.flags).filter { !$0.1 }.map { "the \($0.0)" }
+        var k = Self.and(kept)
+        if let note { k = k.isEmpty ? note : "\(k) (\(note))" }
+        guard !k.isEmpty else { return "Tick what to keep from her base photos." }
+        return "Keeps \(k). Changes \(rest.isEmpty ? "the rest" : Self.and(rest))."
+    }
+
+    static func and(_ xs: [String]) -> String {
+        xs.count <= 1 ? xs.joined() : xs.dropLast().joined(separator: ", ") + " and " + xs.last!
+    }
+}

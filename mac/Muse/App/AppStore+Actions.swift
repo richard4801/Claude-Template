@@ -549,8 +549,12 @@ extension AppStore {
             showToast("Describe the outfit first")
             return
         }
-        if d.mode != .describe && d.images.isEmpty {
-            showToast(d.mode == .photo ? "Drop a product photo first" : "Drop your angle images first")
+        if d.mode == .photo && d.images.isEmpty {
+            showToast("Drop a product photo first")
+            return
+        }
+        if d.mode == .own && d.own.first == nil {
+            showToast("Add the front photo first")
             return
         }
         if d.mode != .own && outfitSetEstimate > balance.balance {
@@ -562,8 +566,15 @@ extension AppStore {
         let draft = d
         perform { [self] in
             do {
-                var refs: [ImageRef] = []
-                for u in draft.images { refs.append(try await uploadImage(u)) }
+                // "My own set": each box is its own angle (front, ¾, side, back); a skipped one is sent empty, never shifted.
+                var refs: [ImageRef?] = []
+                if draft.mode == .own {
+                    for u in draft.own {
+                        if let u { refs.append(try await uploadImage(u)) } else { refs.append(nil) }
+                    }
+                } else {
+                    for u in draft.images { refs.append(try await uploadImage(u)) }
+                }
                 // §5: a name from the start (what was typed, the product photo's file name, else "Outfit · 11 Nov"); it
                 // can be changed in the preview before it's added. Never "Product look" / "My set".
                 let typed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -573,6 +584,7 @@ extension AppStore {
                 var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(OutfitNaming.maxLength)), mode: draft.mode.rawValue,
                                               description: draft.description, images: refs)
                 if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
+                if let base = draft.base, base.keeping { req.base = base } // §6: keep pieces from her base photos
                 let o = try await api.createOutfit(req)
                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
                 outfitSheet?.outfitId = o.id
