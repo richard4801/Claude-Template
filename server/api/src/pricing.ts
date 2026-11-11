@@ -12,6 +12,10 @@ export type RenderReq = {
   engine?: string; steps?: number; use?: string; lipSync?: boolean; takes?: number; clipSeconds?: number | null;
   /** Replicate only: the quality and the $/output-second it was priced at (stored on the job at submit time). */
   quality?: string; pricePerSec?: number;
+  /** A swap engine's own output length range (Genjutsu: 4–30 s), set by the server (engines/service.ts applySwapEngine); absent = 4–15. */
+  minSec?: number; maxSec?: number;
+  /** A swap engine's own resolution label for the ledger line (Genjutsu: 480p/720p/1080p); absent = the quality's. */
+  resolutionLabel?: string;
   /** Upscale only (engine "upscale"): the size, the take's seconds, and the GPU seconds and dollars it was priced at. */
   size?: string; seconds?: number; gpuSeconds?: number; usd?: number;
 };
@@ -95,15 +99,17 @@ export const upscaleLabel = (size?: string) => `${UPSCALE.label} · ${UPSCALE_SI
 /** A replicate job's quality (Draft when it names none, the default). */
 export const qualityOf = (r: RenderReq): Quality => (QUALITY_IDS as string[]).includes(r.quality ?? '') ? r.quality as Quality : 'draft';
 /** Whole output seconds Replicate renders for a clip: rounded up, 4–15 (no clip length = the 9.4 s sample). */
-export const replicateSeconds = (clipSeconds?: number | null) =>
-  Math.min(REPLICATE_MAX_SEC, Math.max(REPLICATE_MIN_SEC, Math.ceil((clipSeconds ?? SAMPLE_CLIP_SEC) - 0.001)));
+export const replicateSeconds = (clipSeconds?: number | null, min = REPLICATE_MIN_SEC, max = REPLICATE_MAX_SEC) =>
+  Math.min(max, Math.max(min, Math.ceil((clipSeconds ?? SAMPLE_CLIP_SEC) - 0.001)));
+/** Whole output seconds of a hosted take, in the request's engine range (Genjutsu 4–30 s; else 4–15 s). */
+export const hostedSeconds = (r: RenderReq) => replicateSeconds(r.clipSeconds, r.minSec ?? REPLICATE_MIN_SEC, r.maxSec ?? REPLICATE_MAX_SEC);
 const pricePerSecOf = (r: RenderReq) => r.pricePerSec ?? QUALITY_PRICE_DEFAULTS[qualityOf(r)];
 /** Rough wall time of one Replicate take (queue + render + download + trim), for progress and ETAs only. */
-export const replicateTakeSeconds = (r: RenderReq) => 45 + 10 * replicateSeconds(r.clipSeconds) * (qualityOf(r) === 'hd' ? 1.5 : qualityOf(r) === 'draft' ? 0.6 : 1);
+export const replicateTakeSeconds = (r: RenderReq) => 45 + 10 * hostedSeconds(r) * (qualityOf(r) === 'hd' ? 1.5 : qualityOf(r) === 'draft' ? 0.6 : 1);
 /** "about $0.56 · 7 s" (+ " · 2 takes"): the price line under the quality picker. */
 export function priceLine(r: RenderReq) {
   const n = Math.max(1, r.takes ?? 1);
-  return `about ${money(totalCost(r))} · ${replicateSeconds(r.clipSeconds)} s${n > 1 ? ` · ${n} takes` : ''}`;
+  return `about ${money(totalCost(r))} · ${hostedSeconds(r)} s${n > 1 ? ` · ${n} takes` : ''}`;
 }
 /** "Video · Standard 768P · 7 s" (the ledger line); with several takes "Video · Standard 768P · 2 × 7 s". */
 export function videoNote(r: RenderReq, secondsPerTake: number[]) {
@@ -111,8 +117,8 @@ export function videoNote(r: RenderReq, secondsPerTake: number[]) {
   const fmt = (v: number) => String(Math.round(v * 10) / 10);
   const allSame = secondsPerTake.every(v => v === secondsPerTake[0]);
   const secs = secondsPerTake.length > 1 ? (allSame ? `${secondsPerTake.length} × ${fmt(secondsPerTake[0]!)} s` : `${fmt(secondsPerTake.reduce((a, b) => a + b, 0))} s`)
-    : `${fmt(secondsPerTake[0] ?? replicateSeconds(r.clipSeconds))} s`;
-  return `Video · ${q.label} ${q.resolution} · ${secs}`;
+    : `${fmt(secondsPerTake[0] ?? hostedSeconds(r))} s`;
+  return `Video · ${q.label} ${r.resolutionLabel ?? q.resolution} · ${secs}`;
 }
 
 export const secPerLen = (len: number) => SEC_PER_STEP_5S * Math.pow(len / BASE_LEN, 1.3);
@@ -120,7 +126,7 @@ export const secPerLen = (len: number) => SEC_PER_STEP_5S * Math.pow(len / BASE_
 /** Seconds actually rendered: the first 5.2 s, or the whole clip (max 15 s). */
 export function lengthSec(r: RenderReq) {
   const clip = r.clipSeconds ?? null;
-  if (isReplicate(r)) return Math.min(clip ?? SAMPLE_CLIP_SEC, MAX_CLIP_SEC);
+  if (isReplicate(r)) return Math.min(clip ?? SAMPLE_CLIP_SEC, r.maxSec ?? MAX_CLIP_SEC);
   if ((r.use ?? 'first') === 'full') return Math.min(clip ?? 9.4, MAX_CLIP_SEC);
   return Math.min(BASE_LEN, clip ?? BASE_LEN);
 }
@@ -134,7 +140,7 @@ export function estMin(r: RenderReq) {
 }
 /** Dollars for one take. */
 export function estCost(r: RenderReq) {
-  if (isReplicate(r)) return pricePerSecOf(r) * replicateSeconds(r.clipSeconds);
+  if (isReplicate(r)) return pricePerSecOf(r) * hostedSeconds(r);
   if (isUpscale(r)) return r.usd ?? 0;
   const L = lengthSec(r);
   return r.engine === 'viggle' ? VIGGLE_COST_5S * (L / BASE_LEN) : estMin(r) / 60 * GPU_PER_HOUR;
@@ -152,7 +158,7 @@ export const takeLabel = (r: RenderReq) => isReplicate(r) ? QUALITY_INFO[quality
 
 /** "Generate · 10 min · $0.67" (the app's button label). */
 export function genLabel(r: RenderReq) {
-  if (isReplicate(r)) return `Generate · ${replicateSeconds(r.clipSeconds)} s · ${money(totalCost(r))}${nTakes(r) > 1 ? ` · ${nTakes(r)} takes` : ''}`;
+  if (isReplicate(r)) return `Generate · ${hostedSeconds(r)} s · ${money(totalCost(r))}${nTakes(r) > 1 ? ` · ${nTakes(r)} takes` : ''}`;
   const m = totalMin(r);
   const time = m < 2 ? `${Math.round(m * 60)}s` : `${Math.round(m)} min`;
   return `Generate · ${time} · ${money(totalCost(r))}${nTakes(r) > 1 ? ` · ${nTakes(r)} takes` : ''}`;

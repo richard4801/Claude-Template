@@ -20,7 +20,7 @@ import { mediaToolsAvailable, padTo, probe, restoreAudio, stripAudio, thumbnail 
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 import { modelById } from '../suite/registry.js';
-import { HF_SWAP_MIN_SEC } from '../engines/purposes.js';
+import { GENJUTSU_NO_ACCESS, GENJUTSU_RES, HF_SWAP_MIN_SEC, swapEngineById } from '../engines/purposes.js';
 import type { VideoProvider } from '../suite/providers.js';
 
 type Line = Pick<Ctx['replicate'], 'create' | 'get' | 'wait' | 'cancel' | 'download'>;
@@ -53,6 +53,15 @@ export function higgsfieldLine(hf: VideoProvider): Line {
   } as Line;
 }
 
+/**
+ * Genjutsu motion transfer's input (docs.higgsfield.ai/docs/models/genjutsu/motion-transfer): the clip, her pictures (≤ 8,
+ * face first), the swap prompt as plain direction (Genjutsu reads "image 1", not H3's <Image 1> tokens), the resolution.
+ */
+export function genjutsuInput(videoUrl: string, imageUrls: string[], prompt: string | null | undefined, resolution: string) {
+  const text = (prompt ?? '').replace(/<Image (\d+)>/g, 'image $1').replace(/<Video 1>/g, 'the source video').replace(/<Video (\d+)>/g, 'video $1').slice(0, 10000);
+  return { video_url: videoUrl, image_urls: imageUrls.slice(0, 8), ...(text.trim() ? { prompt: text } : {}), resolution };
+}
+
 /** WS13: the resolution a chosen hosted swap model runs a quality at (its own list; H3 Lite has no 2K). */
 function swapResolution(id: string, quality: P.Quality) {
   const m = modelById(id), want = P.QUALITY_INFO[quality].resolution;
@@ -74,6 +83,7 @@ export function failureOf(e: unknown): { message: string; code: string; retryabl
     if (e.kind === 'rate_limited') return { message: "Busy right now · you weren't charged. Try again in a minute.", code: 'provider_rate_limited', retryable: true };
     if (e.kind === 'timeout') return { message: "This took too long and was stopped · you weren't charged", code: 'provider_timeout', retryable: true };
     if (e.kind === 'out_of_credit') return { message: OUT_OF_CREDIT, code: 'provider_out_of_credit', retryable: true };
+    if (e.kind === 'unavailable' && e.message === GENJUTSU_NO_ACCESS) return { message: GENJUTSU_NO_ACCESS, code: 'provider_no_access', retryable: false };
     if (e.kind === 'unavailable') return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: false };
     return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: true };
   }
@@ -176,10 +186,13 @@ export class ReplicateVideo {
       const src = path.join(tmp, `source${path.extname(clip.storageKey) || '.mp4'}`);
       await pipeline(obj.body, fs.createWriteStream(src));
       const info = await probe(c.FFPROBE_PATH, src);
-      const len = Math.min(P.REPLICATE_MAX_SEC, Number.isFinite(info.duration) && info.duration > 0 ? info.duration : (r.clipSeconds ?? clip.durationSec));
+      // Higgsfield Genjutsu (motion transfer): its own 4–30 s range (Light 4–15 s); no fallback to another model.
+      const gj = swapEngineById(r.swapEngine ?? '')?.genjutsu ?? null;
+      if (gj && !ctx.suite.providers.higgsfield.configured()) throw new ReplicateError("Higgsfield isn't set up on the server", 'unavailable');
+      const len = Math.min(gj?.maxSec ?? P.REPLICATE_MAX_SEC, Number.isFinite(info.duration) && info.duration > 0 ? info.duration : (r.clipSeconds ?? clip.durationSec));
       // The owner's Higgsfield H3 (swapEngine h3-hf) takes 5–15 s: a shorter clip is padded to 5 s.
       let onHf = r.swapEngine === 'h3-hf' && ctx.suite.providers.higgsfield.configured();
-      const D = onHf ? Math.max(HF_SWAP_MIN_SEC, P.replicateSeconds(len)) : P.replicateSeconds(len);
+      const D = gj ? P.replicateSeconds(len, gj.minSec, gj.maxSec) : onHf ? Math.max(HF_SWAP_MIN_SEC, P.replicateSeconds(len)) : P.replicateSeconds(len);
       // Lip-sync guard: unless the clip is marked as the performer talking, the model gets the clip without sound (it
       // copies the motion, which already carries the beat) and the original sound goes back on the result.
       // Prompt scripts: the request carries the resolved switch/detection; older jobs fall back to the clip's check.
@@ -200,7 +213,7 @@ export class ReplicateVideo {
       // 3. Short-lived signed links (the bucket is never public).
       const ttl = c.REPLICATE_INPUT_URL_TTL_SEC;
       const videoUrl = await ctx.storage.presignGet(state.paddedKey!, ttl);
-      const refs = ((r.references ?? []) as { label: string; image: ImageRef }[]).slice(0, 9);
+      const refs = ((r.references ?? []) as { label: string; image: ImageRef }[]).slice(0, gj?.maxImages ?? 9);
       const imageUrls: string[] = [];
       for (const x of refs) {
         const key = await ctx.images.storedKey(x.image, job.studioId);
@@ -213,10 +226,11 @@ export class ReplicateVideo {
       const replicateInput = { prompt: job.prompt, reference_video_urls: [videoUrl], reference_image_urls: imageUrls, duration: D,
         ...(r.videoNoResolution ? {} : { resolution: r.swapEngine && r.swapEngine !== 'h3-hf' ? swapResolution(r.swapEngine, quality) : r.swapEngine === 'h3-hf' ? '2K' : P.QUALITY_INFO[quality].resolution }), ratio: '9:16' };
       // Higgsfield's H3 reference-to-video: the clip is the reference video, the model's photos the reference images.
-      let input: Record<string, unknown> = onHf
-        ? { prompt: job.prompt, video_urls: [videoUrl], image_urls: imageUrls, duration: D, resolution: '2K', aspect_ratio: '9:16', aigc_watermark: false }
+      let input: Record<string, unknown> = gj ? genjutsuInput(videoUrl, imageUrls, job.prompt, GENJUTSU_RES[quality] ?? '720p')
+        : onHf ? { prompt: job.prompt, video_urls: [videoUrl], image_urls: imageUrls, duration: D, resolution: '2K', aspect_ratio: '9:16', aigc_watermark: false }
         : replicateInput;
-      if (onHf) rep = higgsfieldLine(ctx.suite.providers.higgsfield);
+      if (gj && !imageUrls.length) throw new ReplicateError('Genjutsu needs at least one picture of her', 'failed');
+      if (onHf || gj) rep = higgsfieldLine(ctx.suite.providers.higgsfield);
       /** Higgsfield out of credit, down or busy at the start of a take → that take and the rest run on Replicate H3. */
       const toReplicate = (e: unknown) => {
         if (!onHf || !ctx.replicate.configured || !(e instanceof ReplicateError) || !['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)) return false;
@@ -266,6 +280,8 @@ export class ReplicateVideo {
         // is the clip's audio. Skipping the re-encode also keeps a 2K take from running the API instance out of memory.
         // Keep audio off: drop the audio track with a stream copy (no re-encode, almost no memory).
         if (r.keepAudio === false) await stripAudio(c.FFMPEG_PATH, raw, take);
+        // Genjutsu: the clip's own sound always goes back on (cut to the take's length).
+        else if (gj && info.audioCodec) await restoreAudio(c.FFMPEG_PATH, raw, src, take, info.audioCodec, { shortest: true });
         else if (muteSource) await restoreAudio(c.FFMPEG_PATH, raw, src, take, info.audioCodec);
         else await fs.promises.copyFile(raw, take);
         const out = await probe(c.FFPROBE_PATH, take);

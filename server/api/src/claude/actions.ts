@@ -280,7 +280,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       return { summary: `Delete the camera session “${c?.title ?? a.cameraSessionId}”`, method: 'DELETE', url: `/v1/camera-sessions/${enc(a.cameraSessionId as string)}` };
     } }),
   gated({ name: 'edit_helper', title: 'Run an Edit AI helper', scope: 'edit:write', gate: 'spend',
-    description: 'Runs one of Edit\'s AI helpers on a take or upload (kind from edit_jobs {features: true}: reverse, stabilize, slowmo, translate, separate, captions, cuts, matte, denoise…, with its options), as the helper buttons do. The result arrives as a helper job (edit_jobs). Paid or free: without confirm it gives the price.',
+    description: 'Runs one of Edit\'s AI helpers on a take or upload (kind from edit_jobs {features: true}: reverse, stabilize, slowmo, translate, separate, captions, cuts, matte, denoise, objectswap {images: [{uploadId}], prompt?, resolution?}, restyle {presetId, images?, prompt?, resolution?}…, with its options), as the helper buttons do. The result arrives as a helper job (edit_jobs). Paid or free: without confirm it gives the price.',
     props: { kind: str('The helper', 30), takeId: str('The take', 80), uploadId: str('Or an upload', 80), options: { type: 'object', description: 'The helper\'s options' } }, required: ['kind'],
     plan: async (env, a) => {
       const body = compact({ kind: a.kind, takeId: typeof a.takeId === 'string' ? a.takeId : undefined, uploadId: typeof a.uploadId === 'string' ? a.uploadId : undefined,

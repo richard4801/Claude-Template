@@ -12,4 +12,11 @@ export async function registerEngineRoutes(app: FastifyInstance, ctx: Ctx) {
   // 4c: "Show provider names to members" and the per-model "hide from members" switches (owner).
   app.get('/v1/engines/members', { config: { owner: true } }, async req => mc.membersView(req.user));
   app.patch('/v1/engines/members', { config: { owner: true } }, async req => mc.setMembers(req.user, req.body));
+  // Genjutsu (Higgsfield): does the server's key have access? Free (reads the restyle preset list; no generation, no spend).
+  app.get('/v1/engines/genjutsu/access', { config: { owner: true } }, async () => {
+    const r = await (ctx.suite.providers.higgsfield as { genjutsuPresets?: () => Promise<{ access: string; presets: unknown[]; detail?: string }> }).genjutsuPresets?.()
+      ?? { access: 'unknown', presets: [], detail: 'Higgsfield isn’t set up on the server' };
+    return { access: r.access, presets: r.presets.length, ...(r.detail ? { detail: r.detail } : {}),
+      note: 'Checked with the free restyle preset list. Motion transfer and object swap are confirmed on their first real run.' };
+  });
 }
