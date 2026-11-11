@@ -282,7 +282,7 @@ extension SnapshotRunner {
             var p = EditV2.fromV1(EditList(sourceTakeId: "rx_oval", sourceDurationSec: 3), EditV2.SourceFacts(width: 360, height: 640, fps: 24))
             p.canvas.background = "#FF0000"
             if matte { p = p.addingAsset(EditV2.Asset(id: "bg2", kind: .video, upload: "up_oval", durationSec: 3, width: 64, height: 64, hasAudio: false)) }
-            guard let q = p.updating("c1", { it in
+            guard let q = look == nil && !matte ? p : p.updating("c1", { it in
                 guard case .video(var v) = it else { return }
                 v.look = look
                 if matte { v.alphaMatte = EditV2.AlphaMatte(asset: "bg2") }
