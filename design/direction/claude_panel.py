@@ -26,6 +26,36 @@ POSITIVE = {"b": "#7BD88F", "a": "#2F6B3A", "c": "#4E6B45"}
 STILL = R.img(R.PV / "angles/mcu.webp")
 I = R.icon
 
+DANGER = {"b": "#FF6B5E", "a": "#B5121B", "c": "#A8382F"}
+ACCENT = {"b": "#F2A93B", "a": "#B5121B", "c": "#4E6B45"}
+# The orb (owner, 2026-11-12): MUSE's own design, not Siri's. A small dark glass sphere with one swirling light band tinted
+# by the theme's accent. The state sets the band's angle, its brightness and the glow (still frames of the motion).
+ORB_STATES = {
+    "idle":      dict(rot=210, band=.55, glow=.10, blur=1.2, label="Idle", note="Slow breathing"),
+    "writing":   dict(rot=300, band=.95, glow=.28, blur=0.8, label="Thinking, writing", note="Faster swirl, a pulse per chunk"),
+    "operating": dict(rot=20,  band=.85, glow=.35, blur=0.6, label="Operating MUSE", note="Directional sweep, a flash per action", sweep=True),
+    "waiting":   dict(rot=250, band=.70, glow=.45, blur=1.6, label="Waiting for you", note="Steady glow, slow pulse"),
+    "error":     dict(rot=200, band=.80, glow=.30, blur=1.0, label="Error", note="Red tint", red=True),
+}
+def orb(size, state, k):
+    st = ORB_STATES[state]
+    red = st.get("red")
+    # Error: the whole glass takes the danger tint and the band goes grey and still, so it reads as an error even where
+    # the theme's accent is itself red (Editorial).
+    c = "#B9B6B0" if red else ACCENT[k]
+    halo = DANGER[k] if red else ACCENT[k]
+    g = st["glow"]
+    fill = f"background:radial-gradient(circle at 50% 62%,{DANGER[k]}cc,#2a0d0c 75%);" if red else ""
+    def ring(rot, alpha, w):
+        return (f'<i style="position:absolute;inset:6%;border-radius:50%;transform:rotate({rot}deg);opacity:{alpha};filter:blur({size*st["blur"]/30:.2f}px);'
+                f'background:radial-gradient(ellipse 48% 20% at 50% 54%,transparent {62-w}%,{c} 74%,#fff9 78%,{c} 82%,transparent {90+w}%)"></i>')
+    sweep = (f'<i style="position:absolute;inset:0;border-radius:50%;background:linear-gradient(100deg,transparent 30%,{c}66 50%,transparent 70%);mix-blend-mode:screen"></i>'
+             if st.get("sweep") else "")
+    return (f'<span class="orb" role="img" aria-label="Claude" style="{fill}width:{size}px;height:{size}px;box-shadow:0 0 {size*.55:.0f}px {halo}{int(g*255):02x},inset 0 0 0 .5px rgba(255,255,255,.16)">'
+            f'{ring(st["rot"] % 180 - 20, st["band"] * (.45 if red else 1), 0)}{ring(st["rot"] % 180 + 40, st["band"] * .45, 4) if not red else ""}{sweep}'
+            f'<i style="position:absolute;left:22%;top:10%;width:40%;height:26%;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.45),transparent)"></i></span>')
+ORB_CSS = ".orb{position:relative;display:inline-block;flex:none;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 50% 62%,#24272c,#0a0b0d 72%)}"
+
 
 def css(t, k):
     f = t["text"]
@@ -38,7 +68,7 @@ def css(t, k):
 .menu{{height:28px;padding:0 8px;border-radius:var(--rp);display:inline-flex;align-items:center;gap:4px;font:500 13px/18px "{f}";color:var(--ink)}}
 .ib{{width:28px;height:28px;display:grid;place-items:center;color:var(--ink2);border-radius:var(--rp)}}
 .feed{{flex:1;min-height:0;overflow:hidden;padding:4px 16px 0;display:flex;flex-direction:column;gap:16px}}
-.who{{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}}
+.who{{display:flex;align-items:center;gap:8px;margin-bottom:4px}}
 .you{{align-self:flex-end;max-width:86%;background:var(--field);border-radius:var(--rk);padding:8px 12px;font:400 14px/20px "{f}"}}
 .card{{background:var(--raised);border-radius:var(--rk);padding:12px}}
 .step{{display:flex;gap:8px;align-items:flex-start;font:400 13px/18px "{f}";padding:3px 0}}
@@ -70,7 +100,7 @@ def css(t, k):
 .ph{{font:400 14px/20px "{f}";color:var(--ink2);min-height:40px}}
 .send{{width:32px;height:32px;border-radius:calc(var(--rk) * .8);background:var(--field);color:var(--ink2);display:grid;place-items:center;margin-left:auto}}
 :root{{--pos:{POSITIVE[k]}}}
-"""
+"""+ORB_CSS
 
 
 def panel(t, k):
@@ -82,7 +112,7 @@ def panel(t, k):
     undo = f'<span class="undo">{I("arrow-counter-clockwise", 14)}Undo</span>'
     return f"""<div class="p">
  <div class="hd">
-  <div class="row gap2"><div class="t17 grow">Claude</div>
+  <div class="row gap2">{orb(24, "idle", k)}<div class="t17 grow">Claude</div>
    <div class="menu">Opus 5.5{I("caret-down", 14)}</div>
    <div class="ib" title="New chat">{I("plus", 18)}</div><div class="ib" title="History">{I("clock-counter-clockwise", 18)}</div></div>
   <div><span class="pill">{I("eye", 14)}Sees: Suite · Swap</span></div>
@@ -90,7 +120,7 @@ def panel(t, k):
  <div class="feed">
   <div class="you">Swap the outfit to a hoodie, keep the same scene and mood, and give me a quick plan.</div>
   <div>
-   <div class="who"><span class="t13m">Claude</span><span class="t11 ink2">2:14 PM</span></div>
+   <div class="who">{orb(14, "writing", k)}<span class="t13m">Claude</span><span class="t11 ink2">2:14 PM</span></div>
    <div class="card"><div class="t13m" style="margin-bottom:6px">Plan: outfit swap</div>{plan}</div>
   </div>
   <div class="card row gap3" style="align-items:flex-start">
@@ -110,7 +140,7 @@ def panel(t, k):
   </div>
  </div>
  <div class="act">
-  <div class="row gap2 t13"><span class="grow">Opening Swap… setting outfit…</span><span class="t11 ink2">42%</span><span class="key">Esc to stop</span></div>
+  <div class="row gap2 t13">{orb(16, "operating", k)}<span class="grow">Opening Swap… setting outfit…</span><span class="t11 ink2">42%</span><span class="key">Esc to stop</span></div>
   <div class="bar"><i style="width:42%"></i></div>
  </div>
  <div class="chips"><span class="chip">{I("play-circle", 14)}Watch my clip</span><span class="chip">{I("pencil-simple", 14)}Write the prompt</span><span class="chip">{I("coins", 14)}Check the price</span></div>
@@ -121,17 +151,55 @@ def panel(t, k):
 </div>"""
 
 
+def app_backdrop(t):
+    """A plain MUSE page under the floating panel (sidebar, the frame, a filmstrip). Chrome only: the panel is the subject."""
+    still = R.img(R.PV / "angles/ms.webp")
+    side = "".join(f'<div class="t13" style="padding:8px 12px;border-radius:var(--rp);{"background:var(--field);" if i == 1 else ""}color:{"var(--ink)" if i == 1 else "var(--ink2)"}">{n}</div>'
+                   for i, n in enumerate(["Home", "Suite", "Edit", "Library", "Cast", "Queue"]))
+    strip = "".join(f'<div style="flex:1;height:64px;border-radius:var(--rp);background:url({still}) center/cover;opacity:{.5 + .1 * (i % 3)}"></div>' for i in range(8))
+    return (f'<div style="position:absolute;inset:0;display:flex">'
+            f'<div style="width:200px;background:var(--raised);padding:20px 12px;display:flex;flex-direction:column;gap:4px"><div class="t17" style="padding:0 12px 16px">MUSE</div>{side}</div>'
+            f'<div style="flex:1;padding:32px;display:flex;flex-direction:column;gap:24px"><div class="t17">Swap</div>'
+            f'<div style="flex:1;border-radius:var(--rc);background:url({still}) center/cover"></div><div style="display:flex;gap:8px">{strip}</div></div></div>')
+
+def floating(t, k):
+    c = ACCENT[k]
+    shadow = "0 24px 64px rgba(0,0,0,.55)" if k == "b" else "0 24px 64px rgba(20,18,16,.22)"
+    return (app_backdrop(t) +
+            f'<div style="position:absolute;right:24px;top:24px;bottom:24px;width:400px;border-radius:calc(var(--rc) + 4px);overflow:hidden;'
+            f'background:var(--canvas);box-shadow:{shadow},0 0 0 1px {c}59,0 0 28px {c}26">{panel(t, k)}</div>'
+            f'<div class="t11 ink2" style="position:absolute;right:40px;bottom:30px;opacity:.0">resize</div>')
+
+def closed(t, k):
+    """The panel closed while Claude operates MUSE: the floating orb with "Claude is using MUSE · Esc to stop"."""
+    c = ACCENT[k]
+    ring = f'<div style="position:absolute;left:520px;top:640px;width:150px;height:40px;border-radius:12px;box-shadow:0 0 0 2px {c}aa,0 0 18px {c}55"></div>'
+    pill = (f'<div style="position:absolute;left:50%;top:18px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:6px 14px 6px 8px;'
+            f'border-radius:999px;background:var(--raised);box-shadow:0 8px 24px rgba(0,0,0,.3),0 0 0 1px {c}40">{orb(22, "operating", k)}'
+            f'<span class="t13">Claude is using MUSE</span><span class="key">Esc to stop</span></div>')
+    return app_backdrop(t) + ring + pill
+
+def states(t, k):
+    cells = "".join(f'<div style="display:flex;flex-direction:column;align-items:center;gap:10px;width:140px">{orb(56, s, k)}'
+                    f'<div class="t13m">{v["label"]}</div><div class="t11 ink2" style="text-align:center">{v["note"]}</div></div>'
+                    for s, v in ORB_STATES.items())
+    return f'<div style="padding:32px 24px;display:flex;justify-content:space-between">{cells}</div>'
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    W, H = 400, 1040
+    pages = [(f"panel-{k}", panel, k, 400, 1040) for k in ("b", "a", "c")]
+    pages += [(f"float-{k}", floating, k, 1440, 900) for k in ("b", "a", "c")]
+    pages += [(f"orb-states-{k}", states, k, 760, 200) for k in ("b", "a", "c")]
+    pages += [("closed-b", closed, "b", 1440, 900)]
     with tempfile.TemporaryDirectory() as tmp:
         spec = []
-        for k in ("b", "a", "c"):
+        for name, fn, k, W, H in pages:
             t = THEMES[k]
-            f = Path(tmp) / f"panel-{k}.html"
+            f = Path(tmp) / f"{name}.html"
             f.write_text(f'<!doctype html><meta charset="utf-8"><style>{R.css(t)}{css(t, k)}</style>'
-                         f'<body style="width:{W}px;height:{H}px;overflow:hidden">{panel(t, k)}</body>')
-            spec.append({"html": f.as_uri(), "png": str(OUT / f"panel-{k}.png"), "w": W, "h": H})
+                         f'<body style="width:{W}px;height:{H}px;overflow:hidden;position:relative">{fn(t, k)}</body>')
+            spec.append({"html": f.as_uri(), "png": str(OUT / f"{name}.png"), "w": W, "h": H})
         js = Path(tmp) / "shot.js"
         js.write_text("""const { chromium } = require('playwright');
 (async () => { const jobs = JSON.parse(process.argv[2]); const b = await chromium.launch();
