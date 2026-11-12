@@ -60,9 +60,10 @@ text into safe area" became "Fix the safe area" to stay within 4. Icons are Phos
 checks). The magic-wand icon is not used (design review).
 
 ## Patches (apps; NOT compiled for Mac in this session, there is no Swift here)
-- `plans/patches/claude-live-suggestions-mac.patch`. **Apply base:** prod + Mac bundle-9 in this order:
-  `edit-panels-clean-mac.patch`, `link-to-uploads-mac.patch`, `note-icon-mac.patch` (branch claude/edit-panels-clean),
-  then `edit-continue-draft-mac.patch` (claude/edit-continue-draft). HDR-5 (`hdr-export-mac.patch`) is already in prod.
+- `plans/patches/claude-live-suggestions-mac.patch`. **Apply base:** prod 1f08a6a + Mac bundle-9 in its full order:
+  `edit-panels-clean-mac` → `link-to-uploads-mac` → `note-icon-mac` (branch claude/edit-panels-clean) →
+  `edit-continue-draft-mac` (claude/edit-continue-draft) → `hdr-export-5-mac` (claude/hdr-export @a36c554f). Checked: the
+  chain applies, and this patch applies on top with plain `git apply` (no conflicts).
   MuseCore `ClaudeSuggest.swift` (query, steady order, demo copy of the Edit rules) + tests; `ClaudeAPI.claudeSuggestions`;
   AppStore live refresh (debounced, after replies, jobs, composer); Edit reports its facts; Suite panel live chips;
   crossfade in ChatComposer. CI: new step "Claude live chips check" (`claude-chips-check.txt`, FAIL lines fail CI) with

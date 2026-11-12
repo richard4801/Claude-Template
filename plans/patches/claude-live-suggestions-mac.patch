@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
-index 20e91e0..5e54825 100644
+index 00fb0cb..121fce0 100644
 --- a/.github/workflows/mac.yml
 +++ b/.github/workflows/mac.yml
 @@ -163,6 +163,19 @@ jobs:
@@ -273,10 +273,10 @@ index 0000000..4efaf07
 +    }
 +}
 diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
-index c89ac23..7059c35 100644
+index ae8033f..b16b785 100644
 --- a/mac/Muse/App/SnapshotRunner.swift
 +++ b/mac/Muse/App/SnapshotRunner.swift
-@@ -180,6 +180,7 @@ enum SnapshotRunner {
+@@ -181,6 +181,7 @@ enum SnapshotRunner {
              await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
              await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
              await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
