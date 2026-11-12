@@ -318,8 +318,8 @@ class RealApiContractTest {
         assertEquals(1, owner.sheetVersions(demo.id).size)
         // Dress up was removed (plans/outfit-faces.md): every outfit now has its own face close-ups.
         expectCode("dress_up_removed") { owner.startDressUp(demo.id, studio.muse.app.data.DressUpRequest(studio.muse.app.data.ImageRef.asset("c_front"), "Silver night", "both")) }
-        // Image models: the owner sees six steps (simulated server: no catalog).
-        assertEquals(studio.muse.app.data.Sheet.STEPS, owner.imageModels().steps.map { it.step })
+        // Image models: the owner sees four steps (simulated server: no catalog); Dress up's dressA / dressB are hidden since it was removed.
+        assertEquals(listOf("shot", "edit", "realism", "upscale"), owner.imageModels().steps.map { it.step })
         // Archive: hidden from the list, listed as archived, back again.
         assertTrue(owner.archiveModel(SampleData.NOOR, true).archived)
         assertTrue(owner.listModels().none { it.id == SampleData.NOOR })
