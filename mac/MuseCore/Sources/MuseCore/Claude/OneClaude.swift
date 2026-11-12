@@ -93,13 +93,16 @@ public struct ClaudeUI: Codable, Hashable, Sendable {
     /// approve_result: the action it answers and how it ended (done, failed, declined).
     public var action: String?
     public var status: String?
+    /// A card (claude/cards.ts): plan, clip, what changed, approve with price lines. Drawn instead of the plain line.
+    public var card: ClaudeCardBox?
 
     public init(page: String? = nil, id: String? = nil, tool: String? = nil, label: String? = nil, ask: Bool? = nil, from: ClaudePage? = nil,
                 remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil,
-                approve: String? = nil, gate: String? = nil, summary: String? = nil, priceUsd: Double? = nil, action: String? = nil, status: String? = nil) {
+                approve: String? = nil, gate: String? = nil, summary: String? = nil, priceUsd: Double? = nil, action: String? = nil, status: String? = nil, card: ClaudeCardBox? = nil) {
         self.page = page; self.id = id; self.tool = tool; self.label = label; self.ask = ask; self.from = from
         self.remembered = remembered; self.text = text; self.suggest = suggest; self.area = area; self.characterId = characterId
         self.approve = approve; self.gate = gate; self.summary = summary; self.priceUsd = priceUsd; self.action = action; self.status = status
+        self.card = card
     }
 
     /// Where it goes, as the person reads it ("AI Suite, Shot", "Take, Sunset walk 3").

@@ -15,6 +15,10 @@ struct OneClaudePanel: View {
     @State private var deleteAsk: OneClaudeDeleteAsk?
 
     static let width: CGFloat = 380
+    /// The floating panel's move (translation, ended).
+    var onDrag: ((CGSize, Bool) -> Void)?
+
+    init(onDrag: ((CGSize, Bool) -> Void)? = nil) { self.onDrag = onDrag }
 
     var body: some View {
         let o = store.oneClaude
@@ -25,9 +29,10 @@ struct OneClaudePanel: View {
             lines
             if let id = o.chatId {
                 ClaudeChatView(contextKind: "chat", contextId: id, title: o.current?.shownTitle ?? "Claude", showsHeader: false,
-                               placeholder: "Ask Claude", emptyHint: "Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.",
+                               placeholder: "Tell me what to do next…", emptyHint: "Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.",
                                wrapOutgoing: { [store] text in store.oneClaudeOutgoing(text) }, unwrapShown: ClaudePage.stripContext)
                     .sessions(nil, onToolDone: { [store] name in store.suiteClaudeToolDone(name) })
+                    .panel(chips: o.chips, activity: activityStrip)
                     .id(id)
             } else if let e = o.listError {
                 VStack(spacing: Space.s3) {
@@ -40,8 +45,7 @@ struct OneClaudePanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(width: Self.width)
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(r.raised)
         .sheet(isPresented: $showMemory) { OneClaudeMemorySheet() }
         .sheet(isPresented: $showManage) { OneClaudeManageChats() }
@@ -53,6 +57,13 @@ struct OneClaudePanel: View {
             Button("Cancel", role: .cancel) {}
         } message: { Text(OneClaudeDeleteAsk.keeps) }
         .onChange(of: store.claudePage) { _, _ in store.oneClaudePageChanged() }
+        // Claude's orb (MuseCore ClaudeOrb) hears what waits for the person and the job Claude started.
+        .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
+        .onChange(of: store.claudeJobProgress, initial: true) { _, p in
+            let failed = store.oneClaude.watchJob.flatMap { id in store.jobs.first { $0.id == id } }?.isFailed ?? false
+            service.orbJob(running: p != nil, failed: failed)
+            if p == nil, store.oneClaude.watchJob != nil { store.oneClaude.watchJob = nil }
+        }
     }
 
     // MARK: Header: the chat, New chat, what Claude sees
@@ -60,8 +71,17 @@ struct OneClaudePanel: View {
     private var header: some View {
         let o = store.oneClaude
         let r = t.roles
-        return VStack(alignment: .leading, spacing: Space.s1) {
-            HStack(spacing: Space.s2) {
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            HStack(spacing: Space.s1) {
+                ClaudeOrbView(size: 24)
+                Text("Claude").scaled(t.scale.heading, r.ink).accessibilityAddTraits(.isHeader)
+                    .help(o.current?.shownTitle ?? "New chat")
+                Spacer(minLength: Space.s2)
+                modelMenu
+                Button { Task { await store.newOneClaudeChat() } } label: {
+                    Ph("plus", 16).foregroundStyle(r.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help("New chat").accessibilityLabel("New chat")
                 Menu {
                     Section("Chats") {
                         ForEach(o.chats) { c in
@@ -79,38 +99,46 @@ struct OneClaudePanel: View {
                     }
                     Button("Manage chats…") { showManage = true }
                 } label: {
-                    HStack(spacing: Space.s1) {
-                        Text(o.current?.shownTitle ?? "Claude").scaled(t.scale.label, r.ink).lineLimit(1).truncationMode(.tail)
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(r.ink2)
-                    }
-                    .contentShape(Rectangle())
+                    // A Menu label drops custom image sizing (build 530): the system clock glyph, sized by the font.
+                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 14)).foregroundStyle(r.ink2)
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
-                .fixedSize(horizontal: false, vertical: true)
-                .help("Your chats: switch, or open Claude's memory")
-                .accessibilityLabel("Chat: \(o.current?.shownTitle ?? "Claude"). Open the list of chats")
-                Spacer(minLength: Space.s2)
-                Button { Task { await store.newOneClaudeChat() } } label: {
-                    HStack(spacing: Space.s1) { Ph("plus", 14); Text("New chat").fixedSize() }
-                        .font(t.scale.label.font).foregroundStyle(r.ink2).frame(minHeight: 28).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).help("Start a chat for a new piece of work").accessibilityLabel("New chat")
+                .fixedSize()
+                .help("History: your chats and Claude's memory")
+                .accessibilityLabel("History. Chat: \(o.current?.shownTitle ?? "new chat"). Open the list of chats")
                 SuiteIconButton(systemName: "xmark", label: "Hide Claude", size: 26) { store.toggleOneClaude() }
             }
-            HStack(spacing: Space.s1) {
-                Ph("map-pin", 13)
+            HStack(spacing: 6) {
+                Ph("eye", 13)
                 Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
             }
-            .font(t.scale.caption.font).foregroundStyle(r.ink2)
+            .font(t.scale.micro.font).foregroundStyle(r.ink2)
+            .padding(.horizontal, Space.s2).frame(height: 24)
+            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(r.field))
+            .accessibilityElement(children: .combine)
             .accessibilityLabel("Claude sees \(store.claudePage.line)")
-            modelMenu
         }
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s3)
-        .frame(width: Self.width, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
+        .contentShape(Rectangle())
+        // The floating panel moves by its header (the buttons in it still click: a drag starts after 4 pt).
+        .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
+            .onChanged { onDrag?($0.translation, false) }
+            .onEnded { onDrag?($0.translation, true) })
         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude header") } }
+    }
+
+    // MARK: Live activity: Claude operating the window, or a job it started
+
+    private var activityStrip: AnyView? {
+        var a = service.activity
+        a.job(store.claudeJobProgress)
+        guard a.isActive else { return nil }
+        return AnyView(ClaudeActivityStrip(activity: a) { service.stopUiFromPanel() })
     }
 
     // MARK: The chat's Claude model (step 6b): speed and cost in plain words, per chat, with your own default
@@ -138,8 +166,7 @@ struct OneClaudePanel: View {
                 // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
                 // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
                 HStack(spacing: Space.s1) {
-                    Text("\(cur.info?.name ?? "Claude")\(cur.isDefault ? " (your default)" : "") · \(cur.info?.speed ?? "")")
-                        .lineLimit(1).truncationMode(.tail)
+                    Text(cur.info?.name ?? "Claude").lineLimit(1).fixedSize()
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                 }
                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
@@ -147,8 +174,7 @@ struct OneClaudePanel: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize()
             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude model line") } }
             .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
             .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
@@ -156,7 +182,7 @@ struct OneClaudePanel: View {
             // The list isn't here yet (or the server is older): the line still shows, and tapping it tries again.
             Button { Task { await store.loadClaudeModels() } } label: {
                 HStack(spacing: Space.s1) {
-                    Text("Claude Code's default model").lineLimit(1).truncationMode(.tail)
+                    Text("Default model").lineLimit(1).fixedSize()
                 }
                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
                 .contentShape(Rectangle())

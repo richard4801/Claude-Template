@@ -26,6 +26,8 @@ enum ChatRowKind: Hashable {
     case assistant(text: String, streaming: Bool)
     case tools([ChatToolLine])
     case frame(url: String)
+    /// A card Claude put up (ChatCards.swift); `messageId` is its stored line.
+    case card(messageId: String, ClaudeCard)
 }
 
 struct ChatRow: Identifiable, Hashable {
@@ -56,6 +58,8 @@ struct ChatRow: Identifiable, Hashable {
                 }
             case .image(let id, let url):
                 out.append(ChatRow(id: id, kind: .frame(url: url)))
+            case .card(let id, let messageId, let card):
+                out.append(ChatRow(id: "card_" + id, kind: .card(messageId: messageId, card)))
             }
         }
         return out
@@ -275,6 +279,7 @@ struct ChatRowView: View, Equatable {
         case .assistant(let text, let streaming): ChatAssistantText(text: text, streaming: streaming)
         case .tools(let lines): ChatToolRows(lines: lines)
         case .frame(let url): ChatFrame(url: resolve(url))
+        case .card(let messageId, let card): ChatCardView(card: card, messageId: messageId, resolve: resolve)
         }
     }
 }
@@ -347,6 +352,14 @@ struct ChatAssistantText: View {
     var body: some View {
         let blocks = ChatMarkdown.parse(text, streaming: streaming)
         VStack(alignment: .leading, spacing: Space.s1) {
+            // Claude's orb beside the reply while it is being written (it settles when the reply is done).
+            if streaming {
+                HStack(spacing: Space.s1) {
+                    ClaudeOrbView(size: 16)
+                    Text("Claude").scaled(t.scale.micro, t.roles.ink2)
+                }
+                .accessibilityHidden(true)
+            }
             ChatMarkdownView(blocks: blocks)
             if !streaming {
                 HStack(spacing: Space.s2) {

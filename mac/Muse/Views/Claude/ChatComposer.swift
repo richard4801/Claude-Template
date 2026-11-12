@@ -283,6 +283,14 @@ final class ComposerTextView: NSTextView {
 
 /// The composer bar every Claude chat shares: suggestions, the images waiting to go, the growing field with attach, and
 /// Send (or Stop while Claude answers); a line under it for the mode or the surface's own note.
+/// What the composer's attach buttons add (one-Claude panel).
+enum ChatAttachKind: String, CaseIterable, Identifiable {
+    case file, image, video, document
+    var id: String { rawValue }
+    var icon: String { switch self { case .file: "paperclip"; case .image: "image"; case .video: "video-camera"; case .document: "file-text" } }
+    var label: String { switch self { case .file: "Attach a file"; case .image: "Attach a photo"; case .video: "Attach a video"; case .document: "Attach a document" } }
+}
+
 struct ChatComposerBar: View {
     @Environment(\.theme) private var t
     @Binding var text: String
@@ -304,6 +312,9 @@ struct ChatComposerBar: View {
     var onSuggestion: (String) -> Void
     var onAttach: (() -> Void)?
     var onImages: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)?
+    /// One-Claude panel: the page's quick-action chips over the field, and four attach buttons under it.
+    var chips: [ClaudeChip] = []
+    var onPick: ((ChatAttachKind) -> Void)?
     @State private var height: CGFloat = 0
     @State private var focus = 0
     @State private var focused = false
@@ -334,11 +345,30 @@ struct ChatComposerBar: View {
                     }
                 }
             }
+            if !chips.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(chips) { c in
+                            Button { onSuggestion(c.prompt); focus += 1 } label: {
+                                HStack(spacing: 4) { Ph(c.icon, 13); Text(c.label).fixedSize() }
+                                    .font(t.scale.micro.font).foregroundStyle(t.roles.ink)
+                                    .padding(.horizontal, Space.s2).frame(minHeight: 28)
+                                    .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(busy || held)
+                            .help(c.prompt)
+                            .accessibilityLabel("Ask Claude: \(c.label)")
+                        }
+                    }
+                }
+            }
             if let top { top }
             if !localImages.isEmpty { localRow }
             if let attachNote { Text(attachNote).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
             HStack(alignment: .bottom, spacing: Space.s2) {
-                if let onAttach {
+                if let onAttach, onPick == nil {
                     Button(action: onAttach) { Ph("plus", 16).frame(width: rowH, height: rowH).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
                         .foregroundStyle(t.roles.ink2)
@@ -366,7 +396,20 @@ struct ChatComposerBar: View {
                 .background(shape.fill(t.roles.field))
                 .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
                 .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat field") } }
-                sendOrStop(canSend: canSend, side: rowH, shape: shape)
+                if onPick == nil { sendOrStop(canSend: canSend, side: rowH, shape: shape) }
+            }
+            if let onPick {
+                // The panel's attach row (reference, 2026-11-12): file, photo, video, document, then Send on the right.
+                HStack(spacing: Space.s1) {
+                    ForEach(ChatAttachKind.allCases) { k in
+                        Button { onPick(k) } label: { Ph(k.icon, 16).frame(width: 28, height: 28).contentShape(Rectangle()) }
+                            .buttonStyle(.plain).foregroundStyle(t.roles.ink2)
+                            .disabled(held)
+                            .help(k.label).accessibilityLabel(k.label)
+                    }
+                    Spacer(minLength: 0)
+                    sendOrStop(canSend: canSend, side: 32, shape: shape)
+                }
             }
             if !footer.isEmpty {
                 VStack(alignment: .leading, spacing: Space.s1) {
@@ -376,7 +419,7 @@ struct ChatComposerBar: View {
                 }
                 .help(footerHelp ?? "")
                 // Lines up with the field's text, not with the + button.
-                .padding(.leading, (onAttach != nil ? rowH + Space.s2 : 0) + Space.s3)
+                .padding(.leading, (onAttach != nil && onPick == nil ? rowH + Space.s2 : 0) + Space.s3)
             }
             // ⌘K puts the caret in the field.
             Button("") { focus += 1 }

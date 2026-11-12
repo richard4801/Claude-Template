@@ -24,6 +24,8 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
     /// Claude operates the MUSE window (ui_snapshot / ui_act / ui_wait), and the call ended (another Mac did it, or timed out).
     case uiCall(UiCall)
     case uiCallEnd(id: String)
+    /// A card changed in place (a plan ticked, an Undo pressed): replace the message's card.
+    case card(threadId: String, messageId: String, ClaudeCardBox)
 }
 
 /// SSE lines → `claude` live events; everything else on the stream is ignored.
@@ -53,8 +55,10 @@ public struct ClaudeLiveEventFilter: Sendable {
         var id: String?
         var result: ClaudeJobResult?
         var call: UiCall?
+        var messageId: String?
+        var card: ClaudeCardBox?
 
-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call }
+        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call, messageId, card }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: K.self)
             type = try c.decode(String.self, forKey: .type)
@@ -72,6 +76,8 @@ public struct ClaudeLiveEventFilter: Sendable {
             id = try? c.decodeIfPresent(String.self, forKey: .id)
             result = try? c.decodeIfPresent(ClaudeJobResult.self, forKey: .result)
             call = try? c.decodeIfPresent(UiCall.self, forKey: .call)
+            messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
+            card = try? c.decodeIfPresent(ClaudeCardBox.self, forKey: .card)
         }
     }
 
@@ -98,6 +104,9 @@ public struct ClaudeLiveEventFilter: Sendable {
         case "result": return e.result.map { .result($0) }
         case "uiCall": return e.call.map { .uiCall($0) }
         case "uiCallEnd": return e.id.map { .uiCallEnd(id: $0) }
+        case "card":
+            guard let tid = e.threadId, let mid = e.messageId, let card = e.card else { return nil }
+            return .card(threadId: tid, messageId: mid, card)
         default: return nil
         }
     }

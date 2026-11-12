@@ -13,11 +13,14 @@ public struct UiCall: Codable, Hashable, Sendable, Identifiable {
     public var kind: String
     public var args: JSONValue
     public var expiresAt: Double?
-    public init(id: String, kind: String, args: JSONValue = .object([:]), expiresAt: Double? = nil) {
+    /// The activity strip's words for this call ("Choosing Swap…"); older servers send none.
+    public var step: String?
+    public init(id: String, kind: String, args: JSONValue = .object([:]), expiresAt: Double? = nil, step: String? = nil) {
         self.id = id
         self.kind = kind
         self.args = args
         self.expiresAt = expiresAt
+        self.step = step
     }
 }
 
