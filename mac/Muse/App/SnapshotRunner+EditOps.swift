@@ -45,7 +45,6 @@ extension SnapshotRunner {
         await exportCheck(s, media: media, log: log)
         await formatsCheck(s, media: media, log: log)
         s.close()
-        await hdrConsistencyCheck(store, media: media, log: log)
         note("ALL DONE")
     }
 
@@ -677,60 +676,80 @@ extension SnapshotRunner {
         }
     }
 
-    /// Owner bug 2026-11-12: HDR (HLG) exports turned skin warmer / orange at the start and now and then. An untagged
-    /// SDR take (as AI takes come) in a skin tone, captions on its first second only, exported SDR and HDR. Every HDR
-    /// frame's skin patch (decoded from the file's own 10-bit codes with BT.2020 / HLG, tone-mapped to SDR) must match
-    /// every other frame's (caption vs plain, first vs middle) and the SDR export's.
+    /// HDR colour, on its own and early in review mode (round 2: in build 582 an earlier check stopped the run before it).
+    /// Writes hdr-colour-check.txt. Two skin-tone takes: untagged and tagged BT.709 (as the owner's AI take).
     @MainActor
-    static func hdrConsistencyCheck(_ store: AppStore, media: URL, log: OpsLog) async {
+    static func hdrColourCheck(_ store: AppStore, dir: URL) async {
+        let log = OpsLog(dir.appendingPathComponent("hdr-colour-check.txt"))
+        let media = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-hdr-colour", isDirectory: true)
+        try? FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        await hdrConsistencyCheck(store, media: media, log: log, tagged: false)
+        await hdrConsistencyCheck(store, media: media, log: log, tagged: true)
+        store.takes.removeAll { $0.id.hasPrefix("hdr_") }
+        log.note("ALL DONE")
+    }
+
+    /// Owner bug 2026-11-12: HDR (HLG) exports turned skin warmer / orange at the start and now and then. A skin-tone take
+    /// (`tagged`: BT.709 tags in the file, else none), captions on its first second only, exported SDR and HDR. Every HDR
+    /// frame's skin patch (decoded from the file's own 10-bit codes with BT.2020 / HLG, tone-mapped to SDR) must match
+    /// every other frame's (the first 15 frames, caption vs plain, first vs middle) and the SDR export's. The colour tags
+    /// the compositor's frames really arrived with are written as TRACE lines.
+    @MainActor
+    static func hdrConsistencyCheck(_ store: AppStore, media: URL, log: OpsLog, tagged: Bool) async {
         typealias H = EditV2.HDRColor
-        func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check(name, ok, detail) }
-        // Coordinator, run 591: prod's HDR export still has the owner's colour bug (first frames hotter, darker than SDR);
-        // HDR-5 (bundle-9) fixes it and brings this back as a hard gate. Until then these three lines report, not fail.
-        func known(_ name: String, _ ok: Bool, _ detail: String = "") {
-            if ok { log.check(name, true, detail) }
-            else { log.note("INFO KNOWN: prod HDR bug, fixed by HDR-5 (bundle-9) · \(name)" + (detail.isEmpty ? "" : ": \(detail)")) }
-        }
-        log.note("STEP export HDR: same colour on every frame")
+        let kind = tagged ? "tagged 709" : "untagged"
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check("export HDR colour (\(kind)): \(name)", ok, detail) }
+        log.note("STEP export HDR: same colour on every frame, \(kind) take")
         let skinRGB = (224, 172, 140)
-        let url = media.appendingPathComponent("skin.mp4")
-        do { try await makeSolidVideo(url, seconds: 3, rgb: skinRGB, tone: nil) } catch {
-            check("export HDR colour: test video", false, error.localizedDescription); return
+        let url = media.appendingPathComponent(tagged ? "skin-709.mp4" : "skin.mp4")
+        do { try await makeSolidVideo(url, seconds: 3, rgb: skinRGB, tone: nil, tag709: tagged) } catch {
+            check("test video", false, error.localizedDescription); return
         }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let raw: [String: Any] = ["id": "ops_skin", "kind": "take", "title": "Skin", "videoUrl": url.absoluteString, "durationSec": 3,
+        let raw: [String: Any] = ["id": tagged ? "hdr_skin709" : "hdr_skin", "kind": "take", "title": "Skin", "videoUrl": url.absoluteString, "durationSec": 3,
                                   "width": 360, "height": 640, "fps": 30, "createdAt": now]
         guard let take = (try? JSONSerialization.data(withJSONObject: raw)).flatMap({ try? JSONDecoder().decode(Take.self, from: $0) }) else {
-            check("export HDR colour: test take", false); return
+            check("test take", false); return
         }
         store.takes.insert(take, at: 0)
         await (store.api as? FakeMuseAPI)?.adoptTakes([take])
-        guard let s = store.makeEditSuiteSession(takeId: take.id) else { check("export HDR colour: editor session", false); return }
+        guard let s = store.makeEditSuiteSession(takeId: take.id) else { check("editor session", false); return }
         defer { s.close() }
         await s.load()
-        guard s.isReady, let asset = s.project.mainClips.first?.asset else { check("export HDR colour: the edit opened", false, "\(s.phase)"); return }
+        guard s.isReady, let asset = s.project.mainClips.first?.asset else { check("the edit opened", false, "\(s.phase)"); return }
         // Burned-in captions on 0.1–1.0 s; plain frames after.
         s.edit { $0.setCaptions(words: [EditV2.Word(text: "Hello", startSec: 0.1, endSec: 0.5), EditV2.Word(text: "there", startSec: 0.5, endSec: 1.0)], assetId: asset) }
         s.edit { $0.changeCaptionStyle { $0.y = 0.85 } }
-        guard let sdr = await exportFile(s, media: media, name: "skin-sdr", labelAI: false, note: log.note),
-              let hdr = await exportFile(s, media: media, name: "skin-hdr", labelAI: false, hdr: true, note: log.note) else { return }
+        guard let sdr = await exportFile(s, media: media, name: tagged ? "skin709-sdr" : "skin-sdr", labelAI: false, note: log.note) else { return }
+        EditV2HDRTrace.reset()
+        let hdrFile = await exportFile(s, media: media, name: tagged ? "skin709-hdr" : "skin-hdr", labelAI: false, hdr: true, note: log.note)
+        for line in EditV2HDRTrace.dump() { log.note("TRACE \(line)") }
+        if let vt = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
+           let desc = (try? await vt.load(.formatDescriptions))?.first {
+            log.note("TRACE source file tags \(EditV2Engine.colorTags(desc))")
+        }
+        guard let hdr = hdrFile else { return }
         let sdrPx = await framePatches(sdr.url, hdr: false)
         let hdrPx = await framePatches(hdr.url, hdr: true)
         func nearest(_ px: [Double: (r: Int, g: Int, b: Int)], _ t: Double) -> (r: Int, g: Int, b: Int)? { px.min { abs($0.key - t) < abs($1.key - t) }?.value }
         guard hdrPx.count > 60, let ref = nearest(sdrPx, 1.5) else {
-            check("export HDR colour: read the frames", false, "\(hdrPx.count) HDR, \(sdrPx.count) SDR"); return
+            check("read the frames", false, "\(hdrPx.count) HDR, \(sdrPx.count) SDR"); return
         }
         func at(_ t: Double) -> (r: Int, g: Int, b: Int)? { nearest(hdrPx, t) }
         let all = hdrPx.sorted { $0.key < $1.key }
         let first = all[0].value, caption = at(0.5), plain = at(2.0), middle = at(1.5)
         let worst = all.max { H.distance($0.value, first) < H.distance($1.value, first) }!
-        check("export HDR colour: caption frame = plain frame", caption.map { c in plain.map { H.distance(c, $0) <= 3 } ?? false } ?? false,
+        check("caption frame = plain frame", caption.map { c in plain.map { H.distance(c, $0) <= 3 } ?? false } ?? false,
               "caption \(describe(caption)) plain \(describe(plain))")
-        known("export HDR colour: first frame = middle", middle.map { H.distance(first, $0) <= 3 } ?? false, "first \(describe(first)) middle \(describe(middle))")
-        known("export HDR colour: every frame the same", H.distance(worst.value, first) <= 3,
+        check("first frame = middle", middle.map { H.distance(first, $0) <= 3 } ?? false, "first \(describe(first)) middle \(describe(middle))")
+        let head = all.prefix(15).map(\.value)
+        let headWorst = head.map { m in middle.map { H.distance(m, $0) } ?? 99 }.max() ?? 99
+        check("first 15 frames = middle", headWorst <= 3, "frames 0–14 " + head.map { describe($0) }.joined(separator: " ") + " middle " + describe(middle))
+        log.note("FRAMES " + all.map { String(format: "%.2f ", $0.key) + describe($0.value) }.joined(separator: " | "))
+        check("every frame the same", H.distance(worst.value, first) <= 3,
               String(format: "worst at %.2f s: ", worst.key) + describe(worst.value) + " vs first " + describe(first))
         // The SDR export shows the source colour; HDR, tone-mapped back, within a viewer's rounding of it.
-        known("export HDR colour: matches the SDR export", H.distance(first, ref) <= 10 && H.distance(ref, (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)) <= 6,
+        check("matches the SDR export", H.distance(first, ref) <= 10 && H.distance(ref, (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)) <= 6,
               "HDR \(describe(first)) SDR \(describe(ref)) source rgb\(skinRGB)")
     }
 
@@ -894,13 +913,19 @@ extension SnapshotRunner {
     // MARK: Test media
 
     /// An H.264 MP4 of one colour at 30 fps, 360 × 640, with a steady 440 Hz tone of amplitude `tone` (mono AAC 48 kHz) or no sound.
-    static func makeSolidVideo(_ url: URL, seconds: Double, rgb: (Int, Int, Int), tone: Double?) async throws {
+    static func makeSolidVideo(_ url: URL, seconds: Double, rgb: (Int, Int, Int), tone: Double?, tag709: Bool = false) async throws {
         try? FileManager.default.removeItem(at: url)
         let dir = url.deletingLastPathComponent()
         let silent = tone == nil ? url : dir.appendingPathComponent("v-\(UUID().uuidString).mp4")
         let w = 360, h = 640, fps: Int32 = 30
         let writer = try AVAssetWriter(outputURL: silent, fileType: .mp4)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h])
+        var settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h]
+        if tag709 {
+            settings[AVVideoColorPropertiesKey] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                                                   AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                                                   AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
+        }
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: w, kCVPixelBufferHeightKey as String: h])
