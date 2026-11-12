@@ -1,0 +1,154 @@
+diff --git a/mac/Muse/App/AppStore+LinkImport.swift b/mac/Muse/App/AppStore+LinkImport.swift
+index 6deefabb..98c7e09e 100644
+--- a/mac/Muse/App/AppStore+LinkImport.swift
++++ b/mac/Muse/App/AppStore+LinkImport.swift
+@@ -24,6 +24,9 @@ final class LinkImportState {
+     /// This studio's earlier imports (GET /v1/imports), to pick one again without a download.
+     var recent: [LinkImportResult] = []
+     @ObservationIgnored var task: Task<Void, Never>?
++    /// The open edit's Uploads (EditSuiteView sets it while an edit is open): an import started from Edit lands there.
++    /// Returns whether the edit took it.
++    @ObservationIgnored var deliverToEdit: ((LinkImportResult) -> Bool)?
+ }
+ 
+ extension AppStore {
+@@ -215,7 +218,13 @@ extension AppStore {
+             }
+             Task { await forceReload() }
+         case .edit:
+-            showToast(r.clip.map { "Imported \($0.name). It's in Uploads." } ?? "Imported. It's in Uploads.")
++            // Into the open edit's Uploads (the import's upload is a video upload the editor takes as it is); without an
++            // open edit it's in the Library, and the toast says so.
++            if let deliver = linkImport.deliverToEdit, deliver(r) {
++                showToast(r.clip.map { "Imported \($0.name). It's in Uploads." } ?? "Imported. It's in Uploads.")
++            } else {
++                showToast(r.clip.map { "Imported \($0.name). It's in the Library." } ?? "Imported. It's in the Library.")
++            }
+             Task { await forceReload() }
+         }
+     }
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index 07c6d7a3..563ee523 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -601,6 +601,21 @@ final class EditSuiteSession {
+         if added > 0 { binTab = .uploads }
+     }
+ 
++    /// A video imported from a link while this edit is open (Uploads → Add → From a link): into Uploads like a file from
++    /// this Mac. The import's upload (`uploadId`, a video) is used as the asset's upload; the server's editor takes any
++    /// video upload of the studio. A link imported again shows the same upload, not a second tile.
++    func addLinkImport(_ r: LinkImportResult) -> Bool {
++        guard isReady, let up = r.uploadId, let c = r.clip, c.durationSec >= E.minClipSourceSec else { return false }
++        if project.assets.contains(where: { $0.upload == up }) { binTab = .uploads; return true }
++        let id = project.newId("v")
++        state.assetNames[id] = c.name
++        let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (c.durationSec * 1000).rounded(.down) / 1000,
++                        width: c.width > 0 ? c.width : nil, height: c.height > 0 ? c.height : nil, url: r.videoUrl)
++        guard edit({ $0.addToBin(a) }) else { return false }
++        binTab = .uploads
++        return true
++    }
++
+     /// An upload from the bin onto the timeline: at the playhead ("+"), or where it was dropped (`at`, on row `lane`).
+     func placeUpload(_ id: String, at: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) {
+         if let at { seek(at) }
+diff --git a/mac/Muse/App/SnapshotRunner+Walk.swift b/mac/Muse/App/SnapshotRunner+Walk.swift
+index b8eb7b47..cddfa489 100644
+--- a/mac/Muse/App/SnapshotRunner+Walk.swift
++++ b/mac/Muse/App/SnapshotRunner+Walk.swift
+@@ -116,6 +116,45 @@ extension SnapshotRunner {
+                          note: note)
+         note(store.clip != nil ? "DONE link_import swap source \(store.clip?.name ?? "")" : "FAIL link_import: no swap source after importing")
+         store.closeLinkImport()
++        await linkToUploadsCheck(store, note: note)
++    }
++
++    /// Edit's media bin (owner 2026-11-12): a link imported while an edit is open lands in its Uploads as a video tile
++    /// (the import's own upload), "+" places it, and with no edit open the toast says the Library. Uses editCheck's 15 s
++    /// test video as the open edit's take.
++    static func linkToUploadsCheck(_ store: AppStore, note: (String) -> Void) async {
++        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
++        let raw: [String: Any] = ["id": "rx_link", "kind": "take", "title": "Link check", "videoUrl": long.absoluteString,
++                                  "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
++        guard FileManager.default.fileExists(atPath: long.path), let data = try? JSONSerialization.data(withJSONObject: raw),
++              let take = try? JSONDecoder().decode(Take.self, from: data) else { note("FAIL link_import edit: no test video"); return }
++        store.takes.removeAll { $0.id == take.id }
++        store.takes.insert(take, at: 0)
++        defer { store.takes.removeAll { $0.id == take.id } }
++        guard let s = store.makeEditSuiteSession(takeId: take.id) else { note("FAIL link_import edit: no editor session"); return }
++        await s.load()
++        defer { s.close(); store.linkImport.deliverToEdit = nil }
++        store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
++        func importOnce() async {
++            store.openLinkImport(.edit)
++            store.linkImport.text = demoImportLink
++            store.startLinkImport()
++            for _ in 0..<40 where store.linkImport.open || store.linkImport.fetching { try? await Task.sleep(for: .seconds(0.25)) }
++            store.closeLinkImport()
++        }
++        let before = s.uploads.count
++        await importOnce()
++        guard s.uploads.count == before + 1, let u = s.uploads.first, u.kind == .video else {
++            note("FAIL link_import edit: not in Uploads (\(s.uploads.count) uploads, was \(before))")
++            return
++        }
++        // The same link again: the same tile, not a second one.
++        await importOnce()
++        if s.uploads.count != before + 1 { note("FAIL link_import edit: importing the same link twice made \(s.uploads.count - before) tiles") }
++        let clips = s.project.mainClips.count
++        s.placeUpload(u.id)
++        if s.project.mainClips.count != clips + 1 { note("FAIL link_import edit: + didn't place the imported video") }
++        note("DONE link_import edit: \(u.name) in Uploads, placed with +")
+     }
+ 
+     static let demoImportLink = "https://www.tiktok.com/@muse.demo/video/7300000000000000000"
+diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
+index 43930075..cd05450a 100644
+--- a/mac/Muse/Views/Edit/EditSuiteView.swift
++++ b/mac/Muse/Views/Edit/EditSuiteView.swift
+@@ -45,12 +45,13 @@ struct EditSuiteView: View {
+             if openId == a.takeId { await open(a.takeId) } else { openId = a.takeId }
+         }
+         .onChange(of: takeId) { _, new in openId = new }
+-        .onDisappear { session?.close() }
++        .onDisappear { session?.close(); store.linkImport.deliverToEdit = nil }
+     }
+ 
+     private func open(_ id: String?) async {
+         session?.close()
+         session = nil
++        store.linkImport.deliverToEdit = nil
+         guard let id else { return }
+         let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
+         if attach != nil { store.suite.editAttach = nil }
+@@ -60,6 +61,7 @@ struct EditSuiteView: View {
+             return
+         }
+         session = s
++        store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
+         await s.load()
+         // The viewer's Split: the playhead where the take was when Split was pressed.
+         if let at = store.suite.editAt {
+@@ -71,6 +73,7 @@ struct EditSuiteView: View {
+     private func close() {
+         session?.close()
+         session = nil
++        store.linkImport.deliverToEdit = nil
+         openId = nil
+         // Opened with Edit on a take (Result, Gallery): back there.
+         if takeId != nil, store.editor != nil { store.closeEditor() }
+diff --git a/mac/MuseCore/Sources/MuseCore/Imports/LinkImport.swift b/mac/MuseCore/Sources/MuseCore/Imports/LinkImport.swift
+index 49953303..6dbd48af 100644
+--- a/mac/MuseCore/Sources/MuseCore/Imports/LinkImport.swift
++++ b/mac/MuseCore/Sources/MuseCore/Imports/LinkImport.swift
+@@ -226,7 +226,8 @@ extension FakeMuseAPI: LinkImportAPI {
+         guard check.allowed else { throw ApiError(check.code ?? "link_unsupported", check.reason ?? RecreateLinks.fallback) }
+         var c = uploadClip(SampleData.sampleMeta, file: nil, progress: nil)
+         c.name = name ?? LinkImport.name(title: nil, platform: check.platform) ?? c.name
+-        let r = LinkImportResult(clip: c, sourceUrl: check.url, platform: check.platform)
++        // As on the server, an import carries its upload (Edit puts it in Uploads).
++        let r = LinkImportResult(clip: c, sourceUrl: check.url, platform: check.platform, uploadId: "up_import_\(c.id)")
+         demoImports.removeAll { $0.clip?.id == c.id }
+         demoImports.insert(r, at: 0)
+         return r
