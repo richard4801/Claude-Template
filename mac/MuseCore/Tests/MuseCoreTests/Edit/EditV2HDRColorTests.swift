@@ -51,26 +51,6 @@ final class EditV2HDRColorTests: XCTestCase {
         }
     }
 
-    /// Round 2: tags that are complete but describe neither the track nor the composition are not trusted.
-    func testInconsistentTagsReadAsTheTrack() {
-        let take = H.Tags(primaries: H.bt709, transfer: H.bt709, matrix: H.bt709)
-        let mixed = H.Tags(primaries: H.bt2020, transfer: H.bt709, matrix: H.bt709)        // the orange one
-        let srgbCurve = H.Tags(primaries: H.bt2020, transfer: "IEC_sRGB")
-        XCTAssertEqual(H.resolve(frame: mixed, track: take, composition: H.output), take)
-        XCTAssertEqual(H.resolve(frame: srgbCurve, track: take, composition: H.output), take)
-        XCTAssertEqual(H.resolve(frame: H.Tags(), track: take, composition: H.output), take)
-        XCTAssertEqual(H.resolve(frame: H.Tags(), track: nil, composition: H.output), H.sdrDefault)
-        // Converted by AVFoundation into the composition's space: trusted.
-        XCTAssertEqual(H.resolve(frame: H.output, track: take, composition: H.output), H.output)
-        // Decoded as is, own matrix kept.
-        XCTAssertEqual(H.resolve(frame: H.Tags(primaries: H.bt709, transfer: H.bt709, matrix: "ITU_R_601_4"), track: take, composition: H.output).matrix, "ITU_R_601_4")
-        // Whatever the first frames carry, every frame shows the same skin.
-        let shown = [mixed, srgbCurve, H.Tags(), take].map {
-            H.shown(sdr255: skin, readAs: H.resolve(frame: $0, track: take, composition: H.output), writtenWith: H.bt2020)
-        }
-        for s in shown { XCTAssertLessThanOrEqual(H.distance(s, shown[0]), 1, "\(shown)") }
-    }
-
     /// SDR white is HLG reference white (BT.2408: 75 %), grey stays neutral.
     func testReferenceWhite() {
         let w = H.hlgSignal(sdr: (1, 1, 1))

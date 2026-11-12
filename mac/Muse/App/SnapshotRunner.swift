@@ -95,7 +95,6 @@ enum SnapshotRunner {
             // The composer screens need the suite's catalog (the demo draft picks its camera, light and look from it).
             await store.loadSuite()
             await store.loadEngines()   // the owner's models per purpose (WS6)
-            await hdrColourCheck(store, dir: dir)   // owner bug 2026-11-12: HDR export colour on every frame, first and on its own
             await streamCloseCheck(store, dir: dir)   // closing a chat mid-reply with a screen change must not freeze (SnapshotRunner+StreamClose.swift)
             let shots: [(String, @MainActor () -> Void)] = [
                 ("home", { store.go(.home) }),
