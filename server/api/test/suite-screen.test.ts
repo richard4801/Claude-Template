@@ -46,6 +46,39 @@ describe('the composer on screen reaches Claude', () => {
     expect((await videoOf(a.ctx, ownerU, v.onScreen.inputs[0].watch)).key).toBe('c/link.mp4');
   });
 
+  it('Swap\'s Background and every control on screen reach Claude; Claude\'s Background is what Generate sends until the app takes it', async () => {
+    const id = (await owner.req('POST', '/v1/suite/assist', {})).body.id;
+    await clip('cl_bg', 'c/bg.mp4');
+    const screen = { tool: 'swap', at: Date.now(),
+      request: { mode: 'swap', modelId: 'm_x', clipId: 'cl_bg', keepAudio: false, quality: 'hd', speaking: true, takes: 2, engineModel: 'genjutsu-light', prompt: '',
+        background: 'photo', backgroundImage: { url: '/uploads/u/rooftop.jpg' } },
+      settings: { background: 'photo', backgroundName: 'Rooftop', promptOn: false, addOn: null, odd: { nested: true } },
+      inputs: [{ slot: 'swap.clip', kind: 'video', clipId: 'cl_bg' }] };
+    await owner.req('PATCH', `/v1/suite/assist/${id}`, { draft: { v: 1, tool: 'swap', tokens: [], screen } });
+    const v = await tool('suite_get_draft').run(env(), { assistId: id }) as any;
+    expect(v.request).toMatchObject({ background: 'photo', backgroundImage: { url: '/uploads/u/rooftop.jpg' } });
+    expect(v.onScreen.inputs[1]).toMatchObject({ input: 1, slot: 'background', kind: 'image', label: 'Rooftop', see: 'suite_see {input: 1}' });
+    expect(v.onScreen.settings).toMatchObject({ quality: 'hd', takes: 2, clipSound: false, speaking: true, model: 'genjutsu-light', promptOn: false, addOn: null,
+      background: { mode: 'photo', picture: 'Rooftop', see: 'suite_see {input: 1}' } });
+    expect(v.onScreen.settings.odd).toBeUndefined(); // a bad value is left out, the screen stays
+    // A pill set to New photo with no picture yet still shows.
+    await owner.req('PATCH', `/v1/suite/assist/${id}`, { baseRevision: v.revision, draft: { v: 1, tool: 'swap', tokens: [],
+      screen: { ...screen, request: { ...screen.request, background: undefined, backgroundImage: undefined }, settings: { background: 'photo' } } } });
+    const v2 = await tool('suite_get_draft').run(env(), { assistId: id }) as any;
+    expect(v2.onScreen.settings.background).toEqual({ mode: 'photo', picture: null, note: 'No picture picked yet' });
+    // Claude sets Keep: Generate sends keep (the app then takes it); null goes back to what is on screen.
+    const k = await tool('suite_set_draft').run(env(), { assistId: id, background: 'keep' }) as any;
+    expect(k.request.background).toBe('keep');
+    await owner.req('PATCH', `/v1/suite/assist/${id}`, { baseRevision: k.revision, draft: { ...k.draft, screen } });
+    const v3 = await tool('suite_get_draft').run(env(), { assistId: id }) as any;
+    expect(v3.request.background).toBe('keep');
+    const back = await tool('suite_set_draft').run(env(), { assistId: id, background: null }) as any;
+    expect(back.request.background).toBe('photo');
+    // Describe it: the words are shown with it.
+    const d = await tool('suite_set_draft').run(env(), { assistId: id, background: 'describe' }) as any;
+    expect(d.request.background).toBe('describe');
+  });
+
   it('a Directed camera picked on screen (Rig → Directed, Blender guides) is in the request; directed: null takes it out', async () => {
     const id = (await owner.req('POST', '/v1/suite/assist', {})).body.id;
     const camera = { mode: 'directed', guide: { video: { key: 'c/grey.mp4', seconds: 6 }, use: 'blocking', cameraSessionId: 'cs_x', keyframes: { start: '/uploads/c/s.png' } } };

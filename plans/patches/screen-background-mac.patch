@@ -1,0 +1,108 @@
+diff --git a/mac/Muse/App/SuiteClaudeBridge.swift b/mac/Muse/App/SuiteClaudeBridge.swift
+index e2a04eb..9e9ad8f 100644
+--- a/mac/Muse/App/SuiteClaudeBridge.swift
++++ b/mac/Muse/App/SuiteClaudeBridge.swift
+@@ -295,6 +295,13 @@ extension AppStore {
+             if refs.count > refsBefore.count || !refs.isEmpty { changed.append("References") }
+         }
+         c.rejected = r.rejected
++        // Swap / Recast's Background, set by Claude (suite_set_draft background): the panel takes it like the model.
++        let swapBefore = suite.swap
++        if before.tool == .swap || before.tool == .recast, case .string(let b)? = d.raw["background"], let bg = SwapBackground(rawValue: b), bg != suite.swap.background {
++            suite.swap.background = bg
++            if bg == .describe { suite.swap.promptOn = true } // the words set the new place
++            changed.append(bg == .photo && suite.swap.backgroundImage == nil ? "Background: New photo (pick the picture)" : "Background: \(bg.label)")
++        }
+         if r.composer != before {
+             // A character Claude picked keeps Claude's rig: no default rig is laid on top (as Reuse settings).
+             if r.composer.tokens.characterId != before.tokens.characterId { suite.restoredCharacterId = r.composer.tokens.characterId }
+@@ -307,6 +314,7 @@ extension AppStore {
+             showToast(text, action: "Undo") { [weak self] in
+                 guard let self else { return }
+                 self.suite.composer = before
++                self.suite.swap = swapBefore
+                 if self.suite.claude.references != refsBefore {
+                     self.suite.claude.references = refsBefore
+                     self.suite.claude.refsDirty = true
+@@ -518,14 +526,22 @@ extension AppStore {
+     func suiteScreen(at: Date?) -> JSONValue {
+         let tool = suite.composer.tool
+         var inputs: [SuiteScreen.Input] = []
++        var settings: [String: JSONValue] = [:]
+         let request: ShotRequest?
+         switch tool {
+         case .swap, .recast:
+             if let c = clip { inputs.append(SuiteScreen.clip(c, slot: "\(tool.rawValue).clip")) }
+             request = swapRequest
++            // The panel's controls, also before a request can be built (no clip or character yet).
++            let d = suite.swap
++            settings = ["background": .string(d.background.rawValue), "promptOn": .bool(d.promptOn), "quality": .string(d.quality),
++                        "clipSound": .bool(d.keepAudio), "speaking": .string(d.speaking.rawValue), "addOn": d.addOn.map { .string($0.rawValue) } ?? .null]
++            if let n = d.backgroundName, d.background == .photo { settings["backgroundName"] = .string(String(n.prefix(120))) }
+         case .photo:
+-            inputs = SuiteScreen.inputs(suite.composerSlots.slots)
++            inputs = SuiteScreen.inputs(suite.composerSlots.slots) + SuiteScreen.photoReferences(suite.photo.references)
+             request = nil
++            let p = suite.photo
++            settings = ["count": .number(Double(p.count)), "preset": p.presetId.map { .string($0) } ?? .null, "photoModel": p.imageModel.map { .string($0) } ?? .null]
+         default:
+             if let g = SuiteScreen.guide(suite.composer.directed) { inputs.append(g) }
+             if tool == .extend, let src = suite.composer.extend.source {
+@@ -534,7 +550,7 @@ extension AppStore {
+             inputs += SuiteScreen.inputs(suite.composerSlots.slots)
+             request = shotRequest
+         }
+-        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, at: at)
++        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, settings: settings, at: at)
+     }
+ 
+     // MARK: Generate (only with the owner's press)
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift
+index b514be8..12cb666 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteScreen.swift
+@@ -83,10 +83,19 @@ public enum SuiteScreen {
+         return Input(slot: "guide", kind: "video", label: "Blender guide", role: use ?? "blocking", cameraSessionId: session, key: key, url: url, seconds: seconds)
+     }
+ 
+-    /// The draft's `screen`: the tool, the request Generate would send now (nil when it can't be built yet) and the inputs.
+-    /// `at` nil leaves the time out (to compare a screen with the one last sent).
+-    public static func json(tool: String, request: ShotRequest?, inputs: [Input], at: Date? = Date()) -> JSONValue {
++    /// Photo's reference pictures (the Photo tool keeps them outside the slots): "reference 1" … with their guides.
++    public static func photoReferences(_ refs: [ShootRef]) -> [Input] {
++        refs.enumerated().map { i, r in
++            Input(slot: "reference \(i + 1)", kind: "image", label: r.guides.map(\.label).joined(separator: ", "), role: r.guides.first?.rawValue, url: r.image.url)
++        }
++    }
++
++    /// The draft's `screen`: the tool, the request Generate would send now (nil when it can't be built yet), the inputs and
++    /// `settings`: the panel's own controls the request can't carry (Swap's Background pill even before a picture is picked,
++    /// its picture's name, the prompt toggle, the add-on; Photo's count, preset and photo model). `at` nil leaves the time out.
++    public static func json(tool: String, request: ShotRequest?, inputs: [Input], settings: [String: JSONValue] = [:], at: Date? = Date()) -> JSONValue {
+         var o: [String: JSONValue] = ["tool": .string(tool), "inputs": .array(inputs.prefix(24).map(\.json))]
++        if !settings.isEmpty { o["settings"] = .object(settings) }
+         if let at { o["at"] = .number((at.timeIntervalSince1970 * 1000).rounded()) }
+         if var r = request {
+             r.draft = nil // the draft itself is not repeated inside it
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift b/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift
+index 72a23f4..939cf24 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/SuiteScreenTests.swift
+@@ -45,4 +45,17 @@ final class SuiteScreenTests: XCTestCase {
+         XCTAssertNotNil(t["at"])
+         XCTAssertNil(t["request"])
+     }
++
++    func testSettingsAndPhotoReferences() {
++        let refs = [ShootRef(image: ImageRef(url: "/uploads/u/pose.jpg"), guides: [.pose]), ShootRef(image: ImageRef(url: "/uploads/u/look.jpg"), guides: [.look, .scene])]
++        let inputs = SuiteScreen.photoReferences(refs)
++        XCTAssertEqual(inputs.map(\.slot), ["reference 1", "reference 2"])
++        XCTAssertEqual(inputs[1].role, "look")
++        XCTAssertEqual(inputs[1].url, "/uploads/u/look.jpg")
++        let s: [String: JSONValue] = ["background": .string("photo"), "backgroundName": .string("Rooftop"), "promptOn": .bool(false)]
++        guard case .object(let t) = SuiteScreen.json(tool: "swap", request: nil, inputs: [], settings: s, at: nil) else { return XCTFail() }
++        XCTAssertEqual(t["settings"], .object(s))
++        guard case .object(let e) = SuiteScreen.json(tool: "swap", request: nil, inputs: [], at: nil) else { return XCTFail() }
++        XCTAssertNil(e["settings"]) // none: left out
++    }
+ }

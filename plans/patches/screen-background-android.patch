@@ -1,0 +1,106 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
+index 3c43eb9..2734c01 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
+@@ -9,6 +9,7 @@ import studio.muse.app.data.ApiException
+ import studio.muse.app.data.SuiteAssist
+ import studio.muse.app.data.SuitePending
+ import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
++import studio.muse.app.ui.screens.suite.composer.ComposerTool
+ 
+ /**
+  * Claude in the AI Suite (owner-approved 2026-11-08; WS1 1eda187, plans/api.md "Claude in the AI Suite"). The owner
+@@ -81,6 +82,17 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
+         assistSynced = null // the composer as Claude left it goes back up with its screen
+         // "Claude set Camera and Light", with Undo (the Rigs row's Undo; undoing goes back to Claude as the owner's edit).
+         SuiteClaudeWords.claudeSet(SuiteClaudeWords.changed(before, composer.value))?.let { rigUndo.value = it to before }
++        // Swap / Recast's Background, set by Claude (suite_set_draft background): the panel takes it, as the model is taken.
++        val bg = (a.draft.json["background"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
++        if ((before.tool == ComposerTool.SWAP || before.tool == ComposerTool.RECAST) && bg in setOf("keep", "photo", "describe") && bg != recast.value.background) {
++            val r = recast.value.copy(background = bg!!)
++            recast.value = r
++            app.repo.toast(when {
++                bg == "photo" && r.backgroundImage == null -> "Claude set Background: New photo · pick the picture"
++                bg == "describe" && r.place.isBlank() -> "Claude set Background: Describe it · write the new place"
++                else -> "Claude set Background: ${SuiteClaudeWords.background(bg)}"
++            })
++        }
+     }
+     assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting) }
+ }
+@@ -130,6 +142,7 @@ object SuiteClaudeWords {
+     const val SUBTITLE = "Fills in this composer"
+     const val NOT_NOW = "Told Claude not now"
+     fun toggle(open: Boolean) = if (open) "Hide Claude" else "Show Claude"
++    fun background(b: String) = when (b) { "photo" -> "New photo"; "describe" -> "Describe it"; else -> "Keep" }
+ 
+     /** The chips: what each sends to Claude. */
+     val suggestions = listOf(
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt
+index dc00a22..ac49a3e 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteScreen.kt
+@@ -56,10 +56,23 @@ object SuiteScreen {
+             seconds = (v?.get("seconds") as? JsonPrimitive)?.content?.toDoubleOrNull())
+     }
+ 
+-    /** The draft's `screen`. [at] null leaves the time out (to compare with what was sent). */
+-    fun json(tool: String, request: SuiteShotRequest?, inputs: List<Input>, at: Long? = System.currentTimeMillis()): JsonObject = JsonObject(buildMap {
++    /**
++     * Swap / Recast's panel controls, also before a request can be built: the Background (even New photo before a picture
++     * is picked) and its picture's name, whether the new place is written, the quality, clip sound and takes.
++     */
++    fun swapSettings(r: RecastDraft): Map<String, JsonElement> = buildMap {
++        put("background", JsonPrimitive(r.background))
++        if (r.background == "photo" && r.backgroundImage != null) put("backgroundName", JsonPrimitive(r.backgroundName.ifBlank { "New background" }.take(120)))
++        if (r.background == "describe") put("placeWritten", JsonPrimitive(r.place.isNotBlank()))
++        put("quality", JsonPrimitive(r.quality)); put("clipSound", JsonPrimitive(r.keepAudio)); put("takes", JsonPrimitive(r.takes))
++        put("people", JsonPrimitive(r.people.size))
++    }
++
++    /** The draft's `screen`. [at] null leaves the time out (to compare with what was sent). [settings]: the panel's own controls. */
++    fun json(tool: String, request: SuiteShotRequest?, inputs: List<Input>, at: Long? = System.currentTimeMillis(), settings: Map<String, JsonElement> = emptyMap()): JsonObject = JsonObject(buildMap {
+         put("tool", JsonPrimitive(tool))
+         put("inputs", JsonArray(inputs.take(24).map { it.json() }))
++        if (settings.isNotEmpty()) put("settings", JsonObject(settings))
+         at?.let { put("at", JsonPrimitive(it)) }
+         request?.let { r ->
+             val o = SuiteWireJson.encodeToJsonElement(SuiteShotRequest.serializer(), r) as? JsonObject
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index 7c20e7e..380b7bd 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -354,8 +354,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
+         addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(own))
+         if (d.tool != ComposerTool.SWAP && d.tool != ComposerTool.RECAST) addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(slots))
+     }
+-    LaunchedEffect(d, req, screenInputs, assist?.id) {
+-        if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at) } }
++    val screenSettings = if (d.tool == ComposerTool.SWAP || d.tool == ComposerTool.RECAST) studio.muse.app.ui.screens.suite.SuiteScreen.swapSettings(recast) else emptyMap()
++    LaunchedEffect(d, req, screenInputs, screenSettings, assist?.id) {
++        if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at, screenSettings) } }
+     }
+     ScreenBox {
+         BoxWithConstraints(Modifier.fillMaxSize()) {
+diff --git a/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt b/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt
+index 99f4649..1c28058 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/SuiteScreenTest.kt
+@@ -57,4 +57,17 @@ class SuiteScreenTest {
+         assertNotNull(SuiteScreen.guide(back.directed))
+         assertNull(ComposerDrafts.restore(ComposerDrafts.draft(ComposerDraft()), d).directed)
+     }
++
++    @Test fun swapSettingsCarryTheBackgroundEvenBeforeAPictureIsPicked() {
++        val pending = studio.muse.app.ui.screens.suite.RecastDraft(background = "photo")
++        val s = SuiteScreen.swapSettings(pending)
++        assertEquals(JsonPrimitive("photo"), s["background"])
++        assertNull(s["backgroundName"])
++        val picked = pending.copy(backgroundImage = ImageRef(url = "/uploads/u/roof.jpg"), backgroundName = "Rooftop")
++        assertEquals(JsonPrimitive("Rooftop"), SuiteScreen.swapSettings(picked)["backgroundName"])
++        assertEquals(JsonPrimitive(false), SuiteScreen.swapSettings(pending.copy(background = "describe"))["placeWritten"])
++        val j = SuiteScreen.json("swap", null, emptyList(), null, SuiteScreen.swapSettings(picked))
++        assertEquals(JsonPrimitive("photo"), (j["settings"] as JsonObject)["background"])
++        assertNull(SuiteScreen.json("shot", null, emptyList(), null)["settings"])
++    }
+ }
