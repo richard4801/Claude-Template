@@ -189,7 +189,6 @@ fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // Owner decision 2026-11-12: two ways in, New and Continue draft (only New when there is no draft).
                 item("start") { StartChoice(recent.firstOrNull(), onNew = onNew, onResume = onResume) }
-                item { T("Open a video to cut, caption, grade and export it. Edits are saved as new versions; the original stays.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted) }
                 // "Recreate an edit" (plans/recreate-edit.md): an edit you love, broken into its recipe.
                 if (onRecreate != null) item {
                     Row(
