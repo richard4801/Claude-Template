@@ -38,6 +38,7 @@ import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
 import { CatalogError } from '../replicate/catalog.js';
 import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
+import { previewLayouts } from '../suite/previewLayouts.js'; // the take viewer's safe zones
 import { freePhotoPrompt, PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
 import { referencesOf } from '../suite/assist.js';
@@ -692,6 +693,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!meta) throw badRequest('Missing meta part');
     return makeClip(req.user, meta, key);
   });
+  // The take viewer's platform previews (plans/swap-viewer-design.md §B2): safe zones per skin, the same for everyone.
+  app.get('/v1/preview/layouts', async () => previewLayouts());
   // New Swap (beta): one clip of this studio (the app shows the clip Claude set as New Swap's video).
   app.get('/v1/clips/:id', async req => {
     const [c] = await db.select().from(clips).where(and(eq(clips.id, (req.params as { id: string }).id), eq(clips.studioId, req.user.studioId)));

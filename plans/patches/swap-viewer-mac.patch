@@ -1,0 +1,3172 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/theme/PhosphorIcons.kt b/android/app/src/main/kotlin/studio/muse/app/ui/theme/PhosphorIcons.kt
+index 9c844fd7..d13284a4 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/theme/PhosphorIcons.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/theme/PhosphorIcons.kt
+@@ -130,6 +130,7 @@ object PhosphorIcons {
+         "bag" to "M216,64H176a48,48,0,0,0-96,0H40A16,16,0,0,0,24,80V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V80A16,16,0,0,0,216,64ZM128,32a32,32,0,0,1,32,32H96A32,32,0,0,1,128,32Zm88,168H40V80H80V96a8,8,0,0,0,16,0V80h64V96a8,8,0,0,0,16,0V80h40Z",
+         "bell" to "M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z",
+         "book-open-text" to "M232,48H160a40,40,0,0,0-32,16A40,40,0,0,0,96,48H24a8,8,0,0,0-8,8V200a8,8,0,0,0,8,8H96a24,24,0,0,1,24,24,8,8,0,0,0,16,0,24,24,0,0,1,24-24h72a8,8,0,0,0,8-8V56A8,8,0,0,0,232,48ZM96,192H32V64H96a24,24,0,0,1,24,24V200A39.81,39.81,0,0,0,96,192Zm128,0H160a39.81,39.81,0,0,0-24,8V88a24,24,0,0,1,24-24h64ZM160,88h40a8,8,0,0,1,0,16H160a8,8,0,0,1,0-16Zm48,40a8,8,0,0,1-8,8H160a8,8,0,0,1,0-16h40A8,8,0,0,1,208,128Zm0,32a8,8,0,0,1-8,8H160a8,8,0,0,1,0-16h40A8,8,0,0,1,208,160Z",
++        "bookmark-simple" to "M184,32H72A16,16,0,0,0,56,48V224a8,8,0,0,0,12.24,6.78L128,193.43l59.77,37.35A8,8,0,0,0,200,224V48A16,16,0,0,0,184,32Zm0,177.57-51.77-32.35a8,8,0,0,0-8.48,0L72,209.57V48H184Z",
+         "buildings" to "M240,208H224V96a16,16,0,0,0-16-16H144V32a16,16,0,0,0-24.88-13.32L39.12,72A16,16,0,0,0,32,85.34V208H16a8,8,0,0,0,0,16H240a8,8,0,0,0,0-16ZM208,96V208H144V96ZM48,85.34,128,32V208H48ZM112,112v16a8,8,0,0,1-16,0V112a8,8,0,1,1,16,0Zm-32,0v16a8,8,0,0,1-16,0V112a8,8,0,1,1,16,0Zm0,56v16a8,8,0,0,1-16,0V168a8,8,0,0,1,16,0Zm32,0v16a8,8,0,0,1-16,0V168a8,8,0,0,1,16,0Z",
+         "camera" to "M208,56H180.28L166.65,35.56A8,8,0,0,0,160,32H96a8,8,0,0,0-6.65,3.56L75.71,56H48A24,24,0,0,0,24,80V192a24,24,0,0,0,24,24H208a24,24,0,0,0,24-24V80A24,24,0,0,0,208,56Zm8,136a8,8,0,0,1-8,8H48a8,8,0,0,1-8-8V80a8,8,0,0,1,8-8H80a8,8,0,0,0,6.66-3.56L100.28,48h55.43l13.63,20.44A8,8,0,0,0,176,72h32a8,8,0,0,1,8,8ZM128,88a44,44,0,1,0,44,44A44.05,44.05,0,0,0,128,88Zm0,72a28,28,0,1,1,28-28A28,28,0,0,1,128,160Z",
+         "caret-double-left" to "M205.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L131.31,128ZM51.31,128l74.35-74.34a8,8,0,0,0-11.32-11.32l-80,80a8,8,0,0,0,0,11.32l80,80a8,8,0,0,0,11.32-11.32Z",
+@@ -139,6 +140,7 @@ object PhosphorIcons {
+         "caret-right" to "M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z",
+         "caret-up" to "M213.66,165.66a8,8,0,0,1-11.32,0L128,91.31,53.66,165.66a8,8,0,0,1-11.32-11.32l80-80a8,8,0,0,1,11.32,0l80,80A8,8,0,0,1,213.66,165.66Z",
+         "chat-circle" to "M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z",
++        "chat-circle-dots" to "M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z",
+         "chat-circle-text" to "M168,112a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,112Zm-8,24H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm72-8A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z",
+         "check" to "M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z",
+         "check-circle" to "M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z",
+@@ -156,6 +158,7 @@ object PhosphorIcons {
+         "device-mobile" to "M176,16H80A24,24,0,0,0,56,40V216a24,24,0,0,0,24,24h96a24,24,0,0,0,24-24V40A24,24,0,0,0,176,16ZM72,64H184V192H72Zm8-32h96a8,8,0,0,1,8,8v8H72V40A8,8,0,0,1,80,32Zm96,192H80a8,8,0,0,1-8-8v-8H184v8A8,8,0,0,1,176,224Z",
+         "diamond" to "M235.33,116.72,139.28,20.66a16,16,0,0,0-22.56,0l-96,96.06a16,16,0,0,0,0,22.56l96.05,96.06h0a16,16,0,0,0,22.56,0l96.05-96.06a16,16,0,0,0,0-22.56ZM128,224h0L32,128,128,32,224,128Z",
+         "dots-three" to "M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z",
++        "dots-three-vertical" to "M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM128,72a12,12,0,1,0-12-12A12,12,0,0,0,128,72Zm0,112a12,12,0,1,0,12,12A12,12,0,0,0,128,184Z",
+         "download-simple" to "M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z",
+         "drop" to "M174,47.75a254.19,254.19,0,0,0-41.45-38.3,8,8,0,0,0-9.18,0A254.19,254.19,0,0,0,82,47.75C54.51,79.32,40,112.6,40,144a88,88,0,0,0,176,0C216,112.6,201.49,79.32,174,47.75ZM128,216a72.08,72.08,0,0,1-72-72c0-57.23,55.47-105,72-118,16.53,13,72,60.75,72,118A72.08,72.08,0,0,1,128,216Zm55.89-62.66a57.6,57.6,0,0,1-46.56,46.55A8.75,8.75,0,0,1,136,200a8,8,0,0,1-1.32-15.89c16.57-2.79,30.63-16.85,33.44-33.45a8,8,0,0,1,15.78,2.68Z",
+         "envelope-simple" to "M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48ZM203.43,64,128,133.15,52.57,64ZM216,192H40V74.19l82.59,75.71a8,8,0,0,0,10.82,0L216,74.19V192Z",
+@@ -178,6 +181,7 @@ object PhosphorIcons {
+         "info" to "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z",
+         "intersect" to "M174.63,81.37a80,80,0,1,0-93.26,93.26,80,80,0,1,0,93.26-93.26ZM100.69,136,120,155.31A63.48,63.48,0,0,1,96,160,63.48,63.48,0,0,1,100.69,136Zm33.75,11.13-25.57-25.57a64.65,64.65,0,0,1,12.69-12.69l25.57,25.57A64.65,64.65,0,0,1,134.44,147.13ZM155.31,120,136,100.69A63.48,63.48,0,0,1,160,96,63.48,63.48,0,0,1,155.31,120ZM32,96a64,64,0,0,1,126-16A80.08,80.08,0,0,0,80.05,158,64.11,64.11,0,0,1,32,96ZM160,224A64.11,64.11,0,0,1,98,176,80.08,80.08,0,0,0,176,98,64,64,0,0,1,160,224Z",
+         "key" to "M216.57,39.43A80,80,0,0,0,83.91,120.78L28.69,176A15.86,15.86,0,0,0,24,187.31V216a16,16,0,0,0,16,16H72a8,8,0,0,0,8-8V208H96a8,8,0,0,0,8-8V184h16a8,8,0,0,0,5.66-2.34l9.56-9.57A79.73,79.73,0,0,0,160,176h.1A80,80,0,0,0,216.57,39.43ZM224,98.1c-1.09,34.09-29.75,61.86-63.89,61.9H160a63.7,63.7,0,0,1-23.65-4.51,8,8,0,0,0-8.84,1.68L116.69,168H96a8,8,0,0,0-8,8v16H72a8,8,0,0,0-8,8v16H40V187.31l58.83-58.82a8,8,0,0,0,1.68-8.84A63.72,63.72,0,0,1,96,95.92c0-34.14,27.81-62.8,61.9-63.89A64,64,0,0,1,224,98.1ZM192,76a12,12,0,1,1-12-12A12,12,0,0,1,192,76Z",
++        "laptop" to "M232,168h-8V72a24,24,0,0,0-24-24H56A24,24,0,0,0,32,72v96H24a8,8,0,0,0-8,8v16a24,24,0,0,0,24,24H216a24,24,0,0,0,24-24V176A8,8,0,0,0,232,168ZM48,72a8,8,0,0,1,8-8H200a8,8,0,0,1,8,8v96H48ZM224,192a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8v-8H224ZM152,88a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,88Z",
+         "lightbulb" to "M176,232a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,232Zm40-128a87.55,87.55,0,0,1-33.64,69.21A16.24,16.24,0,0,0,176,186v6a16,16,0,0,1-16,16H96a16,16,0,0,1-16-16v-6a16,16,0,0,0-6.23-12.66A87.59,87.59,0,0,1,40,104.49C39.74,56.83,78.26,17.14,125.88,16A88,88,0,0,1,216,104Zm-16,0a72,72,0,0,0-73.74-72c-39,.92-70.47,33.39-70.26,72.39a71.65,71.65,0,0,0,27.64,56.3A32,32,0,0,1,96,186v6h64v-6a32.15,32.15,0,0,1,12.47-25.35A71.65,71.65,0,0,0,200,104Zm-16.11-9.34a57.6,57.6,0,0,0-46.56-46.55,8,8,0,0,0-2.66,15.78c16.57,2.79,30.63,16.85,33.44,33.45A8,8,0,0,0,176,104a9,9,0,0,0,1.35-.11A8,8,0,0,0,183.89,94.66Z",
+         "lightbulb-filament" to "M176,232a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,232Zm40-128a87.55,87.55,0,0,1-33.64,69.21A16.24,16.24,0,0,0,176,186v6a16,16,0,0,1-16,16H96a16,16,0,0,1-16-16v-6a16,16,0,0,0-6.23-12.66A87.59,87.59,0,0,1,40,104.5C39.74,56.83,78.26,17.15,125.88,16A88,88,0,0,1,216,104Zm-16,0a72,72,0,0,0-73.74-72c-39,.92-70.47,33.39-70.26,72.39a71.64,71.64,0,0,0,27.64,56.3h0A32,32,0,0,1,96,186v6h24V147.31L90.34,117.66a8,8,0,0,1,11.32-11.32L128,132.69l26.34-26.35a8,8,0,0,1,11.32,11.32L136,147.31V192h24v-6a32.12,32.12,0,0,1,12.47-25.35A71.65,71.65,0,0,0,200,104Z",
+         "lightning" to "M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7l-112,120a8,8,0,0,0,3,13l57.63,21.61L88.16,238.43a8,8,0,0,0,13.69,7l112-120A8,8,0,0,0,215.79,118.17ZM109.37,214l10.47-52.38a8,8,0,0,0-5-9.06L62,132.71l84.62-90.66L136.16,94.43a8,8,0,0,0,5,9.06l52.8,19.8Z",
+@@ -203,6 +207,7 @@ object PhosphorIcons {
+         "package" to "M223.68,66.15,135.68,18a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32l80.34,44-29.77,16.3-80.35-44ZM128,120,47.66,76l33.9-18.56,80.34,44ZM40,90l80,43.78v85.79L40,175.82Zm176,85.78h0l-80,43.79V133.82l32-17.51V152a8,8,0,0,0,16,0V107.55L216,90v85.77Z",
+         "palette" to "M200.77,53.89A103.27,103.27,0,0,0,128,24h-1.07A104,104,0,0,0,24,128c0,43,26.58,79.06,69.36,94.17A32,32,0,0,0,136,192a16,16,0,0,1,16-16h46.21a31.81,31.81,0,0,0,31.2-24.88,104.43,104.43,0,0,0,2.59-24A103.28,103.28,0,0,0,200.77,53.89Zm13,93.71A15.89,15.89,0,0,1,198.21,160H152a32,32,0,0,0-32,32,16,16,0,0,1-21.31,15.07C62.49,194.3,40,164,40,128a88,88,0,0,1,87.09-88h.9a88.35,88.35,0,0,1,88,87.25A88.86,88.86,0,0,1,213.81,147.6ZM140,76a12,12,0,1,1-12-12A12,12,0,0,1,140,76ZM96,100A12,12,0,1,1,84,88,12,12,0,0,1,96,100Zm0,56a12,12,0,1,1-12-12A12,12,0,0,1,96,156Zm88-56a12,12,0,1,1-12-12A12,12,0,0,1,184,100Z",
+         "paper-plane-right" to "M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z",
++        "paper-plane-tilt" to "M227.32,28.68a16,16,0,0,0-15.66-4.08l-.15,0L19.57,82.84a16,16,0,0,0-2.49,29.8L102,154l41.3,84.87A15.86,15.86,0,0,0,157.74,248q.69,0,1.38-.06a15.88,15.88,0,0,0,14-11.51l58.2-191.94c0-.05,0-.1,0-.15A16,16,0,0,0,227.32,28.68ZM157.83,231.85l-.05.14,0-.07-40.06-82.3,48-48a8,8,0,0,0-11.31-11.31l-48,48L24.08,98.25l-.07,0,.14,0L216,40Z",
+         "paperclip" to "M209.66,122.34a8,8,0,0,1,0,11.32l-82.05,82a56,56,0,0,1-79.2-79.21L147.67,35.73a40,40,0,1,1,56.61,56.55L105,193A24,24,0,1,1,71,159L154.3,74.38A8,8,0,1,1,165.7,85.6L82.39,170.31a8,8,0,1,0,11.27,11.36L192.93,81A24,24,0,1,0,159,47L59.76,147.68a40,40,0,1,0,56.53,56.62l82.06-82A8,8,0,0,1,209.66,122.34Z",
+         "pause" to "M200,32H160a16,16,0,0,0-16,16V208a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V48A16,16,0,0,0,200,32Zm0,176H160V48h40ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Zm0,176H56V48H96Z",
+         "pencil-simple" to "M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z",
+@@ -210,6 +215,7 @@ object PhosphorIcons {
+         "play-circle" to "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48.24-94.78-64-40A8,8,0,0,0,100,88v80a8,8,0,0,0,12.24,6.78l64-40a8,8,0,0,0,0-13.56ZM116,153.57V102.43L156.91,128Z",
+         "plus" to "M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z",
+         "plus-circle" to "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48-88a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z",
++        "plus-square" to "M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,176H48V48H208V208Zm-32-80a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z",
+         "push-pin" to "M235.32,81.37,174.63,20.69a16,16,0,0,0-22.63,0L98.37,74.49c-10.66-3.34-35-7.37-60.4,13.14a16,16,0,0,0-1.29,23.78L85,159.71,42.34,202.34a8,8,0,0,0,11.32,11.32L96.29,171l48.29,48.29A16,16,0,0,0,155.9,224c.38,0,.75,0,1.13,0a15.93,15.93,0,0,0,11.64-6.33c19.64-26.1,17.75-47.32,13.19-60L235.33,104A16,16,0,0,0,235.32,81.37ZM224,92.69h0l-57.27,57.46a8,8,0,0,0-1.49,9.22c9.46,18.93-1.8,38.59-9.34,48.62L48,100.08c12.08-9.74,23.64-12.31,32.48-12.31A40.13,40.13,0,0,1,96.81,91a8,8,0,0,0,9.25-1.51L163.32,32,224,92.68Z",
+         "question" to "M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,72c-22.06,0-40,16.15-40,36v4a8,8,0,0,0,16,0v-4c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-.72c18.24-3.35,32-17.9,32-35.28C168,88.15,150.06,72,128,72Zm104,56A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z",
+         "rectangle" to "M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,160H40V56H216V200Z",
+@@ -217,6 +223,7 @@ object PhosphorIcons {
+         "scissors" to "M157.73,113.13A8,8,0,0,1,159.82,102L227.48,55.7a8,8,0,0,1,9,13.21l-67.67,46.3a7.92,7.92,0,0,1-4.51,1.4A8,8,0,0,1,157.73,113.13Zm80.87,85.09a8,8,0,0,1-11.12,2.08L136,137.7,93.49,166.78a36,36,0,1,1-9-13.19L121.83,128,84.44,102.41a35.86,35.86,0,1,1,9-13.19l143,97.87A8,8,0,0,1,238.6,198.22ZM80,180a20,20,0,1,0-5.86,14.14A19.85,19.85,0,0,0,80,180ZM74.14,90.13a20,20,0,1,0-28.28,0A19.85,19.85,0,0,0,74.14,90.13Z",
+         "selection" to "M152,40a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,40Zm-8,168H112a8,8,0,0,0,0,16h32a8,8,0,0,0,0-16ZM208,32H184a8,8,0,0,0,0,16h24V72a8,8,0,0,0,16,0V48A16,16,0,0,0,208,32Zm8,72a8,8,0,0,0-8,8v32a8,8,0,0,0,16,0V112A8,8,0,0,0,216,104Zm0,72a8,8,0,0,0-8,8v24H184a8,8,0,0,0,0,16h24a16,16,0,0,0,16-16V184A8,8,0,0,0,216,176ZM40,152a8,8,0,0,0,8-8V112a8,8,0,0,0-16,0v32A8,8,0,0,0,40,152Zm32,56H48V184a8,8,0,0,0-16,0v24a16,16,0,0,0,16,16H72a8,8,0,0,0,0-16ZM72,32H48A16,16,0,0,0,32,48V72a8,8,0,0,0,16,0V48H72a8,8,0,0,0,0-16Z",
+         "selection-background" to "M160,80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H160a16,16,0,0,0,16-16V96A16,16,0,0,0,160,80Zm0,128H48V96H160ZM136,40a8,8,0,0,1,8-8h16a8,8,0,0,1,0,16H144A8,8,0,0,1,136,40Zm88,8v8a8,8,0,0,1-16,0V48h-8a8,8,0,0,1,0-16h8A16,16,0,0,1,224,48Zm0,48v16a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0Zm0,56v8a16,16,0,0,1-16,16h-8a8,8,0,0,1,0-16h8v-8a8,8,0,0,1,16,0ZM80,56V48A16,16,0,0,1,96,32h8a8,8,0,0,1,0,16H96v8a8,8,0,0,1-16,0Z",
++        "share-fat" to "M237.66,106.35l-80-80A8,8,0,0,0,144,32V72.35c-25.94,2.22-54.59,14.92-78.16,34.91-28.38,24.08-46.05,55.11-49.76,87.37a12,12,0,0,0,20.68,9.58h0c11-11.71,50.14-48.74,107.24-52V192a8,8,0,0,0,13.66,5.65l80-80A8,8,0,0,0,237.66,106.35ZM160,172.69V144a8,8,0,0,0-8-8c-28.08,0-55.43,7.33-81.29,21.8a196.17,196.17,0,0,0-36.57,26.52c5.8-23.84,20.42-46.51,42.05-64.86C99.41,99.77,127.75,88,152,88a8,8,0,0,0,8-8V51.32L220.69,112Z",
+         "share-network" to "M176,160a39.89,39.89,0,0,0-28.62,12.09l-46.1-29.63a39.8,39.8,0,0,0,0-28.92l46.1-29.63a40,40,0,1,0-8.66-13.45l-46.1,29.63a40,40,0,1,0,0,55.82l46.1,29.63A40,40,0,1,0,176,160Zm0-128a24,24,0,1,1-24,24A24,24,0,0,1,176,32ZM64,152a24,24,0,1,1,24-24A24,24,0,0,1,64,152Zm112,72a24,24,0,1,1,24-24A24,24,0,0,1,176,224Z",
+         "shield-check" to "M208,40H48A16,16,0,0,0,32,56v56c0,52.72,25.52,84.67,46.93,102.19,23.06,18.86,46,25.26,47,25.53a8,8,0,0,0,4.2,0c1-.27,23.91-6.67,47-25.53C198.48,196.67,224,164.72,224,112V56A16,16,0,0,0,208,40Zm0,72c0,37.07-13.66,67.16-40.6,89.42A129.3,129.3,0,0,1,128,223.62a128.25,128.25,0,0,1-38.92-21.81C61.82,179.51,48,149.3,48,112l0-56,160,0ZM82.34,141.66a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56a8,8,0,0,1-11.32,0Z",
+         "shield-warning" to "M120,136V96a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,48a12,12,0,1,0-12-12A12,12,0,0,0,128,184ZM224,56v56c0,52.72-25.52,84.67-46.93,102.19-23.06,18.86-46,25.27-47,25.53a8,8,0,0,1-4.2,0c-1-.26-23.91-6.67-47-25.53C57.52,196.67,32,164.72,32,112V56A16,16,0,0,1,48,40H208A16,16,0,0,1,224,56Zm-16,0L48,56l0,56c0,37.3,13.82,67.51,41.07,89.81A128.25,128.25,0,0,0,128,223.62a129.3,129.3,0,0,0,39.41-22.2C194.34,179.16,208,149.07,208,112Z",
+@@ -241,6 +248,8 @@ object PhosphorIcons {
+         "t-shirt" to "M247.59,61.22,195.83,33A8,8,0,0,0,192,32H160a8,8,0,0,0-8,8,24,24,0,0,1-48,0,8,8,0,0,0-8-8H64a8,8,0,0,0-3.84,1L8.41,61.22A15.76,15.76,0,0,0,1.82,82.48l19.27,36.81A16.37,16.37,0,0,0,35.67,128H56v80a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16V128h20.34a16.37,16.37,0,0,0,14.58-8.71l19.27-36.81A15.76,15.76,0,0,0,247.59,61.22ZM35.67,112a.62.62,0,0,1-.41-.13L16.09,75.26,56,53.48V112ZM184,208H72V48h16.8a40,40,0,0,0,78.38,0H184Zm36.75-96.14a.55.55,0,0,1-.41.14H200V53.48l39.92,21.78Z",
+         "text-aa" to "M87.24,52.59a8,8,0,0,0-14.48,0l-64,136a8,8,0,1,0,14.48,6.81L39.9,160h80.2l16.66,35.4a8,8,0,1,0,14.48-6.81ZM47.43,144,80,74.79,112.57,144ZM200,96c-12.76,0-22.73,3.47-29.63,10.32a8,8,0,0,0,11.26,11.36c3.8-3.77,10-5.68,18.37-5.68,13.23,0,24,9,24,20v3.22A42.76,42.76,0,0,0,200,128c-22.06,0-40,16.15-40,36s17.94,36,40,36a42.73,42.73,0,0,0,24-7.25,8,8,0,0,0,16-.75V132C240,112.15,222.06,96,200,96Zm0,88c-13.23,0-24-9-24-20s10.77-20,24-20,24,9,24,20S213.23,184,200,184Z",
+         "text-t" to "M208,56V88a8,8,0,0,1-16,0V64H136V192h24a8,8,0,0,1,0,16H96a8,8,0,0,1,0-16h24V64H64V88a8,8,0,0,1-16,0V56a8,8,0,0,1,8-8H200A8,8,0,0,1,208,56Z",
++        "thumbs-down" to "M239.82,157l-12-96A24,24,0,0,0,204,40H32A16,16,0,0,0,16,56v88a16,16,0,0,0,16,16H75.06l37.78,75.58A8,8,0,0,0,120,240a40,40,0,0,0,40-40V184h56a24,24,0,0,0,23.82-27ZM72,144H32V56H72Zm150,21.29a7.88,7.88,0,0,1-6,2.71H152a8,8,0,0,0-8,8v24a24,24,0,0,1-19.29,23.54L88,150.11V56H204a8,8,0,0,1,7.94,7l12,96A7.87,7.87,0,0,1,222,165.29Z",
++        "thumbs-up" to "M234,80.12A24,24,0,0,0,216,72H160V56a40,40,0,0,0-40-40,8,8,0,0,0-7.16,4.42L75.06,96H32a16,16,0,0,0-16,16v88a16,16,0,0,0,16,16H204a24,24,0,0,0,23.82-21l12-96A24,24,0,0,0,234,80.12ZM32,112H72v88H32ZM223.94,97l-12,96a8,8,0,0,1-7.94,7H88V105.89l36.71-73.43A24,24,0,0,1,144,56V80a8,8,0,0,0,8,8h64a8,8,0,0,1,7.94,9Z",
+         "timer" to "M128,40a96,96,0,1,0,96,96A96.11,96.11,0,0,0,128,40Zm0,176a80,80,0,1,1,80-80A80.09,80.09,0,0,1,128,216ZM173.66,90.34a8,8,0,0,1,0,11.32l-40,40a8,8,0,0,1-11.32-11.32l40-40A8,8,0,0,1,173.66,90.34ZM96,16a8,8,0,0,1,8-8h48a8,8,0,0,1,0,16H104A8,8,0,0,1,96,16Z",
+         "trash" to "M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z",
+         "upload-simple" to "M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0ZM93.66,77.66,120,51.31V144a8,8,0,0,0,16,0V51.31l26.34,26.35a8,8,0,0,0,11.32-11.32l-40-40a8,8,0,0,0-11.32,0l-40,40A8,8,0,0,0,93.66,77.66Z",
+diff --git a/design/icons/icons.txt b/design/icons/icons.txt
+index 0991092b..29f29ad7 100644
+--- a/design/icons/icons.txt
++++ b/design/icons/icons.txt
+@@ -273,3 +273,15 @@ arrow-down
+ paperclip
+ square
+ check-square
++# Take viewer (plans/swap-viewer-design.md): the platform previews' generic buttons and the viewer's own
++heart
++chat-circle-dots
++bookmark-simple
++share-fat
++paper-plane-tilt
++thumbs-up
++thumbs-down
++dots-three-vertical
++plus-square
++laptop
++check
+diff --git a/design/icons/phosphor/bookmark-simple.svg b/design/icons/phosphor/bookmark-simple.svg
+new file mode 100644
+index 00000000..8429ae98
+--- /dev/null
++++ b/design/icons/phosphor/bookmark-simple.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,32H72A16,16,0,0,0,56,48V224a8,8,0,0,0,12.24,6.78L128,193.43l59.77,37.35A8,8,0,0,0,200,224V48A16,16,0,0,0,184,32Zm0,177.57-51.77-32.35a8,8,0,0,0-8.48,0L72,209.57V48H184Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/chat-circle-dots.svg b/design/icons/phosphor/chat-circle-dots.svg
+new file mode 100644
+index 00000000..f8ef2d38
+--- /dev/null
++++ b/design/icons/phosphor/chat-circle-dots.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/dots-three-vertical.svg b/design/icons/phosphor/dots-three-vertical.svg
+new file mode 100644
+index 00000000..321aa93e
+--- /dev/null
++++ b/design/icons/phosphor/dots-three-vertical.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM128,72a12,12,0,1,0-12-12A12,12,0,0,0,128,72Zm0,112a12,12,0,1,0,12,12A12,12,0,0,0,128,184Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/laptop.svg b/design/icons/phosphor/laptop.svg
+new file mode 100644
+index 00000000..aa39c255
+--- /dev/null
++++ b/design/icons/phosphor/laptop.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,168h-8V72a24,24,0,0,0-24-24H56A24,24,0,0,0,32,72v96H24a8,8,0,0,0-8,8v16a24,24,0,0,0,24,24H216a24,24,0,0,0,24-24V176A8,8,0,0,0,232,168ZM48,72a8,8,0,0,1,8-8H200a8,8,0,0,1,8,8v96H48ZM224,192a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8v-8H224ZM152,88a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,88Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/paper-plane-tilt.svg b/design/icons/phosphor/paper-plane-tilt.svg
+new file mode 100644
+index 00000000..9ed1562d
+--- /dev/null
++++ b/design/icons/phosphor/paper-plane-tilt.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M227.32,28.68a16,16,0,0,0-15.66-4.08l-.15,0L19.57,82.84a16,16,0,0,0-2.49,29.8L102,154l41.3,84.87A15.86,15.86,0,0,0,157.74,248q.69,0,1.38-.06a15.88,15.88,0,0,0,14-11.51l58.2-191.94c0-.05,0-.1,0-.15A16,16,0,0,0,227.32,28.68ZM157.83,231.85l-.05.14,0-.07-40.06-82.3,48-48a8,8,0,0,0-11.31-11.31l-48,48L24.08,98.25l-.07,0,.14,0L216,40Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/plus-square.svg b/design/icons/phosphor/plus-square.svg
+new file mode 100644
+index 00000000..47112c90
+--- /dev/null
++++ b/design/icons/phosphor/plus-square.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,176H48V48H208V208Zm-32-80a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/share-fat.svg b/design/icons/phosphor/share-fat.svg
+new file mode 100644
+index 00000000..0916c2ec
+--- /dev/null
++++ b/design/icons/phosphor/share-fat.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M237.66,106.35l-80-80A8,8,0,0,0,144,32V72.35c-25.94,2.22-54.59,14.92-78.16,34.91-28.38,24.08-46.05,55.11-49.76,87.37a12,12,0,0,0,20.68,9.58h0c11-11.71,50.14-48.74,107.24-52V192a8,8,0,0,0,13.66,5.65l80-80A8,8,0,0,0,237.66,106.35ZM160,172.69V144a8,8,0,0,0-8-8c-28.08,0-55.43,7.33-81.29,21.8a196.17,196.17,0,0,0-36.57,26.52c5.8-23.84,20.42-46.51,42.05-64.86C99.41,99.77,127.75,88,152,88a8,8,0,0,0,8-8V51.32L220.69,112Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/thumbs-down.svg b/design/icons/phosphor/thumbs-down.svg
+new file mode 100644
+index 00000000..c2d170c8
+--- /dev/null
++++ b/design/icons/phosphor/thumbs-down.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M239.82,157l-12-96A24,24,0,0,0,204,40H32A16,16,0,0,0,16,56v88a16,16,0,0,0,16,16H75.06l37.78,75.58A8,8,0,0,0,120,240a40,40,0,0,0,40-40V184h56a24,24,0,0,0,23.82-27ZM72,144H32V56H72Zm150,21.29a7.88,7.88,0,0,1-6,2.71H152a8,8,0,0,0-8,8v24a24,24,0,0,1-19.29,23.54L88,150.11V56H204a8,8,0,0,1,7.94,7l12,96A7.87,7.87,0,0,1,222,165.29Z"/></svg>
+\ No newline at end of file
+diff --git a/design/icons/phosphor/thumbs-up.svg b/design/icons/phosphor/thumbs-up.svg
+new file mode 100644
+index 00000000..6f2ef57f
+--- /dev/null
++++ b/design/icons/phosphor/thumbs-up.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M234,80.12A24,24,0,0,0,216,72H160V56a40,40,0,0,0-40-40,8,8,0,0,0-7.16,4.42L75.06,96H32a16,16,0,0,0-16,16v88a16,16,0,0,0,16,16H204a24,24,0,0,0,23.82-21l12-96A24,24,0,0,0,234,80.12ZM32,112H72v88H32ZM223.94,97l-12,96a8,8,0,0,1-7.94,7H88V105.89l36.71-73.43A24,24,0,0,1,144,56V80a8,8,0,0,0,8,8h64a8,8,0,0,1,7.94,9Z"/></svg>
+\ No newline at end of file
+diff --git a/mac/Muse/App/AppStore+Actions.swift b/mac/Muse/App/AppStore+Actions.swift
+index 8469e54d..e3471428 100644
+--- a/mac/Muse/App/AppStore+Actions.swift
++++ b/mac/Muse/App/AppStore+Actions.swift
+@@ -21,6 +21,7 @@ extension AppStore {
+             let c = try await withUploadProgress("Uploading \(url.lastPathComponent)") { p in try await self.api.uploadClip(meta, file: url, progress: p) }
+             clip = c
+             clipFile = url
++            clipVideo = url
+             clipThumb = thumb.map { ImageRef(url: $0.absoluteString) }
+             if c.ok {
+                 showToast("Clip checked · \(Pricing.trimNum(c.durationSec))s · \(c.width)×\(c.height). Ready to generate.")
+@@ -38,6 +39,7 @@ extension AppStore {
+             clip = c
+             clipFile = nil
+             clipThumb = nil
++            clipVideo = nil
+         } catch {
+             if !quiet { showToast((error as? ApiError)?.friendlyMessage ?? error.localizedDescription) }
+         }
+diff --git a/mac/Muse/App/AppStore+LinkImport.swift b/mac/Muse/App/AppStore+LinkImport.swift
+index 37474671..6deefabb 100644
+--- a/mac/Muse/App/AppStore+LinkImport.swift
++++ b/mac/Muse/App/AppStore+LinkImport.swift
+@@ -192,6 +192,7 @@ extension AppStore {
+                 clip = c
+                 clipFile = nil
+                 clipThumb = c.thumb
++                clipVideo = r.videoUrl.flatMap(URL.init(string:))
+                 // No poster: the file's first frame (owner bug 2026-11-09: a chosen clip showed a blank slot).
+                 if c.thumb == nil, let v = r.videoUrl.flatMap(URL.init(string:)) {
+                     Task {
+@@ -207,6 +208,9 @@ extension AppStore {
+             showToast(r.clip.map { "Imported \($0.name)" } ?? "Imported", action: "Use in Swap") { [weak self] in
+                 guard let self, let c = r.clip else { return }
+                 self.clip = c
++                self.clipFile = nil
++                self.clipThumb = c.thumb
++                self.clipVideo = r.videoUrl.flatMap(URL.init(string:))
+                 self.openTool(.swap)
+             }
+             Task { await forceReload() }
+diff --git a/mac/Muse/App/AppStore+NewSwap.swift b/mac/Muse/App/AppStore+NewSwap.swift
+index 2819a87a..a3484bad 100644
+--- a/mac/Muse/App/AppStore+NewSwap.swift
++++ b/mac/Muse/App/AppStore+NewSwap.swift
+@@ -146,6 +146,7 @@ extension AppStore {
+             clip = c
+             clipFile = nil
+             clipThumb = take.thumb
++            clipVideo = take.videoUrl.flatMap(URL.init(string:))
+             suite.remix.range = nil
+             showToast("Added \(take.caption) · \(Pricing.trimNum(c.durationSec)) s")
+         }
+diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
+index 72f05eca..78ea15e6 100644
+--- a/mac/Muse/App/AppStore+Suite.swift
++++ b/mac/Muse/App/AppStore+Suite.swift
+@@ -250,6 +250,8 @@ final class SuiteState {
+ 
+     /// The take Edit opens with (top-level Edit: nil).
+     var editTakeId: String?
++    /// Where Edit's playhead starts on that take (the viewer's Split: "open it in Edit at this moment"); read once.
++    var editAt: Double?
+     /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
+     var editAttach: EditAttach?
+     struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
+@@ -351,7 +353,8 @@ extension AppStore {
+     }
+ 
+     /// Edit, top level or with a take.
+-    func openEdit(takeId: String? = nil) {
++    func openEdit(takeId: String? = nil, at seconds: Double? = nil) {
++        suite.editAt = seconds
+         suite.editTakeId = takeId
+         go(.edit)
+     }
+diff --git a/mac/Muse/App/AppStore.swift b/mac/Muse/App/AppStore.swift
+index a2c3c0ad..74bf0503 100644
+--- a/mac/Muse/App/AppStore.swift
++++ b/mac/Muse/App/AppStore.swift
+@@ -298,6 +298,8 @@ final class AppStore {
+     /// The selected clip. Changing it (or its late talking detection arriving) re-sets "Performer is speaking".
+     var clip: Clip? { didSet { clipChangedForSpeaking(from: oldValue) } }
+     var clipFile: URL?
++    /// The source clip's video, to play it (New Swap's stage): the uploaded file, or the Library take's video. nil: a poster only.
++    var clipVideo: URL?
+     var clipThumb: ImageRef?
+     /// Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta). Every option renders the whole clip.
+     var quality: VideoQuality
+@@ -527,6 +529,7 @@ final class AppStore {
+         clip = nil
+         clipFile = nil
+         clipThumb = nil
++        clipVideo = nil
+         stageJobIds = []
+         stageTakeId = nil
+         wallet = nil
+diff --git a/mac/Muse/App/SuiteClaudeBridge.swift b/mac/Muse/App/SuiteClaudeBridge.swift
+index 79ffdf5a..458c2cf8 100644
+--- a/mac/Muse/App/SuiteClaudeBridge.swift
++++ b/mac/Muse/App/SuiteClaudeBridge.swift
+@@ -351,6 +351,7 @@ extension AppStore {
+             clip = c
+             clipFile = nil
+             clipThumb = c.thumb
++            clipVideo = nil
+             suite.remix.range = nil
+         }
+     }
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.bookmark-simple.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.bookmark-simple.imageset/Contents.json
+new file mode 100644
+index 00000000..503bf7fd
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.bookmark-simple.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "bookmark-simple.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.bookmark-simple.imageset/bookmark-simple.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.bookmark-simple.imageset/bookmark-simple.svg
+new file mode 100644
+index 00000000..caa1078c
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.bookmark-simple.imageset/bookmark-simple.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M184,32H72A16,16,0,0,0,56,48V224a8,8,0,0,0,12.24,6.78L128,193.43l59.77,37.35A8,8,0,0,0,200,224V48A16,16,0,0,0,184,32Zm0,177.57-51.77-32.35a8,8,0,0,0-8.48,0L72,209.57V48H184Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.chat-circle-dots.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.chat-circle-dots.imageset/Contents.json
+new file mode 100644
+index 00000000..76a7ed0f
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.chat-circle-dots.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "chat-circle-dots.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.chat-circle-dots.imageset/chat-circle-dots.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.chat-circle-dots.imageset/chat-circle-dots.svg
+new file mode 100644
+index 00000000..29ac9dc0
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.chat-circle-dots.imageset/chat-circle-dots.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.dots-three-vertical.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.dots-three-vertical.imageset/Contents.json
+new file mode 100644
+index 00000000..4ccb8ab2
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.dots-three-vertical.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "dots-three-vertical.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.dots-three-vertical.imageset/dots-three-vertical.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.dots-three-vertical.imageset/dots-three-vertical.svg
+new file mode 100644
+index 00000000..4c6dac66
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.dots-three-vertical.imageset/dots-three-vertical.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM128,72a12,12,0,1,0-12-12A12,12,0,0,0,128,72Zm0,112a12,12,0,1,0,12,12A12,12,0,0,0,128,184Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.laptop.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.laptop.imageset/Contents.json
+new file mode 100644
+index 00000000..386eb2e6
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.laptop.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "laptop.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.laptop.imageset/laptop.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.laptop.imageset/laptop.svg
+new file mode 100644
+index 00000000..969548f8
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.laptop.imageset/laptop.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M232,168h-8V72a24,24,0,0,0-24-24H56A24,24,0,0,0,32,72v96H24a8,8,0,0,0-8,8v16a24,24,0,0,0,24,24H216a24,24,0,0,0,24-24V176A8,8,0,0,0,232,168ZM48,72a8,8,0,0,1,8-8H200a8,8,0,0,1,8,8v96H48ZM224,192a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8v-8H224ZM152,88a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,88Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.paper-plane-tilt.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.paper-plane-tilt.imageset/Contents.json
+new file mode 100644
+index 00000000..6d56d81d
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.paper-plane-tilt.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "paper-plane-tilt.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.paper-plane-tilt.imageset/paper-plane-tilt.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.paper-plane-tilt.imageset/paper-plane-tilt.svg
+new file mode 100644
+index 00000000..2c70b24a
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.paper-plane-tilt.imageset/paper-plane-tilt.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M227.32,28.68a16,16,0,0,0-15.66-4.08l-.15,0L19.57,82.84a16,16,0,0,0-2.49,29.8L102,154l41.3,84.87A15.86,15.86,0,0,0,157.74,248q.69,0,1.38-.06a15.88,15.88,0,0,0,14-11.51l58.2-191.94c0-.05,0-.1,0-.15A16,16,0,0,0,227.32,28.68ZM157.83,231.85l-.05.14,0-.07-40.06-82.3,48-48a8,8,0,0,0-11.31-11.31l-48,48L24.08,98.25l-.07,0,.14,0L216,40Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.plus-square.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.plus-square.imageset/Contents.json
+new file mode 100644
+index 00000000..5ddbd408
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.plus-square.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "plus-square.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.plus-square.imageset/plus-square.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.plus-square.imageset/plus-square.svg
+new file mode 100644
+index 00000000..eae289cc
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.plus-square.imageset/plus-square.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,176H48V48H208V208Zm-32-80a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.share-fat.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.share-fat.imageset/Contents.json
+new file mode 100644
+index 00000000..ca3c4484
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.share-fat.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "share-fat.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.share-fat.imageset/share-fat.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.share-fat.imageset/share-fat.svg
+new file mode 100644
+index 00000000..1a5f32e9
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.share-fat.imageset/share-fat.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M237.66,106.35l-80-80A8,8,0,0,0,144,32V72.35c-25.94,2.22-54.59,14.92-78.16,34.91-28.38,24.08-46.05,55.11-49.76,87.37a12,12,0,0,0,20.68,9.58h0c11-11.71,50.14-48.74,107.24-52V192a8,8,0,0,0,13.66,5.65l80-80A8,8,0,0,0,237.66,106.35ZM160,172.69V144a8,8,0,0,0-8-8c-28.08,0-55.43,7.33-81.29,21.8a196.17,196.17,0,0,0-36.57,26.52c5.8-23.84,20.42-46.51,42.05-64.86C99.41,99.77,127.75,88,152,88a8,8,0,0,0,8-8V51.32L220.69,112Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-down.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-down.imageset/Contents.json
+new file mode 100644
+index 00000000..30f2d83b
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-down.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "thumbs-down.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-down.imageset/thumbs-down.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-down.imageset/thumbs-down.svg
+new file mode 100644
+index 00000000..282c712c
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-down.imageset/thumbs-down.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M239.82,157l-12-96A24,24,0,0,0,204,40H32A16,16,0,0,0,16,56v88a16,16,0,0,0,16,16H75.06l37.78,75.58A8,8,0,0,0,120,240a40,40,0,0,0,40-40V184h56a24,24,0,0,0,23.82-27ZM72,144H32V56H72Zm150,21.29a7.88,7.88,0,0,1-6,2.71H152a8,8,0,0,0-8,8v24a24,24,0,0,1-19.29,23.54L88,150.11V56H204a8,8,0,0,1,7.94,7l12,96A7.87,7.87,0,0,1,222,165.29Z"/></svg>
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-up.imageset/Contents.json b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-up.imageset/Contents.json
+new file mode 100644
+index 00000000..11beb6c7
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-up.imageset/Contents.json
+@@ -0,0 +1,16 @@
++{
++  "images": [
++    {
++      "filename": "thumbs-up.svg",
++      "idiom": "universal"
++    }
++  ],
++  "info": {
++    "author": "xcode",
++    "version": 1
++  },
++  "properties": {
++    "preserves-vector-representation": true,
++    "template-rendering-intent": "template"
++  }
++}
+diff --git a/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-up.imageset/thumbs-up.svg b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-up.imageset/thumbs-up.svg
+new file mode 100644
+index 00000000..7c547602
+--- /dev/null
++++ b/mac/Muse/Resources/Phosphor.xcassets/ph.thumbs-up.imageset/thumbs-up.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><path fill="#000000" d="M234,80.12A24,24,0,0,0,216,72H160V56a40,40,0,0,0-40-40,8,8,0,0,0-7.16,4.42L75.06,96H32a16,16,0,0,0-16,16v88a16,16,0,0,0,16,16H204a24,24,0,0,0,23.82-21l12-96A24,24,0,0,0,234,80.12ZM32,112H72v88H32ZM223.94,97l-12,96a8,8,0,0,1-7.94,7H88V105.89l36.71-73.43A24,24,0,0,1,144,56V80a8,8,0,0,0,8,8h64a8,8,0,0,1,7.94,9Z"/></svg>
+diff --git a/mac/Muse/Theme/PhosphorMap.swift b/mac/Muse/Theme/PhosphorMap.swift
+index b90ffda1..d7efa8a1 100644
+--- a/mac/Muse/Theme/PhosphorMap.swift
++++ b/mac/Muse/Theme/PhosphorMap.swift
+@@ -162,6 +162,7 @@ enum PhosphorMap {
+         "bag",
+         "bell",
+         "book-open-text",
++        "bookmark-simple",
+         "buildings",
+         "camera",
+         "caret-double-left",
+@@ -171,6 +172,7 @@ enum PhosphorMap {
+         "caret-right",
+         "caret-up",
+         "chat-circle",
++        "chat-circle-dots",
+         "chat-circle-text",
+         "check",
+         "check-circle",
+@@ -188,6 +190,7 @@ enum PhosphorMap {
+         "device-mobile",
+         "diamond",
+         "dots-three",
++        "dots-three-vertical",
+         "download-simple",
+         "drop",
+         "envelope-simple",
+@@ -210,6 +213,7 @@ enum PhosphorMap {
+         "info",
+         "intersect",
+         "key",
++        "laptop",
+         "lightbulb",
+         "lightbulb-filament",
+         "lightning",
+@@ -235,6 +239,7 @@ enum PhosphorMap {
+         "package",
+         "palette",
+         "paper-plane-right",
++        "paper-plane-tilt",
+         "paperclip",
+         "pause",
+         "pencil-simple",
+@@ -242,6 +247,7 @@ enum PhosphorMap {
+         "play-circle",
+         "plus",
+         "plus-circle",
++        "plus-square",
+         "push-pin",
+         "question",
+         "rectangle",
+@@ -249,6 +255,7 @@ enum PhosphorMap {
+         "scissors",
+         "selection",
+         "selection-background",
++        "share-fat",
+         "share-network",
+         "shield-check",
+         "shield-warning",
+@@ -273,6 +280,8 @@ enum PhosphorMap {
+         "t-shirt",
+         "text-aa",
+         "text-t",
++        "thumbs-down",
++        "thumbs-up",
+         "timer",
+         "trash",
+         "upload-simple",
+diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
+index 45b66e59..43930075 100644
+--- a/mac/Muse/Views/Edit/EditSuiteView.swift
++++ b/mac/Muse/Views/Edit/EditSuiteView.swift
+@@ -61,6 +61,11 @@ struct EditSuiteView: View {
+         }
+         session = s
+         await s.load()
++        // The viewer's Split: the playhead where the take was when Split was pressed.
++        if let at = store.suite.editAt {
++            store.suite.editAt = nil
++            s.seek(at)
++        }
+     }
+ 
+     private func close() {
+diff --git a/mac/Muse/Views/QueueGalleryViews.swift b/mac/Muse/Views/QueueGalleryViews.swift
+index 360c736f..563fbd56 100644
+--- a/mac/Muse/Views/QueueGalleryViews.swift
++++ b/mac/Muse/Views/QueueGalleryViews.swift
+@@ -300,7 +300,9 @@ struct CompareView: View {
+             HStack(alignment: .top, spacing: Space.s5) {
+                 ForEach(items) { take in
+                     VStack(alignment: .leading, spacing: Space.s2) {
+-                        MediaFrame(ref: take.thumb)
++                        // The one take viewer: each take at its own shape and playable by keys; the buttons below act.
++                        TakeViewer(media: ViewerMedia(take: take), context: .library, take: take, compact: true, autoplay: false, startMuted: true)
++                            .frame(height: 440)
+                         Text(take.caption).scaled(t.scale.heading, t.roles.ink).lineLimit(1).padding(.top, Space.s1)
+                         Text(meta(take)).monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
+                         HStack(spacing: Space.s2) {
+@@ -340,14 +342,12 @@ struct ResultView: View {
+                         Crumb(parent: "Library", title: take.caption) { store.go(.gallery) }
+                         HStack(alignment: .top, spacing: Space.s6) {
+                             Spacer(minLength: 0)
+-                            Group {
+-                                if let v = take.videoUrl, let u = URL(string: v) {
+-                                    TakePlayer(url: u, caption: take.mediaLine ?? "Video")
+-                                } else {
+-                                    MediaFrame(ref: take.thumb)
+-                                }
+-                            }
+-                            .frame(height: min(720, max(360, g.size.height - 110)))
++                            // The one take viewer (plans/swap-viewer-design.md §B): the take at its own shape, the
++                            // preview choices and playback by keys. Its actions are the inspector's, on the right.
++                            TakeViewer(media: ViewerMedia(take: take), context: .library, take: take, job: job, autoplay: false)
++                                .id(take.id)
++                                .frame(width: max(320, g.size.width - 360 - Space.s6 - 2 * Space.gutter - 2 * Space.s4),
++                                       height: min(760, max(400, g.size.height - 110)))
+                             inspector(take, job: job, outfit: outfit)
+                                 .frame(width: 360)
+                             Spacer(minLength: 0)
+@@ -468,42 +468,3 @@ struct ResultView: View {
+     }
+ }
+ 
+-/// A finished take's video (Take.videoUrl), played with AVKit.
+-struct TakePlayer: View {
+-    @Environment(\.theme) private var t
+-    var url: URL
+-    var caption: String
+-    @State private var player: AVPlayer?
+-
+-    var body: some View {
+-        ZStack(alignment: .bottomLeading) {
+-            if let player {
+-                VideoPlayer(player: player)
+-            } else {
+-                Rectangle().fill(Color.black)
+-            }
+-            Text(caption).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
+-                .padding(.horizontal, Space.s2).padding(.vertical, 2)
+-                .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(.black.opacity(0.55)))
+-                .padding(Space.s3)
+-                .allowsHitTesting(false)
+-        }
+-        .aspectRatio(768.0 / 1344.0, contentMode: .fit)
+-        .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
+-        .onAppear { load() }
+-        .onChange(of: url) { load() }
+-        .onDisappear {
+-            // Off screen: release the player and its item (decoder, buffers), not just pause it. onAppear makes a new one.
+-            player?.pause()
+-            player?.replaceCurrentItem(with: nil)
+-            player = nil
+-        }
+-    }
+-
+-    private func load() {
+-        player?.pause()
+-        let p = AVPlayer(url: url)
+-        p.actionAtItemEnd = .pause
+-        player = p
+-    }
+-}
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerFeed.swift b/mac/Muse/Views/Suite/Composer/ComposerFeed.swift
+index 669cd598..aed97eb0 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerFeed.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerFeed.swift
+@@ -298,7 +298,8 @@ struct FeedScopeMenu: View {
+     }
+ }
+ 
+-/// A take large over the feed: the video playing (or the photo), its line, and its actions. ← and → move through the
++/// A take large over the feed, in the one take viewer (plans/swap-viewer-design.md §B): the take in its own shape, the
++/// preview choices, playback by keys (Space, ← → 3 s, ⇧ 10 s, J/K/L) and its actions beside it. ↑ and ↓ move through the
+ /// feed's takes; Esc or Close goes back to the grid.
+ struct FeedViewer: View {
+     @Environment(AppStore.self) private var store
+@@ -306,7 +307,6 @@ struct FeedViewer: View {
+     var takes: [Take]
+     var index: Int
+     var photo: Bool
+-    @State private var player: AVPlayer?
+ 
+     private var take: Take { takes[index] }
+ 
+@@ -321,54 +321,21 @@ struct FeedViewer: View {
+                 Spacer(minLength: Space.s2)
+                 Text("\(index + 1) of \(takes.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                     .lineLimit(1).fixedSize()
+-                SuiteIconButton(systemName: "caret-left", label: "Previous take") { move(-1) }
+-                    .keyboardShortcut(.leftArrow, modifiers: [])
++                SuiteIconButton(systemName: "caret-up", label: "Previous take (↑)") { move(-1) }
+                     .disabled(index == 0)
+-                SuiteIconButton(systemName: "caret-right", label: "Next take") { move(1) }
+-                    .keyboardShortcut(.rightArrow, modifiers: [])
++                SuiteIconButton(systemName: "caret-down", label: "Next take (↓)") { move(1) }
+                     .disabled(index >= takes.count - 1)
+                 SuiteIconButton(systemName: "x", label: "Close the viewer") { store.suite.viewerTakeId = nil }
+                     .keyboardShortcut(.cancelAction)
+             }
+-            Group {
+-                if let player {
+-                    VideoPlayer(player: player)
+-                } else {
+-                    MuseImage(ref: take.thumb)
+-                }
+-            }
+-            .aspectRatio(ratio, contentMode: .fit)
+-            .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+-            .accessibilityLabel(take.displayLabel)
+-            HStack(spacing: Space.s4) {
+-                link("Vary") { store.vary(take) }
+-                if !photo { link("Use as start frame") { store.useAsStartFrame(take) } }
+-                link(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
+-                link("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
+-                if take.isVideo { link("Open in Edit") { store.openEdit(takeId: take.id) } }
+-                SaveToCollectionButton(takeIds: [take.id]) {
+-                    Text("Save to collection").font(t.scale.label.font).foregroundStyle(t.roles.link).lineLimit(1).fixedSize()
+-                }
+-                Spacer(minLength: 0)
+-            }
++            TakeViewer(media: ViewerMedia(take: take), context: .suite, take: take, job: store.job(for: take), onStep: { move($0) })
++                .id(take.id)
++                .frame(maxWidth: .infinity, maxHeight: .infinity)
+         }
+         .padding(Space.s4)
+         .frame(maxWidth: .infinity, maxHeight: .infinity)
+         .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
+         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "viewer") } }
+-        .onAppear { load() }
+-        .onChange(of: take.id) { _, _ in load() }
+-        .onDisappear { release() }
+-    }
+-
+-    private var ratio: CGFloat {
+-        if let w = take.width, let h = take.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
+-        return take.isVideo ? 9.0 / 16.0 : 4.0 / 5.0
+-    }
+-
+-    private func link(_ title: String, _ run: @escaping () -> Void) -> some View {
+-        Button(title, action: run).buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).lineLimit(1).fixedSize()
+     }
+ 
+     private func move(_ by: Int) {
+@@ -376,21 +343,6 @@ struct FeedViewer: View {
+         guard takes.indices.contains(i) else { return }
+         store.suite.viewerTakeId = takes[i].id
+     }
+-
+-    private func load() {
+-        release()
+-        guard let v = take.videoUrl, let u = URL(string: v) else { return }
+-        let p = AVPlayer(url: u)
+-        p.actionAtItemEnd = .pause
+-        player = p
+-        p.play()
+-    }
+-
+-    private func release() {
+-        player?.pause()
+-        player?.replaceCurrentItem(with: nil)
+-        player = nil
+-    }
+ }
+ 
+ /// Only the hovered card plays: muted, looping, released when the pointer leaves (plans/ai-suite-design.md refinement 7).
+@@ -632,7 +584,13 @@ struct ComposerCompare: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+     var takes: [Take]
+-    @State private var players: [String: AVPlayer] = [:]
++    /// One player per take, so "Play both" starts them together.
++    @State private var players: [String: ViewerPlayback]
++
++    init(takes: [Take]) {
++        self.takes = takes
++        _players = State(initialValue: Dictionary(takes.map { ($0.id, ViewerPlayback()) }, uniquingKeysWith: { a, _ in a }))
++    }
+ 
+     var body: some View {
+         VStack(alignment: .leading, spacing: Space.s4) {
+@@ -650,7 +608,9 @@ struct ComposerCompare: View {
+             HStack(alignment: .top, spacing: Space.s4) {
+                 ForEach(takes) { take in
+                     VStack(alignment: .leading, spacing: Space.s2) {
+-                        media(take)
++                        // The one take viewer: each take in its own shape, Keep under it, the rest in its More menu.
++                        TakeViewer(media: ViewerMedia(take: take), context: .compare, take: take, job: store.job(for: take), compact: true,
++                                   autoplay: false, startMuted: true, sharedPlayback: players[take.id])
+                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                         Text(take.displayLabel).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                         Text(SuiteFeedText.summary(take.draft ?? store.job(for: take)?.draft, seconds: take.durationSec))
+@@ -671,45 +631,11 @@ struct ComposerCompare: View {
+         .padding(Space.s5)
+         .frame(maxWidth: .infinity, maxHeight: .infinity)
+         .background(t.roles.canvas)
+-        .onAppear { load() }
+-        .onDisappear {
+-            players.values.forEach { $0.pause(); $0.replaceCurrentItem(with: nil) }
+-            players = [:]
+-        }
+-    }
+-
+-    @ViewBuilder private func media(_ take: Take) -> some View {
+-        let ratio: CGFloat = {
+-            if let w = take.width, let h = take.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
+-            return take.isVideo ? 9.0 / 16.0 : 4.0 / 5.0
+-        }()
+-        Group {
+-            if let p = players[take.id] {
+-                VideoPlayer(player: p)
+-            } else {
+-                MuseImage(ref: take.thumb)
+-            }
+-        }
+-        .aspectRatio(ratio, contentMode: .fit)
+-        .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+-        .accessibilityLabel(take.displayLabel)
+-    }
+-
+-    private func load() {
+-        var out: [String: AVPlayer] = [:]
+-        for take in takes {
+-            guard let v = take.videoUrl, let u = URL(string: v) else { continue }
+-            let p = AVPlayer(url: u)
+-            p.isMuted = true
+-            p.actionAtItemEnd = .pause
+-            out[take.id] = p
+-        }
+-        players = out
++        .onDisappear { players.values.forEach { $0.release() } }
+     }
+ 
+     /// Both from the start, together.
+     private func playBoth() {
+-        for p in players.values { p.seek(to: .zero) }
+-        for p in players.values { p.play() }
++        for p in players.values { p.restart() }
+     }
+ }
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index f31b2108..97c9d978 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -76,7 +76,7 @@ struct ComposerView: View {
+             ComposerPickerHost()
+             // Compare in the feed: two takes side by side over the composer.
+             let comparing = store.suiteComparing
+-            if comparing.count == 2 { ComposerCompare(takes: comparing) }
++            if comparing.count == 2 { ComposerCompare(takes: comparing).id(comparing.map(\.id)) } // new takes: new players
+             // The title's mode menu (owner decision 2026-11-08: a plain grouped list, no presets; they stay in the strip).
+             if s.browserOpen { SuiteModeMenu() }
+             // Review only: the big tool and preset browser it replaced, for the before shot.
+@@ -171,43 +171,49 @@ struct ComposerView: View {
+                     PresetsRow()
+                 }
+             }
+-            HStack(alignment: .top, spacing: Space.s4) {
+-                // The results feed takes the picture's place beside the rail (header "Takes"); so does Claude's panel,
+-                // which keeps the rows it fills in view.
+-                if store.suite.claude.open && store.isOwner {
+-                    SuiteClaudePanel()
+-                } else if store.suite.feedOpen {
+-                    ComposerFeed()
+-                } else {
+-                    ComposerStage(pinned: $pinnedTake, maxPictureHeight: (height * composerPictureShare).rounded())
+-                }
+-                // New Swap (beta): its panel always has the column (its toggles have no strip form).
+-                if !strip || store.isNewSwap {
+-                    ScrollView(.vertical, showsIndicators: false) {
+-                        Group {
+-                            if store.isNewSwap { NewSwapPanel() } else { ComposerRail(narrow: narrow) }
++            if store.isNewSwap {
++                // New Swap's own screen (plans/swap-viewer-design.md §A): the video and its trimmer, the changes, and a
++                // bottom bar with the model, the price and Generate. No prompt box.
++                NewSwapScreen(narrow: narrow)
++                    .frame(minHeight: 0, maxHeight: .infinity)
++            } else {
++                HStack(alignment: .top, spacing: Space.s4) {
++                    // The results feed takes the picture's place beside the rail (header "Takes"); so does Claude's panel,
++                    // which keeps the rows it fills in view.
++                    if store.suite.claude.open && store.isOwner {
++                        SuiteClaudePanel()
++                    } else if store.suite.feedOpen {
++                        ComposerFeed()
++                    } else {
++                        ComposerStage(pinned: $pinnedTake, maxPictureHeight: (height * composerPictureShare).rounded())
++                    }
++                    if !strip {
++                        ScrollView(.vertical, showsIndicators: false) {
++                            Group {
++                                ComposerRail(narrow: narrow)
++                            }
++                            .frame(maxWidth: .infinity, alignment: .leading)
+                         }
+-                        .frame(maxWidth: .infinity, alignment: .leading)
++                        .frame(width: narrow ? 264 : 280)
++                        .frame(maxHeight: .infinity, alignment: .top)
+                     }
+-                    .frame(width: narrow ? 264 : 280)
+-                    .frame(maxHeight: .infinity, alignment: .top)
+                 }
+-            }
+-            .frame(minHeight: 0, maxHeight: .infinity)
+-            .zIndex(0)
+-            // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
+-            // full height; the row above takes what is left.
+-            if strip && !store.isNewSwap {
+-                ComposerSetupStrip()
++                .frame(minHeight: 0, maxHeight: .infinity)
++                .zIndex(0)
++                // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
++                // full height; the row above takes what is left.
++                if strip {
++                    ComposerSetupStrip()
++                        .layoutPriority(1)
++                        .zIndex(1)
++                }
++                // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
++                ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
++                    .fixedSize(horizontal: false, vertical: true)
+                     .layoutPriority(1)
+                     .zIndex(1)
++                    .accessibilityIdentifier("composer.promptBar")
+             }
+-            // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
+-            ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
+-                .fixedSize(horizontal: false, vertical: true)
+-                .layoutPriority(1)
+-                .zIndex(1)
+-                .accessibilityIdentifier("composer.promptBar")
+         }
+         .padding(.horizontal, Space.s5)
+         .padding(.top, Space.s4)
+@@ -345,6 +351,10 @@ struct ComposerMediaPane: View {
+                 .clipShape(shape)
+             } else if idle {
+                 emptyCanvas
++            } else if case .ready = SuiteResultState.of(current) {
++                // A finished take: the take viewer on the page's own tone, the take at its shape (no box around it).
++                SuiteResultPane(job: current, art: art, character: store.composerCharacter)
++                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+             } else {
+                 ZStack {
+                     shape.fill(t.roles.field)
+diff --git a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
+index fbebb440..451487b2 100644
+--- a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
++++ b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
+@@ -28,6 +28,9 @@ struct NewSwapPanel: View {
+     @State private var libraryOpen = false
+     /// Outfit "Her outfit" while Character isn't her: whose outfits are listed.
+     @State private var outfitOwner: String?
++    /// New Swap's own screen (plans/swap-viewer-design.md §A): the video and the trimmer are on the stage, so this column
++    /// holds only the changes.
++    var onScreen = false
+ 
+     private var d: RemixDraft { store.suite.remix }
+ 
+@@ -37,8 +40,16 @@ struct NewSwapPanel: View {
+ 
+     var body: some View {
+         VStack(alignment: .leading, spacing: Space.s4) {
+-            source
+-            if let c = store.clip { trimmer(c) }
++            if onScreen {
++                VStack(alignment: .leading, spacing: Space.s1) {
++                    Text("Changes").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
++                    Text("Switch on what should change. Write only the change.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++                        .fixedSize(horizontal: false, vertical: true)
++                }
++            } else {
++                source
++                if let c = store.clip { trimmer(c) }
++            }
+             VStack(alignment: .leading, spacing: Space.s3) {
+                 toggleRow("Background", isOn: bind(\.backgroundOn), help: "A new place: describe it, or a location or photo") { backgroundField }
+                 toggleRow("Outfit", isOn: bind(\.outfitOn), help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
+diff --git a/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift b/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
+new file mode 100644
+index 00000000..d37e8ac1
+--- /dev/null
++++ b/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
+@@ -0,0 +1,366 @@
++import AppKit
++import AVFoundation
++import MuseCore
++import SwiftUI
++
++// New Swap's own screen (plans/swap-viewer-design.md §A, owner-approved 2026-11-12). Not the composer with a panel:
++// - The stage: before a video, the source (Library grid, Upload, Paste link; a file can be dropped anywhere on it);
++//   with one, the clip in the take viewer at its own shape, and a filmstrip trimmer under it.
++// - The right column: the four changes (NewSwapPanel, onScreen), each with one field.
++// - The bottom bar: clip sound, the model, the price and Generate · $x. No prompt box.
++// While a take renders, and once it's done, the stage shows it (the result pane); "Back to the clip" returns.
++
++struct NewSwapScreen: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var narrow: Bool
++
++    var body: some View {
++        VStack(spacing: 0) {
++            HStack(alignment: .top, spacing: Space.s6) {
++                Group {
++                    if store.suite.claude.open && store.isOwner {
++                        SuiteClaudePanel()
++                    } else if store.suite.feedOpen {
++                        ComposerFeed()
++                    } else {
++                        NewSwapStage()
++                    }
++                }
++                .frame(maxWidth: .infinity, maxHeight: .infinity)
++                ScrollView(.vertical, showsIndicators: false) {
++                    NewSwapPanel(onScreen: true).frame(maxWidth: .infinity, alignment: .leading)
++                }
++                .frame(width: narrow ? 320 : 352)
++                .frame(maxHeight: .infinity, alignment: .top)
++            }
++            .frame(minHeight: 0, maxHeight: .infinity)
++            .padding(.bottom, Space.s4)
++            Rectangle().fill(t.roles.hairline).frame(height: 1)
++            ComposerBottomBar()
++                .padding(.top, Space.s3)
++                .accessibilityIdentifier("newSwap.bottomBar")
++        }
++    }
++}
++
++// MARK: The stage
++
++struct NewSwapStage: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    /// The take rendering or just made is on the stage (after Generate); "Back to the clip" clears it.
++    @State private var showResult = false
++    @State private var dropping = false
++    @State private var replaceLibrary = false
++
++    var body: some View {
++        Group {
++            if showResult {
++                VStack(alignment: .leading, spacing: Space.s3) {
++                    Button { showResult = false } label: {
++                        HStack(spacing: Space.s1) { Ph("caret-left", 14); Text("Back to the clip").font(t.scale.label.font) }
++                            .foregroundStyle(t.roles.ink).frame(minHeight: 28).contentShape(Rectangle())
++                    }
++                    .buttonStyle(.plain)
++                    .help("Show the clip and the trimmer again")
++                    ComposerMediaPane()
++                }
++            } else if let c = store.clip {
++                filled(c)
++            } else {
++                NewSwapSourcePicker()
++            }
++        }
++        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
++        .contentShape(Rectangle())
++        .dropDestination(for: URL.self) { urls, _ in
++            guard let u = urls.first else { return false }
++            if u.isFileURL { store.importClip(u) } else { store.openLinkImport(.swap, link: u.absoluteString) }
++            return true
++        } isTargeted: { dropping = $0 }
++        .overlay {
++            if dropping {
++                RoundedRectangle(cornerRadius: t.radii.container)
++                    .strokeBorder(t.roles.accent, lineWidth: 2)
++                    .overlay(Text("Drop to use this video").font(t.scale.label.font).foregroundStyle(t.roles.ink)
++                        .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
++                        .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.raised)))
++                    .allowsHitTesting(false)
++            }
++        }
++        .onChange(of: store.suite.generating) { _, on in if on { showResult = true } }
++        .onChange(of: store.clip?.id) { _, _ in showResult = false }
++    }
++
++    private func filled(_ c: Clip) -> some View {
++        VStack(spacing: Space.s3) {
++            HStack(spacing: Space.s3) {
++                Text(c.name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
++                Spacer(minLength: Space.s2)
++                Text("\(Take.clock(c.durationSec)), \(c.width) × \(c.height)").font(t.scale.caption.font).monospacedDigit()
++                    .foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
++                Menu {
++                    Button("From the Library…") { replaceLibrary = true }
++                    Button("Upload a file…") { store.pickClip() }
++                    Button("Paste a link…") { store.openLinkImport(.swap) }
++                } label: {
++                    HStack(spacing: Space.s1) { Text("Replace").font(t.scale.label.font); Ph("caret-down", 12) }.foregroundStyle(t.roles.ink)
++                }
++                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
++                .help("Use another video")
++                .popover(isPresented: $replaceLibrary, arrowEdge: .bottom) {
++                    NewSwapLibraryPicker { replaceLibrary = false }
++                        .environment(store)
++                        .environment(\.theme, PickerTheme.dark)
++                        .environment(\.colorScheme, .dark)
++                }
++            }
++            .frame(maxWidth: 600)
++            .frame(height: 32)
++            TakeViewer(media: ViewerMedia(id: c.id, videoURL: store.clipVideo, poster: store.clipPoster, width: c.width, height: c.height, label: c.name),
++                       context: .source, autoplay: false, startMuted: true, previewControls: false)
++                .id(c.id)
++                .frame(maxHeight: .infinity)
++            NewSwapTrimmer(clip: c)
++                .frame(maxWidth: 600)
++        }
++    }
++}
++
++// MARK: The source (empty state)
++
++struct NewSwapSourcePicker: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    enum Tab: String, CaseIterable { case library = "Library", upload = "Upload", link = "Paste link" }
++    @State private var tab: Tab = .library
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: Space.s4) {
++            VStack(alignment: .leading, spacing: Space.s1) {
++                Text("Add the video to remix").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
++                Text("Pick a take from your Library, upload a file, or paste a link. You can also drop a file anywhere here.")
++                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
++            }
++            Picker("Source", selection: $tab) {
++                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
++            }
++            .pickerStyle(.segmented).labelsHidden().fixedSize()
++            switch tab {
++            case .library: library
++            case .upload: upload
++            case .link: link
++            }
++        }
++        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
++    }
++
++    private var library: some View {
++        let list = store.extendableTakes
++        return Group {
++            if list.isEmpty {
++                VStack(alignment: .leading, spacing: Space.s2) {
++                    Text("No finished videos yet. Upload one, or paste a link.").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
++                    MButton("Upload a file…") { tab = .upload; store.pickClip() }
++                }
++            } else {
++                ScrollView {
++                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 120), spacing: Space.s4, alignment: .top)], alignment: .leading,
++                              spacing: Space.s5) {
++                        ForEach(list) { item in
++                            Button { store.useTakeAsRemixSource(item.take) } label: { tile(item) }
++                                .buttonStyle(.plain)
++                                .help("Use \(item.take.caption)")
++                                .accessibilityLabel("Use \(item.take.caption)")
++                        }
++                    }
++                    .padding(.vertical, 2)
++                }
++            }
++        }
++    }
++
++    private func tile(_ item: ExtendTakeOption) -> some View {
++        let r = ViewerFrame.aspect(width: item.take.width, height: item.take.height, isVideo: true)
++        return VStack(alignment: .leading, spacing: Space.s1) {
++            Color.clear
++                .aspectRatio(9.0 / 16.0, contentMode: .fit)
++                .overlay {
++                    // The take at its own shape inside the tile's 9:16 cell, centred on the page tone.
++                    MuseImage(ref: item.take.thumb).aspectRatio(r, contentMode: .fit)
++                        .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
++                }
++                .overlay(alignment: .bottomLeading) {
++                    if let s = item.source.seconds {
++                        Text(Take.clock(s)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
++                            .padding(.horizontal, 6).padding(.vertical, 2)
++                            .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(.black.opacity(0.55)))
++                            .padding(Space.s2)
++                    }
++                }
++            Text(item.take.caption).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++        }
++        .contentShape(Rectangle())
++    }
++
++    private var upload: some View {
++        VStack(spacing: Space.s3) {
++            Text("Drop a video here, or").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
++            MButton("Choose a file…") { store.pickClip() }
++            Text("MP4 or MOV. MUSE checks it after the upload.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++        }
++        .frame(maxWidth: .infinity, maxHeight: 280)
++        .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
++    }
++
++    private var link: some View {
++        VStack(alignment: .leading, spacing: Space.s3) {
++            Text("A link to a video on the web. MUSE downloads it and checks it, as with an upload.")
++                .font(t.scale.body.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
++            MButton("Paste a link…") { store.openLinkImport(.swap) }
++        }
++        .frame(maxWidth: 560, alignment: .leading)
++    }
++}
++
++// MARK: The filmstrip trimmer
++
++/// The part of the clip used, picked on a strip of its frames: drag a handle to change the length (within the model's
++/// limits), drag the middle to slide it. A clip longer than the model takes is never cut silently: until a part is
++/// picked, the line asks for it (and Generate waits).
++struct NewSwapTrimmer: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var clip: Clip
++    @State private var frames: [CGImage] = []
++    /// The window while dragging (the store gets it when the drag ends, so the price is asked once).
++    @State private var live: TrimWindow?
++    @State private var dragStart: TrimWindow?
++
++    private var d: RemixDraft { store.suite.remix }
++    private var row: RemixModels.Row? { store.suite.remixModels?.models.first { d.engineModel == nil ? $0.auto : $0.model == d.engineModel } }
++    private var maxS: Double { store.suite.remixEstimate?.remix?.trim.maxSeconds ?? row?.limits.maxSeconds ?? clip.durationSec }
++    private var minS: Double { store.suite.remixEstimate?.remix?.trim.minSeconds ?? row?.limits.minSeconds ?? 1 }
++
++    private var window: TrimWindow {
++        live ?? TrimWindow.initial(duration: clip.durationSec, minLen: minS, maxLen: maxS, range: d.range.map { ($0.from, $0.to) })
++    }
++
++    var body: some View {
++        let w = window
++        let needed = !w.wholeClipFits && d.range == nil
++        VStack(alignment: .leading, spacing: Space.s2) {
++            GeometryReader { g in strip(w, width: g.size.width) }
++                .frame(height: 56)
++            HStack(spacing: Space.s3) {
++                Text(needed ? "Pick the part to use: \(row?.label ?? "this model") takes up to \(Pricing.trimNum(maxS)) s." : w.line(model: row?.label))
++                    .font(t.scale.caption.font).monospacedDigit()
++                    .foregroundStyle(needed ? t.roles.caution : t.roles.ink2)
++                    .fixedSize(horizontal: false, vertical: true)
++                Spacer(minLength: Space.s2)
++                if needed {
++                    Button("Use \(Take.clock(w.from))–\(Take.clock(w.to))") { store.setRemixRange(from: w.from, to: w.to) }
++                        .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
++                } else if w.wholeClipFits && d.range != nil {
++                    Button("Use the whole clip") { store.suite.remix.range = nil }
++                        .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
++                }
++            }
++        }
++        .task(id: store.clipVideo) { frames = await Filmstrip.frames(store.clipVideo, count: 12) }
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel("Part of the clip used: \(Take.clock(w.from)) to \(Take.clock(w.to))")
++    }
++
++    private func strip(_ w: TrimWindow, width: CGFloat) -> some View {
++        let dur = max(clip.durationSec, 0.1)
++        let x = { (s: Double) -> CGFloat in CGFloat(s / dur) * width }
++        let a = x(w.from), b = x(w.to)
++        let cell = width / 12
++        return ZStack(alignment: .topLeading) {
++            // The frames (or the poster, until they load); the part not used at 35 %.
++            HStack(spacing: 0) {
++                ForEach(0..<12, id: \.self) { i in
++                    Group {
++                        if frames.indices.contains(i) {
++                            Image(decorative: frames[i], scale: 1).resizable().aspectRatio(contentMode: .fill)
++                        } else {
++                            MuseImage(ref: store.clipPoster)
++                        }
++                    }
++                    .frame(width: cell, height: 56).clipped()
++                    .opacity(CGFloat(i) * cell + cell / 2 >= a && CGFloat(i) * cell + cell / 2 <= b ? 1 : 0.35)
++                }
++            }
++            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
++            // The window: drag to slide it.
++            Rectangle().fill(Color.clear)
++                .frame(width: max(0, b - a), height: 56)
++                .overlay(alignment: .top) { Rectangle().fill(t.roles.accent).frame(height: 2) }
++                .overlay(alignment: .bottom) { Rectangle().fill(t.roles.accent).frame(height: 2) }
++                .contentShape(Rectangle())
++                .offset(x: a)
++                .gesture(drag { start, dx in var n = start; n.slide(by: dx); return n }, including: .all)
++                .help("Drag to slide the part used")
++            handle(at: a) { start, dx in var n = start; n.moveStart(to: start.from + dx); return n }
++                .help("Drag to change where it starts")
++            handle(at: b) { start, dx in var n = start; n.moveEnd(to: start.to + dx); return n }
++                .help("Drag to change where it ends")
++        }
++        .frame(width: width, height: 56, alignment: .leading)
++        .onAppear { stripWidth = width }
++        .onChange(of: width) { _, v in stripWidth = v }
++    }
++
++    private func handle(at x: CGFloat, change: @escaping (TrimWindow, Double) -> TrimWindow) -> some View {
++        RoundedRectangle(cornerRadius: 3).fill(t.roles.accent)
++            .frame(width: 8, height: 60)
++            .frame(width: 20, height: 60) // a wider target than it looks
++            .contentShape(Rectangle())
++            .offset(x: x - 10, y: -2)
++            .gesture(drag(change))
++            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
++            .accessibilityElement()
++            .accessibilityLabel("Trim handle")
++    }
++
++    /// A drag in points turned into seconds; the store gets the result when the drag ends.
++    private func drag(_ change: @escaping (TrimWindow, Double) -> TrimWindow) -> some Gesture {
++        DragGesture(minimumDistance: 1)
++            .onChanged { v in
++                let start = dragStart ?? window
++                if dragStart == nil { dragStart = start }
++                live = change(start, Double(v.translation.width) * max(clip.durationSec, 0.1) / Double(max(stripWidth, 1)))
++            }
++            .onEnded { _ in
++                if let l = live { store.setRemixRange(from: l.from, to: l.to) }
++                live = nil
++                dragStart = nil
++            }
++    }
++
++    /// The strip's width, for turning a drag into seconds (the trimmer is at most 600 pt wide).
++    @State private var stripWidth: CGFloat = 600
++}
++
++/// A clip's frames for the trimmer, small (AVAssetImageGenerator on the local file or the take's video).
++enum Filmstrip {
++    static func frames(_ url: URL?, count: Int) async -> [CGImage] {
++        guard let url, count > 0 else { return [] }
++        let asset = AVURLAsset(url: url)
++        guard let d = try? await asset.load(.duration), d.seconds.isFinite, d.seconds > 0 else { return [] }
++        let gen = AVAssetImageGenerator(asset: asset)
++        gen.appliesPreferredTrackTransform = true
++        gen.maximumSize = CGSize(width: 160, height: 160)
++        gen.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
++        gen.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
++        var out: [CGImage] = []
++        for i in 0..<count {
++            if Task.isCancelled { return out }
++            let at = CMTime(seconds: d.seconds * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
++            if let r = try? await gen.image(at: at) { out.append(r.image) }
++        }
++        return out
++    }
++}
+diff --git a/mac/Muse/Views/Suite/SuiteComponents.swift b/mac/Muse/Views/Suite/SuiteComponents.swift
+index ad59a68d..f1b97505 100644
+--- a/mac/Muse/Views/Suite/SuiteComponents.swift
++++ b/mac/Muse/Views/Suite/SuiteComponents.swift
+@@ -124,19 +124,25 @@ struct SuiteResultPane: View {
+     var takeId: String?
+     var emptyTitle = "Your shot\nappears here"
+     var emptyLine = "Pick a character, describe the moment, press Generate."
+-    @State private var muted = true
+     /// WS19: the result shown when the job made several (Photo × 4, takes): ← → / the dots move through them.
+     @State private var page = 0
+ 
+     var body: some View {
+         let state = SuiteResultState.of(job)
+-        Color.clear
+-            .aspectRatio(9.0 / 16.0, contentMode: .fit)
+-            .overlay(content(state))
+-            .clipped()
+-            .animation(.easeOut(duration: 0.6), value: state)
+-            .accessibilityElement(children: .contain)
+-            .onChange(of: job?.id) { page = 0 }
++        Group {
++            if case .ready = state {
++                // A finished take: the one take viewer, at the take's own shape (no 9:16 box around a landscape take).
++                ready
++            } else {
++                Color.clear
++                    .aspectRatio(9.0 / 16.0, contentMode: .fit)
++                    .overlay(content(state))
++                    .clipped()
++            }
++        }
++        .animation(.easeOut(duration: 0.6), value: state)
++        .accessibilityElement(children: .contain)
++        .onChange(of: job?.id) { page = 0 }
+     }
+ 
+     @ViewBuilder private func content(_ state: SuiteResultState) -> some View {
+@@ -208,113 +214,38 @@ struct SuiteResultPane: View {
+         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage busy") } }
+     }
+ 
++    /// The finished take(s) in the take viewer (plans/swap-viewer-design.md §B): its shape, the keys, the preview menu and
++    /// its actions. Several results (Photo × 4, takes): "2 of 4" with ‹ › above it, and ↑ ↓ in the viewer.
+     @ViewBuilder private var ready: some View {
+         let list = store.takes(of: job)
+         let start = list.firstIndex { $0.id == takeId } ?? 0
+         let at = list.isEmpty ? 0 : (start + page) % list.count
+         let take = list.isEmpty ? nil : list[at]
+-        VStack(spacing: 0) {
+-            ZStack {
+-                if let v = take?.videoUrl, let url = URL(string: v) {
+-                    StageVideo(url: url, poster: take?.thumb, muted: muted).id(take?.id)
+-                } else {
+-                    MuseImage(ref: take?.thumb ?? job?.thumb ?? art).id(take?.id)
+-                }
+-            }
+-            .overlay { if list.count > 1 { carousel(count: list.count, at: at, start: start) } }
+-            .focusable(list.count > 1)
+-            .focusEffectDisabled()
+-            .onKeyPress(.leftArrow) { guard list.count > 1 else { return .ignored }; step(-1, count: list.count); return .handled }
+-            .onKeyPress(.rightArrow) { guard list.count > 1 else { return .ignored }; step(1, count: list.count); return .handled }
+-            .overlay(alignment: .topLeading) { SuiteTag(text: "Ready", color: t.goodInk, filled: true).padding(8) }
+-            .overlay(alignment: .topTrailing) {
+-                if take?.videoUrl != nil {
+-                    Button { muted.toggle() } label: {
+-                        Ph(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", 11).foregroundStyle(.white)
+-                            .frame(width: 26, height: 26).background(Circle().fill(.black.opacity(0.5)))
+-                    }
+-                    .buttonStyle(.plain).padding(6)
+-                    .accessibilityLabel(muted ? "Unmute" : "Mute")
++        VStack(spacing: Space.s2) {
++            if list.count > 1 {
++                HStack(spacing: Space.s2) {
++                    Text("\(at + 1) of \(list.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
++                    Spacer(minLength: 0)
++                    SuiteIconButton(systemName: "caret-left", label: "Previous result") { step(-1, count: list.count) }
++                    SuiteIconButton(systemName: "caret-right", label: "Next result") { step(1, count: list.count) }
+                 }
++                .accessibilityElement(children: .contain)
++                .accessibilityLabel("Result \(at + 1) of \(list.count)")
+             }
+             if let take {
+-                // Full labels when they fit; otherwise icons with tooltips, never "✓ K".
+-                ViewThatFits(in: .horizontal) {
+-                    takeActions(take, iconOnly: false).fixedSize(horizontal: true, vertical: false)
+-                    takeActions(take, iconOnly: true).fixedSize(horizontal: true, vertical: false)
+-                }
+-                .frame(maxWidth: .infinity, alignment: .leading)
+-                .padding(.top, 8)
+-                // Finish the take: a longer version (Extend) or a sharper one (Upscale).
+-                let canExtend = ExtendSource.take(take) != nil
+-                if canExtend || take.canUpscale {
+-                    ViewThatFits(in: .horizontal) {
+-                        finishActions(take, canExtend: canExtend, iconOnly: false).fixedSize(horizontal: true, vertical: false)
+-                        finishActions(take, canExtend: canExtend, iconOnly: true).fixedSize(horizontal: true, vertical: false)
+-                    }
+-                    .frame(maxWidth: .infinity, alignment: .leading)
+-                    .padding(.top, 6)
+-                }
++                TakeViewer(media: ViewerMedia(take: take), context: .suite, take: take, job: job, compact: true, startMuted: true,
++                           onStep: list.count > 1 ? { step($0, count: list.count) } : nil)
++                    .id(take.id)
++            } else {
++                MuseImage(ref: job?.thumb ?? art).aspectRatio(9.0 / 16.0, contentMode: .fit)
+             }
+         }
+-    }
+-
+-    private func takeActions(_ take: Take, iconOnly: Bool) -> some View {
+-        HStack(spacing: 6) {
+-            TakeActionButton(title: take.isFinal ? "Kept" : "Keep", icon: "checkmark", iconOnly: iconOnly, off: take.isFinal) { store.approve(take) }
+-            if let j = job { TakeActionButton(title: "Retake", icon: "arrow.clockwise", iconOnly: iconOnly) { store.retakeShot(j) } }
+-            TakeActionButton(title: "Edit", icon: "scissors", iconOnly: iconOnly) { store.openEdit(takeId: take.id) }
+-            TakeActionButton(title: "Share", icon: "square.and.arrow.up", iconOnly: iconOnly) { store.openPostSheet(take) }
+-        }
+-    }
+-
+-    private func finishActions(_ take: Take, canExtend: Bool, iconOnly: Bool) -> some View {
+-        HStack(spacing: 6) {
+-            if canExtend { TakeActionButton(title: "Extend", icon: "arrow.right.to.line", iconOnly: iconOnly) { store.openExtend(take) } }
+-            if take.canUpscale { UpscaleButton(take: take, size: .small, iconOnly: iconOnly) }
+-        }
++        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage ready") } }
++        .background { if SnapshotRunner.probing && list.count > 1 { ComposerBarFrame(key: "stage carousel \(at + 1)/\(list.count)") } }
+     }
+ 
+     private func step(_ d: Int, count: Int) { page = ((page + d) % count + count) % count }
+ 
+-    /// Previous / next and one dot per result, over the picture.
+-    private func carousel(count: Int, at: Int, start: Int) -> some View {
+-        ZStack {
+-            HStack {
+-                arrow("chevron.left", "Previous") { step(-1, count: count) }
+-                Spacer()
+-                arrow("chevron.right", "Next") { step(1, count: count) }
+-            }
+-            .padding(.horizontal, 8)
+-            VStack {
+-                Spacer()
+-                HStack(spacing: 6) {
+-                    ForEach(0..<count, id: \.self) { i in
+-                        Button { page = ((i - start) % count + count) % count } label: {
+-                            Circle().fill(i == at ? Color.white : Color.white.opacity(0.45)).frame(width: 7, height: 7).padding(3).contentShape(Rectangle())
+-                        }
+-                        .buttonStyle(.plain)
+-                        .accessibilityLabel("Result \(i + 1) of \(count)")
+-                    }
+-                }
+-                .padding(.horizontal, 8).padding(.vertical, 4)
+-                .background(Capsule().fill(Color.black.opacity(0.35)))
+-                .padding(.bottom, 10)
+-            }
+-        }
+-        .accessibilityElement(children: .contain)
+-        .accessibilityLabel("Result \(at + 1) of \(count)")
+-        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage carousel \(at + 1)/\(count)") } }
+-    }
+-
+-    private func arrow(_ icon: String, _ label: String, _ run: @escaping () -> Void) -> some View {
+-        Button(action: run) {
+-            Ph(icon, 13).foregroundStyle(.white).frame(width: 30, height: 30).background(Circle().fill(Color.black.opacity(0.45))).contentShape(Circle())
+-        }
+-        .buttonStyle(.plain)
+-        .accessibilityLabel(label)
+-        .help(label)
+-    }
+ 
+     private func failed(_ message: String) -> some View {
+         let tier = job?.request.quality ?? "draft"
+diff --git a/mac/Muse/Views/Viewer/TakeViewer.swift b/mac/Muse/Views/Viewer/TakeViewer.swift
+new file mode 100644
+index 00000000..63e9bb28
+--- /dev/null
++++ b/mac/Muse/Views/Viewer/TakeViewer.swift
+@@ -0,0 +1,987 @@
++import AppKit
++import AVFoundation
++import MuseCore
++import SwiftUI
++
++// The take viewer (plans/swap-viewer-design.md §B, owner-approved 2026-11-12): one viewer wherever a take, a clip or an
++// image is shown (the Suite's stage, Takes, Compare, the Library and New Swap's source).
++// - The frame is the media's own shape: a portrait take sits in a portrait frame, never a letterbox.
++// - Preview: Clean, or a generic drawing of TikTok, Reels, Shorts or Facebook (portrait) / YouTube or Facebook
++//   (landscape), in an optional phone or laptop frame, with the safe zones on request. Remembered per device.
++// - No scrubber, no loader bar: Space plays or pauses, ← → jump 3 s (⇧ 10 s), J/K/L shuttle, , . step a frame, M mutes,
++//   F is full screen, ↑ ↓ change take, Esc closes. A small readout ("+3 s  0:07 / 0:10") shows briefly while seeking.
++// - The take's actions (Keep, Redo, Extend, Upscale, Split, Share, More): a rail beside portrait media, a row under
++//   landscape media; labels give way in a set order (Split, Upscale, Extend, Redo), so nothing is ever cut.
++
++/// What the viewer shows.
++struct ViewerMedia: Equatable {
++    var id: String
++    var videoURL: URL?
++    var poster: ImageRef?
++    var width: Int?
++    var height: Int?
++    var label: String
++
++    var aspect: Double { ViewerFrame.aspect(width: width, height: height, isVideo: videoURL != nil) }
++
++    init(id: String, videoURL: URL?, poster: ImageRef?, width: Int?, height: Int?, label: String) {
++        self.id = id
++        self.videoURL = videoURL
++        self.poster = poster
++        self.width = width
++        self.height = height
++        self.label = label
++    }
++
++    init(take: Take) {
++        self.init(id: take.id, videoURL: take.videoUrl.flatMap(URL.init(string:)), poster: take.thumb, width: take.width, height: take.height,
++                  label: take.displayLabel)
++    }
++}
++
++// MARK: Playback
++
++/// One AVPlayer and the viewer's transport. Loops, so a short take keeps playing; nothing on screen shows its position
++/// except the brief readout while seeking.
++@MainActor @Observable
++final class ViewerPlayback {
++    let player = AVPlayer()
++    private(set) var playing = false
++    private(set) var muted = false
++    /// The brief readout while seeking ("+3 s  0:07 / 0:10"); nil when hidden.
++    private(set) var readout: String?
++    /// Over the poster for more than 600 ms while loading: a small ring in the corner.
++    private(set) var slowLoad = false
++    var transport = ViewerTransport()
++    @ObservationIgnored private var url: URL?
++    @ObservationIgnored private var endObserver: NSObjectProtocol?
++    @ObservationIgnored private var readoutTask: Task<Void, Never>?
++    @ObservationIgnored private var loadTask: Task<Void, Never>?
++
++    var duration: Double {
++        let d = player.currentItem?.duration.seconds ?? 0
++        return d.isFinite ? d : 0
++    }
++
++    var time: Double {
++        let t = player.currentTime().seconds
++        return t.isFinite ? t : 0
++    }
++
++    func load(_ url: URL?, autoplay: Bool, muted: Bool) {
++        guard url != self.url else { return }
++        self.url = url
++        player.pause()
++        playing = false
++        transport = ViewerTransport()
++        if let o = endObserver { NotificationCenter.default.removeObserver(o) }
++        endObserver = nil
++        loadTask?.cancel()
++        slowLoad = false
++        guard let url else {
++            player.replaceCurrentItem(with: nil)
++            return
++        }
++        let item = AVPlayerItem(url: url)
++        player.replaceCurrentItem(with: item)
++        player.actionAtItemEnd = .none
++        player.preventsDisplaySleepDuringVideoPlayback = true
++        setMuted(muted)
++        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
++            MainActor.assumeIsolated { self?.looped() }
++        }
++        loadTask = Task { [weak self] in
++            try? await Task.sleep(nanoseconds: 600_000_000)
++            guard let self, !Task.isCancelled else { return }
++            if self.player.currentItem?.status != .readyToPlay { self.slowLoad = true }
++            while !Task.isCancelled, self.player.currentItem?.status == .unknown { try? await Task.sleep(nanoseconds: 100_000_000) }
++            self.slowLoad = false
++        }
++        if autoplay { play() }
++    }
++
++    func release() { load(nil, autoplay: false, muted: muted) }
++
++    func setMuted(_ m: Bool) {
++        muted = m
++        player.isMuted = m
++    }
++
++    func play() {
++        guard player.currentItem != nil else { return }
++        player.rate = 1
++        playing = true
++    }
++
++    func pause() {
++        player.pause()
++        playing = false
++    }
++
++    func togglePlay() { playing ? pause() : play() }
++
++    /// From the start (Compare's "Play both").
++    func restart() {
++        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
++        play()
++    }
++
++    private func looped() {
++        player.seek(to: .zero)
++        if playing { player.rate = transport.shuttle > 0 ? Float(transport.shuttle) : 1 }
++    }
++
++    /// Run a key's command. Navigation and closing are the host's (returns false for them).
++    func run(_ c: ViewerCommand) -> Bool {
++        switch c {
++        case .togglePlay: togglePlay()
++        case .jump(let d): seek(by: d)
++        case .shuttle(let r): shuttle(r)
++        case .frame(let n):
++            pause()
++            player.currentItem?.step(byCount: n)
++            show(nil)
++        case .toStart: seek(to: 0, delta: nil)
++        case .toEnd: seek(to: max(0, duration - 0.05), delta: nil)
++        case .mute: setMuted(!muted)
++        case .fullScreen: NSApp.keyWindow?.toggleFullScreen(nil)
++        case .previousTake, .nextTake, .close: return false
++        }
++        return true
++    }
++
++    func seek(by d: Double) {
++        let to = ViewerTransport.seek(time, by: d, duration: duration)
++        seek(to: to, delta: d)
++    }
++
++    private func seek(to t: Double, delta: Double?) {
++        player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
++        readout = ViewerTransport.readout(delta: delta, time: t, duration: duration)
++        hideReadoutSoon()
++    }
++
++    private func shuttle(_ r: Double) {
++        if r == 0 {
++            pause()
++            show(nil)
++            return
++        }
++        if r < 0, player.currentItem?.canPlayReverse != true {
++            seek(by: -ViewerTransport.jump) // can't play backwards: jump back instead
++            return
++        }
++        player.rate = Float(r)
++        playing = true
++        readout = ViewerTransport.shuttleLabel(r)
++        hideReadoutSoon()
++    }
++
++    private func show(_ delta: Double?) {
++        readout = ViewerTransport.readout(delta: delta, time: time, duration: duration)
++        hideReadoutSoon()
++    }
++
++    private func hideReadoutSoon() {
++        readoutTask?.cancel()
++        readoutTask = Task { [weak self] in
++            try? await Task.sleep(nanoseconds: 800_000_000)
++            guard !Task.isCancelled else { return }
++            self?.readout = nil
++        }
++    }
++}
++
++/// An AVPlayerLayer filling its frame (the frame is already the media's shape, or the phone's screen for a platform
++/// layout, which crops the sides as those apps do).
++struct ViewerPlayerLayer: NSViewRepresentable {
++    let player: AVPlayer
++
++    func makeNSView(context: Context) -> PlayerNSView {
++        let v = PlayerNSView(frame: .zero)
++        v.player = player
++        return v
++    }
++
++    func updateNSView(_ v: PlayerNSView, context: Context) {
++        if v.player !== player { v.player = player }
++    }
++}
++
++// MARK: Remembered choices
++
++/// The viewer's per-device choices (owner 2026-11-12): the skin per shape, the device frame and the safe zones.
++private struct ViewerPrefsKey {
++    static let key = "viewer.prefs"
++
++    static func read(_ raw: String) -> ViewerPrefs {
++        (try? JSONDecoder().decode(ViewerPrefs.self, from: Data(raw.utf8))) ?? ViewerPrefs()
++    }
++
++    static func write(_ p: ViewerPrefs) -> String {
++        (try? String(decoding: JSONEncoder().encode(p), as: UTF8.self)) ?? ""
++    }
++}
++
++/// The server's safe-zone table, fetched once per launch (defaults until then, and offline).
++@MainActor
++enum ViewerLayouts {
++    private(set) static var current = PreviewLayouts.defaults
++    private static var loaded = false
++
++    static func load(_ api: any MuseAPI) async {
++        guard !loaded else { return }
++        loaded = true
++        current = await api.previewLayouts()
++    }
++}
++
++// MARK: The viewer
++
++struct TakeViewer: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var media: ViewerMedia
++    var context: TakeViewerContext
++    /// The take, for its actions (nil: a clip or an image with no actions).
++    var take: Take? = nil
++    /// The take's job (Redo needs it).
++    var job: Job? = nil
++    /// A small pane (the stage, Compare): the preview choice is one menu and the actions go under the media.
++    var compact = false
++    var autoplay = true
++    var startMuted = false
++    /// ↑ ↓: the previous or next take (nil: no list).
++    var onStep: ((Int) -> Void)? = nil
++    /// Esc (nil: nothing to close).
++    var onClose: (() -> Void)? = nil
++    /// The preview choices (Clean, the platform layouts, the frame, safe zones); off for New Swap's source clip.
++    var previewControls = true
++    /// A player owned by the host (Compare plays two together); nil: the viewer's own.
++    var sharedPlayback: ViewerPlayback? = nil
++
++    @State private var ownPlayback = ViewerPlayback()
++    private var playback: ViewerPlayback { sharedPlayback ?? ownPlayback }
++    @AppStorage(ViewerPrefsKey.key) private var prefsRaw = ""
++    @FocusState private var focused: Bool
++    @State private var layouts = ViewerLayouts.current
++
++    private var prefs: ViewerPrefs { ViewerPrefsKey.read(prefsRaw) }
++    private func update(_ f: (inout ViewerPrefs) -> Void) {
++        var p = prefs
++        f(&p)
++        prefsRaw = ViewerPrefsKey.write(p)
++    }
++
++    private var aspect: Double { media.aspect }
++    private var landscape: Bool { PreviewSkin.isLandscape(aspect) }
++    private var skin: PreviewSkin { previewControls ? prefs.skin(aspect: aspect) : .clean }
++    private var actions: [TakeViewerAction] {
++        guard let take else { return [] }
++        return TakeViewerActions.list(context, isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
++                                      canUpscale: take.canUpscale)
++    }
++
++    var body: some View {
++        VStack(spacing: compact ? Space.s2 : Space.s3) {
++            if !compact && previewControls { previewBar.frame(maxWidth: .infinity) }
++            GeometryReader { g in
++                // Beside portrait media when there's room for it and a 240 pt picture; otherwise the row under it.
++                let rail = !compact && !landscape && !actions.isEmpty && g.size.width >= 2 * (Self.railWidth + Space.s7) + 240
++                if rail {
++                    HStack(alignment: .center, spacing: Space.s7) {
++                        Color.clear.frame(width: Self.railWidth) // balances the rail, so the media stays centred
++                        mediaArea(width: g.size.width - 2 * (Self.railWidth + Space.s7), height: g.size.height)
++                        ViewerActionRail(take: take!, job: job, actions: actions, time: { playback.time })
++                            .frame(width: Self.railWidth)
++                    }
++                    .frame(width: g.size.width, height: g.size.height)
++                } else {
++                    let rowH: CGFloat = actions.isEmpty ? 0 : 36 + Space.s4
++                    VStack(spacing: Space.s4) {
++                        mediaArea(width: g.size.width, height: g.size.height - rowH)
++                        if let take, !actions.isEmpty {
++                            ViewerActionRow(take: take, job: job, actions: actions, more: context != .compare, time: { playback.time })
++                        }
++                    }
++                    .frame(width: g.size.width, height: g.size.height)
++                }
++            }
++            if compact && previewControls { compactPreviewMenu.frame(maxWidth: .infinity, alignment: .leading) }
++        }
++        .focusable()
++        .focused($focused)
++        .focusEffectDisabled()
++        .onKeyPress(phases: [.down, .repeat, .up]) { press in key(press) }
++        .onAppear {
++            playback.load(media.videoURL, autoplay: autoplay, muted: startMuted)
++            if context != .source { focused = true }
++        }
++        .onChange(of: media.videoURL) { _, u in playback.load(u, autoplay: autoplay, muted: playback.muted) }
++        .onDisappear { playback.release() }
++        .task { await ViewerLayouts.load(store.api); layouts = ViewerLayouts.current }
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel(media.label)
++    }
++
++    private static let railWidth: CGFloat = 176
++
++    // MARK: Media in its frame
++
++    @ViewBuilder private func mediaArea(width: CGFloat, height: CGFloat) -> some View {
++        let w = max(0, Double(width)), h = max(0, Double(height))
++        Group {
++            if previewControls && prefs.deviceFrame && !landscape {
++                let sw = ViewerFrame.phoneScreenWidth(width: w, height: h)
++                PhoneFrame(screenWidth: sw) { screen(width: sw, height: sw / ViewerFrame.phoneScreenAspect) }
++            } else if previewControls && prefs.deviceFrame && landscape {
++                let lw = min(w / 1.16, (h - 24) * ViewerFrame.laptopScreenAspect / 1.04)
++                LaptopFrame(screenWidth: max(0, lw)) { laptopScreen(width: max(0, lw), height: max(0, lw) / ViewerFrame.laptopScreenAspect) }
++            } else {
++                let f = ViewerFrame.fit(aspect: aspect, width: w, height: h)
++                surface
++                    .frame(width: f.w, height: f.h)
++                    .overlay { if skin != .clean && !landscape { skinLayer(width: f.w, height: f.h) } }
++                    .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
++                    .overlay(alignment: .center) { readout }
++            }
++        }
++        .frame(width: max(0, width), height: max(0, height))
++        .contentShape(Rectangle())
++        .onTapGesture {
++            focused = true
++            if media.videoURL != nil { playback.togglePlay() }
++        }
++    }
++
++    /// The media itself: the poster, the video over it, the slow-load ring in the corner.
++    private var surface: some View {
++        ZStack(alignment: .bottomTrailing) {
++            Color.black
++            MuseImage(ref: media.poster)
++            if media.videoURL != nil { ViewerPlayerLayer(player: playback.player).allowsHitTesting(false) }
++            if playback.slowLoad {
++                ProgressView().controlSize(.small).tint(.white).padding(Space.s3).accessibilityLabel("Loading")
++            }
++        }
++        .accessibilityLabel(media.label)
++    }
++
++    /// The phone's screen: a platform layout fills it (cropping a 9:16 take's sides, as those apps do on tall phones);
++    /// Clean fits it with black above and below, as a phone's own player does.
++    private func screen(width: Double, height: Double) -> some View {
++        let fill = ViewerFrame.fillsScreen(skin)
++        let f = fill ? (w: width, h: height) : ViewerFrame.fit(aspect: aspect, width: width, height: height)
++        return ZStack {
++            Color.black
++            surface.frame(width: f.w, height: f.h).clipped()
++            if skin != .clean { skinLayer(width: width, height: height) }
++            readout
++        }
++        .frame(width: width, height: height)
++    }
++
++    private func laptopScreen(width: Double, height: Double) -> some View {
++        ZStack {
++            if skin == .clean {
++                Color.black
++                let f = ViewerFrame.fit(aspect: aspect, width: width, height: height)
++                surface.frame(width: f.w, height: f.h).clipped()
++            } else {
++                DesktopSkin(skin: skin, width: width, height: height) { w, h in surface.frame(width: w, height: h).clipped() }
++            }
++            readout
++        }
++        .frame(width: width, height: height)
++    }
++
++    @ViewBuilder private func skinLayer(width: Double, height: Double) -> some View {
++        PhoneSkin(skin: skin, width: width, height: height)
++        if prefs.safeZones, let z = layouts.zone(skin) { SafeZoneLayer(zone: z).allowsHitTesting(false) }
++    }
++
++    @ViewBuilder private var readout: some View {
++        if let r = playback.readout {
++            Text(r).font(t.scale.caption.font).monospacedDigit().foregroundStyle(.white)
++                .padding(.horizontal, Space.s3).padding(.vertical, 6)
++                .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(.black.opacity(0.6)))
++                .transition(.opacity)
++                .accessibilityLabel(r)
++                .allowsHitTesting(false)
++        }
++    }
++
++    // MARK: Preview controls
++
++    /// Clean · TikTok · Reels · Shorts · Facebook (or Clean · YouTube · Facebook), the frame switch and the safe zones.
++    private var previewBar: some View {
++        HStack(spacing: Space.s4) {
++            Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
++                ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
++            }
++            .pickerStyle(.segmented)
++            .labelsHidden()
++            .fixedSize()
++            .help("Preview as it would look on each app (a generic drawing of its layout)")
++            Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
++                .toggleStyle(.switch).controlSize(.small)
++                .font(t.scale.label.font)
++            Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
++                .toggleStyle(.switch).controlSize(.small)
++                .font(t.scale.label.font)
++                .disabled(layouts.zone(skin) == nil)
++                .help(layouts.note ?? "Where each app's own buttons and captions sit")
++        }
++        .frame(height: 32)
++    }
++
++    /// A small pane's one menu: "Preview: Clean ▾".
++    private var compactPreviewMenu: some View {
++        Menu {
++            Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
++                ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
++            }
++            .pickerStyle(.inline)
++            Divider()
++            Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
++            Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
++                .disabled(layouts.zone(skin) == nil)
++        } label: {
++            HStack(spacing: 4) {
++                Text("Preview: \(skin.label)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++                Ph("caret-down", 11).foregroundStyle(t.roles.ink2)
++            }
++        }
++        .menuStyle(.borderlessButton)
++        .menuIndicator(.hidden)
++        .fixedSize()
++        .help("Preview as it would look on each app")
++    }
++
++    // MARK: Keys
++
++    private func key(_ press: KeyPress) -> KeyPress.Result {
++        let shift = press.modifiers.contains(.shift)
++        guard press.modifiers.subtracting([.shift, .capsLock, .numericPad, .function]).isEmpty else { return .ignored } // ⌘ shortcuts go to the app
++        let k: ViewerKey
++        switch press.key {
++        case .space: k = .space
++        case .leftArrow: k = .left
++        case .rightArrow: k = .right
++        case .upArrow: k = .up
++        case .downArrow: k = .down
++        case .home: k = .home
++        case .end: k = .end
++        case .escape: k = .escape
++        default:
++            guard let c = press.characters.first else { return .ignored }
++            if c.lowercased() == "k" { playback.transport.kHeld = press.phase != .up }
++            k = .character(c)
++        }
++        if press.phase == .up { return k == .character("k") || k == .character("K") ? .handled : .ignored }
++        // A held key repeats only seeking and stepping (arrows, J/L, , .); toggles (Space, M, F, K) fire once.
++        if press.phase == .repeat {
++            switch k {
++            case .left, .right, .up, .down: break
++            case .character(let c) where ",.jlJL".contains(c): break
++            default: return .handled
++            }
++        }
++        let hasVideo = media.videoURL != nil
++        guard let cmd = playback.transport.command(for: k, shift: shift) else { return .ignored }
++        switch cmd {
++        case .previousTake:
++            guard let onStep else { return .ignored }
++            onStep(-1)
++        case .nextTake:
++            guard let onStep else { return .ignored }
++            onStep(1)
++        case .close:
++            guard let onClose else { return .ignored }
++            onClose()
++        case .fullScreen, .mute:
++            _ = playback.run(cmd)
++        default:
++            guard hasVideo else { return .ignored }
++            _ = playback.run(cmd)
++        }
++        return .handled
++    }
++}
++
++// MARK: Device frames
++
++/// A generic phone: a rounded body, an even bezel and a round front camera (no maker's shapes).
++struct PhoneFrame<Screen: View>: View {
++    var screenWidth: Double
++    @ViewBuilder var screen: () -> Screen
++
++    var body: some View {
++        let bezel = ViewerFrame.phoneBezel(screenWidth: screenWidth)
++        let r = ViewerFrame.phoneRadius(screenWidth: screenWidth)
++        let k = screenWidth / 300
++        screen()
++            .overlay(alignment: .top) {
++                Circle().fill(.black).frame(width: 10 * k, height: 10 * k)
++                    .overlay(Circle().strokeBorder(Color(white: 0.13), lineWidth: 1))
++                    .padding(.top, 10 * k)
++            }
++            .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
++            .padding(bezel)
++            .background(RoundedRectangle(cornerRadius: r + bezel, style: .continuous).fill(Color(white: 0.04)))
++            .overlay(RoundedRectangle(cornerRadius: r + bezel, style: .continuous).strokeBorder(Color(red: 0.23, green: 0.24, blue: 0.25), lineWidth: 1))
++            .accessibilityElement(children: .contain)
++            .accessibilityLabel("Phone preview")
++    }
++}
++
++/// A generic laptop: a screen with a thin bezel on a wider base.
++struct LaptopFrame<Screen: View>: View {
++    var screenWidth: Double
++    @ViewBuilder var screen: () -> Screen
++
++    var body: some View {
++        let edge = Color(red: 0.23, green: 0.24, blue: 0.25)
++        VStack(spacing: 0) {
++            screen()
++                .padding(screenWidth * 0.018)
++                .background(UnevenRoundedRectangle(topLeadingRadius: screenWidth * 0.025, bottomLeadingRadius: 4, bottomTrailingRadius: 4,
++                                                   topTrailingRadius: screenWidth * 0.025).fill(Color(white: 0.04)))
++                .overlay(UnevenRoundedRectangle(topLeadingRadius: screenWidth * 0.025, bottomLeadingRadius: 4, bottomTrailingRadius: 4,
++                                                topTrailingRadius: screenWidth * 0.025).strokeBorder(edge, lineWidth: 1))
++            UnevenRoundedRectangle(bottomLeadingRadius: screenWidth * 0.03, bottomTrailingRadius: screenWidth * 0.03)
++                .fill(Color(red: 0.16, green: 0.17, blue: 0.18))
++                .overlay(UnevenRoundedRectangle(bottomLeadingRadius: screenWidth * 0.03, bottomTrailingRadius: screenWidth * 0.03).strokeBorder(edge, lineWidth: 1))
++                .frame(width: screenWidth * 1.16, height: max(8, screenWidth * 0.022))
++        }
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel("Laptop preview")
++    }
++}
++
++// MARK: Platform layouts (generic drawings: grey bars for text, Phosphor glyphs for buttons; no logos or brand colours)
++
++private struct Bar: View {
++    var w: Double
++    var h: Double
++    var dim = false
++    var body: some View { RoundedRectangle(cornerRadius: h / 2).fill(.white.opacity(dim ? 0.55 : 0.85)).frame(width: w, height: h) }
++}
++
++private struct Glyph: View {
++    var name: String
++    var size: Double
++    var count = true
++    var body: some View {
++        VStack(spacing: size * 0.12) {
++            Ph(name, size * 0.8).foregroundStyle(.white)
++            if count { Bar(w: size * 0.7, h: max(3, size * 0.2)) }
++        }
++    }
++}
++
++/// A phone app's layout over the take: top bar, the right-hand rail, the caption block and the bottom navigation.
++struct PhoneSkin: View {
++    var skin: PreviewSkin
++    var width: Double
++    var height: Double
++
++    var body: some View {
++        let k = width / 300
++        let nav = 56 * k
++        let icon = 26 * k
++        ZStack(alignment: .topLeading) {
++            // status bar
++            HStack { Bar(w: 28 * k, h: 7 * k); Spacer(); Bar(w: 40 * k, h: 7 * k) }
++                .padding(.horizontal, 18 * k).padding(.top, 8 * k)
++            top(k)
++            rail(k, icon: icon)
++                .padding(.trailing, 10 * k).padding(.bottom, nav + 16 * k)
++                .frame(width: width, height: height, alignment: .bottomTrailing)
++            caption(k)
++                .padding(.leading, 12 * k).padding(.bottom, nav + 14 * k)
++                .frame(width: width, height: height, alignment: .bottomLeading)
++            HStack {
++                ForEach(navIcons, id: \.self) { n in
++                    Spacer(minLength: 0)
++                    Ph(n, 18 * k).foregroundStyle(.white)
++                    Spacer(minLength: 0)
++                }
++            }
++            .padding(.bottom, 10 * k)
++            .frame(width: width, height: nav)
++            .background(Color.black.opacity(0.92))
++            .frame(width: width, height: height, alignment: .bottom)
++        }
++        .frame(width: width, height: height)
++        .allowsHitTesting(false)
++        .accessibilityHidden(true)
++    }
++
++    private var navIcons: [String] {
++        switch skin {
++        case .tiktok: return ["house", "users-three", "plus-square", "chat-circle", "user"]
++        case .reels: return ["house", "magnifying-glass", "plus-square", "film-strip", "user-circle"]
++        case .shorts: return ["house", "lightning", "plus-circle", "play-circle", "user-circle"]
++        default: return ["house", "video", "users-three", "bag", "bell"]
++        }
++    }
++
++    @ViewBuilder private func top(_ k: Double) -> some View {
++        switch skin {
++        case .tiktok:
++            ZStack {
++                HStack(spacing: 14 * k) { Bar(w: 50 * k, h: 8 * k, dim: true); Bar(w: 44 * k, h: 8 * k) }
++                HStack { Spacer(); Ph("magnifying-glass", 18 * k).foregroundStyle(.white) }
++            }
++            .padding(.horizontal, 14 * k).padding(.top, 32 * k)
++        case .reels:
++            HStack { Bar(w: 54 * k, h: 10 * k); Spacer(); Ph("camera", 18 * k).foregroundStyle(.white) }
++                .padding(.horizontal, 14 * k).padding(.top, 32 * k)
++        case .shorts:
++            HStack(spacing: 16 * k) { Spacer(); Ph("magnifying-glass", 18 * k); Ph("dots-three-vertical", 18 * k) }
++                .foregroundStyle(.white).padding(.horizontal, 14 * k).padding(.top, 30 * k)
++        default:
++            HStack(spacing: 14 * k) { Ph("caret-left", 18 * k); Bar(w: 48 * k, h: 10 * k); Spacer(); Ph("magnifying-glass", 18 * k); Ph("user-circle", 18 * k) }
++                .foregroundStyle(.white).padding(.horizontal, 14 * k).padding(.top, 30 * k)
++        }
++    }
++
++    @ViewBuilder private func rail(_ k: Double, icon: Double) -> some View {
++        switch skin {
++        case .tiktok:
++            VStack(spacing: 16 * k) {
++                avatar(40 * k)
++                Glyph(name: "heart", size: icon); Glyph(name: "chat-circle-dots", size: icon)
++                Glyph(name: "bookmark-simple", size: icon); Glyph(name: "share-fat", size: icon)
++                Circle().fill(Color(white: 0.2)).frame(width: 32 * k, height: 32 * k).overlay(Circle().strokeBorder(Color(white: 0.07), lineWidth: 5 * k))
++            }
++        case .reels:
++            VStack(spacing: 18 * k) {
++                Glyph(name: "heart", size: icon); Glyph(name: "chat-circle", size: icon); Glyph(name: "paper-plane-tilt", size: icon)
++                Glyph(name: "dots-three-vertical", size: icon, count: false)
++                RoundedRectangle(cornerRadius: 5 * k).fill(.white.opacity(0.6)).frame(width: 26 * k, height: 26 * k)
++            }
++        case .shorts:
++            VStack(spacing: 16 * k) {
++                Glyph(name: "thumbs-up", size: icon); Glyph(name: "thumbs-down", size: icon, count: false)
++                Glyph(name: "chat-circle-dots", size: icon); Glyph(name: "share-fat", size: icon); Glyph(name: "arrows-clockwise", size: icon)
++                RoundedRectangle(cornerRadius: 6 * k).fill(.white.opacity(0.6)).frame(width: 28 * k, height: 28 * k)
++            }
++        default:
++            VStack(spacing: 18 * k) {
++                Glyph(name: "thumbs-up", size: icon); Glyph(name: "chat-circle", size: icon); Glyph(name: "share-fat", size: icon)
++                Glyph(name: "dots-three", size: icon, count: false)
++            }
++        }
++    }
++
++    private func caption(_ k: Double) -> some View {
++        let w = width * 0.62
++        return VStack(alignment: .leading, spacing: 6 * k) {
++            switch skin {
++            case .tiktok: Bar(w: w * 0.4, h: 9 * k)
++            case .reels:
++                HStack(spacing: 8 * k) { avatar(26 * k); Bar(w: w * 0.34, h: 9 * k)
++                    RoundedRectangle(cornerRadius: 6 * k).strokeBorder(.white.opacity(0.8), lineWidth: 1.2 * k).frame(width: 46 * k, height: 20 * k) }
++            case .shorts:
++                HStack(spacing: 8 * k) { avatar(26 * k); Bar(w: w * 0.3, h: 9 * k); Capsule().fill(.white.opacity(0.9)).frame(width: 60 * k, height: 22 * k) }
++            default:
++                HStack(spacing: 8 * k) { avatar(26 * k); Bar(w: w * 0.3, h: 9 * k)
++                    RoundedRectangle(cornerRadius: 6 * k).fill(.white.opacity(0.25)).frame(width: 44 * k, height: 20 * k) }
++            }
++            Bar(w: w * 0.92, h: 7 * k, dim: true)
++            Bar(w: w * 0.64, h: 7 * k, dim: true)
++            HStack(spacing: 6 * k) { Ph("music-note", 11 * k).foregroundStyle(.white); Bar(w: w * 0.52, h: 6 * k, dim: true) }
++        }
++        .frame(width: w, alignment: .leading)
++    }
++
++    private func avatar(_ d: Double) -> some View {
++        Circle().fill(.white.opacity(0.75)).frame(width: d, height: d).overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
++    }
++}
++
++/// A desktop app's layout on the laptop screen: YouTube's player with its list on the right, or Facebook's player with
++/// its comments column. The take plays where the player is.
++struct DesktopSkin<Player: View>: View {
++    var skin: PreviewSkin
++    var width: Double
++    var height: Double
++    var player: (Double, Double) -> Player
++
++    var body: some View {
++        let pad = width * 0.02
++        let top = height * 0.07
++        ZStack(alignment: .topLeading) {
++            Color(white: 0.06)
++            HStack(spacing: width * 0.015) {
++                Ph("list-bullets", 14).foregroundStyle(.white)
++                Bar(w: width * 0.06, h: 7)
++                Spacer()
++                Capsule().strokeBorder(Color(white: 0.27), lineWidth: 1).frame(width: width * 0.3, height: height * 0.04)
++                Spacer()
++                Ph("bell", 14).foregroundStyle(.white)
++                Circle().fill(Color(white: 0.4)).frame(width: 14, height: 14)
++            }
++            .padding(.horizontal, pad).frame(height: top)
++            let vw = width * (skin == .youtube ? 0.66 : 0.70)
++            VStack(alignment: .leading, spacing: 10) {
++                player(vw, vw * 9 / 16).clipShape(RoundedRectangle(cornerRadius: 6))
++                Bar(w: vw * 0.7, h: 9)
++                HStack(spacing: 8) {
++                    Circle().fill(Color(white: 0.4)).frame(width: 22, height: 22)
++                    Bar(w: vw * 0.18, h: 7, dim: true)
++                    if skin == .youtube { Capsule().fill(.white.opacity(0.9)).frame(width: 56, height: 20) }
++                    Spacer()
++                    Capsule().fill(Color(white: 0.2)).frame(width: 80, height: 20)
++                    Capsule().fill(Color(white: 0.2)).frame(width: 54, height: 20)
++                }
++                .frame(width: vw)
++            }
++            .padding(.leading, pad).padding(.top, height * 0.09)
++            VStack(alignment: .leading, spacing: 10) {
++                ForEach(0..<6, id: \.self) { _ in
++                    HStack(alignment: .top, spacing: 8) {
++                        if skin == .youtube {
++                            RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.17)).frame(width: width * 0.12, height: width * 0.12 * 9 / 16)
++                        } else {
++                            Circle().fill(Color(white: 0.3)).frame(width: 18, height: 18)
++                        }
++                        VStack(alignment: .leading, spacing: 5) { Bar(w: width * 0.12, h: 5, dim: true); Bar(w: width * 0.08, h: 5, dim: true).opacity(0.6) }
++                    }
++                }
++            }
++            .frame(width: width * (skin == .youtube ? 0.27 : 0.24), alignment: .leading)
++            .padding(.top, height * 0.09)
++            .frame(width: width - pad, alignment: .trailing)
++        }
++        .frame(width: width, height: height)
++        .clipped()
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel("\(skin.label) layout")
++    }
++}
++
++/// The safe zones: a diagonal hatch where the app's own buttons and captions sit, and a dashed box around the safe part.
++struct SafeZoneLayer: View {
++    var zone: SafeZone
++
++    var body: some View {
++        Canvas { ctx, size in
++            let r = zone.safeRect
++            let safe = CGRect(x: r.x * size.width, y: r.y * size.height, width: r.w * size.width, height: r.h * size.height)
++            var covered = Path(CGRect(origin: .zero, size: size))
++            covered.addRect(safe)
++            ctx.clip(to: covered, style: FillStyle(eoFill: true))
++            var hatch = Path()
++            var x: CGFloat = -size.height
++            while x < size.width {
++                hatch.move(to: CGPoint(x: x, y: size.height))
++                hatch.addLine(to: CGPoint(x: x + size.height, y: 0))
++                x += 12
++            }
++            ctx.stroke(hatch, with: .color(.white.opacity(0.22)), lineWidth: 5)
++        }
++        .overlay(GeometryReader { g in
++            let r = zone.safeRect
++            RoundedRectangle(cornerRadius: 4)
++                .strokeBorder(.white.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
++                .frame(width: r.w * g.size.width, height: r.h * g.size.height)
++                .offset(x: r.x * g.size.width, y: r.y * g.size.height)
++        })
++        .accessibilityLabel("Safe zones: keep faces and text inside the dashed box")
++    }
++}
++
++// MARK: Actions
++
++/// One take action: icon and label, or the icon alone with the label as its tooltip.
++struct ViewerActionButton: View {
++    @Environment(\.theme) private var t
++    var action: TakeViewerAction
++    var title: String? = nil
++    var iconOnly = false
++    var primary = false
++    var off = false
++    var fullWidth = false
++    var run: () -> Void
++
++    static func icon(_ a: TakeViewerAction) -> String {
++        switch a {
++        case .keep: return "check"
++        case .redo: return "arrow-clockwise"
++        case .extend: return "arrow-line-right"
++        case .upscale: return "arrows-out-simple"
++        case .split: return "scissors"
++        case .share: return "export"
++        }
++    }
++
++    var body: some View {
++        let label = title ?? action.title
++        Button(action: run) {
++            HStack(spacing: Space.s2) {
++                Ph(Self.icon(action), 15)
++                if !iconOnly { Text(label).font(t.scale.label.font).lineLimit(1).fixedSize() }
++                if fullWidth { Spacer(minLength: 0) }
++            }
++            .padding(.horizontal, iconOnly ? 0 : Space.s3)
++            .frame(width: iconOnly ? 36 : nil, height: primary ? 40 : 36)
++            .frame(maxWidth: fullWidth ? .infinity : nil, alignment: primary ? .center : .leading)
++            .foregroundStyle(primary ? t.roles.onAction : t.roles.ink)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(primary ? t.roles.action : .clear))
++            .overlay { if !primary { RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1) } }
++            .contentShape(Rectangle())
++            .opacity(off ? 0.55 : 1)
++        }
++        .buttonStyle(.plain)
++        .disabled(off)
++        .help(action.help)
++        .accessibilityLabel(label)
++    }
++}
++
++/// What each action does (shared by the rail and the row).
++@MainActor
++private struct ViewerActionRunner {
++    let store: AppStore
++    let take: Take
++    let job: Job?
++    let time: () -> Double
++
++    func run(_ a: TakeViewerAction) {
++        switch a {
++        case .keep: store.approve(take)
++        case .redo: if let job { store.retakeShot(job) }
++        case .extend: store.openExtend(take)
++        case .upscale: break // the Upscale button opens its own picker
++        case .split: store.openEdit(takeId: take.id, at: time()) // owner 2026-11-12: Edit at this moment
++        case .share: store.openPostSheet(take)
++        }
++    }
++}
++
++/// More: everything else this take can do, and why a hidden action isn't offered.
++struct ViewerMoreMenu: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var take: Take
++    var job: Job?
++    var fullWidth = false
++    var iconOnly = false
++
++    var body: some View {
++        Menu {
++            Button("Vary") { store.vary(take) }
++            Button("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
++            if take.isVideo { Button("Use as start frame") { store.useAsStartFrame(take) } }
++            Button(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
++            if take.isVideo { Button("Open in Edit") { store.openEdit(takeId: take.id) } }
++            Button("Download") { store.export(take) }
++            let why = TakeViewerActions.hiddenReasons(isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
++                                                      canUpscale: take.canUpscale, isMaxResolution: (take.height ?? 0) >= 2160 || (take.width ?? 0) >= 2160)
++            if !why.isEmpty {
++                Divider()
++                ForEach(why, id: \.self) { Text($0) }
++            }
++        } label: {
++            HStack(spacing: Space.s2) {
++                Ph("dots-three", 15)
++                if !iconOnly { Text("More").font(t.scale.label.font).lineLimit(1).fixedSize() }
++                if fullWidth { Spacer(minLength: 0) }
++            }
++            .foregroundStyle(t.roles.ink2)
++            .padding(.horizontal, Space.s3)
++            .frame(height: 36)
++            .contentShape(Rectangle())
++        }
++        .menuStyle(.borderlessButton)
++        .menuIndicator(.hidden)
++        .fixedSize(horizontal: !fullWidth, vertical: true)
++        .help("More for this take")
++        .accessibilityLabel("More for this take")
++    }
++}
++
++/// Beside portrait media: Keep (the one filled button), then one quiet button per action, More, and the take's details.
++struct ViewerActionRail: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var take: Take
++    var job: Job?
++    var actions: [TakeViewerAction]
++    var time: () -> Double
++
++    var body: some View {
++        let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
++        VStack(alignment: .leading, spacing: Space.s2) {
++            ForEach(actions, id: \.self) { a in
++                if a == .upscale {
++                    UpscaleButton(take: take, size: .regular, fill: true)
++                } else if a == .keep {
++                    ViewerActionButton(action: a, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal, fullWidth: true) { runner.run(a) }
++                } else {
++                    ViewerActionButton(action: a, fullWidth: true) { runner.run(a) }
++                }
++            }
++            ViewerMoreMenu(take: take, job: job, fullWidth: true)
++            Text(details).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
++                .fixedSize(horizontal: false, vertical: true)
++                .padding(.top, Space.s4)
++        }
++    }
++
++    /// "9:16 · 10 s", the size, the price: one per line.
++    private var details: String {
++        var lines: [String] = []
++        let shape = SuiteFeedText.aspect(width: take.width.map(Double.init), height: take.height.map(Double.init))
++        let secs = take.durationSec.map { "\(Pricing.trimNum($0)) s" }
++        lines.append([shape, secs].compactMap { $0 }.joined(separator: " · "))
++        if let w = take.width, let h = take.height { lines.append("\(w) × \(h)") }
++        if take.cost > 0 { lines.append(Pricing.money(take.cost)) }
++        return lines.filter { !$0.isEmpty }.joined(separator: "\n")
++    }
++}
++
++/// Under landscape media (and in small panes): the same buttons in a row. Labels give way in a set order (Split,
++/// Upscale, Extend, Redo); Keep and Share always keep theirs.
++struct ViewerActionRow: View {
++    @Environment(AppStore.self) private var store
++    var take: Take
++    var job: Job?
++    var actions: [TakeViewerAction]
++    var more = true
++    var time: () -> Double
++
++    var body: some View {
++        let steps = TakeViewerActions.steps(actions)
++        // Each step one candidate (at most five: all labels, then Split, Upscale, Extend and Redo give theirs up).
++        ViewThatFits(in: .horizontal) {
++            row(iconOnly: steps[0]).fixedSize()
++            if steps.count > 1 { row(iconOnly: steps[1]).fixedSize() }
++            if steps.count > 2 { row(iconOnly: steps[2]).fixedSize() }
++            if steps.count > 3 { row(iconOnly: steps[3]).fixedSize() }
++            if steps.count > 4 { row(iconOnly: steps[4]).fixedSize() }
++            row(iconOnly: steps[steps.count - 1], moreInline: false).fixedSize()
++        }
++        .frame(maxWidth: .infinity)
++    }
++
++    /// `moreInline` false (the narrowest): More shows only its icon.
++    private func row(iconOnly: Set<TakeViewerAction>, moreInline: Bool = true) -> some View {
++        let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
++        return HStack(spacing: Space.s2) {
++            ForEach(actions, id: \.self) { a in
++                if a == .upscale {
++                    UpscaleButton(take: take, size: .small, iconOnly: iconOnly.contains(a))
++                } else if a == .keep {
++                    ViewerActionButton(action: a, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal) { runner.run(a) }
++                } else {
++                    ViewerActionButton(action: a, iconOnly: iconOnly.contains(a)) { runner.run(a) }
++                }
++            }
++            if more { ViewerMoreMenu(take: take, job: job, iconOnly: !moreInline) }
++        }
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift b/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
+new file mode 100644
+index 00000000..58139574
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
+@@ -0,0 +1,449 @@
++import Foundation
++
++// The take viewer (plans/swap-viewer-design.md §B, owner-approved 2026-11-12): one viewer wherever a take or image is
++// shown. This file holds what the app's views need that can be tested without AppKit: the platform previews ("skins")
++// and their safe zones, the frame maths (no letterbox), playback without a scrubber (the keys, the jumps, the readout),
++// the take actions and the order in which their labels give way, and the New Swap trimmer.
++
++// MARK: Preview skins
++
++/// How the viewer shows a take: clean, or under a generic drawing of a platform's layout. Portrait and square media get
++/// the phone layouts; landscape media gets the desktop ones.
++public enum PreviewSkin: String, Codable, CaseIterable, Sendable {
++    case clean, tiktok, reels, shorts, facebook, youtube
++
++    public var label: String {
++        switch self {
++        case .clean: return "Clean"
++        case .tiktok: return "TikTok"
++        case .reels: return "Reels"
++        case .shorts: return "Shorts"
++        case .facebook: return "Facebook"
++        case .youtube: return "YouTube"
++        }
++    }
++
++    /// The choices for media of this shape (width / height): portrait and square get the phone layouts.
++    public static func options(aspect: Double) -> [PreviewSkin] {
++        isLandscape(aspect) ? [.clean, .youtube, .facebook] : [.clean, .tiktok, .reels, .shorts, .facebook]
++    }
++
++    public static func isLandscape(_ aspect: Double) -> Bool { aspect.isFinite && aspect > 1.05 }
++}
++
++/// The parts of the screen a platform's own buttons and captions cover, as fractions of the screen (approximate; the
++/// apps move their buttons now and then, so the server can send corrections: GET /v1/preview/layouts).
++public struct SafeZone: Codable, Hashable, Sendable {
++    public var top: Double
++    public var bottom: Double
++    public var left: Double
++    public var right: Double
++
++    public init(top: Double, bottom: Double, left: Double = 0, right: Double) {
++        self.top = top
++        self.bottom = bottom
++        self.left = left
++        self.right = right
++    }
++
++    /// The safe box, in the unit square (x, y, width, height).
++    public var safeRect: (x: Double, y: Double, w: Double, h: Double) {
++        let l = Self.clamp(left), r = Self.clamp(right), t = Self.clamp(top), b = Self.clamp(bottom)
++        return (l, t, max(0, 1 - l - r), max(0, 1 - t - b))
++    }
++
++    private static func clamp(_ v: Double) -> Double { v.isFinite ? min(max(v, 0), 0.5) : 0 }
++}
++
++/// The safe zones per skin. The defaults follow the common guidance of the safe-zone checkers (Pallyy, bundle.social,
++/// upload-post) on a 1080 × 1920 frame; the server's table replaces any it sends.
++public struct PreviewLayouts: Codable, Hashable, Sendable {
++    public var zones: [String: SafeZone]
++    public var note: String?
++
++    public init(zones: [String: SafeZone], note: String? = nil) {
++        self.zones = zones
++        self.note = note
++    }
++
++    public static let defaults = PreviewLayouts(zones: [
++        PreviewSkin.tiktok.rawValue: SafeZone(top: 0.11, bottom: 0.29, left: 0.03, right: 0.17),
++        PreviewSkin.reels.rawValue: SafeZone(top: 0.10, bottom: 0.30, left: 0.03, right: 0.16),
++        PreviewSkin.shorts.rawValue: SafeZone(top: 0.09, bottom: 0.30, left: 0.03, right: 0.17),
++        PreviewSkin.facebook.rawValue: SafeZone(top: 0.10, bottom: 0.28, left: 0.03, right: 0.16),
++    ], note: "Approximate. Each app moves its buttons now and then.")
++
++    /// The zone for a skin: the server's, else the default; none for Clean and the desktop layouts.
++    public func zone(_ skin: PreviewSkin) -> SafeZone? {
++        guard skin != .clean, skin != .youtube else { return nil }
++        return zones[skin.rawValue] ?? Self.defaults.zones[skin.rawValue]
++    }
++
++    /// The server's table over the defaults (a skin it leaves out keeps its default).
++    public func merged(over base: PreviewLayouts = .defaults) -> PreviewLayouts {
++        PreviewLayouts(zones: base.zones.merging(zones) { _, new in new }, note: note ?? base.note)
++    }
++}
++
++/// The viewer's remembered choices (per device, owner 2026-11-12): the skin for portrait and for landscape media, the
++/// device frame and the safe zones.
++public struct ViewerPrefs: Codable, Hashable, Sendable {
++    public var portraitSkin: PreviewSkin = .clean
++    public var landscapeSkin: PreviewSkin = .clean
++    public var deviceFrame = false
++    public var safeZones = false
++
++    public init() {}
++
++    public func skin(aspect: Double) -> PreviewSkin {
++        let s = PreviewSkin.isLandscape(aspect) ? landscapeSkin : portraitSkin
++        return PreviewSkin.options(aspect: aspect).contains(s) ? s : .clean
++    }
++
++    public mutating func setSkin(_ s: PreviewSkin, aspect: Double) {
++        guard PreviewSkin.options(aspect: aspect).contains(s) else { return }
++        if PreviewSkin.isLandscape(aspect) { landscapeSkin = s } else { portraitSkin = s }
++    }
++}
++
++// MARK: Frames (no letterbox)
++
++public enum ViewerFrame {
++    /// The media's shape (width / height): the take's own size, else 9:16 for video and 4:5 for a still until it loads.
++    public static func aspect(width: Int?, height: Int?, isVideo: Bool) -> Double {
++        if let w = width, let h = height, w > 0, h > 0 { return Double(w) / Double(h) }
++        return isVideo ? 9.0 / 16.0 : 4.0 / 5.0
++    }
++
++    /// The largest size of this shape inside the box: the frame is the media's shape, never a box around it.
++    public static func fit(aspect: Double, width: Double, height: Double) -> (w: Double, h: Double) {
++        guard aspect.isFinite, aspect > 0, width > 0, height > 0 else { return (0, 0) }
++        if width / height > aspect { return ((height * aspect).rounded(), height.rounded()) }
++        return (width.rounded(), (width / aspect).rounded())
++    }
++
++    /// A generic phone: a 9:19.5 screen, an even bezel and corner radius in proportion to the screen width.
++    public static let phoneScreenAspect = 9.0 / 19.5
++    public static func phoneBezel(screenWidth w: Double) -> Double { max(6, (w * 0.035).rounded()) }
++    public static func phoneRadius(screenWidth w: Double) -> Double { (w * 0.13).rounded() }
++
++    /// A generic laptop: a 16:10 screen.
++    public static let laptopScreenAspect = 16.0 / 10.0
++
++    /// The phone's screen width that fits a box (bezels included).
++    public static func phoneScreenWidth(width: Double, height: Double) -> Double {
++        guard width > 0, height > 0 else { return 0 }
++        // body = screen + 2 bezels, bezel ≈ 3.5 % of the screen width
++        let byHeight = height / (1 / phoneScreenAspect + 0.07)
++        let byWidth = width / 1.07
++        return max(0, min(byHeight, byWidth).rounded(.down))
++    }
++
++    /// Platform layouts fill the phone's screen (the apps crop a 9:16 video's sides on tall phones); Clean fits it, as a
++    /// phone's own player does.
++    public static func fillsScreen(_ skin: PreviewSkin) -> Bool { skin != .clean }
++}
++
++// MARK: Playback without a scrubber
++
++/// What a key does in the viewer (Mac). The keys only work while the viewer has focus and no text field does.
++public enum ViewerCommand: Equatable, Sendable {
++    case togglePlay
++    case jump(Double)           // seconds, signed
++    case shuttle(Double)        // playback rate, signed; 0 pauses
++    case frame(Int)             // one frame back or forward (paused)
++    case toStart, toEnd
++    case mute
++    case fullScreen
++    case previousTake, nextTake
++    case close
++}
++
++public enum ViewerKey: Equatable, Sendable {
++    case space, left, right, up, down, home, end, escape
++    case character(Character)
++}
++
++/// The viewer's transport: the keys (owner 2026-11-12: space plays or pauses, ← → 3 s and 10 s with ⇧, J/K/L) and the
++/// shuttle's state.
++public struct ViewerTransport: Equatable, Sendable {
++    public static let jump = 3.0
++    public static let bigJump = 10.0
++    public static let rates: [Double] = [1, 2, 4]
++
++    /// The shuttle's current rate (signed; 0 = paused by K, or not shuttling).
++    public private(set) var shuttle: Double = 0
++    /// K is held (with J or L: one frame).
++    public var kHeld = false
++
++    public init() {}
++
++    /// The command for a key, and the shuttle's next state.
++    public mutating func command(for key: ViewerKey, shift: Bool) -> ViewerCommand? {
++        switch key {
++        case .space: shuttle = 0; return .togglePlay
++        case .left: return .jump(-(shift ? Self.bigJump : Self.jump))
++        case .right: return .jump(shift ? Self.bigJump : Self.jump)
++        case .up: return .previousTake
++        case .down: return .nextTake
++        case .home: return .toStart
++        case .end: return .toEnd
++        case .escape: return .close
++        case .character(let c):
++            switch Character(c.lowercased()) {
++            case "k": shuttle = 0; return .shuttle(0)
++            case "l":
++                if kHeld { return .frame(1) }
++                shuttle = Self.next(shuttle, forward: true)
++                return .shuttle(shuttle)
++            case "j":
++                if kHeld { return .frame(-1) }
++                shuttle = Self.next(shuttle, forward: false)
++                return .shuttle(shuttle)
++            case ",": return .frame(-1)
++            case ".": return .frame(1)
++            case "m": return .mute
++            case "f": return .fullScreen
++            default: return nil
++            }
++        }
++    }
++
++    /// L: 1×, then 2×, then 4× forward; while going backward, L first slows the backward speed down to a stop. J the same, mirrored.
++    static func next(_ rate: Double, forward: Bool) -> Double {
++        let sign: Double = forward ? 1 : -1
++        if rate == 0 || (rate > 0) != forward {
++            // Starting, or turning around: going the other way at speed steps down first, then stops, then starts.
++            if rate != 0 {
++                let mag = abs(rate)
++                guard let i = rates.firstIndex(of: mag), i > 0 else { return 0 }
++                return -sign * rates[i - 1]
++            }
++            return sign * rates[0]
++        }
++        let mag = abs(rate)
++        let i = rates.firstIndex(of: mag) ?? 0
++        return sign * rates[min(i + 1, rates.count - 1)]
++    }
++
++    /// Where a jump lands, inside the take.
++    public static func seek(_ time: Double, by delta: Double, duration: Double) -> Double {
++        let d = duration.isFinite ? max(0, duration) : 0
++        let t = (time.isFinite ? time : 0) + delta
++        return min(max(0, t), d)
++    }
++
++    /// The brief readout while seeking: "+3 s  0:07 / 0:10" (the jump, then where it landed); with no jump, only the time.
++    public static func readout(delta: Double?, time: Double, duration: Double) -> String {
++        let clock = "\(Take.clock(max(0, time))) / \(Take.clock(max(0, duration)))"
++        guard let d = delta, d != 0 else { return clock }
++        let n = Pricing.trimNum(abs(d))
++        return "\(d > 0 ? "+" : "−")\(n) s  \(clock)"
++    }
++
++    /// A shuttle's readout: "2× ▸" / "◂ 2×".
++    public static func shuttleLabel(_ rate: Double) -> String {
++        guard rate != 0 else { return "Paused" }
++        let n = Pricing.trimNum(abs(rate))
++        return rate > 0 ? "\(n)× forward" : "\(n)× back"
++    }
++}
++
++/// The phone's double-tap skip (Android, after the Mac): the left or right third, 3 s per tap, taps adding up while they
++/// keep coming (YouTube style, owner 2026-11-12). Kept here so both apps share the rule.
++public struct DoubleTapSkip: Equatable, Sendable {
++    public static let step = 3.0
++    public static let window = 0.6
++    public private(set) var total: Double = 0
++    private var lastAt: Double = -1
++    private var lastSide = 0
++
++    public init() {}
++
++    /// -1 left third, +1 right third, 0 middle (a double-tap in the middle does nothing).
++    public static func side(x: Double, width: Double) -> Int {
++        guard width > 0 else { return 0 }
++        if x < width / 3 { return -1 }
++        if x > width * 2 / 3 { return 1 }
++        return 0
++    }
++
++    /// A tap that belongs to a double-tap run on `side` at time `at` (seconds): the skip it adds, and the run's total.
++    public mutating func tap(side: Int, at: Double) -> Double {
++        guard side != 0 else { return 0 }
++        if side != lastSide || at - lastAt > Self.window { total = 0 }
++        lastSide = side
++        lastAt = at
++        total += Double(side) * Self.step
++        return Double(side) * Self.step
++    }
++}
++
++// MARK: Take actions
++
++/// The viewer's take actions, in their one order (plans/swap-viewer-design.md §B4).
++public enum TakeViewerAction: String, CaseIterable, Sendable {
++    case keep, redo, extend, upscale, split, share
++
++    public var title: String {
++        switch self {
++        case .keep: return "Keep"
++        case .redo: return "Redo"
++        case .extend: return "Extend"
++        case .upscale: return "Upscale"
++        case .split: return "Split"
++        case .share: return "Share"
++        }
++    }
++
++    public var help: String {
++        switch self {
++        case .keep: return "Keep this take"
++        case .redo: return "Make it again with the same settings"
++        case .extend: return "A longer take: what happens next, or before"
++        case .upscale: return "Sharper 1080p, 2K or 4K from this take"
++        case .split: return "Open it in Edit at this moment"
++        case .share: return "Post or share this take"
++        }
++    }
++}
++
++/// Where the viewer is shown, which sets its actions.
++public enum TakeViewerContext: String, Sendable {
++    /// The Suite's stage and the Takes viewer: every action.
++    case suite
++    /// The Library's take page: the page's inspector holds the actions.
++    case library
++    /// Compare: Keep only (More in the menu).
++    case compare
++    /// New Swap's source clip: none.
++    case source
++}
++
++public enum TakeViewerActions {
++    /// The actions shown: the context's, minus any this take can't do (hidden, not greyed; More says why).
++    public static func list(_ ctx: TakeViewerContext, isVideo: Bool, canRedo: Bool, canExtend: Bool, canUpscale: Bool) -> [TakeViewerAction] {
++        switch ctx {
++        case .source, .library: return []
++        case .compare: return [.keep]
++        case .suite:
++            return TakeViewerAction.allCases.filter {
++                switch $0 {
++                case .keep, .share: return true
++                case .redo: return canRedo
++                case .extend: return isVideo && canExtend
++                case .upscale: return canUpscale
++                case .split: return isVideo
++                }
++            }
++        }
++    }
++
++    /// The order labels give way when a row is too narrow: Split, Upscale, Extend, then Redo. Keep and Share keep theirs.
++    public static let dropOrder: [TakeViewerAction] = [.split, .upscale, .extend, .redo]
++
++    /// Each step's icon-only set, from all labels to the fewest: what `ViewThatFits` tries in turn.
++    public static func steps(_ actions: [TakeViewerAction]) -> [Set<TakeViewerAction>] {
++        var out: [Set<TakeViewerAction>] = [[]]
++        var cur = Set<TakeViewerAction>()
++        for a in dropOrder where actions.contains(a) {
++            cur.insert(a)
++            out.append(cur)
++        }
++        return out
++    }
++
++    /// Why an action isn't offered, for the More menu.
++    public static func hiddenReasons(isVideo: Bool, canRedo: Bool, canExtend: Bool, canUpscale: Bool, isMaxResolution: Bool) -> [String] {
++        var r: [String] = []
++        if !canRedo { r.append("Redo: this take was made before its settings were saved") }
++        if isVideo && !canExtend { r.append("Extend: no model can continue this take") }
++        if !canUpscale { r.append(isMaxResolution ? "Upscale: already 4K" : "Upscale: not for this take") }
++        return r
++    }
++}
++
++// MARK: New Swap's trimmer
++
++/// The filmstrip trimmer's maths: a window [from, to] inside the clip, at least `minLen` and at most `maxLen` long.
++public struct TrimWindow: Equatable, Sendable {
++    public var from: Double
++    public var to: Double
++    public let duration: Double
++    public let minLen: Double
++    public let maxLen: Double
++
++    public init(from: Double, to: Double, duration: Double, minLen: Double, maxLen: Double) {
++        let d = max(0, duration.isFinite ? duration : 0)
++        self.duration = d
++        self.minLen = min(max(0, minLen), d)
++        self.maxLen = max(self.minLen, min(maxLen.isFinite ? maxLen : d, d))
++        self.from = 0
++        self.to = 0
++        self.set(from: from, to: to)
++    }
++
++    public var length: Double { to - from }
++
++    /// The window for a clip with nothing picked yet: from the start, as long as the model takes.
++    public static func initial(duration: Double, minLen: Double, maxLen: Double, range: (Double, Double)?) -> TrimWindow {
++        if let r = range { return TrimWindow(from: r.0, to: r.1, duration: duration, minLen: minLen, maxLen: maxLen) }
++        return TrimWindow(from: 0, to: min(duration, maxLen), duration: duration, minLen: minLen, maxLen: maxLen)
++    }
++
++    mutating func set(from a: Double, to b: Double) {
++        var a = Self.tenth(max(0, min(a, duration)))
++        var b = Self.tenth(max(0, min(b, duration)))
++        if b - a > maxLen { b = a + maxLen }
++        if b - a < minLen {
++            b = min(duration, a + minLen)
++            a = max(0, b - minLen)
++        }
++        from = a
++        to = b
++    }
++
++    /// Drag the start handle: the end stays unless the length would leave the model's limits.
++    public mutating func moveStart(to x: Double) {
++        let a = max(0, min(x, to - minLen))
++        let b = to - a > maxLen ? a + maxLen : to
++        set(from: a, to: b)
++    }
++
++    /// Drag the end handle.
++    public mutating func moveEnd(to x: Double) {
++        let b = min(duration, max(x, from + minLen))
++        let a = b - from > maxLen ? b - maxLen : from
++        set(from: a, to: b)
++    }
++
++    /// Drag the middle: the same length, slid along the clip.
++    public mutating func slide(by dx: Double) {
++        let len = length
++        let a = max(0, min(from + dx, duration - len))
++        set(from: a, to: a + len)
++    }
++
++    /// The whole clip fits the model.
++    public var wholeClipFits: Bool { duration <= maxLen + 0.05 }
++
++    /// "Uses 0:02–0:12 of 0:24, 10 s." (+ the model's limit when the clip is longer than it takes)
++    public func line(model: String?) -> String {
++        var s = "Uses \(Take.clock(from))–\(Take.clock(to)) of \(Take.clock(duration)), \(Pricing.trimNum(length)) s."
++        if !wholeClipFits, let m = model { s += " \(m) takes up to \(Pricing.trimNum(maxLen)) s." }
++        return s
++    }
++
++    private static func tenth(_ v: Double) -> Double { (v * 10).rounded() / 10 }
++}
++
++// The viewer's one call. Outside the MuseAPI protocol like New Swap's, so every client and test double compiles
++// unchanged; anything but the HTTP client (demo mode, tests) gets the defaults.
++extension MuseAPI {
++    /// GET /v1/preview/layouts: the safe zones per skin, merged over the defaults. Never throws: a server without the
++    /// route, or offline, gives the defaults.
++    public func previewLayouts() async -> PreviewLayouts {
++        guard let h = self as? HTTPMuseAPI, let l: PreviewLayouts = try? await h.suiteCall("GET", "v1/preview/layouts") else { return .defaults }
++        return l.merged()
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift b/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift
+new file mode 100644
+index 00000000..c7c95c35
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift
+@@ -0,0 +1,164 @@
++import XCTest
++@testable import MuseCore
++
++/// The take viewer (plans/swap-viewer-design.md §B): skins per shape, safe zones (defaults and the server's table), the
++/// frame maths (no letterbox), the keys (space, ← → 3 s and ⇧ 10 s, J/K/L), the seek readout, the phone's double-tap,
++/// the actions per context and the order their labels give way, and New Swap's trimmer.
++final class TakeViewerTests: XCTestCase {
++    func testPortraitGetsThePhoneLayoutsAndLandscapeTheDesktopOnes() {
++        XCTAssertEqual(PreviewSkin.options(aspect: 9.0 / 16.0), [.clean, .tiktok, .reels, .shorts, .facebook])
++        XCTAssertEqual(PreviewSkin.options(aspect: 1), [.clean, .tiktok, .reels, .shorts, .facebook])
++        XCTAssertEqual(PreviewSkin.options(aspect: 16.0 / 9.0), [.clean, .youtube, .facebook])
++    }
++
++    func testPrefsRememberOneSkinPerShapeAndNeverOfferOneTheShapeDoesntHave() {
++        var p = ViewerPrefs()
++        XCTAssertEqual(p.skin(aspect: 0.5625), .clean)
++        p.setSkin(.tiktok, aspect: 0.5625)
++        p.setSkin(.youtube, aspect: 1.78)
++        XCTAssertEqual(p.skin(aspect: 0.5625), .tiktok)
++        XCTAssertEqual(p.skin(aspect: 1.78), .youtube)
++        p.setSkin(.youtube, aspect: 0.5625) // not a phone layout: ignored
++        XCTAssertEqual(p.skin(aspect: 0.5625), .tiktok)
++        let back = try? JSONDecoder().decode(ViewerPrefs.self, from: JSONEncoder().encode(p))
++        XCTAssertEqual(back, p)
++    }
++
++    func testSafeZonesComeFromTheServerTableOverTheDefaults() throws {
++        let json = #"{"zones":{"tiktok":{"top":0.12,"bottom":0.3,"left":0.02,"right":0.18}},"note":"From the server"}"#
++        let server = try JSONDecoder().decode(PreviewLayouts.self, from: Data(json.utf8)).merged()
++        XCTAssertEqual(server.zone(.tiktok)?.top, 0.12)
++        XCTAssertEqual(server.zone(.reels), PreviewLayouts.defaults.zone(.reels)) // left out: keeps its default
++        XCTAssertNil(server.zone(.clean))
++        XCTAssertNil(server.zone(.youtube))
++        XCTAssertEqual(server.note, "From the server")
++        let r = try XCTUnwrap(server.zone(.tiktok)).safeRect
++        XCTAssertEqual(r.x, 0.02, accuracy: 1e-9)
++        XCTAssertEqual(r.w, 0.80, accuracy: 1e-9)
++        XCTAssertEqual(r.h, 0.58, accuracy: 1e-9)
++        XCTAssertEqual(SafeZone(top: 2, bottom: -1, right: .nan).safeRect.h, 0.5, accuracy: 1e-9) // nonsense is clamped
++    }
++
++    func testThePortraitTakeSitsInAPortraitFrameNeverALetterbox() {
++        XCTAssertEqual(ViewerFrame.aspect(width: 1080, height: 1920, isVideo: true), 0.5625, accuracy: 1e-9)
++        XCTAssertEqual(ViewerFrame.aspect(width: nil, height: nil, isVideo: false), 0.8, accuracy: 1e-9)
++        let f = ViewerFrame.fit(aspect: 9.0 / 16.0, width: 900, height: 640)
++        XCTAssertEqual(f.h, 640)
++        XCTAssertEqual(f.w, 360) // the frame is the take's own width, not the pane's
++        let l = ViewerFrame.fit(aspect: 16.0 / 9.0, width: 800, height: 900)
++        XCTAssertEqual(l.w, 800)
++        XCTAssertEqual(l.h, 450)
++        XCTAssertEqual(ViewerFrame.fit(aspect: .nan, width: 10, height: 10).w, 0)
++        let s = ViewerFrame.phoneScreenWidth(width: 1000, height: 700)
++        XCTAssertLessThanOrEqual(s / ViewerFrame.phoneScreenAspect + 2 * ViewerFrame.phoneBezel(screenWidth: s), 700)
++        XCTAssertTrue(ViewerFrame.fillsScreen(.tiktok))
++        XCTAssertFalse(ViewerFrame.fillsScreen(.clean))
++    }
++
++    func testKeysSpaceArrowsAndShift() {
++        var t = ViewerTransport()
++        XCTAssertEqual(t.command(for: .space, shift: false), .togglePlay)
++        XCTAssertEqual(t.command(for: .right, shift: false), .jump(3))
++        XCTAssertEqual(t.command(for: .left, shift: false), .jump(-3))
++        XCTAssertEqual(t.command(for: .right, shift: true), .jump(10))
++        XCTAssertEqual(t.command(for: .left, shift: true), .jump(-10))
++        XCTAssertEqual(t.command(for: .up, shift: false), .previousTake)
++        XCTAssertEqual(t.command(for: .down, shift: false), .nextTake)
++        XCTAssertEqual(t.command(for: .character(","), shift: false), .frame(-1))
++        XCTAssertEqual(t.command(for: .character("M"), shift: true), .mute)
++        XCTAssertEqual(t.command(for: .escape, shift: false), .close)
++        XCTAssertNil(t.command(for: .character("x"), shift: false))
++    }
++
++    func testJKLShuttleSpeedsUpTurnsAroundAndStops() {
++        var t = ViewerTransport()
++        XCTAssertEqual(t.command(for: .character("l"), shift: false), .shuttle(1))
++        XCTAssertEqual(t.command(for: .character("l"), shift: false), .shuttle(2))
++        XCTAssertEqual(t.command(for: .character("l"), shift: false), .shuttle(4))
++        XCTAssertEqual(t.command(for: .character("l"), shift: false), .shuttle(4))
++        XCTAssertEqual(t.command(for: .character("j"), shift: false), .shuttle(2)) // slows first
++        XCTAssertEqual(t.command(for: .character("j"), shift: false), .shuttle(1))
++        XCTAssertEqual(t.command(for: .character("j"), shift: false), .shuttle(0))
++        XCTAssertEqual(t.command(for: .character("j"), shift: false), .shuttle(-1))
++        XCTAssertEqual(t.command(for: .character("k"), shift: false), .shuttle(0))
++        t.kHeld = true
++        XCTAssertEqual(t.command(for: .character("l"), shift: false), .frame(1))
++        XCTAssertEqual(t.command(for: .character("j"), shift: false), .frame(-1))
++        XCTAssertEqual(ViewerTransport.shuttleLabel(-2), "2× back")
++    }
++
++    func testSeekStaysInsideTheTakeAndTheReadoutNamesTheJump() {
++        XCTAssertEqual(ViewerTransport.seek(8, by: 3, duration: 10), 10)
++        XCTAssertEqual(ViewerTransport.seek(1, by: -3, duration: 10), 0)
++        XCTAssertEqual(ViewerTransport.seek(.nan, by: 3, duration: 10), 3)
++        XCTAssertEqual(ViewerTransport.readout(delta: 3, time: 7, duration: 10), "+3 s  0:07 / 0:10")
++        XCTAssertEqual(ViewerTransport.readout(delta: -10, time: 2, duration: 64), "−10 s  0:02 / 1:04")
++        XCTAssertEqual(ViewerTransport.readout(delta: nil, time: 7.4, duration: 10), "0:07 / 0:10")
++    }
++
++    func testDoubleTapSidesAddUpAndTheMiddleDoesNothing() {
++        XCTAssertEqual(DoubleTapSkip.side(x: 10, width: 390), -1)
++        XCTAssertEqual(DoubleTapSkip.side(x: 195, width: 390), 0)
++        XCTAssertEqual(DoubleTapSkip.side(x: 380, width: 390), 1)
++        var d = DoubleTapSkip()
++        XCTAssertEqual(d.tap(side: 1, at: 0), 3)
++        XCTAssertEqual(d.tap(side: 1, at: 0.3), 3)
++        XCTAssertEqual(d.total, 6)
++        _ = d.tap(side: -1, at: 0.5) // the other side starts a new run
++        XCTAssertEqual(d.total, -3)
++        _ = d.tap(side: -1, at: 2) // too late: a new run
++        XCTAssertEqual(d.total, -3)
++        XCTAssertEqual(d.tap(side: 0, at: 2.1), 0)
++    }
++
++    func testActionsPerContextAndHiddenWhenTheTakeCantDoThem() {
++        XCTAssertEqual(TakeViewerActions.list(.suite, isVideo: true, canRedo: true, canExtend: true, canUpscale: true),
++                       [.keep, .redo, .extend, .upscale, .split, .share])
++        XCTAssertEqual(TakeViewerActions.list(.suite, isVideo: false, canRedo: false, canExtend: true, canUpscale: false), [.keep, .share])
++        XCTAssertEqual(TakeViewerActions.list(.compare, isVideo: true, canRedo: true, canExtend: true, canUpscale: true), [.keep])
++        XCTAssertEqual(TakeViewerActions.list(.source, isVideo: true, canRedo: true, canExtend: true, canUpscale: true), [])
++        XCTAssertEqual(TakeViewerActions.hiddenReasons(isVideo: true, canRedo: true, canExtend: true, canUpscale: false, isMaxResolution: true),
++                       ["Upscale: already 4K"])
++        XCTAssertEqual(TakeViewerAction.split.help, "Open it in Edit at this moment")
++    }
++
++    func testLabelsGiveWayInOrderAndKeepAndShareAlwaysKeepTheirs() {
++        let all = TakeViewerActions.list(.suite, isVideo: true, canRedo: true, canExtend: true, canUpscale: true)
++        let steps = TakeViewerActions.steps(all)
++        XCTAssertEqual(steps, [[], [.split], [.split, .upscale], [.split, .upscale, .extend], [.split, .upscale, .extend, .redo]])
++        for s in steps { XCTAssertFalse(s.contains(.keep)); XCTAssertFalse(s.contains(.share)) }
++        XCTAssertEqual(TakeViewerActions.steps([.keep, .share]), [[]])
++    }
++
++    func testTrimmerKeepsTheWindowInsideTheClipAndTheModelsLimits() {
++        var w = TrimWindow.initial(duration: 24, minLen: 2, maxLen: 10, range: nil)
++        XCTAssertEqual(w.from, 0)
++        XCTAssertEqual(w.to, 10)
++        XCTAssertEqual(w.line(model: "Wan 2.7 Edit"), "Uses 0:00–0:10 of 0:24, 10 s. Wan 2.7 Edit takes up to 10 s.")
++        w.slide(by: 2)
++        XCTAssertEqual(w.from, 2)
++        XCTAssertEqual(w.to, 12)
++        w.slide(by: 100)
++        XCTAssertEqual(w.from, 14)
++        XCTAssertEqual(w.to, 24)
++        w.moveStart(to: 5) // longer than the model takes: the end follows
++        XCTAssertEqual(w.from, 5)
++        XCTAssertEqual(w.to, 15)
++        w.moveEnd(to: 5.5) // shorter than the model needs: held at the minimum
++        XCTAssertEqual(w.to, 7)
++        XCTAssertEqual(w.length, 2, accuracy: 1e-9)
++        let short = TrimWindow.initial(duration: 6, minLen: 2, maxLen: 10, range: nil)
++        XCTAssertTrue(short.wholeClipFits)
++        XCTAssertEqual(short.line(model: "Wan 2.7 Edit"), "Uses 0:00–0:06 of 0:06, 6 s.")
++        let picked = TrimWindow.initial(duration: 24, minLen: 2, maxLen: 10, range: (3.04, 9.96))
++        XCTAssertEqual(picked.from, 3)
++        XCTAssertEqual(picked.to, 10)
++    }
++}
++
++final class TakeViewerAPITests: XCTestCase {
++    func testDemoModeGetsTheDefaultSafeZones() async {
++        let l = await FakeMuseAPI().previewLayouts()
++        XCTAssertEqual(l, .defaults)
++    }
++}
