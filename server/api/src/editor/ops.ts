@@ -346,8 +346,12 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       return kind === 'blur' ? 'Blurred background' : 'Background colour';
     }
     case 'patch': {
-      if (!Array.isArray(o.patch)) throw badRequest('patch.patch: a JSON Patch array');
-      try { replace(applyPatch(p, o.patch as PatchOp[])); } catch (e) { if (e instanceof PatchError) throw badRequest(`patch.patch: ${e.message}`); throw e; }
+      // Claude sometimes sends the patch as a JSON string, or one operation on its own (owner report ci_d17956dab5c5).
+      let ops: unknown = o.patch;
+      if (typeof ops === 'string') { try { ops = JSON.parse(ops); } catch { throw badRequest('patch.patch: a JSON Patch array, e.g. [{"op":"replace","path":"/canvas/background","value":"#111111"}] (this text isn\'t JSON)'); } }
+      if (ops && typeof ops === 'object' && !Array.isArray(ops) && typeof (ops as { op?: unknown }).op === 'string') ops = [ops];
+      if (!Array.isArray(ops) || !ops.length) throw badRequest('patch.patch: a JSON Patch array, e.g. [{"op":"replace","path":"/canvas/background","value":"#111111"}]');
+      try { replace(applyPatch(p, ops as PatchOp[])); } catch (e) { if (e instanceof PatchError) throw badRequest(`patch.patch: ${e.message}`); throw e; }
       return 'Changed the project';
     }
     case 'set_layer': {

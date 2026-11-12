@@ -278,3 +278,29 @@ No detection-evasion tricks of any kind (declined items stay declined).
   `plans/patches/layers-mac.patch` and `plans/patches/layers-android.patch` (`git apply` from the repo root; each adds
   that app's copy of the shared fixture `layers.json`). Until an app's patch is in, the server's fixture check and
   `scripts/editor-fixtures.ts` skip that app's `layers.json`.
+
+## Owner reports after launch (2026-11-12) · branch claude/layers-fixes
+Fixed (server; plus `plans/patches/layers-fixes-mac.patch`):
+- **ci_f1a8073237b7 matte lags when she moves.** The tracker renders its mask at its own default 30 fps, so a 24/60 fps
+  source's matte ran slow or fast and drifted from the picture. Now the source's fps is sent (`video_fps`), and any matte
+  whose length is still off by > 2 % is retimed on the server to the source length (≤ 720 px, grey). Old results are not
+  reused (`aligned: true` required): the owner must press "Find layers again" (charged again) on clips found before.
+- **ci_0e39a2b16b08 tiny region instead of the person.** Claude's marks came from get_frame (the edited canvas, timeline
+  seconds) but went to the tracker as source-frame positions and source seconds: on a cover-cropped clip they landed
+  elsewhere. find_layers now maps canvas x/y and timeline t onto the clip's source frame (`canvasToSource`). After the
+  run, a layer that doesn't cover the kept taps (or is far smaller than the box) gets a warning: in the edit history
+  (Claude) and as the Mac's notice (patch). Claude's summary shows each layer's size ("38% of the frame, seen in 97%").
+- **ci_d17956dab5c5** `patch` op: accepts a JSON string or one operation; the error shows an example.
+- **ci_decc4aaaa9d6** unknown track kind: the message names the kind and the valid kinds.
+Not yet: a matte preview before paying (a single-frame tracker run would cost ~$0.02; ask the owner).
+
+Scoped, not built (ci_89dae039fbae, owner to choose; all free, no AI cost):
+1. **Captions' horizontal position**: `CaptionStyle.x` (0–1 centre, default 0.5) beside today's `y`; caption_style op
+   and the Mac/Android caption panels get an X slider; all three engines place the page there. Contract change
+   (additive), S per engine.
+2. **A layer's shadow onto what is behind it** (contact/drop shadow onto text behind her): `ClipLayer.shadow
+   {color, opacity, blur, dx, dy}` = the layer's matte offset, blurred and tinted, multiplied over the picture just
+   before the layer is drawn (so over text when the layer is aboveText). M per engine; the server export reuses the
+   layer's matte stream (no extra input).
+3. **Matte edge flicker**: a light temporal smoothing of the matte on the server when it is made (3-frame average), on
+   by default, with feather as today. S, server only; applies to new runs.

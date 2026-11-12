@@ -36,7 +36,7 @@ import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 import { GENJUTSU_HELPERS, GENJUTSU_LIMITS, genjutsuHelperInput, genjutsuSeconds, genjutsuUsd, isGenjutsuHelper, parseGenjutsuOptions, runGenjutsu, type GenjutsuImage, type GenjutsuOptions } from './genjutsu.js';
 import { GENJUTSU_NO_ACCESS } from '../engines/purposes.js';
 
-import { LAYERS_LIMITS, matteBoxes, objectsKey, parseObjects, type LayerObject } from './layers.js';
+import { LAYERS_LIMITS, coverageWarning, matteBoxes, objectsKey, parseObjects, retimeMatte, type LayerObject } from './layers.js';
 
 type Row = typeof editorJobs.$inferSelect;
 export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate', 'cutout', 'objectswap', 'restyle', 'layers'];
@@ -397,7 +397,7 @@ export class EditorAiService {
   private async layersBefore(studioId: string, key: string, objects: LayerObject[]) {
     const since = Date.now() - EDITOR_LIMITS.reuseDays * 86_400_000, want = objectsKey(objects);
     const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'layers'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'), sql`${editorJobs.createdAt} > ${since}`)).orderBy(desc(editorJobs.createdAt)).limit(20);
-    return prev.find(r => objectsKey((r.options as JobOptions).objects ?? []) === want && !!r.result && !(r.result as { reused?: boolean }).reused) ?? null;
+    return prev.find(r => objectsKey((r.options as JobOptions).objects ?? []) === want && !!r.result && !(r.result as { reused?: boolean }).reused && (r.result as { aligned?: boolean }).aligned === true) ?? null;
   }
   private async slowmoBefore(studioId: string, key: string, o: JobOptions) {
     const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'slowmo'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20);
@@ -609,22 +609,28 @@ export class EditorAiService {
             const ob = objs[k]!;
             const part: Hooks = { ...hooks, onProgress: async (f, ph) => { await hooks.onProgress?.((k + f) / objs.length, ph ? `${ph} · ${ob.name}` : `Finding ${ob.name}`); } };
             const pts = await this.pixelPoints(src.key, ob.points, src.size, p.name === 'mock');
-            const made = await paid(p.rates.track, () => p.track(url, d, pts, part));
+            const fps = await this.sourceFps(src.key, src.size);
+            const made = await paid(p.rates.track, () => p.track(url, d, pts, part, { fps }));
             if (made.file) temps.push(made.file);
             if (made.gpuSec == null) known = false; else billed += made.gpuSec;
+            const matte = made.file && p.name !== 'mock' ? await this.alignMatte(made.file, d, temps, id) : made.file;
             // Where the object is over time, for pinned text (best effort: a layer without it just can't take a pin).
-            const boxes = made.file ? await matteBoxes(this.ctx.config.FFMPEG_PATH, made.file).catch(e => { this.ctx.log.warn({ err: (e as Error).message, job: id }, 'layer boxes failed'); return null; }) : null;
-            const asset = await this.store(u, src, made.file, made.contentType, 'video', d);
-            out.push({ name: ob.name, asset, ...(boxes ? { track: { fps: LAYERS_LIMITS.trackFps, boxes } } : {}) });
+            const boxes = matte ? await matteBoxes(this.ctx.config.FFMPEG_PATH, matte).catch(e => { this.ctx.log.warn({ err: (e as Error).message, job: id }, 'layer boxes failed'); return null; }) : null;
+            const warning = boxes ? coverageWarning(ob, boxes, LAYERS_LIMITS.trackFps) : null;
+            const asset = await this.store(u, src, matte, made.contentType, 'video', d);
+            out.push({ name: ob.name, asset, ...(boxes ? { track: { fps: LAYERS_LIMITS.trackFps, boxes } } : {}), ...(warning ? { warning } : {}) });
           }
           gpuSec = known ? billed : null; rate = p.rates.track;
-          result = { layers: out, durationSec: d, reused: false };
+          // aligned: the mattes run at the source's length (results from before this fix aren't reused).
+          result = { layers: out, durationSec: d, reused: false, aligned: true };
         }
       } else if (row.kind === 'matte' || (row.kind === 'denoise' && !o.analyzeOnly)) {
         const tracked = row.kind === 'matte' && !!o.points?.length;
         const pts = tracked ? await this.pixelPoints(src.key, o.points!, src.size, p.name === 'mock') : [];
+        const trackFps = tracked ? await this.sourceFps(src.key, src.size) : undefined;
         const out = row.kind !== 'matte' ? await paid(p.rates.separate, () => p.separate(url, d, hooks))
-          : tracked ? await paid(p.rates.track, () => p.track(url, d, pts, hooks)) : await paid(p.rates.matte, () => p.matte(url, d, hooks));
+          : tracked ? await paid(p.rates.track, () => p.track(url, d, pts, hooks, { fps: trackFps })) : await paid(p.rates.matte, () => p.matte(url, d, hooks));
+        if (tracked && out.file && p.name !== 'mock') { temps.push(out.file); out.file = await this.alignMatte(out.file, d, temps, id); }
         file = out.file; gpuSec = out.gpuSec; rate = row.kind !== 'matte' ? p.rates.separate : tracked ? p.rates.track : p.rates.matte;
         const asset = await this.store(u, src, out.file, out.contentType, row.kind === 'matte' ? 'video' : 'audio', d);
         // workstream 1: an alpha matte (white = keep) the apps apply to the original clip; no green composite, no chroma key.
@@ -709,6 +715,25 @@ export class EditorAiService {
 
   /** The media as something ffmpeg can read: a presigned URL on R2, else a temporary copy of the local object. */
   /** The stored media as a local path (or a short-lived URL on S3) for ffmpeg; temporary copies are removed after. */
+  /** The source's frame rate (known from the take, else probed; 30 when unknown). */
+  private async sourceFps(key: string, known: { fps?: number } | undefined): Promise<number> {
+    if (known?.fps) return known.fps;
+    const info = await this.withLocalInput(key, f => probe(this.ctx.config.FFPROBE_PATH, f)).catch(() => null);
+    return info?.fps || 30;
+  }
+  /** A tracked matte retimed to the source's length when the tracker made it at another frame rate (layers.ts retimeMatte). */
+  private async alignMatte(file: string, d: number, temps: string[], job: string): Promise<string> {
+    const out = path.join(os.tmpdir(), `${uid('matte')}.mp4`);
+    await this.localSlot();
+    try {
+      const done = await retimeMatte(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH, file, d, out);
+      if (done) { temps.push(done); this.ctx.log.info({ job }, 'tracked matte retimed to the source length'); return done; }
+      return file;
+    } catch (e) {
+      this.ctx.log.warn({ err: (e as Error).message, job }, 'retiming the matte failed (kept as made)');
+      return file;
+    } finally { this.localFree(); }
+  }
   /** Tap points (0–1, seconds) → pixels and frame numbers of the source (workstream 1). The mock may guess the size. */
   private async pixelPoints(key: string, points: KeepPoint[], known: { width: number; height: number; fps?: number } | undefined, mock: boolean): Promise<TrackPoint[]> {
     const info = known ?? await this.withLocalInput(key, f => probe(this.ctx.config.FFPROBE_PATH, f)).catch(() => null);

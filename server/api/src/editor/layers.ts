@@ -4,6 +4,7 @@
 import { spawn } from 'node:child_process';
 import { badRequest } from '../errors.js';
 import type { KeepPoint } from './service.js';
+import * as M from './model.js';
 
 /** Owner decisions 2026-11-11: clips up to 60 s; anything above $1 per clip asks first; no depth. */
 export const LAYERS_LIMITS = { maxSec: 60, maxObjects: 5, maxPoints: 10, askAboveUsd: 1, trackFps: 5 } as const;
@@ -78,3 +79,75 @@ export async function matteBoxes(ffmpeg: string, input: string, fps: number = LA
 
 /** The same objects whatever order the database keeps their fields in (for reuse). */
 export const objectsKey = (objs: LayerObject[]) => JSON.stringify(objs.map(o => [o.name, o.points.map(q => [q.x, q.y, q.t, q.keep]), o.box ? [o.box.x, o.box.y, o.box.w, o.box.h, o.box.t] : null]));
+
+/**
+ * The tracker can hand back its matte at another frame rate than the source (it renders at its own default), so the matte
+ * runs slow or fast and drifts away from the picture while she moves (owner report ci_f1a8073237b7). A matte whose length
+ * is off by more than 2 % (and 0.1 s) is retimed to the source's length (and kept at most 720 px on its long side, grey):
+ * a new local file, or null when it already lines up.
+ */
+export async function retimeMatte(ffmpeg: string, ffprobe: string, file: string, durationSec: number, out: string): Promise<string | null> {
+  const { probe } = await import('../replicate/media.js');
+  const info = await probe(ffprobe, file);
+  const got = info.duration;
+  if (!(got > 0) || !(durationSec > 0) || Math.abs(got - durationSec) <= Math.max(0.1, 0.02 * durationSec)) return null;
+  const k = durationSec / got;
+  await new Promise<void>((resolve, reject) => {
+    const p = spawn(ffmpeg, ['-y', '-v', 'error', '-i', file, '-an', '-vf', `setpts=PTS*${k.toFixed(6)},scale='if(gte(iw,ih),min(720,iw),-2)':'if(gte(iw,ih),-2,min(720,ih))',format=gray`,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '2', '-t', durationSec.toFixed(3), out], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    p.stderr.on('data', d => { err = (err + d).slice(-400); });
+    p.on('error', reject);
+    p.on('close', code => (code === 0 ? resolve() : reject(new Error(`retime matte: ${err || `exit ${code}`}`))));
+  });
+  return out;
+}
+
+/**
+ * Whether a found layer covers what was marked (owner report ci_0e39a2b16b08: a tap between two hair buns gave a small
+ * patch of background): each kept tap is looked up in the layer's box on its own frame. Null when it covers them, else a
+ * plain line for the person and for Claude.
+ */
+export function coverageWarning(o: LayerObject, boxes: (number[] | null)[], fps: number): string | null {
+  const kept = o.points.filter(q => q.keep && !(o.box && boxPoints(o.box).some(b => b.x === q.x && b.y === q.y && b.t === q.t)));
+  const at = (t: number) => boxes[Math.min(boxes.length - 1, Math.max(0, Math.round(t * fps)))] ?? null;
+  const pad = 0.03;
+  const inside = (q: { x: number; y: number }, b: number[] | null) => !!b && q.x >= b[0]! - pad && q.x <= b[0]! + b[2]! + pad && q.y >= b[1]! - pad && q.y <= b[1]! + b[3]! + pad;
+  const seen = boxes.filter((b): b is number[] => !!b);
+  if (!seen.length) return `${o.name}: nothing was found · mark it again, ideally with a box round it`;
+  const missed = kept.filter(q => !inside(q, at(q.t))).length;
+  let boxMiss = false;
+  if (o.box) {
+    const b = at(o.box.t), area = b ? b[2]! * b[3]! : 0;
+    boxMiss = !b || area < 0.15 * o.box.w * o.box.h;
+  }
+  if (!missed && !boxMiss) return null;
+  return missed ? `${o.name}: the layer doesn't cover ${missed} of the ${kept.length} ${kept.length === 1 ? 'point' : 'points'} you marked · check it, or find it again with a box round it`
+    : `${o.name}: the layer is much smaller than the box you drew · check it, or find it again with a few taps on it`;
+}
+
+/**
+ * A point Claude marked on the edit as get_frame shows it (x, y 0–1 of the canvas, t seconds on the timeline) → the same
+ * spot on main clip `clip`'s source frame (x, y 0–1 of the source, t seconds of the source), through the inverse of the
+ * clip's crop, fit and placement (model.ts itemCorners). Null when the clip isn't on screen at t, or the point is off its picture.
+ */
+export function canvasToSource(p: M.EditProject, clipId: string, t: number, x: number, y: number, size: { width: number; height: number }): { x: number; y: number; t: number } | null {
+  const main = M.mainTrack(p), tl = M.timeline(p);
+  const i = main.items.findIndex(c => c.id === clipId);
+  const c = main.items[i] as M.VideoClip | undefined, span = tl[i];
+  if (!c || !span || !(size.width > 0 && size.height > 0)) return null;
+  const local = Math.min(Math.max(0, t - span.startSec), Math.max(0, span.endSec - span.startSec - 1e-3));
+  const cr = c.crop ?? {}, cl = cr.left ?? 0, ct = cr.top ?? 0, cw = 1 - cl - (cr.right ?? 0), ch = 1 - ct - (cr.bottom ?? 0);
+  const tr = c.transform ?? {};
+  const k = M.itemCorners(p.canvas, size.width * cw, size.height * ch, c.fit ?? 'cover', { x: M.propAt(c, 'x', tr.x ?? 0.5, local), y: M.propAt(c, 'y', tr.y ?? 0.5, local),
+    scale: M.propAt(c, 'scale', tr.scale ?? 1, local), rotation: M.propAt(c, 'rotation', tr.rotation ?? 0, local), flipX: tr.flipX, flipY: tr.flipY });
+  const [TL, TR, , BL] = k as [number, number][];
+  const ax = TR![0] - TL![0], ay = TR![1] - TL![1], bx = BL![0] - TL![0], by = BL![1] - TL![1];
+  const det = ax * by - ay * bx;
+  if (Math.abs(det) < 1e-9) return null;
+  const px = x * p.canvas.width - TL![0], py = y * p.canvas.height - TL![1];
+  const u = (px * by - py * bx) / det, v = (ax * py - ay * px) / det;
+  if (u < -0.01 || u > 1.01 || v < -0.01 || v > 1.01) return null;
+  const r4 = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 10000) / 10000;
+  return { x: r4(cl + u * cw), y: r4(ct + v * ch), t: Math.round(M.clipSourceAt(c, local) * 1000) / 1000 };
+}
