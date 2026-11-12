@@ -16,6 +16,7 @@ describe('GET /v1/preview/layouts', () => {
     const r = await member.req('GET', '/v1/preview/layouts');
     expect(r.status).toBe(200);
     expect(Object.keys(r.body.zones).sort()).toEqual(['facebook', 'reels', 'shorts', 'tiktok']);
+    expect(Object.keys(r.body.landscape).sort()).toEqual(['facebook', 'youtube']);
     expect(r.body.note).toMatch(/Approximate/);
     for (const z of Object.values(PREVIEW_ZONES)) {
       for (const v of Object.values(z)) expect(v).toBeGreaterThanOrEqual(0);
