@@ -35,6 +35,19 @@ public extension EditV2 {
         public static let sdrDefault = Tags(primaries: bt709, transfer: bt709, matrix: bt709)
         /// What every HDR output frame is, and what the file says it is.
         public static let output = Tags(primaries: bt2020, transfer: hlg, matrix: bt2020)
+        public static let pq = "SMPTE_ST_2084_PQ"
+
+        /// Whether a source track is HDR (HLG or PQ).
+        public static func isHDR(_ t: Tags?) -> Bool { t?.transfer == hlg || t?.transfer == pq }
+
+        /// Round 5 (Mac run 587): the colour space the HDR export's video composition works in. With it set to BT.2020 / HLG,
+        /// AVFoundation itself converted every SDR source frame to HLG before the compositor saw it, and converted the first
+        /// one differently (3 hot frames at 60 fps). So: every source SDR → BT.709, AVFoundation converts nothing and the
+        /// compositor places SDR in HLG itself, the same way on every frame. Any HDR source → BT.2020 / HLG as before (its
+        /// highlights must not be tone-mapped to SDR first).
+        public static func compositionSpace(_ sources: [Tags]) -> Tags {
+            sources.contains(where: isHDR) ? output : sdrDefault
+        }
 
         /// The colour a source frame is read with. A frame with complete tags keeps them (they describe its pixels);
         /// otherwise the source track's complete tags; otherwise BT.709 SDR. Never a mix of a frame's partial tags and

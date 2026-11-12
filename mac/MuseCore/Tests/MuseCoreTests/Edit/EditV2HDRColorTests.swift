@@ -71,6 +71,17 @@ final class EditV2HDRColorTests: XCTestCase {
         for s in shown { XCTAssertLessThanOrEqual(H.distance(s, shown[0]), 1, "\(shown)") }
     }
 
+    /// Round 5: SDR-only edits compose in BT.709 (no AVFoundation conversion); any HDR source keeps BT.2020 / HLG.
+    func testCompositionSpace() {
+        let sdr = H.Tags(primaries: H.bt709, transfer: H.bt709, matrix: H.bt709)
+        XCTAssertEqual(H.compositionSpace([]), H.sdrDefault)
+        XCTAssertEqual(H.compositionSpace([sdr, H.Tags()]), H.sdrDefault)
+        XCTAssertEqual(H.compositionSpace([sdr, H.Tags(primaries: H.bt2020, transfer: H.hlg, matrix: H.bt2020)]), H.output)
+        XCTAssertEqual(H.compositionSpace([H.Tags(primaries: H.bt2020, transfer: H.pq)]), H.output)
+        // An untagged frame of an SDR-only edit is read as BT.709 (what the composition delivers).
+        XCTAssertEqual(H.resolve(frame: H.Tags(), track: H.Tags(), composition: H.sdrDefault), H.sdrDefault)
+    }
+
     /// SDR white is HLG reference white (BT.2408: 75 %), grey stays neutral.
     func testReferenceWhite() {
         let w = H.hlgSignal(sdr: (1, 1, 1))

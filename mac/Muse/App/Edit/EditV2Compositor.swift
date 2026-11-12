@@ -124,10 +124,14 @@ final class EditV2Scene: @unchecked Sendable {
     let burnCaptions: Bool
     /// XL HDR export: colour work on extended sRGB values (highlights above 1 survive the matrices), frames out in HLG.
     let hdr: Bool
+    /// HDR round 5: the video composition's colour space (BT.709 for SDR-only edits, BT.2020 / HLG with an HDR source).
+    let composition: EditV2.HDRColor.Tags
     private let outSpace: CGColorSpace
 
     init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], matteTracks: [Int: CMPersistentTrackID] = [:],
-         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false, layerTracks: [String: CMPersistentTrackID] = [:]) {
+         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false, layerTracks: [String: CMPersistentTrackID] = [:],
+         composition: EditV2.HDRColor.Tags = EditV2.HDRColor.output) {
+        self.composition = composition
         self.layerTracks = layerTracks
         self.burnCaptions = burnCaptions
         self.hdr = hdr
@@ -286,7 +290,7 @@ final class EditV2Scene: @unchecked Sendable {
     private func picture(_ buf: CVPixelBuffer, asset: String, at t: Double) -> CIImage {
         guard hdr else { return CIImage(cvPixelBuffer: buf) }
         let own = Self.tags(of: buf)
-        let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags, composition: EditV2.HDRColor.output)
+        let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags, composition: composition)
         EditV2HDRTrace.source(buf, asset: asset, own: own, resolved: resolved, at: t)
         // Round 3: the decoder's own Y′CbCr (the normal case now): always the resolved tags and colour space, matrix
         // included, on every frame, the first one too.
@@ -666,6 +670,12 @@ enum EditV2HDRTrace {
     nonisolated(unsafe) private static var last: [String: String] = [:]
 
     static func reset() { lock.lock(); lines = []; count = [:]; last = [:]; lock.unlock() }
+    static func note(_ s: String) { lock.lock(); if lines.count < 200 { lines.append(s) }; lock.unlock() }
+    /// What the writer gets, before the pump's own stamp (did AVFoundation retag the compositor's frames?).
+    static func writer(_ buf: CVPixelBuffer, own: EditV2.HDRColor.Tags, at t: Double) {
+        let sig = describe(buf) + " " + tags(own)
+        add("writer", sig, String(format: "%.3f s writer ", t) + sig)
+    }
     static func dump() -> [String] { lock.lock(); defer { lock.unlock() }; return lines }
 
     private static func describe(_ buf: CVPixelBuffer) -> String {

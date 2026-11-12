@@ -14,8 +14,11 @@ extension EditV2Engine {
         let output: AVAssetReaderOutput
         let input: AVAssetWriterInput
         let queue: DispatchQueue
-        init(_ output: AVAssetReaderOutput, _ input: AVAssetWriterInput, _ label: String) {
-            self.output = output; self.input = input; queue = DispatchQueue(label: label)
+        /// HDR: every frame is tagged BT.2020 / HLG right before the encoder (what the compositor drew), whatever AVFoundation
+        /// put on it on the way, so VideoToolbox never converts it again.
+        let hdr: Bool
+        init(_ output: AVAssetReaderOutput, _ input: AVAssetWriterInput, _ label: String, hdr: Bool = false) {
+            self.output = output; self.input = input; queue = DispatchQueue(label: label); self.hdr = hdr
         }
         func run(onSample: @escaping @Sendable (CMTime) -> Void) async {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -24,6 +27,11 @@ extension EditV2Engine {
                     while input.isReadyForMoreMediaData && !done {
                         if let sb = output.copyNextSampleBuffer() {
                             onSample(CMSampleBufferGetPresentationTimeStamp(sb))
+                            if hdr, let pb = CMSampleBufferGetImageBuffer(sb) {
+                                EditV2HDRTrace.writer(pb, own: EditV2Scene.tags(of: pb), at: CMSampleBufferGetPresentationTimeStamp(sb).seconds)
+                                CVBufferRemoveAttachment(pb, kCVImageBufferCGColorSpaceKey)
+                                EditV2Scene.stamp(pb, EditV2.HDRColor.output)
+                            }
                             if !input.append(sb) { done = true; input.markAsFinished(); cont.resume(); return }
                         } else {
                             done = true
@@ -90,7 +98,7 @@ extension EditV2Engine {
             vIn.expectsMediaDataInRealTime = false
             guard writer.canAdd(vIn) else { throw ApiError("edit_export_failed", "This Mac can't encode this video") }
             writer.add(vIn)
-            pumps.append(Pump(vOut, vIn, "studio.muse.edit.export.video"))
+            pumps.append(Pump(vOut, vIn, "studio.muse.edit.export.video", hdr: hdr))
         }
 
         let aTracks = try await asset.loadTracks(withMediaType: .audio)
