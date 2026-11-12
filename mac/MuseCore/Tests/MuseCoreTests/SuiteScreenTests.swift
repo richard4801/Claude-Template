@@ -45,4 +45,17 @@ final class SuiteScreenTests: XCTestCase {
         XCTAssertNotNil(t["at"])
         XCTAssertNil(t["request"])
     }
+
+    func testSettingsAndPhotoReferences() {
+        let refs = [ShootRef(image: ImageRef(url: "/uploads/u/pose.jpg"), guides: [.pose]), ShootRef(image: ImageRef(url: "/uploads/u/look.jpg"), guides: [.look, .scene])]
+        let inputs = SuiteScreen.photoReferences(refs)
+        XCTAssertEqual(inputs.map(\.slot), ["reference 1", "reference 2"])
+        XCTAssertEqual(inputs[1].role, "look")
+        XCTAssertEqual(inputs[1].url, "/uploads/u/look.jpg")
+        let s: [String: JSONValue] = ["background": .string("photo"), "backgroundName": .string("Rooftop"), "promptOn": .bool(false)]
+        guard case .object(let t) = SuiteScreen.json(tool: "swap", request: nil, inputs: [], settings: s, at: nil) else { return XCTFail() }
+        XCTAssertEqual(t["settings"], .object(s))
+        guard case .object(let e) = SuiteScreen.json(tool: "swap", request: nil, inputs: [], at: nil) else { return XCTFail() }
+        XCTAssertNil(e["settings"]) // none: left out
+    }
 }
