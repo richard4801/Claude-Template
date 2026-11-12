@@ -125,6 +125,8 @@ export class SuiteRunner {
    */
   async recover(u: AuthUser, jobId: string) {
     if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can do that');
+    // Edit helpers (Genjutsu, slow motion) keep their own saved provider request (editor/service.ts).
+    if (jobId.startsWith('edj_')) return (await import('../editor/service.js')).editorAi(this.ctx).recoverJob(u, jobId);
     const [j] = await this.ctx.db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.studioId, u.studioId)));
     if (!j) throw notFound('Job');
     // Character swap (Replicate / Higgsfield line): its own saved predictions (services/replicateVideo.ts).
@@ -209,14 +211,16 @@ export class SuiteRunner {
     if (plan.audioRef) {
       const key = this.storageKeyOf(plan.audioRef.ref);
       if (plan.audioRef.beatOnly) {
-        type Sep = { instrumentalKey?: string | null; costUsd?: number; separated?: boolean };
+        type Sep = { instrumentalKey?: string | null; costUsd?: number; separated?: boolean; pending?: string };
         const saved = (job.stats as any)?.suite?.audio as Sep | undefined;
         let sep: Sep | undefined = saved && (saved.separated === false || (saved.instrumentalKey && (await ctx.storage.head(saved.instrumentalKey)))) ? saved : undefined;
         if (!sep && mock) sep = { instrumentalKey: null, costUsd: 0, separated: false };
         if (!sep) {
           if (!key) throw new ReplicateError('the audio must be an upload to separate its beat', 'failed');
           await report(1, 0.02, 'Preparing the audio');
-          const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled }) as { instrumentalKey: string; costUsd: number; separated?: boolean; lost?: boolean };
+          // The separation's prediction is saved as soon as it exists: a restart polls it, never pays for a second one.
+          const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled,
+            resumeId: saved?.pending ?? null, onPrediction: id => this.saveExtra(job.id, { audio: { pending: id } }) }) as { instrumentalKey: string; costUsd: number; separated?: boolean; lost?: boolean };
           const separated = b.separated !== false && b.instrumentalKey !== key;
           // A separation that was paid but couldn't be saved is still billed (the shot runs on its no-audio prompt).
           sep = separated ? { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd, separated: true } : { instrumentalKey: null, costUsd: b.lost ? b.costUsd ?? 0 : 0, separated: false };
@@ -267,7 +271,7 @@ export class SuiteRunner {
     const recovering = !!(job.stats as any)?.suite?.recovering;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-suite-'));
     const finishNotes = new Set<string>(); // AI suite (workstream 1): what finishing did (length cut, sound levelled)
-    const n = Math.max(1, plan?.takes ?? 1);
+    let n = Math.max(1, plan?.takes ?? 1);
     const perTake = (job.totalSeconds || 90) / n;
     const report = async (i: number, f: number, label: string) => {
       const progress = Math.min(99.5, ((i - 1) + Math.min(1, Math.max(0, f))) / n * 100);
@@ -320,7 +324,16 @@ export class SuiteRunner {
           });
         }
         if (!status || status.status === 'canceled') {
-          if (recovering) throw new ReplicateError('nothing came back to recover', 'failed');
+          if (recovering) {
+            // Recovery is free: it never starts a take. The takes it brought back are kept; the job is that many takes.
+            if (billed.length) {
+              n = billed.length;
+              await ctx.db.update(jobs).set({ request: { ...job.request, takes: n } }).where(eq(jobs.id, job.id));
+              await this.saveExtra(job.id, { plan: { ...plan, takes: n } });
+              break;
+            }
+            throw new ReplicateError('nothing came back to recover', 'failed');
+          }
           let input = await inputFor();
           if (!(await report(i, 0.03, 'Starting'))) return;
           const seeded = (x: Record<string, unknown>) => plan.seed != null && x.seed != null ? { ...x, seed: plan.seed + i - 1 } : x;

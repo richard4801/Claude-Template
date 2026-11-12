@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { badRequest } from '../errors.js';
 import { ReplicateError } from '../replicate/client.js';
 import type { VideoProvider } from '../suite/providers.js';
+import { pollPaid, type PollHooks } from './paidPoll.js';
 
 export const GENJUTSU_HELPERS = {
   objectswap: { ref: 'higgsfield/genjutsu/object-swap/v1.0', maxImages: 8, minImages: 1,
@@ -72,24 +73,17 @@ export function genjutsuHelperInput(kind: GenjutsuHelper, videoUrl: string, imag
   };
 }
 
-/** Runs one helper on Higgsfield: start → poll → download to `file`. Cancel stops the request there too. */
-export async function runGenjutsu(hf: VideoProvider, kind: GenjutsuHelper, input: Record<string, unknown>, file: string,
-  o: { cancelled: () => boolean; pollMs: number; timeoutMs: number; onProgress: (f: number) => Promise<void> }) {
-  const id = await hf.start(GENJUTSU_HELPERS[kind].ref, input, { cancelled: o.cancelled });
-  const t0 = Date.now();
-  for (;;) {
-    if (o.cancelled()) { await hf.cancel(id); throw new ReplicateError('Cancelled', 'cancelled'); }
-    const s = await hf.get(id);
-    if (s.status === 'failed') throw s.error ?? new ReplicateError('Higgsfield failed', 'failed');
-    if (s.status === 'canceled') throw new ReplicateError('Higgsfield cancelled the request', 'failed');
-    if (s.status === 'succeeded') {
-      if (!s.url) throw new ReplicateError('Higgsfield finished without a video', 'failed');
-      await hf.download(s.url, file);
-      if (!fs.existsSync(file) || !fs.statSync(file).size) throw new ReplicateError('Higgsfield’s video came back empty', 'failed');
-      return;
-    }
-    if (Date.now() - t0 > o.timeoutMs) { await hf.cancel(id); throw new ReplicateError('Higgsfield took too long', 'timeout'); }
-    await o.onProgress(Math.min(0.9, (Date.now() - t0) / 1000 / 240));
-    await new Promise(r => setTimeout(r, o.pollMs));
+/**
+ * Runs one helper on Higgsfield: start (or resume a saved request) → poll → download to `file` (editor/paidPoll.ts rules:
+ * a timeout asks to cancel and keeps polling; a finished result is paid and never thrown away silently).
+ * `input` is only built when a request must start. `onStart` saves the request handle before polling.
+ */
+export async function runGenjutsu(hf: VideoProvider, kind: GenjutsuHelper, input: () => Promise<Record<string, unknown>>, file: string,
+  o: PollHooks & { resumeId?: string | null; onStart?: (id: string) => Promise<void> }) {
+  let id = o.resumeId ?? null;
+  if (!id) {
+    id = await hf.start(GENJUTSU_HELPERS[kind].ref, await input(), { cancelled: o.cancelled });
+    await o.onStart?.(id);
   }
+  return pollPaid(hf, id, file, 'Higgsfield', o);
 }

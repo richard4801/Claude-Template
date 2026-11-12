@@ -10,6 +10,8 @@ export class PhotoBill {
   /** Billed by the engine for photos that were thrown away. */
   wasted = 0;
   private holdTokens = 0;
+  /** The hold this action took (a photo job saves it, so a restart can give it back). */
+  get held() { return { refId: this.refId, holdTokens: this.holdTokens, estimate: this.estimate }; }
   private done = false;
   constructor(private ctx: Ctx, private who: Who, readonly refId: string, readonly estimate: number, readonly note: string) {}
 
@@ -20,6 +22,8 @@ export class PhotoBill {
   }
   add(usd: number) { this.spent += Math.max(0, usd); }
   waste(usd: number) { this.wasted += Math.max(0, usd); }
+  /** Images first recorded as wasted that the action keeps after all (a partial result): charged, not overhead. */
+  keep(usd: number) { const k = Math.min(this.wasted, Math.max(0, usd)); this.wasted -= k; this.spent += k; }
 
   /** The action finished: settle to what the kept photos cost. */
   async finish() {

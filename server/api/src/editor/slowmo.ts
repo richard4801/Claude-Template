@@ -7,6 +7,7 @@
 import { execFile } from 'node:child_process';
 import type { FalProvider } from '../suite/providers.js';
 import { ReplicateError } from '../replicate/client.js';
+import { pollPaid, type PollHooks } from './paidPoll.js';
 
 export type SlowmoFactor = 2 | 4;
 export const SLOWMO_LIMITS = { maxRangeSec: 10, minRangeSec: 0.3, maxFps: 60, maxShortSide: 1080, maxWaitMs: 15 * 60_000 } as const;
@@ -47,20 +48,16 @@ export async function retime(ffmpeg: string, input: string, out: string, inputSe
 }
 
 /**
- * Runs fal on [url] (the cut range): → the interpolated clip downloaded to [file] and the compute seconds fal reports
- * (null when it reports none). Cancels fal's request when the job is cancelled or takes too long.
+ * Runs fal on the cut range (`url()`, only made when a request must start) or resumes a saved request: → the
+ * interpolated clip downloaded to [file] and the compute seconds fal reports (null when it reports none). The
+ * editor/paidPoll.ts rules apply (a timeout asks fal to cancel and keeps polling; a finished result is paid).
  */
-export async function falInterpolate(fal: FalProvider, url: string, factor: SlowmoFactor, file: string, h: { cancelled: () => boolean; onProgress?: (f: number) => Promise<void> | void; pollMs?: number }) {
-  const id = await fal.start(SLOWMO_MODEL.ref, { video_url: url, num_frames: factor - 1, use_calculated_fps: true, use_scene_detection: false, loop: false }, { cancelled: h.cancelled });
-  const t0 = Date.now(), poll = h.pollMs ?? 2000;
-  for (;;) {
-    if (h.cancelled()) { await fal.cancel(id); throw new ReplicateError('Cancelled', 'cancelled'); }
-    if (Date.now() - t0 > SLOWMO_LIMITS.maxWaitMs) { await fal.cancel(id); throw new ReplicateError('Slow motion took too long', 'failed'); }
-    const st = await fal.get(id);
-    if (st.status === 'succeeded' && st.url) { await fal.download(st.url, file); return { computeSec: st.computeSec ?? null }; }
-    if (st.status === 'failed') throw st.error ?? new ReplicateError('Slow motion failed', 'failed');
-    if (st.status === 'canceled') throw new ReplicateError('Cancelled', 'cancelled');
-    await h.onProgress?.(Math.min(0.9, (Date.now() - t0) / 60_000));
-    await new Promise(r => setTimeout(r, poll));
+export async function falInterpolate(fal: FalProvider, url: () => Promise<string>, factor: SlowmoFactor, file: string,
+  h: { cancelled: () => boolean; leaving?: () => boolean; onProgress?: (f: number) => Promise<void> | void; pollMs?: number; resumeId?: string | null; onStart?: (id: string) => Promise<void>; onMade?: PollHooks['onMade'] }) {
+  let id = h.resumeId ?? null;
+  if (!id) {
+    id = await fal.start(SLOWMO_MODEL.ref, { video_url: await url(), num_frames: factor - 1, use_calculated_fps: true, use_scene_detection: false, loop: false }, { cancelled: h.cancelled });
+    await h.onStart?.(id);
   }
+  return pollPaid(fal, id, file, 'Slow motion', { cancelled: h.cancelled, leaving: h.leaving, pollMs: h.pollMs ?? 2000, timeoutMs: SLOWMO_LIMITS.maxWaitMs, onProgress: h.onProgress, onMade: h.onMade });
 }

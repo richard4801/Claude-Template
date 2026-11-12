@@ -1,0 +1,140 @@
+# paid-jobs-3 (android): editor helper Recover. Apply AFTER plans/patches/paid-jobs-2-android.patch (uses Job.recoverCodes/RECOVER_CODES, api.recoverJob, repo.ownerNow).
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index 1abe7833..9b8c72f4 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -1243,7 +1243,13 @@ data class EditorJob(
+     val result: JsonObject? = null,
+     val error: String? = null,
+     val createdAt: Long = 0,
++    /** Failed after the provider made the result: provider_paid_unsaved / provider_unconfirmed (owner's free Recover when
++     *  [recoverable]) or provider_paid_lost (not recoverable; the member wasn't charged). */
++    val errorCode: String? = null,
++    val recoverable: Boolean = false,
+ ) {
++    /** The owner can bring this result back for free (POST /v1/jobs/:id/recover; never a new run). */
++    val canRecover: Boolean get() = state == "failed" && recoverable && errorCode in Job.RECOVER_CODES
+     val finished: Boolean get() = state == "done" || state == "failed" || state == "cancelled"
+ }
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt
+index 93ecdcbd..1f59c3ba 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt
+@@ -92,6 +92,10 @@ interface EditBackend {
+      * paid.available and each helper's available): captions, matte, denoise. Empty = all available.
+      */
+     suspend fun helpersOff(): Map<String, String> = emptyMap()
++    /** The job id of the last run that failed after the provider made its result, when the owner can recover it (then cleared). */
++    fun takeRecoverable(): String? = null
++    /** Recover (owner, free): fetches a saved provider result again; never a new run. */
++    suspend fun recover(jobId: String, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> = null to "Recover isn't available here" // fakes
+     /**
+      * The languages translated captions can go into (`GET /v1/editor/features` translate.languages, code → name): only
+      * those the export draws correctly. Empty = none offered.
+@@ -280,6 +284,8 @@ sealed interface EditAction {
+     data class Stabilize(val on: Boolean) : EditAction
+     /** Smooth slow motion (2026-11-09, paid): [lengthSec] of the clip's source from the playhead, made [factor]× slower. */
+     data class SlowmoPrice(val factor: Int, val lengthSec: Double) : EditAction
++    /** The owner's free Recover of a helper result the provider made but the server couldn't save. */
++    data class RecoverAi(val key: String) : EditAction
+     /** Translated captions (2026-11-09, paid): the captions in [language]; [best] is the higher-quality option. */
+     data class TranslatePrice(val language: String, val best: Boolean) : EditAction
+     data class Translate(val language: String, val best: Boolean) : EditAction
+@@ -912,6 +918,7 @@ class EditSuiteController(
+             is EditAction.Stabilize -> stabilize(u, a.on)
+             is EditAction.SlowmoPrice -> slowmoRange(u, a.lengthSec)?.let { (_, asset, r) -> estimate("slowmo", slowmoOptions(a.factor, r), sourceOf(asset)) }
+             is EditAction.Slowmo -> slowmo(u, a.factor, a.lengthSec)
++            is EditAction.RecoverAi -> recoverAi(a.key)
+             is EditAction.TranslatePrice -> captionSource()?.let { estimate("translate", translateOptions(a.language, a.best), it) }
+             is EditAction.Translate -> translate(a.language, a.best)
+             EditAction.SeparatePrice -> (soundClip(u) as? VideoClip)?.let { c -> estimate("separate", null, sourceOf(project?.asset(c.asset))) }
+@@ -1126,7 +1133,9 @@ class EditSuiteController(
+             val progress: (EditorJob) -> Unit = { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
+             // No pick: the studio's default (the original call); a pick goes with the model-aware one (WS13).
+             val (result, err) = if (model == null) backend.run(kind, src, options, progress) else backend.run(kind, src, options, model, progress)
+-            setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
++            val recoverId = if (result == null) backend.takeRecoverable() else null
++            if (recoverId != null) recoverApply[key] = apply
++            setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err, recoverJobId = recoverId) }
+             if (result != null) {
+                 actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; "stabilize" -> "Stabilise"; "slowmo" -> "Smooth slow motion"; "translate" -> "Translate captions"; "separate" -> "Split voice and music"; "cutout" -> "Cut out"; else -> "Edit" }
+                 apply(result)
+@@ -1134,6 +1143,19 @@ class EditSuiteController(
+         }
+     }
+ 
++    private val recoverApply = HashMap<String, (JsonObject) -> Unit>()
++    /** Recover (owner, free): the saved provider request is fetched again; its result is applied like the run's. */
++    private fun recoverAi(key: String) {
++        val id = _ui.value.ai[key]?.recoverJobId ?: return
++        val apply = recoverApply.remove(key) ?: return
++        setAi(key) { it.copy(running = true, progress = 0, phase = "Recovering", error = null, recoverJobId = null) }
++        jobs[key] = scope.launch {
++            val (result, err) = backend.recover(id) { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
++            setAi(key) { it.copy(running = false, done = result != null, error = err) }
++            if (result != null) apply(result) else if (err != null) say(err)
++        }
++    }
++
+     fun cancelAi(key: String) { jobs.remove(key)?.cancel(); setAi(key) { it.copy(running = false) } }
+ 
+     // =================================================================== AI helpers
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+index 5bc75a5c..bc65b476 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+@@ -363,8 +363,25 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
+             runCatching { c.repo.attemptInline { cancelEditorJob(job.id) } }
+             throw e
+         }
++        // Made at the provider but not saved: the owner gets a free Recover (members see the server's words).
++        if (job.canRecover && c.repo.ownerNow()) recoverable = job.id
+         return if (job.state == "done" && job.result != null) job.result to null else null to (job.error ?: if (job.state == "cancelled") "Stopped" else "The helper stopped · try again")
+     }
++
++    private var recoverable: String? = null
++    override fun takeRecoverable(): String? = recoverable.also { recoverable = null }
++
++    override suspend fun recover(jobId: String, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
++        if (c.repo.recoverJob(jobId) == null) return null to "Couldn't recover it · try again"
++        var job = runCatching { c.repo.attemptInline { editorJob(jobId) }.first }.getOrNull() ?: return null to "Couldn't reach the studio · try again"
++        onProgress(job)
++        while (!job.finished) {
++            delay(pollMs)
++            job = runCatching { c.repo.attemptInline { editorJob(jobId) }.first }.getOrNull() ?: continue
++            onProgress(job)
++        }
++        return if (job.state == "done" && job.result != null) job.result to null else null to (job.error ?: "The helper stopped · try again")
++    }
+ }
+ 
+ // ======================================================================= view-model (Android side)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
+index 8929cc43..08c12ebe 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
+@@ -54,6 +54,8 @@ data class AiTask(
+     val phase: String = "",
+     val error: String? = null,
+     val done: Boolean = false,
++    /** The provider made this result but the server couldn't save it: the owner's free Recover runs this job again. */
++    val recoverJobId: String? = null,
+ )
+ 
+ sealed interface SuitePhase {
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteSheets.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteSheets.kt
+index b6fe591c..4fabe5eb 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteSheets.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteSheets.kt
+@@ -391,7 +391,9 @@ private fun SlowmoSection(ui: EditSuiteUi, c: VideoClip, act: (EditAction) -> Un
+         job?.running == true -> T("${job.phase.ifEmpty { "Slowing down" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
+         else -> {
+             job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
+-            SuiteButton(job?.price?.let { "Slow down · $it" } ?: "Slow down", { act(EditAction.Slowmo(factor, len)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
++            // Already made and charged at fal: Recover is free (owner only); slowing down again would pay again.
++            if (job?.recoverJobId != null) SuiteButton(studio.muse.app.data.Job.RECOVER, { act(EditAction.RecoverAi("slowmo")) }, Modifier.fillMaxWidth())
++            else SuiteButton(job?.price?.let { "Slow down · $it" } ?: "Slow down", { act(EditAction.Slowmo(factor, len)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+         }
+     }
+ }
