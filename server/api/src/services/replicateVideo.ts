@@ -19,7 +19,8 @@ import { SOMETHING_WENT_WRONG } from './jobs.js';
 import { badRequest } from '../errors.js';
 import { PaidLost, paidLostFailure, reportPaidLost, sleep } from './paidLost.js';
 import { mediaToolsAvailable, padTo, probe, restoreAudio, stripAudio, thumbnail } from '../replicate/media.js';
-import { putFile } from '../storage/objects.js';
+import { putFile, putObject } from '../storage/objects.js';
+import sharp from 'sharp';
 import type { JobRow } from '../gpu/controller.js';
 import { modelById } from '../suite/registry.js';
 import { GENJUTSU_NO_ACCESS, GENJUTSU_RES, HF_SWAP_MIN_SEC, swapEngineById } from '../engines/purposes.js';
@@ -53,6 +54,18 @@ export function higgsfieldLine(hf: VideoProvider): Line {
 export function genjutsuInput(videoUrl: string, imageUrls: string[], prompt: string | null | undefined, resolution: string) {
   const text = (prompt ?? '').replace(/<Image (\d+)>/g, 'image $1').replace(/<Video 1>/g, 'the source video').replace(/<Video (\d+)>/g, 'video $1').slice(0, 10000);
   return { video_url: videoUrl, image_urls: imageUrls.slice(0, 8), ...(text.trim() ? { prompt: text } : {}), resolution };
+}
+
+/** One reference picture for Genjutsu as a JPEG (≤ 2048 px) on our storage, as a signed link; null when it can't be read. */
+async function genjutsuPicture(ctx: Ctx, job: { id: string; studioId: string; userId: string | null }, n: number, key: string | null, url: string | undefined, ttl: number) {
+  let bytes: Buffer | null = null;
+  if (key) { const o = await ctx.storage.get(key); if (o) { const parts: Buffer[] = []; for await (const c of o.body as AsyncIterable<Buffer>) parts.push(Buffer.from(c)); bytes = Buffer.concat(parts); } }
+  else if (url && /^https:\/\//.test(url)) { const r = await fetch(url, { signal: AbortSignal.timeout(30_000) }); if (r.ok) bytes = Buffer.from(await r.arrayBuffer()); }
+  if (!bytes?.length) return null;
+  const jpg = await sharp(bytes).rotate().resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' }).jpeg({ quality: 92 }).toBuffer();
+  const out = `r/${job.id}/genjutsu_ref_${n + 1}.jpg`;
+  await putObject(ctx, { key: out, body: jpg, studioId: job.studioId, kind: 'output', userId: job.userId ?? undefined, contentType: 'image/jpeg' });
+  return ctx.storage.presignGet(out, ttl);
 }
 
 /**
@@ -319,7 +332,8 @@ export class ReplicateVideo {
       // Prompt scripts: the request carries the resolved switch/detection; older jobs fall back to the clip's check.
       const talking = typeof r.speaking === 'boolean' ? r.speaking
         : (clip.checks as { label: string; value: string }[] | null)?.some(x => x.label === 'Performer talking' && x.value === 'Yes') ?? false;
-      return { src, info, D, muteSource: !talking && !!info.audioCodec, gj };
+      // Genjutsu copies motion (no lip-sync to guard against) and keeps the source sound: it gets the clip with its audio.
+      return { src, info, D, muteSource: !gj && !talking && !!info.audioCodec, gj };
     })());
 
     // What starting a take needs: the padded clip, signed links, the model and its input.
@@ -332,7 +346,8 @@ export class ReplicateVideo {
       if (!state.paddedKey || state.seconds !== D || state.muted !== muteSource || !(await ctx.storage.head(state.paddedKey))) {
         await report(1, 0.01, 'Preparing the clip');
         const padded = path.join(tmp, 'source_padded.mp4');
-        await padTo(c.FFMPEG_PATH, src, padded, D, info, { mute: muteSource });
+        // Genjutsu: a sound track always (silent when the clip has none) and at least 409,600 pixels a frame (its documented floor).
+        await padTo(c.FFMPEG_PATH, src, padded, D, info, { mute: muteSource, ...(gj ? { silentAudio: true, minPixels: 409_600 } : {}) });
         state.muted = muteSource;
         state.paddedKey = `r/${job.id}/source_padded.mp4`;
         state.seconds = D;
@@ -344,8 +359,10 @@ export class ReplicateVideo {
       const videoUrl = await ctx.storage.presignGet(state.paddedKey!, ttl);
       const refs = ((r.references ?? []) as { label: string; image: ImageRef }[]).slice(0, gj?.maxImages ?? 9);
       const imageUrls: string[] = [];
-      for (const x of refs) {
+      for (const [n, x] of refs.entries()) {
         const key = await ctx.images.storedKey(x.image, job.studioId);
+        // Genjutsu: each picture re-saved as a JPEG on our storage (no WebP, no third-party links it may not fetch).
+        if (gj) { const u = await genjutsuPicture(ctx, job, n, key, x.image?.url, ttl).catch(e => { ctx.log.warn({ job: job.id, err: (e as Error).message }, 'genjutsu picture kept as is'); return null; }); if (u) { imageUrls.push(u); continue; } }
         const url = key ? await ctx.storage.presignGet(key, ttl) : x.image?.url && /^https:\/\//.test(x.image.url) ? x.image.url : null;
         if (url) imageUrls.push(url);
       }

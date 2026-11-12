@@ -200,6 +200,8 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
       expect(hf[0]!.input.resolution).toBe('1080p');
       expect(hf[0]!.input.image_urls.length).toBeGreaterThan(0);
       expect(hf[0]!.input.image_urls.length).toBeLessThanOrEqual(8);
+      // Each picture re-saved as a JPEG on our storage (no WebP, no third-party links).
+      expect(hf[0]!.input.image_urls.every((u: string) => /genjutsu_ref_\d+\.jpg/.test(u))).toBe(true);
       expect(hf[0]!.input.prompt).not.toMatch(/<Image|<Video/);
       const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, j.id))).find(x => x.kind === 'settle');
       expect(settle!.amountUsd).toBeCloseTo(0.8346 * 4, 6);
@@ -328,9 +330,8 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
       const r = (await owner.req('GET', '/v1/engines/genjutsu/access?schema=1')).body;
       const light = r.schema['higgsfield/genjutsu-light/motion-transfer/v1.0'];
       expect(light.status).toBe(422);
-      expect(light.fields).toContainEqual({ field: 'reference_video_url', type: 'missing', msg: 'Field required' });
       expect(light.detail).toMatch(/reference_video_url: Field required/);
-      expect(hf.every(x => x.input.__muse_schema_probe === true)).toBe(true);
+      expect(hf.every(x => x.input.__muse_schema_probe === true)).toBe(true); // the walk's own steps: test/genjutsu-probe.test.ts
     } finally { await a.close(); }
   });
 

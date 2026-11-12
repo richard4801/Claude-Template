@@ -101,6 +101,9 @@ export class FalProvider implements VideoProvider {
  * nsfw | canceled) → video.url. Auth "Key <key-id>:<key-secret>" from HF_CREDENTIALS (never logged). Failed and nsfw
  * requests are not charged by Higgsfield. Ids carry the status and cancel URLs the API returned.
  */
+/** What the schema walk learned: required names, types, allowed values, optional fields, and each step it took. */
+export type SchemaWalk = { status: number | null; required: string[]; types: Record<string, string>; enums: Record<string, string[]>;
+  optional: Record<string, string>; additionalProperties: boolean | null; steps: { sent: Record<string, unknown>; status: number; said: string }[]; detail: string };
 /** One field Higgsfield's validation named: where, what (missing, extra_forbidden, …) and its words. */
 export type HfFieldIssue = { field: string; type: string; msg: string };
 /** Higgsfield's error text, readable and safe to show: `detail` as words, no links (signed URLs carry tokens). */
@@ -166,21 +169,76 @@ export class HiggsfieldProvider implements VideoProvider {
     return { status: 'running' };
   }
   /**
-   * What a model's request must look like, asked for free: a body that can't pass validation (wrong types, an unknown
-   * field) is sent, and Higgsfield's 422 names every field it wants (missing ones included). Nothing can start or be
-   * charged. For Genjutsu Light, whose schema isn't published.
+   * What a model's request must look like, asked for free (Light's schema isn't published). Higgsfield validates with
+   * JSON Schema and names ONE problem at a time (root problems first: a missing field, an unknown one), so the probe
+   * walks: each body it sends is one the schema must refuse (a missing required field, a field filled with an object
+   * where the schema wants a string or a list), and each answer teaches one fact: a required name, a type, an allowed
+   * value. A field is set right only while another field we have SEEN refused stays wrong, so no body can pass. Every
+   * placeholder link points at example.invalid, which nothing can fetch: even an unexpected acceptance would fail at
+   * once (Higgsfield doesn't charge failed requests), and it is cancelled straight away. At most 16 calls.
    */
-  async probeSchema(ref: string): Promise<{ status: number | null; fields: HfFieldIssue[]; detail: string }> {
-    if (!this.configured()) return { status: null, fields: [], detail: "Higgsfield isn't set up on the server" };
-    const res = await this.fetchFn(`${this.base()}/${ref}`, { method: 'POST', headers: this.headers(), signal: AbortSignal.timeout(20_000),
-      body: JSON.stringify({ prompt: 12345, resolution: 12345, __muse_schema_probe: true }) }).catch(() => null);
-    if (!res) return { status: null, fields: [], detail: 'Higgsfield unreachable' };
-    const text = await res.text().catch(() => '');
-    if (res.ok) { // should never happen; if it did, stop it at once
-      try { const j = JSON.parse(text) as { cancel_url?: string }; if (j.cancel_url) await this.fetchFn(j.cancel_url, { method: 'POST', headers: this.headers() }).catch(() => null); } catch { /* ignore */ }
-      return { status: res.status, fields: [], detail: 'accepted a probe (cancelled at once)' };
+  async probeSchema(ref: string): Promise<SchemaWalk> {
+    const walk: SchemaWalk = { status: null, required: [], types: {}, enums: {}, optional: {}, additionalProperties: null, steps: [], detail: '' };
+    if (!this.configured()) return { ...walk, detail: "Higgsfield isn't set up on the server" };
+    const BAD = { __muse_probe: 1 } as const;
+    const body: Record<string, unknown> = { __muse_schema_probe: true };
+    const bad = new Set<string>(); // fields currently holding BAD
+    const typed = new Set<string>(); // fields whose type error we have seen (BAD is refused there)
+    const placeholder = (f: string, t: string): unknown => t === 'array' ? ['https://example.invalid/muse-probe.jpg']
+      : t === 'string' ? (/video/i.test(f) ? 'https://example.invalid/muse-probe.mp4' : /url|image|photo/i.test(f) ? 'https://example.invalid/muse-probe.jpg' : 'muse probe')
+      : t === 'integer' || t === 'number' ? 5 : t === 'boolean' ? false : undefined;
+    const candidates = ['image_urls', 'prompt', 'resolution'];
+    const post = async () => {
+      const res = await this.fetchFn(`${this.base()}/${ref}`, { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }).catch(() => null);
+      if (!res) return null;
+      const text = await res.text().catch(() => '');
+      if (res.ok) { // never expected: stop it at once (its links can't be fetched, so it would fail unpaid anyway)
+        try { const j = JSON.parse(text) as { cancel_url?: string }; if (j.cancel_url) await this.fetchFn(j.cancel_url, { method: 'POST', headers: this.headers() }).catch(() => null); } catch { /* ignore */ }
+      }
+      return { status: res.status, ok: res.ok, detail: hfDetail(text, 600) };
+    };
+    for (let i = 0; i < 16; i++) {
+      const r = await post();
+      if (!r) { walk.detail = 'Higgsfield unreachable'; break; }
+      walk.status = r.status;
+      walk.steps.push({ sent: Object.fromEntries(Object.entries(body).map(([k, v]) => [k, v === BAD ? '<object>' : Array.isArray(v) ? '<list>' : typeof v === 'string' ? '<text>' : v])), status: r.status, said: r.detail });
+      if (r.ok) { walk.detail = 'Higgsfield accepted a probe: it was cancelled at once (its links point nowhere, so it could not run)'; break; }
+      const d = r.detail;
+      let m: RegExpExecArray | null;
+      if ((m = /'([^']+)' is a required property/.exec(d))) {
+        if (walk.required.includes(m[1]!)) { walk.detail = d; break; }
+        walk.required.push(m[1]!); body[m[1]!] = BAD; bad.add(m[1]!); continue;
+      }
+      if (/Additional properties are not allowed/i.test(d) && '__muse_schema_probe' in body) { walk.additionalProperties = false; delete body.__muse_schema_probe; continue; }
+      if ((m = /^\s*([A-Za-z0-9_]+)(?:\.[^:]*)?\s*:\s*.* is not of type '(\w+)'/.exec(d))) {
+        const f = m[1]!, t = m[2]!;
+        walk.types[f] = t; typed.add(f);
+        if (f in walk.optional) walk.optional[f] = t;
+        // Set it right only while another field we have seen refused stays wrong.
+        // A guard: a field still holding the object that we saw refused, or a required one (required fields carry a type).
+        const guard = [...bad].find(x => x !== f && (typed.has(x) || walk.required.includes(x)));
+        const ph = placeholder(f, t);
+        if (guard && ph !== undefined) { body[f] = ph; bad.delete(f); continue; }
+        walk.detail = 'walked as far as it safely can'; break; // one field we saw refused stays wrong
+      }
+      if ((m = /^\s*([A-Za-z0-9_]+)\s*:\s*.* is not one of \[(.*)\]/.exec(d))) { walk.enums[m[1]!] = m[2]!.split(',').map(x => x.trim().replace(/^'|'$/g, '')); walk.detail = d; break; }
+      walk.detail = d; break;
     }
-    return { status: res.status, fields: hfValidation(text), detail: hfDetail(text, 1200) };
+    // Optional fields: with unknown fields refused at the root (reported before any wrong value), sending a name next to
+    // the field still wrong tells whether the model takes it. The body stays wrong all along.
+    for (const c of candidates) {
+      if (walk.required.includes(c)) continue;
+      if (walk.additionalProperties !== false || walk.steps.length >= 16 || !bad.size) { walk.optional[c] = 'not probed'; continue; }
+      body[c] = BAD;
+      const r = await post();
+      delete body[c];
+      if (!r) { walk.optional[c] = 'not probed'; continue; }
+      walk.steps.push({ sent: { [c]: '<object>' }, status: r.status, said: r.detail });
+      if (r.ok) { walk.optional[c] = 'accepted?'; break; }
+      const t = new RegExp(`^\\s*${c}\\s*:\\s*.* is not of type '(\\w+)'`).exec(r.detail)?.[1];
+      walk.optional[c] = new RegExp(`'${c}' (?:was|were) unexpected`).test(r.detail) ? 'not accepted' : t ?? 'accepted';
+    }
+    return walk;
   }
   /**
    * Genjutsu restyle presets (GET /models/higgsfield/genjutsu/restyle/v1.0/presets): free, needs the key and access to
