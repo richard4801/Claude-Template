@@ -32,7 +32,13 @@ class EditV2Compositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     /// XL HDR export: the HDR subclass reads and writes 10-bit / half-float frames; this one 8-bit BGRA.
     class var hdr: Bool { false }
     private static let sdrFormats = [kCVPixelFormatType_32BGRA]
-    private static let hdrSource = [kCVPixelFormatType_64RGBAHalf]
+    /// HDR round 3 (owner's 582 export: frames 0–2, the first source frame, came out hotter): sources come as the
+    /// decoder's own Y′CbCr (8- or 10-bit), so AVFoundation never converts them and every frame takes our one colour path
+    /// (EditV2Scene.picture). Half-float RGBA stays last for anything the decoder can't give as 4:2:0. Mattes are luma, so
+    /// Y′CbCr is fine for them.
+    private static let hdrSource = [kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                                    kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr10BiPlanarFullRange,
+                                    kCVPixelFormatType_64RGBAHalf]
     private static let hdrOutput = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange]
 
     #if compiler(>=6.0)
@@ -282,6 +288,14 @@ final class EditV2Scene: @unchecked Sendable {
         let own = Self.tags(of: buf)
         let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags, composition: EditV2.HDRColor.output)
         EditV2HDRTrace.source(buf, asset: asset, own: own, resolved: resolved, at: t)
+        // Round 3: the decoder's own Y′CbCr (the normal case now): always the resolved tags and colour space, matrix
+        // included, on every frame, the first one too.
+        if CVPixelBufferIsPlanar(buf) {
+            CVBufferRemoveAttachment(buf, kCVImageBufferCGColorSpaceKey)
+            Self.stamp(buf, resolved)
+            guard let space = colorSpace(resolved) else { return CIImage(cvPixelBuffer: buf) }
+            return CIImage(cvPixelBuffer: buf, options: [.colorSpace: space])
+        }
         // Trusted tags: read exactly as before (the frames that already looked right stay as they are).
         // (The matrix doesn't count: half-float RGBA frames have none.)
         guard resolved.primaries != own.primaries || resolved.transfer != own.transfer else { return CIImage(cvPixelBuffer: buf) }

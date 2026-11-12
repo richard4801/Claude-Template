@@ -702,12 +702,12 @@ extension SnapshotRunner {
         log.note("STEP export HDR: same colour on every frame, \(kind) take")
         let skinRGB = (224, 172, 140)
         let url = media.appendingPathComponent(tagged ? "skin-709.mp4" : "skin.mp4")
-        do { try await makeSolidVideo(url, seconds: 3, rgb: skinRGB, tone: nil, tag709: tagged) } catch {
+        do { try await makeSolidVideo(url, seconds: 3, rgb: skinRGB, tone: nil, tag709: tagged, fps: 24) } catch {
             check("test video", false, error.localizedDescription); return
         }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let raw: [String: Any] = ["id": tagged ? "hdr_skin709" : "hdr_skin", "kind": "take", "title": "Skin", "videoUrl": url.absoluteString, "durationSec": 3,
-                                  "width": 360, "height": 640, "fps": 30, "createdAt": now]
+                                  "width": 360, "height": 640, "fps": 24, "createdAt": now]
         guard let take = (try? JSONSerialization.data(withJSONObject: raw)).flatMap({ try? JSONDecoder().decode(Take.self, from: $0) }) else {
             check("test take", false); return
         }
@@ -720,9 +720,9 @@ extension SnapshotRunner {
         // Burned-in captions on 0.1–1.0 s; plain frames after.
         s.edit { $0.setCaptions(words: [EditV2.Word(text: "Hello", startSec: 0.1, endSec: 0.5), EditV2.Word(text: "there", startSec: 0.5, endSec: 1.0)], assetId: asset) }
         s.edit { $0.changeCaptionStyle { $0.y = 0.85 } }
-        guard let sdr = await exportFile(s, media: media, name: tagged ? "skin709-sdr" : "skin-sdr", labelAI: false, note: log.note) else { return }
+        guard let sdr = await exportFile(s, media: media, name: tagged ? "skin709-sdr" : "skin-sdr", labelAI: false, fps: 60, note: log.note) else { return }
         EditV2HDRTrace.reset()
-        let hdrFile = await exportFile(s, media: media, name: tagged ? "skin709-hdr" : "skin-hdr", labelAI: false, hdr: true, note: log.note)
+        let hdrFile = await exportFile(s, media: media, name: tagged ? "skin709-hdr" : "skin-hdr", labelAI: false, hdr: true, fps: 60, note: log.note)
         for line in EditV2HDRTrace.dump() { log.note("TRACE \(line)") }
         if let vt = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
            let desc = (try? await vt.load(.formatDescriptions))?.first {
@@ -742,6 +742,16 @@ extension SnapshotRunner {
         check("caption frame = plain frame", caption.map { c in plain.map { H.distance(c, $0) <= 3 } ?? false } ?? false,
               "caption \(describe(caption)) plain \(describe(plain))")
         check("first frame = middle", middle.map { H.distance(first, $0) <= 3 } ?? false, "first \(describe(first)) middle \(describe(middle))")
+        // Owner's 582 export: frames 0–2 (the first source frame at 24 → 60 fps) hotter than the rest.
+        check("frame 0 = frame 10", all.count > 10 && H.distance(all[0].value, all[10].value) <= 3,
+              "frame 0 " + describe(all[0].value) + " frame 10 " + describe(all.count > 10 ? all[10].value : nil))
+        if let vt = try? await AVURLAsset(url: hdr.url).loadTracks(withMediaType: .video).first,
+           let desc = (try? await vt.load(.formatDescriptions))?.first {
+            let atoms = (CMFormatDescriptionGetExtension(desc, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any])?.keys.sorted() ?? []
+            let sub = CMFormatDescriptionGetMediaSubType(desc)
+            let dv = atoms.contains { $0.hasPrefix("dv") } || sub == 0x64766831 || sub == 0x64766865   // dvh1 / dvhe
+            check("pure HLG, no Dolby Vision", !dv, "atoms \(atoms) codec " + String(format: "%08x", sub))
+        }
         let head = all.prefix(15).map(\.value)
         let headWorst = head.map { m in middle.map { H.distance(m, $0) } ?? 99 }.max() ?? 99
         check("first 15 frames = middle", headWorst <= 3, "frames 0–14 " + head.map { describe($0) }.joined(separator: " ") + " middle " + describe(middle))
@@ -863,11 +873,11 @@ extension SnapshotRunner {
 
     /// Runs the session's export to a file next to the check's media; returns the file and the saved version.
     @MainActor
-    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, hdr: Bool = false, note: (String) -> Void) async -> (url: URL, take: Take?)? {
+    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, hdr: Bool = false, fps: Int = 30, note: (String) -> Void) async -> (url: URL, take: Take?)? {
         var settings = s.state.export
         settings.ratio = .portrait
         settings.resolution = .p720
-        settings.fps = 30
+        settings.fps = fps
         settings.codec = .h264
         settings.labelAI = labelAI
         settings.hdr = hdr
@@ -913,11 +923,11 @@ extension SnapshotRunner {
     // MARK: Test media
 
     /// An H.264 MP4 of one colour at 30 fps, 360 × 640, with a steady 440 Hz tone of amplitude `tone` (mono AAC 48 kHz) or no sound.
-    static func makeSolidVideo(_ url: URL, seconds: Double, rgb: (Int, Int, Int), tone: Double?, tag709: Bool = false) async throws {
+    static func makeSolidVideo(_ url: URL, seconds: Double, rgb: (Int, Int, Int), tone: Double?, tag709: Bool = false, fps: Int32 = 30) async throws {
         try? FileManager.default.removeItem(at: url)
         let dir = url.deletingLastPathComponent()
         let silent = tone == nil ? url : dir.appendingPathComponent("v-\(UUID().uuidString).mp4")
-        let w = 360, h = 640, fps: Int32 = 30
+        let w = 360, h = 640
         let writer = try AVAssetWriter(outputURL: silent, fileType: .mp4)
         var settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h]
         if tag709 {
