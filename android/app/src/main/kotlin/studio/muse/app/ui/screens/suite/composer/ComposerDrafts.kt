@@ -65,6 +65,10 @@ object ComposerDrafts {
             presetId?.let { put("presetId", JsonPrimitive(it)) }
             // Speaking: on or off; Auto is left out (the strict server refuses nulls), and reads back as Auto.
             if (d.tool != ComposerTool.PHOTO) d.speaking?.let { put("speaking", JsonPrimitive(it)) }
+            // Movement → Directed and the pinned model travel with the draft, so Claude's choices and the composer's agree
+            // (server suite/assist.ts requestOf reads directed.camera, engineModel and resolution).
+            d.directed?.let { j -> runCatching { kotlinx.serialization.json.Json.parseToJsonElement(j) as? JsonObject }.getOrNull()?.let { put("directed", JsonObject(mapOf("camera" to it))) } }
+            d.engineModel?.let { e -> put("engineModel", JsonPrimitive(e)); d.resolution?.let { put("resolution", JsonPrimitive(it)) } }
         }
         val rig = SuiteRig.from(d.settings)
         return if (d.tool == ComposerTool.PHOTO) SuiteDrafts.of("photo", count = photoCount, rig = rig, extra = extra)
@@ -91,7 +95,11 @@ object ComposerDrafts {
             val url = str("url") ?: return@mapNotNull null
             studio.muse.app.data.DraftReference(str("uploadId").orEmpty(), url, str("use") ?: "style", str("label"))
         })
-        return out.copy(collapsed = false, directed = null)
+        // Directed (Claude's suite_set_draft directed: a camera session's camera and guides) and the pinned model come back.
+        val dir = ((s["directed"] as? JsonObject)?.get("camera") as? JsonObject)?.let { JsonObject(it + ("mode" to JsonPrimitive("directed"))).toString() }
+        val e = (s["engineModel"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val r = (s["resolution"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        return out.copy(collapsed = false, directed = dir, engineModel = e, resolution = if (e == null) null else r)
     }
 
     /** The characters @-mentioned in the prompt, in order (a model's default rig applies only when there is exactly one). */

@@ -343,7 +343,20 @@ fun SuiteComposerScreen(toolId: String? = null) {
             else if (ev.type == studio.muse.app.data.ApiEvent.CONNECTED) store.assist.value?.let { a -> runCatching { c.repo.api.suiteAssist(a.id) }.getOrNull()?.let { store.applyAssist(it) } }
         }
     }
-    LaunchedEffect(d, assist?.id) { if (assist != null) { delay(600); store.pushComposerToAssist() } }
+    // One source of truth (owner, 2026-11-11): the shared draft carries the whole screen, so Claude watches the clip and
+    // sees the pictures that are on it (server suite/screen.ts).
+    val screenInputs = buildList {
+        if (d.tool == ComposerTool.SWAP || d.tool == ComposerTool.RECAST) recast.clipId?.let { id ->
+            add(studio.muse.app.ui.screens.suite.SuiteScreen.Input("${d.tool.id}.clip", "video", video.clip?.takeIf { it.id == id }?.name, clipId = id,
+                seconds = video.clip?.takeIf { it.id == id }?.durationSec))
+        }
+        studio.muse.app.ui.screens.suite.SuiteScreen.guide(d.directed)?.let { add(it) }
+        addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(own))
+        if (d.tool != ComposerTool.SWAP && d.tool != ComposerTool.RECAST) addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(slots))
+    }
+    LaunchedEffect(d, req, screenInputs, assist?.id) {
+        if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at) } }
+    }
     ScreenBox {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = ComposerLayout.wide(maxWidth.value.toInt())
@@ -379,6 +392,16 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
                     onUploadVideo = { open(null); pickExtendUpload(ToolSlots.EXTEND_VIDEO) },
+                    locations = locations,
+                    onUploadBackground = { uri ->
+                        scope.launch {
+                            val media = c.media ?: return@launch c.repo.toast("Couldn't read that picture")
+                            val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that picture")
+                            val (ref, err) = c.repo.attemptInline { uploadImage("background.jpg", bytes, media.mime(uri).takeIf { it.startsWith("image/") } ?: "image/jpeg") }
+                            if (ref != null) store.recast.update { it.copy(background = "photo", backgroundImage = ref, backgroundName = "Uploaded picture") }
+                            if (err != null) c.repo.toast(err)
+                        }
+                    },
                     onCreateLocation = { name, uri ->
                         scope.launch {
                             val media = c.media ?: return@launch c.repo.toast("Couldn't read that photo")

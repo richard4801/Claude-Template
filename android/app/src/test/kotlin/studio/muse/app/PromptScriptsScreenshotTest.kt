@@ -6,6 +6,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.update
@@ -74,7 +76,8 @@ class PromptScriptsScreenshotTest(private val theme: String, private val screen:
         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
         if (screen == "rule") {
-            compose.onNodeWithText("Not speaking: no lip-sync").performClick()
+            // The row can sit below the fold; its click action works without scrolling (a scroll animates and the clock is manual).
+            compose.onNodeWithText("Not speaking: no lip-sync").performSemanticsAction(SemanticsActions.OnClick)
             repeat(3) { idle(); compose.mainClock.advanceTimeBy(400) }
             compose.onNodeWithText("Reads as", substring = true, ignoreCase = true).assertExists()
         }

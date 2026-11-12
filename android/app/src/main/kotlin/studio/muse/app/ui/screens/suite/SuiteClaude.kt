@@ -52,7 +52,7 @@ suspend fun SuiteStore.newClaudeChat(): String? {
     val (a, err) = app.repo.attemptInline { createSuiteAssist(ComposerDrafts.draft(composer.value)) }
     if (a == null) { app.repo.toast(err ?: "Claude in the Suite isn't available on this server yet"); return null }
     assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey)
-    assistSynced = ComposerDrafts.draft(composer.value).json.toString()
+    assistSynced = null // the screen goes up with the next sync
     return a.id
 }
 
@@ -78,7 +78,7 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
         val before = composer.value
         // The composer keeps its mode (WS18): a draft an older server set to Shot doesn't switch Photo or Talking to Shot.
         composer.value = ComposerDrafts.restore(a.draft, before).copy(tool = before.tool)
-        assistSynced = ComposerDrafts.draft(composer.value).json.toString()
+        assistSynced = null // the composer as Claude left it goes back up with its screen
         // "Claude set Camera and Light", with Undo (the Rigs row's Undo; undoing goes back to Claude as the owner's edit).
         SuiteClaudeWords.claudeSet(SuiteClaudeWords.changed(before, composer.value))?.let { rigUndo.value = it to before }
     }
@@ -86,15 +86,18 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
 }
 
 /** The owner's own edit in the composer: sent so Claude sees it. When Claude changed the draft meanwhile, Claude's wins. */
-suspend fun SuiteStore.pushComposerToAssist() {
+suspend fun SuiteStore.pushComposerToAssist(screen: ((Long?) -> kotlinx.serialization.json.JsonObject)? = null) {
     val cur = assist.value ?: return
     // Another mode's draft (WS18): the composer switched tools; that mode's chat is bound when Claude opens there.
     if (cur.key != null && cur.key != claudeKey) return
-    val d = ComposerDrafts.draft(composer.value)
-    if (d.json.toString() == assistSynced) return
+    val base = ComposerDrafts.draft(composer.value)
+    // Everything on screen (owner, 2026-11-11): the clip, guides and slot pictures and the request Generate would send.
+    val key = screen?.let { kotlinx.serialization.json.JsonObject(base.json + ("screen" to it(null))) } ?: base.json
+    if (key.toString() == assistSynced) return
+    val d = screen?.let { studio.muse.app.data.SuiteDraft(kotlinx.serialization.json.JsonObject(base.json + ("screen" to it(System.currentTimeMillis())))) } ?: base
     try {
         val a = app.repo.api.patchSuiteAssist(cur.id, d, cur.revision)
-        assistSynced = d.json.toString()
+        assistSynced = key.toString()
         assist.update { it?.copy(revision = a.revision, pending = a.waiting) }
     } catch (e: ApiException) {
         if (e.code == "stale") runCatching { app.repo.api.suiteAssist(cur.id) }.getOrNull()?.let { applyAssist(it) }
@@ -147,6 +150,8 @@ object SuiteClaudeWords {
         val x = a.settings; val y = b.settings
         if (a.tokens.character?.id != b.tokens.character?.id) add("Character")
         if (a.tokens != b.tokens) add("Prompt")
+        if (a.directed != b.directed) add("Movement")
+        if (a.engineModel != b.engineModel || a.resolution != b.resolution) add("Model")
         if (listOf(x.body, x.lens, x.focalMm, x.aperture, x.height, x.shotSize) != listOf(y.body, y.lens, y.focalMm, y.aperture, y.height, y.shotSize)) add("Camera")
         if (x.lighting != y.lighting) add("Light")
         if (listOf(x.palette, x.stock, x.gradeLook) != listOf(y.palette, y.stock, y.gradeLook)) add("Look")
