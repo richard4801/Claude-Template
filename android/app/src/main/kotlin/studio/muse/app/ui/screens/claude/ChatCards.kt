@@ -284,6 +284,9 @@ private fun OrbStill(s: OrbState, page: Color, light: Boolean) {
  * ClaudeOrb.metal (the Mac) ≙ design/direction/orb_alive.py, in AGSL: keep the three in step. AGSL has no `thread`
  * references (out params instead) and its loops need constant bounds; the picture is the same.
  */
+// Lighter than the Mac's Metal orb: Android's Skia rejects a runtime shader over ~100k unrolled nodes ("program is too
+// large"; the Metal version is ~225k). 14 march steps instead of 22, single-octave warp/glints, and the self-shadow taken from
+// the previous step's density instead of a second density() per step. Same look, roughly a fifth of the size.
 private val ORB_AGSL = """
 uniform float2 size; uniform float scale; uniform float phase; uniform float time; uniform float bright; uniform float spin;
 uniform float danger; uniform float pulse; uniform float breath; uniform float lightPage; uniform float wobble; uniform float pop;
@@ -297,12 +300,11 @@ float noise3(float3 p) {
     float b = mix(mix(hash3(i + float3(0, 0, 1)), hash3(i + float3(1, 0, 1)), u.x), mix(hash3(i + float3(0, 1, 1)), hash3(i + float3(1, 1, 1)), u.x), u.y);
     return mix(a, b, u.z);
 }
-float fbm4(float3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise3(p); p = p * 2.07 + float3(1.7, 9.2, 4.1); a *= 0.5; } return v; }
 float fbm3(float3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 3; i++) { v += a * noise3(p); p = p * 2.07 + float3(1.7, 9.2, 4.1); a *= 0.5; } return v; }
 
 float3 dye(float3 p) {
     float h = fbm3(p * 0.9 + float3(11.0, 3.0, phase * 0.05));
-    float g = sstep(0.62, 0.75, fbm3(p * 1.3 + float3(-4.0, 7.0, 2.0)));
+    float g = sstep(0.62, 0.75, noise3(p * 1.3 + float3(-4.0, 7.0, 2.0)));
     float3 m = float3(1.0, 0.24, 0.66); float3 v = float3(0.56, 0.33, 1.0); float3 bl = float3(0.22, 0.48, 1.0); float3 c = float3(0.15, 0.9, 0.95);
     float t = clamp((h - 0.3) * 2.5, 0.0, 1.0) * 3.0;
     float3 col = t < 1.0 ? mix(m, v, t) : (t < 2.0 ? mix(v, bl, t - 1.0) : mix(bl, c, t - 2.0));
@@ -313,16 +315,16 @@ float3 dye(float3 p) {
 
 float density(float3 p, out float3 q) {
     float t = phase;
-    float3 w = float3(fbm3(p * 1.1 + float3(0.0, -t * 0.18, t * 0.07)), fbm3(p * 1.1 + float3(5.2, 1.3 - t * 0.2, -t * 0.05)), fbm3(p * 1.1 + float3(2.7, 8.1, t * 0.09)));
+    float3 w = float3(noise3(p * 1.1 + float3(0.0, -t * 0.18, t * 0.07)), noise3(p * 1.1 + float3(5.2, 1.3 - t * 0.2, -t * 0.05)), noise3(p * 1.1 + float3(2.7, 8.1, t * 0.09)));
     q = p + (w - 0.5) * 1.3 + float3(-spin * t * 0.5, -t * 0.12, 0.0);
-    float d = fbm4(q * 2.8 + float3(0.0, 0.0, t * 0.04));
+    float d = fbm3(q * 2.8 + float3(0.0, 0.0, t * 0.04));
     float edge = sstep(0.86, 0.45, length(p));
     float low = mix(1.15, 0.6, sstep(-0.6, 0.7, p.y));
     float thick = mix(0.5, 0.42, danger) - 0.04 * bright;
     d = sstep(thick, thick + 0.2, d) * edge * low;
     float age = 1.0 - pulse;
     float3 c = float3(0.18 * sin(time * 1.3), -0.55 + 0.55 * age, 0.1 * cos(time * 1.1));
-    d += pulse * sstep(0.32 + 0.2 * age, 0.0, length((p - c) * float3(1.0, 0.7, 1.0)) - 0.15 * (fbm3(p * 4.0 + t) - 0.5));
+    d += pulse * sstep(0.32 + 0.2 * age, 0.0, length((p - c) * float3(1.0, 0.7, 1.0)) - 0.15 * (noise3(p * 4.0 + t) - 0.5));
     return d;
 }
 
@@ -344,16 +346,14 @@ half4 main(float2 position) {
     float shade = mix(light ? 0.9 : 0.03, light ? 0.97 : 0.3, sstep(0.3, -0.9, uv.y));
     float3 glass = page * shade + (light ? float3(0.0) : float3(0.015, 0.015, 0.025));
 
-    float z0 = nz * 0.9; float z1 = -nz * 0.9; float dz = (z0 - z1) / 22.0;
-    float3 acc = float3(0.0); float T = 1.0;
-    for (int i = 0; i < 22; i++) {
+    float z0 = nz * 0.9; float z1 = -nz * 0.9; float dz = (z0 - z1) / 14.0;
+    float3 acc = float3(0.0); float T = 1.0; float sh = 0.0;
+    for (int i = 0; i < 14; i++) {
         float z = z0 - (float(i) + 0.5) * dz;
         float3 p = float3(uv, z);
         float3 q;
         float d = density(p, q);
         if (d > 0.01) {
-            float3 qs;
-            float sh = density(p + float3(-0.12, 0.16, 0.12), qs);
             float3 col = dye(q);
             float hot = sstep(0.45, 0.95, d);
             float3 e = mix(col, float3(1.0, 0.97, 0.95), hot * 0.85) * d * (1.0 + 0.5 * hot) * (1.0 - 0.45 * clamp(sh, 0.0, 1.0));
@@ -362,6 +362,7 @@ half4 main(float2 position) {
             T *= exp(-d * dz * 4.5);
             if (T < 0.03) { break; }
         }
+        sh = d;
     }
     float dense = 1.0 - T;
 
