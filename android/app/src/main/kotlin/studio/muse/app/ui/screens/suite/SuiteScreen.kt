@@ -56,10 +56,23 @@ object SuiteScreen {
             seconds = (v?.get("seconds") as? JsonPrimitive)?.content?.toDoubleOrNull())
     }
 
-    /** The draft's `screen`. [at] null leaves the time out (to compare with what was sent). */
-    fun json(tool: String, request: SuiteShotRequest?, inputs: List<Input>, at: Long? = System.currentTimeMillis()): JsonObject = JsonObject(buildMap {
+    /**
+     * Swap / Recast's panel controls, also before a request can be built: the Background (even New photo before a picture
+     * is picked) and its picture's name, whether the new place is written, the quality, clip sound and takes.
+     */
+    fun swapSettings(r: RecastDraft): Map<String, JsonElement> = buildMap {
+        put("background", JsonPrimitive(r.background))
+        if (r.background == "photo" && r.backgroundImage != null) put("backgroundName", JsonPrimitive(r.backgroundName.ifBlank { "New background" }.take(120)))
+        if (r.background == "describe") put("placeWritten", JsonPrimitive(r.place.isNotBlank()))
+        put("quality", JsonPrimitive(r.quality)); put("clipSound", JsonPrimitive(r.keepAudio)); put("takes", JsonPrimitive(r.takes))
+        put("people", JsonPrimitive(r.people.size))
+    }
+
+    /** The draft's `screen`. [at] null leaves the time out (to compare with what was sent). [settings]: the panel's own controls. */
+    fun json(tool: String, request: SuiteShotRequest?, inputs: List<Input>, at: Long? = System.currentTimeMillis(), settings: Map<String, JsonElement> = emptyMap()): JsonObject = JsonObject(buildMap {
         put("tool", JsonPrimitive(tool))
         put("inputs", JsonArray(inputs.take(24).map { it.json() }))
+        if (settings.isNotEmpty()) put("settings", JsonObject(settings))
         at?.let { put("at", JsonPrimitive(it)) }
         request?.let { r ->
             val o = SuiteWireJson.encodeToJsonElement(SuiteShotRequest.serializer(), r) as? JsonObject

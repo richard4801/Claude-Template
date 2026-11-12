@@ -354,8 +354,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
         addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(own))
         if (d.tool != ComposerTool.SWAP && d.tool != ComposerTool.RECAST) addAll(studio.muse.app.ui.screens.suite.SuiteScreen.inputs(slots))
     }
-    LaunchedEffect(d, req, screenInputs, assist?.id) {
-        if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at) } }
+    val screenSettings = if (d.tool == ComposerTool.SWAP || d.tool == ComposerTool.RECAST) studio.muse.app.ui.screens.suite.SuiteScreen.swapSettings(recast) else emptyMap()
+    LaunchedEffect(d, req, screenInputs, screenSettings, assist?.id) {
+        if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at, screenSettings) } }
     }
     ScreenBox {
         BoxWithConstraints(Modifier.fillMaxSize()) {

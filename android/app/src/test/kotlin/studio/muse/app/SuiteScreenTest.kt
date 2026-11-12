@@ -57,4 +57,17 @@ class SuiteScreenTest {
         assertNotNull(SuiteScreen.guide(back.directed))
         assertNull(ComposerDrafts.restore(ComposerDrafts.draft(ComposerDraft()), d).directed)
     }
+
+    @Test fun swapSettingsCarryTheBackgroundEvenBeforeAPictureIsPicked() {
+        val pending = studio.muse.app.ui.screens.suite.RecastDraft(background = "photo")
+        val s = SuiteScreen.swapSettings(pending)
+        assertEquals(JsonPrimitive("photo"), s["background"])
+        assertNull(s["backgroundName"])
+        val picked = pending.copy(backgroundImage = ImageRef(url = "/uploads/u/roof.jpg"), backgroundName = "Rooftop")
+        assertEquals(JsonPrimitive("Rooftop"), SuiteScreen.swapSettings(picked)["backgroundName"])
+        assertEquals(JsonPrimitive(false), SuiteScreen.swapSettings(pending.copy(background = "describe"))["placeWritten"])
+        val j = SuiteScreen.json("swap", null, emptyList(), null, SuiteScreen.swapSettings(picked))
+        assertEquals(JsonPrimitive("photo"), (j["settings"] as JsonObject)["background"])
+        assertNull(SuiteScreen.json("shot", null, emptyList(), null)["settings"])
+    }
 }
