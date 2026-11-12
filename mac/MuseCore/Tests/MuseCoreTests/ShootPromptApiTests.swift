@@ -46,7 +46,8 @@ final class ShootPromptApiTests: XCTestCase {
         XCTAssertEqual(lib.sections.first?.group.id, "photoshoot")
         let refsPose = try XCTUnwrap(lib.entry("refs.pose"))
         XCTAssertTrue(refsPose.placeholders.contains { $0.name == "refIndex" && $0.required })
-        XCTAssertEqual(lib.entry("style.house")?.defaultText, PromptEngine.houseStyle)
+        XCTAssertEqual(lib.entry("style.realism")?.defaultText, PromptEngine.realism)
+        XCTAssertEqual(lib.entry("style.camera")?.defaultText, PromptEngine.cameraFeel)
 
         let all = try await boss.listModels()
         let m = try XCTUnwrap(all.first { !$0.outfitIds.isEmpty })

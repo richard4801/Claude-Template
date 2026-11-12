@@ -770,6 +770,10 @@ public struct ShotRequest: Codable, Hashable, Sendable {
     public var dryRun: Bool?
     public var clipId: String?
     public var keepAudio: Bool?
+    /// Swap / Recast background: nil = Keep (the clip's place); "describe" = the prompt's words set the new place; "photo" = a new picture.
+    public var background: String?
+    /// Background "photo": the new background picture (a studio location or an upload).
+    public var backgroundImage: ImageRef?
     /// "Grade the take with this look" (nil = the server's default, on).
     public var gradeLook: Bool?
     /// Owner only (bypass the ladder). Members never send these.
