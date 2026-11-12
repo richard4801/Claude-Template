@@ -1,8 +1,8 @@
 """Claude's orb, Option C2 alive (owner, 2026-11-12: "the orb itself moves subtly in time with the swirling inside"): C2's smoke,
 and the glass body follows it: a soft-body wobble of the silhouette (bulging where the smoke presses), a breathing scale
 with the emission (a pop per chunk, a bump per action), a tiny drift and a tilt of the reflections with the flow (leaning
-into the current when operating). The rim and highlight deform with the silhouette. A horizon glint like the owner's
-reference sits just below the centre with the smoke around and through it. Reduce Motion freezes the shape.
+into the current when operating). The rim and highlight deform with the silhouette. No glint and no added lines (owner):
+the densest smoke is the light. Reduce Motion freezes the shape.
 Based on Option C2 (owner, 2026-11-12: "smoke with depth; right now it moves in a pattern"): B's glass ball with
 real 3D volumetric smoke inside. A ray is marched through the ball (front to back, with absorption) in a 3D density
 field: domain-warped 3D noise advected by a slowly evolving flow (time as the fourth dimension) — plumes rise, curl,
@@ -67,13 +67,6 @@ float density(vec3 p, out vec3 q) {
   return d;
 }
 
-// The glint's spectrum (as Option B): gold and orange at its left end, cyan, blue and violet at its right.
-vec3 spectrum(float x) {
-  vec3 l = mix(vec3(1.0, 0.78, 0.45), vec3(1.0, 0.45, 0.15), clamp(-x, 0.0, 1.0));
-  vec3 r = mix(vec3(0.45, 0.85, 1.0), mix(vec3(0.3, 0.5, 1.0), vec3(0.62, 0.42, 1.0), clamp(x * 2.0 - 1.0, 0.0, 1.0)), clamp(x * 1.6, 0.0, 1.0));
-  vec3 c = mix(mix(l, vec3(1.0, 0.95, 0.9), smoothstep(-0.6, 0.0, x)), r, smoothstep(0.0, 0.6, x));
-  return mix(c, mix(vec3(1.0, 0.35, 0.2), vec3(1.0, 0.65, 0.25), clamp(0.5 - x, 0.0, 1.0)), uDanger);
-}
 
 void main() {
   vec2 px = (gl_FragCoord.xy - uCenter) / uRadius;
@@ -115,7 +108,7 @@ void main() {
       float sh = density(p + vec3(-0.12, 0.16, 0.12), qs);          // toward the light: denser there, darker here
       vec3 col = dye(q);
       float hot = smoothstep(0.45, 0.95, d);
-      vec3 e = mix(col, vec3(1.0, 0.97, 0.95), hot * 0.85) * d * (1.0 - 0.45 * clamp(sh, 0.0, 1.0));
+      vec3 e = mix(col, vec3(1.0, 0.97, 0.95), hot * 0.85) * d * (1.0 + 0.5 * hot) * (1.0 - 0.45 * clamp(sh, 0.0, 1.0));
       e *= mix(0.55, 1.0, (z - z1) / max(z0 - z1, 1e-3));          // farther smoke is dimmer
       acc += T * e * dz * 6.5 * bright;
       T *= exp(-d * dz * 4.5);
@@ -134,20 +127,6 @@ void main() {
   vec2 su = vec2(cos(tiltA) * uv.x - sin(tiltA) * uv.y, sin(tiltA) * uv.x + cos(tiltA) * uv.y);
   vec3 spec = vec3(1.0) * exp(-(pow(su.x + 0.12, 2.0) / 0.22 + pow(su.y - 0.62, 2.0) / 0.035)) * 0.16;
 
-  // The horizon glint (the owner's reference): a short bright caustic just below the centre, its ends split into
-  // spectrum, with the smoke around and through it. It brightens with the state and pops with each chunk or action.
-  vec2 g = su - vec2(0.02 * sin(uPhase * 0.4), -0.16);
-  float halfLen = 0.62 + 0.1 * uPulse;
-  float gx = g.x / halfLen;
-  float taper = clamp(1.0 - gx * gx, 0.0, 1.0);
-  float gd = g.y - (0.07 * (1.0 - gx * gx) - 0.03);
-  float gw = (0.07 + 0.02 * uPulse) * pow(taper, 0.8) + 0.004;
-  float ends = smoothstep(0.25, 0.9, abs(gx)) * taper;
-  vec3 glint = vec3(1.0, 0.98, 0.95) * exp(-pow(gd / (0.5 * gw), 2.0)) * pow(taper, 1.8) * 1.3 * (1.0 - 0.5 * ends)
-             + spectrum(gx) * exp(-pow(gd / gw, 2.0)) * pow(taper, 1.1) * (0.4 + 1.5 * ends)
-             + mix(vec3(0.95, 0.88, 0.78), spectrum(gx), 0.4) * exp(-pow(gd / 0.22, 2.0)) * pow(taper, 0.7) * 0.3;
-  glint *= (0.55 + 0.45 * bright) * mix(1.0, 0.7, clamp(dense, 0.0, 1.0));      // the smoke passes in front of it
-  vec3 glintRim = (spectrum(-0.9) * exp(-pow((atan(uv.y, uv.x) - 3.4) / 0.35, 2.0)) + spectrum(0.9) * exp(-pow((atan(uv.y, uv.x) + 0.3) / 0.35, 2.0))) * f * 0.5;
 
   vec3 col;
   if (light) {
@@ -155,10 +134,9 @@ void main() {
     float a = clamp(dense * 1.25, 0.0, 0.95);
     vec3 dyeC = clamp(acc / max(0.2, max(acc.r, max(acc.g, acc.b))), 0.0, 1.0);
     col = mix(glass, dyeC, a) + rim * 0.55 - vec3(0.05) * f + spec * 0.6;
-    col = mix(col, vec3(0.1, 0.08, 0.14), clamp(length(glint) * 0.25, 0.0, 0.5)) + glint * 0.8 + glintRim * 0.5;
   } else {
     vec3 lit = 1.0 - exp(-acc * 1.15);                                                // soft tone map: bright, never blown out
-    col = glass * T + lit + rim + spec + glint * (1.0 - 0.5 * clamp(lit.r + lit.g + lit.b - 1.5, 0.0, 1.0)) + glintRim;
+    col = glass * T + lit + rim + spec;
   }
   float aa = smoothstep(1.0, 0.985, r);
   gl_FragColor = vec4(clamp(col, 0.0, 1.0) * aa, aa);
