@@ -108,6 +108,9 @@ extension SnapshotRunner {
             // Edit: the editor's Claude panel on its Chat tab.
             if let take {
                 state.claudeTab = 0
+                // A reload since the walk began (a review job finishing) replaces store.takes and drops this stand-in;
+                // the editor would then refuse it and stay on the Edit home (run 578). Put it back right before opening.
+                if !store.takes.contains(where: { $0.id == take.id }) { store.takes.insert(take, at: 0) }
                 store.openEdit(takeId: take.id)
                 try? await Task.sleep(for: .seconds(7))
                 lines.append(drawnLine("claude_edit", theme, needsReply: true))
