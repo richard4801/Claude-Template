@@ -254,6 +254,20 @@ index 907e976..7552abb 100644
              Text("Claude is using MUSE")
                  .font(.system(size: 12, weight: .medium))
              Text("·").foregroundStyle(.secondary)
+diff --git a/mac/Muse/App/SuiteClaudeBridge.swift b/mac/Muse/App/SuiteClaudeBridge.swift
+index 79ffdf5..49120d8 100644
+--- a/mac/Muse/App/SuiteClaudeBridge.swift
++++ b/mac/Muse/App/SuiteClaudeBridge.swift
+@@ -599,6 +599,9 @@ extension AppStore {
+             inputs += SuiteScreen.inputs(suite.composerSlots.slots)
+             request = shotRequest
+         }
++        // The pinned model as the server labels it ("<Model> · <Provider>", the Model pill's words): Claude and the
++        // panel's context strip name it the same way.
++        if composerPinnedModel != nil { settings["modelLabel"] = .string(String(composerModelLabel.prefix(120))) }
+         return SuiteScreen.json(tool: toolName, request: request, inputs: inputs, settings: settings, at: at)
+     }
+ 
 diff --git a/mac/Muse/Views/Claude/ChatCards.swift b/mac/Muse/Views/Claude/ChatCards.swift
 new file mode 100644
 index 0000000..fcecb9c
@@ -1646,10 +1660,10 @@ index 0000000..47fbaf8
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift
 new file mode 100644
-index 0000000..f259415
+index 0000000..ed80569
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,112 @@
 +import Foundation
 +
 +// The Claude panel's live context strip (owner, 2026-11-12: "the 'Claude sees' feature is basic"): under the header, a row
@@ -1739,8 +1753,10 @@ index 0000000..f259415
 +            out.append(ClaudeContextItem(id: "in:\(slot)", kind: k, label: label, detail: str(i["label"]), image: imageOf(i, video: kind == "video"),
 +                                         clipId: str(i["clipId"]), isVideo: kind == "video", words: nil))
 +        }
-+        if let e = str(request["engineModel"]) {
-+            out.append(ClaudeContextItem(id: "model:\(e)", kind: .model, label: "Model", detail: lookups.modelLabel(e) ?? e, image: nil, clipId: nil, isVideo: false, words: nil))
++        // The picked model, by the label the server gives it (settings.modelLabel, the Model pill's words).
++        if let e = str(request["engineModel"]) ?? str(settings["modelLabel"]) {
++            let label = str(settings["modelLabel"]) ?? lookups.modelLabel(e) ?? e
++            out.append(ClaudeContextItem(id: "model:\(e)", kind: .model, label: "Model", detail: label, image: nil, clipId: nil, isVideo: false, words: nil))
 +        }
 +        return out
 +    }
@@ -2113,7 +2129,7 @@ index e457bb6..05f1617 100644
              let all = shown.joined(separator: "\n")
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
 new file mode 100644
-index 0000000..28a091f
+index 0000000..8894e61
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
 @@ -0,0 +1,222 @@
@@ -2324,17 +2340,17 @@ index 0000000..28a091f
 +            SuiteScreen.Input(slot: "remix.outfit", kind: "image", label: "Hoodie photo", url: "/uploads/p.jpg"),
 +            SuiteScreen.Input(slot: "reference 1", kind: "image", label: "Look", role: "style", url: "/uploads/r.jpg"),
 +            SuiteScreen.Input(slot: "guide", kind: "video", label: "Blender guide", role: "blocking", key: "g.mp4"),
-+        ], at: nil)
++        ], settings: ["modelLabel": .string("Seedance 2.0 · Higgsfield")], at: nil)
 +        let items = ClaudeContext.items(screen: screen, lookups: .init(
 +            character: { $0 == "m_1" ? ("Ava", ImageRef(url: "/uploads/face.jpg")) : nil },
 +            outfit: { $0 == "of_1" ? ("Hoodie", nil) : nil },
 +            clipPoster: { $0 == "clip_1" ? ImageRef(url: "/uploads/poster.jpg") : nil },
-+            modelLabel: { _ in "Seedance 2 · Higgsfield" }))
++            modelLabel: { _ in "not used: the screen names it" }))
 +        XCTAssertEqual(items.map(\.label), ["Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide", "Model"])
 +        XCTAssertEqual(items[0].image?.url, "/uploads/poster.jpg")
 +        XCTAssertEqual(items[1].detail, "Ava")
 +        XCTAssertEqual(items[3].words, "a beach at dusk")
-+        XCTAssertEqual(items.last?.detail, "Seedance 2 · Higgsfield")
++        XCTAssertEqual(items.last?.detail, "Seedance 2.0 · Higgsfield") // the server's label, never built in the app
 +        XCTAssertEqual(Set(items.map(\.id)).count, items.count) // stable, unique ids (the strip animates by id)
 +        XCTAssertTrue(ClaudeContext.items(screen: .null).isEmpty)
 +    }
