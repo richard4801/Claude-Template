@@ -497,7 +497,7 @@ final class BlenderRelayTests: XCTestCase {
 
     func testReaderHandlesALargeReply() throws {
         let items = (0..<40_000).map { #"{"name":"MUSE_obj_\#($0)","location":[1.25,-2.5,0.0]}"# }.joined(separator: ",")
-        let reply = Data(#"{"status":"success","result":{"objects":["#.utf8 + Data(items.utf8) + Data("]}}".utf8)
+        let reply = Data(#"{"status":"success","result":{"objects":["#.utf8) + Data(items.utf8) + Data("]}}".utf8)
         XCTAssertGreaterThan(reply.count, 1_500_000)
         XCTAssertEqual(try feedAll(chunks(reply, size: 64 * 1024)), reply)
         XCTAssertThrowsError(try feedAll(chunks(reply, size: 64 * 1024), max: 1_048_576)) {
