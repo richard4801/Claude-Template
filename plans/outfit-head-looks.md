@@ -7,7 +7,9 @@ back→back (character sheet slots: face, faceTq, profile, front, tq, side, back
 (routes/index.ts POST /v1/outfits, identityRefs; the built-in model path makes a front shot then edits it, custom
 models make four new shots at once). A missing slot falls back to the front body photo.
 
-## 2. Head looks (new feature: design, then build)
+## 2. Head looks — DROPPED (owner, 2026-11-12)
+Dropped: outfits carry their own hair, make-up and accessories (each outfit's 3 face close-ups, §7). Nothing was built
+(no code, flags or migrations). The original idea, kept for the record:
 - A Head look = her head with a hairstyle/headpiece, makeup and face accessories (glasses, earrings, piercings):
   FOUR pictures: face front, face ¾, face side, back of head.
 - Own inventory on the character (not scattered among outfits). Reusable across outfits.
@@ -89,4 +91,11 @@ are edits of that front + her base photo of the same angle. Nothing kept → as 
 ## 7. Outfits carry their own face close-ups; Dress up removed (owner, 2026-11-11; built on claude/outfit-faces)
 Every outfit = 4 body angles + 3 face close-ups with its own hair, make-up and face accessories, made from her base face
 photos and the outfit's front. Shots with an outfit send only the outfit's images. Dress up is removed. Spec, prices and
-app design: `plans/outfit-faces.md`. (Whether §2 Head looks is still wanted on top of this is the owner's call.)
+app design: `plans/outfit-faces.md`. Head looks (§2) DROPPED (owner, 2026-11-12): outfits carry their own hair,
+make-up and accessories.
+
+## 8. Reorder an outfit's pictures (owner, 2026-11-12; built on claude/outfit-reorder)
+"The picture in Side is actually the back": POST /v1/outfits/:id/reorder {moves: [{from, to}], dryRun?} swaps pictures
+between the 7 slots (front, tq, side, back, face, faceTq, profile); free; the owner or the outfit's maker. Claude:
+`outfit_reorder` (preview without confirm, then an Approve card), and suite_see labels each picture with its slot. Apps:
+drag a picture onto another slot in the open outfit, or "Move to…" on each picture. Fixes Claude issue ci_cf8c3c8ee924.

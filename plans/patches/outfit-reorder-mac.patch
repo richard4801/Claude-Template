@@ -1,0 +1,246 @@
+diff --git a/mac/Muse/App/AppStore+Outfits.swift b/mac/Muse/App/AppStore+Outfits.swift
+index bba90fc5..edb8b072 100644
+--- a/mac/Muse/App/AppStore+Outfits.swift
++++ b/mac/Muse/App/AppStore+Outfits.swift
+@@ -124,6 +124,21 @@ extension AppStore {
+             try await api.redoOutfit(id: o.id, picture: OutfitPictures.keys[k], imageModel: enginePick(.outfit)?.model)
+         }
+     }
++    /// Move a picture to another of its 7 slots (owner 2026-11-12: "the picture in Side is actually the back"): the two
++    /// swap, so nothing is lost. Free; the owner or the outfit's maker (the server checks too).
++    func moveOutfitPicture(_ o: Outfit, from: Int, to: Int) {
++        let keys = OutfitPictures.keys
++        guard from != to, keys.indices.contains(from), keys.indices.contains(to), canChange(o) else { return }
++        guard remakingOutfit[o.id] == nil, !fillingOutfits.contains(o.id), o.state != "generating" else {
++            showToast("This outfit is still being made")
++            return
++        }
++        perform { [self] in
++            let r = try await api.reorderOutfit(id: o.id, moves: [OutfitMove(from: keys[from], to: keys[to])])
++            LiveEvents.applyOutfit(&outfits, &models, r.outfit)
++        }
++    }
++
+     /// One edit; the front is a new shot (its price as one new outfit picture).
+     func outfitRedoEstimate(_ k: Int) -> Double { k == 0 ? photoPricing.outfitSet() - 3 * photoPricing.perEdit : photoPricing.perEdit }
+ 
+diff --git a/mac/Muse/Views/OutfitPageViews.swift b/mac/Muse/Views/OutfitPageViews.swift
+index 49c4ee1f..2a155dc0 100644
+--- a/mac/Muse/Views/OutfitPageViews.swift
++++ b/mac/Muse/Views/OutfitPageViews.swift
+@@ -137,6 +137,7 @@ struct OutfitOpenView: View {
+                             ForEach(row, id: \.self) { k in
+                                 VStack(alignment: .leading, spacing: Space.s2) {
+                                     picture(o, k, items: items, filling: filling)
++                                        .dropDestination(for: String.self) { got, _ in dropped(o, on: k, got) }
+                                     Text(OutfitPictures.captions[k]).scaled(t.scale.caption, t.roles.ink2)
+                                 }
+                                 .frame(maxWidth: .infinity, alignment: .leading)
+@@ -223,8 +224,12 @@ struct OutfitOpenView: View {
+         if busy {
+             SkeletonBlock(ratio: 0.75, radius: t.radii.container)
+         } else if let ref, let at = items.firstIndex(where: { $0.ref == ref && $0.label == label }) {
++            let free = store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil
+             OutfitPictureTile(ref: ref, label: label,
+-                              redo: store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
++                              redo: free ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
++                              moves: free ? OutfitPictures.moveTargets(o, from: k).map { OutfitMoveTarget(index: $0.index, title: $0.title) } : [],
++                              dragPayload: free ? Self.payload(o.id, k) : nil,
++                              onMove: { store.moveOutfitPicture(o, from: k, to: $0) },
+                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
+                               onRedo: { store.redoOutfitPicture(o, k) })
+         } else {
+@@ -234,6 +239,15 @@ struct OutfitOpenView: View {
+         }
+     }
+ 
++    /// Drag and drop between slots: the dragged picture is "<outfit id>#<slot index>"; dropping it on another slot swaps them.
++    static func payload(_ outfitId: String, _ k: Int) -> String { "\(outfitId)#\(k)" }
++    private func dropped(_ o: Outfit, on k: Int, _ got: [String]) -> Bool {
++        guard let s = got.first, let hash = s.lastIndex(of: "#"), String(s[..<hash]) == o.id,
++              let from = Int(s[s.index(after: hash)...]), from != k, store.canChange(o) else { return false }
++        store.moveOutfitPicture(o, from: from, to: k)
++        return true
++    }
++
+     /// The pictures that exist, in order, for the full-size viewer ("Face side  7 of 7").
+     static func items(_ o: Outfit) -> [LightboxItem] {
+         OutfitPictures.shown(o).map { LightboxItem(label: $0.label, ref: $0.ref) }
+@@ -241,17 +255,29 @@ struct OutfitOpenView: View {
+ }
+ 
+ /// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), the same in its menu.
++/// A "Move to…" entry: the slot (0–6) and its title ("Swap with Back", "Move to Face side").
++struct OutfitMoveTarget: Hashable {
++    var index: Int
++    var title: String
++}
++
++/// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), and in its menu Redo
++/// and "Move to…" (the other 6 slots). Drag it onto another slot to swap them.
+ struct OutfitPictureTile: View {
+     var ref: ImageRef
+     var label: String
+     /// "Redo · $0.03", or nil when this person can't change the outfit.
+     var redo: String?
++    var moves: [OutfitMoveTarget] = []
++    /// Set when it may be dragged to another slot.
++    var dragPayload: String?
++    var onMove: (Int) -> Void = { _ in }
+     var open: () -> Void
+     var onRedo: () -> Void
+     @State private var hover = false
+ 
+     var body: some View {
+-        Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
++        withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
+             .buttonStyle(.plain)
+             .help("View \(label.lowercased()) full size")
+             .accessibilityLabel("View \(label.lowercased()) full size")
+@@ -263,6 +289,15 @@ struct OutfitPictureTile: View {
+             .onHover { hover = $0 }
+             .contextMenu {
+                 if let redo { Button(redo, action: onRedo) }
+-            }
++                if !moves.isEmpty {
++                    Menu("Move to…") {
++                        ForEach(moves, id: \.self) { m in Button(m.title) { onMove(m.index) } }
++                    }
++                }
++            })
++    }
++
++    @ViewBuilder private func withDrag<V: View>(_ v: V) -> some View {
++        if let dragPayload { v.draggable(dragPayload) { MediaFrame(ref: ref, ratio: 0.75).frame(width: 90) } } else { v }
+     }
+ }
+diff --git a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+index 6845d64e..f2113788 100644
+--- a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+@@ -708,6 +708,22 @@ public actor FakeMuseAPI: MuseAPI {
+         return OutfitFill(outfit: outfits[i], cost: cost)
+     }
+ 
++    public func reorderOutfit(id: String, moves: [OutfitMove]) throws -> OutfitReorder {
++        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
++        var pics = OutfitPictures.refs(outfits[i])
++        for m in moves {
++            guard let f = OutfitPictures.keys.firstIndex(of: m.from), let t = OutfitPictures.keys.firstIndex(of: m.to), f != t else {
++                throw ApiError("bad_request", "moves: two different slots (front, tq, side, back, face, faceTq, profile)")
++            }
++            pics = OutfitPictures.swapped(pics, f, t)
++        }
++        let changed = OutfitPictures.keys.indices.filter { pics[$0] != OutfitPictures.refs(outfits[i])[$0] }.map { OutfitPictures.keys[$0] }
++        outfits[i].angles = Array(pics.prefix(4))
++        outfits[i].faces = Array(pics.suffix(3))
++        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
++        return OutfitReorder(outfit: outfits[i], changed: changed)
++    }
++
+     public func redoOutfit(id: String, picture: String, imageModel: String?) throws -> OutfitFill {
+         guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+         guard let k = OutfitPictures.keys.firstIndex(of: picture) else { throw ApiError("bad_request", "angle: front, tq, side, back, face, faceTq or profile") }
+diff --git a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+index 5e842cd9..81d46479 100644
+--- a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+@@ -284,6 +284,12 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
+         try await call("POST", "v1/outfits/\(Self.pathKey(id))/redo", OutfitRedoBody(angle: picture, imageModel: imageModel))
+     }
+     private struct OutfitRedoBody: Encodable { var angle: String; var imageModel: String? }
++    public func reorderOutfit(id: String, moves: [OutfitMove]) async throws -> OutfitReorder {
++        var r: OutfitReorder = try await call("POST", "v1/outfits/\(Self.pathKey(id))/reorder", OutfitReorderBody(moves: moves))
++        r.outfit = absolutize(r.outfit)
++        return r
++    }
++    private struct OutfitReorderBody: Encodable { var moves: [OutfitMove] }
+ 
+     /// Images: presign → PUT → confirm. A server without presigned uploads (server/mock), or a PUT that can't reach storage, falls back to multipart.
+     public func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef {
+diff --git a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+index 99fe2570..327a1f46 100644
+--- a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+@@ -79,6 +79,8 @@ public protocol MuseAPI: AnyObject, Sendable {
+     func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill
+     /// Redo one of its 7 pictures (`OutfitPictures.keys`: front, tq, side, back, face, faceTq, profile; paid).
+     func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill
++    /// Move pictures between its 7 slots (each move swaps `from` and `to`; free; owner or maker).
++    func reorderOutfit(id: String, moves: [OutfitMove]) async throws -> OutfitReorder
+ 
+     // Uploads (HTTP: presign → PUT → confirm, falling back to a multipart upload). `progress` reports 0…1.
+     func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef
+diff --git a/mac/MuseCore/Sources/MuseCore/OutfitPage.swift b/mac/MuseCore/Sources/MuseCore/OutfitPage.swift
+index 515133cf..e19c19d4 100644
+--- a/mac/MuseCore/Sources/MuseCore/OutfitPage.swift
++++ b/mac/MuseCore/Sources/MuseCore/OutfitPage.swift
+@@ -166,8 +166,34 @@ public enum OutfitPictures {
+         return angles + faces
+     }
+ 
++    /// Swap the pictures of slots `a` and `b` (a reorder move: nothing is lost).
++    public static func swapped(_ pics: [ImageRef?], _ a: Int, _ b: Int) -> [ImageRef?] {
++        var p = pics
++        guard p.indices.contains(a), p.indices.contains(b) else { return p }
++        p.swapAt(a, b)
++        return p
++    }
++    /// "Move to…" entries for the picture in slot `from`: every other slot, "Swap with Back" when it holds a picture,
++    /// "Move to Face side" when it is empty.
++    public static func moveTargets(_ o: Outfit, from: Int) -> [(index: Int, title: String)] {
++        let pics = refs(o)
++        return pics.indices.filter { $0 != from }.map { k in (k, pics[k] == nil ? "Move to \(captions[k])" : "Swap with \(captions[k])") }
++    }
++
+     /// The ones with a picture, in order, with their index (0–6) and viewer label.
+     public static func shown(_ o: Outfit) -> [(index: Int, label: String, ref: ImageRef)] {
+         refs(o).enumerated().compactMap { i, r in r.map { (i, viewerLabels[i], $0) } }
+     }
+ }
++
++/// One reorder move (POST /v1/outfits/{id}/reorder): the pictures of `from` and `to` swap.
++public struct OutfitMove: Codable, Hashable, Sendable {
++    public var from: String
++    public var to: String
++    public init(from: String, to: String) { self.from = from; self.to = to }
++}
++public struct OutfitReorder: Codable, Sendable {
++    public var outfit: Outfit
++    public var changed: [String]
++    public init(outfit: Outfit, changed: [String]) { self.outfit = outfit; self.changed = changed }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift b/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift
+index 230a3bb9..2000f140 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift
+@@ -48,4 +48,16 @@ final class OutfitPagesTests: XCTestCase {
+         XCTAssertFalse(o.hasFaces)
+         XCTAssertEqual(OutfitPictures.shown(o).count, 3)
+     }
++
++    /// Reorder (owner 2026-11-12): moves swap two slots; "Move to…" names the other six.
++    func testReorderSwapsAndMenuTitles() {
++        let o = Outfit(id: "o", modelId: "m", name: "Linen", angles: [.asset("f"), .asset("t"), .asset("b"), .asset("s")], faces: [.asset("ff"), nil, nil])
++        let fixed = OutfitPictures.swapped(OutfitPictures.refs(o), 2, 3)
++        XCTAssertEqual(fixed.prefix(4).map { $0?.asset }, ["f", "t", "s", "b"])
++        XCTAssertEqual(fixed.compactMap { $0 }.count, 5, "nothing is lost")
++        let targets = OutfitPictures.moveTargets(o, from: 2)
++        XCTAssertEqual(targets.map { $0.index }, [0, 1, 3, 4, 5, 6])
++        XCTAssertEqual(targets.first { $0.index == 3 }?.title, "Swap with Back")
++        XCTAssertEqual(targets.first { $0.index == 6 }?.title, "Move to Face side")
++    }
+ }
+diff --git a/mac/README.md b/mac/README.md
+index 5f753716..e341c70e 100644
+--- a/mac/README.md
++++ b/mac/README.md
+@@ -85,7 +85,7 @@ Every screen from the approved desktop prototype (`prototype/desktop`):
+ - **Model tools** (`plans/api.md` "Model tools"):
+   - **Character sheet has 7 images**, shown as two groups: face close-ups (Face · front, Face · ¾, Face · profile) and full body (front, ¾, side, back). The face ¾ slot is optional, like a missing face close-up.
+   - **Enhance** (profile → Character sheet → Enhance): realism Off / Subtle / Balanced / Strong and upscale Off / 2× / 4× (either can be off, not both), the total estimate before you start ("6 images · about $0.26"), then review each image with a before/after slider: Keep, Reject or Retry one. Kept images replace their slots; the old sheet is saved as a previous version (**Versions**, restorable; restoring saves the current sheet first).
+-  - **Outfit face close-ups** (2026-11-11; Dress up was removed): every outfit has 7 pictures, its four angles and three face close-ups with its own hair, make-up and face accessories (made from her base faces and the outfit front). Hover a picture to Redo it; an older outfit offers "Add face close-ups". Shots with an outfit send only its pictures.
++  - **Outfit face close-ups** (2026-11-11; Dress up was removed): every outfit has 7 pictures, its four angles and three face close-ups with its own hair, make-up and face accessories (made from her base faces and the outfit front). Hover a picture to Redo it; right-click "Move to…" or drag it onto another slot to fix a picture in the wrong place (they swap); an older outfit offers "Add face close-ups". Shots with an outfit send only its pictures.
+   - **Image models** (owner only, Settings → Engines): the model for every image step (New shots, Edits, Enhance · realism / upscale) with its price line and compatibility. **Change** opens a searchable catalog served by the server (Replicate collections or search; name, owner, description, runs, price line, compatible?), or paste owner/model; the advanced view shows how MUSE fills the model's inputs and lets the owner set extra inputs (never the safety checker). **Default** goes back to the contract's model. A small owner-only **Model** chooser on Shoot, Enhance and Dress up overrides it for one run (`models` in the request); members never see it.
+   - **Archive** (owner, profile ⋯ → Archive model): she disappears from every list and picker; **Settings → Archived models** restores her. New work on an archived model reads "This model is archived · restore her in Settings → Archived models".
+   - `ModelToolsTests` cover decoding every new shape, the any-model estimates (per unit, by time, unknown), labels and price lines, request encoding, and the demo flows (Enhance review → apply → restore, Dress up Both → whole-set pick → new outfit, discard and failure releasing the hold, archive, owner-only checks).

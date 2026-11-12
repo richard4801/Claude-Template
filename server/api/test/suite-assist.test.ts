@@ -122,7 +122,7 @@ describe.skipIf(!hasFfmpeg)('Claude in the AI Suite (mock provider, fake Claude)
     const set = await tool('suite_set_draft').run(env(), { assistId, outfitId: 'of_old' }) as any;
     expect(set.request.outfitId).toBe('of_old');
     expect(set.mcpContent.filter((b: any) => b.type === 'image')).toHaveLength(3); // front, ¾, back
-    expect(set.mcpContent.some((b: any) => b.type === 'text' && /outfit “Product look” \(2026-10-01 00:00 UTC\) · back/.test(b.text))).toBe(true);
+    expect(set.mcpContent.some((b: any) => b.type === 'text' && /outfit “Product look” \(2026-10-01 00:00 UTC\) · slot back \(back\)/.test(b.text))).toBe(true);
     const see = await tool('suite_see').run(env(), { assistId }) as any;
     expect(see.structuredContent).toMatchObject({ model: { id: model.id }, outfit: { id: 'of_old', created: '2026-10-01 00:00 UTC' }, images: 10 }); // 7 references + 3 angles
     await tool('suite_set_draft').run(env(), { assistId, outfitId: null });
