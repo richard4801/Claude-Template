@@ -148,3 +148,23 @@ Every label is `.fixedSize()` and probed (`preview view`, `preview view menu`, `
 - Each writes `FITS` or `CUT edit preview bar …` to `fit-check.txt`, and Mac CI fails on any `CUT` line. A bar that wasn't drawn is also a `CUT`.
 
 Checks: `swiftc -parse` passes on both files. SwiftUI can't be built on Linux, so the Mac CI run is the real check.
+
+### Fix: Edit's docked Claude panel at 1000 × 700 (run 591, `plans/patches/edit-claude-panel-fit-mac.patch`)
+This is a follow-up on top of `claude/mac-bundle-8` @fc2c144a. At 1000 × 700 the panel ran off the right edge: its ✕, the "+", the end of the Playbook tab, the intro text and Send were all cut.
+
+**Cause:** the editor's left column wasn't held to its share of the width. At narrow widths the timeline toolbar needs about 630 pt (icons plus the 96 pt zoom slider) against 607 pt free, so it pushed the panel about 15 pt past the window.
+
+**Fix:**
+- `EditSuiteView`: the left column is `.frame(width: w).clipped()`, so the panel always ends at the window's edge. The panel width is clamped: 360 or 320 as before, but never more than leaves the editor 560 pt, and never under 300.
+- `EditSuiteTimeline`: when narrow (editor under 760 pt), the zoom slider goes. The − and + buttons stay.
+- `EditSuiteClaudePanel`:
+  - frame probes on the panel, the header, the ✕ and the tabs;
+  - a fit probe on the "Shared with Claude" line;
+  - the chat's existing `chat sessions` ("+") and `chat composer` (Send) probes are reused.
+
+**Review check** (the `mac_editpreview_claude_<a|b>_<1280x800|1000x700>` states, with the sample chat):
+- each part must be drawn and lie inside the window;
+- the status line and the Chat, History and Playbook tab labels must be whole;
+- the result is `FITS` or `CUT edit claude panel …` in `fit-check.txt`, and a CUT fails Mac CI.
+
+Checks: `swiftc -parse` passes. The Mac CI run is the real check.

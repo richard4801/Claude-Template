@@ -1,0 +1,132 @@
+diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
+index 2a45f199..c57c4980 100644
+--- a/mac/Muse/App/SnapshotRunner.swift
++++ b/mac/Muse/App/SnapshotRunner.swift
+@@ -526,6 +526,7 @@ enum SnapshotRunner {
+             state.editCollapsed = false
+             state.editPreview = nil
+             state.claudeTab = 0
++            state.chatSample = true   // the chat (its "+" row and composer) stands in for a live session, as in the panel shots
+             if !store.takes.contains(where: { $0.id == take.id }) { store.takes.insert(take, at: 0) }
+             store.openEdit(takeId: take.id)
+             try? await Task.sleep(for: .seconds(8))
+@@ -544,9 +545,25 @@ enum SnapshotRunner {
+                 } else {
+                     lines.append(contentsOf: cut.map { "CUT edit preview bar \(width)x\(height) \(theme.rawValue) with Claude \($0)" })
+                 }
++                // The docked Claude panel (owner review, run 591: at 1000 × 700 it ran off the right edge): its header with
++                // the ✕, the tabs, the chat row with "+", and the composer with Send must be drawn and lie inside the window;
++                // the header's status and the tab labels must be whole.
++                state.probeTick += 1
++                try? await Task.sleep(for: .seconds(0.3))
++                let winW = w.contentLayoutRect.width
++                let panelKeys = ["edit claude panel", "edit claude header", "edit claude close", "edit claude tabs", "chat sessions", "chat composer"]
++                var panelCut: [String] = []
++                for key in panelKeys {
++                    guard let f = state.composerFrames[key], f.width > 0 else { panelCut.append("\(key) not drawn"); continue }
++                    if f.minX < -0.5 || f.maxX > winW + 0.5 { panelCut.append("\(key) at \(Int(f.minX))–\(Int(f.maxX)) of \(Int(winW)) pt") }
++                }
++                panelCut += truncatedLabels().filter { l in ["claude panel status", "segment Chat", "segment History", "segment Playbook"].contains { l.hasPrefix($0) } }
++                lines.append(contentsOf: panelCut.isEmpty ? ["FITS edit claude panel \(width)x\(height) \(theme.rawValue) (\(panelKeys.count) parts inside \(Int(winW)) pt)"]
++                                                         : panelCut.map { "CUT edit claude panel \(width)x\(height) \(theme.rawValue) \($0)" })
+             }
+             state.editPreview = nil
+             state.claudeTab = nil
++            state.chatSample = false
+             w.setFrame(original, display: true)
+             store.openEdit(takeId: nil)
+             try? await Task.sleep(for: .seconds(1))
+diff --git a/mac/Muse/Views/Edit/EditSuiteClaude.swift b/mac/Muse/Views/Edit/EditSuiteClaude.swift
+index b2bbf545..e1375ea8 100644
+--- a/mac/Muse/Views/Edit/EditSuiteClaude.swift
++++ b/mac/Muse/Views/Edit/EditSuiteClaude.swift
+@@ -202,14 +202,18 @@ struct EditSuiteClaudePanel: View {
+             HStack(spacing: 8) {
+                 ClaudeBadge()
+                 Text(session.liveConnected ? "Shared with Claude" : "Not shared").font(t.body(12.5)).foregroundStyle(t.muted)
+-                Spacer()
++                    .lineLimit(1).fitProbe("claude panel status")
++                Spacer(minLength: 4)
+                 SuiteIconButton(systemName: "xmark", label: "Hide Claude", size: 26, action: close)
++                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude close") } }
+             }
+             .padding(.horizontal, 12)
+             .frame(height: 44)
++            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude header") } }
+             EditSeg(options: [(0, "Chat"), (1, "History"), (2, "Playbook")], selection: tab) { tab = $0 }
+                 .padding(.horizontal, 12)
+                 .padding(.bottom, 8)
++                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude tabs") } }
+             SuiteRule()
+             if tab == 0 {
+                 // Review mode: the sample thread stands in for a live session (demo mode has none).
+@@ -228,6 +232,7 @@ struct EditSuiteClaudePanel: View {
+             }
+         }
+         .background(t.chrome)
++        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude panel") } }
+         .onAppear { if let x = SnapshotRunner.state.claudeTab { tab = x } } // review mode: the Playbook tab's shot
+     }
+ 
+diff --git a/mac/Muse/Views/Edit/EditSuiteTimeline.swift b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+index 53f281c8..52b29d96 100644
+--- a/mac/Muse/Views/Edit/EditSuiteTimeline.swift
++++ b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+@@ -106,11 +106,14 @@ struct EditSuiteTimeline: View {
+             SuiteIconButton(systemName: "magnifying-glass-minus", label: "Zoom out", tint: t.roles.ink2) {
+                 session.view { $0.zoom = exp(max(range.lowerBound, log($0.zoom) - step)) }
+             }
+-            Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }), in: range)
+-                .controlSize(.mini)
+-                .tint(t.roles.accent)
+-                .frame(width: 96)
+-                .accessibilityLabel("Timeline zoom")
++            // Very narrow (the Claude panel open in a small window): the − and + buttons alone, so the toolbar fits.
++            if !narrow {
++                Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }), in: range)
++                    .controlSize(.mini)
++                    .tint(t.roles.accent)
++                    .frame(width: 96)
++                    .accessibilityLabel("Timeline zoom")
++            }
+             SuiteIconButton(systemName: "magnifying-glass-plus", label: "Zoom in", tint: t.roles.ink2) {
+                 session.view { $0.zoom = exp(min(range.upperBound, log($0.zoom) + step)) }
+             }
+diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
+index 43930075..6fc16254 100644
+--- a/mac/Muse/Views/Edit/EditSuiteView.swift
++++ b/mac/Muse/Views/Edit/EditSuiteView.swift
+@@ -166,6 +166,9 @@ struct EditSuiteEditor: View {
+     /// the 72 pt sidebar rail).
+     static let mediaFits: CGFloat = 1108
+     static let inspectorFits: CGFloat = 880
++    /// With the Claude panel open: the editor's least width (the preview and the narrow timeline toolbar) and the panel's.
++    static let editorMin: CGFloat = 560
++    static let claudeMin: CGFloat = 300
+ 
+     /// Runs an editor shortcut unless the person is typing (then the key goes to the text box).
+     private func shortcut(_ key: EditShortcuts.Key, plain: Bool = true) -> KeyPress.Result {
+@@ -206,9 +209,10 @@ struct EditSuiteEditor: View {
+     private var editor: some View {
+         GeometryReader { g in
+             let full = g.size.width
+-            let claudeW: CGFloat = full >= 1300 ? 360 : 320
+-            // The Claude panel takes its width from the editor.
+-            let w = claudeOpen ? full - claudeW - 1 : full
++            // The Claude panel takes its width from the editor, clamped so both fit the window (owner review, run 591: at
++            // 1000 × 700 the panel ran off the right edge): the editor keeps at least `editorMin`, the panel at least 300.
++            let claudeW: CGFloat = max(Self.claudeMin, min(full >= 1300 ? 360 : 320, full - 1 - Self.editorMin))
++            let w = claudeOpen ? max(0, full - claudeW - 1) : full
+             VStack(spacing: 0) {
+                 topBar(width: w)
+                 SuiteRule()
+@@ -237,6 +241,9 @@ struct EditSuiteEditor: View {
+                                 .frame(height: Self.timelineHeight)
+                         }
+                     }
++                    // The editor gets exactly its share, so the panel beside it always ends at the window's edge.
++                    .frame(width: w)
++                    .clipped()
+                     if claudeOpen {
+                         SuiteRule(vertical: true)
+                         EditSuiteClaudePanel(session: session, openPlaybook: {
