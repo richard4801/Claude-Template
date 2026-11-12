@@ -406,7 +406,8 @@ export class ByoService {
         try { k = await self.keyOf(r.providerId); } catch { throw new ImageEngineError("The provider's key can't be used", 'engine_unavailable'); }
         const ad = self.adapters[k.p.kind as ProviderKind];
         const images: EngineImage[] = [];
-        const fail = (e: ImageEngineError) => { e.partial = images.slice(); return e; };
+        // Made images carry no bill of their own here: their cost (and one the provider made but we lost) is recorded.
+        const fail = (e: ImageEngineError, paidToo = false) => { e.partial = images.slice(); e.wastedUsd = perImage * (images.length + (paidToo ? 1 : 0)); return e; };
         // Owner 2026-11-09: the largest size the model offers; a size it refuses for this shape (e.g. 2K at 9:16) steps down.
         const sizes = largestFirst(r.analysis, r.fixedInputs);
         for (let i = 0; i < req.count; i++) {
@@ -425,11 +426,13 @@ export class ByoService {
             const t0 = Date.now();
             let retry = false;
             for (;;) {
-              const s = await ad.get(k.key, h);
+              // A status check that didn't get through is asked again (the image may be on its way, and billed).
+              const s = await ad.get(k.key, h).catch(() => ({ status: 'running' as const }));
               if (s.status === 'succeeded') { images.push({ url: s.url }); break; }
               if (s.status === 'failed' && more && s.error?.kind !== 'refused' && s.error?.kind !== 'out_of_credit') { retry = true; break; }
-              if (s.status === 'failed' || s.status === 'canceled') throw fail(new ImageEngineError(s.error?.message ?? 'failed', s.error?.kind === 'refused' ? 'provider_refused' : undefined));
-              if (Date.now() - t0 > self.ctx.config.IMAGE_TIMEOUT_SEC * 1000) { await ad.cancel(k.key, h); throw fail(new ImageEngineError('timed out')); }
+              if (s.status === 'failed' || s.status === 'canceled') throw fail(new ImageEngineError(s.error?.message ?? 'failed', s.error?.kind === 'refused' ? 'provider_refused' : undefined), !!(s.error as { paid?: boolean } | undefined)?.paid);
+              // Our timeout: asked to cancel, but the provider may still finish and bill it (recorded as overhead).
+              if (Date.now() - t0 > self.ctx.config.IMAGE_TIMEOUT_SEC * 1000) { await ad.cancel(k.key, h); throw fail(new ImageEngineError('timed out'), true); }
               await sleep(Math.min(1500, self.ctx.config.REPLICATE_POLL_MS));
             }
             if (!retry) break;

@@ -38,6 +38,8 @@ export interface ImageEngine {
 export class ImageEngineError extends Error {
   /** Images the engine had already made (and been billed for) before it failed. */
   partial: EngineImage[] = [];
+  /** What the provider billed for work that was made (or may have been) but not kept, beyond `partial` (studio overhead). */
+  wastedUsd = 0;
   constructor(message: string, readonly code?: 'provider_refused' | 'provider_rate_limited' | 'engine_unavailable' | 'provider_out_of_credit') { super(message); }
 }
 
@@ -94,18 +96,31 @@ export class FalEngine implements ImageEngine {
     const statusUrl = q.status_url ?? `${this.base}/${sel.model}/requests/${q.request_id}/status`;
     const responseUrl = q.response_url ?? `${this.base}/${sel.model}/requests/${q.request_id}`;
     const t0 = Date.now();
+    /** fal bills once it has made the images: anything lost after that is recorded, never just "not charged". */
+    const paidLost = (msg: string) => Object.assign(new ImageEngineError(msg), { wastedUsd: this.costPerImage * req.count });
     for (;;) {
-      const s = await this.fetchFn(statusUrl, { headers: this.headers() });
-      const st = (await s.json().catch(() => ({}))) as { status?: string };
-      if (st.status === 'COMPLETED') break;
-      if (st.status === 'FAILED' || st.status === 'ERROR') throw new ImageEngineError('fal could not make the image');
-      if (Date.now() - t0 > this.timeoutMs) throw new ImageEngineError('fal took too long');
+      // A status check that didn't get through is asked again (never a failure: the images may be on their way).
+      const s = await this.fetchFn(statusUrl, { headers: this.headers() }).catch(() => null);
+      const st = (await s?.json().catch(() => ({}))) as { status?: string } | undefined;
+      if (st?.status === 'COMPLETED') break;
+      if (st?.status === 'FAILED' || st?.status === 'ERROR') throw new ImageEngineError('fal could not make the image');
+      if (Date.now() - t0 > this.timeoutMs) {
+        // Ask fal to stop; it may already have made (and billed) them, so the cost is recorded.
+        await this.fetchFn(`${responseUrl}/cancel`, { method: 'PUT', headers: this.headers() }).catch(() => null);
+        throw paidLost('fal took too long');
+      }
       await sleep(this.pollMs);
     }
-    const r = await this.fetchFn(responseUrl, { headers: this.headers() });
-    if (!r.ok) throw new ImageEngineError(`fal result error ${r.status}`);
-    const out = (await r.json()) as { images?: { url: string }[]; seed?: number };
-    if (!out.images?.length) throw new ImageEngineError('fal returned no images');
+    // The result, asked up to three times (fal has already billed).
+    type Out = { images?: { url: string }[]; seed?: number };
+    let out = null as Out | null, last = '';
+    for (let a = 0; a < 3 && !out; a++) {
+      const r = await this.fetchFn(responseUrl, { headers: this.headers() }).catch(e => { last = (e as Error).message; return null; });
+      if (r?.ok) out = (await r.json().catch(() => null)) as Out | null;
+      else { last = r ? `status ${r.status}` : last; await sleep(this.pollMs); }
+    }
+    if (!out) throw paidLost(`fal result error (${last})`);
+    if (!out.images?.length) throw paidLost('fal returned no images');
     return { images: out.images.map(i => ({ url: i.url })), seed: out.seed ?? req.seed, costUsd: this.costPerImage * out.images.length };
   }
 }

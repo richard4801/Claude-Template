@@ -15,6 +15,7 @@ import * as P from '../pricing.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ApiError, badRequest, notFound } from '../errors.js';
+import { PhotoError } from '../images/service.js';
 import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
@@ -516,18 +517,22 @@ export class RecreateReferences {
     const r = await this.row(u, id);
     const recipe = r.recipe as Recipe | null, f = r.fill ?? {};
     const jobIds = Object.values(f.jobs ?? {}).map(j => j.jobId);
-    const js = jobIds.length ? await this.ctx.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(inArray(jobs.id, jobIds)) : [];
+    const js = jobIds.length ? await this.ctx.db.select({ id: jobs.id, state: jobs.state, stats: jobs.stats }).from(jobs).where(inArray(jobs.id, jobIds)) : [];
     const ts = jobIds.length ? await this.ctx.db.select({ id: takesTable.id, jobId: takesTable.jobId, index: takesTable.index }).from(takesTable).where(inArray(takesTable.jobId, jobIds)) : [];
     const slots = (recipe?.slots ?? []).map(sl => {
       const job = f.jobs?.[sl.id], m = f.matched?.[sl.id];
       if (job) {
-        const st = js.find(x => x.id === job.jobId)?.state;
+        const jr = js.find(x => x.id === job.jobId), st = jr?.state;
+        const code = (jr?.stats as { errorCode?: string } | null)?.errorCode;
         const take = ts.filter(x => x.jobId === job.jobId).sort((a, b) => a.index - b.index)[0];
         const method = job.method ?? 'generate';
         if (st === 'done' && take) return { slotId: sl.id, state: 'ready' as const, takeId: take.id, jobId: job.jobId, method, reason: method === 'swap' ? 'Your model in the reference’s own shot' : 'Generated for this slot' };
         if (st !== 'failed') return { slotId: sl.id, state: 'generating' as const, jobId: job.jobId, method, ...(job.estimate != null ? { estimate: { amount: job.estimate, label: `about $${job.estimate.toFixed(2)}` } } : {}) };
         // A failed swap (refunded): offer a generated shot instead, at its own price.
-        if (method === 'swap') return { slotId: sl.id, state: 'to_generate' as const, reason: 'The swap didn’t work and you weren’t charged · generate this shot instead', fallback: 'generate' as const, failedJobId: job.jobId };
+        if (method === 'swap') return { slotId: sl.id, state: 'to_generate' as const, fallback: 'generate' as const, failedJobId: job.jobId,
+          // Made at the provider but not saved: the owner can recover it for free (never "not charged").
+          reason: code === 'provider_paid_unsaved' || code === 'provider_unconfirmed' ? 'The swap was made but not saved · the studio owner can recover it for free, or generate this shot instead'
+            : 'The swap didn’t work and you weren’t charged · generate this shot instead' };
       }
       if (m) return { slotId: sl.id, state: 'matched' as const, takeId: m.takeId, score: m.score, reason: m.reasons.join(', ') };
       if (f.toGenerate?.includes(sl.id)) return { slotId: sl.id, state: 'to_generate' as const, reason: 'None of your takes fits this shot' };
@@ -723,6 +728,9 @@ export class RecreateReferences {
     } catch (e) {
       if (settled) throw e; // made and paid for; only saving it failed
       await this.ctx.money.release(u.studioId, u.id, id, hold, 'background not made').catch(() => undefined);
+      // The member isn't charged, but what the provider billed for it goes on the studio's books (never silently lost).
+      const spent = e instanceof PhotoError ? e.spentUsd : 0;
+      if (spent > 1e-9) await this.ctx.money.overhead(u.studioId, spent, 'Background that didn’t finish').catch(() => undefined);
       this.ctx.log?.warn({ err: String((e as Error)?.message ?? e) }, 'recreate background');
       throw new ApiError(502, 'background_failed', 'Couldn’t make the background for your setting · you weren’t charged · try again, or pick one of your locations');
     }

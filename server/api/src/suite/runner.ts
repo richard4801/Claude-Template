@@ -216,13 +216,14 @@ export class SuiteRunner {
         if (!sep) {
           if (!key) throw new ReplicateError('the audio must be an upload to separate its beat', 'failed');
           await report(1, 0.02, 'Preparing the audio');
-          const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled }) as { instrumentalKey: string; costUsd: number; separated?: boolean };
+          const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled }) as { instrumentalKey: string; costUsd: number; separated?: boolean; lost?: boolean };
           const separated = b.separated !== false && b.instrumentalKey !== key;
-          sep = separated ? { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd, separated: true } : { instrumentalKey: null, costUsd: 0, separated: false };
+          // A separation that was paid but couldn't be saved is still billed (the shot runs on its no-audio prompt).
+          sep = separated ? { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd, separated: true } : { instrumentalKey: null, costUsd: b.lost ? b.costUsd ?? 0 : 0, separated: false };
           await this.saveExtra(job.id, { audio: sep });
         }
+        separationCost = sep.costUsd ?? 0;
         if (sep.separated && sep.instrumentalKey) {
-          separationCost = sep.costUsd ?? 0;
           urls.audio = await ctx.storage.presignGet(sep.instrumentalKey, c.REPLICATE_INPUT_URL_TTL_SEC);
         } else if (plan.promptNoAudio) {
           prompt = plan.promptNoAudio;
@@ -395,7 +396,7 @@ export class SuiteRunner {
       }
       // Settle: price × billed seconds (+ fixed extras); the mock charges nothing unless SUITE_MOCK_CHARGE.
       const savedSep = (job.stats as any)?.suite?.audio as { separated?: boolean; costUsd?: number } | undefined;
-      const separationCost = prepared ? (await prepared).separationCost : savedSep?.separated ? savedSep.costUsd ?? 0 : 0;
+      const separationCost = prepared ? (await prepared).separationCost : savedSep?.costUsd ?? 0;
       const exact = plan.perSec * billed.reduce((a, b) => a + b, 0) + plan.extraPerTake * n + separationCost;
       const actual = mock && !c.SUITE_MOCK_CHARGE ? 0 : exact;
       const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;

@@ -64,6 +64,9 @@ function swapResolution(id: string, quality: P.Quality) {
 /** The pod id replicate jobs are claimed under (no pod row exists for it). */
 export const REPLICATE_POD = 'replicate';
 export const REFUSED_CLIP = "This clip was refused by the content filter · you weren't charged";
+/** The provider made it (and billed the studio), then refused or returned nothing usable: honest, never "not charged". */
+export const REFUSED_PAID = "The result was refused by the content filter after it was made · the provider charged the studio";
+export const FAILED_PAID = "The provider finished but sent back nothing usable · it charged the studio";
 
 type TakeState = { id?: string; /** Where the prediction lives (older jobs: guessed from the id). */ provider?: LineId; done?: boolean; key?: string; thumbKey?: string;
   billed?: number; output?: Record<string, unknown>;
@@ -84,6 +87,7 @@ const failedError = (p: Prediction) => (p.error instanceof ReplicateError ? p.er
 /** Why a run failed, for the job: a member-safe message shown as-is and the machine code (the details go to the log). */
 export function failureOf(e: unknown): { message: string; code: string; retryable: boolean } {
   if (e instanceof ReplicateError) {
+    if ((e as { paid?: boolean }).paid) return e.kind === 'refused' ? { message: REFUSED_PAID, code: 'provider_refused', retryable: false } : { message: FAILED_PAID, code: 'provider_failed', retryable: false };
     if (e.kind === 'refused') return { message: REFUSED_CLIP, code: 'provider_refused', retryable: false };
     if (e.kind === 'rate_limited') return { message: "Busy right now · you weren't charged. Try again in a minute.", code: 'provider_rate_limited', retryable: true };
     if (e.kind === 'timeout') return { message: "This took too long and was stopped · you weren't charged", code: 'provider_timeout', retryable: true };
