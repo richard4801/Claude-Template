@@ -101,6 +101,8 @@ data class StudioStage(
                 "provider_rate_limited" -> "Busy right now · you weren't charged. Try again in a minute."
                 "provider_timeout" -> "This took too long and was stopped · you weren't charged"
                 "provider_out_of_credit" -> "Something went wrong · you weren't charged. The studio owner has been told."
+                "provider_paid_unsaved" -> "Your video was made (the provider charged the studio) but MUSE couldn't save it · it can be recovered for free"
+                "provider_unconfirmed" -> "The provider didn't finish in time and may still charge the studio · it can be recovered for free if it finishes"
                 else -> ErrorText.WENT_WRONG
             }
         }

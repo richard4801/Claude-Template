@@ -123,6 +123,7 @@ object EditJson {
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
         holdSec = o.numOrNull("holdSec"), blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
         animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), animLoop = loop(o),
+        layers = o.el("layers"), layerBase = o.el("layerBase"), layerSource = o.el("layerSource"),
     )
 
     private fun imageItem(o: Obj) = ImageItem(
@@ -142,6 +143,7 @@ object EditJson {
         id = o.str("id"), startSec = o.num("startSec"), durationSec = o.num("durationSec"), text = o.str("text"), style = textStyle(o.obj("style")),
         transform = transform(o), opacity = o.numOrNull("opacity"), keyframes = keyframes(o),
         animIn = anim(o, "animIn"), animOut = anim(o, "animOut"), template = o.strOrNull("template"), animLoop = loop(o),
+        pin = o.el("pin"),
     )
 
     private fun audioClip(o: Obj) = AudioClip(
@@ -309,6 +311,7 @@ object EditJson {
             it.alphaMatte?.let { m -> put("alphaMatte", buildJsonObject { put("asset", m.asset); bool("invert", m.invert) }) }
             it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
             num("holdSec", it.holdSec); str("blend", it.blend?.wire); anim("animIn", it.animIn); anim("animOut", it.animOut); loop(it.animLoop)
+            it.layers?.let { v -> put("layers", v) }; it.layerBase?.let { v -> put("layerBase", v) }; it.layerSource?.let { v -> put("layerSource", v) }
         }
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
@@ -318,6 +321,7 @@ object EditJson {
         is TextItem -> buildJsonObject {
             put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec); put("text", it.text); put("style", encodeTextStyle(it.style))
             transform(it.transform); num("opacity", it.opacity); keyframes(it.keyframes); anim("animIn", it.animIn); anim("animOut", it.animOut); str("template", it.template); loop(it.animLoop)
+            it.pin?.let { v -> put("pin", v) }
         }
         is AudioClip -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("inSec", it.inSec); num("outSec", it.outSec); num("speed", it.speed)

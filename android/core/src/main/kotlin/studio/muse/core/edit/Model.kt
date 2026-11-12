@@ -1,5 +1,7 @@
 package studio.muse.core.edit
 
+import kotlinx.serialization.json.JsonElement
+
 /*
  * Editor v2: the multitrack edit project (plans/video-editor.md "Editor v2"). A Kotlin port of the TypeScript reference
  * server/api/src/editor/model.ts: the same data, the same JSON field names (EditJson), and the same answers from every
@@ -263,6 +265,13 @@ data class VideoClip(
     /** A repeating animation (overlay clips only): [loopState]. */
     val animLoop: AnimLoop? = null,
     override val effect: Effect? = null,
+    /**
+     * Layers (plans/layers-edit.md, Phase 1; made on the Mac and the server): kept as their JSON so saving from Android
+     * never drops them. Android doesn't draw them yet.
+     */
+    val layers: JsonElement? = null,
+    val layerBase: JsonElement? = null,
+    val layerSource: JsonElement? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -325,6 +334,8 @@ data class TextItem(
     val animOut: Anim? = null,
     val template: String? = null,
     val animLoop: AnimLoop? = null,
+    /** Layers: the text pinned to a tracked layer (kept as its JSON; Android doesn't move it yet). */
+    val pin: JsonElement? = null,
 ) : Item
 
 data class AudioClip(

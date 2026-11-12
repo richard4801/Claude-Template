@@ -155,7 +155,7 @@ fun reverseClip(c: VideoClip, reversed: String, durationSec: Double): VideoClip?
     }
     // alphaMatte and audioAsset are lined up with the original's frames, so they'd play the wrong way: dropped.
     return c.copy(asset = reversed, inSec = r6(maxOf(0.0, durationSec - c.outSec)), outSec = r6(minOf(durationSec, durationSec - c.inSec)), speedCurve = curve,
-        alphaMatte = null, audioAsset = null)
+        alphaMatte = null, audioAsset = null, layers = null, layerBase = null, layerSource = null)
 }
 
 /**
@@ -164,7 +164,7 @@ fun reverseClip(c: VideoClip, reversed: String, durationSec: Double): VideoClip?
  * original is dropped (the apps say so).
  */
 fun deriveClip(c: VideoClip, copy: String, op: DerivedOp?): VideoClip =
-    c.copy(asset = copy, alphaMatte = if (op == DerivedOp.STABILIZE) null else c.alphaMatte)
+    if (op == DerivedOp.STABILIZE) c.copy(asset = copy, alphaMatte = null, layers = null, layerBase = null, layerSource = null) else c.copy(asset = copy)
 
 const val SLOWMO_MIN_RANGE_SEC = 0.3
 const val SLOWMO_MAX_RANGE_SEC = 10.0
@@ -206,7 +206,7 @@ fun applySlowmo(p: EditProject, clipId: String, slowId: String): Pair<EditProjec
     val pieces = ArrayList<VideoClip>()
     if (hasBefore) pieces += base.copy(outSec = r6(s), keyframes = sliceKeys(c.keyframes, 0.0, la, 1.0))
     val midId = if (hasBefore) nextId() else c.id
-    pieces += base.copy(id = midId, asset = slowId, inSec = 0.0, outSec = midLen, speed = 1.0, muted = true, alphaMatte = null, audioAsset = null,
+    pieces += base.copy(id = midId, asset = slowId, inSec = 0.0, outSec = midLen, speed = 1.0, muted = true, alphaMatte = null, audioAsset = null, layers = null, layerBase = null, layerSource = null,
         keyframes = sliceKeys(c.keyframes, la, lb, if (lb > la) midLen / (lb - la) else 1.0))
     if (hasAfter) pieces += base.copy(id = nextId(), inSec = r6(e), keyframes = sliceKeys(c.keyframes, lb, len, 1.0))
     pieces[0] = pieces[0].copy(transitionIn = c.transitionIn, fadeInSec = c.fadeInSec, animIn = c.animIn)

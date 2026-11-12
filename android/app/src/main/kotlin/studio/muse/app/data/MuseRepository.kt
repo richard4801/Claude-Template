@@ -462,6 +462,14 @@ class MuseRepository(
 
     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
 
+    /** Recover (owner only, free): fetched again by the saved provider request id; the take arrives as usual. */
+    suspend fun recoverJob(id: String) = attempt { recoverJob(id) }?.also {
+        _state.update { s -> s.copy(jobs = s.jobs.map { if (it.id == id) it.copy(state = "running", error = null, errorCode = null) else it }) }
+        toast("Recovering · free")
+    }
+    /** The signed-in person is the studio owner (owner-only actions such as Recover). */
+    fun ownerNow() = isOwner()
+
     suspend fun clearFailedJobs() = attempt { clearFailedJobs() }?.also { ids -> _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id in ids }) } }
 
     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }

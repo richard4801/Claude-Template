@@ -208,6 +208,8 @@ data class SuitePane(
     val price: String = "",
     val takes: List<Take> = emptyList(),
     val failure: String? = null,
+    /** Failed after the provider made (and charged for) it: Recover (owner, free) instead of Retry. */
+    val recoverJobId: String? = null,
 ) {
     companion object {
         val STEPS = listOf("Keyframe from %s’s sheet", "Motion & camera", "Sharpen & finish")
@@ -222,7 +224,7 @@ data class SuitePane(
             return when (st.phase) {
                 StagePhase.IDLE -> SuitePane()
                 StagePhase.READY -> SuitePane(StagePhase.READY, "Ready", "100%", 1f, "Ready", price = st.price, takes = st.takes)
-                StagePhase.FAILED -> SuitePane(StagePhase.FAILED, "Failed", st.percent, st.progress, "Failed", price = st.price, failure = st.failure)
+                StagePhase.FAILED -> SuitePane(StagePhase.FAILED, "Failed", st.percent, st.progress, "Failed", price = st.price, failure = st.failure, recoverJobId = j.id.takeIf { j.canRecover })
                 StagePhase.QUEUED -> {
                     val pos = j.queuePosition
                     val badge = if (pos != null && pos > 1) "#$pos in line" else "In line"

@@ -277,7 +277,8 @@ data class Job(
     val warm: Boolean? = null,
     /** The server's label ("Draft · 768P", "Edit", "Fast · beta"); older servers send none. */
     @SerialName("engineLabel") val serverEngineLabel: String? = null,
-    /** Failed replicate jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout. */
+    /** Failed replicate/suite jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout |
+     *  provider_paid_unsaved | provider_unconfirmed (made and charged at the provider: Recover, not Retry). */
     val errorCode: String? = null,
     /** Done replicate jobs: output seconds Replicate billed. */
     val billedSeconds: Double? = null,
@@ -289,6 +290,15 @@ data class Job(
     val running get() = state == "running" || state == "queued"
     val done get() = state == "done"
     val failed get() = state == "failed"
+    /** The provider made (and charged for) the video but the server couldn't save it, or may still finish it: the owner
+     *  brings it back with Recover (free, POST /v1/jobs/:id/recover). Retry would pay for it again. */
+    val canRecover get() = failed && errorCode in RECOVER_CODES
+    companion object {
+        val RECOVER_CODES = setOf("provider_paid_unsaved", "provider_unconfirmed")
+        const val RECOVER = "Recover"
+        /** What a member sees instead (Recover is owner-only on the server). */
+        const val RECOVER_BY_OWNER = "The studio owner can recover it for free"
+    }
 }
 
 /** One take of a job, or one photoshoot still. status: test | final. kind: take | shot. */
