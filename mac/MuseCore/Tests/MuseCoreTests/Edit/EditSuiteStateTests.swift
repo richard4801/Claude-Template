@@ -300,7 +300,15 @@ final class EditSuiteStateTests: XCTestCase {
         XCTAssertEqual(ex.effectiveCodec, .hevc)
         XCTAssertEqual(ex.summary(durationSec: 18), "0:18 · 1080 × 1920 · 30 fps · HDR")
         XCTAssertEqual(ex.videoBitrate, 16e6 * 0.6 * 1.2, accuracy: 1)
+        XCTAssertTrue(ex.writesDolbyVision, "Dolby Vision on by default with HDR")
+        ex.dolbyVision = false
+        XCTAssertFalse(ex.writesDolbyVision)
+        ex.dolbyVision = true
+        ex.format = .gif
+        XCTAssertFalse(ex.writesDolbyVision)
+        ex.format = .video
         ex.hdr = false
+        XCTAssertFalse(ex.writesDolbyVision)
         XCTAssertEqual(ex.effectiveCodec, .h264)
         ex.codec = .hevc
         XCTAssertLessThan(ex.estimatedBytes(durationSec: 18), 30_000_000)
