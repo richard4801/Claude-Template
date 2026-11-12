@@ -310,7 +310,7 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     const j = (await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate' })).body;
     const f = await ended(j.id);
     expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_failed', phase: 'Failed' });
-    expect(f.error).toBe("Something went wrong · you weren't charged");
+    expect(f.error).toBe("CUDA out of memory · you weren't charged"); // the provider's own words (2026-11-12), never a bare "Something went wrong"
     expect(f.refunded).toBeCloseTo(0.14, 9);                       // Draft (the default): 0.02 × 7
     const l = await rows(j.id);
     expect(l.find(x => x.kind === 'release')!.tokens).toBe(l.find(x => x.kind === 'hold')!.tokens! * -1);

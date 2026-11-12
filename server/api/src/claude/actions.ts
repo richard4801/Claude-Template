@@ -391,7 +391,7 @@ export const ACTION_TOOLS: GatedTool[] = [
 ];
 
 /** Studio settings Claude may read and (with the owner's go-ahead) change. Never keys, providers or prices. */
-const SETTINGS: Record<string, { name: string; path: string; method: 'PATCH' }> = {
+const SETTINGS: Record<string, { name: string; path: string; method: 'PATCH' | null }> = {
   studio: { name: 'Studio limits', path: '/v1/settings/studio', method: 'PATCH' },
   image_engine: { name: 'Image engine', path: '/v1/settings/image-engine', method: 'PATCH' },
   editor: { name: 'Editor paid helpers', path: '/v1/editor/settings', method: 'PATCH' },
@@ -399,6 +399,8 @@ const SETTINGS: Record<string, { name: string; path: string; method: 'PATCH' }> 
   suite_models: { name: 'AI Suite models on/off', path: '/v1/suite/settings', method: 'PATCH' },
   engine_defaults: { name: 'Default models', path: '/v1/engines/defaults', method: 'PATCH' },
   members_models: { name: 'Models members see', path: '/v1/engines/members', method: 'PATCH' },
+  // Read only: does the Higgsfield key reach Genjutsu, and what each motion-transfer model's request must look like (free).
+  genjutsu_access: { name: 'Genjutsu access and request fields (read only)', path: '/v1/engines/genjutsu/access?schema=1', method: null },
 };
 const AREA = { type: 'string', enum: Object.keys(SETTINGS) };
 const area = (v: unknown) => { if (typeof v !== 'string' || !SETTINGS[v]) throw badRequest(`area: one of ${Object.keys(SETTINGS).join(', ')}`); return SETTINGS[v]!; };
@@ -414,6 +416,7 @@ export const SETTINGS_TOOLS: EditTool[] = [
     props: { area: AREA, changes: { type: 'object', description: 'The fields to change, as the Settings screen sends them' } }, required: ['area', 'changes'],
     plan: async (env, a) => {
       const s = area(a.area);
+      if (!s.method) throw badRequest(`${s.name} can only be read`);
       if (!a.changes || typeof a.changes !== 'object' || Array.isArray(a.changes) || !Object.keys(a.changes).length) throw badRequest('changes: the fields to change');
       if (/key|secret|token|price|markup|provider/i.test(Object.keys(a.changes).join(' '))) throw new ApiError(403, 'not_through_claude', 'Keys, providers and prices are changed by the owner in Settings, never through Claude');
       const now = await appCall(env.ctx, env.user, 'GET', s.path).catch(() => ({}));

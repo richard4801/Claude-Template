@@ -101,6 +101,29 @@ export class FalProvider implements VideoProvider {
  * nsfw | canceled) → video.url. Auth "Key <key-id>:<key-secret>" from HF_CREDENTIALS (never logged). Failed and nsfw
  * requests are not charged by Higgsfield. Ids carry the status and cancel URLs the API returned.
  */
+/** One field Higgsfield's validation named: where, what (missing, extra_forbidden, …) and its words. */
+export type HfFieldIssue = { field: string; type: string; msg: string };
+/** Higgsfield's error text, readable and safe to show: `detail` as words, no links (signed URLs carry tokens). */
+export function hfDetail(text: string, max = 300) {
+  let out = text;
+  try {
+    const j = JSON.parse(text) as { detail?: unknown; error?: unknown; message?: unknown };
+    const d = j.detail ?? j.error ?? j.message;
+    if (Array.isArray(d)) out = d.map(x => { const o = x as { loc?: unknown[]; msg?: string }; return `${(o.loc ?? []).filter(l => l !== 'body').join('.')}: ${o.msg ?? ''}`.trim(); }).join('; ');
+    else if (typeof d === 'string') out = d;
+  } catch { /* plain text */ }
+  return out.replace(/https?:\/\/\S+/g, '<link>').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+/** The fields a 422 names (FastAPI/pydantic `detail: [{loc: ["body", field], type, msg}]`). */
+export function hfValidation(text: string): HfFieldIssue[] {
+  try {
+    const d = (JSON.parse(text) as { detail?: unknown }).detail;
+    if (!Array.isArray(d)) return [];
+    return d.map(x => { const o = x as { loc?: unknown[]; type?: string; msg?: string }; const loc = (o.loc ?? []).filter(l => l !== 'body');
+      return { field: String(loc[0] ?? ''), type: String(o.type ?? ''), msg: String(o.msg ?? '').slice(0, 200) }; }).filter(f => f.field);
+  } catch { return []; }
+}
+
 export class HiggsfieldProvider implements VideoProvider {
   id = 'higgsfield' as const;
   constructor(private ctx: Ctx, private fetchFn: typeof fetch = fetch) {}
@@ -119,7 +142,11 @@ export class HiggsfieldProvider implements VideoProvider {
     if (res.status === 402 || res.status === 403 || CREDIT_RE.test(text) || /not enough credits/i.test(text)) throw new ReplicateError('Higgsfield is out of credit', 'out_of_credit', res.status);
     if (res.status === 429) throw new ReplicateError('Higgsfield is busy', 'rate_limited', 429);
     if (res.status >= 500) throw new ReplicateError(`Higgsfield is having trouble (${res.status})`, 'unavailable', res.status);
-    if (!res.ok) throw new ReplicateError(`Higgsfield rejected the request (${res.status}: ${text.slice(0, 200)})`, SAFETY_RE.test(text) ? 'refused' : 'failed', res.status);
+    if (!res.ok) {
+      const e = new ReplicateError(`Higgsfield rejected the request (${res.status}: ${hfDetail(text)})`, SAFETY_RE.test(text) ? 'refused' : 'failed', res.status);
+      (e as ReplicateError & { validation?: HfFieldIssue[] }).validation = hfValidation(text); // 422: which fields it wanted (nothing started, nothing charged)
+      throw e;
+    }
     const j = JSON.parse(text) as { request_id: string; status_url?: string; cancel_url?: string };
     const r = `${this.base()}/requests/${j.request_id}`;
     return JSON.stringify({ id: j.request_id, s: j.status_url ?? `${r}/status`, c: j.cancel_url ?? `${r}/cancel` });
@@ -134,9 +161,26 @@ export class HiggsfieldProvider implements VideoProvider {
       return { status: 'succeeded', url: st.video.url, billedSeconds: null };
     }
     if (st.status === 'nsfw') return { status: 'failed', error: new ReplicateError('Higgsfield’s content check refused this shot', 'refused') };
-    if (st.status === 'failed') { const t = errorText(st.error ?? 'failed'); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
+    if (st.status === 'failed') { const t = errorText(st.error ?? 'failed'); return { status: 'failed', error: new ReplicateError(`Higgsfield: ${t || 'failed'}`, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
     if (st.status === 'canceled') return { status: 'canceled' };
     return { status: 'running' };
+  }
+  /**
+   * What a model's request must look like, asked for free: a body that can't pass validation (wrong types, an unknown
+   * field) is sent, and Higgsfield's 422 names every field it wants (missing ones included). Nothing can start or be
+   * charged. For Genjutsu Light, whose schema isn't published.
+   */
+  async probeSchema(ref: string): Promise<{ status: number | null; fields: HfFieldIssue[]; detail: string }> {
+    if (!this.configured()) return { status: null, fields: [], detail: "Higgsfield isn't set up on the server" };
+    const res = await this.fetchFn(`${this.base()}/${ref}`, { method: 'POST', headers: this.headers(), signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({ prompt: 12345, resolution: 12345, __muse_schema_probe: true }) }).catch(() => null);
+    if (!res) return { status: null, fields: [], detail: 'Higgsfield unreachable' };
+    const text = await res.text().catch(() => '');
+    if (res.ok) { // should never happen; if it did, stop it at once
+      try { const j = JSON.parse(text) as { cancel_url?: string }; if (j.cancel_url) await this.fetchFn(j.cancel_url, { method: 'POST', headers: this.headers() }).catch(() => null); } catch { /* ignore */ }
+      return { status: res.status, fields: [], detail: 'accepted a probe (cancelled at once)' };
+    }
+    return { status: res.status, fields: hfValidation(text), detail: hfDetail(text, 1200) };
   }
   /**
    * Genjutsu restyle presets (GET /models/higgsfield/genjutsu/restyle/v1.0/presets): free, needs the key and access to

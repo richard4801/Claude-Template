@@ -55,6 +55,28 @@ export function genjutsuInput(videoUrl: string, imageUrls: string[], prompt: str
   return { video_url: videoUrl, image_urls: imageUrls.slice(0, 8), ...(text.trim() ? { prompt: text } : {}), resolution };
 }
 
+/**
+ * Genjutsu Light's schema isn't published (owner 2026-11-12: every Light swap failed). When Higgsfield's validation (422:
+ * nothing started, nothing charged) names the fields it wants, the same values are sent once more under those names:
+ * a missing video field gets the clip, an image field the pictures (one for a singular name), prompt/resolution theirs;
+ * fields it forbids are left out. Null: nothing to change.
+ */
+export function adaptGenjutsuInput(input: Record<string, unknown>, fields: { field: string; type: string }[]): Record<string, unknown> | null {
+  const out = { ...input };
+  const video = input.video_url, images = (input.image_urls as string[] | undefined) ?? [];
+  let changed = false;
+  for (const f of fields) {
+    if (/extra|forbidden|not permitted/i.test(f.type) && f.field in out) { delete out[f.field]; changed = true; continue; }
+    if (!/missing|required/i.test(f.type) || f.field in out) continue;
+    const n = f.field.toLowerCase();
+    const v = /video/.test(n) ? (/s$|urls|list/.test(n) ? [video] : video)
+      : /image|photo|picture|character|reference/.test(n) ? (/s$|urls|list/.test(n) ? images : images[0])
+      : /prompt/.test(n) ? input.prompt ?? '' : /resolution/.test(n) ? input.resolution : undefined;
+    if (v !== undefined) { out[f.field] = v; changed = true; }
+  }
+  return changed ? out : null;
+}
+
 /** WS13: the resolution a chosen hosted swap model runs a quality at (its own list; H3 Lite has no 2K). */
 function swapResolution(id: string, quality: P.Quality) {
   const m = modelById(id), want = P.QUALITY_INFO[quality].resolution;
@@ -84,6 +106,13 @@ const lineOf = (ts: TakeState): LineId => ts.provider ?? (ts.id?.startsWith('{')
 /** A failed prediction's error (Higgsfield's line carries its own ReplicateError). */
 const failedError = (p: Prediction) => (p.error instanceof ReplicateError ? p.error : predictionError(p));
 
+/** "Higgsfield rejected the request (422: video_url: Field required) · you weren't charged": the provider's words, no links. */
+function providerSaid(e: ReplicateError): string | null {
+  const t = e.message.replace(/https?:\/\/\S+/g, '<link>').replace(/\s+/g, ' ').trim();
+  if (!t || /^(failed|the prediction failed|Cancelled)$/i.test(t)) return null;
+  return `${t.slice(0, 300)} · you weren't charged`;
+}
+
 /** Why a run failed, for the job: a member-safe message shown as-is and the machine code (the details go to the log). */
 export function failureOf(e: unknown): { message: string; code: string; retryable: boolean } {
   if (e instanceof ReplicateError) {
@@ -93,8 +122,10 @@ export function failureOf(e: unknown): { message: string; code: string; retryabl
     if (e.kind === 'timeout') return { message: "This took too long and was stopped · you weren't charged", code: 'provider_timeout', retryable: true };
     if (e.kind === 'out_of_credit') return { message: OUT_OF_CREDIT, code: 'provider_out_of_credit', retryable: true };
     if (e.kind === 'unavailable' && e.message === GENJUTSU_NO_ACCESS) return { message: GENJUTSU_NO_ACCESS, code: 'provider_no_access', retryable: false };
-    if (e.kind === 'unavailable') return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: false };
-    return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: true };
+    // The provider's own words (owner 2026-11-12: Genjutsu Light failed with a bare "Something went wrong").
+    const said = providerSaid(e);
+    if (e.kind === 'unavailable') return { message: said ?? SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: false };
+    return { message: said ?? SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: true };
   }
   return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: true };
 }
@@ -381,7 +412,15 @@ export class ReplicateVideo {
             maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled,
             onWait: async w => { await report(i, 0.03, `Waiting to start · retrying in ${w}s`); },
           });
-          try { pred = await begin(); } catch (e) { if (!toReplicate(e, s)) throw e; pred = await begin(); }
+          try { pred = await begin(); } catch (e) {
+            const v = (e as { validation?: { field: string; type: string }[] }).validation;
+            const adapted = s.gj && e instanceof ReplicateError && e.status === 422 && v?.length ? adaptGenjutsuInput(s.input, v) : null;
+            if (adapted) { // Genjutsu named other fields (not started, not charged): once more with its names
+              ctx.log.warn({ job: job.id, fields: v!.map(f => `${f.field}:${f.type}`) }, 'Genjutsu wanted other fields · sending again with its names');
+              s.input = adapted;
+            } else if (!toReplicate(e, s)) throw e;
+            pred = await begin();
+          }
           ts.id = pred.id; ts.provider = lineId(); ts.startedAt = Date.now();
           delete ts.cancelAsked; delete ts.paid; delete ts.result;
           await this.saveState(job.id, state);

@@ -103,7 +103,7 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
   let server: http.Server, dir: string, base = '';
   const hf: { url: string; input: any }[] = [];
   const rep: unknown[] = [];
-  let mode: 'ok' | 'no_access' | 'no_credit' = 'ok';
+  let mode: 'ok' | 'no_access' | 'no_credit' | 'light_fields' | 'gen_failed' = 'ok';
   beforeAll(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-gj-fake-'));
     const file = path.join(dir, 'out.mp4');
@@ -126,10 +126,18 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
           hf.push({ url: sub, input: JSON.parse(body) });
           if (mode === 'no_access') return json(403, { detail: 'Model not available on your plan' });
           if (mode === 'no_credit') return json(403, { detail: 'Not enough credits' });
+          const inp = hf.at(-1)!.input;
+          // The probe: wrong types and an unknown field are always refused, naming what the model wants.
+          if (inp.__muse_schema_probe) return json(422, { detail: [{ loc: ['body', 'reference_video_url'], type: 'missing', msg: 'Field required' },
+            { loc: ['body', 'prompt'], type: 'string_type', msg: 'Input should be a valid string' }, { loc: ['body', '__muse_schema_probe'], type: 'extra_forbidden', msg: 'Extra inputs are not permitted' }] });
+          // Light with other field names: video_url refused, reference_video_url wanted.
+          if (mode === 'light_fields' && sub.includes('genjutsu-light') && !('reference_video_url' in inp))
+            return json(422, { detail: [{ loc: ['body', 'reference_video_url'], type: 'missing', msg: 'Field required' }, { loc: ['body', 'video_url'], type: 'extra_forbidden', msg: 'Extra inputs are not permitted' }] });
           const id = `00000000-0000-0000-0000-0000000000${String(hf.length).padStart(2, '0')}`;
           return json(200, { status: 'queued', request_id: id, status_url: `${base}/hf/requests/${id}/status`, cancel_url: `${base}/hf/requests/${id}/cancel` });
         }
-        if (/^\/requests\/[0-9a-f-]+\/status$/.test(sub)) return json(200, { status: 'completed', request_id: 'x', video: { url: `${base}/out.mp4` } });
+        if (/^\/requests\/[0-9a-f-]+\/status$/.test(sub)) return mode === 'gen_failed' ? json(200, { status: 'failed', request_id: 'x', error: 'Reference image could not be downloaded' })
+          : json(200, { status: 'completed', request_id: 'x', video: { url: `${base}/out.mp4` } });
         json(404, {});
       });
     });
@@ -287,6 +295,42 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
       expect(last.prompt).toMatch(new RegExp(`place and background from image ${last.image_urls.length}`));
       // Other hosted swaps still refuse a background photo.
       expect((await owner.req('POST', '/v1/jobs', { modelId: m.id, clipId, engineModel: 'h3', quality: 'standard', background: 'photo', backgroundImage: { url: 'https://example.com/room.jpg' } })).body.error).toMatch(/only on Edit or Genjutsu/);
+    } finally { await a.close(); }
+  });
+
+  it('Light: when Higgsfield names other fields (422, not started) the swap is sent once more under its names; its own error text reaches the job', async () => {
+    hf.length = 0; mode = 'light_fields';
+    const a = await makeApp(env());
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const { j } = await swap(a, owner, 'genjutsu-light', 'standard');
+      expect(j.state, j.error).toBe('done');
+      expect(hf).toHaveLength(2);
+      expect(hf[0]!.input.video_url).toBeTruthy();
+      expect(hf[1]!.input.video_url).toBeUndefined();
+      expect(hf[1]!.input.reference_video_url).toBe(hf[0]!.input.video_url);
+      expect(hf[1]!.input.image_urls).toEqual(hf[0]!.input.image_urls);
+      // A generation that fails at Higgsfield: its words, never a bare "Something went wrong".
+      mode = 'gen_failed';
+      const f = await swap(a, owner, 'genjutsu-light', 'standard');
+      expect(f.j.state).toBe('failed');
+      expect(f.j.error).toBe("Higgsfield: Reference image could not be downloaded · you weren't charged");
+      // A request it refuses outright: its words too, no links.
+      mode = 'no_credit';
+    } finally { await a.close(); mode = 'ok'; }
+  });
+
+  it('the free schema probe names the fields each motion-transfer model wants (nothing started)', async () => {
+    hf.length = 0; mode = 'ok';
+    const a = await makeApp(env());
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const r = (await owner.req('GET', '/v1/engines/genjutsu/access?schema=1')).body;
+      const light = r.schema['higgsfield/genjutsu-light/motion-transfer/v1.0'];
+      expect(light.status).toBe(422);
+      expect(light.fields).toContainEqual({ field: 'reference_video_url', type: 'missing', msg: 'Field required' });
+      expect(light.detail).toMatch(/reference_video_url: Field required/);
+      expect(hf.every(x => x.input.__muse_schema_probe === true)).toBe(true);
     } finally { await a.close(); }
   });
 

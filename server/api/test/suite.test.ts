@@ -383,7 +383,7 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect((await a.ctx.db.select().from(jobs)).length).toBe(n0);
     a.ctx.suite.mock.failNext = 1;
     const f = await done((await member.req('POST', '/v1/suite/shots', { prompt: 'A city at night.' })).body.id);
-    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_failed', error: "Something went wrong · you weren't charged" });
+    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_failed', error: "mock failure · you weren't charged" });
     expect(f.refunded).toBe(f.cost);
     a.ctx.suite.mock.refuseNext = 1;
     const g = await done((await member.req('POST', '/v1/suite/shots', { prompt: 'A city at night.' })).body.id);
