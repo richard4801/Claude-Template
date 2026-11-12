@@ -1,0 +1,1247 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt
+index 7a08a20..56ae052 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt
+@@ -32,7 +32,9 @@ import java.util.concurrent.TimeUnit
+ // ---------------------------------------------------------------- types
+ 
+ @Serializable
+-data class ClaudeToolRef(val id: String = "", val name: String = "", val ok: Boolean? = null, val summary: String? = null)
++data class ClaudeToolRef(val id: String = "", val name: String = "", val ok: Boolean? = null, val summary: String? = null,
++    /** One Claude: what the app does with the line; `ui.card` is a card (studio.muse.core.claude.ClaudeCard). */
++    val ui: kotlinx.serialization.json.JsonObject? = null)
+ 
+ @Serializable
+ data class ClaudeImageRef(val url: String = "")
+@@ -163,6 +165,9 @@ interface ClaudeApi {
+     /** "" goes back to the chat's first words. */
+     suspend fun renameThread(id: String, title: String): ClaudeThread = throw ApiException("not_found", "This server keeps one chat per place")
+     suspend fun deleteThread(id: String): Unit = throw ApiException("not_found", "This server keeps one chat per place")
++    /** Cards: Approve / Decline on a gated action's card; Undo on one row of "What I changed". */
++    suspend fun answerAction(id: String, approve: Boolean): String = throw ApiException("not_found", "This server can't answer Claude's actions yet")
++    suspend fun undoCardRow(messageId: String, row: Int): Unit = throw ApiException("not_found", "This server can't undo from the chat yet")
+ 
+     object Unsupported : ClaudeApi {
+         private fun no(): Nothing = throw ApiException("unsupported", "Claude chat needs the studio server")
+@@ -179,7 +184,17 @@ interface ClaudeApi {
+ /** Relative upload URLs ("/uploads/…") made absolute against [base]. */
+ fun ClaudeMessage.absolute(base: String): ClaudeMessage {
+     fun abs(u: String) = if (u.startsWith("/")) base.trimEnd('/') + u else u
+-    val m = if (image?.url?.startsWith("/") == true) copy(image = ClaudeImageRef(abs(image.url))) else this
++    var m = if (image?.url?.startsWith("/") == true) copy(image = ClaudeImageRef(abs(image.url))) else this
++    // A clip card's video ("/uploads/…").
++    val card = m.tool?.ui?.get("card") as? kotlinx.serialization.json.JsonObject
++    val video = card?.get("video") as? kotlinx.serialization.json.JsonObject
++    val vu = (video?.get("url") as? kotlinx.serialization.json.JsonPrimitive)?.content
++    if (vu != null && vu.startsWith("/")) {
++        val v2 = kotlinx.serialization.json.JsonObject(video + ("url" to kotlinx.serialization.json.JsonPrimitive(abs(vu))))
++        val c2 = kotlinx.serialization.json.JsonObject(card + ("video" to v2))
++        val t = m.tool!!
++        m = m.copy(tool = t.copy(ui = kotlinx.serialization.json.JsonObject(t.ui.orEmpty() + ("card" to c2))))
++    }
+     return if (m.attachments.any { it.url.startsWith("/") }) m.copy(attachments = m.attachments.map { it.copy(url = abs(it.url)) }) else m
+ }
+ 
+@@ -228,6 +243,15 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
+     private fun enc(id: String) = java.net.URLEncoder.encode(id, "UTF-8")
+     private val origin get() = base.trimEnd('/')
+ 
++    override suspend fun answerAction(id: String, approve: Boolean): String {
++        val a = raw("POST", "v1/claude/actions/${enc(id)}", """{"approve":$approve}""")
++        if (a.code !in 200..299) throw errorOf(a.code, a.text)
++        return runCatching { (json.parseToJsonElement(a.text) as kotlinx.serialization.json.JsonObject)["status"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } }.getOrNull() ?: "done"
++    }
++    override suspend fun undoCardRow(messageId: String, row: Int) {
++        val a = raw("POST", "v1/claude/cards/${enc(messageId)}/undo", """{"row":$row}""")
++        if (a.code !in 200..299) throw errorOf(a.code, a.text)
++    }
+     override suspend fun status() = call("GET", "v1/claude/status", null, ClaudePlanStatus.serializer())
+     override suspend fun setApiFallback(on: Boolean) =
+         call("PATCH", "v1/claude/settings", json.encodeToString(FallbackBody.serializer(), FallbackBody(on)), ClaudePlanStatus.serializer())
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/SuiteAssist.kt b/android/app/src/main/kotlin/studio/muse/app/data/SuiteAssist.kt
+index 686b071..7d36ae1 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/SuiteAssist.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/SuiteAssist.kt
+@@ -15,6 +15,9 @@ data class SuiteAssist(
+     val revision: Int = 0,
+     val pending: List<SuitePending> = emptyList(),
+     val updatedAt: Long = 0,
++    /** What Generate would send and what the composer shows (the server's view): the Claude panel's context strip. */
++    val request: kotlinx.serialization.json.JsonObject? = null,
++    val onScreen: kotlinx.serialization.json.JsonObject? = null,
+ ) {
+     /** The approval waiting for the owner, if any (the newest). */
+     val waiting: SuitePending? get() = pending.lastOrNull { it.status == "waiting" }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatCards.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatCards.kt
+new file mode 100644
+index 0000000..17eeb02
+--- /dev/null
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatCards.kt
+@@ -0,0 +1,449 @@
++package studio.muse.app.ui.screens.claude
++
++import android.graphics.RuntimeShader
++import android.os.Build
++import androidx.annotation.RequiresApi
++import androidx.compose.foundation.Canvas
++import androidx.compose.foundation.background
++import androidx.compose.foundation.border
++import androidx.compose.foundation.horizontalScroll
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.aspectRatio
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.Stable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableDoubleStateOf
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.runtime.withFrameNanos
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.draw.drawBehind
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.geometry.Size
++import androidx.compose.ui.graphics.Brush
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.Outline
++import androidx.compose.ui.graphics.ShaderBrush
++import androidx.compose.ui.graphics.Shape
++import androidx.compose.ui.graphics.drawOutline
++import androidx.compose.ui.graphics.drawscope.Stroke
++import androidx.compose.ui.graphics.toArgb
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.unit.Dp
++import androidx.compose.ui.unit.dp
++import coil3.compose.AsyncImage
++import kotlinx.coroutines.delay
++import studio.muse.app.ui.components.T
++import studio.muse.app.ui.components.press
++import studio.muse.app.ui.screens.Caption
++import studio.muse.app.ui.screens.PrimaryButton
++import studio.muse.app.ui.screens.SecondaryButton
++import studio.muse.app.ui.screens.StageVideo
++import studio.muse.app.ui.theme.Ic
++import studio.muse.app.ui.theme.MuseSpace
++import studio.muse.app.ui.theme.muse
++import studio.muse.app.ui.theme.radii
++import studio.muse.app.ui.theme.roles
++import studio.muse.app.ui.theme.scale
++import studio.muse.core.claude.CardText
++import studio.muse.core.claude.ClaudeCard
++import studio.muse.core.claude.ClaudeOrb
++import studio.muse.core.claude.ContextItem
++import studio.muse.core.claude.OrbState
++
++// The Claude panel on Android (owner's chosen reference, 2026-11-12; the Mac's ClaudeCards / ClaudeOrbView /
++// ClaudeContextStrip): cards in the chat, Claude's orb (the C2 "alive" shader as AGSL on Android 13+, a still tint
++// below), the floating panel's living edge, and the context strip. Logic lives in :core (studio.muse.core.claude).
++
++// ---------------------------------------------------------------- cards
++
++@Composable
++internal fun ChatCardView(item: ChatItem.Card, answer: String?, actions: ClaudeChatActions) {
++    val m = muse
++    val shape = RoundedCornerShape(m.radii.container)
++    Column(Modifier.fillMaxWidth().padding(vertical = MuseSpace.s1).clip(shape).background(m.roles.raised)
++        .border(1.dp, m.roles.hairline, shape).padding(MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
++        when (val c = item.card) {
++            is ClaudeCard.Plan -> PlanCard(c)
++            is ClaudeCard.Media -> ClipCard(c)
++            is ClaudeCard.Changes -> ChangesCard(c) { row, what -> actions.undoCard(item.messageId, row, what) }
++            is ClaudeCard.Approve -> ApproveCard(c, answer) { yes -> actions.answerCard(item.messageId, c.target, yes) }
++        }
++    }
++}
++
++@Composable
++private fun CardTitle(text: String, trailing: String? = null) {
++    val m = muse
++    Row(verticalAlignment = Alignment.CenterVertically) {
++        T(text, m.scale.heading, m.roles.ink, Modifier.weight(1f), maxLines = 2)
++        trailing?.let { T(it, m.scale.caption, m.roles.ink2) }
++    }
++}
++
++@Composable
++private fun PlanCard(c: ClaudeCard.Plan) {
++    val m = muse
++    CardTitle(c.title, "${c.done} of ${c.steps.size}")
++    val next = c.steps.indexOfFirst { !it.done }
++    c.steps.forEachIndexed { i, s ->
++        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2),
++            modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "${s.text}, " + if (s.done) "done" else if (i == next) "next" else "to do" }) {
++            Box(Modifier.size(18.dp).clip(CircleShape).background(if (s.done) m.roles.positive else Color.Transparent)
++                .border(1.5.dp, if (s.done) m.roles.positive else if (i == next) m.roles.accent else m.roles.hairline, CircleShape), contentAlignment = Alignment.Center) {
++                if (s.done) Ic("check", 12.dp, m.roles.onAction)
++            }
++            T(s.text, m.scale.body, if (s.done) m.roles.ink2 else m.roles.ink, weight = if (i == next) FontWeight.Medium else null)
++        }
++    }
++}
++
++@Composable
++private fun ClipCard(c: ClaudeCard.Media) {
++    val m = muse
++    CardTitle(c.title, c.durationSec?.let { CardText.clock(it) })
++    c.summary?.let { Caption(it) }
++    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(m.radii.control)).background(Color.Black)) {
++        StageVideo(c.video.url, null, muted = true, modifier = Modifier.matchParentSize())
++    }
++    if (c.moments.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
++        T("Key moments", m.scale.label, m.roles.ink2)
++        for (mo in c.moments) Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
++            T(mo.timecode, m.scale.caption.copy(fontFeatureSettings = "tnum"), m.roles.ink2, Modifier.width(76.dp))
++            T(mo.label, m.scale.body, m.roles.ink, Modifier.weight(1f))
++        }
++    }
++}
++
++@Composable
++private fun ChangesCard(c: ClaudeCard.Changes, undo: (Int, String) -> Unit) {
++    val m = muse
++    CardTitle(c.title)
++    c.rows.forEachIndexed { i, r ->
++        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = CardText.change(r) }) {
++            Column(Modifier.weight(1f)) {
++                T(r.what, m.scale.caption, m.roles.ink2)
++                T(r.to, m.scale.body, if (r.undone) m.roles.ink2 else m.roles.ink, maxLines = 2)
++            }
++            when {
++                r.undone -> T("Undone", m.scale.caption, m.roles.ink2)
++                r.undoable -> T("Undo", m.scale.label, m.roles.link, Modifier.clip(RoundedCornerShape(m.radii.chip)).press { undo(i, r.what) }
++                    .padding(horizontal = MuseSpace.s2, vertical = MuseSpace.s1).semantics { contentDescription = "Undo ${r.what}" })
++            }
++        }
++    }
++}
++
++@Composable
++private fun ApproveCard(c: ClaudeCard.Approve, answer: String?, answerIt: (Boolean) -> Unit) {
++    val m = muse
++    CardTitle(c.title)
++    c.subtitle?.let { Caption(it) }
++    val money = m.scale.body.copy(fontFeatureSettings = "tnum")
++    for (l in c.lines) Row { T(l.label, m.scale.body, m.roles.ink2, Modifier.weight(1f)); T(CardText.money(l.usd), money, m.roles.ink) }
++    Box(Modifier.fillMaxWidth().height(1.dp).background(m.roles.hairline))
++    Row { T("Total", m.scale.body, m.roles.ink, Modifier.weight(1f), weight = FontWeight.SemiBold); T(CardText.money(CardText.total(c.lines, c.totalUsd)), money, m.roles.ink, weight = FontWeight.SemiBold) }
++    if (answer != null) Caption(if (answer == "…") "Answering…" else answer)
++    else Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
++        SecondaryButton(c.declineLabel, { answerIt(false) }, Modifier.weight(1f), height = 44.dp)
++        PrimaryButton(c.approveLabel, { answerIt(true) }, Modifier.weight(1f))
++    }
++}
++
++// ---------------------------------------------------------------- the orb
++
++/** The chat's orb, fed only by real events from the thread (the turn, its streamed text, tool steps, a failed turn). */
++@Stable
++class ChatOrb internal constructor() {
++    val orb = ClaudeOrb()
++    /** Seconds since the orb was made (the shader's clock). */
++    var now by mutableDoubleStateOf(0.0)
++    var phase by mutableDoubleStateOf(0.0)
++    var state by mutableStateOf(OrbState.IDLE)
++}
++
++@Composable
++internal fun rememberChatOrb(ui: ClaudeChatUi): ChatOrb {
++    val o = remember { ChatOrb() }
++    val t0 = remember { System.nanoTime() }
++    fun now() = (System.nanoTime() - t0) / 1e9
++    val turn = ui.turn
++    val text = turn?.parts?.sumOf { (it as? LivePart.Text)?.text?.length ?: 0 } ?: 0
++    val running = turn?.parts?.filterIsInstance<LivePart.Tool>()?.filter { it.status == "running" }?.map { it.id }.orEmpty()
++    LaunchedEffect(turn?.id, turn?.active) {
++        if (turn?.active == true) o.orb.turnStarted() else if (o.orb.turnRunning) o.orb.turnEnded(turn?.error == null && turn?.state != "failed", now())
++    }
++    LaunchedEffect(text) { if (text > 0 && turn?.active == true) o.orb.chunk(now()) }
++    LaunchedEffect(running) {
++        running.forEach { o.orb.uiCallBegan(it, now()) }
++        if (running.isEmpty()) o.orb.stopped()
++    }
++    LaunchedEffect(ui.cardAnswers.size) { if (ui.cardAnswers.isNotEmpty()) o.orb.changeApplied(now()) }
++    val reduce = rememberReduceMotion()
++    // Frames only while something moves (0 / 12 / 30 fps, as on the Mac).
++    LaunchedEffect(reduce) {
++        var last = now()
++        while (true) {
++            val n = now()
++            o.orb.look(n, reduce).let { l -> o.phase = ClaudeOrb.advance(o.phase, n - last, l) }
++            last = n; o.now = n; o.state = o.orb.state(n)
++            val fps = o.orb.frameRate(n, reduce)
++            if (fps == 0) delay(250) else { delay((1000L / fps) - 2); withFrameNanos { } }
++        }
++    }
++    return o
++}
++
++@Composable
++private fun rememberReduceMotion(): Boolean {
++    val ctx = LocalContext.current
++    return remember { android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
++}
++
++/** Claude's orb: the C2 "alive" glass ball with luminous smoke (AGSL, Android 13+); a still tinted ball below that. */
++@Composable
++fun ClaudeOrbView(o: ChatOrb, size: Dp, modifier: Modifier = Modifier) {
++    val m = muse
++    val reduce = rememberReduceMotion()
++    val page = m.roles.canvas
++    val light = !m.t.dark
++    Box(modifier.size(size).semantics { contentDescription = "Claude, " + orbWords(o.state) }) {
++        if (Build.VERSION.SDK_INT >= 33) OrbShaderCanvas(o, reduce, page, light)
++        else OrbStill(o.state, page, light)
++    }
++}
++
++private fun orbWords(s: OrbState) = when (s) {
++    OrbState.IDLE -> "ready"; OrbState.THINKING -> "thinking"; OrbState.OPERATING -> "working in the app"
++    OrbState.WAITING -> "waiting for you"; OrbState.ERROR -> "something went wrong"
++}
++
++@RequiresApi(33)
++@Composable
++private fun OrbShaderCanvas(o: ChatOrb, reduce: Boolean, page: Color, light: Boolean) {
++    val shader = remember { RuntimeShader(ORB_AGSL) }
++    val brush = remember { ShaderBrush(shader) }
++    Canvas(Modifier.matchParentSize()) {
++        val n = o.now
++        val u = o.orb.uniforms(n, reduce)
++        shader.setFloatUniform("size", this.size.width, this.size.height)
++        shader.setFloatUniform("scale", ClaudeOrb.SCALE.toFloat())
++        shader.setFloatUniform("phase", o.phase.toFloat())
++        shader.setFloatUniform("time", if (reduce) 0f else n.toFloat())
++        shader.setFloatUniform("bright", u.bright.toFloat())
++        shader.setFloatUniform("spin", u.current.toFloat())
++        shader.setFloatUniform("danger", u.danger.toFloat())
++        shader.setFloatUniform("pulse", u.pulse.toFloat())
++        shader.setFloatUniform("breath", u.breath.toFloat())
++        shader.setFloatUniform("lightPage", if (light) 1f else 0f)
++        shader.setFloatUniform("wobble", u.wobble.toFloat())
++        shader.setFloatUniform("pop", u.pop.toFloat())
++        shader.setFloatUniform("page", page.red, page.green, page.blue)
++        drawRect(brush)
++    }
++}
++
++/** Below Android 13: the ball still, tinted with the state's colours (no animation, the same silhouette and rim). */
++@Composable
++private fun OrbStill(s: OrbState, page: Color, light: Boolean) {
++    val pal = (if (s == OrbState.ERROR) ClaudeOrb.ERROR_PALETTE else ClaudeOrb.PALETTE).map { Color(it) }
++    Canvas(Modifier.matchParentSize()) {
++        val r = this.size.minDimension / 2f / ClaudeOrb.SCALE.toFloat()
++        val c = center
++        drawCircle(page, r, c)
++        drawCircle(Brush.radialGradient(listOf(pal[0].copy(alpha = .9f), pal[1].copy(alpha = .8f), pal[2].copy(alpha = .55f), Color.Transparent),
++            Offset(c.x - r * .15f, c.y + r * .2f), r * 1.05f), r, c)
++        drawCircle(Brush.radialGradient(listOf(pal[3].copy(alpha = .45f), Color.Transparent), Offset(c.x + r * .35f, c.y - r * .1f), r * .6f), r, c)
++        if (!light) drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = .35f), Color.Transparent), Offset(c.x + r * .1f, c.y + r * .25f), r * .35f), r, c)
++        drawCircle(Brush.radialGradient(listOf(Color.Transparent, Color.White.copy(alpha = if (light) .25f else .35f)), c, r), r, c, style = Stroke(r * .06f))
++        drawOval(Color.White.copy(alpha = .14f), Offset(c.x - r * .55f, c.y - r * .8f), Size(r * .9f, r * .3f))
++    }
++}
++
++/**
++ * ClaudeOrb.metal (the Mac) ≙ design/direction/orb_alive.py, in AGSL: keep the three in step. AGSL has no `thread`
++ * references (out params instead) and its loops need constant bounds; the picture is the same.
++ */
++private val ORB_AGSL = """
++uniform float2 size; uniform float scale; uniform float phase; uniform float time; uniform float bright; uniform float spin;
++uniform float danger; uniform float pulse; uniform float breath; uniform float lightPage; uniform float wobble; uniform float pop;
++uniform float3 page;
++
++float sstep(float e0, float e1, float x) { float t = clamp((x - e0) / (e1 - e0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
++float hash3(float3 p) { return fract(sin(dot(p, float3(127.1, 311.7, 74.7))) * 43758.5453); }
++float noise3(float3 p) {
++    float3 i = floor(p); float3 f = fract(p); float3 u = f * f * (3.0 - 2.0 * f);
++    float a = mix(mix(hash3(i), hash3(i + float3(1, 0, 0)), u.x), mix(hash3(i + float3(0, 1, 0)), hash3(i + float3(1, 1, 0)), u.x), u.y);
++    float b = mix(mix(hash3(i + float3(0, 0, 1)), hash3(i + float3(1, 0, 1)), u.x), mix(hash3(i + float3(0, 1, 1)), hash3(i + float3(1, 1, 1)), u.x), u.y);
++    return mix(a, b, u.z);
++}
++float fbm4(float3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise3(p); p = p * 2.07 + float3(1.7, 9.2, 4.1); a *= 0.5; } return v; }
++float fbm3(float3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 3; i++) { v += a * noise3(p); p = p * 2.07 + float3(1.7, 9.2, 4.1); a *= 0.5; } return v; }
++
++float3 dye(float3 p) {
++    float h = fbm3(p * 0.9 + float3(11.0, 3.0, phase * 0.05));
++    float g = sstep(0.62, 0.75, fbm3(p * 1.3 + float3(-4.0, 7.0, 2.0)));
++    float3 m = float3(1.0, 0.24, 0.66); float3 v = float3(0.56, 0.33, 1.0); float3 bl = float3(0.22, 0.48, 1.0); float3 c = float3(0.15, 0.9, 0.95);
++    float t = clamp((h - 0.3) * 2.5, 0.0, 1.0) * 3.0;
++    float3 col = t < 1.0 ? mix(m, v, t) : (t < 2.0 ? mix(v, bl, t - 1.0) : mix(bl, c, t - 2.0));
++    col = mix(col, float3(1.0, 0.72, 0.3), g * 0.8);
++    float3 err = mix(float3(1.0, 0.25, 0.1), float3(1.0, 0.62, 0.15), clamp((h - 0.35) * 3.0, 0.0, 1.0));
++    return mix(col, err, danger);
++}
++
++float density(float3 p, out float3 q) {
++    float t = phase;
++    float3 w = float3(fbm3(p * 1.1 + float3(0.0, -t * 0.18, t * 0.07)), fbm3(p * 1.1 + float3(5.2, 1.3 - t * 0.2, -t * 0.05)), fbm3(p * 1.1 + float3(2.7, 8.1, t * 0.09)));
++    q = p + (w - 0.5) * 1.3 + float3(-spin * t * 0.5, -t * 0.12, 0.0);
++    float d = fbm4(q * 2.8 + float3(0.0, 0.0, t * 0.04));
++    float edge = sstep(0.86, 0.45, length(p));
++    float low = mix(1.15, 0.6, sstep(-0.6, 0.7, p.y));
++    float thick = mix(0.5, 0.42, danger) - 0.04 * bright;
++    d = sstep(thick, thick + 0.2, d) * edge * low;
++    float age = 1.0 - pulse;
++    float3 c = float3(0.18 * sin(time * 1.3), -0.55 + 0.55 * age, 0.1 * cos(time * 1.1));
++    d += pulse * sstep(0.32 + 0.2 * age, 0.0, length((p - c) * float3(1.0, 0.7, 1.0)) - 0.15 * (fbm3(p * 4.0 + t) - 0.5));
++    return d;
++}
++
++half4 main(float2 position) {
++    float2 px = float2(position.x - 0.5 * size.x, 0.5 * size.y - position.y) / (0.5 * min(size.x, size.y)) * scale;
++    float2 drift = float2(0.012 * sin(phase * 0.31) + 0.015 * spin, 0.01 * cos(phase * 0.27));
++    float ang = atan(px.y - drift.y, px.x - drift.x);
++    float3 dir = float3(cos(ang), sin(ang), 0.0);
++    float press = fbm3(dir * 0.9 + float3(0.0, -phase * 0.12, phase * 0.05));
++    float wob = (fbm3(dir * 1.4 + float3(phase * 0.2, 3.0, -phase * 0.15)) - 0.5) * 2.0;
++    float shape = (1.0 + pop) * (1.0 + wobble * (0.6 * wob + 0.8 * (press - 0.45)));
++    float2 uv = (px - drift) / shape;
++    float r = length(uv);
++    if (r >= 1.0) { return half4(0.0); }
++    float nz = sqrt(1.0 - r * r);
++    float br = bright * (1.0 + 0.5 * pulse) * (1.0 - 0.3 * breath);
++
++    bool light = lightPage > 0.5;
++    float shade = mix(light ? 0.9 : 0.03, light ? 0.97 : 0.3, sstep(0.3, -0.9, uv.y));
++    float3 glass = page * shade + (light ? float3(0.0) : float3(0.015, 0.015, 0.025));
++
++    float z0 = nz * 0.9; float z1 = -nz * 0.9; float dz = (z0 - z1) / 22.0;
++    float3 acc = float3(0.0); float T = 1.0;
++    for (int i = 0; i < 22; i++) {
++        float z = z0 - (float(i) + 0.5) * dz;
++        float3 p = float3(uv, z);
++        float3 q;
++        float d = density(p, q);
++        if (d > 0.01) {
++            float3 qs;
++            float sh = density(p + float3(-0.12, 0.16, 0.12), qs);
++            float3 col = dye(q);
++            float hot = sstep(0.45, 0.95, d);
++            float3 e = mix(col, float3(1.0, 0.97, 0.95), hot * 0.85) * d * (1.0 + 0.5 * hot) * (1.0 - 0.45 * clamp(sh, 0.0, 1.0));
++            e *= mix(0.55, 1.0, (z - z1) / max(z0 - z1, 1e-3));
++            acc += T * e * dz * 6.5 * br;
++            T *= exp(-d * dz * 4.5);
++            if (T < 0.03) { break; }
++        }
++    }
++    float dense = 1.0 - T;
++
++    float f = pow(1.0 - nz, 3.0);
++    float where = 0.35 + 0.65 * max(sstep(0.4, -0.9, uv.y) * sstep(0.2, -0.8, uv.x), sstep(0.3, 0.95, uv.x));
++    float3 smokeTint = acc / max(0.15, max(acc.r, max(acc.g, acc.b)));
++    float3 rim = float3(f, pow(f, 1.15), pow(f, 1.3)) * 0.55 * where + smokeTint * f * 0.5 * clamp(dense * 2.0, 0.0, 1.0) * br;
++    float tiltA = 0.07 * sin(phase * 0.23) + 0.09 * spin;
++    float2 su = float2(cos(tiltA) * uv.x - sin(tiltA) * uv.y, sin(tiltA) * uv.x + cos(tiltA) * uv.y);
++    float3 spec = float3(1.0) * exp(-(pow(su.x + 0.12, 2.0) / 0.22 + pow(su.y - 0.62, 2.0) / 0.035)) * 0.16;
++
++    float3 col;
++    if (light) {
++        float a = clamp(dense * 1.25, 0.0, 0.95);
++        float3 dyeC = clamp(acc / max(0.2, max(acc.r, max(acc.g, acc.b))), 0.0, 1.0);
++        col = mix(glass, dyeC, a) + rim * 0.55 - float3(0.05) * f + spec * 0.6;
++    } else {
++        float3 lit = 1.0 - exp(-acc * 1.15);
++        col = glass * T + lit + rim + spec;
++    }
++    float aa = sstep(1.0, 0.985, r);
++    return half4(half3(clamp(col, 0.0, 1.0) * aa), half(aa));
++}
++"""
++
++// ---------------------------------------------------------------- the living edge
++
++/**
++ * The floating panel's living edge: a thin line around the panel in the orb's colours, glowing with Claude's state
++ * (calm when idle or while typing, brighter while working, red on an error). Drawn over the panel, never over content.
++ */
++@Composable
++fun ClaudeLivingEdge(modifier: Modifier, shape: Shape, orb: ChatOrb? = null) {
++    val o = orb ?: ClaudePanelOrb.current ?: return
++    val reduce = rememberReduceMotion()
++    val n = o.now
++    val edge = o.orb.edge(n, reduce).toFloat()
++    if (edge <= 0.01f) return
++    val pal = (if (o.state == OrbState.ERROR) ClaudeOrb.ERROR_PALETTE else ClaudeOrb.PALETTE).map { Color(it) }
++    Box(modifier.drawBehind {
++        val outline: Outline = shape.createOutline(size, layoutDirection, this)
++        val c = Offset(size.width / 2f, size.height / 2f)
++        val brush = Brush.sweepGradient((pal + pal.first()).map { it.copy(alpha = edge) }, c)
++        drawOutline(outline, brush, style = Stroke(1.5.dp.toPx()))
++    })
++}
++
++/** The orb the open panel shows, so the frame's living edge glows with the same state as the header's orb. */
++val ClaudePanelOrb = androidx.compose.runtime.compositionLocalOf<ChatOrb?> { null }
++
++// ---------------------------------------------------------------- the context strip
++
++/** What Claude sees here now: small thumbnails with a tiny label (clip, her, outfit, background, refs, guide, model). */
++@Composable
++fun ClaudeContextStrip(items: List<ContextItem>, modifier: Modifier = Modifier) {
++    if (items.isEmpty()) return
++    val m = muse
++    Column(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
++        T("Claude sees", m.scale.caption, m.roles.ink2)
++        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
++            for (i in items) Column(Modifier.width(56.dp).semantics(mergeDescendants = true) { contentDescription = i.label + (i.detail?.let { ", $it" } ?: "") },
++                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
++                val shape = RoundedCornerShape(m.radii.chip)
++                Box(Modifier.size(44.dp).clip(shape).background(m.roles.field).border(1.dp, m.roles.hairline, shape), contentAlignment = Alignment.Center) {
++                    when {
++                        i.image != null -> AsyncImage(i.image, null, Modifier.matchParentSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
++                        i.words != null -> T(i.words!!, m.scale.micro, m.roles.ink2, Modifier.padding(3.dp), maxLines = 3)
++                        else -> Ic(contextIcon(i.kind), 18.dp, m.roles.ink2)
++                    }
++                    if (i.isVideo && i.image != null) Ic("play", 14.dp, Color.White)
++                }
++                T(i.label, m.scale.micro, m.roles.ink2, maxLines = 1)
++            }
++        }
++    }
++}
++
++private fun contextIcon(k: ContextItem.Kind) = when (k) {
++    ContextItem.Kind.CLIP, ContextItem.Kind.GUIDE -> "video-camera"
++    ContextItem.Kind.CHARACTER, ContextItem.Kind.FACE -> "user"
++    ContextItem.Kind.OUTFIT, ContextItem.Kind.PRODUCT -> "t-shirt"
++    ContextItem.Kind.BACKGROUND -> "mountains"
++    ContextItem.Kind.FRAME, ContextItem.Kind.REFERENCE -> "image"
++    ContextItem.Kind.AUDIO -> "music-note"
++    ContextItem.Kind.MODEL -> "sparkle"
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt
+index 7bd5bd3..0f81bc4 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt
+@@ -25,6 +25,7 @@ import androidx.compose.foundation.Image
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.border
+ import androidx.compose.foundation.gestures.detectTapGestures
++import androidx.compose.foundation.gestures.detectVerticalDragGestures
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.BoxWithConstraints
+@@ -58,6 +59,7 @@ import androidx.compose.runtime.derivedStateOf
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
++import androidx.compose.runtime.saveable.rememberSaveable
+ import androidx.compose.runtime.rememberCoroutineScope
+ import androidx.compose.runtime.setValue
+ import androidx.compose.runtime.snapshotFlow
+@@ -138,6 +140,9 @@ class ClaudeChatActions(
+     val sendAsJpeg: (String) -> Unit = {},
+     /** WS18: New chat, switch, rename and delete (shown once the server keeps lists). */
+     val sessions: ChatSessionActions = ChatSessionActions(),
++    /** Cards: Approve / Decline, Undo a row, open a clip's moment. */
++    val answerCard: (String, studio.muse.core.claude.ApproveTarget, Boolean) -> Unit = { _, _, _ -> },
++    val undoCard: (String, Int, String) -> Unit = { _, _, _ -> },
+ )
+ 
+ /** A store for one thread, fed by the app's live `claude` events, loaded once. */
+@@ -200,6 +205,8 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
+         retry = { store.load() },
+         retryTurn = { store.retry() },
+         sessions = ChatSessionActions(newChat = { store.newChat() }, open = { store.open(it) }, rename = { t, n -> store.rename(t, n) }, delete = { store.delete(it) }),
++        answerCard = store::answerCard,
++        undoCard = store::undoCard,
+     ), modifier)
+ }
+ 
+@@ -342,6 +349,7 @@ private fun RowView(r: ChatRow, ui: ClaudeChatUi, actions: ClaudeChatActions, co
+             is ChatItem.Assistant -> AssistantText(it, r.first, copy)
+             is ChatItem.Tool -> ToolRow(it, r.first, it.key in expanded) { toggle(it.key) }
+             is ChatItem.Image -> FrameView(it, r.first, view)
++            is ChatItem.Card -> ChatCardView(it, ui.cardAnswers[it.messageId], actions)
+         }
+         is ChatRow.Thinking -> Thinking(r.text)
+         is ChatRow.Ended -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+@@ -386,7 +394,11 @@ private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact:
+     val s = if (ui.status == null && (!ui.loaded || ui.error != null)) StatusLineText(if (ui.loaded) "Not connected" else "Connecting…", Tone.OFF) else ClaudeText.status(ui)
+     Column(Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = if (compact) MuseSpace.s1 else MuseSpace.s3).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+         verticalArrangement = Arrangement.spacedBy(2.dp)) {
+-        if (title.isNotBlank() && !compact) T(title, m.scale.title, m.roles.ink, Modifier.semantics { heading() }, maxLines = 1)
++        if (title.isNotBlank() && !compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
++            // Claude's orb as the avatar (the same state machine as the Mac's: it moves only with real events).
++            ClaudeOrbView(ClaudePanelOrb.current ?: rememberChatOrb(ui), 28.dp)
++            T(title, m.scale.title, m.roles.ink, Modifier.semantics { heading() }, maxLines = 1)
++        }
+         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2), modifier = Modifier.heightIn(min = 24.dp)) {
+             Box(Modifier.size(8.dp).clip(CircleShape).background(toneColor(s.tone)))
+             T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 2)
+@@ -661,41 +673,67 @@ fun ClaudeChatSheet(open: Boolean, onDismiss: () -> Unit, contextKind: String, c
+     above: (@Composable () -> Unit)? = null,
+     /** WS18: the Suite's own sessions (each chat bound to a shared draft) and its tool-step hook. */
+     hooks: ClaudeChatStore.SessionHooks? = null,
+-    onToolDone: ((String) -> Unit)? = null) {
++    onToolDone: ((String) -> Unit)? = null,
++    /** The Suite: an Approve card for its waiting shot answers through the composer (the same as its approval bar). */
++    answerSuite: (suspend (assistId: String, pendingId: String, approve: Boolean) -> String?)? = null) {
+     if (!open) return
+     val store = rememberClaudeChatStore(contextKind, contextId)
+     store.hooks = hooks
+     store.onToolDone = onToolDone
+-    ClaudeSheetFrame(onDismiss, modifier, heightFraction) {
+-        Column(Modifier.fillMaxSize()) {
+-            above?.invoke()
+-            ClaudeChat(store, title, Modifier.weight(1f).fillMaxWidth())
++    store.suiteAnswer = answerSuite
++    // One orb for the panel: the header's avatar and the frame's living edge move together.
++    val ui by store.ui.collectAsState()
++    val orb = rememberChatOrb(ui)
++    androidx.compose.runtime.CompositionLocalProvider(ClaudePanelOrb provides orb) {
++        ClaudeSheetFrame(onDismiss, modifier, heightFraction) {
++            Column(Modifier.fillMaxSize()) {
++                above?.invoke()
++                ClaudeChat(store, title, Modifier.weight(1f).fillMaxWidth())
++            }
+         }
+     }
+ }
+ 
+-/** The sheet's frame (scrim, handle, the container radius on top, the float shadow); [content] fills it. */
++/**
++ * The sheet's frame (owner, 2026-11-12: a floating panel, not a slab): a rounded panel floating over the page with a
++ * soft shadow and the living edge (glowing with Claude's orb), inset from the screen's edges. Drag the handle to make it
++ * taller or shorter (remembered while the app runs); Back and the scrim close it. [content] fills it.
++ */
+ @Composable
+ fun ClaudeSheetFrame(onDismiss: () -> Unit, modifier: Modifier = Modifier, heightFraction: Float = .88f, content: @Composable () -> Unit) {
+     val m = muse
+     BackHandler(onBack = onDismiss)
+-    // The keyboard: the sheet sits on top of it and grows to most of what's left, so the composer and the latest message stay in view.
++    // The keyboard: the panel sits on top of it and grows to most of what's left, so the composer and the latest message stay in view.
+     val keyboard = WindowInsets.ime.getBottom(LocalDensity.current) > 0
++    var fraction by rememberSaveable { mutableStateOf(ClaudeSheetMemory.fraction ?: heightFraction) }
+     Box(modifier.fillMaxSize()) {
+-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .38f)).press(onClick = onDismiss).semantics { contentDescription = "Close Claude" })
+-        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+-        val shape = RoundedCornerShape(topStart = m.radii.container, topEnd = m.radii.container)
+-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(maxHeight * (if (keyboard) maxOf(heightFraction, .92f) else heightFraction))
++        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .28f)).press(onClick = onDismiss).semantics { contentDescription = "Close Claude" })
++        BoxWithConstraints(Modifier.fillMaxSize().imePadding().padding(horizontal = MuseSpace.s3).padding(bottom = MuseSpace.s3).navigationBarsPadding()) {
++        val shape = RoundedCornerShape(m.radii.container + 4.dp)
++        val full = maxHeight
++        val density = LocalDensity.current
++        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(full * (if (keyboard) maxOf(fraction, .92f) else fraction))
+             .museFloat(m, shape).clip(shape).background(m.roles.canvas)) {
+-            Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
++            Box(Modifier.fillMaxWidth().height(24.dp)
++                .pointerInput(Unit) {
++                    detectVerticalDragGestures(onDragEnd = { ClaudeSheetMemory.fraction = fraction }) { _, dy ->
++                        val h = with(density) { full.toPx() }
++                        fraction = (fraction - dy / h).coerceIn(.4f, .95f)
++                    }
++                }
++                .semantics { contentDescription = "Drag to resize Claude" }, contentAlignment = Alignment.Center) {
+                 Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(m.roles.hairline))
+             }
+             Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+         }
++        ClaudeLivingEdge(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(full * (if (keyboard) maxOf(fraction, .92f) else fraction)), shape)
+         }
+     }
+ }
+ 
++/** The floating panel's height, kept while the app runs. */
++object ClaudeSheetMemory { var fraction: Float? = null }
++
+ /** Tablet: the chat as a right panel of [width] with a hairline on its left. */
+ @Composable
+ fun ClaudeChatPanel(contextKind: String, contextId: String, title: String = "Claude", width: Dp = 380.dp, modifier: Modifier = Modifier) {
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt
+index e527f08..66312cf 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt
+@@ -127,6 +127,29 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
+         } finally { removing.remove(id) }
+     }
+ 
++    /** Approve or Decline on an Approve card: a gated action, or the Suite's waiting shot (through [suiteAnswer]). */
++    var suiteAnswer: (suspend (assistId: String, pendingId: String, approve: Boolean) -> String?)? = null
++    fun answerCard(messageId: String, target: studio.muse.core.claude.ApproveTarget, approve: Boolean) {
++        if (_ui.value.cardAnswers.containsKey(messageId)) return
++        _ui.update { it.copy(cardAnswers = it.cardAnswers + (messageId to "…")) }
++        scope.launch {
++            val words = try {
++                when (target) {
++                    is studio.muse.core.claude.ApproveTarget.Action -> api().answerAction(target.id, approve).let { s -> if (s == "failed") "Didn't work. Try it from its screen" else if (approve) "Approved" else "Declined" }
++                    is studio.muse.core.claude.ApproveTarget.Suite -> suiteAnswer?.invoke(target.assistId, target.pendingId, approve) ?: if (suiteAnswer == null) "Answer it in the Suite" else null
++                }
++            } catch (e: ApiException) { if (e.code == "price_changed") e.message ?: "The price changed" else if (e.code in setOf("not_found", "already_answered", "expired")) "Already answered" else null }
++            _ui.update { u -> if (words == null) u.copy(cardAnswers = u.cardAnswers - messageId, notice = "Couldn't answer that. Try again") else u.copy(cardAnswers = u.cardAnswers + (messageId to words)) }
++        }
++    }
++    /** Undo one row of "What I changed": the server puts back only that part; the card comes back marked Undone. */
++    fun undoCard(messageId: String, row: Int, what: String) {
++        scope.launch {
++            try { api().undoCardRow(messageId, row); reload() }
++            catch (e: ApiException) { _ui.update { it.copy(notice = "Couldn't undo ${what.lowercase()}. ${e.message ?: ""}".trim()) } }
++        }
++    }
++
+     suspend fun reload() {
+         val id = _ui.value.thread?.id ?: return
+         runCatching { api().getThread(id) }.onSuccess { t -> _ui.update { u -> ChatReducer.loaded(u, t) } }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt
+index eea836d..94d4cbf 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt
+@@ -96,6 +96,8 @@ sealed interface ChatItem {
+     data class Tool(override val key: String, val text: String, val ok: Boolean, val running: Boolean = false, val detail: String = "") : ChatItem
+     /** A frame Claude grabbed: [url] when stored, [data] (base64) while it streams. */
+     data class Image(override val key: String, val url: String? = null, val data: String? = null, val mimeType: String? = null) : ChatItem
++    /** A card Claude put up (plan, clip, what changed, approve); [messageId] is its stored line (Undo). */
++    data class Card(override val key: String, val messageId: String, val card: studio.muse.core.claude.ClaudeCard) : ChatItem
+ }
+ 
+ /** The chat's state for one thread. */
+@@ -116,6 +118,8 @@ data class ClaudeChatUi(
+     val refusedText: String? = null,
+     val draft: String = "",
+     val notice: String? = null,
++    /** Approve cards answered here ("Approved, rendering"), by message id. */
++    val cardAnswers: Map<String, String> = emptyMap(),
+     val loaded: Boolean = false,
+     val error: String? = null,
+     /** Images picked for the next message (Recreate, Edit and Suite threads; ≤ 4): uploading until [ChatAttachment.uploadId]. */
+@@ -243,6 +247,8 @@ object ChatReducer {
+         for (m in ui.messages) when {
+             m.role == "user" -> out += ChatItem.User(m.id, ChatClean.userText(m.text), m.source, m.attachments.map { it.url }, m.createdAt)
+             m.image != null -> out += ChatItem.Image(m.id, url = m.image.url)
++            m.tool?.ui?.get("card")?.let { studio.muse.core.claude.ClaudeCard.parse(it) } != null ->
++                out += ChatItem.Card("card-${m.id}", m.id, studio.muse.core.claude.ClaudeCard.parse(m.tool!!.ui!!["card"])!!)
+             m.role == "tool" || m.tool != null -> m.tool?.let { tl -> out += tool(m.id, tl.name, ChatClean.summary(tl.summary ?: m.text), if (tl.ok == false) "error" else "done") }
+             m.text.isNotBlank() -> out += ChatItem.Assistant(m.id, ChatClean.assistantText(m.text), at = m.createdAt)
+         }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
+index 2734c01..81fdaad 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteClaude.kt
+@@ -19,7 +19,20 @@ import studio.muse.app.ui.screens.suite.composer.ComposerTool
+  */
+ data class SuiteAssistUi(val id: String, val revision: Int, val pending: SuitePending? = null, val answering: Boolean = false, val message: String? = null,
+     /** WS18: the mode's list of chats this draft belongs to (`suite:photo`…). */
+-    val key: String? = null)
++    val key: String? = null,
++    /** What Claude sees here, as the context strip reads it ({request, inputs, settings}). */
++    val screen: kotlinx.serialization.json.JsonObject? = null)
++
++/** The context strip's screen from the server's view of the shared draft. */
++fun SuiteAssist.contextScreen(): kotlinx.serialization.json.JsonObject? {
++    val r = request ?: return null
++    val o = onScreen
++    return kotlinx.serialization.json.JsonObject(buildMap {
++        put("request", r)
++        o?.get("inputs")?.let { put("inputs", it) }
++        o?.get("settings")?.let { put("settings", it) }
++    })
++}
+ 
+ /** WS18: the composer's mode's list of chats. */
+ val SuiteStore.claudeKey: String get() = ClaudeSessions.suiteKey(composer.value.tool.id)
+@@ -41,7 +54,7 @@ suspend fun SuiteStore.openClaude(): String? {
+ suspend fun SuiteStore.bindClaudeChat(t: ClaudeThread): Boolean {
+     if (t.contextKind != "suite") return false
+     val a = runCatching { app.repo.api.suiteAssist(t.contextId) }.getOrNull() ?: return false
+-    assist.value = SuiteAssistUi(a.id, 0, a.waiting, key = claudeKey)
++    assist.value = SuiteAssistUi(a.id, 0, a.waiting, key = claudeKey, screen = a.contextScreen())
+     assistSynced = null
+     applyAssist(a)
+     ClaudeSessions.remember(claudeKey, t.id)
+@@ -52,7 +65,7 @@ suspend fun SuiteStore.bindClaudeChat(t: ClaudeThread): Boolean {
+ suspend fun SuiteStore.newClaudeChat(): String? {
+     val (a, err) = app.repo.attemptInline { createSuiteAssist(ComposerDrafts.draft(composer.value)) }
+     if (a == null) { app.repo.toast(err ?: "Claude in the Suite isn't available on this server yet"); return null }
+-    assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey)
++    assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey, screen = a.contextScreen())
+     assistSynced = null // the screen goes up with the next sync
+     return a.id
+ }
+@@ -94,7 +107,7 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
+             })
+         }
+     }
+-    assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting) }
++    assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting, screen = a.contextScreen() ?: it.screen) }
+ }
+ 
+ /** The owner's own edit in the composer: sent so Claude sees it. When Claude changed the draft meanwhile, Claude's wins. */
+@@ -110,7 +123,7 @@ suspend fun SuiteStore.pushComposerToAssist(screen: ((Long?) -> kotlinx.serializ
+     try {
+         val a = app.repo.api.patchSuiteAssist(cur.id, d, cur.revision)
+         assistSynced = key.toString()
+-        assist.update { it?.copy(revision = a.revision, pending = a.waiting) }
++        assist.update { it?.copy(revision = a.revision, pending = a.waiting, screen = a.contextScreen() ?: it.screen) }
+     } catch (e: ApiException) {
+         if (e.code == "stale") runCatching { app.repo.api.suiteAssist(cur.id) }.getOrNull()?.let { applyAssist(it) }
+     }
+@@ -120,10 +133,11 @@ suspend fun SuiteStore.pushComposerToAssist(screen: ((Long?) -> kotlinx.serializ
+  * The owner's answer to Claude's Generate. Yes runs it at the approved price (the server re-prices and refuses with
+  * `price_changed` if it rose); the new render joins the composer's renders. No declines it.
+  */
+-suspend fun SuiteStore.answerClaude(approve: Boolean) {
+-    val cur = assist.value ?: return
+-    val p = cur.pending ?: return
+-    if (cur.answering) return
++suspend fun SuiteStore.answerClaude(approve: Boolean, pendingId: String? = null): String? {
++    val cur = assist.value ?: return null
++    val p = cur.pending ?: return "Already answered"
++    if (pendingId != null && p.id != pendingId) return "Already answered"
++    if (cur.answering) return null
+     assist.update { it?.copy(answering = true, message = null) }
+     try {
+         val r = app.repo.api.answerSuitePending(cur.id, p.id, approve)
+@@ -131,9 +145,12 @@ suspend fun SuiteStore.answerClaude(approve: Boolean) {
+         val msg = when (r.status) { "failed" -> r.error ?: "That shot didn't start · you weren't charged"; else -> null }
+         assist.update { it?.copy(answering = false, pending = null, message = msg) }
+         if (!approve) app.repo.toast(SuiteClaudeWords.NOT_NOW)
++        // The Approve card's words (the chat shows them in place of its buttons).
++        return msg ?: if (approve) "Approved, rendering" else "Declined"
+     } catch (e: ApiException) {
+         val msg = if (e.code == "price_changed") "${e.message ?: "The price changed"} · ask Claude again or press Generate yourself" else e.message ?: "Couldn't answer Claude"
+         assist.update { it?.copy(answering = false, pending = if (e.code == "price_changed") null else it.pending, message = msg) }
++        return if (e.code == "price_changed") msg else null
+     }
+ }
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index 380b7bd..c417d71 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -426,7 +426,10 @@ fun SuiteComposerScreen(toolId: String? = null) {
+             assist?.let { a ->
+                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
+                     hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope) },
++                    answerSuite = { _, pid, yes -> store.answerClaude(yes, pid) },
+                     above = {
++                        // What Claude sees on this composer now (the same screen the server reads).
++                        studio.muse.app.ui.screens.claude.ClaudeContextStrip(remember(a.screen) { studio.muse.core.claude.ClaudeContext.items(a.screen) })
+                         SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
+                         if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                     })
+diff --git a/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeCards.kt b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeCards.kt
+new file mode 100644
+index 0000000..72251bd
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeCards.kt
+@@ -0,0 +1,92 @@
++package studio.muse.core.claude
++
++import kotlinx.serialization.json.JsonArray
++import kotlinx.serialization.json.JsonElement
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import kotlinx.serialization.json.booleanOrNull
++import kotlinx.serialization.json.doubleOrNull
++import kotlinx.serialization.json.contentOrNull
++import kotlin.math.roundToLong
++
++// Claude panel cards (owner's chosen chat reference, 2026-11-12; server/api/src/claude/cards.ts; the Mac's
++// MuseCore/Claude/ClaudeCards.swift). Claude's replies can carry structured parts drawn as cards instead of plain bubbles:
++// a plan that ticks, a clip with its key moments, "What I changed" with Undo per row, and an Approve card with price lines
++// and a Total. Each arrives as a tool line (tool.name "card" or "approve", tool.ui.card). Pure and lenient: an unknown or
++// broken card is null (the app keeps the plain tool row), never an error.
++
++data class PlanStep(val text: String, val done: Boolean)
++data class Moment(val from: Double, val to: Double?, val label: String) {
++    /** "0:04–0:10", or "0:04" for one moment. */
++    val timecode: String get() = to?.let { "${CardText.clock(from)}–${CardText.clock(it)}" } ?: CardText.clock(from)
++}
++data class CardVideo(val id: String, val kind: String, val url: String, val title: String?)
++data class ChangeRow(val what: String, val to: String, val undoable: Boolean, val undone: Boolean)
++data class PriceLine(val label: String, val usd: Double)
++
++/** Who answers an Approve card: a gated action, or the Suite composer's waiting shot. */
++sealed interface ApproveTarget {
++    data class Action(val id: String) : ApproveTarget
++    data class Suite(val assistId: String, val pendingId: String) : ApproveTarget
++}
++
++sealed interface ClaudeCard {
++    data class Plan(val planId: String, val title: String, val steps: List<PlanStep>) : ClaudeCard {
++        val done get() = steps.count { it.done }
++    }
++    data class Media(val title: String, val summary: String?, val video: CardVideo, val durationSec: Double?, val moments: List<Moment>) : ClaudeCard
++    data class Changes(val title: String, val rows: List<ChangeRow>) : ClaudeCard
++    data class Approve(val title: String, val subtitle: String?, val lines: List<PriceLine>, val totalUsd: Double?, val target: ApproveTarget,
++                       val approveLabel: String, val declineLabel: String) : ClaudeCard
++
++    companion object {
++        /** A card from its JSON (`tool.ui.card`), or null when unknown or broken. */
++        fun parse(e: JsonElement?): ClaudeCard? {
++            val o = e as? JsonObject ?: return null
++            val title = o.str("title")
++            return when (o.str("kind")) {
++                "plan" -> {
++                    val steps = o.arr("steps")?.mapNotNull { s -> (s as? JsonObject)?.let { st -> st.str("text")?.let { PlanStep(it, st.bool("done") ?: false) } } } ?: return null
++                    Plan(o.str("planId") ?: "plan", title ?: "Plan", steps)
++                }
++                "media" -> {
++                    val v = o["video"] as? JsonObject ?: return null
++                    val video = CardVideo(v.str("id") ?: return null, v.str("kind") ?: "take", v.str("url") ?: return null, v.str("title"))
++                    val moments = o.arr("moments")?.mapNotNull { m -> (m as? JsonObject)?.let { x -> x.num("from")?.let { Moment(it, x.num("to"), x.str("label") ?: "") } } }.orEmpty()
++                    Media(title ?: "Clip analysis", o.str("summary"), video, o.num("durationSec"), moments)
++                }
++                "changes" -> Changes(title ?: "What I changed", o.arr("rows")?.mapNotNull { r ->
++                    (r as? JsonObject)?.let { x -> val w = x.str("what"); val t = x.str("to"); if (w == null || t == null) null else ChangeRow(w, t, x.bool("undoable") ?: false, x.bool("undone") ?: false) }
++                }.orEmpty())
++                "approve" -> {
++                    val a = o["answer"] as? JsonObject ?: return null
++                    val target = a.str("actionId")?.let { ApproveTarget.Action(it) }
++                        ?: a.str("assistId")?.let { s -> a.str("pendingId")?.let { p -> ApproveTarget.Suite(s, p) } } ?: return null
++                    val lines = o.arr("lines")?.mapNotNull { l -> (l as? JsonObject)?.let { x -> x.str("label")?.let { lb -> x.num("usd")?.let { PriceLine(lb, it) } } } }.orEmpty()
++                    Approve(title ?: "", o.str("subtitle"), lines, o.num("totalUsd"), target, o.str("approveLabel") ?: "Approve", o.str("declineLabel") ?: "Decline")
++                }
++                else -> null
++            }
++        }
++    }
++}
++
++object CardText {
++    /** "0:04", "1:02:05". */
++    fun clock(s: Double): String {
++        val t = maxOf(0L, s.toLong())
++        return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, (t % 3600) / 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
++    }
++    /** "$1.17". */
++    fun money(v: Double) = "$" + "%.2f".format(java.util.Locale.US, v)
++    /** The Total under the lines: the card's own, else the lines added up. */
++    fun total(lines: List<PriceLine>, total: Double?) = total ?: (lines.sumOf { it.usd } * 100).roundToLong() / 100.0
++    /** "Outfit changed to Hoodie". */
++    fun change(r: ChangeRow) = "${r.what} changed to ${r.to}" + if (r.undone) ", undone" else ""
++}
++
++internal fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.ifEmpty { null }
++internal fun JsonObject.num(k: String): Double? = (this[k] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
++internal fun JsonObject.bool(k: String): Boolean? = (this[k] as? JsonPrimitive)?.booleanOrNull
++internal fun JsonObject.arr(k: String): JsonArray? = this[k] as? JsonArray
++internal fun JsonObject.obj(k: String): JsonObject = this[k] as? JsonObject ?: JsonObject(emptyMap())
+diff --git a/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeContext.kt b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeContext.kt
+new file mode 100644
+index 0000000..aedcb98
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeContext.kt
+@@ -0,0 +1,79 @@
++package studio.muse.core.claude
++
++import kotlinx.serialization.json.JsonElement
++import kotlinx.serialization.json.JsonObject
++
++// The Claude panel's live context strip (owner, 2026-11-12; the Mac's MuseCore/Claude/ClaudeContext.swift): small
++// thumbnails, each with a tiny label, of what Claude sees on this page now (the clip, her, the outfit, the background,
++// references, the guide, the model), read from the SAME `screen` JSON the composer syncs to the server for Claude.
++
++data class ContextItem(val id: String, val kind: Kind, val label: String, val detail: String?, val image: String?,
++                       val clipId: String?, val isVideo: Boolean, val words: String?) {
++    enum class Kind { CLIP, CHARACTER, OUTFIT, BACKGROUND, FRAME, REFERENCE, GUIDE, AUDIO, MODEL, PRODUCT, FACE }
++}
++
++/** Names and pictures the strip needs (the app looks them up). */
++class ContextLookups(
++    val character: (String) -> Pair<String, String?>? = { null },
++    val outfit: (String) -> Pair<String, String?>? = { null },
++    val clipPoster: (String) -> String? = { null },
++)
++
++object ClaudeContext {
++    fun items(screen: JsonElement?, lookups: ContextLookups = ContextLookups()): List<ContextItem> {
++        val s = screen as? JsonObject ?: return emptyList()
++        val request = s.obj("request"); val settings = s.obj("settings"); val remix = request.obj("remix")
++        val inputs = s.arr("inputs")?.mapNotNull { it as? JsonObject }.orEmpty()
++        val out = mutableListOf<ContextItem>()
++        fun source(slot: String?) = slot != null && (slot.endsWith(".clip") || slot == "extend.video")
++        for (i in inputs.filter { source(it.str("slot")) }) {
++            val clip = i.str("clipId")
++            out += ContextItem("in:${i.str("slot")}", ContextItem.Kind.CLIP, "Clip", i.str("label"), clip?.let(lookups.clipPoster), clip, true, null)
++        }
++        request.str("modelId")?.let { m -> val c = lookups.character(m); out += ContextItem("character:$m", ContextItem.Kind.CHARACTER, "Her", c?.first, c?.second, null, false, null) }
++        request.str("outfitId")?.let { o -> val x = lookups.outfit(o); out += ContextItem("outfit:$o", ContextItem.Kind.OUTFIT, "Outfit", x?.first, x?.second, null, false, null) }
++        remix.obj("outfit").str("words")?.let { w -> out += ContextItem("outfit:words", ContextItem.Kind.OUTFIT, "Outfit", w, null, null, false, w) }
++        val bgWords = remix.obj("background").str("words")
++            ?: if ((request.str("background") ?: settings.str("background")) == "describe") request.str("direction") ?: request.str("prompt") else null
++        if (bgWords != null && inputs.none { it.str("slot")?.endsWith("background") == true })
++            out += ContextItem("background:words", ContextItem.Kind.BACKGROUND, "Background", bgWords, null, null, false, bgWords)
++        var refs = 0; var frames = 0
++        for (i in inputs.filterNot { source(it.str("slot")) }) {
++            val slot = i.str("slot") ?: ""
++            val kind = i.str("kind") ?: "image"
++            val (label, k) = when {
++                slot.endsWith("background") -> "Background" to ContextItem.Kind.BACKGROUND
++                slot.endsWith(".outfit") -> "Product" to ContextItem.Kind.PRODUCT
++                slot.endsWith(".face") -> "Face" to ContextItem.Kind.FACE
++                slot == "guide" -> "Guide" to ContextItem.Kind.GUIDE
++                slot == "start" -> "Start" to ContextItem.Kind.FRAME
++                slot == "end" -> "End" to ContextItem.Kind.FRAME
++                slot.startsWith("middle") -> { frames++; "Frame $frames" to ContextItem.Kind.FRAME }
++                kind == "audio" -> "Sound" to ContextItem.Kind.AUDIO
++                else -> { refs++; (i.str("role")?.replaceFirstChar { it.uppercase() } ?: "Ref $refs") to ContextItem.Kind.REFERENCE }
++            }
++            out += ContextItem("in:$slot", k, label, i.str("label"), if (kind == "video") null else i.str("url"), i.str("clipId"), kind == "video", null)
++        }
++        // The picked model, by the server's label (settings.modelLabel: the model pill's words, never built in the app).
++        (request.str("engineModel") ?: settings.str("modelLabel"))?.let { e ->
++            out += ContextItem("model:$e", ContextItem.Kind.MODEL, "Model", settings.str("modelLabel") ?: e, null, null, false, null)
++        }
++        return out
++    }
++}
++
++/** The quick-action chips over the composer (GET v1/claude/chips; this copy when the server is older or offline). */
++data class ClaudeChip(val label: String, val prompt: String, val icon: String) {
++    companion object {
++        fun fallback(page: String?, tool: String?): List<ClaudeChip> {
++            val price = ClaudeChip("Check the price", "What will this cost, line by line?", "coins")
++            val write = ClaudeChip("Write the prompt", "Write the prompt for this shot.", "pencil-simple")
++            return when (page) {
++                "suite" -> if (tool in setOf("swap", "remix", "recast", "extend")) listOf(ClaudeChip("Watch my clip", "Watch my clip and tell me the key moments.", "play-circle"), write, price)
++                           else listOf(write, ClaudeChip("Set the rig", "Set up the rig for this shot.", "aperture"), price)
++                "edit" -> listOf(ClaudeChip("Watch my edit", "Watch my edit and tell me what to fix.", "play-circle"), ClaudeChip("Cut to the beat", "Cut this to the beat.", "scissors"), ClaudeChip("Add captions", "Add captions to this edit.", "text-aa"))
++                else -> listOf(ClaudeChip("What can you do", "What can you do on this page?", "chat-circle"), ClaudeChip("Start a shot", "Help me start a new shot.", "video-camera"), ClaudeChip("Watch my clip", "Watch my latest clip.", "play-circle"))
++            }
++        }
++    }
++}
+diff --git a/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeOrb.kt b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeOrb.kt
+new file mode 100644
+index 0000000..3bd6f2d
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeOrb.kt
+@@ -0,0 +1,152 @@
++package studio.muse.core.claude
++
++import kotlin.math.PI
++import kotlin.math.abs
++import kotlin.math.cos
++import kotlin.math.max
++import kotlin.math.min
++import kotlin.math.sin
++
++// Claude's orb (owner, 2026-11-12: Option C2 "alive"; plans/design/claude-panel/orb-alive-*.png): a glass ball with
++// luminous 3D smoke inside, the glass wobbling, breathing and turning a little with it. ONE state machine, fed only by
++// real events (the chat stream, cards, jobs), the same as the Mac's MuseCore ClaudeOrb + ClaudeOrbShader, so both apps
++// move the same way. The app's AGSL shader (Android 13+) reads [ClaudeOrbUniforms]; older phones draw a still tint.
++
++enum class OrbState { IDLE, THINKING, OPERATING, WAITING, ERROR }
++
++/** How a state looks: [swirl] the flow speed (phase per second), [glow] the halo/edge, [breath] seconds per breath. */
++data class OrbLook(val swirl: Double, val band: Double, val glow: Double, val breath: Double, val breathDepth: Double,
++                   val sweep: Boolean, val flashes: Boolean, val danger: Boolean, val edge: Double)
++
++/** The shader's inputs (ClaudeOrb.agsl ≙ the Mac's ClaudeOrb.metal). */
++data class ClaudeOrbUniforms(val bright: Double, val current: Double, val danger: Double, val pulse: Double, val breath: Double,
++                             val wobble: Double, val pop: Double)
++
++class ClaudeOrb {
++    var turnRunning = false; private set
++    private val openUi = mutableSetOf<String>()
++    var waitingCount = 0; private set
++    var jobRunning = false; private set
++    var errorUntil: Double? = null; private set
++    var pulses = 0; private set
++    var lastPulseAt = Double.NEGATIVE_INFINITY; private set
++    /** The person is typing: the edge stays calm. */
++    var typing = false
++
++    // ---- events in
++    fun turnStarted() { turnRunning = true; errorUntil = null }
++    fun chunk(now: Double) { turnRunning = true; pulse(now) }
++    fun turnEnded(ok: Boolean, now: Double) { turnRunning = false; if (!ok) errorUntil = now + ERROR_HOLD }
++    fun uiCallBegan(id: String, now: Double) { openUi += id; pulse(now) }
++    fun uiCallEnded(id: String, ok: Boolean = true, now: Double) { openUi -= id; if (!ok) errorUntil = now + ERROR_HOLD }
++    fun stopped() = openUi.clear()
++    fun changeApplied(now: Double) = pulse(now)
++    fun waiting(count: Int) { waitingCount = max(0, count) }
++    fun job(running: Boolean, failed: Boolean = false, now: Double) { jobRunning = running; if (failed) errorUntil = now + ERROR_HOLD }
++    private fun pulse(now: Double) { pulses++; lastPulseAt = now }
++
++    // ---- what it shows
++    fun state(now: Double): OrbState = when {
++        errorUntil?.let { now < it } == true -> OrbState.ERROR
++        openUi.isNotEmpty() -> OrbState.OPERATING
++        turnRunning || jobRunning -> OrbState.THINKING
++        waitingCount > 0 -> OrbState.WAITING
++        else -> OrbState.IDLE
++    }
++
++    /** The last pulse's flash at [now], 1 → 0 over [FLASH_DECAY] (0 under Reduce Motion). */
++    fun pulse(now: Double, reduceMotion: Boolean = false): Double {
++        if (reduceMotion || now < lastPulseAt) return 0.0
++        val t = (now - lastPulseAt) / FLASH_DECAY
++        return if (t >= 0.999) 0.0 else (1 - t) * (1 - t)
++    }
++
++    fun look(now: Double, reduceMotion: Boolean = false) = look(state(now), reduceMotion, typing)
++
++    /** The glow 0…1 (halo and panel edge move together): the state's glow, its breath, the last flash. */
++    fun glow(now: Double, reduceMotion: Boolean = false): Double {
++        val l = look(now, reduceMotion)
++        var g = l.glow
++        if (l.breath > 0) g *= 1 - l.breathDepth * 0.5 * (1 - cos(2 * PI * now / l.breath))
++        if (l.flashes && !typing) g += (1 - g) * 0.6 * pulse(now, reduceMotion)
++        return g.coerceIn(0.0, 1.0)
++    }
++
++    fun edge(now: Double, reduceMotion: Boolean = false): Double {
++        val l = look(now, reduceMotion)
++        val base = if (l.glow > 0) glow(now, reduceMotion) / l.glow else 1.0
++        return (l.edge * base).coerceIn(0.0, 1.0)
++    }
++
++    /** Frames per second to draw at: 0 when nothing moves, 12 idle or error, 30 at most. */
++    fun frameRate(now: Double, reduceMotion: Boolean = false): Int {
++        val l = look(now, reduceMotion)
++        val moves = l.swirl > 0 || l.breath > 0 || l.sweep || pulse(now, reduceMotion) > 0
++        if (!moves) return 0
++        val s = state(now)
++        return if (s == OrbState.IDLE || s == OrbState.ERROR) 12 else 30
++    }
++
++    /** The shader's uniforms at [now] (Reduce Motion: the shape stays still). */
++    fun uniforms(now: Double, reduceMotion: Boolean = false): ClaudeOrbUniforms {
++        val s = state(now); val l = look(now, reduceMotion)
++        return uniforms(s, l, now, pulse(now, reduceMotion), reduceMotion)
++    }
++
++    companion object {
++        const val ERROR_HOLD = 8.0
++        const val FLASH_DECAY = 0.6
++        /** The ball fills 1/SCALE of its frame (room for the wobble and the pop). */
++        const val SCALE = 1.1
++        /** The smoke's colours (magenta, violet, blue, cyan) and the error ones: the panel edge uses them too. */
++        val PALETTE = listOf(0xFFFF3DA8, 0xFF8E5BFF, 0xFF3B82FF, 0xFF2FE0C0)
++        val ERROR_PALETTE = listOf(0xFFFF4D3D, 0xFFFF8A2B, 0xFFD9302B, 0xFFFFB347)
++
++        fun look(s: OrbState, reduceMotion: Boolean = false, typing: Boolean = false): OrbLook {
++            var l = when (s) {
++                OrbState.IDLE -> OrbLook(1.05, 0.85, 0.10, 6.0, 0.35, false, false, false, 0.12)
++                OrbState.THINKING -> OrbLook(2.7, 1.1, 0.28, 0.0, 0.0, false, true, false, 0.30)
++                OrbState.OPERATING -> OrbLook(2.4, 1.0, 0.35, 0.0, 0.0, true, true, false, 0.40)
++                OrbState.WAITING -> OrbLook(0.75, 1.15, 0.45, 3.2, 0.20, false, false, false, 0.45)
++                OrbState.ERROR -> OrbLook(0.45, 0.9, 0.30, 0.0, 0.0, false, false, true, 0.35)
++            }
++            if (reduceMotion) l = l.copy(swirl = 0.0, breath = 0.0, breathDepth = 0.0, sweep = false, flashes = false)
++            if (typing) l = l.copy(edge = min(l.edge, 0.15))
++            return l
++        }
++
++        /** The phase only moves forward, at the state's speed; a stalled frame counts at most 0.25 s. */
++        fun advance(phase: Double, dt: Double, look: OrbLook) = phase + dt.coerceIn(0.0, 0.25) * look.swirl
++
++        fun uniforms(s: OrbState, look: OrbLook, time: Double, pulse: Double, reduceMotion: Boolean = false): ClaudeOrbUniforms {
++            val breath = if (look.breath > 0) 0.5 - 0.5 * cos(2 * PI * time / look.breath) else 0.0
++            var u = when (s) {
++                OrbState.IDLE -> ClaudeOrbUniforms(0.85, 0.0, 0.0, 0.0, breath, 0.02, 0.0)
++                OrbState.THINKING -> ClaudeOrbUniforms(1.1, 0.0, 0.0, pulse, 0.0, 0.05, 0.0)
++                OrbState.OPERATING -> ClaudeOrbUniforms(1.0, 1.6, 0.0, pulse, 0.0, 0.045, 0.0)
++                OrbState.WAITING -> ClaudeOrbUniforms(1.15, 0.0, 0.0, 0.0, breath, 0.025, 0.0)
++                OrbState.ERROR -> ClaudeOrbUniforms(0.9, 0.0, 1.0, 0.0, 0.0, 0.015, 0.0)
++            }
++            u = u.copy(pop = 0.006 * sin(time * 0.7) + 0.035 * u.pulse + 0.02 * u.breath)
++            if (reduceMotion) u = u.copy(wobble = 0.0, pop = 0.0, pulse = 0.0, breath = 0.0)
++            return u
++        }
++    }
++}
++
++/** The live activity strip: "Opening Swap… setting outfit…", a percentage. Steps come from the chat's tool steps. */
++class ClaudeActivity {
++    private val steps = ArrayDeque<String>()
++    var progress: Double? = null
++    val isActive get() = steps.isNotEmpty() || progress != null
++    val line: String get() {
++        val last = steps.toList().takeLast(2)
++        if (last.isEmpty()) return if (progress != null) "Working…" else ""
++        if (last.size == 1) return last[0]
++        val b = last[1]
++        return "${last[0]} ${b.take(1).lowercase()}${b.drop(1)}"
++    }
++    val percent: String? get() = progress?.let { "${(it.coerceIn(0.0, 1.0) * 100).let { p -> abs(p).toInt().let { i -> if (p - i >= 0.5) i + 1 else i } }}%" }
++    fun step(s: String) { if (steps.lastOrNull() != s) steps.addLast(s); while (steps.size > 6) steps.removeFirst() }
++    fun clear() { steps.clear(); progress = null }
++}
+diff --git a/android/core/src/test/kotlin/studio/muse/core/claude/ClaudePanelTest.kt b/android/core/src/test/kotlin/studio/muse/core/claude/ClaudePanelTest.kt
+new file mode 100644
+index 0000000..59b73b3
+--- /dev/null
++++ b/android/core/src/test/kotlin/studio/muse/core/claude/ClaudePanelTest.kt
+@@ -0,0 +1,60 @@
++package studio.muse.core.claude
++
++import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.JsonElement
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++// The Claude panel's pure parts on Android, matching the Mac's ClaudeCardsTests / ClaudeOrbTests / ClaudeContextTests.
++class ClaudePanelTest {
++    private fun j(s: String): JsonElement = Json.parseToJsonElement(s)
++
++    @Test fun cardsDecodeAndUnknownOnesAreSkipped() {
++        val plan = ClaudeCard.parse(j("""{"kind":"plan","planId":"swap","title":"Plan: outfit swap","steps":[{"text":"Watch","done":true},{"text":"Swap"}]}""")) as ClaudeCard.Plan
++        assertEquals(1, plan.done); assertEquals(2, plan.steps.size)
++        val media = ClaudeCard.parse(j("""{"kind":"media","durationSec":15,"video":{"id":"tk","kind":"take","url":"/uploads/a.mp4"},"moments":[{"from":4,"to":10,"label":"Face"},{"from":11,"label":"End"}]}""")) as ClaudeCard.Media
++        assertEquals(listOf("0:04–0:10", "0:11"), media.moments.map { it.timecode })
++        assertEquals("Clip analysis", media.title)
++        val ch = ClaudeCard.parse(j("""{"kind":"changes","rows":[{"what":"Outfit","to":"Hoodie","undoable":true},{"what":"Background","to":"Describe it","undone":true}]}""")) as ClaudeCard.Changes
++        assertEquals(listOf(true, false), ch.rows.map { it.undoable }); assertEquals("Outfit changed to Hoodie", CardText.change(ch.rows[0]))
++        val ap = ClaudeCard.parse(j("""{"kind":"approve","title":"Generate · 15 s · $1.17","lines":[{"label":"Video","usd":0.99},{"label":"Pictures","usd":0.18}],"totalUsd":1.17,"answer":{"assistId":"sa","pendingId":"sp"}}""")) as ClaudeCard.Approve
++        assertEquals(ApproveTarget.Suite("sa", "sp"), ap.target); assertEquals("$1.17", CardText.money(CardText.total(ap.lines, null)))
++        assertNull(ClaudeCard.parse(j("""{"kind":"poll"}""")))
++        assertNull(ClaudeCard.parse(j("""{"kind":"approve","title":"no answer"}""")))
++        assertEquals("1:02:05", CardText.clock(3725.0))
++    }
++
++    @Test fun orbStatesFollowEventsErrorFirstAndReduceMotionStills() {
++        val o = ClaudeOrb()
++        assertEquals(OrbState.IDLE, o.state(0.0))
++        o.waiting(1); assertEquals(OrbState.WAITING, o.state(0.0))
++        o.turnStarted(); assertEquals(OrbState.THINKING, o.state(1.0))
++        o.uiCallBegan("u", 2.0); assertEquals(OrbState.OPERATING, o.state(2.0))
++        o.uiCallEnded("u", now = 3.0); o.turnEnded(false, 4.0)
++        assertEquals(OrbState.ERROR, o.state(5.0))
++        assertEquals(OrbState.WAITING, o.state(4.0 + ClaudeOrb.ERROR_HOLD + 0.1))
++        o.chunk(20.0); assertEquals(1.0, o.pulse(20.0), 1e-9); assertEquals(0.0, o.pulse(20.0 + ClaudeOrb.FLASH_DECAY), 1e-9)
++        val u = o.uniforms(20.0); assertTrue(u.pop > 0.02); assertEquals(0.05, u.wobble, 1e-9)
++        val still = o.uniforms(20.0, reduceMotion = true); assertEquals(0.0, still.wobble, 0.0); assertEquals(0.0, still.pop, 0.0)
++        assertEquals(0, o.frameRate(20.0, reduceMotion = true)); assertEquals(30, o.frameRate(20.0))
++        for (s in OrbState.values()) assertTrue(ClaudeOrb.uniforms(s, ClaudeOrb.look(s), 1.0, 1.0).wobble <= 0.05)
++        assertTrue(ClaudeOrb.look(OrbState.ERROR).swirl < ClaudeOrb.look(OrbState.IDLE).swirl)
++        assertEquals(5.0 + 0.25 * 2.7, ClaudeOrb.advance(5.0, 1.0, ClaudeOrb.look(OrbState.THINKING)), 1e-9)
++    }
++
++    @Test fun contextStripReadsTheScreenClaudeGets() {
++        val screen = j("""{"tool":"remix","request":{"modelId":"m1","outfitId":"of1","engineModel":"seedance-2","remix":{"background":{"mode":"describe","words":"a beach at dusk"}}},
++            "settings":{"modelLabel":"Seedance 2.0 · Higgsfield"},
++            "inputs":[{"slot":"remix.clip","kind":"video","label":"Walk.mp4","clipId":"c1"},{"slot":"remix.outfit","kind":"image","label":"Hoodie","url":"/u/p.jpg"},
++                      {"slot":"reference 1","kind":"image","role":"style","url":"/u/r.jpg"},{"slot":"guide","kind":"video","label":"Blender guide"}]}""")
++        val items = ClaudeContext.items(screen, ContextLookups(character = { "Ava" to "/u/face.jpg" }, outfit = { "Hoodie" to null }, clipPoster = { "/u/poster.jpg" }))
++        assertEquals(listOf("Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide", "Model"), items.map { it.label })
++        assertEquals("/u/poster.jpg", items[0].image); assertEquals("a beach at dusk", items[3].words); assertEquals("Seedance 2.0 · Higgsfield", items.last().detail)
++        assertTrue(ClaudeContext.items(null).isEmpty())
++        assertEquals(listOf("Watch my clip", "Write the prompt", "Check the price"), ClaudeChip.fallback("suite", "remix").map { it.label })
++        val a = ClaudeActivity(); a.step("Opening Swap…"); a.step("Setting outfit…"); a.progress = 0.42
++        assertEquals("Opening Swap… setting outfit…", a.line); assertEquals("42%", a.percent)
++    }
++}
