@@ -262,3 +262,19 @@ No detection-evasion tricks of any kind (declined items stay declined).
   exposes Miracle (watch for API/MCP access).
 - No depth in Phase 1.
 - Longest clip for the Layers step: 60 s.
+
+## Build status (Phase 1, branch claude/layers)
+- Server (pushed): contract fields `layers` / `layerBase` / `layerSource` (main clips) and `TextItem.pin`, shared
+  functions + fixture `layers.json`; job `layers` (one SAM 2 run per object, ≤ 5 objects, ≤ 60 s, matte + box track per
+  layer, reuse free, above $1 needs `acceptUsd` → 409 `price_confirm`); Claude tools `find_layers` (spend gate),
+  `set_layer`, `layer_base`, `text_behind`, `pin_text`; server export draws layers (≤ `RENDER_MAX_LAYERS`, default 3,
+  per clip on the 512 MB box: 0 layers 197 MB, 3 → 366 MB, 5 → 447 MB peak at 1080p; the rest listed as not drawn).
+- Mac: model, validation and functions (fixture tests), Find layers flow (tap / ⌥-tap / drag a box, price on the button,
+  confirm above $1), Layers panel (eye, Background row: blur, brightness, swap; per layer: colour wash, look,
+  brightness, saturation, blur, opacity, soft edge, text behind), "Pin to a layer" in the text inspector; preview and
+  export draw all five layers.
+- Android: not drawn yet; the patch keeps `layers`, `layerBase`, `layerSource` and `pin` as their JSON when saving.
+- Delivery (coordinator, 2026-11-12): server on `claude/layers` (one commit on prod 962d47e); the app parts as
+  `plans/patches/layers-mac.patch` and `plans/patches/layers-android.patch` (`git apply` from the repo root; each adds
+  that app's copy of the shared fixture `layers.json`). Until an app's patch is in, the server's fixture check and
+  `scripts/editor-fixtures.ts` skip that app's `layers.json`.

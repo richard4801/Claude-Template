@@ -15,6 +15,25 @@ export const OP_NAMES = ['trim', 'split', 'delete', 'move', 'speed', 'add_text',
   'transition', 'mask', 'transform', 'keyframe', 'remove_keyframe', 'volume', 'duck', 'voice', 'add_music', 'ratio', 'patch',
   // wave 1 (plans/edit-parity.md): mirror, freeze frame, blend modes, the background fill
   'flip', 'freeze', 'blend', 'fill'] as const;
+/** Layers (plans/layers-edit.md, Phase 1): free changes to a clip's layers after Find layers (kept out of OP_NAMES' fixture). */
+export const LAYER_OP_NAMES = ['set_layer', 'layer_base', 'text_behind', 'pin_text'] as const;
+/** A clip's layer by id or name (any case). */
+function layerOf(p: P, o: EditOp): { clip: M.VideoClip; layer: M.ClipLayer } {
+  const clip = find(p, str(o, 'itemId', true)!).item as M.VideoClip;
+  const key = str(o, 'layer', true)!;
+  const layer = clip.layers?.find(l => l.id === key) ?? clip.layers?.find(l => l.name.toLowerCase() === key.toLowerCase());
+  if (!layer) throw badRequest(`${o.op}.layer: ${clip.layers?.length ? `one of ${clip.layers.map(l => `${l.id} (${l.name})`).join(', ')}` : 'this clip has no layers yet (find_layers)'}`);
+  return { clip, layer };
+}
+/** A look for a layer or the background: a look id from list_looks, a look object, or null (none of its own). */
+function lookArg(o: EditOp): Look | null | undefined {
+  if (o.look === undefined) return undefined;
+  if (o.look === null) return null;
+  if (typeof o.look === 'string') { const l = packLook(o.look); if (!l) throw badRequest(`${o.op}.look: a look id from list_looks`); return l; }
+  if (typeof o.look === 'object') return o.look as Look;
+  throw badRequest(`${o.op}.look: a look id, a look, or null`);
+}
+const setOrClear = <T extends object, K extends keyof T>(t: T, k: K, v: T[K] | null | undefined) => { if (v === undefined) return; if (v === null) delete t[k]; else t[k] = v; };
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 const t2 = (s: number) => { const m = Math.floor(s / 60), r = s - m * 60; return `${m}:${r.toFixed(1).padStart(4, '0')}`; };
@@ -331,6 +350,47 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       try { replace(applyPatch(p, o.patch as PatchOp[])); } catch (e) { if (e instanceof PatchError) throw badRequest(`patch.patch: ${e.message}`); throw e; }
       return 'Changed the project';
     }
-    default: throw badRequest(`op: one of ${OP_NAMES.join(', ')}`);
+    case 'set_layer': {
+      const { layer } = layerOf(p, o);
+      if (o.name !== undefined) { if (typeof o.name !== 'string' || !o.name.trim()) throw badRequest('set_layer.name: text'); layer.name = o.name.trim().slice(0, M.LAYER_LIMITS.maxName); }
+      setOrClear(layer, 'look', lookArg(o));
+      if (o.adjust !== undefined) setOrClear(layer, 'adjust', o.adjust === null ? null : { ...(layer.adjust ?? {}), ...(o.adjust as M.Adjust) });
+      setOrClear(layer, 'filter', o.filter as M.FilterRef | null | undefined);
+      setOrClear(layer, 'recolor', o.recolor as M.Recolor | null | undefined);
+      for (const k of ['opacity', 'blur', 'feather'] as const) setOrClear(layer, k, o[k] === undefined ? undefined : o[k] === null ? null : num(o, k));
+      for (const k of ['hidden', 'aboveText'] as const) if (o[k] !== undefined) { if (typeof o[k] !== 'boolean') throw badRequest(`set_layer.${k}: true or false`); if (o[k]) layer[k] = true; else delete layer[k]; }
+      return `Layer · ${layer.name}`;
+    }
+    case 'layer_base': {
+      const c = find(p, str(o, 'itemId', true)!).item as M.VideoClip;
+      if (!c.layers?.length) throw badRequest('layer_base.itemId: this clip has no layers yet (find_layers)');
+      const b: M.LayerBase = { ...(c.layerBase ?? {}) };
+      setOrClear(b, 'look', lookArg(o));
+      if (o.adjust !== undefined) setOrClear(b, 'adjust', o.adjust === null ? null : { ...(b.adjust ?? {}), ...(o.adjust as M.Adjust) });
+      setOrClear(b, 'filter', o.filter as M.FilterRef | null | undefined);
+      setOrClear(b, 'blur', o.blur === undefined ? undefined : o.blur === null ? null : num(o, 'blur'));
+      setOrClear(b, 'asset', o.asset === undefined ? undefined : o.asset === null ? null : str(o, 'asset'));
+      if (o.hidden !== undefined) { if (typeof o.hidden !== 'boolean') throw badRequest('layer_base.hidden: true or false'); if (o.hidden) b.hidden = true; else delete b.hidden; }
+      if (Object.keys(b).length) c.layerBase = b; else delete c.layerBase;
+      return 'Background';
+    }
+    case 'text_behind': {
+      const { layer } = layerOf(p, o);
+      const on = o.behind === undefined ? true : o.behind;
+      if (typeof on !== 'boolean') throw badRequest('text_behind.behind: true or false');
+      if (on) layer.aboveText = true; else delete layer.aboveText;
+      return on ? `Text behind ${layer.name}` : `Text in front of ${layer.name}`;
+    }
+    case 'pin_text': {
+      const tx = find(p, str(o, 'textId', true)!).item as M.TextItem;
+      if (typeof tx.text !== 'string') throw badRequest('pin_text.textId: a text item');
+      if (o.layer === null) { delete tx.pin; return 'Unpinned text'; }
+      const { clip, layer } = layerOf(p, o);
+      if (!layer.track) throw badRequest('pin_text.layer: this layer has no tracking to follow (find layers again)');
+      const anchor = (str(o, 'anchor') ?? 'center') as M.TextPin['anchor'];
+      tx.pin = { clip: clip.id, layer: layer.id, anchor, ...(o.offset !== undefined ? { offset: o.offset as { x: number; y: number } } : {}) };
+      return `Pinned text to ${layer.name}`;
+    }
+    default: throw badRequest(`op: one of ${[...OP_NAMES, ...LAYER_OP_NAMES].join(', ')}`);
   }
 }
