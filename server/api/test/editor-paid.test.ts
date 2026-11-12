@@ -107,6 +107,8 @@ describe('Edit helpers on Higgsfield across a restart (FAKE Higgsfield, no money
       const failed = await ended(owner, id);
       expect(failed.state).toBe('failed');
       expect(failed.error).toBe(PAID_UNSAVED);
+      expect(failed).toMatchObject({ errorCode: 'provider_paid_unsaved', recoverable: true });
+      expect(failed.options.runner).toBeUndefined();
       expect(fake.downloads).toBe(3);
       expect((await member.req('POST', `/v1/jobs/${id}/recover`)).status).toBe(403);
       fake.failDownloads = 0;

@@ -145,6 +145,19 @@ const services = new WeakMap<Ctx, EditorAiService>();
 /** One service per app (routes, edit sessions and MCP tools share it). */
 export const editorAi = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { s = new EditorAiService(ctx); services.set(ctx, s); } return s; };
 
+/** A job's options as the apps see them (the server instance running it stays internal). */
+const viewOptions = (o: Record<string, unknown>) => { const { runner: _r, ...rest } = o ?? {}; return rest; };
+/**
+ * A finished job's result; a failed one made at the provider but not saved carries `errorCode` (provider_paid_unsaved /
+ * provider_unconfirmed: the owner's free Recover, POST /v1/jobs/:id/recover; provider_paid_lost: not recoverable).
+ */
+const viewResult = (res: Record<string, unknown> | null, role: 'owner' | 'member') => {
+  if (!res) return {};
+  const { errorCode, paid, recovering: _x, ...rest } = res as { errorCode?: string; paid?: { recoverable?: boolean; usd?: number }; recovering?: boolean };
+  return { ...(Object.keys(rest).length ? { result: rest } : {}), ...(errorCode ? { errorCode, recoverable: !!paid?.recoverable } : {}),
+    ...(role === 'owner' && paid?.usd != null ? { paidUsd: paid.usd } : {}) };
+};
+
 export class EditorAiService {
   readonly provider: EditorProvider;
   private stopping = new Set<string>();
@@ -161,8 +174,8 @@ export class EditorAiService {
   // ------------------------------------------------------------------ views and events
   view(r: Row, role: 'owner' | 'member') {
     return {
-      id: r.id, kind: r.kind, state: r.state, progress: Math.round(r.progress), phase: r.phase, source: r.source, options: r.options,
-      estimateUsd: r.estimate, costUsd: r.cost, ...(r.result ? { result: r.result } : {}), ...(r.error ? { error: r.error } : {}),
+      id: r.id, kind: r.kind, state: r.state, progress: Math.round(r.progress), phase: r.phase, source: r.source, options: viewOptions(r.options),
+      estimateUsd: r.estimate, costUsd: r.cost, ...viewResult(r.result, role), ...(r.error ? { error: r.error } : {}),
       createdAt: r.createdAt, ...(r.finishedAt ? { finishedAt: r.finishedAt } : {}),
       ...(role === 'owner' ? { models: r.models } : {}),
     };
