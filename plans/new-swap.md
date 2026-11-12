@@ -18,6 +18,65 @@ suggests one and says why; Claude can read and set everything, but a run needs A
 
 ---
 
+## Build (phase 2, 2026-11-12) — owner answers and what was built
+
+**Owner answers (via the coordinator):**
+1. **Wan 2.7 Edit is Auto's default for Background and Look & light.** Every other model stays pickable. Its one paid test is prepared but **not run** (below).
+2. **A clip longer than the model takes is trimmed by the person first.** It is never cut silently. A trimmer (start and length) picks the part, and the price follows it.
+3. **Character is her by default, under a strict figure lock.** Her face, hair and skin come only from her images, and her body only from her outfit's angles or her body shots. From the clip the model takes only the motion and facial gestures, never the body, face or figure of the person in it. Every remix prompt carries a figure-lock line, including the same-person and face-swap versions. **Someone else's photo is an optional face swap (face only).** It is clearly labelled and off by default.
+4. **Mac first, Android after** Mac is green.
+
+**Changes from the phase-1 design:**
+- **Every New Swap model runs on the suite runner** (`suite/remix.ts` builds the plan, like Recast), Genjutsu included. A new `hf-genjutsu` input adapter writes the prompt in plain words ("image 1"). Paid-job recovery is the suite runner's own. The runner's Higgsfield → Replicate H3 move now applies only to the H3 adapter (`hf-h3`), so a Genjutsu remix never silently becomes another model.
+- **The person's words sit in one line, `CHANGE: Background: … Outfit: … Look & light: …`.** Each toggle's own block says "as written under CHANGE". The reason: the prompt engine lets only one user section see user words, and keeps owner-editable system blocks free of them.
+- **The Library pick copies a finished take to a clip** (`POST /v1/clips/from-take`), so deleting either one never touches the other. `GET /v1/clips/{id}` lets the app show a clip Claude picked.
+- **H3 swap models are not New Swap models in v1.** They need a person picture and use reference video, not edit. Use the current Swap for them.
+
+### Server (branch `claude/new-swap`)
+| Piece | Where |
+|---|---|
+| Edit capabilities per model (`edit`: source seconds, max pictures, keeps sound, tested, what each toggle can do, needs her) | `suite/registry.ts` (Wan 2.7 Edit new; Kling O1, Kling 4.0, Seedance 2.5, Genjutsu, Genjutsu Light, H3 Max Recast, Wan 2.2 Animate) |
+| Request: `mode: "remix"`, `remix {background, outfit, character, look}`, `range [from, to]` | `suite/plan.ts` (`RemixSchema`) |
+| Auto order and reason, support check, pictures (one per toggle, then fill), trimmer, prompt, price | `suite/remix.ts` |
+| Script `suite.remix` (Settings → Prompts → Scripts, "Swap · New Swap (beta)") and its 14 blocks | `suite/scripts.ts`, `suite/prompts.ts` |
+| Planner hook, estimate's `remix` block, refusals (`remix_empty`, `remix_incomplete`, `remix_unsupported`, `remix_trim_needed`, `remix_too_short`), model pill | `suite/service.ts`, `POST /v1/suite/remix/models` |
+| Trimmed part sent, clip's sound put back by stream copy | `suite/runner.ts`, `suite/extendMedia.ts` (`cutRange`) |
+| Wan 2.7 Edit / Genjutsu / Seedance remix inputs | `suite/inputs.ts` |
+| Library → clip; one clip by id | `routes/index.ts` (`POST /v1/clips/from-take`, `GET /v1/clips/:id`) |
+| Claude: `suite_set_draft` `swapVariant`, `clipId`, `remix` (a toggle set to null turns it off), `range`; `suite_remix_models`; the estimate and Approve for New Swap; screen sync of the toggles | `suite/assist.ts`, `suite/mcpTools.ts`, `suite/screen.ts`, `suite/drafts.ts` (tool `remix`) |
+| Skill §7b (both copies, identical) | `.claude/skills/muse-prompt-structure/SKILL.md`, `server/api/assets/skills/muse-prompt-structure.md` |
+| Tests | `test/new-swap.test.ts` (16: unit and API on the mock provider), plus updated `suite-assist`, `claude-sessions` |
+
+### Mac (`plans/patches/new-swap-mac.patch`, for the next Mac bundle)
+- **MuseCore** `Suite/NewSwap.swift`: the draft, the request, what's missing, the kept line, Claude's sync, and the estimate and model-pill views. Also `remix`/`range` on `ShotRequest`, `remix` on `ShotEstimate`, `remix` as a draft tool, and demo-mode pricing. Tests are in `NewSwapTests` (7). **MuseCore was built and its whole suite run on Linux with Swift 6.0.3: 876 tests, 0 failures.**
+- **App:**
+  - `AppStore+NewSwap.swift`: the switch, estimate, generate, pictures, Library and trimmer.
+  - `NewSwapPanel.swift`: the header switch, the panel, the trimmer, the Library picker and the model pill.
+  - Changes in `ComposerView`, `ComposerBottomBar`, `SuiteClaudeBridge` and `AppStore+Suite`.
+  - The app files pass `swiftc -parse`. SwiftUI can't be type-checked on Linux, so the Mac CI is their first full build.
+- **The Mac prompt-scripts fixture** (`MuseCoreTests/Fixtures/prompt_scripts_fixture.json`) is in the same patch.
+
+### Android (after Mac is green)
+`plans/patches/new-swap-android-fixtures.patch` holds only the regenerated demo copies, `prompt_library.json` and `prompt_scripts.json`.
+**The server's fixture tests need these two patches applied.** On `claude/new-swap` alone, `prompts.test.ts` and `prompt-scripts-fixture.test.ts` (3 tests) fail. Merge the server branch together with both fixture patches. With them applied, `tsc` is clean and the full vitest is green. The Android panel itself is the next job.
+
+### Wan 2.7 Edit's paid test (prepared, NOT run; needs the owner's OK)
+One run, about **$1.00** (10 s × $0.10, 1080p, provider cost = member price at priceScale 1). The request, sent from the app as the owner on one of the owner's clips of 10 s or less:
+```json
+POST /v1/suite/shots
+{ "mode": "remix", "clipId": "<the owner's clip, 2–10 s>", "engineModel": "wan-2.7-edit", "resolution": "1080p", "keepAudio": true,
+  "remix": { "background": { "mode": "describe", "words": "a rooftop at golden hour, city lights behind her" } } }
+```
+Check after the run:
+1. Replicate bills only the output seconds. If the input seconds are billed too, the registry price changes.
+2. The clip's motion, face and figure are kept and only the place changed.
+3. The sound is the clip's own.
+4. Then set `edit.tested: true` for `wan-2.7-edit`, so the picker drops "not tested yet".
+
+Seedance 2.5 in remix mode (`tested: false`) also needs one approved test before anyone relies on it; until then the picker says "not tested yet". Genjutsu, Genjutsu Light, Kling O1, Kling 4.0, H3 Max Recast and Wan 2.2 Animate are marked tested because they ran in Swap or Recast with the same input fields. Genjutsu now runs New Swap through the suite runner, though: its first New Swap run is worth watching.
+
+---
+
 ## Part 1 · For the owner (plain language)
 
 **What changes for you.** In Swap, a small switch at the top says **Swap | New Swap (beta)**. Old Swap is exactly as

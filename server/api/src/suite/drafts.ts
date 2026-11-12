@@ -5,7 +5,7 @@ import { badRequest } from '../errors.js';
 import { APERTURES, BODIES, ERAS, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, TEMPOS, UGC_FORMATS, type Option } from './camera.js';
 
 /** The composer's tools (the clients' ComposerTool ids) plus `upscale`, which only the feed names. */
-export const TOOLS = ['shot', 'photo', 'storyboard', 'swap', 'recast', 'extend', 'upscale', 'talking', 'ugc'] as const;
+export const TOOLS = ['shot', 'photo', 'storyboard', 'swap', 'recast', 'extend', 'upscale', 'talking', 'ugc', 'remix' /* New Swap (beta), shown as "Swap" */] as const;
 export type Tool = (typeof TOOLS)[number];
 
 const ids = (l: { id: string }[]) => new Set(l.map(x => x.id));

@@ -1,7 +1,10 @@
 // App-facing routes: plans/api.md, plus invites, wallets/members, settings and presigned uploads.
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { probe } from '../replicate/media.js';
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -23,7 +26,7 @@ import { PhotoBill } from '../images/bill.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
 import type { EngineSelection } from '../images/engines.js'; // WS5
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
-import { cleanUploadedPhoto, objectInfo, putObject } from '../storage/objects.js';
+import { cleanUploadedPhoto, objectInfo, putFile, putObject } from '../storage/objects.js';
 import { cleanMemberPhoto } from '../storage/clean.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
@@ -688,6 +691,34 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     if (!meta) throw badRequest('Missing meta part');
     return makeClip(req.user, meta, key);
+  });
+  // New Swap (beta): one clip of this studio (the app shows the clip Claude set as New Swap's video).
+  app.get('/v1/clips/:id', async req => {
+    const [c] = await db.select().from(clips).where(and(eq(clips.id, (req.params as { id: string }).id), eq(clips.studioId, req.user.studioId)));
+    if (!c) throw notFound('Clip');
+    return clipView(c);
+  });
+  // New Swap (beta, plans/new-swap.md): a finished take from the Library as a source clip. The video is copied to a clip
+  // of its own (streamed through a temp file; deleting the clip never touches the take), then analysed like an upload.
+  app.post('/v1/clips/from-take', async req => {
+    const b = parse(z.object({ takeId: z.string().max(80) }).strict(), req.body);
+    const [t] = await db.select().from(takes).where(and(eq(takes.id, b.takeId), eq(takes.studioId, req.user.studioId)));
+    if (!t || !t.mediaKey) throw notFound('Take');
+    const m = (t.media ?? {}) as Record<string, unknown>;
+    if (m.kind && m.kind !== 'video' || /\.(jpe?g|png|webp)$/i.test(t.mediaKey)) throw badRequest('That take is a photo · pick a video');
+    const obj = await ctx.storage.get(t.mediaKey);
+    if (!obj) throw notFound('Take video');
+    const tmp = path.join(os.tmpdir(), `${uid('fromtake')}.mp4`);
+    try {
+      await pipeline(obj.body, fs.createWriteStream(tmp));
+      const key = `c/${uid('vid')}.mp4`;
+      await putFile(ctx, { key, file: tmp, studioId: req.user.studioId, kind: 'clip', userId: req.user.id, contentType: 'video/mp4' });
+      const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : d);
+      const info = await probe(ctx.config.FFPROBE_PATH, tmp).catch(() => null); // the file's own numbers first
+      const durationSec = num(info?.duration, num(m.durationSec, 0));
+      if (!(durationSec > 0)) throw badRequest('That take’s video can’t be read');
+      return makeClip(req.user, { name: (t.title || 'Take').slice(0, 200), durationSec, width: Math.round(num(info?.width, num(m.width, 1080))), height: Math.round(num(info?.height, num(m.height, 1920))), fps: Math.max(1, Math.round(num(info?.fps, num(m.fps, 30)))) }, key);
+    } finally { await fs.promises.rm(tmp, { force: true }); }
   });
   // Large files: presigned PUT straight to R2, then confirm.
   app.post('/v1/uploads/presign', async req => {

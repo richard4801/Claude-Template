@@ -19,7 +19,9 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
-import { buildPlan, modelName as specName, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
+import { buildRemixPlan, pickRemix, remixIncomplete, remixModels, remixSpan, remixView, togglesOn } from './remix.js';
+import { z } from 'zod';
+import { billedSeconds, buildPlan, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
@@ -43,6 +45,10 @@ export const STUDIO_DEFAULT_SKIPPED = 'The studio’s chosen engine can’t make
 export const SEPARATION_ESTIMATE_USD = 0.0066;
 
 export const isSuiteJob = (j: { request?: Record<string, any> | null }) => j.request?.engine === 'suite';
+
+/** New Swap's model pill: the toggles, and the clip and trimmed part when known. */
+const RemixModelsBody = z.object({ remix: RemixSchema.default({}), clipId: z.string().max(80).optional(), range: z.tuple([z.number().min(0), z.number().positive()]).optional() }).strict();
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export class SuiteService {
   readonly mock: MockProvider;
@@ -261,9 +267,11 @@ export class SuiteService {
   async plan(u: AuthUser, r: ShotRequest) {
     if (this.mode === 'off') throw new ApiError(400, 'engine_unavailable', "The AI suite isn't switched on yet");
     if (r.engineModel?.startsWith('c_')) { // WS5: a custom model makes plain shots only
-      if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
+      if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.mode === 'remix' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
       await this.byo.checkUse(u, r.engineModel, 'video');
     }
+    // New Swap (plans/new-swap.md): its own planner; the old Swap and Recast paths below are untouched.
+    if (r.mode === 'remix') return this.remixPlan(u, r);
     // Auto (no model picked, no studio Recast default): "same moves, new look or scene" → Genjutsu Light (a swap of her
     // onto the clip, the new scene from the prompt); "same scene, new person" → the Recast models. The reason is shown.
     let autoNote: string | null = null;
@@ -377,6 +385,83 @@ export class SuiteService {
    * Recast (same take, new cast): up to 4 people in the source clip, each → a studio character. Speaking per person:
    * its switch; else, with one person, the clip's (switch → upload → detection); else unknown (the mouth follows the clip).
    */
+  /**
+   * New Swap (remix): the source clip with toggles. Auto (or the picked model) must do every toggle that is on; her
+   * images under the figure lock; the part of the clip used (the person trims a clip longer than the model takes).
+   */
+  private async remixPlan(u: AuthUser, r: ShotRequest) {
+    if (!r.clipId) throw badRequest('New Swap needs the video (clipId)');
+    const x = r.remix ?? {};
+    const missing = remixIncomplete(x);
+    if (missing) throw new ApiError(400, missing.startsWith('Turn on') ? 'remix_empty' : 'remix_incomplete', missing);
+    const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, u.studioId)));
+    if (!clip) throw notFound('Clip');
+    if (!clip.storageKey) throw badRequest('Upload the clip file first');
+    const prefs = await this.prefs(u.studioId);
+    // 4c: members pick any model the owner hasn't hidden from them; Auto skips the hidden ones too.
+    const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
+    if (r.engineModel && hidden.has(r.engineModel)) throw new ApiError(403, 'owner_only', 'That model isn’t offered to members');
+    const pick = pickRemix(x, { prefs, providers: this.available(), engineModel: r.engineModel, hidden });
+    if ('error' in pick) {
+      const words = await this.wordsFor(u);
+      const e = new ApiError(400, pick.error, words(pick.message));
+      (e as any).tried = pick.tried;
+      throw e;
+    }
+    const her = x.character?.kind === 'model' ? await this.character(u.studioId, x.character.modelId, x.outfit?.kind === 'outfit' ? x.outfit.outfitId : undefined) : null;
+    if (her && !her.images.length) throw badRequest('Character: her character sheet has no pictures yet');
+    let outfitOnly: Character['outfit'] = null;
+    if (x.outfit?.kind === 'outfit' && !her) {
+      const [o] = await this.ctx.db.select({ modelId: outfits.modelId }).from(outfits).where(and(eq(outfits.id, x.outfit.outfitId), eq(outfits.studioId, u.studioId)));
+      if (!o) throw notFound('Outfit');
+      outfitOnly = (await this.character(u.studioId, o.modelId, x.outfit.outfitId))?.outfit ?? null;
+    }
+    if (x.outfit?.kind === 'outfit' && !(her?.outfit ?? outfitOnly)?.images.length) throw badRequest('Outfit: this outfit has no pictures yet');
+    const texts = await this.ctx.prompts.texts(u.studioId);
+    const plan = buildRemixPlan(r, x, pick, { her, outfitOnly }, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    return { swap: false as const, plan, pick: { model: pick.model, resolution: pick.model.resolutions.find(z => z.id === plan.resolution)!, seconds: plan.seconds, tried: [] }, prefs,
+      tried: pick.tried.map(t => ({ ...t, resolution: '' })), talk: { speaking: false, source: 'default' as const } };
+  }
+
+  /**
+   * New Swap's model pill (POST /v1/suite/remix/models): every model that edits a video, with what it can do for these
+   * toggles ("yes", "prompt" = by instruction only, "no" + why), its limits, whether it was tested, and its price for
+   * this clip (the part used, the billed seconds). Auto's pick is marked with its reason. Members: 4c rules.
+   */
+  async remixModels(u: AuthUser, body: unknown) {
+    const p = RemixModelsBody.safeParse(body ?? {});
+    if (!p.success) throw badRequest(`Invalid request: ${p.error.issues[0]?.path.join('.')} ${p.error.issues[0]?.message}`);
+    const { remix: x, clipId, range } = p.data;
+    let clipSeconds: number | null = null;
+    if (clipId) {
+      const [clip] = await this.ctx.db.select({ s: clips.durationSec }).from(clips).where(and(eq(clips.id, clipId), eq(clips.studioId, u.studioId)));
+      if (!clip) throw notFound('Clip');
+      clipSeconds = clip.s;
+    }
+    const prefs = await this.prefs(u.studioId);
+    const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
+    const o = { prefs, providers: this.available(), hidden };
+    const auto = togglesOn(x).length ? pickRemix(x, o) : null;
+    const autoId = auto && !('error' in auto) ? auto.model.id : null;
+    const words = await this.wordsFor(u);
+    const models = remixModels(x, o).filter(c => !(u.role !== 'owner' && hidden.has(c.model.id))).map(({ model: m, support, unavailable }) => {
+      const e = m.edit!, scale = prefs.models?.[m.id]?.priceScale ?? 1;
+      const res = m.resolutions.find(z => z.id === e.defaultResolution) ?? m.resolutions.at(-1)!;
+      const perSec = round4(perSecond(m, res, { videoInput: true, audio: false, kind: 'guide' }) * scale);
+      const span = clipSeconds != null ? remixSpan(m, clipSeconds, range ?? null) : null;
+      const seconds = span ? (span.needed ? span.max : span.seconds) : null;
+      return {
+        model: m.id, label: words(specName(m)), support: support.support, reason: support.reason, unavailable, tested: e.tested, auto: m.id === autoId,
+        ...(m.id === autoId && auto && !('error' in auto) ? { why: words(auto.why ?? '') } : {}),
+        limits: { minSeconds: e.sourceSeconds[0], maxSeconds: e.sourceSeconds[1], resolutions: m.resolutions.map(z => z.id), maxImages: e.maxImages, keepsAudio: e.keepsAudio,
+          soundNote: e.keepsAudio ? 'keeps the clip’s sound' : 'MUSE puts the clip’s sound back' },
+        price: { resolution: res.id, perSec, ...(seconds != null ? { seconds, trimNeeded: span!.needed, usd: round4(perSec * billedSeconds(m, Math.max(seconds, e.sourceSeconds[0]), { videoInput: true, guideSeconds: seconds })) } : {}),
+          inputBilled: m.id === 'genjutsu-light' ? 'the clip’s seconds are billed too (in the rate)' : res.perSecWithVideo != null ? 'the clip is priced into the rate' : 'only the new video is billed' },
+      };
+    });
+    return { toggles: togglesOn(x), auto: autoId ? { model: autoId, why: models.find(m => m.auto)?.why ?? null } : auto && 'error' in auto ? { model: null, why: words(auto.message) } : null, models };
+  }
+
   /** Extend's source: a take, clip or upload in this studio, with its length (stored, else the client's `seconds`). */
   private async extendSource(studioId: string, v: NonNullable<ShotRequest['extend']>['video']) {
     const key = this.runner.storageKeyOf(v);
@@ -526,15 +611,16 @@ export class SuiteService {
   estimateView(u: AuthUser, r: ShotRequest, plan: ShotPlan, caps: Awaited<ReturnType<SuiteService['checkCaps']>>, tried: { model: string; resolution: string; why: string }[]) {
     const res = plan.resolution.replace(/P$/, 'p');
     const base = {
-      quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
+      quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : plan.mode === 'remix' ? 'Swap' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
       estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       buttonLabel: `Generate · ${Math.round(plan.seconds * 10) / 10} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], ...(plan.adapted?.length ? { adapted: plan.adapted } : {}), camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
+      ...(plan.remix ? { remix: remixView(plan) } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
       look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
       // Rig check (workstream 3): clashes between the choices and with the prompt; never blocks Generate.
-      rig: plan.mode === 'recast' ? [] : rigCheck({ prompt: r.prompt, camera: r.camera, speaking: plan.speaking }),
+      rig: plan.mode === 'recast' || plan.mode === 'remix' ? [] : rigCheck({ prompt: r.prompt, camera: r.camera, speaking: plan.speaking }),
       // Images sent (images/sent.ts): what goes to the model, automatic or changed, each with why.
       sentImages: plan.sentImages ?? { images: [], changed: false },
     };
@@ -590,24 +676,30 @@ export class SuiteService {
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
     if (r.dryRun) { const words = await this.wordsFor(u), v = this.estimateView(u, r, plan, caps, p.tried); return { dryRun: true, estimate: { ...v, warnings: v.warnings.map(words), speaking: p.talk } }; }
+    // New Swap: a clip longer than the model takes is trimmed by the person first (owner 2026-11-12: never cut silently).
+    if (plan.remix?.trimNeeded) throw Object.assign(new ApiError(400, 'remix_trim_needed', `Trim the clip first: ${specName(modelById(plan.modelId)!)} takes up to ${plan.remix.maxSeconds} s`),
+      { extra: { maxSeconds: plan.remix.maxSeconds, minSeconds: plan.remix.minSeconds, clipSeconds: plan.remix.clipSeconds } });
+    if (plan.remix?.tooShort) throw new ApiError(400, 'remix_too_short', `${specName(modelById(plan.modelId)!)} needs at least ${plan.remix.minSeconds} s of video`);
     if (!caps.ok) throw new ApiError(402, caps.code!, caps.message!);
     if (!(await this.runner.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The AI suite isn't available right now");
     await this.checkMedia(u.studioId, plan);
-    const label = shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot');
+    const label = shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : plan.mode === 'remix' ? 'Swap' : 'Shot');
+    const herId = r.remix?.character?.kind === 'model' ? r.remix.character.modelId : undefined;
     const request = {
       engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: p.talk.speaking, speakingSource: p.talk.source,
-      prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId ?? plan.recast?.people[0]?.characterId, outfitId: r.outfitId,
-      keepAudio: plan.recast?.keepAudio ?? true, ...(plan.recast ? { clipId: r.clipId, cast: plan.recast.people } : {}),
+      prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId ?? plan.recast?.people[0]?.characterId ?? herId, outfitId: r.outfitId,
+      keepAudio: plan.recast?.keepAudio ?? plan.remix?.keepAudio ?? true, ...(plan.recast ? { clipId: r.clipId, cast: plan.recast.people } : {}),
+      ...(plan.remix ? { clipId: r.clipId, remix: r.remix, range: plan.remix.range, engineModel: r.engineModel ?? null } : {}),
       // The take's Look (suite/looks.ts): the Edit suite opens with this LUT applied (reversible).
       look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
     };
     const perTake = 45 + plan.seconds * 10 * (plan.tier === 'draft' ? 0.6 : plan.tier === 'cinema' ? 2 : plan.tier === 'hd' ? 1.5 : 1);
     const seed = r.seed ?? 1000 + Math.floor(Math.random() * 99000);
-    const leadId = r.modelId ?? plan.recast?.people[0]?.characterId;
+    const leadId = r.modelId ?? plan.recast?.people[0]?.characterId ?? herId;
     const [mrow] = leadId ? await this.ctx.db.select({ name: models.name, slots: models.slots }).from(models).where(eq(models.id, leadId)) : [];
     const thumb = (plan.images.start ?? plan.images.refs.find(x => x.role === 'character')?.image ?? mrow?.slots?.[0]?.image ?? null) as ImageRef | null;
     const job = await this.ctx.jobs.createInternal(u, {
-      kind: 'render', title: r.title ?? (plan.recast ? 'Recast' : 'Untitled shot'), modelId: leadId ?? '', modelName: mrow?.name ?? '', outfitId: r.outfitId ?? '', request,
+      kind: 'render', title: r.title ?? (plan.recast ? 'Recast' : plan.remix ? 'New Swap' : 'Untitled shot'), modelId: leadId ?? '', modelName: mrow?.name ?? '', outfitId: r.outfitId ?? '', request,
       cost: round2(plan.estimate * 10000) / 10000, prompt: plan.prompt, seed, thumb, totalSeconds: perTake * plan.takes, totalSteps: plan.takes, phase: 'Queued',
       stats: { suite: { plan, mode: this.mode } }, draft,
     });

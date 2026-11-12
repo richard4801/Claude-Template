@@ -27,7 +27,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       set(i, 'reference_image_urls', u.refs); set(i, 'reference_video_urls', u.videos.slice(0, 3)); set(i, 'reference_audio_urls', u.audio ? [u.audio] : undefined);
       break;
     case 'kling-v4':
-      if (p.mode === 'recast') { // edit the source clip (base_video): length and aspect come from it
+      if (p.mode === 'recast' || p.mode === 'remix') { // edit the source clip (base_video): length and aspect come from it
         i.base_video = u.videos[0]; i.resolution = p.resolution; set(i, 'reference_images', u.refs.slice(0, 10));
         break;
       }
@@ -43,6 +43,11 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       else i.generate_audio = p.audio;
       break;
     case 'seedance':
+      if (p.mode === 'remix') { // New Swap: the clip as [Video1], the pictures as references; its own sound is not wanted (MUSE puts the clip's back)
+        i.duration = Math.round(p.seconds); i.resolution = p.resolution; i.aspect_ratio = p.aspect; i.generate_audio = false;
+        set(i, 'reference_videos', u.videos.slice(0, 1)); set(i, 'reference_images', u.refs); set(i, 'seed', p.seed);
+        break;
+      }
       i.duration = p.seconds; i.resolution = p.resolution; i.aspect_ratio = frames ? 'adaptive' : p.aspect; i.generate_audio = p.audio;
       if (frames) { set(i, 'image', u.start); if (u.start) set(i, 'last_frame_image', u.end); }
       else { set(i, 'reference_images', u.refs); set(i, 'reference_videos', u.videos); set(i, 'reference_audios', u.audio ? [u.audio] : undefined); }
@@ -74,14 +79,22 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       break;
     case 'kling-o1': // the source as the base video, references mapped by the prompt
       i.reference_video = u.videos[0]; i.video_reference_type = 'base'; set(i, 'reference_images', u.refs.slice(0, 4));
-      i.keep_original_sound = p.recast?.keepAudio ?? true; i.mode = p.resolution === '720p' ? 'std' : 'pro';
+      i.keep_original_sound = p.recast?.keepAudio ?? p.remix?.keepAudio ?? true; i.mode = p.resolution === '720p' ? 'std' : 'pro';
       if (['9:16', '16:9', '1:1'].includes(p.aspect)) i.aspect_ratio = p.aspect;
       break;
     case 'wan-animate': { // one character per call; no prompt
-      const o: Record<string, unknown> = { video: u.videos[0], character_image: u.refs[0], resolution: p.resolution === '480' ? '480' : '720', merge_audio: p.recast?.keepAudio ?? true };
+      const o: Record<string, unknown> = { video: u.videos[0], character_image: u.refs[0], resolution: p.resolution === '480' ? '480' : '720', merge_audio: p.recast?.keepAudio ?? p.remix?.keepAudio ?? true };
       set(o, 'seed', p.seed);
       return o;
     }
+    // ---- New Swap (remix, plans/new-swap.md)
+    case 'wan-2.7-edit': // replicate.com/wan-video/wan-2.7-videoedit: the clip (2–10 s), the instruction, one reference picture
+      i.video = u.videos[0]; i.resolution = p.resolution; i.aspect_ratio = 'auto'; i.audio_setting = 'origin';
+      set(i, 'reference_image', u.refs[0]); set(i, 'seed', p.seed);
+      break;
+    case 'hf-genjutsu': // docs.higgsfield.ai genjutsu motion-transfer: video_url, image_urls 1–8, prompt in plain words ("image 1")
+      return { video_url: u.videos[0], image_urls: u.refs.slice(0, 8), resolution: p.resolution,
+        ...(p.prompt.trim() ? { prompt: p.prompt.replace(/<Image (\d+)>/g, 'image $1').replace(/<Video 1>/g, 'the source video').slice(0, 10000) } : {}) };
     case 'mock':
       Object.assign(i, { duration: p.seconds, resolution: p.resolution, aspect_ratio: p.aspect, start: u.start, middle: u.middle, end: u.end, refs: u.refs, videos: u.videos, audio: u.audio, ...p.params });
       break;

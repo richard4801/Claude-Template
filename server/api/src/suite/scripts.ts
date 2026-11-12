@@ -154,3 +154,51 @@ export const SUITE_RECAST_SCRIPT: Script = {
   ],
 };
 registerScript(SUITE_RECAST_SCRIPT);
+
+// ---------------------------------------------------------------- New Swap (remix): change parts of a clip with toggles
+// plans/new-swap.md §2. One block per toggle that is on, the figure lock (owner 2026-11-12: strict, in every remix prompt),
+// the keep line for what is off, then the person's own words (the only user section). Image tokens come from the code.
+export const SUITE_REMIX_SCRIPT: Script = {
+  id: 'suite.remix', group: 'suite', title: 'Swap · New Swap (beta)', format: 'lines',
+  description: 'New Swap: change only what is switched on (background, outfit, character, look & light) and keep everything else of the clip. The person writes only the change.',
+  inputs: [
+    en('character', 'Character', 'Who the person becomes.', [['none', 'Kept from the clip'], ['model', 'Her (her images)'], ['face', 'Face swap (a photo)']], 'model'),
+    en('outfit', 'Outfit', 'What they wear.', [['none', 'Kept from the clip'], ['outfit', 'One of her outfits'], ['product', 'A product photo'], ['words', 'In words']], 'outfit'),
+    en('background', 'Background', 'The place.', [['none', 'Kept from the clip'], ['describe', 'Described in words'], ['photo', 'A new photo']], 'photo'),
+    bool('look', 'Look & light', 'Time of day, light and colour grade change.', false),
+  ],
+  sections: [
+    sec('head', 'Task'), sec('lock', 'Figure lock'), sec('character', 'Character'), sec('outfit', 'Outfit'), sec('background', 'Background'), sec('look', 'Look & light'),
+    sec('keep', 'Keep'), { id: 'change', label: 'The change in the person’s words', kind: 'user', pick: 'first' }, sec('footer', 'Closing line'),
+  ],
+  rules: [
+    R('head', 'Change only what is listed', 'head', 'suite.remix.head', [], { locked: true }),
+    R('lock.model', 'Figure lock · her', 'lock', 'suite.remix.lock.model', [is('character', 'model')], { locked: true }),
+    R('lock.face', 'Figure lock · face swap', 'lock', 'suite.remix.lock.face', [is('character', 'face')], { locked: true }),
+    R('lock.keep', 'Figure lock · same person', 'lock', 'suite.remix.lock.keep', [is('character', 'none')], { locked: true }),
+    R('character.model', 'Character · her', 'character', 'suite.remix.character.model', [is('character', 'model')]),
+    R('character.face', 'Character · face swap', 'character', 'suite.remix.character.face', [is('character', 'face')]),
+    R('outfit.set', 'Outfit · one of her outfits', 'outfit', 'suite.remix.outfit.set', [is('outfit', 'outfit')]),
+    R('outfit.product', 'Outfit · product photo', 'outfit', 'suite.remix.outfit.product', [is('outfit', 'product')]),
+    R('outfit.words', 'Outfit · in words', 'outfit', 'suite.remix.outfit.words', [is('outfit', 'words')]),
+    R('background.describe', 'Background · described', 'background', 'suite.remix.background.describe', [is('background', 'describe')]),
+    R('background.photo', 'Background · new photo', 'background', 'suite.remix.background.photo', [is('background', 'photo')]),
+    R('look', 'Look & light', 'look', 'suite.remix.look', [is('look', true)]),
+    R('keep', 'Keep everything else', 'keep', 'suite.remix.keep', [], { locked: true }),
+    R('change', 'The person’s words', 'change', 'suite.remix.change', [], { locked: true }),
+    R('footer', 'Closing line', 'footer', 'suite.shot.footer'),
+  ],
+  vars: [
+    { name: 'source', description: 'the source clip token', sample: '<Video 1>' },
+    { name: 'subject', description: '"she" (her) or "the person"', sample: 'she' },
+    { name: 'name', description: 'her name', sample: 'Mia' },
+    { name: 'refs', description: 'her image tokens', sample: '<Image 1> and <Image 2>' },
+    { name: 'figureRefs', description: 'the images her figure comes from (her outfit’s angles, else her body shots)', sample: '<Image 3>, <Image 4>, <Image 5> and <Image 6>' },
+    { name: 'outfitRefs', description: 'the outfit’s image tokens', sample: '<Image 3>, <Image 4>, <Image 5> and <Image 6>' },
+    { name: 'productRef', description: 'the product photo token', sample: '<Image 3>' },
+    { name: 'faceRef', description: 'the face-swap photo token', sample: '<Image 1>' },
+    { name: 'bgRef', description: 'the background photo token', sample: '<Image 7>' },
+    { name: 'kept', description: 'what is kept from the clip (toggles that are off)', sample: 'the light and colour; ' },
+  ],
+};
+registerScript(SUITE_REMIX_SCRIPT);
