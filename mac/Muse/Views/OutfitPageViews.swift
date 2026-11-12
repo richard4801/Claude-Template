@@ -126,6 +126,8 @@ struct OutfitOpenView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             title(o)
                             Text(subtitle(o, model)).scaled(t.scale.caption, t.roles.ink2)
+                            // A set that came out partly: what was made, and that each missing picture has its own Redo.
+                            if let p = o.partial { Text(p.label).scaled(t.scale.caption, t.roles.caution) }
                         }
                         Spacer(minLength: Space.s3)
                         RIconButton(systemName: "xmark", help: "Close (Esc)") { store.closeOutfit() }
@@ -232,6 +234,14 @@ struct OutfitOpenView: View {
                               onMove: { store.moveOutfitPicture(o, from: k, to: $0) },
                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
                               onRedo: { store.redoOutfitPicture(o, k) })
+        } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
+            // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged).
+            Color.clear.aspectRatio(0.75, contentMode: .fit)
+                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
+                .overlay {
+                    RButton("Redo · \(Pricing.money(store.outfitRedoEstimate(k)))", small: true) { store.redoOutfitPicture(o, k) }
+                }
+                .accessibilityLabel("\(label) missing")
         } else {
             Color.clear.aspectRatio(0.75, contentMode: .fit)
                 .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))

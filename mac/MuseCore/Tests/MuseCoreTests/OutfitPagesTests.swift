@@ -60,4 +60,15 @@ final class OutfitPagesTests: XCTestCase {
         XCTAssertEqual(targets.first { $0.index == 3 }?.title, "Swap with Back")
         XCTAssertEqual(targets.first { $0.index == 6 }?.title, "Move to Face side")
     }
+
+    /// A set that came out partly (owner 2026-11-12): the label, and each missing picture has its own Redo.
+    func testPartialOutfitDecodesAndNamesMissingPictures() throws {
+        let json = #"{"id":"o1","modelId":"m","name":"Red","angles":[{"asset":"c_front"},{"asset":"c_tq"},null,null],"faces":[{"asset":"face"},{"asset":"face"},{"asset":"face"}],"state":"preview","partial":{"made":5,"of":7,"missing":["side","back"],"label":"5 of 7 made · Redo the missing ones"}}"#
+        let o = try JSONDecoder().decode(Outfit.self, from: Data(json.utf8))
+        XCTAssertEqual(o.partial?.label, "5 of 7 made · Redo the missing ones")
+        XCTAssertEqual((0..<7).filter { o.isMissing($0) }, [2, 3])
+        let whole = try JSONDecoder().decode(Outfit.self, from: Data(#"{"id":"o2","angles":[null,null,null,null]}"#.utf8))
+        XCTAssertNil(whole.partial)
+        XCTAssertFalse(whole.isMissing(2))
+    }
 }
