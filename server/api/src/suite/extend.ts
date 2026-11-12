@@ -9,7 +9,7 @@ import { EXTEND_LADDER, modelById, refFor, type LadderStep, type ModelSpec, type
 export type Direction = 'after' | 'before';
 export type ExtendMethod = 'clip' | 'reference' | 'frame';
 export type ExtendNeed = { direction: Direction; sourceSeconds: number; seconds: number; aspect: string };
-export type ExtendPick = { model: ModelSpec; resolution: Resolution; method: ExtendMethod; seconds: number; tried: { model: string; resolution: string; why: string }[] };
+export type ExtendPick = { model: ModelSpec; resolution: Resolution; method: ExtendMethod; seconds: number; tried: { model: string; resolution: string; why: string }[]; /** What MUSE did for a model without its own extend. */ adapted?: string };
 
 /** How `m` extends in this direction, or null. */
 export const extendMethod = (m: ModelSpec, d: Direction): ExtendMethod | null => (d === 'after' ? m.extend?.after : m.extend?.before) ?? null;
@@ -29,19 +29,40 @@ export function extendFit(m: ModelSpec, resolution: string, n: ExtendNeed): { wh
   return { why: null, seconds };
 }
 
+/**
+ * Owner 2026-11-12 ("every model on every mode"): a picked model without its own extend gets one MUSE can drive — a frame
+ * bridge (its start / end frame), else the clip as a reference video — with the note saying so. Null when it can't
+ * continue a clip at all (it edits a clip in place, or takes words only).
+ */
+export function adaptedExtend(m: ModelSpec): { model: ModelSpec; note: string } | null {
+  if (m.extend) return { model: m, note: '' };
+  const shots = m.modes.text || m.modes.image || m.modes.reference;
+  if (!shots) return null;
+  const vids = m.refs.videos > 0 && m.camera.referenceVideo;
+  const after: ExtendMethod | undefined = m.frames.start ? 'frame' : vids ? 'reference' : undefined;
+  const before: 'frame' | 'reference' | undefined = m.frames.end ? 'frame' : vids ? 'reference' : undefined;
+  if (!after && !before) return null;
+  const how = after === 'frame' ? 'continues from your clip’s last frame' : 'takes your clip as a reference video and continues it in words';
+  return { model: { ...m, extend: { after, before, sourceSeconds: [0.5, m.refs.videoSecondsMax ?? 10] } }, note: `${m.byo?.displayName ?? m.name} has no extend of its own: MUSE ${how}, so the join may show` };
+}
+
 export function pickExtend(tier: Tier, n: ExtendNeed, o: { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string }): ExtendPick | { error: string; tried: ExtendPick['tried'] } {
   const ladder: LadderStep[] = o.engineModel ? [{ model: o.engineModel, resolution: o.resolution ?? modelById(o.engineModel)?.resolutions.at(-1)?.id ?? '' }] : EXTEND_LADDER[tier];
   const tried: ExtendPick['tried'] = [];
   for (const step of ladder) {
-    const m = modelById(step.model);
-    if (!m) { tried.push({ ...step, why: 'unknown model' }); continue; }
+    const m0 = modelById(step.model);
+    if (!m0) { tried.push({ ...step, why: 'unknown model' }); continue; }
+    // A picked model: adapted when it has no extend of its own (said in the plan); the ladder's models extend natively.
+    const ad = o.engineModel ? adaptedExtend(m0) : { model: m0, note: '' };
+    if (!ad) { tried.push({ ...step, why: `${m0.name} makes no new seconds from a clip (it edits a clip in place, or takes words only)` }); continue; }
+    const m = ad.model;
     const pref = o.prefs?.models?.[m.id];
     if (pref?.enabled === false) { tried.push({ ...step, why: 'switched off' }); continue; }
     if (m.licence.requiresAck && !pref?.acknowledgedAt) { tried.push({ ...step, why: 'licence not acknowledged' }); continue; }
     if (!o.providers.has(m.provider)) { tried.push({ ...step, why: `${m.provider} not set up` }); continue; }
     const f = extendFit(m, step.resolution, n);
     if (f.why) { tried.push({ ...step, why: f.why }); continue; }
-    return { model: m, resolution: m.resolutions.find(x => x.id === step.resolution)!, method: extendMethod(m, n.direction)!, seconds: f.seconds, tried };
+    return { model: m, resolution: m.resolutions.find(x => x.id === step.resolution) ?? m.resolutions.at(-1)!, method: extendMethod(m, n.direction)!, seconds: f.seconds, tried, ...(ad.note ? { adapted: ad.note } : {}) };
   }
   return { error: 'nothing_fits', tried };
 }

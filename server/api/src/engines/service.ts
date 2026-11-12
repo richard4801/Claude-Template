@@ -18,6 +18,8 @@ import { memberRules, saveMemberRules, type MemberRules } from './members.js';
 import { labelList } from './labels.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
+import { adaptedExtend } from '../suite/extend.js';
+import { remixSupport } from '../suite/remix.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
 import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, HF_SWAP_MIN_SEC, GENJUTSU_KEEPS, GENJUTSU_RES, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
 
@@ -36,10 +38,35 @@ export type Engine = {
   resolution: string | null; price: Price | null; inputs: InputSlots;
   /** Genjutsu: what it keeps from the clip and what it changes (plain words for the picker), and when Auto picks it. */
   keeps?: typeof GENJUTSU_KEEPS; bestFor?: string;
+  /**
+   * Owner 2026-11-12 ("every model on every mode"): `native` = made for this purpose; `adapted` = MUSE adapts what it
+   * can't take natively and says so in the plan (`fitNote` is the picker's one line). Only in a purpose's list.
+   */
+  fit?: 'native' | 'adapted'; fitNote?: string;
+  /** Priced live from the provider's free quote (Wan 3.0 on Higgsfield): `price` is null until a request is planned. */
+  livePrice?: boolean;
 };
 export type Choice = { model: string; source: 'request' | 'studio'; engine: Engine };
 
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
+
+/** The picker's line for a model used outside the purposes it's made for: what MUSE does with it there. */
+export function adaptNote(id: string, fallbackName: string, purpose: Purpose): string {
+  const m = modelById(id);
+  const n = m?.byo?.displayName ?? m?.name ?? fallbackName;
+  if (!m) return `${n}: MUSE adapts what it can't take, and says what it changed`;
+  const shots = m.modes.text || m.modes.image || m.modes.reference;
+  switch (purpose) {
+    case 'swap': case 'recast': return `${n} runs as a New Swap with her as Character (one person): ${remixSupport(m, { character: { kind: 'model', modelId: '' } }).notes[0] ?? 'it edits the clip'}`;
+    case 'extend': return adaptedExtend(m)?.note ?? `${n} edits a clip in place or takes words only: it can't add new seconds`;
+    default:
+      if (!shots) return `${n} edits an existing video: it can't make a shot from words or pictures · use it in New Swap`;
+      if (purpose === 'talking' && m.refs.audios === 0) return `${n} takes no voice track: MUSE writes the words to say in the prompt`;
+      if (purpose === 'ugc' && m.refs.images === 0) return `${n} takes no product photo: MUSE describes the product in words`;
+      if (purpose === 'guide') return `${n} takes no guide clip: MUSE describes the camera move in words`;
+      return `${n}: MUSE adapts what it can't take (frames, references, length) and says what it changed`;
+  }
+}
 const VIDEO_PURPOSES = PURPOSES.filter(p => PURPOSE_INFO[p].kind === 'video');
 const IMAGE_PURPOSES = PURPOSES.filter(p => PURPOSE_INFO[p].kind === 'image');
 const LADDER_PURPOSES: Purpose[] = ['shot', 'talking', 'ugc', 'storyboard', 'guide', 'fill', 'recast', 'extend'];
@@ -91,7 +118,8 @@ export class ModelChoice {
       notice: m.licence.notice ?? null,
       limits: { minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios,
         resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label })), maxInputSeconds: m.recast?.sourceSeconds[1] ?? m.extend?.sourceSeconds[1] ?? m.refs.videoSecondsMax ?? null },
-      resolution: res.id, price: perRun != null ? { basis: 'per_run', usd: perRun } : { basis: 'per_second', usd: r4(res.perSec * scale) }, inputs: inputSlotsOf([m]) };
+      resolution: res.id, price: m.livePrice ? null : perRun != null ? { basis: 'per_run', usd: perRun } : { basis: 'per_second', usd: r4(res.perSec * scale) }, inputs: inputSlotsOf([m]),
+      ...(m.livePrice ? { livePrice: true } : {}) };
   }
 
   private async videoEngines(studioId: string): Promise<Engine[]> {
@@ -105,15 +133,17 @@ export class ModelChoice {
     for (const m of [...MODELS, ...customModelsOf(studioId)]) {
       const pref = p.models?.[m.id];
       if (m.status === 'removed' || m.licence.blockNewFeatures || pref?.enabled === false || (m.licence.requiresAck && !pref?.acknowledgedAt) || !avail.has(m.provider)) continue;
-      const purposes = videoPurposes(m);
-      if (purposes.length) out.set(m.id, this.videoEntry(m, purposes, pref?.priceScale ?? 1, ladderRes(m.id)));
+      // Every video model is listed (owner 2026-11-12), also one made only for New Swap (Wan 2.7 Edit): its purposes
+      // are the ones it's made for; the others adapt (candidates).
+      out.set(m.id, this.videoEntry(m, videoPurposes(m), pref?.priceScale ?? 1, ladderRes(m.id)));
     }
     // Character swap (and Recreate swap fills): the hosted H3 family joins with "swap"; Edit / Fast on our GPU are added.
     for (const e of this.swapUsable(p)) {
       const cur = out.get(e.id);
       if (e.runs !== 'gpu') {
         const m = modelById(e.id)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
-        const base = cur ?? this.videoEntry(m, [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
+        // A swap-only model (Genjutsu) is listed at its swap resolution and price.
+        const base = cur && cur.purposes.length ? cur : this.videoEntry(m, cur?.purposes ?? [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
         out.set(e.id, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
           ...(e.genjutsu ? { keeps: GENJUTSU_KEEPS, bestFor: 'Same moves, new look or scene: a new outfit or background, added characters or products' } : {}),
           limits: { ...base.limits, minSeconds: e.genjutsu?.minSec ?? (e.runs === 'higgsfield' ? HF_SWAP_MIN_SEC : P.REPLICATE_MIN_SEC), maxInputSeconds: e.genjutsu?.maxSec ?? P.REPLICATE_MAX_SEC } });
@@ -204,9 +234,19 @@ export class ModelChoice {
       ...(kinds.includes('tool') ? this.toolEngines() : []),
     ], { showProviders: true }) as Engine[];
   }
-  /** The candidates for one purpose (owner view). */
+  /**
+   * The candidates for one purpose (owner view). Owner 2026-11-12: "Every model in our app should be available on every
+   * mode … the default models are mostly on top of the list". Video purposes list every video model: the ones made for
+   * the purpose first, then the rest, which MUSE adapts (`fit: 'adapted'` with a one-line `fitNote`). Image purposes
+   * already list every image model. Tools stay per job (a matte model can't caption).
+   */
   async candidates(u: AuthUser, purpose: Purpose) {
-    return (await this.all(u, [PURPOSE_INFO[purpose].kind])).filter(e => e.purposes.includes(purpose));
+    const all = await this.all(u, [PURPOSE_INFO[purpose].kind]);
+    if (PURPOSE_INFO[purpose].kind !== 'video') return all.filter(e => e.purposes.includes(purpose));
+    const native = all.filter(e => e.purposes.includes(purpose));
+    // Our GPU's swap engines (Edit, Fast) run only the classic swap: they can't be adapted to other purposes.
+    const rest = all.filter(e => !e.purposes.includes(purpose) && e.provider !== 'runpod');
+    return [...native.map(e => ({ ...e, fit: 'native' as const })), ...rest.map(e => ({ ...e, fit: 'adapted' as const, fitNote: adaptNote(e.model, e.name, purpose) }))];
   }
 
   // ------------------------------------------------------------------ defaults
@@ -347,7 +387,9 @@ export class ModelChoice {
     const rules = await this.memberRules(u.studioId);
     const shown = u.role === 'owner' ? engines.map(e => this.ownerView(e, rules)) : this.memberViews(engines, rules);
     const view = [];
-    for (const e of shown) view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}) });
+    // The default first, then the others in candidate order (made for this purpose, then adapted).
+    const ordered = only && def ? [...shown.filter(e => e.model === def), ...shown.filter(e => e.model !== def)] : shown;
+    for (const e of ordered) view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}) });
     const ps = u.role === 'owner' ? purposes : purposes.map(p => ({ ...p, default: null }));
     // With ?purpose: also `purpose`, `default` and `models` (= engines), the shape WS7 proposed.
     return { ...(only ? { purpose: only, default: ps[0]!.default, models: view } : {}), purposes: ps, engines: view,
@@ -420,6 +462,9 @@ export async function applySwapEngine(mc: ModelChoice, u: AuthUser, r: Record<st
   const choice = pre !== undefined ? pre : await mc.choose(u, 'swap', requested);
   if (!choice) return null;
   const e = swapEngineById(choice.model);
+  // Every model can be picked for Swap (owner 2026-11-12); a non-swap model runs as a New Swap in the AI suite's
+  // planner. This classic job pipeline can't adapt one: a picked one is said plainly; a studio default is skipped here.
+  if (!e && choice.source === 'request') throw Object.assign(new ApiError(400, 'engine_not_allowed', `${choice.engine.label ?? choice.engine.name} isn’t a swap model: generate it from the AI suite’s Swap, where it runs as a New Swap`), { extra: { purpose: 'swap', valid: SWAP_ENGINES.map(x => x.id) } });
   if (!e) return null;
   if (e.runs === 'gpu') { r.engine = e.gpuEngine; r.use = 'full'; delete r.quality; }
   else { r.engine = 'replicate'; r.videoModel = e.ref; if (e.noResolution) r.videoNoResolution = true; } // Higgsfield runs on the hosted line too (swapEngine h3-hf)

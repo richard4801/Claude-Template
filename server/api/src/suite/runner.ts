@@ -11,7 +11,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { PaidLost, paidLostFailure, reportPaidLost, sleep } from '../services/paidLost.js';
 import { ReplicateError } from '../replicate/client.js';
 import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail, type MediaInfo } from '../replicate/media.js';
-import { frameOf, joinClips, segment } from './extendMedia.js';
+import { cutRange, frameAt, frameOf, joinClips, segment } from './extendMedia.js';
 import { finishPlan, finishTake, TARGET_LUFS } from './finish.js';
 import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
@@ -261,7 +261,43 @@ export class SuiteRunner {
         urls.videos = [await put('source_part.mp4', f, 'video/mp4')];
       }
     }
+    // New Swap: the part of the clip the person picked with the trimmer (the model gets only that part; its sound goes
+    // back on). Routes without a video (owner 2026-11-12: every model in every mode) get frames from it instead, and a
+    // model that puts a person from pictures into the clip gets a still of the clip's person.
+    const rx = plan.remix;
+    if (rx && (rx.range || rx.frames || rx.personStill)) {
+      await report(1, 0.02, 'Preparing the clip');
+      const part = await this.remixSource(job.studioId, plan, tmp);
+      const put = async (name: string, f: string, contentType: string) => {
+        const key = `s/${job.id}/${name}`;
+        await putFile(ctx, { key, file: f, studioId: job.studioId, kind: 'output', userId: job.userId, contentType });
+        return ctx.storage.presignGet(key, c.REPLICATE_INPUT_URL_TTL_SEC);
+      };
+      if (rx.range && plan.videos.length) urls.videos = [await put('source_part.mp4', part, 'video/mp4')];
+      if (rx.frames || rx.personStill) {
+        const info = await probe(c.FFPROBE_PATH, part);
+        const D = Math.max(0.1, info.duration);
+        const grab = async (name: string, at: number) => { const f = path.join(tmp, name); await frameAt(c.FFMPEG_PATH, part, f, Math.max(0, Math.min(D - 0.05, at))); return put(name, f, 'image/jpeg'); };
+        if (rx.frames?.start) urls.start = await grab('frame_first.jpg', 0);
+        if (rx.frames?.end) urls.end = await grab('frame_last.jpg', D - 0.1);
+        for (let k = 0; k < (rx.frames?.stills ?? 0); k++) urls.refs.push(await grab(`frame_${k + 1}.jpg`, (D * (k + 0.5)) / (rx.frames!.stills)));
+        if (rx.personStill) urls.refs.push(await grab('person.jpg', D / 2));
+      }
+    }
     return { urls, prompt, separationCost, source };
+  }
+
+  /** New Swap's source as sent: the trimmed part of the clip (or the whole clip), fetched and cut once per run. */
+  private async remixSource(studioId: string, plan: ShotPlan, tmp: string) {
+    const ctx = this.ctx, c = ctx.config;
+    const src = path.join(tmp, 'remix_source.mp4');
+    if (fs.existsSync(src)) return src;
+    const full = plan.remix?.range ? path.join(tmp, 'remix_full.mp4') : src;
+    const obj = await ctx.storage.get(plan.remix?.sourceKey ?? plan.videos[0]!.video.key!);
+    if (!obj) throw new ReplicateError('the source clip is missing', 'failed');
+    await pipeline(obj.body, fs.createWriteStream(full));
+    if (plan.remix?.range) await cutRange(c.FFMPEG_PATH, full, src, plan.remix.range[0], plan.remix.range[1], await probe(c.FFPROBE_PATH, full));
+    return src;
   }
 
   private async run(job: JobRow, st: Running) {
@@ -297,7 +333,7 @@ export class SuiteRunner {
       let moved = false;
       const moveToReplicate = () => { model = alt!; provider = this.suite.providers.replicate; ref = typeof alt!.ref === 'string' ? alt!.ref : (alt!.ref.ref2v ?? alt!.ref.t2v ?? ''); moved = true; };
       // A shot that already moved to Replicate (Higgsfield refused at its start) resumes there, never on Higgsfield again.
-      if (provider.id === 'higgsfield' && alt && prior.some(t => t.id && t.provider === 'replicate')) moveToReplicate();
+      if (provider.id === 'higgsfield' && model.adapter === 'hf-h3' && alt && prior.some(t => t.id && t.provider === 'replicate')) moveToReplicate();
       const mock = provider.id === 'mock';
       if (!(await this.toolsReady())) throw new Error('ffmpeg is not installed on the server');
       await report(1, 0.01, 'Preparing');
@@ -344,7 +380,7 @@ export class SuiteRunner {
             // Higgsfield refused before anything ran (no credit, bad key, busy, down): skip it for a while and run the
             // same shot on Replicate H3 2K (same model, prompt and references). The quoted price stands (the studio
             // absorbs the difference); the owner sees why in the log. Nothing was charged by Higgsfield.
-            const canMove = provider.id === 'higgsfield' && alt && e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)
+            const canMove = provider.id === 'higgsfield' && model.adapter === 'hf-h3' && alt && e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)
               && !takes.some(t => t.id) && this.suite.providers.replicate.configured();
             if (!canMove) throw e;
             this.suite.markDown('higgsfield');
@@ -414,7 +450,7 @@ export class SuiteRunner {
       const actual = mock && !c.SUITE_MOCK_CHARGE ? 0 : exact;
       const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;
       await ctx.jobs.complete(job.id, {
-        outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds), plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot')}${mock ? ' · test render' : ''}${recovering ? ' · recovered' : ''}`,
+        outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds), plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : plan.mode === 'remix' ? 'Swap' : 'Shot')}${mock ? ' · test render' : ''}${recovering ? ' · recovered' : ''}`,
         stats: { ...fresh, suite: { ...(fresh.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact, separationCost, ...(finishNotes.size ? { finished: [...finishNotes] } : {}) } },
       });
     } catch (e) {
@@ -470,7 +506,14 @@ export class SuiteRunner {
     };
     // Sound off: the audio track is dropped by stream copy. Then finishing (below) cuts to the planned length and levels the sound.
     let shaped = false;
-    if (plan.recast?.restoreAudio && plan.videos[0]?.video.key) {
+    if (plan.remix?.restoreAudio && (plan.remix.sourceKey || plan.videos[0]?.video.key)) {
+      // New Swap keeps the clip's sound: put back by stream copy from the part used (no re-encode of the video).
+      shaped = await soft('putting the original sound back', async () => {
+        const src = await this.remixSource(job.studioId, plan, tmp);
+        const si = await probe(c.FFPROBE_PATH, src);
+        if (si.audioCodec) await restoreAudio(c.FFMPEG_PATH, raw, src, take, si.audioCodec, { shortest: true }); else await fs.promises.copyFile(raw, take);
+      });
+    } else if (plan.recast?.restoreAudio && plan.videos[0]?.video.key) {
       // Recast keeps the original sound: this model doesn't return it, so it goes back on by stream copy (no re-encode).
       shaped = await soft('putting the original sound back', async () => {
         const src = path.join(tmp, 'source');
@@ -482,7 +525,7 @@ export class SuiteRunner {
     if (!shaped) await fs.promises.copyFile(raw, take);
     // AI suite (workstream 1): the planned length (a provider may round up) and even loudness (~−16 LUFS) for the
     // model's own sound. Recast keeps the original sound and length; Extend is cut by its join, not here.
-    if (!plan.recast) {
+    if (!plan.recast && !plan.remix) {
       await soft('finishing (length and sound level)', async () => {
         const ti = await probe(c.FFPROBE_PATH, take);
         const fp = finishPlan(ti, ex ? null : plan.seconds, { level: true });

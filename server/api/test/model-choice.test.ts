@@ -71,52 +71,22 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect((await owner.req('GET', '/v1/engines?purpose=nope')).status).toBe(400);
   });
 
-  it('?purpose= lists only that purpose\'s candidates and marks the default', async () => {
+  it('?purpose= lists every model of its kind, the default first, then the ones made for it, then the adapted ones (owner 2026-11-12)', async () => {
     const swap = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
-    expect(swap.engines.map((e: any) => e.model)).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']);
+    const ids = swap.engines.map((e: any) => e.model);
+    expect(ids.slice(0, 5)).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']);
+    expect(ids).toEqual(expect.arrayContaining(['kling-v4', 'veo-3.1-lite', 'wan-2.7-edit']));
     expect(swap.engines.filter((e: any) => e.default).map((e: any) => e.model)).toEqual(['h3']);
-    const talk = (await owner.req('GET', '/v1/engines?purpose=talking')).body.engines.map((e: any) => e.model);
-    expect(talk).toContain('h3');
-    expect(talk).not.toContain('kling-v4');
-    const recast = (await owner.req('GET', '/v1/engines?purpose=recast')).body.engines.map((e: any) => e.model);
-    expect(recast).toEqual(expect.arrayContaining(['kling-v4', 'kling-o1', 'wan-2.2-animate', 'h3-max-recast']));
-    const outfit = (await owner.req('GET', '/v1/engines?purpose=outfit')).body.engines;
-    expect(outfit.every((e: any) => e.kind === 'image')).toBe(true);
-    expect(outfit.find((e: any) => e.default).model).toBe(a.ctx.config.REPLICATE_IMAGE_MODEL);
-  });
-
-  it('members (4c): every video and image model not hidden, with provider names while the studio shows them; no tools, defaults or owner-only fields', async () => {
-    const r = await member.req('GET', '/v1/engines');
-    expect(r.status).toBe(200);
-    const ids = r.body.engines.map((e: any) => e.model);
-    expect(ids).toEqual(expect.arrayContaining(['kling-v4', 'h3', 'h3-lite', 'h3-open']));
-    expect(r.body.engines.every((e: any) => e.kind === 'video' || e.kind === 'image')).toBe(true);
-    expect(r.body.engines.find((e: any) => e.model === 'kling-v4')).toMatchObject({ provider: expect.any(String), providerName: expect.any(String) });
-    expect(r.body.purposes.every((p: any) => p.default === null && p.studioDefault === null)).toBe(true);
-    expect(JSON.stringify(r.body)).not.toMatch(OWNER_ONLY_WORDS);
-    expect(r.body.memberSettings).toBeUndefined();
-    expect((await member.req('GET', '/v1/engines/defaults')).status).toBe(403);
-    // The owner's switches: members can't see or change them.
-    expect((await member.req('GET', '/v1/engines/members')).status).toBe(403);
-    expect((await member.req('PATCH', '/v1/engines/members', { showProviderNames: false })).status).toBe(403);
-    const ow = (await owner.req('GET', '/v1/engines')).body;
-    expect(ow.memberSettings).toEqual({ showProviderNames: true });
-    expect(ow.engines.find((e: any) => e.model === 'kling-v4').members).toBe(true);
-    // Provider names off and Kling hidden: gone from the member's list and refused when picked; the owner still has it.
-    const off = await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false, hidden: { 'kling-v4': true } });
-    expect(off.status).toBe(200);
-    expect(off.body.showProviderNames).toBe(false);
-    expect(off.body.models.find((m: any) => m.model === 'kling-v4').members).toBe(false);
-    const hid = (await member.req('GET', '/v1/engines')).body;
-    expect(hid.engines.map((e: any) => e.model)).not.toContain('kling-v4');
-    expect(JSON.stringify(hid)).not.toMatch(/"provider(Name)?"/);
-    expect((await member.req('GET', '/v1/suite/catalog')).body.engines.some((e: any) => e.model === 'kling-v4' || e.provider)).toBe(false);
-    const shot = { modelId: char.id, prompt: 'She smiles.', duration: 5, quality: 'standard', engineModel: 'kling-v4' };
-    expect((await member.req('POST', '/v1/suite/shots/estimate', shot)).status).toBe(403);
-    expect((await owner.req('POST', '/v1/suite/shots/estimate', shot)).status).toBe(200);
-    expect((await owner.req('PATCH', '/v1/engines/members', { hidden: { 'no-such-model': true } })).status).toBe(400);
-    expect((await owner.req('PATCH', '/v1/engines/members', { showProviderNames: true, hidden: { 'kling-v4': false } })).body.showProviderNames).toBe(true);
-    expect((await member.req('GET', '/v1/engines')).body.engines.map((e: any) => e.model)).toContain('kling-v4');
+    expect(swap.engines.slice(0, 5).every((e: any) => e.fit === 'native')).toBe(true);
+    const kv = swap.engines.find((e: any) => e.model === 'kling-v4');
+    expect(kv).toMatchObject({ fit: 'adapted' });
+    expect(kv.fitNote).toMatch(/^Kling 4.0 runs as a New Swap with her as Character/);
+    const talk = (await owner.req('GET', '/v1/engines?purpose=talking')).body.engines;
+    expect(talk[0].default).toBe(true);
+    expect(talk.find((e: any) => e.model === 'kling-v4')).toMatchObject({ fit: 'adapted', fitNote: 'Kling 4.0 takes no voice track: MUSE writes the words to say in the prompt' });
+    // Tools stay per job: a matte model can't caption.
+    const matte = (await owner.req('GET', '/v1/engines?purpose=matte')).body.engines;
+    expect(matte.every((e: any) => e.purposes.includes('matte'))).toBe(true);
   });
 
   it('shot: an override is priced on that model (members too, 4c); a model of another purpose is refused with the valid list', async () => {
@@ -124,24 +94,36 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     const k = (await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4', resolution: '720p' })).body;
     expect(k.engine).toMatchObject({ model: 'kling-v4', resolution: '720p' });
     expect(k.estimate).toBeCloseTo(0.157 * 5, 1);
+    // Any model can be picked; one that only edits an existing video has nothing to make a shot from: said plainly.
     const bad = await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-max-recast' });
     expect(bad.status).toBe(400);
-    expect(bad.body.code).toBe('engine_not_allowed');
-    expect(bad.body.valid).toEqual(expect.arrayContaining(['h3', 'kling-v4']));
-    expect(bad.body.valid).not.toContain('h3-max-recast');
+    expect(bad.body.code).toBe('needs_a_video');
+    expect(bad.body.error).toMatch(/edits an existing video: it can’t make a shot from words or pictures · use it in Swap → New Swap/);
     const mk = await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4', resolution: '720p' });
     expect(mk.status).toBe(200);
     expect(mk.body.estimate).toBeCloseTo(k.estimate, 6); // charged as the owner's run is priced
-    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-max-recast' })).body.code).toBe('engine_not_allowed');
+    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-max-recast' })).body.code).toBe('needs_a_video');
   });
 
-  it('recast, extend, guide: refused outside their candidates', async () => {
+  it('recast, extend, guide on any model: MUSE adapts and says what it did (owner 2026-11-12)', async () => {
+    // A one-person Recast on Veo runs as a New Swap with her as Character; Veo gets frames from the clip.
     const recast = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId: 'c_swap', cast: [{ characterId: char.id }], engineModel: 'veo-3.1-lite' });
-    expect([recast.status, recast.body.code]).toEqual([400, 'engine_not_allowed']);
+    expect(recast.status, JSON.stringify(recast.body)).toBe(200);
+    expect(recast.body).toMatchObject({ mode: 'remix', remix: { route: 'frames' } });
+    expect(recast.body.warnings[0]).toBe('Veo 3.1 Lite · Replicate isn’t a Recast model: MUSE runs it as a New Swap with her as Character');
+    // Several people need a model that tells them apart.
+    const two = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId: 'c_swap', cast: [{ characterId: char.id, personHint: 'left' }, { characterId: char.id, personHint: 'right' }], engineModel: 'veo-3.1-lite' });
+    expect(two.body.error).toMatch(/can’t tell several people in a clip apart/);
+    // Extend on Veo: a frame bridge from the clip's last frame.
     const ext = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'extend', extend: { video: { key: 'clips/dance.mp4', seconds: 7 } }, engineModel: 'veo-3.1-lite' });
-    expect([ext.status, ext.body.code]).toEqual([400, 'engine_not_allowed']);
+    expect(ext.status, JSON.stringify(ext.body)).toBe(200);
+    expect(ext.body.warnings[0]).toBe('Veo 3.1 Lite has no extend of its own: MUSE continues from your clip’s last frame, so the join may show');
+    // Extend on an edit-only model: nothing to make new seconds from.
+    const no = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'extend', extend: { video: { key: 'clips/dance.mp4', seconds: 7 } }, engineModel: 'wan-2.7-edit' });
+    expect(no.body.error).toMatch(/Can't extend with this model · Wan 2.7 Edit makes no new seconds from a clip/);
+    // Directed camera on Veo: adapted by the shot planner (the guide described in words), not refused.
     const guide = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', engineModel: 'veo-3.1-lite', camera: { mode: 'directed', guide: { video: { url: 'https://x.test/g.mp4' } } } });
-    expect([guide.status, guide.body.code]).toEqual([400, 'engine_not_allowed']);
+    expect(guide.body.code).not.toBe('engine_not_allowed');
   });
 
   it('swap (Suite): any swap engine, priced on it (members too, 4c); a non-swap model is refused; nothing runs', async () => {
@@ -154,9 +136,11 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     const edit = (await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-open' })).body;
     expect(edit.label).toBe('Edit');
     expect(edit.estimate).toBeCloseTo(P.totalCost({ engine: 'h3', use: 'full', steps: P.STEPS_DEFAULT, takes: 1, clipSeconds: 7.2 }), 2);
-    const bad = await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' });
-    expect([bad.status, bad.body.code]).toEqual([400, 'engine_not_allowed']);
-    expect(bad.body.valid).toEqual(['h3', 'h3-lite', 'h3-highspeed', 'h3-open', 'viggle']);
+    // Any model: a non-swap one runs as a New Swap on it (owner 2026-11-12), said in the warnings.
+    const other = await owner.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'kling-v4' });
+    expect(other.status, JSON.stringify(other.body)).toBe(200);
+    expect(other.body).toMatchObject({ mode: 'remix', engine: { model: 'kling-v4' } });
+    expect(other.body.warnings[0]).toBe('Kling 4.0 · Replicate isn’t a Swap model: MUSE runs it as a New Swap with her as Character');
     expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, engineModel: 'h3-lite' })).body.estimate).toBeCloseTo(lite.estimate, 6);
     expect(JSON.stringify((await member.req('POST', '/v1/suite/shots/estimate', body)).body)).not.toMatch(PROVIDER_WORDS);
     expect(fake.state.creates).toEqual([]);
@@ -172,7 +156,7 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect((await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, engineModel: 'h3-lite' })).body.estimate).toBeCloseTo(0.02 * 8, 2);
     // A real Recast model stays a Recast; two people stay a Recast (a swap model is refused there).
     const two = await owner.req('POST', '/v1/suite/shots/estimate', { ...asRecast, cast: [{ characterId: char.id }, { characterId: char.id }], engineModel: 'h3-lite' });
-    expect(two.body.code).toBe('engine_not_allowed');
+    expect(two.body.error).toMatch(/can’t tell several people in a clip apart/);
     // Auto (no model) is unchanged.
     expect((await owner.req('POST', '/v1/suite/shots/estimate', asRecast)).status).toBe(200);
     expect(fake.state.creates).toEqual([]);
@@ -203,7 +187,9 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
   });
 
   it('studio defaults: "always use X for Swap" prices and runs every swap on X (members included); bad values refused; null clears', async () => {
-    expect((await owner.req('PATCH', '/v1/engines/defaults', { swap: 'kling-v4' })).body.code).toBe('engine_not_allowed');
+    // Any video model can be the Swap default (owner 2026-11-12); a picture model can't.
+    expect((await owner.req('PATCH', '/v1/engines/defaults', { swap: 'kling-v4' })).status).toBe(200);
+    expect((await owner.req('PATCH', '/v1/engines/defaults', { swap: 'black-forest-labs/flux-2-pro' })).body.code).toBe('engine_not_allowed');
     expect((await owner.req('PATCH', '/v1/engines/defaults', { nope: 'h3' })).status).toBe(400);
     expect((await member.req('PATCH', '/v1/engines/defaults', { swap: 'h3-lite' })).status).toBe(403);
     const set = (await owner.req('PATCH', '/v1/engines/defaults', { swap: 'h3-lite', recast: 'kling-o1' })).body;

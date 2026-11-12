@@ -1,0 +1,1089 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+index 312a084a..818a1145 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+@@ -218,6 +218,12 @@ data class SuiteCatalogEngine(
+     val purposes: List<String> = emptyList(),
+     /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
+     val label: String = "",
++    /** Owner 2026-11-12, every model on every mode (GET /v1/engines?purpose=): "native" or "adapted", and for an adapted one
++     *  the server's line saying what MUSE does with it there. */
++    val fit: String? = null,
++    val fitNote: String? = null,
++    /** Priced live by the provider when a request is planned (Wan 3.0 on Higgsfield): no price in the list. */
++    val livePrice: Boolean = false,
+ ) {
+     /** What to show for the model: the server's label, else its name. */
+     val shownName: String get() = label.ifBlank { name }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
+index 68c32b85..0d1cd68f 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
+@@ -64,6 +64,10 @@ data class PickerEngine(
+     val ladderRes: Map<String, String> = emptyMap(),
+     /** WS13: the purposes it serves (empty = any). */
+     val purposes: List<String> = emptyList(),
++    /** Owner 2026-11-12: for a model not made for this purpose, what MUSE does with it (it is still offered). */
++    val note: String? = null,
++    /** Priced live by the provider when picked (Wan 3.0). */
++    val livePrice: Boolean = false,
+ ) {
+     val tier: String? get() = tiers.firstOrNull()
+ 
+@@ -128,7 +132,8 @@ object ModelPicker {
+         cat.engines?.let { list ->
+             return list.filter { it.kind == kind }.map { e ->
+                 PickerEngine(e.model, e.shownName.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
+-                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes)
++                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes,
++                    note = e.fitNote?.takeIf { e.fit == "adapted" }, livePrice = e.livePrice)
+             }
+         }
+         if (kind != "video") return cat.custom.orEmpty().filter { it.kind == kind }.map { c -> customEngine(c) }
+@@ -147,20 +152,30 @@ object ModelPicker {
+ 
+     /** The picker's groups for a shot on [quality]: the engines on that quality's ladder first, then the rest, then "Your providers". */
+     fun groups(cat: SuiteCatalog?, quality: String, kind: String = "video", purpose: String? = null): PickerGroups {
+-        // WS13: engines list their purposes; Talking and UGC take narrower lists than Shot. An entry without purposes fits any.
+-        val fit = engines(cat, kind).filter { e -> purpose == null || e.purposes.isEmpty() || purpose in e.purposes }
+-        val (custom, core) = fit.partition { it.custom }
++        // Owner 2026-11-12: "Every model in our app should be available on every mode … the default models are mostly on
++        // top of the list". Nothing is filtered by purpose: the models made for it come first, then the others, which MUSE
++        // adapts (each says how). An entry without purposes fits any.
++        fun native(e: PickerEngine) = e.note == null && (purpose == null || e.purposes.isEmpty() || purpose in e.purposes)
++        val all = engines(cat, kind).map { e -> if (native(e) || e.note != null) e else e.copy(note = adaptedLine(purpose)) }
++        val (custom, core) = all.partition { it.custom }
+         val (ladder, others) = core.partition { quality in it.tiers }
+-        // This quality's ladder in its own order; the others in quality order (Draft → Cinema).
++        // This quality's ladder in its own order; the others in quality order (Draft → Cinema); adapted ones after.
+         val ladderOrder = cat?.tier(quality)?.models.orEmpty().map { it.model }
+         val order = cat?.tiers?.map { it.id } ?: SuiteRules.TIERS
+         return PickerGroups(
+-            ladder.sortedBy { e -> ladderOrder.indexOf(e.id).let { if (it < 0) Int.MAX_VALUE else it } },
+-            others.sortedBy { e -> order.indexOf(e.tier).let { if (it < 0) Int.MAX_VALUE else it } },
+-            custom,
++            ladder.sortedWith(compareBy<PickerEngine>({ if (native(it)) 0 else 1 }, { e -> ladderOrder.indexOf(e.id).let { if (it < 0) Int.MAX_VALUE else it } })),
++            others.sortedWith(compareBy<PickerEngine>({ if (native(it)) 0 else 1 }, { e -> order.indexOf(e.tier).let { if (it < 0) Int.MAX_VALUE else it } })),
++            custom.sortedBy { if (native(it)) 0 else 1 },
+         )
+     }
+ 
++    /** The line for a model a composer tool adapts (Talking: no voice slot; UGC ad: no product photo). */
++    fun adaptedLine(purpose: String?): String = when (purpose) {
++        "talking" -> "Takes no voice track: MUSE writes the words to say in the prompt"
++        "ugc" -> "Takes no product photo: MUSE describes the product in words"
++        else -> "Not made for this: MUSE adapts what it can’t take and says what it changed"
++    }
++
+     /** The engine a draft has pinned, or null (Auto, or a pin the catalog no longer has). */
+     fun find(cat: SuiteCatalog?, id: String?, kind: String = "video"): PickerEngine? = id?.let { engines(cat, kind).firstOrNull { e -> e.id == id } }
+ 
+@@ -216,7 +231,7 @@ fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngin
+ fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups: PickerGroups, autoLine: String, onPick: (PickerEngine?, String?) -> Unit) {
+     val m = muse
+     Column(Modifier.fillMaxWidth().testTag("model_picker"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+-        ModelRow("Auto", autoLine, emptyList(), null, selected == null, {}) { onPick(null, null) }
++        ModelRow("Auto", autoLine, emptyList(), null, selected == null, onChip = {}) { onPick(null, null) }
+         listOf(
+             (quality?.let { "On ${SuiteRules.tierLabel(it)}" } ?: "") to groups.ladder,
+             (if (quality == null) "Models" else "Other models") to groups.others,
+@@ -228,7 +243,8 @@ fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups:
+                 val detail = listOfNotNull(e.tier?.takeIf { quality != null && quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
+                 // The chip lit is the resolution it would run at: the pinned one, else this quality's.
+                 val res = if (on) selectedRes ?: quality?.let(e::resolutionOn) ?: e.resolution else quality?.let(e::resolutionOn) ?: e.resolution
+-                ModelRow(e.name, detail, e.chips, res, on, { r -> onPick(e, r) }) { onPick(e, null) }
++                val note = listOfNotNull(e.note, "Priced by the provider when you pick it".takeIf { e.livePrice }).joinToString(" · ").ifBlank { null }
++                ModelRow(e.name, detail, e.chips, res, on, note = note, onChip = { r -> onPick(e, r) }) { onPick(e, null) }
+             }
+         }
+     }
+@@ -239,7 +255,7 @@ fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups:
+  * Tapping the row pins it at this quality's resolution.
+  */
+ @Composable
+-private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, String>>, lit: String?, on: Boolean, onChip: (String?) -> Unit, onClick: () -> Unit) {
++private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, String>>, lit: String?, on: Boolean, note: String? = null, onChip: (String?) -> Unit, onClick: () -> Unit) {
+     val m = muse
+     val shape = RoundedCornerShape(12.dp)
+     Column(
+@@ -252,6 +268,8 @@ private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, Str
+             Column(Modifier.weight(1f)) {
+                 T(name, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                 if (detail.isNotBlank()) T(detail, m.scale.caption, m.t.muted, maxLines = 1)
++                // Every model on every mode: one not made for this says what MUSE does with it.
++                if (!note.isNullOrBlank()) T(note, m.scale.caption, m.t.muted, maxLines = 2)
+             }
+             Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { if (on) SIc("check", 18.dp, m.t.accent) }
+         }
+diff --git a/android/app/src/main/resources/prompt_library.json b/android/app/src/main/resources/prompt_library.json
+index 12e9c731..86c1d2dd 100644
+--- a/android/app/src/main/resources/prompt_library.json
++++ b/android/app/src/main/resources/prompt_library.json
+@@ -2228,6 +2228,325 @@
+    "updatedAt": null,
+    "updatedBy": null
+   },
++  {
++   "key": "suite.remix.head",
++   "group": "suite",
++   "title": "New Swap · task",
++   "description": "First line of every New Swap prompt.",
++   "kind": "text",
++   "default": "Edit {source}. Change only what is listed below; everything else stays exactly as in {source}.",
++   "current": "Edit {source}. Change only what is listed below; everything else stays exactly as in {source}.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": true
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.lock.model",
++   "group": "suite",
++   "title": "New Swap · figure lock (her)",
++   "description": "Character is her: her figure only from her images (owner rule, strict).",
++   "kind": "text",
++   "default": "FIGURE LOCK: her face, hair and skin come only from {refs}, and her body shape and proportions only from {figureRefs}, unchanged. From {source} take only the motion, timing and facial gestures (expressions, eye and mouth movements), never the face, body, figure or proportions of the person in it.",
++   "current": "FIGURE LOCK: her face, hair and skin come only from {refs}, and her body shape and proportions only from {figureRefs}, unchanged. From {source} take only the motion, timing and facial gestures (expressions, eye and mouth movements), never the face, body, figure or proportions of the person in it.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "refs",
++     "description": "her image tokens",
++     "required": true
++    },
++    {
++     "name": "figureRefs",
++     "description": "the images her figure comes from",
++     "required": false
++    },
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.lock.face",
++   "group": "suite",
++   "title": "New Swap · figure lock (face swap)",
++   "description": "Face swap: only the face changes.",
++   "kind": "text",
++   "default": "FIGURE LOCK: only the face changes. The body, figure, proportions, hair and skin of the person in {source} stay exactly as they are; never slimmer, taller or reshaped.",
++   "current": "FIGURE LOCK: only the face changes. The body, figure, proportions, hair and skin of the person in {source} stay exactly as they are; never slimmer, taller or reshaped.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.lock.keep",
++   "group": "suite",
++   "title": "New Swap · figure lock (same person)",
++   "description": "Character is off: the person in the clip stays.",
++   "kind": "text",
++   "default": "FIGURE LOCK: the person in {source} keeps their exact face, body, figure and proportions; never slimmer, taller or reshaped.",
++   "current": "FIGURE LOCK: the person in {source} keeps their exact face, body, figure and proportions; never slimmer, taller or reshaped.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.character.model",
++   "group": "suite",
++   "title": "New Swap · character (her)",
++   "description": "Character is her.",
++   "kind": "text",
++   "default": "PERSON: the person in {source} becomes {name}, shown in {refs}.",
++   "current": "PERSON: the person in {source} becomes {name}, shown in {refs}.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": false
++    },
++    {
++     "name": "name",
++     "description": "her name",
++     "required": true
++    },
++    {
++     "name": "refs",
++     "description": "her image tokens",
++     "required": true
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.character.face",
++   "group": "suite",
++   "title": "New Swap · face swap",
++   "description": "Character is a face swap from a photo (optional, off by default).",
++   "kind": "text",
++   "default": "FACE: the face of the person in {source} becomes the face in {faceRef}; the expressions and mouth movements still follow {source}.",
++   "current": "FACE: the face of the person in {source} becomes the face in {faceRef}; the expressions and mouth movements still follow {source}.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": false
++    },
++    {
++     "name": "faceRef",
++     "description": "the photo token",
++     "required": true
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.outfit.set",
++   "group": "suite",
++   "title": "New Swap · outfit (one of hers)",
++   "description": "Outfit is one of her saved outfits (its pictures are sent).",
++   "kind": "text",
++   "default": "OUTFIT: {subject} wears the outfit shown in {outfitRefs}, exactly: cut, fabric and colour, with its hair, make-up and accessories.",
++   "current": "OUTFIT: {subject} wears the outfit shown in {outfitRefs}, exactly: cut, fabric and colour, with its hair, make-up and accessories.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "subject",
++     "description": "\"she\" or \"the person\"",
++     "required": false
++    },
++    {
++     "name": "outfitRefs",
++     "description": "the outfit’s image tokens",
++     "required": true
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.outfit.product",
++   "group": "suite",
++   "title": "New Swap · outfit (product photo)",
++   "description": "Outfit is a product photo.",
++   "kind": "text",
++   "default": "OUTFIT: {subject} wears the garment in {productRef}, fitted to the body and the movement.",
++   "current": "OUTFIT: {subject} wears the garment in {productRef}, fitted to the body and the movement.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "subject",
++     "description": "\"she\" or \"the person\"",
++     "required": false
++    },
++    {
++     "name": "productRef",
++     "description": "the photo token",
++     "required": true
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.outfit.words",
++   "group": "suite",
++   "title": "New Swap · outfit (words)",
++   "description": "Outfit is written in words (under CHANGE).",
++   "kind": "text",
++   "default": "OUTFIT: {subject} wears new clothes, as written under CHANGE.",
++   "current": "OUTFIT: {subject} wears new clothes, as written under CHANGE.",
++   "overridden": false,
++   "allowEmpty": true,
++   "placeholders": [
++    {
++     "name": "subject",
++     "description": "\"she\" or \"the person\"",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.background.describe",
++   "group": "suite",
++   "title": "New Swap · background (words)",
++   "description": "Background is written in words (under CHANGE).",
++   "kind": "text",
++   "default": "BACKGROUND: replace the place as written under CHANGE. Same camera, framing and timing; {subject} and the movement stay where they are.",
++   "current": "BACKGROUND: replace the place as written under CHANGE. Same camera, framing and timing; {subject} and the movement stay where they are.",
++   "overridden": false,
++   "allowEmpty": true,
++   "placeholders": [
++    {
++     "name": "subject",
++     "description": "\"she\" or \"the person\"",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.background.photo",
++   "group": "suite",
++   "title": "New Swap · background (photo)",
++   "description": "Background is a new photo.",
++   "kind": "text",
++   "default": "BACKGROUND: replace the place with the place in {bgRef}. Same camera, framing and timing; {subject} and the movement stay where they are.",
++   "current": "BACKGROUND: replace the place with the place in {bgRef}. Same camera, framing and timing; {subject} and the movement stay where they are.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "bgRef",
++     "description": "the photo token",
++     "required": true
++    },
++    {
++     "name": "subject",
++     "description": "\"she\" or \"the person\"",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.look",
++   "group": "suite",
++   "title": "New Swap · look & light",
++   "description": "Look & light is on (time of day, light, colour grade; under CHANGE).",
++   "kind": "text",
++   "default": "LOOK & LIGHT: relight and grade the whole scene as written under CHANGE; nothing else changes.",
++   "current": "LOOK & LIGHT: relight and grade the whole scene as written under CHANGE; nothing else changes.",
++   "overridden": false,
++   "allowEmpty": true,
++   "placeholders": [],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.keep",
++   "group": "suite",
++   "title": "New Swap · keep",
++   "description": "Always: what stays from the clip ({kept} lists the toggles that are off).",
++   "kind": "text",
++   "default": "KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}. Any on-screen text is removed.",
++   "current": "KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}. Any on-screen text is removed.",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "kept",
++     "description": "what is kept, e.g. \"the background, the light and colour; \"",
++     "required": false
++    },
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "required": false
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
++  {
++   "key": "suite.remix.change",
++   "group": "suite",
++   "title": "New Swap · the person’s words",
++   "description": "The change, in the person’s own words (one part per toggle).",
++   "kind": "text",
++   "default": "CHANGE: {direction}",
++   "current": "CHANGE: {direction}",
++   "overridden": false,
++   "allowEmpty": false,
++   "placeholders": [
++    {
++     "name": "direction",
++     "description": "the person’s words, per toggle",
++     "required": true
++    }
++   ],
++   "updatedAt": null,
++   "updatedBy": null
++  },
+   {
+    "key": "suite.shot.footer",
+    "group": "suite",
+diff --git a/android/app/src/main/resources/prompt_scripts.json b/android/app/src/main/resources/prompt_scripts.json
+index 031ab094..3e2ef24b 100644
+--- a/android/app/src/main/resources/prompt_scripts.json
++++ b/android/app/src/main/resources/prompt_scripts.json
+@@ -5714,6 +5714,616 @@
+    "stale": false,
+    "updatedAt": null,
+    "updatedBy": null
++  },
++  {
++   "id": "suite.remix",
++   "group": "suite",
++   "title": "Swap · New Swap (beta)",
++   "description": "New Swap: change only what is switched on (background, outfit, character, look & light) and keep everything else of the clip. The person writes only the change.",
++   "format": "lines",
++   "inputs": [
++    {
++     "name": "character",
++     "label": "Character",
++     "description": "Who the person becomes.",
++     "type": "enum",
++     "options": [
++      {
++       "id": "none",
++       "label": "Kept from the clip"
++      },
++      {
++       "id": "model",
++       "label": "Her (her images)"
++      },
++      {
++       "id": "face",
++       "label": "Face swap (a photo)"
++      }
++     ],
++     "sample": "model"
++    },
++    {
++     "name": "outfit",
++     "label": "Outfit",
++     "description": "What they wear.",
++     "type": "enum",
++     "options": [
++      {
++       "id": "none",
++       "label": "Kept from the clip"
++      },
++      {
++       "id": "outfit",
++       "label": "One of her outfits"
++      },
++      {
++       "id": "product",
++       "label": "A product photo"
++      },
++      {
++       "id": "words",
++       "label": "In words"
++      }
++     ],
++     "sample": "outfit"
++    },
++    {
++     "name": "background",
++     "label": "Background",
++     "description": "The place.",
++     "type": "enum",
++     "options": [
++      {
++       "id": "none",
++       "label": "Kept from the clip"
++      },
++      {
++       "id": "describe",
++       "label": "Described in words"
++      },
++      {
++       "id": "photo",
++       "label": "A new photo"
++      }
++     ],
++     "sample": "photo"
++    },
++    {
++     "name": "look",
++     "label": "Look & light",
++     "description": "Time of day, light and colour grade change.",
++     "type": "bool",
++     "sample": false
++    }
++   ],
++   "sections": [
++    {
++     "id": "head",
++     "label": "Task",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "lock",
++     "label": "Figure lock",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "character",
++     "label": "Character",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "outfit",
++     "label": "Outfit",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "background",
++     "label": "Background",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "look",
++     "label": "Look & light",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "keep",
++     "label": "Keep",
++     "kind": "system",
++     "pick": "first"
++    },
++    {
++     "id": "change",
++     "label": "The change in the person’s words",
++     "kind": "user",
++     "pick": "first"
++    },
++    {
++     "id": "footer",
++     "label": "Closing line",
++     "kind": "system",
++     "pick": "first"
++    }
++   ],
++   "values": [],
++   "targets": [
++    {
++     "id": "head",
++     "label": "Task"
++    },
++    {
++     "id": "lock",
++     "label": "Figure lock"
++    },
++    {
++     "id": "character",
++     "label": "Character"
++    },
++    {
++     "id": "outfit",
++     "label": "Outfit"
++    },
++    {
++     "id": "background",
++     "label": "Background"
++    },
++    {
++     "id": "look",
++     "label": "Look & light"
++    },
++    {
++     "id": "keep",
++     "label": "Keep"
++    },
++    {
++     "id": "change",
++     "label": "The change in the person’s words"
++    },
++    {
++     "id": "footer",
++     "label": "Closing line"
++    }
++   ],
++   "vars": [
++    {
++     "name": "source",
++     "description": "the source clip token",
++     "sample": "<Video 1>"
++    },
++    {
++     "name": "subject",
++     "description": "\"she\" (her) or \"the person\"",
++     "sample": "she"
++    },
++    {
++     "name": "name",
++     "description": "her name",
++     "sample": "Mia"
++    },
++    {
++     "name": "refs",
++     "description": "her image tokens",
++     "sample": "<Image 1> and <Image 2>"
++    },
++    {
++     "name": "figureRefs",
++     "description": "the images her figure comes from (her outfit’s angles, else her body shots)",
++     "sample": "<Image 3>, <Image 4>, <Image 5> and <Image 6>"
++    },
++    {
++     "name": "outfitRefs",
++     "description": "the outfit’s image tokens",
++     "sample": "<Image 3>, <Image 4>, <Image 5> and <Image 6>"
++    },
++    {
++     "name": "productRef",
++     "description": "the product photo token",
++     "sample": "<Image 3>"
++    },
++    {
++     "name": "faceRef",
++     "description": "the face-swap photo token",
++     "sample": "<Image 1>"
++    },
++    {
++     "name": "bgRef",
++     "description": "the background photo token",
++     "sample": "<Image 7>"
++    },
++    {
++     "name": "kept",
++     "description": "what is kept from the clip (toggles that are off)",
++     "sample": "the light and colour; "
++    }
++   ],
++   "blocks": [
++    "suite.remix.head",
++    "suite.remix.lock.model",
++    "suite.remix.lock.face",
++    "suite.remix.lock.keep",
++    "suite.remix.character.model",
++    "suite.remix.character.face",
++    "suite.remix.outfit.set",
++    "suite.remix.outfit.product",
++    "suite.remix.outfit.words",
++    "suite.remix.background.describe",
++    "suite.remix.background.photo",
++    "suite.remix.look",
++    "suite.remix.keep",
++    "suite.remix.change",
++    "suite.shot.footer"
++   ],
++   "variants": [],
++   "rules": [
++    {
++     "id": "head",
++     "label": "Change only what is listed",
++     "target": "head",
++     "when": [],
++     "block": "suite.remix.head",
++     "locked": true
++    },
++    {
++     "id": "lock.model",
++     "label": "Figure lock · her",
++     "target": "lock",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "model"
++      }
++     ],
++     "block": "suite.remix.lock.model",
++     "locked": true
++    },
++    {
++     "id": "lock.face",
++     "label": "Figure lock · face swap",
++     "target": "lock",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "face"
++      }
++     ],
++     "block": "suite.remix.lock.face",
++     "locked": true
++    },
++    {
++     "id": "lock.keep",
++     "label": "Figure lock · same person",
++     "target": "lock",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "none"
++      }
++     ],
++     "block": "suite.remix.lock.keep",
++     "locked": true
++    },
++    {
++     "id": "character.model",
++     "label": "Character · her",
++     "target": "character",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "model"
++      }
++     ],
++     "block": "suite.remix.character.model"
++    },
++    {
++     "id": "character.face",
++     "label": "Character · face swap",
++     "target": "character",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "face"
++      }
++     ],
++     "block": "suite.remix.character.face"
++    },
++    {
++     "id": "outfit.set",
++     "label": "Outfit · one of her outfits",
++     "target": "outfit",
++     "when": [
++      {
++       "input": "outfit",
++       "op": "is",
++       "value": "outfit"
++      }
++     ],
++     "block": "suite.remix.outfit.set"
++    },
++    {
++     "id": "outfit.product",
++     "label": "Outfit · product photo",
++     "target": "outfit",
++     "when": [
++      {
++       "input": "outfit",
++       "op": "is",
++       "value": "product"
++      }
++     ],
++     "block": "suite.remix.outfit.product"
++    },
++    {
++     "id": "outfit.words",
++     "label": "Outfit · in words",
++     "target": "outfit",
++     "when": [
++      {
++       "input": "outfit",
++       "op": "is",
++       "value": "words"
++      }
++     ],
++     "block": "suite.remix.outfit.words"
++    },
++    {
++     "id": "background.describe",
++     "label": "Background · described",
++     "target": "background",
++     "when": [
++      {
++       "input": "background",
++       "op": "is",
++       "value": "describe"
++      }
++     ],
++     "block": "suite.remix.background.describe"
++    },
++    {
++     "id": "background.photo",
++     "label": "Background · new photo",
++     "target": "background",
++     "when": [
++      {
++       "input": "background",
++       "op": "is",
++       "value": "photo"
++      }
++     ],
++     "block": "suite.remix.background.photo"
++    },
++    {
++     "id": "look",
++     "label": "Look & light",
++     "target": "look",
++     "when": [
++      {
++       "input": "look",
++       "op": "is",
++       "value": true
++      }
++     ],
++     "block": "suite.remix.look"
++    },
++    {
++     "id": "keep",
++     "label": "Keep everything else",
++     "target": "keep",
++     "when": [],
++     "block": "suite.remix.keep",
++     "locked": true
++    },
++    {
++     "id": "change",
++     "label": "The person’s words",
++     "target": "change",
++     "when": [],
++     "block": "suite.remix.change",
++     "locked": true
++    },
++    {
++     "id": "footer",
++     "label": "Closing line",
++     "target": "footer",
++     "when": [],
++     "block": "suite.shot.footer"
++    }
++   ],
++   "defaultRules": [
++    {
++     "id": "head",
++     "label": "Change only what is listed",
++     "target": "head",
++     "when": [],
++     "block": "suite.remix.head",
++     "locked": true
++    },
++    {
++     "id": "lock.model",
++     "label": "Figure lock · her",
++     "target": "lock",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "model"
++      }
++     ],
++     "block": "suite.remix.lock.model",
++     "locked": true
++    },
++    {
++     "id": "lock.face",
++     "label": "Figure lock · face swap",
++     "target": "lock",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "face"
++      }
++     ],
++     "block": "suite.remix.lock.face",
++     "locked": true
++    },
++    {
++     "id": "lock.keep",
++     "label": "Figure lock · same person",
++     "target": "lock",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "none"
++      }
++     ],
++     "block": "suite.remix.lock.keep",
++     "locked": true
++    },
++    {
++     "id": "character.model",
++     "label": "Character · her",
++     "target": "character",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "model"
++      }
++     ],
++     "block": "suite.remix.character.model"
++    },
++    {
++     "id": "character.face",
++     "label": "Character · face swap",
++     "target": "character",
++     "when": [
++      {
++       "input": "character",
++       "op": "is",
++       "value": "face"
++      }
++     ],
++     "block": "suite.remix.character.face"
++    },
++    {
++     "id": "outfit.set",
++     "label": "Outfit · one of her outfits",
++     "target": "outfit",
++     "when": [
++      {
++       "input": "outfit",
++       "op": "is",
++       "value": "outfit"
++      }
++     ],
++     "block": "suite.remix.outfit.set"
++    },
++    {
++     "id": "outfit.product",
++     "label": "Outfit · product photo",
++     "target": "outfit",
++     "when": [
++      {
++       "input": "outfit",
++       "op": "is",
++       "value": "product"
++      }
++     ],
++     "block": "suite.remix.outfit.product"
++    },
++    {
++     "id": "outfit.words",
++     "label": "Outfit · in words",
++     "target": "outfit",
++     "when": [
++      {
++       "input": "outfit",
++       "op": "is",
++       "value": "words"
++      }
++     ],
++     "block": "suite.remix.outfit.words"
++    },
++    {
++     "id": "background.describe",
++     "label": "Background · described",
++     "target": "background",
++     "when": [
++      {
++       "input": "background",
++       "op": "is",
++       "value": "describe"
++      }
++     ],
++     "block": "suite.remix.background.describe"
++    },
++    {
++     "id": "background.photo",
++     "label": "Background · new photo",
++     "target": "background",
++     "when": [
++      {
++       "input": "background",
++       "op": "is",
++       "value": "photo"
++      }
++     ],
++     "block": "suite.remix.background.photo"
++    },
++    {
++     "id": "look",
++     "label": "Look & light",
++     "target": "look",
++     "when": [
++      {
++       "input": "look",
++       "op": "is",
++       "value": true
++      }
++     ],
++     "block": "suite.remix.look"
++    },
++    {
++     "id": "keep",
++     "label": "Keep everything else",
++     "target": "keep",
++     "when": [],
++     "block": "suite.remix.keep",
++     "locked": true
++    },
++    {
++     "id": "change",
++     "label": "The person’s words",
++     "target": "change",
++     "when": [],
++     "block": "suite.remix.change",
++     "locked": true
++    },
++    {
++     "id": "footer",
++     "label": "Closing line",
++     "target": "footer",
++     "when": [],
++     "block": "suite.shot.footer"
++    }
++   ],
++   "overridden": false,
++   "stale": false,
++   "updatedAt": null,
++   "updatedBy": null
+   }
+  ]
+ }
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ModelChoiceTest.kt b/android/app/src/test/kotlin/studio/muse/app/ModelChoiceTest.kt
+index 254af81a..1b49e589 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ModelChoiceTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ModelChoiceTest.kt
+@@ -92,8 +92,15 @@ class ModelChoiceLogicTest {
+             studio.muse.app.data.SuiteCatalogEngine("a", "A", purposes = listOf("shot", "guide")),
+             studio.muse.app.data.SuiteCatalogEngine("b", "B", purposes = listOf("shot")),
+         ))
+-        assertEquals(listOf("a"), studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "guide").all.map { it.id })
++        // Owner 2026-11-12: every model on every mode. The ones made for the purpose first; the others after, saying how
++        // MUSE adapts them.
++        val guide = studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "guide").all
++        assertEquals(listOf("a", "b"), guide.map { it.id })
++        assertNull(guide[0].note)
++        assertEquals("Not made for this: MUSE adapts what it can’t take and says what it changed", guide[1].note)
+         assertEquals(listOf("a", "b"), studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "shot").all.map { it.id })
++        val talking = studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "talking").all
++        assertEquals("Takes no voice track: MUSE writes the words to say in the prompt", talking[0].note)
+     }
+ 
+     @Test fun aPickDoesNotCarryToAnotherKindOfWork() {

@@ -139,8 +139,8 @@ describe('Claude\'s draft changes in every mode', () => {
     // What the app reads back (GET, as after each tool step) is the same revision.
     const g = (await owner.req('GET', `/v1/suite/assist/${d.id}`)).body;
     expect([g.revision, g.draft.tool, g.draft.references.length]).toEqual([r.revision, 'photo', 1]);
-    // Generating from Claude is a Shot thing; in Photo the owner presses Generate.
-    await expect(tool('suite_request_shot').run(env(), { assistId: d.id, confirm: true })).rejects.toThrow(/Shot only/);
+    // Generating from Claude is a Shot (or New Swap) thing; in Photo the owner presses Generate.
+    await expect(tool('suite_request_shot').run(env(), { assistId: d.id, confirm: true })).rejects.toThrow(/Shot or a New Swap only/);
   });
 
   it('a Shot draft stays a Shot', async () => {

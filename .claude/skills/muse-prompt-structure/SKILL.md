@@ -19,7 +19,7 @@ Never fight the rig in the prompt. If the rig says Golden hour, don't write "ove
 |---|---|---|
 | **Shot** (video) | A new clip of a model | Full skeleton (§3) |
 | **Photo** | A still or a photoshoot set | SUBJECT, POSE, LOCATION, WARDROBE, CONSTRAINTS. No ACTION timeline, no move. |
-| **Swap** | Put a model into an existing clip, or change its background; keep the motion | A SHORT prompt: only what changes (see §7a). MUSE's swap scripts already say what to keep (motion, timing, camera, framing, figure). Her figure always comes from her own images or her outfit's pictures (see Figure lock). No camera words: the source clip has the camera. |
+| **Swap** | Put a model into an existing clip, or change its background; keep the motion | A SHORT prompt: only what changes (see §7a; New Swap's toggles: §7b). MUSE's swap scripts already say what to keep (motion, timing, camera, framing, figure). Her figure always comes from her own images or her outfit's pictures (see Figure lock). No camera words: the source clip has the camera. |
 | **Storyboard** | Several connected shots | One §3 prompt per scene, sharing the Style Prefix and the @tags |
 | **Recreate fill** | A missing shot of a reference edit | The slot brief is the ACTION. Keep it to that shot's length and framing. |
 
@@ -267,6 +267,20 @@ In Swap the prompt is **only the change**. MUSE's own swap prompt (Settings → 
 - **Length**: Genjutsu Light uses the first 15 s of the clip, and full Genjutsu up to 30 s. For a longer clip, trim it in Edit first.
 - **Price**: Higgsfield bills the clip's own seconds as well as the new video, so a 10 s swap at 720p is about 20 billed seconds. Always show `suite_request_shot` without confirm first.
 - Before writing, look: `suite_get_draft` shows onScreen settings (background, its picture, outfit, character), and `watch` the clip when you need to know what's in it.
+
+## 7b. New Swap (beta): toggles, only the change (owner, 2026-11-12)
+
+Swap's header has a switch, **Swap | New Swap (beta)**. New Swap starts from the video (upload, link or Library), with no model picked first. Then the person turns on what should change. Everything left off is kept from the clip.
+- **You write only the change, one short phrase per toggle.** MUSE builds the prompt from the toggles (script `suite.remix`): the task line, the figure lock, one block per toggle, the keep line, then the person's words. Never write a skeleton, a keep list or camera words.
+- **Toggles** (`suite_set_draft` with `swapVariant: "new"`, then `clipId` and `remix`; a toggle set to `null` is switched off):
+  - **Background**: `{mode: "describe", words: "a rooftop at golden hour"}`, or `{mode: "photo", image, name}` for a location or upload.
+  - **Outfit**: `{kind: "outfit", outfitId}` for one of her outfits (its pictures are sent; never describe the clothes), `{kind: "product", image}`, or `{kind: "words", words: "a black linen two-piece"}`.
+  - **Character**: `{kind: "model", modelId}` (her, the default). Her face, hair and skin come from her images, and her body only from her outfit's angles or her body shots. From the clip the model takes **only the motion and facial gestures**, never the body, face or figure of the person in it. MUSE puts this figure lock in every New Swap prompt. `{kind: "face", image}` is the optional **face swap** (face only). Use it only when the person asks for it; it is off by default.
+  - **Look & light**: `{words: "night, neon, teal grade"}` (time of day, light, colour grade).
+- **Put each change in its own toggle.** A new place goes in Background, not in Look & light. Clothes go in Outfit, and never in her words.
+- **Model**: leave `engineModel` empty for Auto. Auto picks Wan 2.7 Edit for Background or Look, Kling O1 for Outfit, and Genjutsu Light (≤ 15 s, else Genjutsu) when her Character is on. Tell the person Auto's one-line reason. Any video model can be picked (owner rule: every model in every mode). `suite_remix_models` lists them all, defaults first, each with what it does for these toggles ("prompt" = by instruction only; "adapted" = MUSE sends the clip as a reference video, as frames, or not at all, and its `notes` say exactly what). It also gives each model's limits, whether it has had a test run in MUSE, and its price for this clip. When you pick an adapted model, tell the person what MUSE will do.
+- **Length**: a clip longer than the model takes is **never cut silently**. `suite_estimate` shows `remix.trim.needed` and the maximum. Ask which part to use, then set `range: [from, to]`, or let the person use the trimmer.
+- **Price**: the clip's own seconds can be billed too (Genjutsu Light: output plus input). Always show `suite_request_shot` without `confirm` first. With `confirm`, the owner gets Approve in the app; nothing runs before that.
 
 ## 8. Worked example: a seated editorial photo
 

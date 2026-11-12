@@ -22,7 +22,7 @@ export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @v
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'mock' | 'byo';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'hf-wan3' | 'wan-2.7-edit' | 'mock' | 'byo';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -46,6 +46,13 @@ export type ModelSpec = {
    * frame as the end image (before). `sourceSeconds` = the source length the model takes (longer sources are trimmed).
    */
   extend?: { after?: 'clip' | 'reference' | 'frame'; before?: 'reference' | 'frame'; sourceSeconds: [number, number] };
+  /**
+   * New Swap (remix, plans/new-swap.md): edit a source clip with toggles. `does` = how well each toggle works on this
+   * model ("yes" designed for it, "prompt" by instruction only, "no" can't). `needsCharacter` = it puts a person from
+   * pictures into the clip, so Character (her) must be on. `prompt: false` = no prompt (one picture drives it).
+   * `tested` = a real run was made in MUSE (else the picker says "not tested yet").
+   */
+  edit?: EditCaps;
   recast?: { maxPeople: number; keepsCuts: boolean; keepsAudio: boolean; refsPerPerson: number; totalImages: number; faceCrops: boolean; sourceSeconds: [number, number]; maxShotSeconds?: number };
   frames: { start: boolean; end: boolean; middle: number; /** frames and references can be combined */ withRefs: boolean };
   refs: { images: number; videos: number; audios: number; /** all images (frames + refs) together */ totalImages?: number; videoSecondsMax?: number; videoSecondsMin?: number;
@@ -66,9 +73,18 @@ export type ModelSpec = {
     /** hidden until the owner acknowledges it in suite settings */ requiresAck?: boolean; notes?: string };
   status: 'active' | 'preview' | 'removed';
   notes?: string;
+  /**
+   * Priced live from the provider's free quote (Higgsfield POST /estimate/{ref}) for each request, not from `perSec`
+   * (owner 2026-11-12: Wan 3.0 has no published rate). `perSec` is 0 there and never shown as a price.
+   */
+  livePrice?: boolean;
   /** Bring your own provider (WS5): an owner-added model, run with the studio's own provider key (byo/service.ts). */
   byo?: ByoSpec;
 };
+export type EditDo = 'yes' | 'prompt' | 'no';
+export type EditToggle = 'background' | 'outfit' | 'character' | 'look' | 'face';
+export type EditCaps = { sourceSeconds: [number, number]; maxImages: number; keepsAudio: boolean; tested: boolean; defaultResolution: string;
+  does: Record<EditToggle, EditDo>; needsCharacter?: boolean; prompt?: boolean };
 /** An owner-added model: whose it is, how its inputs are filled and what it costs (cost basis before priceScale). */
 export type ByoSpec = { studioId: string; providerId: string; providerKind: string; providerRef: string; version: string | null; displayName: string;
   members: boolean; analysis: import('../byo/classify.js').Analysis; fixed: Record<string, unknown>; perRunUsd: number; perSecUsd: number; priceScale: number };
@@ -107,6 +123,7 @@ export const MODELS: ModelSpec[] = [
     status: 'active' },
   // ---------------------------------------------------------------- Kling (Replicate)
   { id: 'kling-v4', name: 'Kling 4.0', provider: 'replicate', ref: 'kwaivgi/kling-v4.0', adapter: 'kling-v4',
+    edit: { sourceSeconds: [3, 30], maxImages: 10, keepsAudio: false, tested: true, defaultResolution: '720p', does: { background: 'prompt', outfit: 'prompt', character: 'yes', look: 'prompt', face: 'prompt' } },
     modes: { text: true, image: true, reference: true, guide: true, recast: true }, frames: { start: true, end: true, middle: 8, withRefs: true },
     refs: { images: 10, videos: 5, audios: 0, totalImages: 10, videoSecondsMin: 3, videoSecondsMax: 30 }, duration: { min: 3, max: 30 },
     // Recast via base_video: people are mapped only by the prompt (no per-person field): ≤ 3 is a cautious limit (⚠ unverified).
@@ -135,6 +152,7 @@ export const MODELS: ModelSpec[] = [
     camera: { vocab: 'seedance', refStyle: 'bracket', referenceVideo: true }, lora: false, promptMax: 4000,
     licence: hosted('Seedance (hosted)', { notes: 'May refuse realistic faces as references.' }), status: 'active' },
   { id: 'seedance-2.5', name: 'Seedance 2.5', provider: 'replicate', ref: 'bytedance/seedance-2.5', adapter: 'seedance',
+    edit: { sourceSeconds: [4, 30], maxImages: 9, keepsAudio: false, tested: false, defaultResolution: '720p', does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'yes', face: 'prompt' } },
     modes: { text: true, image: true, reference: true, guide: true }, frames: { start: true, end: true, middle: 0, withRefs: false },
     refs: { images: 30, videos: 10, audios: 10, videoSecondsMax: 30 }, duration: { min: 4, max: 30 },
     resolutions: [R('480p', '480p', 480, 0.1028, { perSecWithVideo: 0.4304 }), R('720p', '720p', 720, 0.2312, { perSecWithVideo: 0.9676 })],
@@ -157,6 +175,26 @@ export const MODELS: ModelSpec[] = [
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 via Higgsfield (hosted)'), status: 'active',
     notes: '50% max-discount price; each reference image beyond 5 adds $0.08.' },
+  // ---------------------------------------------------------------- Wan 3.0 / Wan 3.0 Prime on Higgsfield (owner 2026-11-12)
+  // docs.higgsfield.ai/docs/models/wan-3 and wan-3-prime (read 2026-11-12; schemas in assets/higgsfield/catalog.json):
+  // text-to-video, image-to-video (image_url, end_image_url) and reference-to-video (image_urls ≤ 10, video_urls ≤ 5,
+  // audio_urls ≤ 5); duration 2–30 s; 480p / 720p / 1080p; generate_audio. No published rate: priced live (livePrice).
+  { id: 'wan-3.0', name: 'Wan 3.0', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'alibaba/wan-3.0/text-to-video', i2v: 'alibaba/wan-3.0/image-to-video', ref2v: 'alibaba/wan-3.0/reference-to-video' }, adapter: 'hf-wan3',
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false },
+    refs: { images: 10, videos: 5, audios: 5 }, duration: { min: 2, max: 30 },
+    resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)], aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
+    audio: 'flag', negativePrompt: false, seed: true, camera: { vocab: 'wan', refStyle: 'angle', referenceVideo: true }, lora: false,
+    licence: hosted('Wan 3.0 via Higgsfield (hosted)'), status: 'active',
+    notes: 'Text, image (start and end frame) or references (≤ 10 pictures, ≤ 5 videos, ≤ 5 audio); 2–30 s. No video-edit endpoint. Priced live from Higgsfield’s free estimate.' },
+  { id: 'wan-3.0-prime', name: 'Wan 3.0 Prime', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'alibaba/wan-3.0-prime/text-to-video', i2v: 'alibaba/wan-3.0-prime/image-to-video', ref2v: 'alibaba/wan-3.0-prime/reference-to-video' }, adapter: 'hf-wan3',
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false },
+    refs: { images: 10, videos: 5, audios: 5 }, duration: { min: 2, max: 30 },
+    resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)], aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
+    audio: 'flag', negativePrompt: false, seed: true, camera: { vocab: 'wan', refStyle: 'angle', referenceVideo: true }, lora: false,
+    licence: hosted('Wan 3.0 Prime via Higgsfield (hosted)'), status: 'active',
+    notes: 'Text, image (start and end frame) or references (≤ 10 pictures, ≤ 5 videos, ≤ 5 audio); 2–30 s. No video-edit endpoint. Priced live from Higgsfield’s free estimate.' },
   // ---------------------------------------------------------------- Higgsfield Genjutsu motion transfer (swap only)
   // docs.higgsfield.ai/docs/models/genjutsu/motion-transfer (read 2026-11-11): video_url (≥ 4 s, cut to 30 s), image_urls
   // 1–8, prompt (optional), resolution 480p | 720p | 1080p. Billed per source second rounded up: $0.154 / $0.3446 /
@@ -164,6 +202,7 @@ export const MODELS: ModelSpec[] = [
   // $0.20 per TOTAL second = output + input video seconds, so twice that per output second. Swap / Recast / Recreate
   // only (modes off: it makes no shots of its own); priced × the owner's priceScale like every model.
   { id: 'genjutsu', name: 'Genjutsu', provider: 'higgsfield', ref: 'higgsfield/genjutsu/motion-transfer/v1.0', adapter: 'hf-genjutsu',
+    edit: { sourceSeconds: [4, 30], maxImages: 8, keepsAudio: false, tested: true, defaultResolution: '720p', needsCharacter: true, does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'prompt', face: 'no' } },
     modes: { text: false, image: false, reference: false }, frames: { start: false, end: false, middle: 0, withRefs: false },
     refs: { images: 8, videos: 1, audios: 0, videoSecondsMin: 4, videoSecondsMax: 30 }, duration: { min: 4, max: 30 },
     resolutions: [R('480p', '480p', 480, 0.154), R('720p', '720p', 720, 0.3446), R('1080p', '1080p', 1080, 0.8346)], aspectRatios: ['9:16'],
@@ -171,6 +210,7 @@ export const MODELS: ModelSpec[] = [
     licence: hosted('Genjutsu via Higgsfield (hosted)'), status: 'active',
     notes: 'Motion transfer: her images onto the clip. Billed per source second (4–30 s). The clip’s own sound is put back.' },
   { id: 'genjutsu-light', name: 'Genjutsu Light', provider: 'higgsfield', ref: 'higgsfield/genjutsu-light/motion-transfer/v1.0', adapter: 'hf-genjutsu',
+    edit: { sourceSeconds: [4, 15], maxImages: 8, keepsAudio: false, tested: true, defaultResolution: '720p', needsCharacter: true, does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'prompt', face: 'no' } },
     modes: { text: false, image: false, reference: false }, frames: { start: false, end: false, middle: 0, withRefs: false },
     refs: { images: 8, videos: 1, audios: 0, videoSecondsMin: 4, videoSecondsMax: 15 }, duration: { min: 4, max: 15 },
     resolutions: [R('480p', '480p', 480, 0.1), R('720p', '720p', 720, 0.2), R('1080p', '1080p', 1080, 0.4)], aspectRatios: ['9:16'],
@@ -215,6 +255,7 @@ export const MODELS: ModelSpec[] = [
   // The purpose-built one: up to 4 people, one photo each (left to right by default), keeps motion, camera, cuts and
   // the source sound (fal page, 2026-11-05). No per-person field: who-is-who goes in the prompt.
   { id: 'h3-max-recast', name: 'MiniMax H3 Max Recast', provider: 'fal', ref: 'minimax/h3-max/recast', adapter: 'fal-h3-recast',
+    edit: { sourceSeconds: [5, 30], maxImages: 1, keepsAudio: true, tested: true, defaultResolution: '768P', does: { background: 'no', outfit: 'prompt', character: 'yes', look: 'no', face: 'no' } },
     modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
     refs: { images: 4, videos: 1, audios: 0 }, duration: { min: 5, max: 30 },
     recast: { maxPeople: 4, keepsCuts: true, keepsAudio: true, refsPerPerson: 1, totalImages: 4, faceCrops: false, sourceSeconds: [5, 30], maxShotSeconds: 15 },
@@ -222,8 +263,20 @@ export const MODELS: ModelSpec[] = [
     audio: 'always', negativePrompt: false, seed: true, camera: { vocab: 'h3', refStyle: 'photo', referenceVideo: true }, lora: false, promptMax: 2000,
     licence: hosted('MiniMax H3 Max (hosted on fal)', { notice: 'MiniMax H3' }), status: 'preview',
     notes: 'Clips 5–30 s, no single shot over 15 s. Needs FAL_KEY.' },
+  // Wan 2.7 VideoEdit (New Swap, owner 2026-11-12: Auto's first pick for Background and Look & light). Read on
+  // replicate.com/wan-video/wan-2.7-videoedit/llms.txt (2026-11-12): video (mp4/mov, 2–10 s), prompt, reference_image (one),
+  // resolution 720p | 1080p, aspect_ratio auto, audio_setting origin keeps the clip's sound. $0.10 per output second (L,
+  // plans/precise-edit.md §1); no input-video charge is listed, confirm on the first paid test.
+  { id: 'wan-2.7-edit', name: 'Wan 2.7 Edit', provider: 'replicate', ref: 'wan-video/wan-2.7-videoedit', adapter: 'wan-2.7-edit',
+    edit: { sourceSeconds: [2, 10], maxImages: 1, keepsAudio: true, tested: false, defaultResolution: '1080p', does: { background: 'yes', outfit: 'prompt', character: 'no', look: 'yes', face: 'prompt' } },
+    modes: { text: false, image: false, reference: false }, frames: { start: false, end: false, middle: 0, withRefs: true },
+    refs: { images: 1, videos: 1, audios: 0, videoSecondsMin: 2, videoSecondsMax: 10 }, duration: { min: 2, max: 10 },
+    resolutions: [R('720p', '720p', 720, 0.10), R('1080p', '1080p', 1080, 0.10)], aspectRatios: AR_FULL,
+    audio: 'none', negativePrompt: false, seed: true, camera: { vocab: 'wan', refStyle: 'angle', referenceVideo: true }, lora: false,
+    licence: hosted('Wan (hosted)'), status: 'active', notes: 'Instruction video edit: background, light, colour, clothes. Keeps the clip’s sound.' },
   // Kling O1 edit: the source as base video plus up to 4 reference images; mapped by the prompt (⚠ people limit unverified).
   { id: 'kling-o1', name: 'Kling O1 Edit', provider: 'replicate', ref: 'kwaivgi/kling-o1', adapter: 'kling-o1',
+    edit: { sourceSeconds: [3, 10], maxImages: 4, keepsAudio: true, tested: true, defaultResolution: '720p', does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'yes', face: 'prompt' } },
     modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
     refs: { images: 4, videos: 1, audios: 0, videoSecondsMin: 3, videoSecondsMax: 10 }, duration: { min: 3, max: 10 },
     recast: { maxPeople: 2, keepsCuts: false, keepsAudio: true, refsPerPerson: 2, totalImages: 4, faceCrops: true, sourceSeconds: [3, 10] },
@@ -232,6 +285,7 @@ export const MODELS: ModelSpec[] = [
     licence: hosted('Kling (hosted)'), status: 'active' },
   // Wan 2.2 Animate Replace: one character per call, source sound merged back (Apache-2.0 weights; hosted).
   { id: 'wan-2.2-animate', name: 'Wan 2.2 Animate Replace', provider: 'replicate', ref: 'wan-video/wan-2.2-animate-replace', adapter: 'wan-animate',
+    edit: { sourceSeconds: [1, 30], maxImages: 1, keepsAudio: true, tested: true, defaultResolution: '720', prompt: false, does: { background: 'no', outfit: 'prompt', character: 'yes', look: 'no', face: 'no' } },
     modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
     refs: { images: 1, videos: 1, audios: 0 }, duration: { min: 1, max: 30 },
     recast: { maxPeople: 1, keepsCuts: false, keepsAudio: true, refsPerPerson: 1, totalImages: 1, faceCrops: false, sourceSeconds: [1, 30] },

@@ -22,6 +22,17 @@ export async function segment(ffmpeg: string, src: string, out: string, seconds:
   await run(ffmpeg, ['-y', ...seek, '-i', src, '-t', s.toFixed(3), ...ENC, ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
 }
 
+/** New Swap's trimmer: `from`–`to` seconds of `src` (re-encoded so the cut lands on the exact time). */
+export async function cutRange(ffmpeg: string, src: string, out: string, from: number, to: number, info: MediaInfo) {
+  const a = Math.max(0, Math.min(from, info.duration)), d = Math.max(0.1, Math.min(to, info.duration) - a);
+  await run(ffmpeg, ['-y', '-ss', a.toFixed(3), '-i', src, '-t', d.toFixed(3), ...ENC, ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
+}
+
+/** One frame of `src` at `at` seconds, as a JPEG (New Swap's frames for models that can't take a video). */
+export async function frameAt(ffmpeg: string, src: string, out: string, at: number) {
+  await run(ffmpeg, ['-y', '-ss', Math.max(0, at).toFixed(3), '-i', src, '-frames:v', '1', '-q:v', '2', out]);
+}
+
 /** The first or last frame of `src` as a JPEG (the frame bridge's start or end image). */
 export async function frameOf(ffmpeg: string, src: string, out: string, which: 'first' | 'last', info: MediaInfo) {
   const at = which === 'first' ? 0 : Math.max(0, info.duration - Math.max(0.05, 1 / Math.max(1, info.fps || 24)) * 1.5);
