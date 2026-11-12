@@ -41,8 +41,8 @@ struct ClaudeContextStrip: View {
         return VStack(spacing: 3) {
             ZStack {
                 shape.fill(r.field)
-                if let ref = item.image {
-                    MuseImage(ref: ImageRef(url: service.resolve(ref.url)), symbol: nil)
+                if let url = item.image?.url {
+                    MuseImage(ref: ImageRef(url: service.resolve(url)), symbol: nil)
                 } else if item.words != nil {
                     Ph("text-aa", 13).foregroundStyle(r.ink2)
                 } else {
