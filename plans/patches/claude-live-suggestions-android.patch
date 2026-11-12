@@ -1,0 +1,212 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+index b71dedf..871bcc1 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+@@ -228,6 +228,7 @@ interface MuseService {
+     @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
+     @POST("v1/suite/assist") suspend fun createSuiteAssist(@Body r: JsonObject): SuiteAssist
+     @GET("v1/suite/assist/{id}") suspend fun suiteAssist(@Path("id") id: String): SuiteAssist
++    @GET("v1/claude/suggestions") suspend fun claudeSuggestions(@QueryMap q: Map<String, String>): JsonObject
+     @PATCH("v1/suite/assist/{id}") suspend fun patchSuiteAssist(@Path("id") id: String, @Body r: JsonObject): SuiteAssist
+     @POST("v1/suite/assist/{id}/pending/{pid}") suspend fun answerSuitePending(@Path("id") id: String, @Path("pid") pid: String, @Body r: JsonObject): SuitePending
+     @GET("v1/recreate/settings") suspend fun recreateSettings(): RecreateLinkSettings
+@@ -572,6 +573,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
+         createSuiteAssist(buildJsonObject { draft?.let { put("draft", it.json) }; fromJobId?.let { put("fromJobId", JsonPrimitive(it)) } })
+     }
+     override suspend fun suiteAssist(id: String) = call { suiteAssist(id) }
++    override suspend fun claudeSuggestions(q: studio.muse.core.claude.ClaudeSuggestQuery) =
++        studio.muse.core.claude.ClaudeSuggest.parse(call { claudeSuggestions(q.params()) })
+     override suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?) = call {
+         patchSuiteAssist(id, buildJsonObject { put("draft", draft.json); baseRevision?.let { put("baseRevision", JsonPrimitive(it)) } })
+     }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+index 0d0244f..c677f9c 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+@@ -353,6 +353,8 @@ interface MuseApi {
+     /** A shared draft: the composer's current [draft], or a job's ([fromJobId]). */
+     suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String? = null): SuiteAssist = throw ApiException("not_found", "This studio server doesn't have Claude in the Suite yet")
+     suspend fun suiteAssist(id: String): SuiteAssist = throw ApiException("not_found", "Assist not found")
++    /** Live chips (owner 2026-11-12): the chips for what is on screen now (GET v1/claude/suggestions). An older server: not_found. */
++    suspend fun claudeSuggestions(q: studio.muse.core.claude.ClaudeSuggestQuery): List<studio.muse.core.claude.ClaudeChip> = throw ApiException("not_found", "This server has no live chips yet")
+     /** The owner's own composer edits, so Claude sees them. `stale` (409): Claude changed it since; re-read it. */
+     suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?): SuiteAssist = throw ApiException("not_found", "Assist not found")
+     /** The owner's answer to Claude's Generate. `price_changed` (409): the price rose above the approved one; nothing ran. */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index 67324c0..e689d39 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -336,6 +336,17 @@ fun SuiteComposerScreen(toolId: String? = null) {
+     val assist by store.assist.collectAsState()
+     var claudeOpen by remember { mutableStateOf(false) }
+     var chipsUsed by remember(assist?.id) { mutableStateOf(false) }
++    // Live chips (owner 2026-11-12): the server's chips for this composer now, asked ~1 s after the composer, the shared
++    // draft or a Claude step changes (a newer change cancels the wait); null = the fixed ones (offline, older server).
++    var liveChips by remember(assist?.id) { mutableStateOf<List<studio.muse.core.claude.ClaudeChip>?>(null) }
++    var claudeSteps by remember { mutableStateOf(0) }
++    LaunchedEffect(assist?.id, assist?.revision, d, claudeOpen, claudeSteps) {
++        val a = assist ?: return@LaunchedEffect
++        if (!claudeOpen || c.repo.demo) return@LaunchedEffect
++        delay(1000)
++        val q = studio.muse.core.claude.ClaudeSuggestQuery("suite", d.tool.id, mapOf("assistId" to a.id))
++        runCatching { c.repo.api.claudeSuggestions(q) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { liveChips = studio.muse.core.claude.ClaudeSuggest.steady(liveChips.orEmpty(), it) }
++    }
+     val canClaude = owner || c.repo.demo
+     LaunchedEffect(Unit) {
+         c.repo.live.collect { ev ->
+@@ -425,7 +436,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
+             }
+             assist?.let { a ->
+                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
+-                    hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope) },
++                    hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope); claudeSteps++ },
+                     answerSuite = { _, pid, yes -> store.answerClaude(yes, pid) },
+                     above = {
+                         // What Claude sees on this composer now (the same screen the server reads).
+@@ -435,7 +446,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
+                                 outfit = { id -> st.outfits.firstOrNull { it.id == id }?.let { o -> o.name to o.angles.firstNotNullOfOrNull { it?.url } } },
+                             ))
+                         })
+-                        SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
++                        val live = liveChips
++                        SuiteClaudeTop(a, showChips = live != null || !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } },
++                            chips = live?.map { it.label to it.prompt } ?: studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions)
+                         if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                     })
+             }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/SuiteClaudeViews.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/SuiteClaudeViews.kt
+index 503cbec..cc74766 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/SuiteClaudeViews.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/SuiteClaudeViews.kt
+@@ -122,19 +122,25 @@ fun SuiteReferenceChips(refs: List<DraftReference>, onRemove: (DraftReference) -
+     }
+ }
+ 
+-/** The top of the Suite's Claude sheet: "Fills in this composer", and the three chips until one is used. */
++/**
++ * The top of the Suite's Claude sheet: "Fills in this composer", and three chips. Live chips (owner 2026-11-12) follow the
++ * composer and crossfade when they change; without them (offline, an older server) the fixed three until one is used.
++ */
+ @Composable
+-fun SuiteClaudeTop(a: SuiteAssistUi, showChips: Boolean, onChip: (String) -> Unit) {
++fun SuiteClaudeTop(a: SuiteAssistUi, showChips: Boolean, onChip: (String) -> Unit,
++                   chips: List<Pair<String, String>> = studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions) {
+     val m = muse
+     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+         T(studio.muse.app.ui.screens.suite.SuiteClaudeWords.SUBTITLE, m.scale.caption, m.roles.ink2, maxLines = 1)
+-        if (showChips && a.pending == null) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+-            studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions.forEach { (label, prompt) ->
++        if (showChips && a.pending == null) androidx.compose.animation.Crossfade(targetState = chips, animationSpec = androidx.compose.animation.core.tween(200), label = "chips") { shown ->
++          androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
++            shown.forEach { (label, prompt) ->
+                 Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.control))
+                     .press { onChip(prompt) }.padding(horizontal = 14.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+                     T(label, m.scale.label, m.roles.ink, maxLines = 1)
+                 }
+             }
++          }
+         }
+     }
+ }
+diff --git a/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeSuggest.kt b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeSuggest.kt
+new file mode 100644
+index 0000000..05161fd
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/claude/ClaudeSuggest.kt
+@@ -0,0 +1,59 @@
++package studio.muse.core.claude
++
++import kotlinx.serialization.json.JsonElement
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import kotlinx.serialization.json.contentOrNull
++
++// Live suggestion chips (owner 2026-11-12; the Mac's MuseCore/Claude/ClaudeSuggest.swift): the chips over Claude's input
++// follow what is on screen and what just happened. The server holds the rules (server/api/src/claude/suggest.ts,
++// GET v1/claude/suggestions); the app says where it is and keeps the chips' order steady while they change.
++
++/** What the app tells the server: the page, its open ids and the chat (Claude's last reply gives follow-ups). */
++data class ClaudeSuggestQuery(val page: String?, val tool: String? = null, val ids: Map<String, String> = emptyMap(), val chatId: String? = null) {
++    /** The query parameters, sorted (the same facts always make the same request); ids that aren't plain are left out. */
++    fun params(): Map<String, String> {
++        val q = sortedMapOf<String, String>()
++        fun add(k: String, v: String?) { if (v != null && plain(v)) q[k] = v }
++        add("page", page); add("tool", tool)
++        ids.filterKeys { it in IDS }.forEach { (k, v) -> add(k, v) }
++        add("chatId", chatId)
++        return q
++    }
++
++    fun queryString(): String = params().entries.joinToString("&") { "${it.key}=${it.value}" }
++
++    companion object {
++        private val IDS = setOf("sessionId", "assistId", "takeId", "referenceId")
++        fun plain(s: String) = s.isNotEmpty() && s.length <= 80 && s.all { it.isLetterOrDigit() && it.code < 128 || it == '_' || it == '-' }
++    }
++}
++
++object ClaudeSuggest {
++    /** `{chips: [{label, prompt, icon}]}` → chips (empty for anything else). */
++    fun parse(json: JsonElement?): List<ClaudeChip> {
++        val arr = ((json as? JsonObject)?.get("chips") as? kotlinx.serialization.json.JsonArray) ?: return emptyList()
++        return arr.mapNotNull { e ->
++            val o = e as? JsonObject ?: return@mapNotNull null
++            fun s(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
++            val label = s("label") ?: return@mapNotNull null
++            ClaudeChip(label, s("prompt") ?: label, s("icon") ?: "chat-circle")
++        }
++    }
++
++    /**
++     * Steady chips: a chip that stays keeps its place, new ones take the freed places in the server's order, so the row
++     * doesn't jump about when one chip changes.
++     */
++    fun steady(old: List<ClaudeChip>, new: List<ClaudeChip>): List<ClaudeChip> {
++        if (old.isEmpty()) return new
++        val rest = new.filter { n -> old.none { it.label == n.label } }.toMutableList()
++        val out = mutableListOf<ClaudeChip>()
++        for (o in old) {
++            val n = new.firstOrNull { it.label == o.label }
++            if (n != null) out += n else if (rest.isNotEmpty()) out += rest.removeAt(0)
++        }
++        out += rest
++        return out.take(new.size)
++    }
++}
+diff --git a/android/core/src/test/kotlin/studio/muse/core/claude/ClaudeSuggestTest.kt b/android/core/src/test/kotlin/studio/muse/core/claude/ClaudeSuggestTest.kt
+new file mode 100644
+index 0000000..c09fc35
+--- /dev/null
++++ b/android/core/src/test/kotlin/studio/muse/core/claude/ClaudeSuggestTest.kt
+@@ -0,0 +1,31 @@
++package studio.muse.core.claude
++
++import kotlinx.serialization.json.Json
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++// Live chips on Android (the Mac's ClaudeSuggestTests): the query, the server's answer, the steady order.
++class ClaudeSuggestTest {
++    private fun c(l: String) = ClaudeChip(l, l, "x")
++
++    @Test fun queryIsSortedAndPlain() {
++        val q = ClaudeSuggestQuery("suite", "shot", mapOf("assistId" to "sa_1", "modelId" to "m1", "takeId" to "bad id!"), "ct_1")
++        assertEquals("assistId=sa_1&chatId=ct_1&page=suite&tool=shot", q.queryString())
++    }
++
++    @Test fun parsesTheServersChips() {
++        val l = ClaudeSuggest.parse(Json.parseToJsonElement("""{"chips":[{"id":"suite.fill","label":"Build from my idea","prompt":"Fill in…","icon":"sliders-horizontal","why":"x"},{"label":""},7],"key":"suite.fill"}"""))
++        assertEquals(listOf("Build from my idea"), l.map { it.label })
++        assertEquals("sliders-horizontal", l[0].icon)
++        assertTrue(ClaudeSuggest.parse(Json.parseToJsonElement("""{"nope":1}""")).isEmpty())
++    }
++
++    @Test fun steadyKeepsChipsInTheirPlaces() {
++        val old = listOf(c("A"), c("B"), c("C"))
++        assertEquals(listOf("D", "B", "C"), ClaudeSuggest.steady(old, listOf(c("B"), c("D"), c("C"))).map { it.label })
++        assertEquals(listOf("A", "B", "C"), ClaudeSuggest.steady(old, listOf(c("C"), c("B"), c("A"))).map { it.label })
++        assertEquals(listOf("X", "Y"), ClaudeSuggest.steady(emptyList(), listOf(c("X"), c("Y"))).map { it.label })
++        assertEquals(listOf("Z"), ClaudeSuggest.steady(old, listOf(c("Z"))).map { it.label })
++    }
++}

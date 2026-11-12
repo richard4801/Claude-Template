@@ -32,7 +32,9 @@ import java.util.concurrent.TimeUnit
 // ---------------------------------------------------------------- types
 
 @Serializable
-data class ClaudeToolRef(val id: String = "", val name: String = "", val ok: Boolean? = null, val summary: String? = null)
+data class ClaudeToolRef(val id: String = "", val name: String = "", val ok: Boolean? = null, val summary: String? = null,
+    /** One Claude: what the app does with the line; `ui.card` is a card (studio.muse.core.claude.ClaudeCard). */
+    val ui: kotlinx.serialization.json.JsonObject? = null)
 
 @Serializable
 data class ClaudeImageRef(val url: String = "")
@@ -163,6 +165,9 @@ interface ClaudeApi {
     /** "" goes back to the chat's first words. */
     suspend fun renameThread(id: String, title: String): ClaudeThread = throw ApiException("not_found", "This server keeps one chat per place")
     suspend fun deleteThread(id: String): Unit = throw ApiException("not_found", "This server keeps one chat per place")
+    /** Cards: Approve / Decline on a gated action's card; Undo on one row of "What I changed". */
+    suspend fun answerAction(id: String, approve: Boolean): String = throw ApiException("not_found", "This server can't answer Claude's actions yet")
+    suspend fun undoCardRow(messageId: String, row: Int): Unit = throw ApiException("not_found", "This server can't undo from the chat yet")
 
     object Unsupported : ClaudeApi {
         private fun no(): Nothing = throw ApiException("unsupported", "Claude chat needs the studio server")
@@ -179,7 +184,17 @@ interface ClaudeApi {
 /** Relative upload URLs ("/uploads/…") made absolute against [base]. */
 fun ClaudeMessage.absolute(base: String): ClaudeMessage {
     fun abs(u: String) = if (u.startsWith("/")) base.trimEnd('/') + u else u
-    val m = if (image?.url?.startsWith("/") == true) copy(image = ClaudeImageRef(abs(image.url))) else this
+    var m = if (image?.url?.startsWith("/") == true) copy(image = ClaudeImageRef(abs(image.url))) else this
+    // A clip card's video ("/uploads/…").
+    val card = m.tool?.ui?.get("card") as? kotlinx.serialization.json.JsonObject
+    val video = card?.get("video") as? kotlinx.serialization.json.JsonObject
+    val vu = (video?.get("url") as? kotlinx.serialization.json.JsonPrimitive)?.content
+    if (vu != null && vu.startsWith("/")) {
+        val v2 = kotlinx.serialization.json.JsonObject(video + ("url" to kotlinx.serialization.json.JsonPrimitive(abs(vu))))
+        val c2 = kotlinx.serialization.json.JsonObject(card + ("video" to v2))
+        val t = m.tool!!
+        m = m.copy(tool = t.copy(ui = kotlinx.serialization.json.JsonObject(t.ui.orEmpty() + ("card" to c2))))
+    }
     return if (m.attachments.any { it.url.startsWith("/") }) m.copy(attachments = m.attachments.map { it.copy(url = abs(it.url)) }) else m
 }
 
@@ -228,6 +243,15 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
     private fun enc(id: String) = java.net.URLEncoder.encode(id, "UTF-8")
     private val origin get() = base.trimEnd('/')
 
+    override suspend fun answerAction(id: String, approve: Boolean): String {
+        val a = raw("POST", "v1/claude/actions/${enc(id)}", """{"approve":$approve}""")
+        if (a.code !in 200..299) throw errorOf(a.code, a.text)
+        return runCatching { (json.parseToJsonElement(a.text) as kotlinx.serialization.json.JsonObject)["status"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } }.getOrNull() ?: "done"
+    }
+    override suspend fun undoCardRow(messageId: String, row: Int) {
+        val a = raw("POST", "v1/claude/cards/${enc(messageId)}/undo", """{"row":$row}""")
+        if (a.code !in 200..299) throw errorOf(a.code, a.text)
+    }
     override suspend fun status() = call("GET", "v1/claude/status", null, ClaudePlanStatus.serializer())
     override suspend fun setApiFallback(on: Boolean) =
         call("PATCH", "v1/claude/settings", json.encodeToString(FallbackBody.serializer(), FallbackBody(on)), ClaudePlanStatus.serializer())

@@ -25,6 +25,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,6 +59,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -138,6 +140,9 @@ class ClaudeChatActions(
     val sendAsJpeg: (String) -> Unit = {},
     /** WS18: New chat, switch, rename and delete (shown once the server keeps lists). */
     val sessions: ChatSessionActions = ChatSessionActions(),
+    /** Cards: Approve / Decline, Undo a row, open a clip's moment. */
+    val answerCard: (String, studio.muse.core.claude.ApproveTarget, Boolean) -> Unit = { _, _, _ -> },
+    val undoCard: (String, Int, String) -> Unit = { _, _, _ -> },
 )
 
 /** A store for one thread, fed by the app's live `claude` events, loaded once. */
@@ -200,6 +205,8 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
         retry = { store.load() },
         retryTurn = { store.retry() },
         sessions = ChatSessionActions(newChat = { store.newChat() }, open = { store.open(it) }, rename = { t, n -> store.rename(t, n) }, delete = { store.delete(it) }),
+        answerCard = store::answerCard,
+        undoCard = store::undoCard,
     ), modifier)
 }
 
@@ -342,6 +349,7 @@ private fun RowView(r: ChatRow, ui: ClaudeChatUi, actions: ClaudeChatActions, co
             is ChatItem.Assistant -> AssistantText(it, r.first, copy)
             is ChatItem.Tool -> ToolRow(it, r.first, it.key in expanded) { toggle(it.key) }
             is ChatItem.Image -> FrameView(it, r.first, view)
+            is ChatItem.Card -> ChatCardView(it, ui.cardAnswers[it.messageId], actions)
         }
         is ChatRow.Thinking -> Thinking(r.text)
         is ChatRow.Ended -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
@@ -386,7 +394,11 @@ private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact:
     val s = if (ui.status == null && (!ui.loaded || ui.error != null)) StatusLineText(if (ui.loaded) "Not connected" else "Connecting…", Tone.OFF) else ClaudeText.status(ui)
     Column(Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = if (compact) MuseSpace.s1 else MuseSpace.s3).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (title.isNotBlank() && !compact) T(title, m.scale.title, m.roles.ink, Modifier.semantics { heading() }, maxLines = 1)
+        if (title.isNotBlank() && !compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+            // Claude's orb as the avatar (the same state machine as the Mac's: it moves only with real events).
+            ClaudeOrbView(ClaudePanelOrb.current ?: rememberChatOrb(ui), 28.dp)
+            T(title, m.scale.title, m.roles.ink, Modifier.semantics { heading() }, maxLines = 1)
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2), modifier = Modifier.heightIn(min = 24.dp)) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(toneColor(s.tone)))
             T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 2)
@@ -661,40 +673,66 @@ fun ClaudeChatSheet(open: Boolean, onDismiss: () -> Unit, contextKind: String, c
     above: (@Composable () -> Unit)? = null,
     /** WS18: the Suite's own sessions (each chat bound to a shared draft) and its tool-step hook. */
     hooks: ClaudeChatStore.SessionHooks? = null,
-    onToolDone: ((String) -> Unit)? = null) {
+    onToolDone: ((String) -> Unit)? = null,
+    /** The Suite: an Approve card for its waiting shot answers through the composer (the same as its approval bar). */
+    answerSuite: (suspend (assistId: String, pendingId: String, approve: Boolean) -> String?)? = null) {
     if (!open) return
     val store = rememberClaudeChatStore(contextKind, contextId)
     store.hooks = hooks
     store.onToolDone = onToolDone
-    ClaudeSheetFrame(onDismiss, modifier, heightFraction) {
-        Column(Modifier.fillMaxSize()) {
-            above?.invoke()
-            ClaudeChat(store, title, Modifier.weight(1f).fillMaxWidth())
+    store.suiteAnswer = answerSuite
+    // One orb for the panel: the header's avatar and the frame's living edge move together.
+    val ui by store.ui.collectAsState()
+    val orb = rememberChatOrb(ui)
+    androidx.compose.runtime.CompositionLocalProvider(ClaudePanelOrb provides orb) {
+        ClaudeSheetFrame(onDismiss, modifier, heightFraction) {
+            Column(Modifier.fillMaxSize()) {
+                above?.invoke()
+                ClaudeChat(store, title, Modifier.weight(1f).fillMaxWidth())
+            }
         }
     }
 }
 
-/** The sheet's frame (scrim, handle, the container radius on top, the float shadow); [content] fills it. */
+/**
+ * The sheet's frame (owner, 2026-11-12: a floating panel, not a slab): a rounded panel floating over the page with a
+ * soft shadow and the living edge (glowing with Claude's orb), inset from the screen's edges. Drag the handle to make it
+ * taller or shorter (remembered while the app runs); Back and the scrim close it. [content] fills it.
+ */
 @Composable
 fun ClaudeSheetFrame(onDismiss: () -> Unit, modifier: Modifier = Modifier, heightFraction: Float = .88f, content: @Composable () -> Unit) {
     val m = muse
     BackHandler(onBack = onDismiss)
-    // The keyboard: the sheet sits on top of it and grows to most of what's left, so the composer and the latest message stay in view.
+    // The keyboard: the panel sits on top of it and grows to most of what's left, so the composer and the latest message stay in view.
     val keyboard = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var fraction by rememberSaveable { mutableStateOf(ClaudeSheetMemory.fraction ?: heightFraction) }
     Box(modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .38f)).press(onClick = onDismiss).semantics { contentDescription = "Close Claude" })
-        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
-        val shape = RoundedCornerShape(topStart = m.radii.container, topEnd = m.radii.container)
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(maxHeight * (if (keyboard) maxOf(heightFraction, .92f) else heightFraction))
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .28f)).press(onClick = onDismiss).semantics { contentDescription = "Close Claude" })
+        BoxWithConstraints(Modifier.fillMaxSize().imePadding().padding(horizontal = MuseSpace.s3).padding(bottom = MuseSpace.s3).navigationBarsPadding()) {
+        val shape = RoundedCornerShape(m.radii.container + 4.dp)
+        val full = maxHeight
+        val density = LocalDensity.current
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(full * (if (keyboard) maxOf(fraction, .92f) else fraction))
             .museFloat(m, shape).clip(shape).background(m.roles.canvas)) {
-            Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().height(24.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(onDragEnd = { ClaudeSheetMemory.fraction = fraction }) { _, dy ->
+                        val h = with(density) { full.toPx() }
+                        fraction = (fraction - dy / h).coerceIn(.4f, .95f)
+                    }
+                }
+                .semantics { contentDescription = "Drag to resize Claude" }, contentAlignment = Alignment.Center) {
                 Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(m.roles.hairline))
             }
             Box(Modifier.weight(1f).fillMaxWidth()) { content() }
         }
+        ClaudeLivingEdge(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(full * (if (keyboard) maxOf(fraction, .92f) else fraction)), shape)
         }
     }
 }
+
+/** The floating panel's height, kept while the app runs. */
+object ClaudeSheetMemory { var fraction: Float? = null }
 
 /** Tablet: the chat as a right panel of [width] with a hairline on its left. */
 @Composable

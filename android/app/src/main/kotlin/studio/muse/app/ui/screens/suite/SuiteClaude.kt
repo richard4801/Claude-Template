@@ -19,7 +19,20 @@ import studio.muse.app.ui.screens.suite.composer.ComposerTool
  */
 data class SuiteAssistUi(val id: String, val revision: Int, val pending: SuitePending? = null, val answering: Boolean = false, val message: String? = null,
     /** WS18: the mode's list of chats this draft belongs to (`suite:photo`…). */
-    val key: String? = null)
+    val key: String? = null,
+    /** What Claude sees here, as the context strip reads it ({request, inputs, settings}). */
+    val screen: kotlinx.serialization.json.JsonObject? = null)
+
+/** The context strip's screen from the server's view of the shared draft. */
+fun SuiteAssist.contextScreen(): kotlinx.serialization.json.JsonObject? {
+    val r = request ?: return null
+    val o = onScreen
+    return kotlinx.serialization.json.JsonObject(buildMap {
+        put("request", r)
+        o?.get("inputs")?.let { put("inputs", it) }
+        o?.get("settings")?.let { put("settings", it) }
+    })
+}
 
 /** WS18: the composer's mode's list of chats. */
 val SuiteStore.claudeKey: String get() = ClaudeSessions.suiteKey(composer.value.tool.id)
@@ -41,7 +54,7 @@ suspend fun SuiteStore.openClaude(): String? {
 suspend fun SuiteStore.bindClaudeChat(t: ClaudeThread): Boolean {
     if (t.contextKind != "suite") return false
     val a = runCatching { app.repo.api.suiteAssist(t.contextId) }.getOrNull() ?: return false
-    assist.value = SuiteAssistUi(a.id, 0, a.waiting, key = claudeKey)
+    assist.value = SuiteAssistUi(a.id, 0, a.waiting, key = claudeKey, screen = a.contextScreen())
     assistSynced = null
     applyAssist(a)
     ClaudeSessions.remember(claudeKey, t.id)
@@ -52,7 +65,7 @@ suspend fun SuiteStore.bindClaudeChat(t: ClaudeThread): Boolean {
 suspend fun SuiteStore.newClaudeChat(): String? {
     val (a, err) = app.repo.attemptInline { createSuiteAssist(ComposerDrafts.draft(composer.value)) }
     if (a == null) { app.repo.toast(err ?: "Claude in the Suite isn't available on this server yet"); return null }
-    assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey)
+    assist.value = SuiteAssistUi(a.id, a.revision, a.waiting, key = claudeKey, screen = a.contextScreen())
     assistSynced = null // the screen goes up with the next sync
     return a.id
 }
@@ -94,7 +107,7 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
             })
         }
     }
-    assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting) }
+    assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting, screen = a.contextScreen() ?: it.screen) }
 }
 
 /** The owner's own edit in the composer: sent so Claude sees it. When Claude changed the draft meanwhile, Claude's wins. */
@@ -110,7 +123,7 @@ suspend fun SuiteStore.pushComposerToAssist(screen: ((Long?) -> kotlinx.serializ
     try {
         val a = app.repo.api.patchSuiteAssist(cur.id, d, cur.revision)
         assistSynced = key.toString()
-        assist.update { it?.copy(revision = a.revision, pending = a.waiting) }
+        assist.update { it?.copy(revision = a.revision, pending = a.waiting, screen = a.contextScreen() ?: it.screen) }
     } catch (e: ApiException) {
         if (e.code == "stale") runCatching { app.repo.api.suiteAssist(cur.id) }.getOrNull()?.let { applyAssist(it) }
     }
@@ -120,10 +133,11 @@ suspend fun SuiteStore.pushComposerToAssist(screen: ((Long?) -> kotlinx.serializ
  * The owner's answer to Claude's Generate. Yes runs it at the approved price (the server re-prices and refuses with
  * `price_changed` if it rose); the new render joins the composer's renders. No declines it.
  */
-suspend fun SuiteStore.answerClaude(approve: Boolean) {
-    val cur = assist.value ?: return
-    val p = cur.pending ?: return
-    if (cur.answering) return
+suspend fun SuiteStore.answerClaude(approve: Boolean, pendingId: String? = null): String? {
+    val cur = assist.value ?: return null
+    val p = cur.pending ?: return "Already answered"
+    if (pendingId != null && p.id != pendingId) return "Already answered"
+    if (cur.answering) return null
     assist.update { it?.copy(answering = true, message = null) }
     try {
         val r = app.repo.api.answerSuitePending(cur.id, p.id, approve)
@@ -131,9 +145,12 @@ suspend fun SuiteStore.answerClaude(approve: Boolean) {
         val msg = when (r.status) { "failed" -> r.error ?: "That shot didn't start · you weren't charged"; else -> null }
         assist.update { it?.copy(answering = false, pending = null, message = msg) }
         if (!approve) app.repo.toast(SuiteClaudeWords.NOT_NOW)
+        // The Approve card's words (the chat shows them in place of its buttons).
+        return msg ?: if (approve) "Approved, rendering" else "Declined"
     } catch (e: ApiException) {
         val msg = if (e.code == "price_changed") "${e.message ?: "The price changed"} · ask Claude again or press Generate yourself" else e.message ?: "Couldn't answer Claude"
         assist.update { it?.copy(answering = false, pending = if (e.code == "price_changed") null else it.pending, message = msg) }
+        return if (e.code == "price_changed") msg else null
     }
 }
 

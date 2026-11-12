@@ -96,6 +96,8 @@ sealed interface ChatItem {
     data class Tool(override val key: String, val text: String, val ok: Boolean, val running: Boolean = false, val detail: String = "") : ChatItem
     /** A frame Claude grabbed: [url] when stored, [data] (base64) while it streams. */
     data class Image(override val key: String, val url: String? = null, val data: String? = null, val mimeType: String? = null) : ChatItem
+    /** A card Claude put up (plan, clip, what changed, approve); [messageId] is its stored line (Undo). */
+    data class Card(override val key: String, val messageId: String, val card: studio.muse.core.claude.ClaudeCard) : ChatItem
 }
 
 /** The chat's state for one thread. */
@@ -116,6 +118,8 @@ data class ClaudeChatUi(
     val refusedText: String? = null,
     val draft: String = "",
     val notice: String? = null,
+    /** Approve cards answered here ("Approved, rendering"), by message id. */
+    val cardAnswers: Map<String, String> = emptyMap(),
     val loaded: Boolean = false,
     val error: String? = null,
     /** Images picked for the next message (Recreate, Edit and Suite threads; ≤ 4): uploading until [ChatAttachment.uploadId]. */
@@ -243,6 +247,8 @@ object ChatReducer {
         for (m in ui.messages) when {
             m.role == "user" -> out += ChatItem.User(m.id, ChatClean.userText(m.text), m.source, m.attachments.map { it.url }, m.createdAt)
             m.image != null -> out += ChatItem.Image(m.id, url = m.image.url)
+            m.tool?.ui?.get("card")?.let { studio.muse.core.claude.ClaudeCard.parse(it) } != null ->
+                out += ChatItem.Card("card-${m.id}", m.id, studio.muse.core.claude.ClaudeCard.parse(m.tool!!.ui!!["card"])!!)
             m.role == "tool" || m.tool != null -> m.tool?.let { tl -> out += tool(m.id, tl.name, ChatClean.summary(tl.summary ?: m.text), if (tl.ok == false) "error" else "done") }
             m.text.isNotBlank() -> out += ChatItem.Assistant(m.id, ChatClean.assistantText(m.text), at = m.createdAt)
         }

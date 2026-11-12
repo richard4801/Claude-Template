@@ -10,6 +10,7 @@ import { storeAttachments } from './claudeAttachments.js';
 import { registerChatRoutes } from '../claude/chatRoutes.js';
 import { CHAT_TOOLS } from '../claude/chatTools.js';
 import { APP_TOOLS } from '../claude/appTools.js';
+import { registerSuggestionRoutes } from '../claude/suggest.js';
 import { registerCardRoutes } from '../claude/cards.js';
 import { assistOf } from '../suite/assist.js';
 import { CHAT_REGISTRY } from '../claude/registry.js';
@@ -92,6 +93,7 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   await registerActionRoutes(app, ctx); // the person's Approve cards for Claude's gated actions
   // Chat cards (claude/cards.ts): Undo on a "What I changed" row, and the page's quick-action chips.
   await registerCardRoutes(app, ctx, (u, assistId, fn) => assistOf(ctx).rewrite(u, assistId, fn));
+  registerSuggestionRoutes(app, ctx);
   // Every tool of the one registry is on the MCP server too (Claude Code on the Mac): members see those members may use
   // (mcp/server.ts memberOk). Listing the registry, not each set, so a new set can't be left off the MCP list again.
   (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools([...CHAT_REGISTRY, ...CHAT_TOOLS, ...ISSUE_TOOLS, ...ISSUE_ADMIN_TOOLS, ...APP_TOOLS, ...ACTION_TOOLS, ...SETTINGS_TOOLS, PERMISSION_TOOL, UPLOAD_TOOL]);

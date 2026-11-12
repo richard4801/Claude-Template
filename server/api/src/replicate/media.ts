@@ -111,5 +111,5 @@ export async function stripAudio(ffmpeg: string, src: string, out: string) {
 
 /** A JPEG frame from the finished take, for its thumbnail. */
 export async function thumbnail(ffmpeg: string, video: string, out: string, at: number) {
-  await run(ffmpeg, ['-y', '-v', 'error', '-ss', sec(Math.max(0, at)), '-i', video, '-frames:v', '1', '-vf', "scale='min(720,iw)':-2", '-q:v', '3', out], 60_000);
+  await run(ffmpeg, ['-y', '-v', 'error', '-threads', '1', '-ss', sec(Math.max(0, at)), '-i', video, '-frames:v', '1', '-vf', "scale='min(720,iw)':-2", '-q:v', '3', out], 60_000);
 }

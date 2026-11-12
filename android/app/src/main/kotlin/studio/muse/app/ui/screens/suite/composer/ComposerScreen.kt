@@ -426,7 +426,15 @@ fun SuiteComposerScreen(toolId: String? = null) {
             assist?.let { a ->
                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
                     hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope) },
+                    answerSuite = { _, pid, yes -> store.answerClaude(yes, pid) },
                     above = {
+                        // What Claude sees on this composer now (the same screen the server reads).
+                        studio.muse.app.ui.screens.claude.ClaudeContextStrip(remember(a.screen, st.models, st.outfits) {
+                            studio.muse.core.claude.ClaudeContext.items(a.screen, studio.muse.core.claude.ContextLookups(
+                                character = { id -> st.models.firstOrNull { it.id == id }?.let { m -> m.name to m.slots.firstNotNullOfOrNull { it.image?.url } } },
+                                outfit = { id -> st.outfits.firstOrNull { it.id == id }?.let { o -> o.name to o.angles.firstNotNullOfOrNull { it?.url } } },
+                            ))
+                        })
                         SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
                         if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     })

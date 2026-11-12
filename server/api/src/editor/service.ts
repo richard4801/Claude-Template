@@ -13,7 +13,7 @@ import { studioSettings, takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
-import { cleanUploadedPhoto, putFile } from '../storage/objects.js';
+import { cleanUploadedPhoto, putFile, readyIfStored } from '../storage/objects.js';
 import { ReplicateError } from '../replicate/client.js';
 import { PaidLost, paidLostFailure, reportPaidLost } from '../services/paidLost.js';
 import { StepBack } from './paidPoll.js';
@@ -217,7 +217,8 @@ export class EditorAiService {
       if (!/^(video|audio)\//.test(up.contentType)) throw badRequest('source.uploadId: must be a video or audio upload');
       if (typeof s.durationSec !== 'number' || !(s.durationSec > 0)) throw badRequest('source.durationSec: required for an upload');
       if (!(await this.ctx.storage.head(up.storageKey))) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
-      if (up.state !== 'ready') await cleanUploadedPhoto(this.ctx, up); // no EXIF/GPS reaches a provider
+      // A video or audio upload is made ready with its size, never read into memory (a phone video can be hundreds of MB).
+      if (up.state !== 'ready') await readyIfStored(this.ctx, up);
       return { source: { uploadId: up.id, durationSec: s.durationSec }, key: up.storageKey, contentType: up.contentType };
     }
     throw badRequest('source: {takeId} or {uploadId, durationSec}');

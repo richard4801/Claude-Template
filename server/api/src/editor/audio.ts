@@ -111,6 +111,13 @@ export function detectBeats(x: Float32Array, sr = BEAT_SR): Beats {
   let strongOff = 0, strongSum = -1;
   for (let o = 0; o < 4; o++) { let s = 0; for (let k = o; k < beatsF.length; k += 4) s += env[beatsF[k]!]!; if (s > strongSum) { strongSum = s; strongOff = o; } }
   const toSec = (f: number) => Math.round(((f * hop + win - hop / 2) / sr) * 1000) / 1000; // the rise shows when the window first takes the onset in
+  // No beats in silence: the grid keeps running through a silent tail or intro; drop beats whose surrounding ~0.3 s is
+  // 45 dB below the track's loudest stretch (or quieter than -60 dBFS).
+  const rmsDb = (f: number) => { const c = f * hop + win / 2, h = Math.round(0.15 * sr); let e = 0, k = 0; for (let i = Math.max(0, c - h); i < Math.min(x.length, c + h); i++) { e += x[i]! * x[i]!; k++; } return 10 * Math.log10(1e-12 + (k ? e / k : 0)); };
+  let loud = -120; for (let f = 0; f < n; f += 4) loud = Math.max(loud, rmsDb(f));
+  const floor = Math.max(-60, loud - 45);
+  for (let k = beatsF.length - 1; k >= 0; k--) if (rmsDb(beatsF[k]!) < floor) beatsF.splice(k, 1);
+  if (!beatsF.length) return { bpm: 0, beats: [], strong: [] };
   const beats = beatsF.map(toSec);
   // Tempo from the beats themselves (least squares on beat number → time), finer than the lag grid.
   const m = beats.length, mx = (m - 1) / 2, my = beats.reduce((a, b) => a + b, 0) / m;
@@ -120,9 +127,9 @@ export function detectBeats(x: Float32Array, sr = BEAT_SR): Beats {
 }
 
 /** Decodes a file or URL's audio (first 10 min) to 11025 Hz mono floats with ffmpeg (analysis only; nothing encoded). */
-export function decodeMono(ffmpeg: string, input: string, maxSec = 600): Promise<Float32Array> {
+export function decodeMono(ffmpeg: string, input: string, maxSec = 600, fromSec = 0): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
-    execFile(ffmpeg, ['-v', 'error', '-i', input, '-vn', '-ac', '1', '-ar', String(BEAT_SR), '-t', String(maxSec), '-f', 'f32le', 'pipe:1'],
+    execFile(ffmpeg, ['-v', 'error', '-threads', '1', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-vn', '-sn', '-dn', '-i', input, '-ac', '1', '-ar', String(BEAT_SR), '-t', String(maxSec), '-f', 'f32le', 'pipe:1'],
       { encoding: 'buffer', timeout: 180_000, maxBuffer: BEAT_SR * 4 * maxSec + 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) return reject(new Error(`ffmpeg failed: ${String(stderr ?? '').trim().split('\n').slice(-1)[0]?.slice(0, 200) || err.message}`));
         const b = stdout as Buffer;

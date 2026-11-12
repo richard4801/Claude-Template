@@ -127,6 +127,29 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
         } finally { removing.remove(id) }
     }
 
+    /** Approve or Decline on an Approve card: a gated action, or the Suite's waiting shot (through [suiteAnswer]). */
+    var suiteAnswer: (suspend (assistId: String, pendingId: String, approve: Boolean) -> String?)? = null
+    fun answerCard(messageId: String, target: studio.muse.core.claude.ApproveTarget, approve: Boolean) {
+        if (_ui.value.cardAnswers.containsKey(messageId)) return
+        _ui.update { it.copy(cardAnswers = it.cardAnswers + (messageId to "…")) }
+        scope.launch {
+            val words = try {
+                when (target) {
+                    is studio.muse.core.claude.ApproveTarget.Action -> api().answerAction(target.id, approve).let { s -> if (s == "failed") "Didn't work. Try it from its screen" else if (approve) "Approved" else "Declined" }
+                    is studio.muse.core.claude.ApproveTarget.Suite -> suiteAnswer?.invoke(target.assistId, target.pendingId, approve) ?: if (suiteAnswer == null) "Answer it in the Suite" else null
+                }
+            } catch (e: ApiException) { if (e.code == "price_changed") e.message ?: "The price changed" else if (e.code in setOf("not_found", "already_answered", "expired")) "Already answered" else null }
+            _ui.update { u -> if (words == null) u.copy(cardAnswers = u.cardAnswers - messageId, notice = "Couldn't answer that. Try again") else u.copy(cardAnswers = u.cardAnswers + (messageId to words)) }
+        }
+    }
+    /** Undo one row of "What I changed": the server puts back only that part; the card comes back marked Undone. */
+    fun undoCard(messageId: String, row: Int, what: String) {
+        scope.launch {
+            try { api().undoCardRow(messageId, row); reload() }
+            catch (e: ApiException) { _ui.update { it.copy(notice = "Couldn't undo ${what.lowercase()}. ${e.message ?: ""}".trim()) } }
+        }
+    }
+
     suspend fun reload() {
         val id = _ui.value.thread?.id ?: return
         runCatching { api().getThread(id) }.onSuccess { t -> _ui.update { u -> ChatReducer.loaded(u, t) } }
