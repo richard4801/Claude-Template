@@ -329,6 +329,12 @@ public struct EditorJob: Codable, Hashable, Sendable, Identifiable {
     public var costUsd: Double?
     public var result: EditorJobResult?
     public var error: String?
+    /// Failed after the provider made the result: provider_paid_unsaved / provider_unconfirmed (owner's free Recover when
+    /// `recoverable`), provider_paid_lost (not recoverable; the member wasn't charged).
+    public var errorCode: String?
+    public var recoverable: Bool = false
+    /// The owner can bring this result back for free (POST /v1/jobs/:id/recover; never a new run).
+    public var canRecover: Bool { state == "failed" && recoverable && Job.recoverCodes.contains(errorCode ?? "") }
     public init(id: String, kind: EditorJobKind, state: String, progress: Double = 0, phase: String? = nil, estimateUsd: Double? = nil,
                 costUsd: Double? = nil, result: EditorJobResult? = nil, error: String? = nil) {
         self.id = id; self.kind = kind; self.state = state; self.progress = progress; self.phase = phase; self.estimateUsd = estimateUsd
@@ -338,7 +344,7 @@ public struct EditorJob: Codable, Hashable, Sendable, Identifiable {
     public var isDone: Bool { state == "done" }
     public var isOver: Bool { state != "running" }
 
-    enum CodingKeys: String, CodingKey { case id, kind, state, progress, phase, estimateUsd, costUsd, result, error }
+    enum CodingKeys: String, CodingKey { case id, kind, state, progress, phase, estimateUsd, costUsd, result, error, errorCode, recoverable }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -353,6 +359,8 @@ public struct EditorJob: Codable, Hashable, Sendable, Identifiable {
         if let s = try? c.decodeIfPresent(String.self, forKey: .error) { error = s }
         else if let o = try? c.decodeIfPresent([String: String].self, forKey: .error) { error = o["message"] ?? o["error"] }
         else { error = nil }
+        errorCode = try? c.decodeIfPresent(String.self, forKey: .errorCode)
+        recoverable = (try? c.decodeIfPresent(Bool.self, forKey: .recoverable)) ?? false
     }
 }
 
