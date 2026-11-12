@@ -173,7 +173,8 @@ fun SafeWarning(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier =
         val z = EditSafeBox.zone(ui.preview, p.canvas.width, p.canvas.height, ui.previewLayouts) ?: return@remember null
         EditSafeCheck.line(EditSafeCheck.issues(p, z), EditSafeBox.covers(ui.preview, p.canvas.width, p.canvas.height))
     } ?: return
-    Row(modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = .72f)).padding(start = 10.dp),
+    // Opaque: it sits over the bottom of the picture, where an app's chrome (TikTok's tab bar) would show through the words.
+    Row(modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).background(StageColor).padding(start = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         EIc("warning", 14.dp, SafeRed)
         T(line, muse.scale.micro, Color.White, Modifier.weight(1f, fill = false), maxLines = 2)
