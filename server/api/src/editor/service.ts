@@ -15,6 +15,10 @@ import { uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import { cleanUploadedPhoto, putFile } from '../storage/objects.js';
 import { ReplicateError } from '../replicate/client.js';
+import { PaidLost, paidLostFailure, reportPaidLost } from '../services/paidLost.js';
+import { StepBack } from './paidPoll.js';
+import { users } from '../db/schema.js';
+import type { JobRow } from '../gpu/controller.js';
 import { CUT_DEFAULTS, suggestCuts, type CutOptions, type Word } from './cuts.js';
 import { makeProvider, rmQuiet, type EditorProvider, type Hooks, type TrackPoint } from './providers.js';
 import { mediaToolsAvailable, probe } from '../replicate/media.js';
@@ -144,6 +148,12 @@ export const editorAi = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { s =
 export class EditorAiService {
   readonly provider: EditorProvider;
   private stopping = new Set<string>();
+  /** This server instance: a job resumed by another instance after a deploy is left to it (options.runner). */
+  private leaving = false;
+  /** Shutdown (a deploy): Genjutsu / slow-motion runs step back at their next poll, their jobs stay running with the
+   *  request id saved, and the next instance resumes them (never failed, never cancelled at the provider). */
+  stop() { this.leaving = true; }
+  private readonly instance = `${os.hostname()}:${process.pid}:${Math.random().toString(36).slice(2, 10)}`;
   private running = 0;
   private waiting: (() => void)[] = [];
   constructor(private ctx: Ctx, provider?: EditorProvider) { this.provider = provider ?? makeProvider(ctx); this.fal = new FalProvider(ctx); this.assembly = new AssemblyAI(ctx.config.ASSEMBLYAI_API_KEY, ctx.config.ASSEMBLYAI_API_URL, fetch, ctx.log); }
@@ -331,7 +341,7 @@ export class EditorAiService {
     resultsOf(this.ctx).link(u, `editor-${id}`);
     try {
       [row] = await this.ctx.db.insert(editorJobs).values({
-        id, studioId: u.studioId, userId: u.id, kind: e.kind, state: 'running', source: e.src.source, mediaKey: e.src.key, options: e.opts as Record<string, unknown>,
+        id, studioId: u.studioId, userId: u.id, kind: e.kind, state: 'running', source: e.src.source, mediaKey: e.src.key, options: { ...(e.opts as Record<string, unknown>), runner: this.instance },
         models, estimate: e.usd, holdTokens, progress: 0, phase: e.usd > 0 ? 'Waiting' : PHASE[e.kind], createdAt: Date.now(),
       }).returning() as Row[];
     } catch (err) {
@@ -417,7 +427,8 @@ export class EditorAiService {
    * The cut-out: the photo upright and at most 2048 px as a one-second clip (stored for the helper to fetch, deleted
    * after), the matte (person, or the tapped object at frame 0), then its alpha on the photo, trimmed: a PNG upload.
    */
-  private async cutout(u: AuthUser, src: { key: string; source: EditorSource }, o: JobOptions, _url: string, hooks: Hooks, temps: string[]) {
+  private async cutout(u: AuthUser, src: { key: string; source: EditorSource }, o: JobOptions, _url: string, hooks: Hooks, temps: string[],
+    paid: <T extends { gpuSec: number | null }>(rate: number, f: () => Promise<T>) => Promise<T>) {
     const ffmpeg = this.ctx.config.FFMPEG_PATH, p = this.provider;
     const [still, clip, mask, out] = ['png', 'mp4', 'png', 'png'].map(ext => path.join(os.tmpdir(), `${uid('cut')}.${ext}`)) as [string, string, string, string];
     temps.push(still, clip, mask, out);
@@ -428,8 +439,8 @@ export class EditorAiService {
     try {
       const url = await this.ctx.storage.presignGet(key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
       made = o.points?.length
-        ? await p.track(url, CUTOUT_LIMITS.clipSec, o.points.map(q => ({ x: q.x * (size.width - 1), y: q.y * (size.height - 1), frame: 0, keep: q.keep })), hooks)
-        : await p.matte(url, CUTOUT_LIMITS.clipSec, hooks);
+        ? await paid(p.rates.track, () => p.track(url, CUTOUT_LIMITS.clipSec, o.points!.map(q => ({ x: q.x * (size.width - 1), y: q.y * (size.height - 1), frame: 0, keep: q.keep })), hooks))
+        : await paid(p.rates.matte, () => p.matte(url, CUTOUT_LIMITS.clipSec, hooks));
     } finally { await this.ctx.storage.delete(key).catch(() => {}); }
     if (made.file) temps.push(made.file);
     if (!made.file) throw new ReplicateError('The background removal returned nothing', 'failed');
@@ -447,8 +458,20 @@ export class EditorAiService {
   /** Whether this server's ffmpeg can stabilise (checked once). */
   stabilizeAvailable() { return (this.vidstab ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH).then(ok => ok && vidstabAvailable(this.ctx.config.FFMPEG_PATH))); }
 
-  private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource; size?: { width: number; height: number; fps?: number } }, reuse: { words: Word[]; language: string } | null) {
+  private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource; size?: { width: number; height: number; fps?: number } }, reuse: { words: Word[]; language: string } | null,
+    resume = false) {
     const id = row.id, d = src.source.durationSec, o = row.options as JobOptions, p = this.provider;
+    /** Genjutsu / slow motion after a restart or a recover: the saved provider request is polled, never started again. */
+    const resumeId = resume ? row.predictionId : null;
+    const recovering = resume && !!(row.result as { recovering?: boolean } | null)?.recovering;
+    // Once a provider has made a result it is paid: a late cancel no longer throws it away, and a failure after it is
+    // said honestly (services/paidLost.ts). `made.usd` is what it cost (provider × markup, what the member would pay).
+    let made: { usd: number } | null = null;
+    const addMade = (usd: number) => { made = { usd: (made?.usd ?? 0) + Math.max(0, usd) }; };
+    const gpuUsd = (gpuSec: number | null, r: number) => gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * r * this.markup * 10000) / 10000) : row.estimate;
+    /** A paid Replicate helper call: its cost counts as made the moment it returns. */
+    const paid = async <T extends { gpuSec: number | null }>(r: number, f: () => Promise<T>) => { const out = await f(); if (row.estimate > 0) addMade(gpuUsd(out.gpuSec, r)); return out; };
+    const saveHandle = async (hid: string) => { await this.ctx.db.update(editorJobs).set({ predictionId: hid }).where(eq(editorJobs.id, id)); };
     const hooks: Hooks = {
       cancelled: () => this.stopping.has(id),
       onPrediction: async pid => { await this.ctx.db.update(editorJobs).set({ predictionId: pid }).where(eq(editorJobs.id, id)); },
@@ -460,7 +483,7 @@ export class EditorAiService {
     const temps: string[] = [];
     try {
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
-      await this.patch(id, { phase: PHASE[row.kind], progress: 5 });
+      await this.patch(id, { phase: recovering ? 'Recovering the result' : PHASE[row.kind], progress: 5 });
       const url = await this.ctx.storage.presignGet(src.key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
       let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0, spentUsd: number | null = null;
       const transcript = async () => {
@@ -470,7 +493,7 @@ export class EditorAiService {
           spentUsd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(t.usd * this.markup * 10000) / 10000);
           return t;
         }
-        const t = await p.transcribe(url, d, o.language ?? null, hooks);
+        const t = await paid(p.rates.transcribe, () => p.transcribe(url, d, o.language ?? null, hooks));
         gpuSec = t.gpuSec; rate = p.rates.transcribe;
         return t;
       };
@@ -509,9 +532,11 @@ export class EditorAiService {
       } else if (isGenjutsuHelper(row.kind)) {
         const out = path.join(os.tmpdir(), `${uid('gj')}.mp4`);
         temps.push(out);
-        const images = await this.genjutsuImages(u, o.images ?? [], this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
-        await runGenjutsu(this.ctx.suite.providers.higgsfield, row.kind, genjutsuHelperInput(row.kind, url, images, o), out, {
-          cancelled: () => this.stopping.has(id), pollMs: this.genjutsuPollMs, timeoutMs: 30 * 60_000,
+        // The pictures are only signed when a request must start (a resumed one is polled by its saved id).
+        await runGenjutsu(this.ctx.suite.providers.higgsfield, row.kind,
+          async () => genjutsuHelperInput(row.kind as 'objectswap' | 'restyle', url, await this.genjutsuImages(u, o.images ?? [], this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC), o), out, {
+          cancelled: () => this.stopping.has(id), leaving: () => this.leaving, pollMs: this.genjutsuPollMs, timeoutMs: this.genjutsuTimeoutMs, resumeId, onStart: saveHandle,
+          onMade: () => { addMade(row.estimate); }, // Higgsfield bills the source seconds the estimate priced
           onProgress: f => this.patch(id, { progress: 5 + f * 85 }).then(() => undefined) });
         const info = await probe(this.ctx.config.FFPROBE_PATH, out).catch(() => null);
         const seconds = info?.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : Math.min(d, GENJUTSU_LIMITS.maxSec);
@@ -523,20 +548,20 @@ export class EditorAiService {
         const prev = await this.slowmoBefore(u.studioId, src.key, o);
         if (prev) { result = { ...(prev.result as Record<string, unknown>), reused: true }; spentUsd = 0; }
         else {
-          const r = await this.slowmo(row, u, src, o, temps);
+          const r = await this.slowmo(row, u, src, o, temps, { resumeId, onStart: saveHandle, onMade: c => addMade(c != null ? slowmoUsd(c, this.markup) : row.estimate) });
           result = r.result;
           if (r.computeSec != null) spentUsd = slowmoUsd(r.computeSec, this.markup);
         }
       } else if (row.kind === 'cutout') {
         const tracked = !!o.points?.length;
-        const c = await this.cutout(u, src, o, url, hooks, temps);
+        const c = await this.cutout(u, src, o, url, hooks, temps, paid);
         gpuSec = c.gpuSec; rate = tracked ? p.rates.track : p.rates.matte;
         result = { ...c.result, mode: tracked ? 'tracked' : 'person', ...(tracked ? { points: o.points } : {}) };
       } else if (row.kind === 'separate') {
         const prev = await this.separateBefore(u.studioId, src.key);
         if (prev) { result = { ...(prev.result as Record<string, unknown>), reused: true }; spentUsd = 0; }
         else {
-          const out = await p.separateBoth(url, d, hooks);
+          const out = await paid(p.rates.separate, () => p.separateBoth(url, d, hooks));
           temps.push(...[out.vocals.file, out.instrumental.file].filter((f): f is string => !!f));
           gpuSec = out.gpuSec; rate = p.rates.separate;
           const vocals = await this.store(u, src, out.vocals.file, out.vocals.contentType, 'audio', d);
@@ -570,7 +595,8 @@ export class EditorAiService {
           for (let k = 0; k < objs.length; k++) {
             const ob = objs[k]!;
             const part: Hooks = { ...hooks, onProgress: async (f, ph) => { await hooks.onProgress?.((k + f) / objs.length, ph ? `${ph} · ${ob.name}` : `Finding ${ob.name}`); } };
-            const made = await p.track(url, d, await this.pixelPoints(src.key, ob.points, src.size, p.name === 'mock'), part);
+            const pts = await this.pixelPoints(src.key, ob.points, src.size, p.name === 'mock');
+            const made = await paid(p.rates.track, () => p.track(url, d, pts, part));
             if (made.file) temps.push(made.file);
             if (made.gpuSec == null) known = false; else billed += made.gpuSec;
             // Where the object is over time, for pinned text (best effort: a layer without it just can't take a pin).
@@ -583,8 +609,9 @@ export class EditorAiService {
         }
       } else if (row.kind === 'matte' || (row.kind === 'denoise' && !o.analyzeOnly)) {
         const tracked = row.kind === 'matte' && !!o.points?.length;
-        const out = row.kind !== 'matte' ? await p.separate(url, d, hooks)
-          : tracked ? await p.track(url, d, await this.pixelPoints(src.key, o.points!, src.size, p.name === 'mock'), hooks) : await p.matte(url, d, hooks);
+        const pts = tracked ? await this.pixelPoints(src.key, o.points!, src.size, p.name === 'mock') : [];
+        const out = row.kind !== 'matte' ? await paid(p.rates.separate, () => p.separate(url, d, hooks))
+          : tracked ? await paid(p.rates.track, () => p.track(url, d, pts, hooks)) : await paid(p.rates.matte, () => p.matte(url, d, hooks));
         file = out.file; gpuSec = out.gpuSec; rate = row.kind !== 'matte' ? p.rates.separate : tracked ? p.rates.track : p.rates.matte;
         const asset = await this.store(u, src, out.file, out.contentType, row.kind === 'matte' ? 'video' : 'audio', d);
         // workstream 1: an alpha matte (white = keep) the apps apply to the original clip; no green composite, no chroma key.
@@ -594,11 +621,17 @@ export class EditorAiService {
       } else {
         result = { suggestion: noiseSuggestion(reuse?.words ?? []) };
       }
-      if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
+      // A cancel that arrives after the provider made the result doesn't throw the paid result away.
+      if (this.stopping.has(id) && !made) throw new ReplicateError('Cancelled', 'cancelled');
+      if (!(await this.owns(id))) return; // another server instance resumed it after a deploy
       const actual = spentUsd != null ? spentUsd : !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
       if (row.holdTokens || actual > 0) await this.ctx.money.settle(u.studioId, u.id, id, row.holdTokens, actual, `Editor ${row.kind}`);
       await this.patch(id, { state: 'done', progress: 100, phase: 'Done', result, cost: actual, finishedAt: Date.now() });
     } catch (e) {
+      if (e instanceof StepBack || this.leaving) { this.ctx.log.info({ job: id }, 'editor job left for the next server instance'); return; }
+      if (!(await this.owns(id).catch(() => true))) return; // another server instance resumed it after a deploy
+      const lost = e instanceof PaidLost ? e : made ? new PaidLost('unsaved', 1, (e as Error).message) : null;
+      if (lost) { await this.paidLost(row, u, lost, (made as { usd: number } | null)?.usd ?? row.estimate); return; }
       const cancelled = e instanceof ReplicateError && e.kind === 'cancelled';
       if (row.holdTokens) await this.ctx.money.release(u.studioId, u.id, id, row.holdTokens, cancelled ? 'editor job cancelled' : 'editor job failed').catch(() => {});
       if (!cancelled) this.ctx.log.warn({ err: (e as Error).message, job: id, kind: row.kind }, 'editor job failed');
@@ -619,7 +652,8 @@ export class EditorAiService {
    * Smooth slow motion: the range cut here (one local ffmpeg job at a time), stored for fal to fetch, interpolated by
    * fal, then retimed here to play at the source's frame rate. The cut sent to fal is deleted again whatever happens.
    */
-  private async slowmo(row: Row, u: AuthUser, src: { key: string; source: EditorSource }, o: JobOptions, temps: string[]) {
+  private async slowmo(row: Row, u: AuthUser, src: { key: string; source: EditorSource }, o: JobOptions, temps: string[],
+    run: { resumeId: string | null; onStart: (id: string) => Promise<void>; onMade: (computeSec: number | null) => void }) {
     const ffmpeg = this.ctx.config.FFMPEG_PATH, ffprobe = this.ctx.config.FFPROBE_PATH, factor = o.factor!, cancelled = () => this.stopping.has(row.id);
     const cut = path.join(os.tmpdir(), `${uid('slowcut')}.mp4`), raw = path.join(os.tmpdir(), `${uid('slowraw')}.mp4`), out = path.join(os.tmpdir(), `${uid('slow')}.mp4`);
     temps.push(cut, raw, out);
@@ -633,14 +667,18 @@ export class EditorAiService {
     } finally { this.localFree(); }
     const rangeSec = (await probe(ffprobe, cut)).duration || o.endSec! - o.startSec!;
     await this.patch(row.id, { progress: 15 });
+    // The cut is uploaded for fal only when a request must start (a resumed one is polled by its saved id).
     const key = `t/${uid('slowin')}.mp4`;
-    await this.ctx.storage.putStream(key, fs.createReadStream(cut), 'video/mp4', fs.statSync(cut).size);
-    let computeSec: number | null;
+    let uploaded = false, computeSec: number | null;
     try {
-      const url = await this.ctx.storage.presignGet(key, 3600);
-      ({ computeSec } = await falInterpolate(this.fal, url, factor, raw, { cancelled, pollMs: this.falPollMs, onProgress: f => this.patch(row.id, { progress: 15 + f * 70 }).then(() => undefined) }));
-    } finally { await this.ctx.storage.delete(key).catch(() => {}); }
-    if (cancelled()) throw new ReplicateError('Cancelled', 'cancelled');
+      ({ computeSec } = await falInterpolate(this.fal, async () => {
+        await this.ctx.storage.putStream(key, fs.createReadStream(cut), 'video/mp4', fs.statSync(cut).size);
+        uploaded = true;
+        return this.ctx.storage.presignGet(key, 3600);
+      }, factor, raw, { cancelled, leaving: () => this.leaving, pollMs: this.falPollMs, resumeId: run.resumeId, onStart: run.onStart, onMade: (_u, c) => run.onMade(c),
+        onProgress: f => this.patch(row.id, { progress: 15 + f * 70 }).then(() => undefined) }));
+    } finally { if (uploaded) await this.ctx.storage.delete(key).catch(() => {}); }
+    // From here fal has made (and billed) it: a late cancel no longer throws it away.
     const got = await probe(ffprobe, raw);
     if (!(got.duration > 0)) throw new ReplicateError('Slow motion came back empty', 'failed');
     const seconds = Math.round(rangeSec * factor * 1000) / 1000, fps = Math.min(info.fps || 30, SLOWMO_LIMITS.maxFps);
@@ -676,8 +714,68 @@ export class EditorAiService {
     } finally { rmQuiet(file); }
   }
 
-  /** Tests: how often Higgsfield is polled for a Genjutsu helper. */
+  /** Tests: how often Higgsfield is polled for a Genjutsu helper, and how long before a cancel is asked. */
   genjutsuPollMs = 3000;
+  genjutsuTimeoutMs = 30 * 60_000;
+
+  /** Whether this instance still runs the job (false: another instance resumed it after a deploy and finishes it). */
+  private async owns(id: string) {
+    const [r] = await this.ctx.db.select({ options: editorJobs.options, state: editorJobs.state }).from(editorJobs).where(eq(editorJobs.id, id));
+    const by = (r?.options as { runner?: string } | undefined)?.runner;
+    return !!r && r.state === 'running' && (!by || by === this.instance);
+  }
+
+  /**
+   * The provider made (and billed) the result, or may still, and it isn't saved. The member's hold goes back (they get
+   * nothing). Genjutsu and slow motion keep their request id: the owner recovers them for free (recoverJob), and the
+   * provider's cost waits for that. Replicate helpers can't be fetched again: their cost goes on studio overhead now.
+   */
+  private async paidLost(row: Row, u: AuthUser, e: PaidLost, usd: number) {
+    const [fresh] = await this.ctx.db.select().from(editorJobs).where(eq(editorJobs.id, row.id));
+    const recoverable = (isGenjutsuHelper(row.kind) || row.kind === 'slowmo') && !!fresh?.predictionId;
+    if (row.holdTokens) await this.ctx.money.release(u.studioId, u.id, row.id, row.holdTokens, 'editor result made but not saved').catch(() => {});
+    if (!recoverable && usd > 1e-9) await this.ctx.money.overhead(u.studioId, usd, `Edit ${row.kind} made but not saved`).catch(() => {});
+    const f = paidLostFailure(e);
+    const msg = recoverable ? f.message : 'The result was made but MUSE couldn’t save it · you weren’t charged (the studio paid for it) · try again';
+    this.ctx.log.error({ job: row.id, kind: row.kind, why: e.why, usd }, 'editor job: provider result paid but not saved');
+    await this.patch(row.id, { state: 'failed', phase: msg, error: msg, finishedAt: Date.now(), holdTokens: 0,
+      result: { errorCode: recoverable ? f.code : 'provider_paid_lost', paid: { usd, recoverable, kind: e.kind, why: e.why.slice(0, 300) } } }).catch(() => {});
+    if (recoverable) await reportPaidLost(this.ctx, { id: row.id, studioId: row.studioId, userId: row.userId } as JobRow, `Edit ${row.kind}`, e, 'editor')
+      .catch(err => this.ctx.log.warn({ err: (err as Error).message }, 'editor: could not record the issue'));
+  }
+
+  /** The job's person, as the run needs them (money is held and settled on them). */
+  private async userOf(row: Row): Promise<AuthUser> {
+    const [x] = await this.ctx.db.select({ role: users.role, email: users.email }).from(users).where(eq(users.id, row.userId));
+    return { id: row.userId, studioId: row.studioId, email: x?.email ?? '', role: (x?.role as AuthUser['role']) ?? 'member', studioName: '', sessionId: null };
+  }
+
+  /** Runs a saved Genjutsu / slow-motion request again on this instance: polls its id, never a new paid start. */
+  private async relaunch(row: Row) {
+    const [r] = await this.ctx.db.update(editorJobs).set({ options: { ...(row.options ?? {}), runner: this.instance } }).where(eq(editorJobs.id, row.id)).returning() as Row[];
+    const u = await this.userOf(r!);
+    void this.run(r!, u, { key: r!.mediaKey!, contentType: '', source: r!.source }, null, true);
+  }
+
+  /**
+   * Owner, free: an Edit helper (Genjutsu restyle / object swap, slow motion) that failed after the provider made its
+   * result (errorCode provider_paid_unsaved / provider_unconfirmed) is fetched again by its saved request id. Never a
+   * new generation. The member is charged as usual once it is saved.
+   */
+  async recoverJob(u: AuthUser, id: string) {
+    if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can do that');
+    const [r] = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.id, id), eq(editorJobs.studioId, u.studioId)));
+    if (!r) throw notFound('Job');
+    if (r.state === 'running') return { ok: true, state: 'running', job: id };
+    const paid = (r.result as { paid?: { recoverable?: boolean } } | null)?.paid;
+    if (r.state !== 'failed' || !paid?.recoverable || !r.predictionId) throw badRequest('Nothing to recover: no saved provider request for this job');
+    const [row] = await this.ctx.db.update(editorJobs).set({ state: 'running', error: null, finishedAt: null, holdTokens: 0, phase: 'Recovering the result', result: { recovering: true } })
+      .where(and(eq(editorJobs.id, id), eq(editorJobs.state, 'failed'))).returning() as Row[];
+    if (!row) throw badRequest('This job changed · try again');
+    this.emit(row);
+    await this.relaunch(row);
+    return { ok: true, state: 'recovering', job: id };
+  }
   private presetCache: { at: number; list: { id: string; name: string; preview?: string | null }[] } | null = null;
   /** Restyle's presets from Higgsfield (free; cached 6 h; an empty list when it can't be read). */
   async restylePresets() {
@@ -753,6 +851,12 @@ export class EditorAiService {
   async recover() {
     const rows = await this.ctx.db.select().from(editorJobs).where(eq(editorJobs.state, 'running'));
     for (const r of rows) {
+      // Genjutsu / slow motion with a saved request: polled again (never started, never paid twice). Its hold stays.
+      if ((isGenjutsuHelper(r.kind) || r.kind === 'slowmo') && r.predictionId && r.mediaKey) {
+        this.ctx.log.info({ job: r.id, kind: r.kind }, 'editor job resumed after a restart');
+        await this.relaunch(r).catch(e => this.ctx.log.warn({ job: r.id, err: (e as Error).message }, 'editor resume failed'));
+        continue;
+      }
       if (r.holdTokens) await this.ctx.money.release(r.studioId, r.userId, r.id, r.holdTokens, 'editor job interrupted by a restart').catch(() => {});
       if (r.predictionId && this.provider.name === 'replicate') await this.ctx.replicate.cancel(r.predictionId);
       await this.ctx.db.update(editorJobs).set({ state: 'failed', error: 'Interrupted · try again', phase: 'Interrupted · try again', finishedAt: Date.now() }).where(eq(editorJobs.id, r.id));

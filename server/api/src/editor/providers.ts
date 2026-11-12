@@ -12,6 +12,8 @@ import type { Word } from './cuts.js';
 export type Hooks = {
   cancelled: () => boolean;
   onPrediction?: (id: string) => void | Promise<void>;
+  /** A prediction saved before a restart: polled again instead of starting (and paying for) a new one. */
+  resumeId?: string | null;
   onProgress?: (p: number, phase: string) => void | Promise<void>;
 };
 export type Stem = 'vocals' | 'no_vocals';
@@ -214,8 +216,11 @@ export class ReplicateProvider implements EditorProvider {
     const c = this.ctx.config, r = this.ctx.replicate;
     const { version, inputs } = await this.version(model);
     const input = adaptInput(wanted, inputs);
-    const created = await r.create(model, input, { maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled: h.cancelled, ...(version ? { version } : {}) });
-    await h.onPrediction?.(created.id);
+    // A saved prediction is polled again; only one Replicate no longer knows (or that ended without a result) starts afresh.
+    const saved = h.resumeId ? await r.get(h.resumeId).catch(() => null) : null;
+    const created = saved && saved.status !== 'canceled' && saved.status !== 'failed' ? saved
+      : await r.create(model, input, { maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled: h.cancelled, ...(version ? { version } : {}) });
+    if (created !== saved) await h.onPrediction?.(created.id);
     const done = await r.wait(created.id, { pollMs: c.REPLICATE_POLL_MS, timeoutMs: timeoutSec * 1000, cancelled: h.cancelled,
       onPoll: async (_p, ms) => { await h.onProgress?.(Math.min(0.9, ms / 1000 / Math.max(10, timeoutSec / 6)), ''); } });
     if (done.status !== 'succeeded') throw new ReplicateError(typeof done.error === 'string' ? done.error : 'The helper failed', done.status === 'canceled' ? 'cancelled' : 'failed');

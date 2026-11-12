@@ -144,6 +144,32 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield job across a restart (FAKE H
     } finally { await a.close(); fs.rmSync(uploads, { recursive: true, force: true }); }
   });
 
+  it('a two-take shot whose first take was made but not saved: recovery keeps that take and never starts the second', async () => {
+    reset();
+    fake.startState = 'completed'; fake.failDownloads = 1000;
+    const uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-up-'));
+    const a = await makeApp(env(uploads));
+    try {
+      const { owner } = await people(a, 0, { topUp: 100 });
+      const m = await demoModel(owner);
+      const r = (await owner.req('POST', '/v1/suite/shots', { modelId: m.id, prompt: 'She turns to the camera.', duration: 6, quality: 'hd', takes: 2, camera: { preset: 'talking_head' } })).body;
+      expect(r.id, JSON.stringify(r)).toBeTruthy();
+      const failed = await ended(owner, r.id);
+      expect(failed.errorCode).toBe('provider_paid_unsaved');
+      expect(reqs).toHaveLength(1); // the second take never started
+      expect((await row(a, r.id)).request.takes).toBe(2);
+      fake.failDownloads = 0;
+      expect((await owner.req('POST', `/v1/jobs/${r.id}/recover`)).status).toBe(200);
+      const done = await ended(owner, r.id);
+      expect(done.state, done.error).toBe('done');
+      expect(reqs).toHaveLength(1); // recovery never pays for a new take
+      const j = await row(a, r.id);
+      expect(j.request.takes).toBe(1);
+      const takesOut = ((await owner.req('GET', '/v1/takes')).body as any[]).filter(t => t.jobId === r.id);
+      expect(takesOut).toHaveLength(1);
+    } finally { await a.close(); fs.rmSync(uploads, { recursive: true, force: true }); }
+  });
+
   it('recover refuses when the provider says the render failed or nothing was saved', async () => {
     reset();
     const uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-up-'));

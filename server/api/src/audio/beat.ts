@@ -30,11 +30,13 @@ function ffmpeg(bin: string, args: string[]) {
  */
 export async function beatOnlyAudio(ctx: Ctx, o: {
   studioId: string; userId?: string | null; jobId: string; audioKey: string; durationSec?: number; cancelled?: () => boolean; provider?: EditorProvider;
+  /** The separation's prediction, saved by the caller so a restart polls it instead of paying for a second one. */
+  resumeId?: string | null; onPrediction?: (id: string) => Promise<void> | void;
 }): Promise<BeatOnly> {
   const provider = o.provider ?? makeProvider(ctx);
   const url = await ctx.storage.presignGet(o.audioKey, ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
   let predictionId: string | null = null;
-  const r = await provider.separate(url, o.durationSec ?? 30, { cancelled: o.cancelled ?? (() => false), onPrediction: id => { predictionId = id; } }, 'no_vocals');
+  const r = await provider.separate(url, o.durationSec ?? 30, { cancelled: o.cancelled ?? (() => false), resumeId: o.resumeId, onPrediction: async id => { predictionId = id; await o.onPrediction?.(id); } }, 'no_vocals');
   const costUsd = (r.gpuSec ?? 0) * provider.rates.separate;
   if (!r.file) return { instrumentalKey: o.audioKey, separated: false, costUsd, predictionId, seconds: r.gpuSec };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-beat-'));
