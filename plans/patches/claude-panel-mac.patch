@@ -869,21 +869,126 @@ index 0000000..5adaa6d
 +        }
 +    }
 +}
+diff --git a/mac/Muse/Views/Claude/ClaudeOrb.metal b/mac/Muse/Views/Claude/ClaudeOrb.metal
+new file mode 100644
+index 0000000..6a0456a
+--- /dev/null
++++ b/mac/Muse/Views/Claude/ClaudeOrb.metal
+@@ -0,0 +1,98 @@
++// Claude's orb (owner, 2026-11-12, third pass; plans/design/claude-panel/orb-states.png, orb-preview.mp4): a luminous
++// vortex. Twisting ribbons of light spiral round a bright core in 3D (perspective; front bright and sharp, back dim and
++// soft), white-hot in the middle with iridescent edges, a faint Fresnel shimmer where light meets the edge and a halo
++// tinted by the ribbons. No disc, no rim line. The same shader as design/direction/orb_shader.py (GLSL), line for line:
++// keep them in step. Used through SwiftUI's colorEffect (ShaderLibrary.claudeOrb); returns premultiplied colour.
++#include <metal_stdlib>
++#include <SwiftUI/SwiftUI_Metal.h>
++using namespace metal;
++
++constant float PI = 3.14159265;
++constant int RIBBONS = 4;
++constant int SEG = 40;
++
++static float3 rotX(float3 p, float a) { float c = cos(a), s = sin(a); return float3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }
++static float3 rotY(float3 p, float a) { float c = cos(a), s = sin(a); return float3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }
++static float3 rotZ(float3 p, float a) { float c = cos(a), s = sin(a); return float3(c * p.x - s * p.y, s * p.x + c * p.y, p.z); }
++
++// Iridescent colour along a ribbon: magenta → violet → blue → cyan (error: red → orange).
++static float3 iris(float h, float danger) {
++    h = fract(h);
++    float3 a = float3(1.0, 0.24, 0.66), b = float3(0.56, 0.36, 1.0), c = float3(0.23, 0.51, 1.0), d = float3(0.18, 0.88, 0.75);
++    float3 col = h < 0.25 ? mix(a, b, h * 4.0) : h < 0.5 ? mix(b, c, h * 4.0 - 1.0) : h < 0.75 ? mix(c, d, h * 4.0 - 2.0) : mix(d, a, h * 4.0 - 3.0);
++    float3 err = mix(float3(1.0, 0.3, 0.22), float3(1.0, 0.62, 0.2), 0.5 + 0.5 * sin(h * 6.283));
++    return mix(col, err, danger);
++}
++
++// A point of ribbon k at s (0…1): a spiral arm in a tilted plane, wobbling, turning with the phase; then perspective.
++static float3 ribbon(int k, float s, float phase, float count, float align) {
++    float fk = float(k);
++    float th = s * 2.4 * PI + phase * (1.0 + 0.25 * fk) + fk * 2.0 * PI / max(count, 1.0);
++    float r = 0.10 + 0.78 * pow(s, 0.85);
++    float3 p = float3(r * cos(th), r * sin(th), 0.16 * sin(2.0 * th + phase * 1.3 + fk));
++    float tilt = mix(1.05 + 0.35 * sin(fk * 1.7 + phase * 0.21), 1.15, align);
++    p = rotX(p, tilt);
++    p = rotY(p, mix(0.5 * sin(fk * 2.3 + phase * 0.17), 0.0, align));
++    p = rotZ(p, mix(fk * 0.9 + phase * 0.12, phase * 0.6, align));
++    float persp = 3.0 / (3.0 - p.z);
++    return float3(p.xy * persp * 0.78, p.z);
++}
++
++[[ stitchable ]] half4 claudeOrb(float2 position, half4 color, float2 size, float scale, float phase, float count, float brightIn,
++                                 float align, float danger, float pulse, float breath, float lightPage) {
++    // Metal's y runs down; the GLSL preview's runs up: flip so both draw the same picture.
++    float2 uv = float2(position.x - 0.5 * size.x, 0.5 * size.y - position.y) / (0.5 * min(size.x, size.y)) * scale;
++    float len = length(uv);
++    float3 light = float3(0.0);
++    float3 tint = float3(0.0); float tintW = 0.0;
++    float bright = brightIn * (1.0 + 0.6 * pulse) * (1.0 - 0.25 * breath);
++    for (int k = 0; k < RIBBONS; k++) {
++        if (float(k) >= count) break;
++        // Thin parts (white core, coloured glow) from the nearest point of the ribbon; the wide light from a line
++        // integral along it (each segment weighted by its length), so it is one smooth field with no seams.
++        float best = 1e3, bs = 0.0, bz = 0.0;
++        float3 wideAcc = float3(0.0);
++        float3 a = ribbon(k, 0.0, phase, count, align);
++        for (int i = 1; i <= SEG; i++) {
++            float s1 = float(i) / float(SEG);
++            float3 b = ribbon(k, s1, phase, count, align);
++            float2 ab = b.xy - a.xy, ap = uv - a.xy;
++            float t = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
++            float d = length(ap - ab * t);
++            float sm = s1 - (1.0 - t) / float(SEG);
++            float z = mix(a.z, b.z, t);
++            if (d < best) { best = d; bs = sm; bz = z; }
++            float fr = clamp(0.5 + 0.9 * z, 0.0, 1.0), tp = pow(sin(PI * clamp(sm, 0.0, 1.0)), 0.9);
++            float ww = 4.0 * (0.03 + 0.055 * tp) * mix(1.9, 0.8, fr);
++            wideAcc += iris(0.12 * float(k) + 0.55 * sm + 0.05 * phase, danger) * exp(-pow(d / ww, 2.0)) * length(ab) / (ww * 1.772) * tp * mix(0.35, 1.0, fr);
++            a = b;
++        }
++        float front = clamp(0.5 + 0.9 * bz, 0.0, 1.0);          // 0 back … 1 front
++        float taper = pow(sin(PI * clamp(bs, 0.0, 1.0)), 0.9);   // thick in the middle, fine at the ends
++        float w = (0.03 + 0.055 * taper) * mix(1.9, 0.8, front) * (1.0 + 0.35 * pulse);
++        float core = exp(-pow(best / (0.28 * w), 2.0));
++        float glow = exp(-pow(best / w, 2.0));
++        float3 col = iris(0.12 * float(k) + 0.55 * bs + 0.05 * phase, danger);
++        float br = bright * taper * mix(0.35, 1.0, front);
++        light += (float3(1.0, 0.97, 1.0) * core * 0.8 + col * glow * 0.85) * br + wideAcc * 0.4 * bright;
++        tint += col * glow * br + wideAcc * bright; tintW += glow * br + dot(wideAcc, float3(0.333)) * bright;
++    }
++    float3 avg = tintW > 0.0 ? tint / tintW : float3(0.55, 0.45, 1.0);
++    // The bright core the ribbons turn round.
++    light += mix(float3(1.0), avg, 0.35) * exp(-len * len / 0.018) * 0.9 * bright;
++    light += avg * exp(-len * len / 0.15) * 0.35 * bright;
++    // A faint glassy boundary: a Fresnel shimmer, only where the light reaches the edge.
++    float rim = exp(-pow((len - 0.92) / 0.06, 2.0));
++    light += avg * rim * 0.07 * bright * (0.4 + 0.6 * clamp(tintW, 0.0, 1.0));
++    // The halo, tinted by the ribbons, bleeding into the page.
++    light += avg * exp(-pow(max(len - 0.35, 0.0) / 0.45, 2.0)) * 0.12 * bright;
++    light *= smoothstep(1.25, 0.85, len);
++    float3 c = 1.0 - exp(-light * 1.4);                        // soft tone map
++    float alpha = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0);
++    // On a light page the light needs a little shade behind it to read: a soft, transparent pool (never a disc).
++    float pool = lightPage * 0.38 * exp(-len * len / 0.42) * clamp(0.35 + bright, 0.0, 1.0);
++    float3 shade = float3(0.09, 0.07, 0.17);
++    float outA = alpha + pool * (1.0 - alpha);
++    float3 outC = c + shade * pool * (1.0 - alpha);
++    return half4(half3(outC), half(outA));                    // premultiplied
++}
 diff --git a/mac/Muse/Views/Claude/ClaudeOrbView.swift b/mac/Muse/Views/Claude/ClaudeOrbView.swift
 new file mode 100644
-index 0000000..fd65df2
+index 0000000..56e26f7
 --- /dev/null
 +++ b/mac/Muse/Views/Claude/ClaudeOrbView.swift
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,123 @@
 +import AppKit
 +import MuseCore
 +import SwiftUI
 +
-+// Claude's orb (owner, 2026-11-12, second pass; plans/design/claude-panel/orb-states-*.png, orb-preview.mp4): our own
-+// design, a dark glass sphere with multicolour liquid light inside (MuseCore ClaudeOrbLiquid: four soft blobs added
-+// together, drifting on noise), an inner shadow, a thin rim and a soft halo. State and rhythm come from ClaudeOrb (real
-+// events only). Drawn with Canvas (gradients and plus-lighter blending, no blur filters) inside a TimelineView at the
-+// orb's own rate (12 fps idle or error, 30 at most), paused when nothing moves (Reduce Motion) or the window is hidden.
++// Claude's orb (owner, 2026-11-12, third pass; plans/design/claude-panel/orb-states.png, orb-small.png, orb-preview.mp4):
++// our own design, a luminous vortex. Light ribbons spiral round a bright core in 3D, white-hot with iridescent edges, a
++// faint Fresnel shimmer and a halo tinted by the ribbons; no disc, no rim. Drawn on the GPU by ClaudeOrb.metal
++// (SwiftUI colorEffect), with uniforms from MuseCore's ClaudeOrb (real events only) and ClaudeOrbShader. A TimelineView
++// redraws at the orb's own rate (12 fps idle or error, 30 at most) and pauses when nothing moves (Reduce Motion) or the
++// window is hidden.
 +
 +struct ClaudeOrbView: View {
 +    @Environment(\.theme) private var t
@@ -898,11 +1003,18 @@ index 0000000..fd65df2
 +        let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
 +        TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
 +            let time = ctx.date.timeIntervalSinceReferenceDate
-+            Canvas { g, sz in
-+                draw(&g, sz, orb: orb, time: time)
-+            }
++            let look = orb.look(at: time, reduceMotion: reduceMotion)
++            let state = orb.state(at: time)
++            let u = ClaudeOrbShader.uniforms(state, look: look, time: time, pulse: orb.pulse(at: time, reduceMotion: reduceMotion))
++            let phase = OrbPhase.shared.phase(at: time, look: look)
++            Rectangle()
++                .fill(.white)
++                .colorEffect(ShaderLibrary.claudeOrb(.float2(Float(size), Float(size)), .float(Float(ClaudeOrbShader.scale)), .float(Float(phase)),
++                                                     .float(Float(u.count)), .float(Float(u.bright)), .float(Float(u.align)), .float(Float(u.danger)),
++                                                     .float(Float(u.pulse)), .float(Float(u.breath)), .float(t.isDark ? 0 : 1)))
 +        }
 +        .frame(width: size, height: size)
++        .allowsHitTesting(false)
 +        .accessibilityElement()
 +        .accessibilityLabel(Self.words(orb.state(at: now)))
 +    }
@@ -916,58 +1028,10 @@ index 0000000..fd65df2
 +        case .error: "Claude ran into a problem"
 +        }
 +    }
-+
-+    private func draw(_ g: inout GraphicsContext, _ sz: CGSize, orb: ClaudeOrb, time: Double) {
-+        let look = orb.look(at: time, reduceMotion: reduceMotion)
-+        let glow = orb.glow(at: time, reduceMotion: reduceMotion)
-+        let pulse = look.flashes ? orb.pulse(at: time, reduceMotion: reduceMotion) : 0
-+        let phase = OrbPhase.shared.phase(at: time, look: look)
-+        let d = min(sz.width, sz.height)
-+        let inset = d * 0.16 // room for the halo
-+        let r = CGRect(x: inset, y: inset, width: d - 2 * inset, height: d - 2 * inset)
-+        let R = r.width / 2
-+        let c = CGPoint(x: r.midX, y: r.midY)
-+        let sphere = Path(ellipseIn: r)
-+
-+        // Halo (violet, or warm on error), breathing and flashing with the state.
-+        let halo = look.danger ? Color(red: 1, green: 0.35, blue: 0.24) : Color(red: 0.59, green: 0.43, blue: 1)
-+        g.fill(Path(ellipseIn: r.insetBy(dx: -R * 0.6, dy: -R * 0.6)),
-+               with: .radialGradient(Gradient(stops: [.init(color: halo.opacity(0.15 + 0.6 * glow), location: 0.5), .init(color: halo.opacity(0), location: 1)]),
-+                                     center: c, startRadius: 0, endRadius: R * 1.6))
-+
-+        // The dark glass, then the liquid: four soft blobs added together (overlaps brighten), clipped to the sphere.
-+        var inner = g
-+        inner.clip(to: sphere)
-+        inner.fill(sphere, with: .radialGradient(Gradient(colors: [Color(red: 0.09, green: 0.094, blue: 0.114), Color(red: 0.016, green: 0.016, blue: 0.024)]),
-+                                                 center: CGPoint(x: c.x, y: c.y + R * 0.25), startRadius: 0, endRadius: R * 1.05))
-+        inner.blendMode = .plusLighter
-+        for b in ClaudeOrbLiquid.blobs(phase: phase, time: time, look: look, pulse: pulse) {
-+            let col = Color(red: b.r, green: b.g, blue: b.b)
-+            let at = CGPoint(x: c.x + b.x * R, y: c.y + b.y * R)
-+            inner.fill(sphere, with: .radialGradient(Gradient(stops: [.init(color: col.opacity(b.alpha), location: 0),
-+                                                                     .init(color: col.opacity(b.alpha * 0.45), location: 0.45),
-+                                                                     .init(color: col.opacity(0), location: 1)]),
-+                                                     center: at, startRadius: 0, endRadius: b.radius * R))
-+        }
-+        inner.blendMode = .normal
-+        // It reads as a ball: an inner shadow at the edge and a soft highlight at the top.
-+        inner.fill(sphere, with: .radialGradient(Gradient(stops: [.init(color: .clear, location: 0.62), .init(color: .black.opacity(0.55), location: 1)]),
-+                                                 center: c, startRadius: 0, endRadius: R))
-+        let hi = CGPoint(x: c.x - R * 0.3, y: c.y - R * 0.55)
-+        inner.fill(sphere, with: .radialGradient(Gradient(colors: [.white.opacity(0.32), .clear]), center: hi, startRadius: 0, endRadius: R * 0.45))
-+
-+        // The thin bright glass rim.
-+        let w = max(0.75, R * 0.03)
-+        g.stroke(Path(ellipseIn: r.insetBy(dx: w / 2, dy: w / 2)),
-+                 with: .linearGradient(Gradient(stops: [.init(color: .white.opacity(0.55), location: 0), .init(color: .white.opacity(0.08), location: 0.5),
-+                                                        .init(color: .white.opacity(0.22), location: 1)]),
-+                                       startPoint: CGPoint(x: c.x, y: r.minY), endPoint: CGPoint(x: c.x, y: r.maxY)),
-+                 lineWidth: w)
-+    }
 +}
 +
-+/// The liquid's phase, shared by every orb and the panel's edge so they flow together. It only moves forward, at the
-+/// state's flow speed (ClaudeOrbLiquid.advance), so a state change never makes the liquid jump.
++/// The ribbons' phase, shared by every orb and the panel's edge so they turn together. It only moves forward, at the
++/// state's speed (ClaudeOrbShader.advance), so a state change never makes the ribbons jump.
 +@MainActor
 +final class OrbPhase {
 +    static let shared = OrbPhase()
@@ -975,7 +1039,7 @@ index 0000000..fd65df2
 +    private var last: Double?
 +
 +    func phase(at time: Double, look: ClaudeOrbLook) -> Double {
-+        if let l = last, time > l { value = ClaudeOrbLiquid.advance(value, by: time - l, look: look) }
++        if let l = last, time > l { value = ClaudeOrbShader.advance(value, by: time - l, look: look) }
 +        if last == nil || time > last! { last = time }
 +        return value
 +    }
@@ -1023,7 +1087,7 @@ index 0000000..fd65df2
 +            let look = orb.look(at: time, reduceMotion: reduceMotion)
 +            let e = orb.edge(at: time, reduceMotion: reduceMotion)
 +            // The orb's own colours flowing round the border (the same phase as the orb, so they move together).
-+            let hexes = look.danger ? ClaudeOrbLiquid.errorPalette : ClaudeOrbLiquid.palette
++            let hexes = look.danger ? ClaudeOrbShader.errorPalette : ClaudeOrbShader.palette
 +            let colors = (hexes + [hexes[0]]).map { h in Color(red: Double((h >> 16) & 0xFF) / 255, green: Double((h >> 8) & 0xFF) / 255, blue: Double(h & 0xFF) / 255) }
 +            let turn = Angle.degrees(OrbPhase.shared.phase(at: time, look: look) * 90)
 +            let flow = AngularGradient(colors: colors, center: .center, angle: turn)
@@ -1742,14 +1806,14 @@ index 52a35ca..11b5d06 100644
      }
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift
 new file mode 100644
-index 0000000..79c923a
+index 0000000..1b99abd
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift
 @@ -0,0 +1,161 @@
 +import Foundation
 +
 +// Claude's orb (owner, 2026-11-12; plans/design/claude-panel/orb-states-*.png): MUSE's own design, a small dark glass
-+// sphere with soft multicolour light flowing inside it (ClaudeOrbLiquid). It sits in the panel header, beside the reply being written,
++// vortex of light ribbons (ClaudeOrbShader, ClaudeOrb.metal). It sits in the panel header, beside the reply being written,
 +// in the activity strip, and floats over the app while Claude operates MUSE with the panel closed. The panel's edge
 +// glows in step with it. ONE state machine, fed only by real events (the chat stream, ui-control calls, cards, jobs),
 +// never by a timer of its own; the views read `look` and `pulse(at:)` and draw. Pure, so Android can port it as is.
@@ -1860,12 +1924,12 @@ index 0000000..79c923a
 +    public static func look(_ s: ClaudeOrbState, reduceMotion: Bool = false, typing: Bool = false) -> ClaudeOrbLook {
 +        var l: ClaudeOrbLook
 +        switch s {
-+        // swirl: the liquid's flow speed (phase per second); band: how bright the blobs are; glow: the halo.
-+        case .idle: l = ClaudeOrbLook(swirl: 0.12, band: 0.45, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
-+        case .thinking: l = ClaudeOrbLook(swirl: 0.65, band: 0.85, glow: 0.28, breath: 0, breathDepth: 0, sweep: false, flashes: true, danger: false, edge: 0.30)
-+        case .operating: l = ClaudeOrbLook(swirl: 0.45, band: 0.80, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
-+        case .waiting: l = ClaudeOrbLook(swirl: 0.10, band: 0.95, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
-+        case .error: l = ClaudeOrbLook(swirl: 0.06, band: 0.70, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
++        // swirl: the ribbons' turning speed (phase per second); band: their brightness; glow: the halo.
++        case .idle: l = ClaudeOrbLook(swirl: 0.25, band: 0.55, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
++        case .thinking: l = ClaudeOrbLook(swirl: 1.1, band: 1.0, glow: 0.28, breath: 0, breathDepth: 0, sweep: false, flashes: true, danger: false, edge: 0.30)
++        case .operating: l = ClaudeOrbLook(swirl: 0.9, band: 0.95, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
++        case .waiting: l = ClaudeOrbLook(swirl: 0.18, band: 1.1, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
++        case .error: l = ClaudeOrbLook(swirl: 0.12, band: 0.8, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
 +        }
 +        if reduceMotion { l.swirl = 0; l.breath = 0; l.breathDepth = 0; l.sweep = false; l.flashes = false }
 +        // While the person types, the edge stays calm: at most the idle glow, never pulsing.
@@ -1907,78 +1971,57 @@ index 0000000..79c923a
 +        return s == .idle || s == .error ? 12 : 30
 +    }
 +}
-diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbLiquid.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbLiquid.swift
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbShader.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbShader.swift
 new file mode 100644
-index 0000000..30119e0
+index 0000000..c0cc001
 --- /dev/null
-+++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbLiquid.swift
-@@ -0,0 +1,67 @@
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbShader.swift
+@@ -0,0 +1,46 @@
 +import Foundation
 +
-+// The orb's liquid (owner, 2026-11-12, second pass): inside the dark glass, four soft blobs of coloured light (magenta,
-+// violet, blue, a touch of cyan-green; the same in every theme) drift, swell and melt into each other, added together so
-+// overlaps brighten. Motion is value noise over a phase that only moves forward, so it never loops or circles. Pure maths:
-+// the Mac draws these blobs with Canvas, the review preview (design/direction/orb_preview.py) runs the same numbers in
-+// JavaScript, and Android can port it as is. The state machine (ClaudeOrb) decides how fast and how bright.
++// The orb's shader inputs (owner, 2026-11-12, third pass: a luminous vortex of light ribbons; the shader is
++// mac/Muse/Views/Claude/ClaudeOrb.metal, previewed by design/direction/orb_shader.py with the same numbers). ClaudeOrb
++// decides the state; this turns a state into the shader's uniforms. Pure, so Android can port it with the shader.
 +
-+public struct ClaudeOrbBlob: Hashable, Sendable {
-+    /// Centre, relative to the sphere's centre, in sphere radii (−1…1).
-+    public var x: Double
-+    public var y: Double
-+    /// Radius in sphere radii.
-+    public var radius: Double
-+    /// 0…1, multiplied into the colour.
-+    public var alpha: Double
-+    /// sRGB 0…1.
-+    public var r: Double, g: Double, b: Double
++public struct ClaudeOrbUniforms: Hashable, Sendable {
++    /// How many ribbons (1…4).
++    public var count: Double
++    /// Their brightness.
++    public var bright: Double
++    /// 0: each ribbon in its own tilted plane; 1: aligned, sweeping one way (operating).
++    public var align: Double
++    /// 0…1: the iridescent palette → red and orange (error).
++    public var danger: Double
++    /// 0…1: the last chunk or action (the ribbons brighten and widen).
++    public var pulse: Double
++    /// 0…1: the breath (dims a little at its low point).
++    public var breath: Double
 +}
 +
-+public enum ClaudeOrbLiquid {
-+    /// Magenta, violet, blue, cyan-green (sRGB hex), and the error palette (red and orange).
++public enum ClaudeOrbShader {
++    /// The ribbons' colours (magenta, violet, blue, cyan) and the error ones (red, orange): the panel's edge uses them too.
 +    public static let palette: [UInt32] = [0xFF3DA8, 0x8E5BFF, 0x3B82FF, 0x2FE0C0]
 +    public static let errorPalette: [UInt32] = [0xFF4D3D, 0xFF8A2B, 0xD9302B, 0xFFB347]
 +
-+    /// The phase moves at the state's flow speed (`look.swirl`): call each frame with the time since the last.
++    /// The orb fills 1/scale of its frame; the rest is room for the halo.
++    public static let scale = 1.4
++
++    /// The phase moves at the state's flow speed (`look.swirl`) and never jumps (a stalled frame counts at most 0.25 s).
 +    public static func advance(_ phase: Double, by dt: Double, look: ClaudeOrbLook) -> Double {
-+        phase + max(0, min(dt, 0.25)) * max(0.02, look.swirl)
++        phase + max(0, min(dt, 0.25)) * look.swirl
 +    }
 +
-+    /// The four blobs at `phase`. `pulse` (0…1, the last chunk/action) swells them; `time` drives the operating sweep.
-+    public static func blobs(phase: Double, time: Double, look: ClaudeOrbLook, pulse: Double) -> [ClaudeOrbBlob] {
-+        let colors = look.danger ? errorPalette : palette
-+        let sweepAt = (time * 0.45).truncatingRemainder(dividingBy: 1) * 2.6 - 1.3
-+        return (0..<4).map { i in
-+            let s = Double(i) * 17.0
-+            var x = 0.6 * noise(s + 1, phase * 0.9)
-+            var y = 0.6 * noise(s + 5, phase * 0.75)
-+            if look.sweep {
-+                // Operating: the blobs stream across the glass, left to right, in a loose line.
-+                let lane = (Double(i) - 1.5) / 1.5
-+                x = mix(x, sweepAt + 0.35 * lane, 0.65)
-+                y = mix(y, 0.25 * lane, 0.4)
-+            }
-+            let swell = 0.18 * pulse
-+            let radius = 0.62 + 0.18 * noise(s + 9, phase * 0.6) + swell
-+            let alpha = min(0.9, look.band * (0.6 + 0.25 * noise(s + 13, phase * 0.5)) + 0.18 * pulse)
-+            let c = colors[i]
-+            return ClaudeOrbBlob(x: x, y: y, radius: radius, alpha: max(0, alpha),
-+                                 r: Double((c >> 16) & 0xFF) / 255, g: Double((c >> 8) & 0xFF) / 255, b: Double(c & 0xFF) / 255)
++    /// The uniforms for a state at `time`, with the pulse (`ClaudeOrb.pulse(at:)`).
++    public static func uniforms(_ s: ClaudeOrbState, look: ClaudeOrbLook, time: Double, pulse: Double) -> ClaudeOrbUniforms {
++        let breath = look.breath > 0 ? 0.5 - 0.5 * cos(2 * .pi * time / look.breath) : 0
++        switch s {
++        case .idle: return ClaudeOrbUniforms(count: 2, bright: 0.55, align: 0, danger: 0, pulse: 0, breath: breath)
++        case .thinking: return ClaudeOrbUniforms(count: 4, bright: 1.0, align: 0, danger: 0, pulse: pulse, breath: 0)
++        case .operating: return ClaudeOrbUniforms(count: 4, bright: 0.95, align: 1, danger: 0, pulse: pulse, breath: 0)
++        case .waiting: return ClaudeOrbUniforms(count: 1, bright: 1.1, align: 0, danger: 0, pulse: 0, breath: breath)
++        case .error: return ClaudeOrbUniforms(count: 3, bright: 0.8, align: 0, danger: 1, pulse: 0, breath: 0)
 +        }
 +    }
-+
-+    /// Smooth 1-D value noise in −1…1 (hashed lattice values, smoothstep between them): drifts without repeating.
-+    public static func noise(_ seed: Double, _ x: Double) -> Double {
-+        let i = floor(x), f = x - i
-+        let u = f * f * (3 - 2 * f)
-+        return mix(lattice(seed, i), lattice(seed, i + 1), u)
-+    }
-+
-+    static func lattice(_ seed: Double, _ i: Double) -> Double {
-+        let v = sin(i * 127.1 + seed * 311.7) * 43758.5453
-+        return (v - floor(v)) * 2 - 1
-+    }
-+
-+    static func mix(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift
 index dbfcf1a..85941fc 100644
@@ -2070,10 +2113,10 @@ index e457bb6..05f1617 100644
              let all = shown.joined(separator: "\n")
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
 new file mode 100644
-index 0000000..c92b1b7
+index 0000000..28a091f
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,222 @@
 +import XCTest
 +@testable import MuseCore
 +
@@ -2246,36 +2289,26 @@ index 0000000..c92b1b7
 +    }
 +}
 +
-+final class ClaudeOrbLiquidTests: XCTestCase {
-+    func testBlobsDriftWithoutLoopingAndStayInTheGlass() {
-+        let look = ClaudeOrb.look(.thinking)
-+        var seen: [Double] = []
-+        var phase = 0.0
-+        for k in 0..<600 {
-+            phase = ClaudeOrbLiquid.advance(phase, by: 1.0 / 30, look: look)
-+            let b = ClaudeOrbLiquid.blobs(phase: phase, time: Double(k) / 30, look: look, pulse: 0)
-+            XCTAssertEqual(b.count, 4)
-+            for x in b { XCTAssertLessThanOrEqual(abs(x.x), 0.61); XCTAssertLessThanOrEqual(abs(x.y), 0.61); XCTAssertGreaterThan(x.radius, 0.4) }
-+            seen.append(b[0].x)
-+        }
-+        // Moves smoothly (no jumps between frames) and does not come back to the same path (no loop).
-+        for (a, b) in zip(seen, seen.dropFirst()) { XCTAssertLessThan(abs(a - b), 0.05) }
-+        XCTAssertNotEqual(Array(seen[0..<60]), Array(seen[300..<360]))
-+    }
-+
-+    func testStatesChangeTheLiquid() {
-+        let quiet = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 0)
-+        let chunk = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 1)
-+        for (a, b) in zip(quiet, chunk) { XCTAssertGreaterThan(b.radius, a.radius) } // a streamed chunk swells them
-+        let err = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.error), pulse: 0)
-+        XCTAssertTrue(err.allSatisfy { $0.r > $0.b }) // red and orange
++final class ClaudeOrbShaderTests: XCTestCase {
++    func testStatesBecomeTheShadersRibbons() {
++        func u(_ s: ClaudeOrbState, pulse: Double = 0) -> ClaudeOrbUniforms { ClaudeOrbShader.uniforms(s, look: ClaudeOrb.look(s), time: 1, pulse: pulse) }
++        XCTAssertEqual(u(.idle).count, 2)
++        XCTAssertEqual(u(.thinking).count, 4)
++        XCTAssertEqual(u(.waiting).count, 1)
++        XCTAssertEqual(u(.operating).align, 1) // aligned, sweeping one way
++        XCTAssertEqual(u(.error).danger, 1)
++        XCTAssertEqual(u(.thinking, pulse: 0.7).pulse, 0.7) // chunks brighten the ribbons
++        XCTAssertEqual(u(.idle, pulse: 0.7).pulse, 0) // idle never flashes
++        XCTAssertLessThan(u(.idle).bright, u(.thinking).bright)
 +        XCTAssertGreaterThan(ClaudeOrb.look(.thinking).swirl, ClaudeOrb.look(.idle).swirl)
 +        XCTAssertLessThan(ClaudeOrb.look(.error).swirl, ClaudeOrb.look(.idle).swirl) // error slows down
-+        // Operating: the blobs stream one way across the glass as time moves.
-+        let a = ClaudeOrbLiquid.blobs(phase: 1, time: 0.2, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
-+        let b = ClaudeOrbLiquid.blobs(phase: 1, time: 1.0, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
-+        XCTAssertGreaterThan(b, a)
-+        XCTAssertEqual(ClaudeOrbLiquid.advance(5, by: 1, look: ClaudeOrb.look(.idle)), 5 + 0.25 * 0.12, accuracy: 1e-9) // a stall never jumps
++    }
++
++    func testPhaseOnlyMovesForwardAndNeverJumps() {
++        let look = ClaudeOrb.look(.thinking)
++        XCTAssertEqual(ClaudeOrbShader.advance(5, by: 1, look: look), 5 + 0.25 * look.swirl, accuracy: 1e-9) // a stall
++        XCTAssertEqual(ClaudeOrbShader.advance(5, by: -1, look: look), 5)
++        XCTAssertEqual(ClaudeOrbShader.advance(5, by: 0.1, look: ClaudeOrb.look(.idle, reduceMotion: true)), 5) // Reduce Motion: still
 +    }
 +}
 +
