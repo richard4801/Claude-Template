@@ -385,6 +385,7 @@ extension EditSuiteState {
         guard let d = project.asset(original)?.durationSec ?? target.durationSec, let next = E.reverseClip(c, reversed: target.id, durationSec: d) else { return nil }
         var dropped: [String] = []
         if c.alphaMatte != nil { dropped.append("background removal") }
+        if c.layers != nil { dropped.append("layers") }
         if c.audioAsset != nil { dropped.append("the separate sound") }
         let ok = apply { p in p.addingAsset(target).updating(c.id) { $0 = .video(next) } }
         return ok ? dropped : nil
@@ -432,7 +433,7 @@ extension EditSuiteState {
         guard let c = selectedVideo else { return nil }
         let on = target.derivedFrom?.kind == .stabilize
         let next = E.deriveClip(c, copy: target.id, op: on ? .stabilize : nil)
-        let dropped = on && c.alphaMatte != nil ? ["background removal"] : []
+        let dropped = on ? (c.alphaMatte != nil ? ["background removal"] : []) + (c.layers != nil ? ["layers"] : []) : []
         let ok = apply { p in p.addingAsset(target).updating(c.id) { $0 = .video(next) } }
         return ok ? dropped : nil
     }

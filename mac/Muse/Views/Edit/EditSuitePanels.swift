@@ -34,6 +34,8 @@ struct VideoPanels: View {
             }
             if session.state.clipsHere.count >= 2 { SplitScreenPanel(session: session) }
             if session.state.selectedIsMain { BackgroundPanel(session: session) }
+            // Layers (plans/layers-edit.md): main clips only.
+            if session.state.selectedIsMain, let c = session.state.selectedVideo, c.holdSec == nil { LayersPanel(session: session, clip: c) }
             if session.state.selectedItem?.textItem == nil {
                 LooksPanel(session: session, visual: v)
                 AdjustPanel(session: session, visual: v)

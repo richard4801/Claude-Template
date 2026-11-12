@@ -46,7 +46,7 @@ extension FakeMuseAPI {
     /// A run that would cost money on the server (not the free passes).
     private func isPaid(_ req: EditorJobRequest) -> Bool {
         switch req.kind {
-        case .captions, .matte, .slowmo, .translate, .separate, .cutout: return true
+        case .captions, .matte, .slowmo, .translate, .separate, .cutout, .layers: return true
         case .denoise: return req.options?.analyzeOnly != true
         case .cuts, .beats, .reverse, .stabilize: return false
         }
@@ -117,6 +117,14 @@ extension FakeMuseAPI {
         }
         if req.kind == .stabilize && d > 180 { throw ApiError("bad_request", "Stabilise works on videos up to 3 minutes") }
         if req.kind == .matte && d > 120 { throw ApiError("bad_request", "Background removal works on videos up to 2 minutes") }
+        if req.kind == .layers {
+            if d > EditSuite.layersMaxSec + 0.05 { throw ApiError("bad_request", "Layers work on clips up to 60 s · trim it first") }
+            if let problem = EditSuite.layerObjectsProblem(req.options?.objects ?? [], sourceSec: d) { throw ApiError("bad_request", problem) }
+            // Above $1 a clip the owner says yes to the price first (server: 409 price_confirm).
+            if editorPriceUsd > EditSuite.layersAskAboveUsd && (req.acceptUsd ?? 0) < editorPriceUsd - 1e-9 {
+                throw ApiError("price_confirm", "Finding these layers costs $\(String(format: "%.2f", editorPriceUsd)) · confirm to go ahead")
+            }
+        }
         // Tap to keep: the points are checked before anything starts (as the server does before it holds).
         if req.kind == .matte, let pts = req.options?.points, let problem = EditSuite.keepPointsProblem(pts, sourceSec: d) {
             throw ApiError("bad_request", problem)
@@ -135,6 +143,7 @@ extension FakeMuseAPI {
         case .translate: phase = "Translating"
         case .separate: phase = "Separating"
         case .cutout: phase = "Cutting out"
+        case .layers: phase = "Finding layers"
         }
         let job = EditorJob(id: id, kind: req.kind, state: "running", progress: 5, phase: phase, estimateUsd: 0, costUsd: 0)
         editorJobs[id] = job
@@ -186,6 +195,11 @@ extension FakeMuseAPI {
             // The demo hands back the source's sound as both parts.
             r.vocals = EditorResultAsset(kind: "audio", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
             r.instrumental = EditorResultAsset(kind: "audio", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
+        case .layers:
+            // The demo hands back the source itself as every matte (so its light is the alpha), each seen in the whole frame.
+            let boxes: [[Double]?] = Array(repeating: [0, 0, 1, 1], count: max(1, Int((d * 5).rounded(.down)) + 1))
+            r.layers = (req.options?.objects ?? []).map { LayerResult(name: $0.name, asset: EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: d),
+                                                                       track: EditV2.LayerTrack(fps: 5, boxes: boxes)) }
         case .cutout:
             // The demo hands back the picture itself, its whole frame as the box.
             r.asset = EditorResultAsset(kind: "image", upload: req.source.uploadId, take: req.source.takeId, width: 1000, height: 1000)

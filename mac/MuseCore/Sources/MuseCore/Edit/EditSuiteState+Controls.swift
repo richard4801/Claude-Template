@@ -521,6 +521,7 @@ extension EditSuiteState {
             guard var q = p.removing(id) else { return nil }
             c.startSec = E.r6(span.startSec)
             c.transitionIn = nil
+            E.dropLayers(&c)   // layers are on main clips only
             for t in q.tracks where t.kind == .video {
                 if let r = q.adding(.video(c), toTrack: t.id) { return r }
             }
