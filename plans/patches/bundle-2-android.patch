@@ -1,0 +1,259 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt
+index 27c0ebb6..c5acb3ae 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakePrompts.kt
+@@ -41,7 +41,7 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
+         val text = req.text ?: view(e).current
+         validate(e, text)?.let { throw ApiException("prompt_invalid", it) }
+         val lib = { k: String -> if (k == e.key) text else text(k) }
+-        val values = SAMPLE + mapOf("style" to lib("style.house"), "never" to neverList(SAMPLE_ID, lib).joinToString(", "))
++        val values = SAMPLE + mapOf("style" to houseStyle(lib), "never" to neverList(SAMPLE_ID, lib).joinToString(", "))
+         val rendered = when (e.kind) {
+             "list" -> items(text, ",").joinToString(", ")
+             "lines" -> items(text, "\n").joinToString("\n")
+@@ -81,6 +81,13 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
+     }
+ 
+     companion object {
++        /**
++         * The house style (server prompt/library.ts, split 2026-11-11): Camera feel then Realism. The demo has no rigs, so
++         * Camera feel is always on (the server leaves it out when a rig or preset sets its own camera, lens, grade or look).
++         */
++        fun houseStyle(library: (String) -> String): String =
++            listOf(library("style.camera"), library("style.realism")).map { it.trim().trimEnd('.', ',', ';', ' ') }.filter { it.isNotEmpty() }.joinToString(", ")
++
+         private val PH = Regex("\\{([A-Za-z][A-Za-z0-9]*)\\}")
+         /** The server's default library (the same file the server checks is current). */
+         val DEFAULTS: PromptLibrary by lazy {
+@@ -176,7 +183,7 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
+             val lines = sent.map { referenceLine(it, library) }.iterator()
+             return slots.mapNotNull { s ->
+                 when (s.layer) {
+-                    Layer.STYLE.key -> s.copy(text = fill(library("shoot.style"), mapOf("style" to library("style.house"))))
++                    Layer.STYLE.key -> s.copy(text = fill(library("shoot.style"), mapOf("style" to houseStyle(library))))
+                     Layer.NEGATIVE.key -> s.copy(text = fill(library("shoot.never"), mapOf("never" to neverList(identity, library).joinToString(", "))))
+                     Layer.REFERENCE.key -> s.copy(text = if (lines.hasNext()) lines.next() else s.text)
+                     else -> s
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+index 3245de6a..312a084a 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+@@ -376,6 +376,10 @@ data class SuiteShotRequest(
+     val camera: JsonElement? = null,
+     val clipId: String? = null,
+     val keepAudio: Boolean? = null,
++    /** Swap / Recast background: null = Keep; "describe" = the prompt's words set the new place (Auto then runs Genjutsu Light). */
++    val background: String? = null,
++    /** background "photo": the new background picture (a studio location or an upload). */
++    val backgroundImage: ImageRef? = null,
+     /** "Grade the take with this look" (default on at the server). */
+     val gradeLook: Boolean? = null,
+     /** Input slots (InputSlots.kt): start / middle / end frames and references, only those the tier takes. */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
+index d439c3a7..8e5faef5 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
+@@ -69,7 +69,16 @@ data class RecastDraft(
+     val quality: String = "standard",
+     val keepAudio: Boolean = true,
+     val takes: Int = 1,
++    /** Background (one person only): "keep" (the clip's place), "photo" ([backgroundImage]) or "describe" ([place] sets the new place). */
++    val background: String = "keep",
++    val place: String = "",
++    val backgroundImage: studio.muse.app.data.ImageRef? = null,
++    val backgroundName: String = "",
+ ) {
++    /** Describe it applies to a one-person swap. */
++    val describing: Boolean get() = background == "describe" && people.size == 1
++    /** New photo, with its picture chosen, on a one-person swap. */
++    val newPhoto: Boolean get() = background == "photo" && people.size == 1 && backgroundImage != null
+     val canAdd: Boolean get() = people.size < SuiteRules.MAX_CAST
+     /** Room for one more under the catalog's `recastMaxPeople`. */
+     fun canAdd(max: Int): Boolean = people.size < max.coerceIn(1, SuiteRules.MAX_CAST)
+@@ -117,6 +126,8 @@ data class RecastDraft(
+             clipId == null -> "Choose the source clip"
+             people.any { it.characterId == null } -> "Pick who each person becomes"
+             people.any { it.cropping } -> "Waiting for the face upload"
++            describing && place.isBlank() -> "Describe the new place"
++            background == "photo" && people.size == 1 && backgroundImage == null -> "Pick the new background"
+             loose.map { it.hint }.toSet().size != loose.size -> "Two people point at the same spot"
+             else -> null
+         }
+@@ -124,6 +135,8 @@ data class RecastDraft(
+ 
+     fun request(): SuiteShotRequest = SuiteShotRequest(
+         mode = "recast", clipId = clipId, quality = quality, keepAudio = keepAudio, takes = takes,
++        background = when { describing -> "describe"; newPhoto -> "photo"; else -> null }, backgroundImage = if (newPhoto) backgroundImage else null,
++        prompt = if (describing) place.trim().take(500) else "",
+         cast = people.mapNotNull { p ->
+             p.characterId?.let { SuiteCastMember(it, p.outfitId, personHint = p.hint, speaking = if (people.size == 1 && p.speaking == null) null else p.speaking, faceCrop = p.faceCrop) }
+         },
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index c85a8c6b..e733a308 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -379,6 +379,16 @@ fun SuiteComposerScreen(toolId: String? = null) {
+                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
+                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
+                     onUploadVideo = { open(null); pickExtendUpload(ToolSlots.EXTEND_VIDEO) },
++                    locations = locations,
++                    onUploadBackground = { uri ->
++                        scope.launch {
++                            val media = c.media ?: return@launch c.repo.toast("Couldn't read that picture")
++                            val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that picture")
++                            val (ref, err) = c.repo.attemptInline { uploadImage("background.jpg", bytes, media.mime(uri).takeIf { it.startsWith("image/") } ?: "image/jpeg") }
++                            if (ref != null) store.recast.update { it.copy(background = "photo", backgroundImage = ref, backgroundName = "Uploaded picture") }
++                            if (err != null) c.repo.toast(err)
++                        }
++                    },
+                     onCreateLocation = { name, uri ->
+                         scope.launch {
+                             val media = c.media ?: return@launch c.repo.toast("Couldn't read that photo")
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
+index 995aa934..041d7051 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
+@@ -99,6 +99,9 @@ class SheetContext(
+     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
+     /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
+     val onCreateLocation: (String, android.net.Uri) -> Unit = { _, _ -> },
++    /** Swap's Background → New photo: the studio's locations (the library) and an uploaded picture. */
++    val locations: List<studio.muse.app.data.SuiteLocation> = emptyList(),
++    val onUploadBackground: (android.net.Uri) -> Unit = {},
+     /** Extend's VIDEO picker: the studio's takes that can be extended, the key in the slot now, and the two ways to fill it. */
+     val takes: List<studio.muse.app.data.Take> = emptyList(),
+     val extendKey: String? = null,
+@@ -615,6 +618,37 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
+         if (r.canAdd(max)) Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).border(1.dp, m.t.line, RoundedCornerShape(25.dp)).press { x.updateRecast { it.add() }; active = r.people.size }, contentAlignment = Alignment.Center) {
+             T("Add a person", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
+         }
++        if (r.people.size == 1) {
++            Row(verticalAlignment = Alignment.CenterVertically) {
++                T("Background", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f))
++                MiniSeg(listOf("keep" to "Keep", "photo" to "New photo", "describe" to "Describe it"), r.background) { k -> x.updateRecast { it.copy(background = k) } }
++            }
++            if (r.background == "photo") {
++                val upload = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { u -> if (u != null) x.onUploadBackground(u) }
++                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
++                    items(x.locations.size) { i ->
++                        val loc = x.locations[i]
++                        val on = r.backgroundImage == loc.image
++                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).border(if (on) 2.dp else 1.dp, if (on) m.t.accent else m.t.line, RoundedCornerShape(10.dp))
++                            .press { x.updateRecast { it.copy(backgroundImage = loc.image, backgroundName = loc.name) } }.semantics { role = Role.Button; contentDescription = "Background · ${loc.name}" }) {
++                            RefImage(loc.image, Modifier.size(72.dp))
++                        }
++                    }
++                    item {
++                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).background(m.t.surface2).press { upload.launch("image/*") }
++                            .semantics { role = Role.Button; contentDescription = "Upload a picture" }, contentAlignment = Alignment.Center) { SIc("image", 20.dp, m.t.muted) }
++                    }
++                }
++                T(if (r.backgroundImage == null) "Pick a saved location or upload a picture" else "New background: ${r.backgroundName.ifBlank { "your picture" }}", m.type.body.copy(fontSize = 12.sp), m.t.muted)
++            }
++            if (r.background == "describe") {
++                Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface2).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
++                    androidx.compose.foundation.text.BasicTextField(r.place, { v -> x.updateRecast { it.copy(place = v.take(500)) } }, Modifier.fillMaxWidth().semantics { contentDescription = "New place" },
++                        textStyle = m.type.body.copy(fontSize = 15.sp, color = m.t.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.t.accent),
++                        decorationBox = { inner -> if (r.place.isEmpty()) T("Same moves, on a rooftop at night…", m.type.body.copy(fontSize = 15.sp), m.t.muted); inner() })
++                }
++            }
++        }
+         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).press { x.updateRecast { it.copy(keepAudio = !it.keepAudio) } }, verticalAlignment = Alignment.CenterVertically) {
+             Column(Modifier.weight(1f)) {
+                 T("Keep the clip's audio", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
+diff --git a/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt b/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt
+index be714ed5..5517a746 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/PromptScriptsTest.kt
+@@ -92,7 +92,7 @@ class PromptScriptsTest {
+ 
+     @Test fun httpParsesTheScriptsListGetSaveResetAndPreview() = runBlocking {
+         val list = api.listPromptScripts()
+-        assertEquals(14, list.scripts.size) // 11 (dressup removed) + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1)
++        assertEquals(15, list.scripts.size) // 11 (dressup removed) + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1) + House style (2026-11-11)
+         assertTrue(list.ops.first { it.id == "in" }.types == listOf("enum"))
+         assertEquals("Video", list.groups.first { it.id == "video" }.label)
+         val v = list.scripts.first { it.id == "video.replicate" }
+@@ -188,7 +188,7 @@ class PromptScriptsTest {
+         val p = api.previewPromptScript("refs.collage", null)
+         assertEquals(listOf("panel.outfit", "panel.ref", "sheet"), p.fired)
+         assertEquals("The input image is a reference sheet of numbered panels (\"image N\" below means panel N): panels 1–3 show the person (use her face, hair " +
+-            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing only; create one new photo, not a collage.", p.text)
++            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing and the look & colour and the scene only; create one new photo, not a collage.", p.text)
+         // Item fields are offered (and validated) for a rule in a per-item value slot.
+         val s = api.getPromptScript("refs.collage")
+         assertTrue(ScriptText.inputsFor(s, "@panels").any { it.first == "item.role" })
+diff --git a/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt b/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
+index 91142f1a..3342651f 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/RealApiContractTest.kt
+@@ -196,16 +196,16 @@ class RealApiContractTest {
+         val tplPv = member.previewShoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, templateId = mirror.id, shuffleSeed = 5, refs = refReq.refs))
+         assertTrue(tplPv.slots.map { it.layer }.toString(), tplPv.slots.any { it.layer == "reference" } && tplPv.refs.single().index != null)
+         expectCode("owner_only") { member.prompts() }
+-        expectCode("owner_only") { member.savePrompt("style.house", "x") }
++        expectCode("owner_only") { member.savePrompt("style.realism", "x") }
+         val lib = owner.prompts()
+         assertTrue("${lib.prompts.size} prompts", lib.prompts.size >= 52)
+         assertEquals(lib.prompts.size, lib.prompts.map { it.key }.toSet().size)
+         assertEquals("References", lib.groups[1].label)
+         expectCode("prompt_invalid") { owner.savePrompt("refs.pose", "no number") }
+-        assertTrue(owner.savePrompt("style.house", "HOUSE X").overridden)
+-        assertTrue(member.previewShoot(refReq).text.contains("Style: HOUSE X."))
++        assertTrue(owner.savePrompt("style.realism", "HOUSE X").overridden)
++        assertTrue(member.previewShoot(refReq).text.contains("Style: realistic smartphone photo, HOUSE X."))
+         assertTrue(owner.previewPrompt(studio.muse.app.data.PromptPreviewRequest("refs.look", "Look like image {refIndex}.")).text.startsWith("Look like image "))
+-        assertEquals(false, owner.resetPrompt("style.house").overridden)
++        assertEquals(false, owner.resetPrompt("style.realism").overridden)
+         val draft = member.templateDraft(plain.id)
+         assertTrue(draft.variationPool.getValue("pose").isNotEmpty())
+         val mine = member.createTemplate(CreateTemplateRequest("My mirror", listOf("Selfie"), variationPool = draft.variationPool + ("expression" to listOf("soft smile")), fromShotId = plain.id))
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt b/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
+index eb13270b..8f4374c3 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ScreenshotTest.kt
+@@ -141,7 +141,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
+             "templates_mine" -> c.drafts.templateFilter.value = studio.muse.app.data.TemplateFilter(tab = "mine")
+             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
+             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
+-            "prompts" -> runBlocking { fake.savePrompt("style.house", "realistic phone photo, visible skin texture, true colour, no filter") }
++            "prompts" -> runBlocking { fake.savePrompt("style.realism", "visible skin texture, true colour, no filter") }
+             "prompt_edit" -> runBlocking { fake.savePrompt("refs.pose", "Copy the pose and framing from image {refIndex}, but keep her own hands.") }
+             "warm_confirm" -> c.warmUi.confirm()
+             "quality_draft" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)) }
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt b/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
+index fcf1f9e5..e2e22def 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ShootReferencesTest.kt
+@@ -105,11 +105,11 @@ class ShootReferencesTest {
+         val req = ShootDraft(refs = listOf(ref("c_front", "look"))).request(SampleData.DEMO, SampleData.GREEN)
+         val before = api.previewShoot(req).text
+         assertTrue(before.contains("Style: ${PromptEngine.HOUSE_STYLE}."))
+-        api.savePrompt("style.house", "HOUSE X")
++        api.savePrompt("style.realism", "HOUSE X")
+         api.savePrompt("refs.look", "Match the colours of image {refIndex}.")
+         api.savePrompt("never.base", "logos, stickers")
+         val after = api.previewShoot(req)
+-        assertTrue(after.text, after.text.contains("Style: HOUSE X."))
++        assertTrue(after.text, after.text.contains("Style: realistic smartphone photo, HOUSE X."))
+         assertEquals("Match the colours of image 7. Do not take the face, body, hair or clothes from image 7.", after.slots.single { it.layer == "reference" }.text)
+         assertTrue(after.text, after.text.contains("Never add: ") && after.text.contains("logos, stickers.") && !after.text.contains("warped jewellery"))
+         // The editor's preview: this entry with sample values, and the whole prompt it's part of.
+@@ -118,7 +118,7 @@ class ShootReferencesTest {
+         assertTrue(pv.example, pv.example.startsWith("Demo model: ") && pv.example.contains("Pose like image 8. Match the colours of image 8."))
+         assertTrue(api.previewPrompt(PromptPreviewRequest("shoot.scene", "Somewhere: {scene}.")).example.contains("\nSomewhere: rooftop · golden hour.\n"))
+         // Defaults again: the same text as the app's own engine.
+-        listOf("style.house", "refs.look", "never.base").forEach { api.resetPrompt(it) }
++        listOf("style.realism", "refs.look", "never.base").forEach { api.resetPrompt(it) }
+         assertEquals(FakePromptLibrary.shootPreview(FakeMuseApi.identity(SampleData.models().first()), "Green set", req, studio.muse.core.PhotoPrices()).text,
+             api.previewShoot(req).text)
+     }
+@@ -139,7 +139,7 @@ class ShootReferencesTest {
+         assertTrue(saved.overridden); assertEquals("Location: {scene}!", saved.current)
+         assertEquals("Location: rooftop · golden hour!", api.previewPrompt(PromptPreviewRequest("shoot.scene")).text)
+         assertFalse(api.resetPrompt("shoot.scene").overridden)
+-        assertFalse(api.savePrompt("style.house", lib.prompts.first { it.key == "style.house" }.default).overridden)
++        assertFalse(api.savePrompt("style.realism", lib.prompts.first { it.key == "style.realism" }.default).overridden)
+     }
+ }
+ 

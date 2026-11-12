@@ -1,0 +1,275 @@
+diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
+index 8c82e483..146a0bb9 100644
+--- a/mac/Muse/App/AppStore+Suite.swift
++++ b/mac/Muse/App/AppStore+Suite.swift
+@@ -91,6 +91,25 @@ extension ComposerTool {
+ 
+ enum SwapKind: String { case swap, recast }
+ 
++/// Swap's Background pill: Keep (the clip's place), New photo (a studio location or an upload), Describe it (the prompt's words).
++enum SwapBackground: String, CaseIterable, Equatable {
++    case keep, photo, describe
++    var label: String {
++        switch self {
++        case .keep: return "Keep"
++        case .photo: return "New photo"
++        case .describe: return "Describe it"
++        }
++    }
++    /// What the request sends (nil = the server's default, Keep).
++    var value: String? { self == .keep ? nil : rawValue }
++}
++
++/// One choice of the Background pill's list.
++enum SwapBackgroundPick: Hashable {
++    case keep, describe, location(String), upload
++}
++
+ /// Character swap and Recast (tools of the composer).
+ struct SwapDraft: Equatable {
+     var kind: SwapKind = .swap
+@@ -99,6 +118,11 @@ struct SwapDraft: Equatable {
+     var quality = "standard"
+     var keepAudio = true
+     var speaking: ComposerSpeaking = .auto
++    /// Background: keep (the clip's place) or describe (the prompt's words set the new place; Auto then runs Genjutsu Light).
++    var background: SwapBackground = .keep
++    /// New photo: the picture and its name (a location's, or the uploaded file's).
++    var backgroundImage: ImageRef?
++    var backgroundName: String?
+     /// The prompt sits behind a toggle (off by default).
+     var promptOn = false
+     /// Swap's add-ons (they stay add-ons: Edit, Fast · beta), off = the ladder.
+@@ -610,7 +634,8 @@ extension AppStore {
+         case .swap:
+             guard let m = d.modelId else { return nil }
+             var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
+-                                prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
++                                prompt: d.promptOn || d.background == .describe ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
++            applySwapBackground(&r, d)
+             applyLook(&r)
+             applyEnginePick(&r, .swap) // the owner's model (WS6)
+             if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
+@@ -622,13 +647,50 @@ extension AppStore {
+         case .recast:
+             guard !d.cast.isEmpty else { return nil }
+             let cast = RecastFaces.resolveClashes(d.cast, faces: d.people.map(\.face))
+-            var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
++            var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)",
++                                       prompt: d.background == .describe ? suite.composer.tokens.promptText() : "")
++            if cast.count == 1 { applySwapBackground(&r, d) } // a new background is a one-person swap
+             applyLook(&r)
+             applyEnginePick(&r, .recast) // the owner's model (WS6)
+             return r
+         }
+     }
+ 
++    /// Background: Keep sends nothing; New photo sends its picture (none picked yet = Keep); Describe it sends the words.
++    private func applySwapBackground(_ r: inout ShotRequest, _ d: SwapDraft) {
++        switch d.background {
++        case .keep: r.background = nil
++        case .describe: r.background = "describe"
++        case .photo:
++            guard let img = d.backgroundImage else { r.background = nil; return }
++            r.background = "photo"
++            r.backgroundImage = img
++        }
++    }
++
++    /// The Background pill's choice: a studio location or an uploaded picture makes it New photo.
++    func pickSwapBackground(_ p: SwapBackgroundPick) {
++        switch p {
++        case .keep: suite.swap.background = .keep
++        case .describe:
++            suite.swap.background = .describe
++            suite.swap.promptOn = true // the words set the new place
++        case .location(let id):
++            guard let loc = suite.locations.first(where: { $0.id == id }) else { return }
++            suite.swap.background = .photo
++            suite.swap.backgroundImage = loc.image
++            suite.swap.backgroundName = loc.name
++        case .upload:
++            guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use as the new background").first(where: MediaImport.isImage) else { return }
++            perform { [self] in
++                let ref = try await uploadImage(url)
++                suite.swap.background = .photo
++                suite.swap.backgroundImage = ref
++                suite.swap.backgroundName = url.deletingPathExtension().lastPathComponent
++            }
++        }
++    }
++
+     /// Swap and Recast show only the Look chip: camera and light come from the clip.
+     private func applyLook(_ r: inout ShotRequest) {
+         let look = suite.composer.settings
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
+index ed18ff6b..f1bc0cb9 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
+@@ -98,6 +98,24 @@ struct ComposerBottomBar: View {
+             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pricing") } }
+     }
+ 
++    /// Background pill: Keep, the studio's locations and an upload (New photo), Describe it.
++    private var backgroundOptions: [(String, SwapBackgroundPick)] {
++        [("Keep", .keep)] + store.suite.locations.map { ("New photo · \($0.name)", .location($0.id)) } + [("New photo · Upload a picture…", .upload), ("Describe it", .describe)]
++    }
++    private var backgroundSelected: SwapBackgroundPick {
++        let d = store.suite.swap
++        switch d.background {
++        case .keep: return .keep
++        case .describe: return .describe
++        case .photo: return store.suite.locations.first(where: { $0.image == d.backgroundImage }).map { .location($0.id) } ?? .upload
++        }
++    }
++    private var backgroundValue: String {
++        let d = store.suite.swap
++        if d.background == .photo { return d.backgroundImage == nil ? "Keep" : (d.backgroundName ?? "New photo") }
++        return d.background.label
++    }
++
+     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
+     @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
+         HStack(spacing: spacing) {
+@@ -105,6 +123,8 @@ struct ComposerBottomBar: View {
+             if isSwap {
+                 listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
+                          help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
++                listPill("background", icon: "photo", value: backgroundValue, help: "Background: keep the clip’s place, a new photo, or describe it in the prompt",
++                         options: backgroundOptions, selected: backgroundSelected) { store.pickSwapBackground($0) }
+                 if tool == .swap {
+                     listPill("speaking", icon: "text.bubble", value: store.suite.swap.speaking.label, help: "Speaking",
+                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
+diff --git a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI+Prompts.swift b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI+Prompts.swift
+index 9db06515..8f589a9a 100644
+--- a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI+Prompts.swift
++++ b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI+Prompts.swift
+@@ -38,7 +38,12 @@ extension FakeMuseAPI {
+         var id = m.promptIdentity(lora: loras[m.id])
+         id.neverAdd += promptText("never.base").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+         return PromptEngine.shootPreview(identity: id, outfitName: outfit, settings: s, presets: req.presets ?? true, refs: refs, prompt: req.prompt,
+-                                         houseStyle: promptText("style.house"), pricing: photoPricing, count: count)
++                                         houseStyle: houseStyleText(), pricing: photoPricing, count: count)
++    }
++
++    /// The demo's house style: Camera feel then Realism (the demo has no rigs, so Camera feel is always on).
++    func houseStyleText(_ edited: [String: String] = [:]) -> String {
++        PromptEngine.houseStyle(camera: edited["style.camera"] ?? promptText("style.camera"), realism: edited["style.realism"] ?? promptText("style.realism"))
+     }
+ 
+     func promptText(_ key: String) -> String {
+@@ -96,9 +101,9 @@ extension FakeMuseAPI {
+         let id = PromptIdentity(name: "Demo model", look: sample["look"] ?? "")
+         var s = ShootSettings()
+         s.direction = sample["direction"] ?? ""
+-        let isStyle = e.key == "style.house"
++        let isStyle = e.key == "style.camera" || e.key == "style.realism"
+         var lines = PromptEngine.shoot(identity: id, outfitName: sample["outfit"] ?? "outfit", settings: s,
+-                                       houseStyle: isStyle ? rendered : promptText("style.house")).map(\.text)
++                                       houseStyle: houseStyleText(isStyle ? [e.key: rendered] : [:])).map(\.text)
+         if !isStyle {
+             if let i = lines.firstIndex(of: PromptPlaceholders.fill(e.current, sample)) ?? lines.firstIndex(of: PromptPlaceholders.fill(e.defaultText, sample)) {
+                 lines[i] = rendered
+diff --git a/mac/MuseCore/Sources/MuseCore/PromptEngine.swift b/mac/MuseCore/Sources/MuseCore/PromptEngine.swift
+index 49e774a4..2f0f5861 100644
+--- a/mac/MuseCore/Sources/MuseCore/PromptEngine.swift
++++ b/mac/MuseCore/Sources/MuseCore/PromptEngine.swift
+@@ -110,7 +110,15 @@ public struct VideoPromptInput: Equatable, Sendable {
+ /// The layered prompt engine from plans/prompt-system.md, worded exactly like prototype/desktop/desktop.js
+ /// (`shootPrompt`, `videoPrompt`). Users never write prompts from scratch; their choices fill slots and empty slots are dropped.
+ public enum PromptEngine {
+-    public static let houseStyle = "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
++    /// The house style, split in two (server prompt/library.ts, 2026-11-11): Camera feel (left out by the server when a rig or
++    /// preset sets its own camera, lens, grade or look) and Realism (always). Together they read as the old single house style.
++    public static let cameraFeel = "realistic smartphone photo"
++    public static let realism = "natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
++    public static let houseStyle = "\(cameraFeel), \(realism)"
++    /// The house style from its two parts (an empty part is left out; trailing full stops dropped).
++    public static func houseStyle(camera: String, realism: String) -> String {
++        [camera, realism].map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " .,;\n")) }.filter { !$0.isEmpty }.joined(separator: ", ")
++    }
+     public static let globalNever = ["logos", "extra fingers", "warped jewellery"]
+ 
+     static func identityLine(_ id: PromptIdentity) -> String {
+diff --git a/mac/MuseCore/Sources/MuseCore/PromptLibrary.swift b/mac/MuseCore/Sources/MuseCore/PromptLibrary.swift
+index 92a5729c..e480e281 100644
+--- a/mac/MuseCore/Sources/MuseCore/PromptLibrary.swift
++++ b/mac/MuseCore/Sources/MuseCore/PromptLibrary.swift
+@@ -230,7 +230,9 @@ public enum PromptLibraryDefaults {
+     private static func ph(_ n: String, _ d: String, _ r: Bool = false) -> PromptPlaceholder { PromptPlaceholder(name: n, description: d, required: r) }
+ 
+     public static let entries: [PromptEntry] = [
+-        PromptEntry(key: "style.house", group: "photoshoot", title: "House style", description: "Added to every photo prompt.", defaultText: PromptEngine.houseStyle),
++        PromptEntry(key: "style.realism", group: "photoshoot", title: "Realism", description: "Always on. How real every photo looks: skin, colour, no filters.", defaultText: PromptEngine.realism),
++        PromptEntry(key: "style.camera", group: "photoshoot", title: "Camera feel", description: "The camera the photo looks taken with, when the shot names none. Left out when a rig or preset sets its own camera, lens, grade or look.",
++                    defaultText: PromptEngine.cameraFeel, allowEmpty: true),
+         PromptEntry(key: "never.base", group: "photoshoot", title: "Never add · every model", description: "Appended to every model's never-add list.",
+                     kind: "list", defaultText: PromptEngine.globalNever.joined(separator: ", "), allowEmpty: true),
+         PromptEntry(key: "shoot.identity", group: "photoshoot", title: "Identity line", description: "Who she is, in every photo prompt.",
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
+index 9bbc953c..37e15d09 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
+@@ -770,6 +770,10 @@ public struct ShotRequest: Codable, Hashable, Sendable {
+     public var dryRun: Bool?
+     public var clipId: String?
+     public var keepAudio: Bool?
++    /// Swap / Recast background: nil = Keep (the clip's place); "describe" = the prompt's words set the new place; "photo" = a new picture.
++    public var background: String?
++    /// Background "photo": the new background picture (a studio location or an upload).
++    public var backgroundImage: ImageRef?
+     /// "Grade the take with this look" (nil = the server's default, on).
+     public var gradeLook: Bool?
+     /// Owner only (bypass the ladder). Members never send these.
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/PromptScriptsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/PromptScriptsTests.swift
+index 96bafee3..2bb7a634 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/PromptScriptsTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/PromptScriptsTests.swift
+@@ -62,7 +62,7 @@ final class PromptScriptsTests: XCTestCase {
+         XCTAssertEqual(refs.fields?.map(\.name), ["refIndex", "guides"])
+         XCTAssertEqual(refs.fields?.last?.options?.map(\.id), ["pose", "look", "scene"])
+         guard case .array(let items) = refs.sample, case .object(let first)? = items.first else { return XCTFail("refs sample is a list of items") }
+-        XCTAssertEqual(first["refIndex"], .number(8))
++        XCTAssertEqual(first["refIndex"], .number(5)) // the shared sample set: her images 1–3, the outfit 4, the reference 5
+         XCTAssertEqual(shoot.section("reference")?.each, "refs")
+         XCTAssertEqual(shoot.values.map(\.name), ["lensNote"])
+         XCTAssertEqual(shoot.targets.last?.id, "@lensNote")
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ShootPromptApiTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ShootPromptApiTests.swift
+index 0ad7cc87..39f4340b 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ShootPromptApiTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ShootPromptApiTests.swift
+@@ -46,7 +46,8 @@ final class ShootPromptApiTests: XCTestCase {
+         XCTAssertEqual(lib.sections.first?.group.id, "photoshoot")
+         let refsPose = try XCTUnwrap(lib.entry("refs.pose"))
+         XCTAssertTrue(refsPose.placeholders.contains { $0.name == "refIndex" && $0.required })
+-        XCTAssertEqual(lib.entry("style.house")?.defaultText, PromptEngine.houseStyle)
++        XCTAssertEqual(lib.entry("style.realism")?.defaultText, PromptEngine.realism)
++        XCTAssertEqual(lib.entry("style.camera")?.defaultText, PromptEngine.cameraFeel)
+ 
+         let all = try await boss.listModels()
+         let m = try XCTUnwrap(all.first { !$0.outfitIds.isEmpty })
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ShootReferencesTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ShootReferencesTests.swift
+index bbf57e5b..3b3c31c1 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ShootReferencesTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ShootReferencesTests.swift
+@@ -294,15 +294,15 @@ final class ShootReferencesTests: XCTestCase {
+         XCTAssertEqual(got?.key, "shoot.seed.new")
+         // A saved house style reaches the shoot preview.
+         let s = ShootSettings()
+-        let style = try await api.setPrompt(key: "style.house", text: "film photo")
++        let style = try await api.setPrompt(key: "style.realism", text: "film photo")
+         XCTAssertTrue(style.overridden)
+         let p2 = try await api.shootPreview(ShootRequest.built(modelId: SampleData.demo, outfitId: SampleData.green, settings: s, presets: true, refs: []))
+-        XCTAssertTrue(p2.slots.contains(PromptSlotView(layer: "style", text: "Style: film photo.")))
+-        let pv = try await api.previewPrompt(PromptPreviewRequest(key: "style.house", text: "grainy film"))
++        XCTAssertTrue(p2.slots.contains(PromptSlotView(layer: "style", text: "Style: \(PromptEngine.cameraFeel), film photo.")))
++        let pv = try await api.previewPrompt(PromptPreviewRequest(key: "style.camera", text: "grainy film"))
+         XCTAssertEqual(pv.text, "grainy film")
+-        XCTAssertTrue(pv.example.contains("Style: grainy film."))
++        XCTAssertTrue(pv.example.contains("Style: grainy film, film photo."))
+         // Saving the default text clears the override; Reset does too.
+-        let back = try await api.setPrompt(key: "style.house", text: PromptEngine.houseStyle)
++        let back = try await api.setPrompt(key: "style.realism", text: PromptEngine.realism)
+         XCTAssertFalse(back.overridden)
+         let reset = try await api.resetPrompt(key: "shoot.seed.new")
+         XCTAssertFalse(reset.overridden)
