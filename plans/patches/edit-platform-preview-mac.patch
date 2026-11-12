@@ -1209,10 +1209,10 @@ index b891bcb9..4d248549 100644
  struct ViewerUpscaleButton: View {
 diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditPlatformPreview.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditPlatformPreview.swift
 new file mode 100644
-index 00000000..8bbc6004
+index 00000000..968a1b4d
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Edit/EditPlatformPreview.swift
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,259 @@
 +import Foundation
 +
 +// Edit's platform preview (owner decision 2026-11-12, plans/edit-platform-preview.md). The platform views left the take
@@ -1426,6 +1426,11 @@ index 00000000..8bbc6004
 +        for ti in q.tracks.indices where q.tracks[ti].kind == .text {
 +            for ii in q.tracks[ti].items.indices {
 +                guard case .text(var it) = q.tracks[ti].items[ii], found.contains(where: { $0.itemId == it.id }) else { continue }
++                // Wrap no wider than the box, then the block's centre inside it.
++                let room = r.w - 2 * margin
++                if box(it, aspect: aspect).w > room, room > 0.1 {
++                    it.style.maxWidthPct = (room / (it.transform?.scale ?? 1) * 100).rounded(.down) / 100
++                }
 +                let b = box(it, aspect: aspect)
 +                var tr = it.transform ?? E.Transform()
 +                tr.x = clampCentre(b.x, half: b.w / 2, lo: r.x + margin, hi: r.x + r.w - margin)
@@ -1665,10 +1670,10 @@ index 58139574..d5935f84 100644
  // MARK: Playback without a scrubber
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditPlatformPreviewTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditPlatformPreviewTests.swift
 new file mode 100644
-index 00000000..f1e34b35
+index 00000000..781fb72e
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditPlatformPreviewTests.swift
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,113 @@
 +import XCTest
 +@testable import MuseCore
 +
@@ -1749,6 +1754,21 @@ index 00000000..f1e34b35
 +        XCTAssertEqual(issue.edges, ["right"])
 +        let fixed = try XCTUnwrap(EditSafeCheck.fixed(s.project, zone: zone))
 +        XCTAssertTrue(EditSafeCheck.issues(fixed, zone: zone).isEmpty)
++        // A long line wider than the box: the fix narrows its wrap width too.
++        var long = s
++        XCTAssertTrue(long.apply { p in
++            var q = p
++            for ti in q.tracks.indices { for ii in q.tracks[ti].items.indices {
++                if case .text(var it) = q.tracks[ti].items[ii], it.id == id {
++                    it.text = "Things nobody tells you about the first week"
++                    it.style.maxWidthPct = 0.85
++                    q.tracks[ti].items[ii] = .text(it)
++                }
++            } }
++            return q
++        })
++        let longFixed = try XCTUnwrap(EditSafeCheck.fixed(long.project, zone: zone))
++        XCTAssertTrue(EditSafeCheck.issues(longFixed, zone: zone).isEmpty)
 +        // Clean with the box off has no issues to show (the app asks only when the box is on).
 +        XCTAssertNil(EditSafeBox.zone(EditPreview(view: .clean, safeArea: false), width: 1080, height: 1920))
 +    }

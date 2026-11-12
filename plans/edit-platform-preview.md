@@ -108,5 +108,25 @@ Apply it **on top of** `plans/patches/swap-viewer-fix-mac.patch` (branch `claude
   - the patch applies cleanly on prod `31fe6868` with `swap-viewer-fix-mac.patch` applied.
 - **Watch on CI:** at 1000 × 700 the five-way View control plus the switch may not fit in the viewer bar. That size only gives INFO lines, not CUT lines.
 
-### Not done here
-- Android (after the Mac): the same view picker, chrome and box in Compose. The rules are in MuseCore `EditPlatformPreview.swift` and the server's `safeArea.ts`.
+- "Move into the safe area" also narrows a text item's wrap width when the text is wider than the box (a long hook at 85 % on TikTok's 80 % box). A MuseCore test covers it.
+
+### Android (`plans/patches/edit-platform-preview-android.patch`, on prod 767fabdc; the coordinator's go, 2026-11-12)
+**Core** (`core/src/main/kotlin/studio/muse/core/edit/PlatformPreview.kt`) has the same rules as MuseCore and the server:
+- `PreviewView`, `SafeZone` and `PreviewLayouts` (defaults, plus the server's table parsed and merged);
+- `EditPreview`, `EditSafeBox`, `EditSafeCheck` (the issues, the line, and the fix) and `EditPreviewPrefs` (JSON).
+
+Tests: `PlatformPreviewTest` (6), on the shared fixtures.
+
+**App**
+- `EditSuiteUi.preview` and `previewLayouts` replace `safeArea` (the `SafeArea` enum is gone).
+- Actions: `PreviewOf`, `PreviewLayoutsOf` and `MoveIntoSafeArea` (one undo step).
+- `onPreviewChanged`: the ViewModel remembers the choice per project in SharedPreferences (`edit-preview`). On load it restores the choice and fetches `GET /v1/preview/layouts` (`MuseApi.previewLayouts`, null on demo or offline).
+- `EditPresence.preview` is sent every 30 s, and at once when the view changes, so Claude knows the view.
+- `EditPlatformChrome.kt` has the same generic drawings as the Mac (`PhoneChrome`, `LandscapeChrome`, `SafeBoxGuide`, red `#FF5A5F`).
+- **Phone:** the old safe-area chip, which cycled TikTok, Reels, Shorts and off, becomes a view chip. It opens a menu with the views and a Safe area switch.
+- **Tablet:** "View" (segmented) plus the Safe area switch.
+- **Both layouts:** a warning pill at the bottom of the stage with "Move into the safe area" (48 dp target).
+- `EditAuditTest`: the view checks replace the old safe-area line.
+
+**TakeViewer on Android:** nothing to remove. Android never got the viewer's skins, frames or safe zones (the swap-viewer work stopped at the Mac), so its viewer is already a clean player. When the Android TakeViewer is built, it must not get platform previews.
+
