@@ -1,0 +1,5 @@
+2026-11-12 22:49:47.833 MUSE[59986:149997] [snapshot] FITS stream_close d try 2 relay: main thread back after 0.15 s late, store.screen edit, drawn [edit]
+2026-11-12 22:49:51.197 MUSE[59986:149997] [snapshot] stream_close d try 3 sample: chat up
+2026-11-12 22:49:53.338 MUSE[59986:149997] [snapshot] stream_close d try 3 sample: chat closes mid-reply, Edit + Recreate open
+2026-11-12 22:49:54.441 MUSE[59986:149997] [snapshot] FITS stream_close d try 3 sample: main thread back after 0.10 s late, store.screen edit, drawn [edit]
+2026-11-12 22:49:54.443 MUSE[59986:149997] [snapshot] DONE stream_close
