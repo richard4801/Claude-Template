@@ -1351,7 +1351,9 @@ final class EditSuiteSession {
             guard let self, let found = r.layers, !found.isEmpty else { self?.lastError = "Nothing was found · mark it again"; return }
             let jobId = self.jobs[.layers]?.id
             if self.edit({ s in s.apply { E.applyLayerResults($0, clipId: clipId, jobId: jobId, found: found, sourceAsset: a) } }) {
-                self.notice = found.count == 1 ? "Found 1 layer" : "Found \(found.count) layers"
+                // A layer that missed what was marked says so (owner report ci_0e39a2b16b08), instead of "Found".
+                let warnings = found.compactMap(\.warning)
+                self.notice = !warnings.isEmpty ? warnings.joined(separator: " · ") : found.count == 1 ? "Found 1 layer" : "Found \(found.count) layers"
                 self.layerSelection = "l1"
                 self.cancelLayersPick()
                 Task { await self.ensureFiles(); self.rebuild(immediately: true) }
