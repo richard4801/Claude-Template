@@ -1,0 +1,33 @@
+STEP export HDR: same colour on every frame, untagged, Dolby Vision take
+TRACE #0 0.000 s src src x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020 -> ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #0 0.000 s out x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #1 0.017 s src src x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020 -> ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #1 0.017 s out x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #2 0.033 s src src x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020 -> ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #2 0.033 s out x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE source file tags Tags(primaries: nil, transfer: nil, matrix: nil)
+OK export HDR colour (untagged, Dolby Vision): caption frame = plain frame
+FAIL export HDR colour (untagged, Dolby Vision): first frame = middle: first rgb(255, 183, 143) middle rgb(212, 158, 124)
+FAIL export HDR colour (untagged, Dolby Vision): frame 0 = frame 10: frame 0 rgb(255, 183, 143) frame 10 rgb(212, 158, 124)
+FAIL export HDR colour (untagged, Dolby Vision): Dolby Vision record and RPU: record true rpu false atoms ["dvvC", "hvcC"]
+FAIL export HDR colour (untagged, Dolby Vision): first 15 frames = middle: frames 0–14 rgb(255, 183, 143) rgb(255, 183, 143) rgb(255, 183, 143) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) middle rgb(212, 158, 124)
+FRAMES 0.00 rgb(255, 183, 143) | 0.02 rgb(255, 183, 143) | 0.03 rgb(255, 183, 143) | 0.05 rgb(212, 158, 124) | 0.07 rgb(212, 158, 124) | 0.08 rgb(212, 158, 124) | …(rest = frame 3 value)
+FAIL export HDR colour (untagged, Dolby Vision): every frame the same: worst at 0.05 s: rgb(212, 158, 124) vs first rgb(255, 183, 143)
+FAIL export HDR colour (untagged, Dolby Vision): matches the SDR export: HDR rgb(255, 183, 143) SDR rgb(228, 180, 152) source rgb(224, 172, 140)
+STEP export HDR: same colour on every frame, tagged 709, plain HLG take
+TRACE #0 0.000 s src src x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020 -> ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #0 0.000 s out x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #1 0.017 s src src x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020 -> ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #1 0.017 s out x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #2 0.033 s src src x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020 -> ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE #2 0.033 s out x420 cgspace=- ITU_R_2020/ITU_R_2100_HLG/ITU_R_2020
+TRACE source file tags Tags(primaries: Optional("ITU_R_709_2"), transfer: Optional("ITU_R_709_2"), matrix: Optional("ITU_R_709_2"))
+OK export HDR colour (tagged 709, plain HLG): caption frame = plain frame
+FAIL export HDR colour (tagged 709, plain HLG): first frame = middle: first rgb(255, 183, 143) middle rgb(212, 158, 124)
+FAIL export HDR colour (tagged 709, plain HLG): frame 0 = frame 10: frame 0 rgb(255, 183, 143) frame 10 rgb(212, 158, 124)
+OK export HDR colour (tagged 709, plain HLG): plain HLG, no Dolby Vision
+FAIL export HDR colour (tagged 709, plain HLG): first 15 frames = middle: frames 0–14 rgb(255, 183, 143) rgb(255, 183, 143) rgb(255, 183, 143) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) rgb(212, 158, 124) middle rgb(212, 158, 124)
+FRAMES 0.00 rgb(255, 183, 143) | 0.02 rgb(255, 183, 143) | 0.03 rgb(255, 183, 143) | 0.05 rgb(212, 158, 124) | 0.07 rgb(212, 158, 124) | 0.08 rgb(212, 158, 124) | …(rest = frame 3 value)
+FAIL export HDR colour (tagged 709, plain HLG): every frame the same: worst at 0.05 s: rgb(212, 158, 124) vs first rgb(255, 183, 143)
+FAIL export HDR colour (tagged 709, plain HLG): matches the SDR export: HDR rgb(255, 183, 143) SDR rgb(228, 180, 152) source rgb(224, 172, 140)
+ALL DONE
