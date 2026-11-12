@@ -250,6 +250,8 @@ final class SuiteState {
 
     /// The take Edit opens with (top-level Edit: nil).
     var editTakeId: String?
+    /// Where Edit's playhead starts on that take (the viewer's Split: "open it in Edit at this moment"); read once.
+    var editAt: Double?
     /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
     var editAttach: EditAttach?
     struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
@@ -351,7 +353,8 @@ extension AppStore {
     }
 
     /// Edit, top level or with a take.
-    func openEdit(takeId: String? = nil) {
+    func openEdit(takeId: String? = nil, at seconds: Double? = nil) {
+        suite.editAt = seconds
         suite.editTakeId = takeId
         go(.edit)
     }

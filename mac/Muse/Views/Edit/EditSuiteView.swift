@@ -61,6 +61,11 @@ struct EditSuiteView: View {
         }
         session = s
         await s.load()
+        // The viewer's Split: the playhead where the take was when Split was pressed.
+        if let at = store.suite.editAt {
+            store.suite.editAt = nil
+            s.seek(at)
+        }
     }
 
     private func close() {

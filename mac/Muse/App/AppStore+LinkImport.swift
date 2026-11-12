@@ -192,6 +192,7 @@ extension AppStore {
                 clip = c
                 clipFile = nil
                 clipThumb = c.thumb
+                clipVideo = r.videoUrl.flatMap(URL.init(string:))
                 // No poster: the file's first frame (owner bug 2026-11-09: a chosen clip showed a blank slot).
                 if c.thumb == nil, let v = r.videoUrl.flatMap(URL.init(string:)) {
                     Task {
@@ -207,6 +208,9 @@ extension AppStore {
             showToast(r.clip.map { "Imported \($0.name)" } ?? "Imported", action: "Use in Swap") { [weak self] in
                 guard let self, let c = r.clip else { return }
                 self.clip = c
+                self.clipFile = nil
+                self.clipThumb = c.thumb
+                self.clipVideo = r.videoUrl.flatMap(URL.init(string:))
                 self.openTool(.swap)
             }
             Task { await forceReload() }

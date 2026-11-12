@@ -351,6 +351,7 @@ extension AppStore {
             clip = c
             clipFile = nil
             clipThumb = c.thumb
+            clipVideo = nil
             suite.remix.range = nil
         }
     }

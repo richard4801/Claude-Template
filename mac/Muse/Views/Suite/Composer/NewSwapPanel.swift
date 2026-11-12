@@ -28,6 +28,9 @@ struct NewSwapPanel: View {
     @State private var libraryOpen = false
     /// Outfit "Her outfit" while Character isn't her: whose outfits are listed.
     @State private var outfitOwner: String?
+    /// New Swap's own screen (plans/swap-viewer-design.md §A): the video and the trimmer are on the stage, so this column
+    /// holds only the changes.
+    var onScreen = false
 
     private var d: RemixDraft { store.suite.remix }
 
@@ -37,8 +40,16 @@ struct NewSwapPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
-            source
-            if let c = store.clip { trimmer(c) }
+            if onScreen {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Text("Changes").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
+                    Text("Switch on what should change. Write only the change.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                source
+                if let c = store.clip { trimmer(c) }
+            }
             VStack(alignment: .leading, spacing: Space.s3) {
                 toggleRow("Background", isOn: bind(\.backgroundOn), help: "A new place: describe it, or a location or photo") { backgroundField }
                 toggleRow("Outfit", isOn: bind(\.outfitOn), help: "New clothes: one of her outfits, a product photo, or words") { outfitField }

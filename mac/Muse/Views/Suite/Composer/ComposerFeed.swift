@@ -298,7 +298,8 @@ struct FeedScopeMenu: View {
     }
 }
 
-/// A take large over the feed: the video playing (or the photo), its line, and its actions. ← and → move through the
+/// A take large over the feed, in the one take viewer (plans/swap-viewer-design.md §B): the take in its own shape, the
+/// preview choices, playback by keys (Space, ← → 3 s, ⇧ 10 s, J/K/L) and its actions beside it. ↑ and ↓ move through the
 /// feed's takes; Esc or Close goes back to the grid.
 struct FeedViewer: View {
     @Environment(AppStore.self) private var store
@@ -306,7 +307,6 @@ struct FeedViewer: View {
     var takes: [Take]
     var index: Int
     var photo: Bool
-    @State private var player: AVPlayer?
 
     private var take: Take { takes[index] }
 
@@ -321,75 +321,27 @@ struct FeedViewer: View {
                 Spacer(minLength: Space.s2)
                 Text("\(index + 1) of \(takes.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     .lineLimit(1).fixedSize()
-                SuiteIconButton(systemName: "caret-left", label: "Previous take") { move(-1) }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
+                SuiteIconButton(systemName: "caret-up", label: "Previous take (↑)") { move(-1) }
                     .disabled(index == 0)
-                SuiteIconButton(systemName: "caret-right", label: "Next take") { move(1) }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
+                SuiteIconButton(systemName: "caret-down", label: "Next take (↓)") { move(1) }
                     .disabled(index >= takes.count - 1)
                 SuiteIconButton(systemName: "x", label: "Close the viewer") { store.suite.viewerTakeId = nil }
                     .keyboardShortcut(.cancelAction)
             }
-            Group {
-                if let player {
-                    VideoPlayer(player: player)
-                } else {
-                    MuseImage(ref: take.thumb)
-                }
-            }
-            .aspectRatio(ratio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel(take.displayLabel)
-            HStack(spacing: Space.s4) {
-                link("Vary") { store.vary(take) }
-                if !photo { link("Use as start frame") { store.useAsStartFrame(take) } }
-                link(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
-                link("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
-                if take.isVideo { link("Open in Edit") { store.openEdit(takeId: take.id) } }
-                SaveToCollectionButton(takeIds: [take.id]) {
-                    Text("Save to collection").font(t.scale.label.font).foregroundStyle(t.roles.link).lineLimit(1).fixedSize()
-                }
-                Spacer(minLength: 0)
-            }
+            TakeViewer(media: ViewerMedia(take: take), context: .suite, take: take, job: store.job(for: take), onStep: { move($0) })
+                .id(take.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "viewer") } }
-        .onAppear { load() }
-        .onChange(of: take.id) { _, _ in load() }
-        .onDisappear { release() }
-    }
-
-    private var ratio: CGFloat {
-        if let w = take.width, let h = take.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
-        return take.isVideo ? 9.0 / 16.0 : 4.0 / 5.0
-    }
-
-    private func link(_ title: String, _ run: @escaping () -> Void) -> some View {
-        Button(title, action: run).buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).lineLimit(1).fixedSize()
     }
 
     private func move(_ by: Int) {
         let i = index + by
         guard takes.indices.contains(i) else { return }
         store.suite.viewerTakeId = takes[i].id
-    }
-
-    private func load() {
-        release()
-        guard let v = take.videoUrl, let u = URL(string: v) else { return }
-        let p = AVPlayer(url: u)
-        p.actionAtItemEnd = .pause
-        player = p
-        p.play()
-    }
-
-    private func release() {
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
-        player = nil
     }
 }
 
@@ -632,7 +584,13 @@ struct ComposerCompare: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var takes: [Take]
-    @State private var players: [String: AVPlayer] = [:]
+    /// One player per take, so "Play both" starts them together.
+    @State private var players: [String: ViewerPlayback]
+
+    init(takes: [Take]) {
+        self.takes = takes
+        _players = State(initialValue: Dictionary(takes.map { ($0.id, ViewerPlayback()) }, uniquingKeysWith: { a, _ in a }))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
@@ -650,7 +608,9 @@ struct ComposerCompare: View {
             HStack(alignment: .top, spacing: Space.s4) {
                 ForEach(takes) { take in
                     VStack(alignment: .leading, spacing: Space.s2) {
-                        media(take)
+                        // The one take viewer: each take in its own shape, Keep under it, the rest in its More menu.
+                        TakeViewer(media: ViewerMedia(take: take), context: .compare, take: take, job: store.job(for: take), compact: true,
+                                   autoplay: false, startMuted: true, sharedPlayback: players[take.id])
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         Text(take.displayLabel).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
                         Text(SuiteFeedText.summary(take.draft ?? store.job(for: take)?.draft, seconds: take.durationSec))
@@ -671,45 +631,11 @@ struct ComposerCompare: View {
         .padding(Space.s5)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(t.roles.canvas)
-        .onAppear { load() }
-        .onDisappear {
-            players.values.forEach { $0.pause(); $0.replaceCurrentItem(with: nil) }
-            players = [:]
-        }
-    }
-
-    @ViewBuilder private func media(_ take: Take) -> some View {
-        let ratio: CGFloat = {
-            if let w = take.width, let h = take.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
-            return take.isVideo ? 9.0 / 16.0 : 4.0 / 5.0
-        }()
-        Group {
-            if let p = players[take.id] {
-                VideoPlayer(player: p)
-            } else {
-                MuseImage(ref: take.thumb)
-            }
-        }
-        .aspectRatio(ratio, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
-        .accessibilityLabel(take.displayLabel)
-    }
-
-    private func load() {
-        var out: [String: AVPlayer] = [:]
-        for take in takes {
-            guard let v = take.videoUrl, let u = URL(string: v) else { continue }
-            let p = AVPlayer(url: u)
-            p.isMuted = true
-            p.actionAtItemEnd = .pause
-            out[take.id] = p
-        }
-        players = out
+        .onDisappear { players.values.forEach { $0.release() } }
     }
 
     /// Both from the start, together.
     private func playBoth() {
-        for p in players.values { p.seek(to: .zero) }
-        for p in players.values { p.play() }
+        for p in players.values { p.restart() }
     }
 }

@@ -146,6 +146,7 @@ extension AppStore {
             clip = c
             clipFile = nil
             clipThumb = take.thumb
+            clipVideo = take.videoUrl.flatMap(URL.init(string:))
             suite.remix.range = nil
             showToast("Added \(take.caption) · \(Pricing.trimNum(c.durationSec)) s")
         }

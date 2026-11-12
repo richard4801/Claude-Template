@@ -21,6 +21,7 @@ extension AppStore {
             let c = try await withUploadProgress("Uploading \(url.lastPathComponent)") { p in try await self.api.uploadClip(meta, file: url, progress: p) }
             clip = c
             clipFile = url
+            clipVideo = url
             clipThumb = thumb.map { ImageRef(url: $0.absoluteString) }
             if c.ok {
                 showToast("Clip checked · \(Pricing.trimNum(c.durationSec))s · \(c.width)×\(c.height). Ready to generate.")
@@ -38,6 +39,7 @@ extension AppStore {
             clip = c
             clipFile = nil
             clipThumb = nil
+            clipVideo = nil
         } catch {
             if !quiet { showToast((error as? ApiError)?.friendlyMessage ?? error.localizedDescription) }
         }

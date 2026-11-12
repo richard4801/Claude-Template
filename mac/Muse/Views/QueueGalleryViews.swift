@@ -300,7 +300,9 @@ struct CompareView: View {
             HStack(alignment: .top, spacing: Space.s5) {
                 ForEach(items) { take in
                     VStack(alignment: .leading, spacing: Space.s2) {
-                        MediaFrame(ref: take.thumb)
+                        // The one take viewer: each take at its own shape and playable by keys; the buttons below act.
+                        TakeViewer(media: ViewerMedia(take: take), context: .library, take: take, compact: true, autoplay: false, startMuted: true)
+                            .frame(height: 440)
                         Text(take.caption).scaled(t.scale.heading, t.roles.ink).lineLimit(1).padding(.top, Space.s1)
                         Text(meta(take)).monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
                         HStack(spacing: Space.s2) {
@@ -340,14 +342,12 @@ struct ResultView: View {
                         Crumb(parent: "Library", title: take.caption) { store.go(.gallery) }
                         HStack(alignment: .top, spacing: Space.s6) {
                             Spacer(minLength: 0)
-                            Group {
-                                if let v = take.videoUrl, let u = URL(string: v) {
-                                    TakePlayer(url: u, caption: take.mediaLine ?? "Video")
-                                } else {
-                                    MediaFrame(ref: take.thumb)
-                                }
-                            }
-                            .frame(height: min(720, max(360, g.size.height - 110)))
+                            // The one take viewer (plans/swap-viewer-design.md §B): the take at its own shape, the
+                            // preview choices and playback by keys. Its actions are the inspector's, on the right.
+                            TakeViewer(media: ViewerMedia(take: take), context: .library, take: take, job: job, autoplay: false)
+                                .id(take.id)
+                                .frame(width: max(320, g.size.width - 360 - Space.s6 - 2 * Space.gutter - 2 * Space.s4),
+                                       height: min(760, max(400, g.size.height - 110)))
                             inspector(take, job: job, outfit: outfit)
                                 .frame(width: 360)
                             Spacer(minLength: 0)
@@ -468,42 +468,3 @@ struct ResultView: View {
     }
 }
 
-/// A finished take's video (Take.videoUrl), played with AVKit.
-struct TakePlayer: View {
-    @Environment(\.theme) private var t
-    var url: URL
-    var caption: String
-    @State private var player: AVPlayer?
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            if let player {
-                VideoPlayer(player: player)
-            } else {
-                Rectangle().fill(Color.black)
-            }
-            Text(caption).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
-                .padding(.horizontal, Space.s2).padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(.black.opacity(0.55)))
-                .padding(Space.s3)
-                .allowsHitTesting(false)
-        }
-        .aspectRatio(768.0 / 1344.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
-        .onAppear { load() }
-        .onChange(of: url) { load() }
-        .onDisappear {
-            // Off screen: release the player and its item (decoder, buffers), not just pause it. onAppear makes a new one.
-            player?.pause()
-            player?.replaceCurrentItem(with: nil)
-            player = nil
-        }
-    }
-
-    private func load() {
-        player?.pause()
-        let p = AVPlayer(url: url)
-        p.actionAtItemEnd = .pause
-        player = p
-    }
-}

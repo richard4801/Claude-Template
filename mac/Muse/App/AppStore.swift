@@ -298,6 +298,8 @@ final class AppStore {
     /// The selected clip. Changing it (or its late talking detection arriving) re-sets "Performer is speaking".
     var clip: Clip? { didSet { clipChangedForSpeaking(from: oldValue) } }
     var clipFile: URL?
+    /// The source clip's video, to play it (New Swap's stage): the uploaded file, or the Library take's video. nil: a poster only.
+    var clipVideo: URL?
     var clipThumb: ImageRef?
     /// Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta). Every option renders the whole clip.
     var quality: VideoQuality
@@ -527,6 +529,7 @@ final class AppStore {
         clip = nil
         clipFile = nil
         clipThumb = nil
+        clipVideo = nil
         stageJobIds = []
         stageTakeId = nil
         wallet = nil
