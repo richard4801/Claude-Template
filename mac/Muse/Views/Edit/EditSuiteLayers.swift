@@ -148,7 +148,7 @@ struct BackgroundControls: View {
 
     var body: some View {
         let b = clip.layerBase
-        let pictures = session.project.assets.filter { ($0.kind == .image || $0.kind == .video) && $0.id != clip.asset && !(clip.layers ?? []).contains(where: { l in l.matte == $0.id }) }
+        let pictures = session.project.assets.filter { a in (a.kind == .image || a.kind == .video) && a.id != clip.asset && !(clip.layers ?? []).contains(where: { l in l.matte == a.id }) }
         VStack(alignment: .leading, spacing: Space.s3) {
             SuiteSlider("Blur", value: b?.blur ?? 0, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
                 session.changeLayerBase { $0.blur = v < 0.005 ? nil : round2(v) }
