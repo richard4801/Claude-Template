@@ -1,0 +1,110 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index 9b8c72f4..6544bbbe 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -104,12 +104,21 @@ data class Outfit(
+     /** When it was made (ms; the folder's date) and who made it (they or the owner may rename/delete it). */
+     val createdAt: Long? = null,
+     val createdBy: String? = null,
++    /** A set that came out partly (some pictures failed while making it; owner 2026-11-12): "5 of 7 made · Redo the
++     *  missing ones" and which are missing (OutfitPictures.KEYS names). Null when complete or still being made. */
++    val partial: OutfitPartial? = null,
+ ) {
+     val front: ImageRef? get() = angles.firstOrNull()
++    /** One of its 7 pictures (0–3 angles, 4–6 faces) is missing from a partial set: it gets its own Redo with its price. */
++    fun isMissing(i: Int): Boolean = partial?.missing?.contains(OutfitPictures.KEYS.getOrNull(i)) == true
+     /** How many of the four angles have a picture (a set can come back with some empty). */
+     val madeAngles: Int get() = (0 until 4).count { angles.getOrNull(it) != null }
+ }
+ 
++/** A set that came out partly (server outfitView `partial`). */
++@Serializable
++data class OutfitPartial(val made: Int = 0, val of: Int = 7, val missing: List<String> = emptyList(), val label: String = "")
++
+ /** PATCH /v1/outfits/{id}, POST /v1/outfits/{id}/save: the outfit's name (save: null keeps it). */
+ @Serializable
+ data class OutfitNameBody(val name: String? = null)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
+index d12e27c8..367642e9 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
+@@ -295,12 +295,15 @@ fun OutfitOpenScreen(id: String) {
+                     DisplayTitle(o.name)
+                     Caption(listOfNotNull(s.model?.name?.substringBefore(' ')?.let { "For $it" }, outfitDate(o.createdAt)?.let { "made $it" }).joinToString(", "))
+                 }
+-                OutfitPictureGrid(pictures, making + fillingAt, busy = false) { i ->
++                // A set that came out partly: what was made; each missing picture has its own Redo with its price.
++                o.partial?.let { if (!filling && making.isEmpty()) Notice(it.label, tone = NoticeTone.CAUTION) }
++                OutfitPictureGrid(pictures, making + fillingAt, busy = false,
++                    redo = if (canChange && !filling && making.isEmpty()) ({ i -> if (o.isMissing(i)) Pair<String, () -> Unit>("Redo · ${Pricing.money(vm.redoEstimate(i))}") { vm.redo(o, i) } else null }) else null) { i ->
+                     viewing = OutfitPictures.pageOf(pictures, i)
+                 }
+                 if (filling) Notice("Making the missing angles from the front.")
+                 else if (o.madeAngles < 4 && o.front != null && canChange) {
+-                    Notice("${o.madeAngles} of 4 angles. The others came back empty.", tone = NoticeTone.CAUTION)
++                    if (o.partial == null) Notice("${o.madeAngles} of 4 angles. The others came back empty.", tone = NoticeTone.CAUTION)
+                     SecondaryButton("Make missing angles · ${studio.muse.core.PhotoPricing.about(vm.fillEstimate(o))}", { vm.fill(o) }, Modifier.fillMaxWidth())
+                 }
+                 // An older outfit (made before every outfit had face close-ups), or faces that came back empty.
+@@ -332,7 +335,9 @@ fun OutfitOpenScreen(id: String) {
+  * any not made yet) shows a skeleton; a tap opens [onOpen] with its index into [OutfitPictures.KEYS].
+  */
+ @Composable
+-fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onOpen: (Int) -> Unit) {
++fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean,
++    /** A missing picture's Redo ("Redo · $0.04" and its action), or null for none. */
++    redo: ((Int) -> Pair<String, () -> Unit>?)? = null, onOpen: (Int) -> Unit) {
+     val m = muse
+     BoxWithConstraints(Modifier.fillMaxWidth()) {
+         val cols = if (maxWidth >= 600.dp) 4 else 2
+@@ -350,7 +355,10 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy:
+                                     else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
+                                         if (ref == null) t.semantics { contentDescription = "$label missing" }
+                                         else t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
+-                                    }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
++                                    }, contentAlignment = androidx.compose.ui.Alignment.Center) {
++                                        if (ref != null) RefImage(ref, Modifier.fillMaxSize())
++                                        else redo?.invoke(i)?.let { (text, go) -> TextAction(text, go) }
++                                    }
+                                     Caption(label, maxLines = 1)
+                                 }
+                             }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt
+index 0d23a0f7..dd9688dd 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitScreen.kt
+@@ -199,6 +199,8 @@ fun OutfitScreen() {
+                 if (s.draft.mode != "own") ModelChoiceRow(studio.muse.app.data.ModelPurpose.OUTFIT, ModelPick(s.draft.imageModel), { p -> vm.edit { it.copy(imageModel = p.model) } })
+                 if (!ownPicking) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                     OutfitPictureGrid(pictures, emptyList(), busy = s.busy) { i -> viewing = OutfitPictures.pageOf(pictures, i) }
++                    // A set that came out partly: the pictures made are kept; the outfit page redoes the missing ones.
++                    s.preview?.partial?.takeIf { s.done }?.let { Notice(it.label, tone = NoticeTone.CAUTION) }
+                     Caption("Plain, unbranded clothes work best. Visible logos carry into the video.")
+                 } else Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                     OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->
+diff --git a/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt b/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt
+index 23eba14b..0e6ce962 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/OutfitFacesTest.kt
+@@ -2,6 +2,8 @@ package studio.muse.app
+ 
+ import kotlinx.coroutines.test.runTest
+ import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import kotlinx.serialization.json.Json
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ import studio.muse.app.data.CreateOutfitRequest
+@@ -67,4 +69,12 @@ class OutfitFacesTest {
+         // Redo one face: one edit.
+         assertEquals(PhotoPrices().perEdit, api.redoOutfit(SampleData.CRYSTAL, "faceTq").cost, 1e-9)
+     }
++
++    /** A set that came out partly (owner 2026-11-12): its label, and each missing picture has its own Redo. */
++    @Test fun `a partial outfit decodes its label and names the missing pictures`() {
++        val o = Json { ignoreUnknownKeys = true }.decodeFromString(Outfit.serializer(), """{"id":"o1","modelId":"m","name":"Red","angles":[{"asset":"c_front"},{"asset":"c_tq"},null,null],"partial":{"made":5,"of":7,"missing":["side","back"],"label":"5 of 7 made · Redo the missing ones"}}""")
++        assertEquals("5 of 7 made · Redo the missing ones", o.partial?.label)
++        assertEquals(listOf(2, 3), (0 until 7).filter { o.isMissing(it) })
++        assertFalse(o.copy(partial = null).isMissing(2))
++    }
+ }
