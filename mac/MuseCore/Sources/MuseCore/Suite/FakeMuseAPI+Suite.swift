@@ -131,7 +131,7 @@ extension FakeMuseAPI {
             }
             if pick.method == "frame" { warnings.append(x.direction == "before" ? "ends on the clip’s first frame" : "continues from the clip’s last frame") }
             if pick.seconds != r.duration { warnings.append("length set to \(pick.seconds) s (this quality makes \(m.minSeconds)–\(m.maxSeconds) s)") }
-        case "recast", "swap":
+        case "recast", "swap", "remix": // New Swap (demo): priced like a swap of the clip
             guard let id = r.clipId, let clip = suiteClip(id) else { throw ApiError("not_found", "Clip not found") }
             if mode == "recast" {
                 guard let list = r.cast, !list.isEmpty else { throw ApiError("bad_request", "Pick who to recast") }
@@ -182,9 +182,9 @@ extension FakeMuseAPI {
                              buttonLabel: SuiteText.buttonLabel(shown, seconds: seconds, takes: r.takes), ok: caps.ok, code: caps.code, message: caps.message, caps: caps,
                              warnings: warnings, camera: SuiteEstimateCamera(moves: moves), prompt: suitePrompt(r), test: true,
                              speaking: SuiteSpeaking(speaking: speaking, source: r.speaking == nil ? "default" : "switch"), cast: cast,
-                             keepAudio: mode == "recast" || mode == "swap" ? (r.keepAudio ?? true) : nil)
+                             keepAudio: mode == "recast" || mode == "swap" || mode == "remix" ? (r.keepAudio ?? true) : nil)
         e.look = SuiteLooks.look(for: r, camera: SuiteDemoCatalog.catalog.camera)
-        e.rig = mode == "recast" || mode == "swap" ? [] : FakeRigCheck.check(prompt: r.prompt, camera: r.camera, speaking: speaking)
+        e.rig = mode == "recast" || mode == "swap" || mode == "remix" ? [] : FakeRigCheck.check(prompt: r.prompt, camera: r.camera, speaking: speaking)
         if suiteIsOwner {
             e.engine = SuiteEngine(model: p.model, name: p.name, provider: p.provider, resolution: p.resolution, perSec: p.perSec, billedPerTake: seconds, test: true)
         }

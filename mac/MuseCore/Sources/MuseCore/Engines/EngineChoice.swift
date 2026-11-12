@@ -40,6 +40,8 @@ public enum EnginePurpose: String, CaseIterable, Sendable, Hashable, Identifiabl
 
     /// Which request field carries the pick: `imageModel` for stills, else `engineModel`.
     public var isImage: Bool { self == .photo || self == .outfit || self == .character || self == .plate }
+    /// A job-specific tool (upscale, matte, track, captions, noise): only its own models (a matte model can't caption).
+    public var isTool: Bool { self == .upscale || self == .matte || self == .track || self == .captions || self == .denoise }
 
     /// The composer's tool → its purpose.
     public init?(tool: ComposerTool) {
@@ -151,8 +153,22 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
     public var label: String?
     /// What to show for the model: the server's label; older servers: the name with its provider.
     public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
+    /// Owner 2026-11-12 ("every model on every mode"): with `?purpose=`, "native" or "adapted" and the server's line for an
+    /// adapted one (what MUSE does with it there).
+    public var fit: String?
+    public var fitNote: String?
+    /// Priced live by the provider when a request is planned (Wan 3.0 on Higgsfield): no price in the list.
+    public var livePrice = false
 
-    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName, label }
+    /// Whether the model is made for `p` (else MUSE adapts it there).
+    public func isNative(_ p: EnginePurpose) -> Bool { fit.map { $0 == "native" } ?? purposes.contains(p.rawValue) }
+    /// The picker's line for a model used outside what it's made for, or nil.
+    public func adaptedNote(_ p: EnginePurpose) -> String? {
+        if isNative(p) { return nil }
+        return fitNote ?? "Not made for this: MUSE adapts what it can’t take and says what it changed"
+    }
+
+    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName, label, fit, fitNote, livePrice }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         model = try c.decode(String.self, forKey: .model)
@@ -168,6 +184,9 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
         resolution = c.o(.resolution)
         price = c.o(.price)
         inputs = c.o(.inputs)
+        fit = c.o(.fit)
+        fitNote = c.o(.fitNote)
+        livePrice = c.v(.livePrice, false)
     }
 
     /// The picker's entry: the price per second (or per output second) on the engine's own resolution; the others
@@ -200,14 +219,22 @@ public struct EngineCatalog: Decodable, Sendable {
 
     public func purpose(_ p: EnginePurpose) -> EnginePurposeInfo? { purposes.first { $0.id == p.rawValue } }
 
-    /// The engines for a purpose (all of them when the list was asked for that purpose already), default first.
+    /// The engines for a purpose. Owner 2026-11-12: "Every model in our app should be available on every mode … the
+    /// default models are mostly on top of the list". Every model of the purpose's kind (video or image; a tool's own
+    /// models only): the default first, then the ones made for it, then the ones MUSE adapts; the owner's providers after
+    /// MUSE's within each. Never filtered by what a model is made for.
     public func engines(for p: EnginePurpose) -> [EngineEntry] {
-        let list = engines.filter { $0.purposes.isEmpty || $0.purposes.contains(p.rawValue) }
-        return list.sorted { a, b in
-            if a.custom != b.custom { return !a.custom }
-            if a.isDefault != b.isDefault { return a.isDefault }
-            return false
+        let kind = p.isImage ? "image" : "video"
+        let list = engines.filter { e in p.isTool ? e.purposes.contains(p.rawValue) : (e.kind == kind || (e.kind.isEmpty && e.purposes.contains(p.rawValue))) }
+        let def = purpose(p)?.default
+        func rank(_ e: EngineEntry) -> Int {
+            if e.isDefault || e.model == def { return 0 }
+            return (e.isNative(p) ? 1 : 3) + (e.custom ? 1 : 0)
         }
+        return list.enumerated().sorted { a, b in
+            let ra = rank(a.element), rb = rank(b.element)
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }.map(\.element)
     }
 
     /// The pill's words for a pick: "Auto (Kling 4.0)" / "Auto" / the model's name (and resolution).

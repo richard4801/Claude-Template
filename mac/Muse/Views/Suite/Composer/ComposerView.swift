@@ -18,6 +18,8 @@ struct ComposerPriceKey: Equatable {
     var clipId: String?
     var catalogLoaded: Bool
     var photo: PhotoDraft // Photo tool (workstream 3): count, preset and references re-price too
+    var remix: RemixDraft // New Swap (beta): the toggles, trim and model re-price too
+    var swapVariant: SwapVariant
 }
 
 /// The composer's width below which the rail narrows to 264 and the bar's pills go to icon plus value. A 1000 pt window
@@ -103,6 +105,8 @@ struct ComposerView: View {
         .onChange(of: s.composer) { _, _ in store.suiteComposerChanged() }
         // …and what else is on screen: Swap/Recast's panel and clip, the input slots (Claude watches and sees them).
         .onChange(of: s.swap) { _, _ in store.suiteComposerChanged() }
+        .onChange(of: s.remix) { _, _ in store.suiteComposerChanged() } // New Swap (beta)
+        .onChange(of: s.swapVariant) { _, _ in store.suiteComposerChanged() }
         .onChange(of: store.clip?.id) { _, _ in store.suiteComposerChanged() }
         .onChange(of: s.composerSlots.slots) { _, _ in store.suiteComposerChanged() }
         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
@@ -112,12 +116,13 @@ struct ComposerView: View {
             if let r = s.restoredCharacterId { s.restoredCharacterId = nil; if r == new { return } }
             if new != nil { store.applyDefaultRigIfAny() }
         }
-        .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
+        .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo,
+                                          remix: s.remix, swapVariant: s.swapVariant)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
             switch s.composer.tool {
             case .shot, .talking, .ugc, .extend: if !store.isComingSoon(s.composer.tool) { await store.estimateShot() }
-            case .swap, .recast: await store.estimateSwap()
+            case .swap, .recast: if store.isNewSwap { await store.estimateRemix() } else { await store.estimateSwap() }
             case .photo: await store.estimatePhoto() // Photo tool (workstream 3)
             default: break
             }
@@ -128,7 +133,7 @@ struct ComposerView: View {
                     Spacer()
                     Button("Done") { s.showEngines = false }.keyboardShortcut(.cancelAction).padding(12)
                 }
-                ScrollView { SuiteEnginesPanel(estimate: s.composer.tool == .swap || s.composer.tool == .recast ? s.swapEstimate : s.estimate).padding(20) }
+                ScrollView { SuiteEnginesPanel(estimate: store.isNewSwap ? s.remixEstimate : s.composer.tool == .swap || s.composer.tool == .recast ? s.swapEstimate : s.estimate).padding(20) }
             }
             .frame(minWidth: 560, minHeight: 520)
             .environment(store)
@@ -175,10 +180,13 @@ struct ComposerView: View {
                 } else {
                     ComposerStage(pinned: $pinnedTake, maxPictureHeight: (height * composerPictureShare).rounded())
                 }
-                if !strip {
+                // New Swap (beta): its panel always has the column (its toggles have no strip form).
+                if !strip || store.isNewSwap {
                     ScrollView(.vertical, showsIndicators: false) {
-                        ComposerRail(narrow: narrow)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Group {
+                            if store.isNewSwap { NewSwapPanel() } else { ComposerRail(narrow: narrow) }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(width: narrow ? 264 : 280)
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -188,7 +196,7 @@ struct ComposerView: View {
             .zIndex(0)
             // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
             // full height; the row above takes what is left.
-            if strip {
+            if strip && !store.isNewSwap {
                 ComposerSetupStrip()
                     .layoutPriority(1)
                     .zIndex(1)
@@ -221,6 +229,7 @@ struct ComposerView: View {
             .buttonStyle(.plain)
             .help("Change the mode")
             .accessibilityLabel("\(d.tool.title), change mode")
+            if d.tool == .swap { SwapVariantSwitch() } // New Swap (beta): Swap | New Swap
             if let name = preset?.label ?? photoPreset?.name {
                 Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1)
             }
@@ -879,6 +888,9 @@ struct ComposerPromptBar: View {
 
     private var currentProblem: String? {
         switch draft.tool {
+        case .swap where store.isNewSwap: // New Swap (beta): what a toggle still needs, then the estimate's problem
+            if store.clip == nil { return "Add a video first" }
+            return store.suite.remix.missing ?? store.suite.remixEstimate?.problem ?? store.suite.remixError
         case .swap, .recast:
             if store.clip == nil { return "Choose a clip first" }
             return store.suite.swapEstimate?.problem ?? store.suite.swapError
@@ -889,6 +901,11 @@ struct ComposerPromptBar: View {
 
     @ViewBuilder private var promptArea: some View {
         switch draft.tool {
+        case .swap where store.isNewSwap:
+            Text("Write only the change in each switch on the right. Everything you leave off stays as it is in the clip.")
+                .font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
         case .swap:
             if store.suite.swap.promptOn {
                 promptBox

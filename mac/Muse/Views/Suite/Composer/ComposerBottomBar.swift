@@ -17,6 +17,8 @@ struct ComposerBottomBar: View {
 
     private var tool: ComposerTool { store.suite.composer.tool }
     private var isSwap: Bool { tool == .swap || tool == .recast }
+    /// New Swap (beta): Swap's second panel (the header switch).
+    private var isRemix: Bool { store.isNewSwap }
 
     var body: some View {
         // About 1000 pt wide (owner, coordination item 8): each pill is icon + value and never wraps; Generate always
@@ -119,8 +121,13 @@ struct ComposerBottomBar: View {
     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
     @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
         HStack(spacing: spacing) {
-            if tool != .photo { qualityPill } // Photo tool (workstream 3): stills render at the shoot's size, no Quality
-            if isSwap {
+            if tool != .photo && !isRemix { qualityPill } // Photo (workstream 3) and New Swap: the model's own resolution, no Quality
+            if isRemix {
+                // New Swap (beta): the clip's sound and the model (Auto first, with why; every video-editing model).
+                listPill("sound", icon: store.suite.remix.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.remix.keepAudio ? "On" : "Off",
+                         help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.remix.keepAudio) { store.suite.remix.keepAudio = $0 }
+                RemixModelPill(compact: compact)
+            } else if isSwap {
                 listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
                          help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
                 listPill("background", icon: "photo", value: backgroundValue, help: "Background: keep the clip’s place, a new photo, or describe it in the prompt",
@@ -164,6 +171,7 @@ struct ComposerBottomBar: View {
 
     private var estimate: ShotEstimate? {
         if tool == .photo { return store.suite.photoEstimate?.asShotEstimate } // Photo tool (workstream 3)
+        if isRemix { return store.suite.remixEstimate }
         return isSwap ? store.suite.swapEstimate : store.suite.estimate
     }
 
@@ -173,7 +181,7 @@ struct ComposerBottomBar: View {
     }
 
     private var generateLabel: String {
-        if isSwap, let q = store.suite.swap.addOn { return "Generate · \(Pricing.money(Pricing.totalCost(store.spec(for: q))))" }
+        if isSwap, !isRemix, let q = store.suite.swap.addOn { return "Generate · \(Pricing.money(Pricing.totalCost(store.spec(for: q))))" }
         if pricing { return "Generate · Pricing…" }
         return price.buttonText
     }
@@ -183,18 +191,21 @@ struct ComposerBottomBar: View {
         // Photo tool (workstream 3): pricing while a request exists and its estimate hasn't come back or failed.
         if tool == .photo { return store.suite.photoEstimate == nil && store.suite.photoError == nil && store.photoRequest != nil }
         guard estimate == nil, store.suite.enabled else { return false }
+        if isRemix { return store.suite.remixError == nil && store.remixRequest != nil }
         if isSwap { return store.suite.swapError == nil && store.swapRequest != nil }
         if tool == .extend && store.suite.composer.extendRequest() == nil { return false }
         return store.suite.estimateError == nil
     }
 
     private var canGenerate: Bool {
-        if isSwap, store.suite.swap.addOn != nil { return !store.generateBlocked }
+        if isRemix, store.suite.remixEstimate?.remix?.trim.needed == true { return false } // trim first (never cut silently)
+        if isSwap, !isRemix, store.suite.swap.addOn != nil { return !store.generateBlocked }
         return price.canGenerate
     }
 
     private func generate() {
         if tool == .photo { return store.generatePhoto() } // Photo tool (workstream 3): POST /v1/suite/photos
+        if isRemix { return store.generateRemix() }
         if isSwap { store.generateSwap() } else { store.generateShot() }
     }
 

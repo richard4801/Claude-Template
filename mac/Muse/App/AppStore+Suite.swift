@@ -232,6 +232,13 @@ final class SuiteState {
     var swapEstimates: [String: ShotEstimate] = [:]
     var swapError: String?
     var swapJobIds: [String] = []
+    // New Swap (beta, plans/new-swap.md): the header switch (remembered on this Mac), the panel's toggles, its estimate
+    // and the model pill's list.
+    var swapVariant: SwapVariant = SwapVariant.saved
+    var remix = RemixDraft()
+    var remixEstimate: ShotEstimate?
+    var remixError: String?
+    var remixModels: RemixModels?
 
     // Storyboard (D8)
     var board = Storyboard()

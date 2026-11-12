@@ -271,7 +271,7 @@ enum SuiteTime {
 /// read and written through the accessors; setting one to nil removes its key.
 public struct SuiteDraft: Codable, Hashable, Sendable {
     /// The composer's tools plus `upscale` (only the feed names it).
-    public static let tools = ["shot", "photo", "storyboard", "swap", "recast", "extend", "upscale", "talking", "ugc"]
+    public static let tools = ["shot", "photo", "storyboard", "swap", "recast", "extend", "upscale", "talking", "ugc", "remix"]
     /// The keys the server reads or checks; everything else is `extra`.
     public static let knownKeys: Set<String> = ["v", "tool", "quality", "aspect", "duration", "takes", "count", "sound", "speaking", "rig", "tokens", "slots"]
     public static let maxBytes = 64 * 1024

@@ -162,6 +162,9 @@ struct EngineList: View {
                 Text(e.shownName).scaled(t.scale.body, t.roles.ink).lineLimit(1)
                 if let n = e.notice, !n.isEmpty { Text(n).scaled(t.scale.caption, t.roles.caution).lineLimit(2) }
                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
+                // Every model on every mode (owner 2026-11-12): one not made for this purpose says what MUSE does with it.
+                if let n = e.adaptedNote(purpose) { Text(n).scaled(t.scale.caption, t.roles.ink2).lineLimit(2) }
+                if e.livePrice { Text("Priced by the provider when you pick it").scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
                 if o.resolutions.count < 2 {
                     let price = ComposerModelPicker.price(o, resolution: o.resolution)
                     chip(price.isEmpty ? "Use" : price, picked: on, label: "Use \(e.shownName)") { onPick(e.model, o.resolution) }
