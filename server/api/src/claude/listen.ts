@@ -150,6 +150,18 @@ type Heard = Record<string, unknown> & { curves?: Listening['curves']; bassHits?
 const cache = new Map<string, Heard>();
 const remember = (k: string, v: Heard) => { cache.set(k, v); while (cache.size > 16) cache.delete(cache.keys().next().value!); return v; };
 
+/** The stored file whose sound an id names (as watch takes ids), or an audio upload (music, voice-over). */
+export async function soundFileOf(ctx: Ctx, u: AuthUser, args: Record<string, unknown>): Promise<{ key: string; id: string }> {
+  const target = await watchTarget({ ctx, user: u }, args);
+  const [au] = typeof target === 'string' ? await ctx.db.select().from(uploads).where(and(eq(uploads.id, target), eq(uploads.studioId, u.studioId))) : [];
+  if (au && /^audio\//i.test(au.contentType)) {
+    if (!(await readyIfStored(ctx, au))) throw new ApiError(409, 'not_ready', `${au.id}: the upload hasn't arrived on the server yet`);
+    return { key: au.storageKey, id: au.id };
+  }
+  const v = await videoOf(ctx, u, target);
+  return { key: v.key, id: v.id };
+}
+
 /** Listen to a video's or audio file's sound (an id, as watch takes it), or in Edit with no id the edit's mixed sound. */
 export async function listenTo(ctx: Ctx, u: AuthUser, a: Record<string, unknown> | unknown): Promise<Heard> {
   if (!(await mediaToolsAvailable(ctx.config.FFMPEG_PATH, ctx.config.FFPROBE_PATH))) throw new ApiError(503, 'unavailable', 'Listening needs ffmpeg on the server, which is missing here');
@@ -178,13 +190,7 @@ export async function listenTo(ctx: Ctx, u: AuthUser, a: Record<string, unknown>
     });
     return remember(ck, { source: { sessionId: s.id, revision: s.revision, timeline: true }, ...r });
   }
-  const target = await watchTarget({ ctx, user: u }, args);
-  let key: string, rid: string;
-  const [au] = typeof target === 'string' ? await ctx.db.select().from(uploads).where(and(eq(uploads.id, target), eq(uploads.studioId, u.studioId))) : [];
-  if (au && /^audio\//i.test(au.contentType)) {
-    if (!(await readyIfStored(ctx, au))) throw new ApiError(409, 'not_ready', `${au.id}: the upload hasn't arrived on the server yet`);
-    key = au.storageKey; rid = au.id;
-  } else { const v = await videoOf(ctx, u, target); key = v.key; rid = v.id; }
+  const { key, id: rid } = await soundFileOf(ctx, u, args);
   const ck = `${u.studioId}|${key}|${fromSec}|${toSec}`;
   const hit = cache.get(ck);
   if (hit) return hit;

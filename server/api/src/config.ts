@@ -250,6 +250,11 @@ const Env = z.object({
   // by default (owner's choice 2026-11-09: same price; per AssemblyAI's docs, EU files are never used for training).
   ASSEMBLYAI_API_KEY: str(),
   ASSEMBLYAI_API_URL: z.string().default('https://api.eu.assemblyai.com'),
+  // Gemini audio understanding for song_notes (listening: true): mood, genre, instruments, vocal spans, arc. Unset = the
+  // free DSP notes only (a note says so). Server-side only; never logged.
+  GEMINI_API_KEY: str(),
+  GEMINI_MODEL: z.string().default('gemini-3.5-flash'),
+  GEMINI_API_URL: z.string().default('https://generativelanguage.googleapis.com'),
   DIRECTOR_MODEL: z.string().default('claude-opus-5-5'),
   /** workstream 1 (G8): the model that writes Recreate shot briefs on the server (opt-in, priced, in the editor's daily cap). */
   RECREATE_BRIEF_MODEL: z.string().default('claude-sonnet-5-5'),
@@ -319,6 +324,7 @@ export function describeConfig(c: Config) {
       OWNER_INVITE_CODE: !!c.OWNER_INVITE_CODE,
       ANTHROPIC_API_KEY: !!c.ANTHROPIC_API_KEY,
       ASSEMBLYAI_API_KEY: !!c.ASSEMBLYAI_API_KEY,
+      GEMINI_API_KEY: !!c.GEMINI_API_KEY,
       PROVIDER_KEYS_SECRET: !!c.PROVIDER_KEYS_SECRET, // WS5
     },
   };
