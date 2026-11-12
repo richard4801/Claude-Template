@@ -16,6 +16,9 @@ extension SnapshotRunner {
         let service = ClaudeCodeService.shared
         var lines: [String] = []
         let wasOpen = store.oneClaude.open
+        // The sample thread (every kind of row) in the panel, as the chat walk shows it: a real-looking chat around the orb.
+        state.chatSample = true
+        defer { state.chatSample = false }
         for theme in [ThemeID.c, .a, .b, .d] {
             store.themeID = theme
             w.setFrame(NSRect(x: full.minX, y: full.maxY - 800, width: 1280, height: 800), display: true)
@@ -31,15 +34,21 @@ extension SnapshotRunner {
             await store.useSampleClip(bad: false, quiet: true)
             store.oneClaude.open = true
             try? await Task.sleep(for: .seconds(2.5))
+            // The chat's rows and composer drawn (run 591 caught it still loading), and no toast over the header.
+            for _ in 0..<50 where state.composerFrames["chat composer"] == nil { try? await Task.sleep(for: .seconds(0.1)) }
+            store.toast = nil
+            try? await Task.sleep(for: .seconds(0.6))
             w.contentView?.layoutSubtreeIfNeeded()
+            let composer = state.composerFrames["chat composer"] != nil
             let items = store.claudeContextItems
             let header = state.composerFrames["claude header"].map { "\(Int($0.width))×\(Int($0.height))" } ?? "not drawn"
-            lines.append("INFO claude_panel_idle 1280x800 \(theme.rawValue) header \(header), context strip \(items.count) items (\(items.map(\.label).joined(separator: ", "))), orb \(service.orb.state(at: ClaudeCodeService.now).rawValue)")
+            lines.append("INFO claude_panel_idle 1280x800 \(theme.rawValue) header \(header), context strip \(items.count) items (\(items.map(\.label).joined(separator: ", "))), orb \(service.orb.state(at: ClaudeCodeService.now).rawValue), chat composer \(composer ? "drawn" : "NOT drawn")")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_panel_idle.png"))
             // A turn runs: the orb's thinking state (no message is sent; the turn ends right after the shot).
             service.orbTurnStarted()
             service.orbEvent(.text(delta: "…"))
             try? await Task.sleep(for: .seconds(1.2))
+            store.toast = nil
             lines.append("INFO claude_panel_thinking 1280x800 \(theme.rawValue) orb \(service.orb.state(at: ClaudeCodeService.now).rawValue)")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_panel_thinking.png"))
             service.orbEvent(.done(ok: true, error: nil, model: nil))

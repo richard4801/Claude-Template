@@ -178,7 +178,6 @@ enum SnapshotRunner {
             await linkImportShots(store, dir: dir)   // Import a video from a link (owner 2026-11-08)   // Settings redesign (owner 2026-11-08): before and the proposed mock
             await suiteStageCheck(store, dir: dir)   // WS19: generating → result on the stage, Photo × 4 carousel, back after leaving, in the Queue
             await claudeChatCheck(store, dir: dir)   // WS18: one bubble per message, chat sessions, Claude's draft in the composer
-            await claudePanelShots(store, dir: dir)   // the floating Claude panel: orb idle and thinking, the context strip filled
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
@@ -187,6 +186,9 @@ enum SnapshotRunner {
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
             await chatShots(store, dir: dir)   // Claude chat on every surface, four themes, and the composer's fit (SnapshotRunner+Chat.swift)
             await scrollCheck(store, dir: dir)
+            // Last, so opening the floating panel on New Swap can't change the chat the other walks expect (run 591:
+            // claude_edit then showed an empty chat).
+            await claudePanelShots(store, dir: dir)   // the floating Claude panel: orb idle and thinking, the context strip filled
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
             capture(dir.appendingPathComponent("mac_a_signin.png"))
