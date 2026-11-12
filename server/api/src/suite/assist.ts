@@ -105,7 +105,8 @@ export function requestOf(d: Draft) {
     ...(camera ? { camera } : {}),
     ...(typeof extra.engineModel === 'string' ? { engineModel: extra.engineModel, ...(typeof extra.resolution === 'string' ? { resolution: extra.resolution } : {}) } : {}),
     ...(rig.gradeLook === false && (rig.palette || rig.stock) ? { gradeLook: false } : {}),
-    ...(extra.background === 'photo' || extra.background === 'describe' ? { background: extra.background as 'photo' | 'describe' } : {}),
+    // Claude's background (keep included, so its Keep wins over the screen's); none set: the screen's (screen.ts FALLBACK).
+    ...(extra.background === 'keep' || extra.background === 'photo' || extra.background === 'describe' ? { background: extra.background as 'keep' | 'photo' | 'describe' } : {}),
     ...(referencesOf(d).length ? { references: { images: referencesOf(d).map(r => ({ image: { url: r.url }, role: r.use, label: r.label ?? r.use })) } } : {}),
     // Images sent (images/sent.ts): Claude's or the person's choice, kept in the draft (set_sent_images).
     ...sentOfDraft(d),
@@ -237,7 +238,8 @@ export class SuiteAssist {
     }
     if (b.engineModel !== undefined) { if (b.engineModel === null) { delete d.engineModel; delete d.resolution; } else d.engineModel = b.engineModel; }
     if (b.resolution !== undefined) { if (b.resolution === null) delete d.resolution; else d.resolution = b.resolution; }
-    if (b.background !== undefined) { if (b.background === null || b.background === 'keep') delete (d as Record<string, unknown>).background; else (d as Record<string, unknown>).background = b.background; }
+    // The app takes it (Swap / Recast panel) and shows "Claude set Background"; null = back to what is on screen.
+    if (b.background !== undefined) { if (b.background === null) delete (d as Record<string, unknown>).background; else (d as Record<string, unknown>).background = b.background; }
     // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
     // change Claude made outside Shot, because it only lays a draft over the composer of the same tool.
     if (!d.tool) d.tool = 'shot';

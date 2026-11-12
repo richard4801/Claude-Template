@@ -48,8 +48,14 @@ export const ScreenSchema = z.object({
   inputs: z.array(z.unknown()).max(24).optional(),
   /** When the app read the screen (ms). */
   at: z.number().optional(),
+  /**
+   * The panel's own controls that the request can't carry (or not yet): Swap's background pill (even before a picture
+   * is picked) and its picture's name, the prompt toggle, the add-on (Edit / Fast), the Photo references count …
+   */
+  settings: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();
-export type Screen = { tool?: (typeof TOOLS)[number]; request?: Record<string, unknown>; inputs?: ScreenInput[]; at?: number; dropped?: number };
+export type Screen = { tool?: (typeof TOOLS)[number]; request?: Record<string, unknown>; inputs?: ScreenInput[]; at?: number; dropped?: number;
+  settings?: Record<string, string | number | boolean | null> };
 
 /** The draft's screen, checked leniently: a bad input is left out (and counted) rather than refusing the whole sync. */
 export function screenOf(d: Draft | Record<string, unknown> | null | undefined): Screen | null {
@@ -60,14 +66,22 @@ export function screenOf(d: Draft | Record<string, unknown> | null | undefined):
   const inputs: ScreenInput[] = [];
   let dropped = 0;
   for (const x of p.data.inputs ?? []) { const i = ScreenInputSchema.safeParse(x); if (i.success) inputs.push(i.data); else dropped++; }
+  // Swap's new background picture is an input too (Claude sees it with suite_see), unless the app listed it already.
+  const bg = p.data.request?.backgroundImage as { url?: unknown; asset?: unknown } | undefined;
+  const bgName = typeof p.data.settings?.backgroundName === 'string' ? (p.data.settings.backgroundName as string) : undefined;
+  if (bg && (typeof bg.url === 'string' || typeof bg.asset === 'string') && !inputs.some(i => i.slot === 'background'))
+    inputs.push({ slot: 'background', kind: 'image', label: (bgName ?? 'New background').slice(0, 120), ...(typeof bg.url === 'string' ? { url: bg.url.slice(0, 2000) } : {}) });
+  // Settings: plain values only (a bad one is left out, never the whole screen); at most 30.
+  const settings = Object.fromEntries(Object.entries(p.data.settings ?? {}).slice(0, 30).filter(([k, v]) => k.length <= 40
+    && (v === null || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && v.length <= 200)))) as Record<string, string | number | boolean | null>;
   return { ...(p.data.tool ? { tool: p.data.tool } : {}), ...(p.data.request ? { request: p.data.request } : {}), inputs,
-    ...(typeof p.data.at === 'number' ? { at: p.data.at } : {}), ...(dropped ? { dropped } : {}) };
+    ...(typeof p.data.at === 'number' ? { at: p.data.at } : {}), ...(dropped ? { dropped } : {}), ...(Object.keys(settings).length ? { settings } : {}) };
 }
 
 /** Request fields that are media on screen: the app's are the truth (Claude can't set them except references/sent). */
 const MEDIA = ['mode', 'clipId', 'keepAudio', 'cast', 'extend', 'frames', 'direction'] as const;
 /** Fields Claude sets in the draft; the screen's are used only when the draft has none (Swap's character lives there). */
-const FALLBACK = ['modelId', 'outfitId', 'engineModel', 'resolution'] as const;
+const FALLBACK = ['modelId', 'outfitId', 'engineModel', 'resolution', 'background', 'backgroundImage'] as const;
 
 type Req = Record<string, unknown> & { references?: { images?: unknown[]; videos?: unknown[]; audio?: unknown } };
 
@@ -113,8 +127,35 @@ export function onScreen(d: Draft) {
     return { input: n, slot: i.slot, kind: i.kind, ...(i.label ? { label: i.label } : {}), ...(i.role ? { role: i.role } : {}), ...(i.link ? { link: i.link } : {}),
       ...(i.seconds ? { seconds: i.seconds } : {}), ...how };
   });
-  return { synced: true, tool: s.tool ?? (d as { tool?: string }).tool, ...(s.at ? { at: s.at } : {}), inputs, ...(s.dropped ? { unreadable: s.dropped } : {}),
-    note: 'What the composer on screen holds. Watch each video (watch {id}) and see each image (suite_see {input}) before you write about it.' };
+  const tool = s.tool ?? (d as { tool?: string }).tool;
+  return { synced: true, tool, ...(s.at ? { at: s.at } : {}), inputs, settings: screenSettings(s, tool), ...(s.dropped ? { unreadable: s.dropped } : {}),
+    note: 'What the composer on screen holds: its inputs and every control (settings). Watch each video (watch {id}) and see each image (suite_see {input}) before you write about it.' };
+}
+
+/** Request fields that are controls on screen, with the words the composer uses for them. */
+const CONTROLS: [key: string, label: string][] = [['quality', 'quality'], ['duration', 'length'], ['aspectRatio', 'shape'], ['takes', 'takes'], ['audio', 'sound'],
+  ['keepAudio', 'clipSound'], ['speaking', 'speaking'], ['engineModel', 'model'], ['resolution', 'resolution'], ['gradeLook', 'gradeLook']];
+
+/**
+ * Every control on screen as the person set it (owner 2026-11-12: Claude couldn't see Swap's Background): the request's
+ * bar values (quality, length, shape, takes, sound, clip sound, speaking, model), the camera (chips or Directed), Swap /
+ * Recast's background (keep / photo / describe, the picture's name and input number) and the app's own panel settings
+ * (prompt toggle, add-on, …). Absent: not on this tool or not set.
+ */
+export function screenSettings(s: Screen, tool?: string) {
+  const r = s.request ?? {}, app = s.settings ?? {};
+  const out: Record<string, unknown> = {};
+  for (const [k, label] of CONTROLS) if (r[k] !== undefined && r[k] !== null) out[label] = r[k];
+  const cam = r.camera as { mode?: string; move?: unknown; guide?: unknown } | undefined;
+  if (cam) out.camera = cam.mode === 'directed' ? { mode: 'directed', guide: !!cam.guide } : { mode: cam.mode ?? 'preset', ...(cam.move ? { move: cam.move } : {}) };
+  if (tool === 'swap' || tool === 'recast') {
+    const bg = (typeof app.background === 'string' ? app.background : typeof r.background === 'string' ? r.background : 'keep');
+    const n = (s.inputs ?? []).findIndex(i => i.slot === 'background');
+    out.background = bg === 'photo' ? { mode: 'photo', ...(n >= 0 ? { picture: s.inputs![n]!.label ?? 'New background', see: `suite_see {input: ${n}}` } : { picture: null, note: 'No picture picked yet' }) }
+      : bg === 'describe' ? { mode: 'describe', words: typeof r.prompt === 'string' && r.prompt.trim() ? r.prompt : (r.direction ?? null) } : { mode: 'keep' };
+  }
+  for (const [k, v] of Object.entries(app)) if (k !== 'background' && k !== 'backgroundName' && out[k] === undefined) out[k] = v;
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ which draft
