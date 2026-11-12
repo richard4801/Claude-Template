@@ -92,6 +92,10 @@ interface EditBackend {
      * paid.available and each helper's available): captions, matte, denoise. Empty = all available.
      */
     suspend fun helpersOff(): Map<String, String> = emptyMap()
+    /** The job id of the last run that failed after the provider made its result, when the owner can recover it (then cleared). */
+    fun takeRecoverable(): String? = null
+    /** Recover (owner, free): fetches a saved provider result again; never a new run. */
+    suspend fun recover(jobId: String, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> = null to "Recover isn't available here" // fakes
     /**
      * The languages translated captions can go into (`GET /v1/editor/features` translate.languages, code → name): only
      * those the export draws correctly. Empty = none offered.
@@ -280,6 +284,8 @@ sealed interface EditAction {
     data class Stabilize(val on: Boolean) : EditAction
     /** Smooth slow motion (2026-11-09, paid): [lengthSec] of the clip's source from the playhead, made [factor]× slower. */
     data class SlowmoPrice(val factor: Int, val lengthSec: Double) : EditAction
+    /** The owner's free Recover of a helper result the provider made but the server couldn't save. */
+    data class RecoverAi(val key: String) : EditAction
     /** Translated captions (2026-11-09, paid): the captions in [language]; [best] is the higher-quality option. */
     data class TranslatePrice(val language: String, val best: Boolean) : EditAction
     data class Translate(val language: String, val best: Boolean) : EditAction
@@ -912,6 +918,7 @@ class EditSuiteController(
             is EditAction.Stabilize -> stabilize(u, a.on)
             is EditAction.SlowmoPrice -> slowmoRange(u, a.lengthSec)?.let { (_, asset, r) -> estimate("slowmo", slowmoOptions(a.factor, r), sourceOf(asset)) }
             is EditAction.Slowmo -> slowmo(u, a.factor, a.lengthSec)
+            is EditAction.RecoverAi -> recoverAi(a.key)
             is EditAction.TranslatePrice -> captionSource()?.let { estimate("translate", translateOptions(a.language, a.best), it) }
             is EditAction.Translate -> translate(a.language, a.best)
             EditAction.SeparatePrice -> (soundClip(u) as? VideoClip)?.let { c -> estimate("separate", null, sourceOf(project?.asset(c.asset))) }
@@ -1126,11 +1133,26 @@ class EditSuiteController(
             val progress: (EditorJob) -> Unit = { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
             // No pick: the studio's default (the original call); a pick goes with the model-aware one (WS13).
             val (result, err) = if (model == null) backend.run(kind, src, options, progress) else backend.run(kind, src, options, model, progress)
-            setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
+            val recoverId = if (result == null) backend.takeRecoverable() else null
+            if (recoverId != null) recoverApply[key] = apply
+            setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err, recoverJobId = recoverId) }
             if (result != null) {
                 actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; "reverse" -> "Reverse"; "stabilize" -> "Stabilise"; "slowmo" -> "Smooth slow motion"; "translate" -> "Translate captions"; "separate" -> "Split voice and music"; "cutout" -> "Cut out"; else -> "Edit" }
                 apply(result)
             } else if (err != null) say(err)
+        }
+    }
+
+    private val recoverApply = HashMap<String, (JsonObject) -> Unit>()
+    /** Recover (owner, free): the saved provider request is fetched again; its result is applied like the run's. */
+    private fun recoverAi(key: String) {
+        val id = _ui.value.ai[key]?.recoverJobId ?: return
+        val apply = recoverApply.remove(key) ?: return
+        setAi(key) { it.copy(running = true, progress = 0, phase = "Recovering", error = null, recoverJobId = null) }
+        jobs[key] = scope.launch {
+            val (result, err) = backend.recover(id) { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
+            setAi(key) { it.copy(running = false, done = result != null, error = err) }
+            if (result != null) apply(result) else if (err != null) say(err)
         }
     }
 

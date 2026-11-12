@@ -363,7 +363,24 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
             runCatching { c.repo.attemptInline { cancelEditorJob(job.id) } }
             throw e
         }
+        // Made at the provider but not saved: the owner gets a free Recover (members see the server's words).
+        if (job.canRecover && c.repo.ownerNow()) recoverable = job.id
         return if (job.state == "done" && job.result != null) job.result to null else null to (job.error ?: if (job.state == "cancelled") "Stopped" else "The helper stopped · try again")
+    }
+
+    private var recoverable: String? = null
+    override fun takeRecoverable(): String? = recoverable.also { recoverable = null }
+
+    override suspend fun recover(jobId: String, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
+        if (c.repo.recoverJob(jobId) == null) return null to "Couldn't recover it · try again"
+        var job = runCatching { c.repo.attemptInline { editorJob(jobId) }.first }.getOrNull() ?: return null to "Couldn't reach the studio · try again"
+        onProgress(job)
+        while (!job.finished) {
+            delay(pollMs)
+            job = runCatching { c.repo.attemptInline { editorJob(jobId) }.first }.getOrNull() ?: continue
+            onProgress(job)
+        }
+        return if (job.state == "done" && job.result != null) job.result to null else null to (job.error ?: "The helper stopped · try again")
     }
 }
 

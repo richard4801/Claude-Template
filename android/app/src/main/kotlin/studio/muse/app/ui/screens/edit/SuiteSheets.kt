@@ -391,7 +391,9 @@ private fun SlowmoSection(ui: EditSuiteUi, c: VideoClip, act: (EditAction) -> Un
         job?.running == true -> T("${job.phase.ifEmpty { "Slowing down" }}… ${job.progress}%", m.type.body.copy(fontSize = 13.sp), m.t.ink)
         else -> {
             job?.error?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted) }
-            SuiteButton(job?.price?.let { "Slow down · $it" } ?: "Slow down", { act(EditAction.Slowmo(factor, len)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
+            // Already made and charged at fal: Recover is free (owner only); slowing down again would pay again.
+            if (job?.recoverJobId != null) SuiteButton(studio.muse.app.data.Job.RECOVER, { act(EditAction.RecoverAi("slowmo")) }, Modifier.fillMaxWidth())
+            else SuiteButton(job?.price?.let { "Slow down · $it" } ?: "Slow down", { act(EditAction.Slowmo(factor, len)) }, Modifier.fillMaxWidth(), enabled = job?.price != null)
         }
     }
 }

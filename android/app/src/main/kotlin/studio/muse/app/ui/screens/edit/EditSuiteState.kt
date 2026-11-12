@@ -54,6 +54,8 @@ data class AiTask(
     val phase: String = "",
     val error: String? = null,
     val done: Boolean = false,
+    /** The provider made this result but the server couldn't save it: the owner's free Recover runs this job again. */
+    val recoverJobId: String? = null,
 )
 
 sealed interface SuitePhase {
