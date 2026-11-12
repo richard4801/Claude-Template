@@ -336,6 +336,17 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val assist by store.assist.collectAsState()
     var claudeOpen by remember { mutableStateOf(false) }
     var chipsUsed by remember(assist?.id) { mutableStateOf(false) }
+    // Live chips (owner 2026-11-12): the server's chips for this composer now, asked ~1 s after the composer, the shared
+    // draft or a Claude step changes (a newer change cancels the wait); null = the fixed ones (offline, older server).
+    var liveChips by remember(assist?.id) { mutableStateOf<List<studio.muse.core.claude.ClaudeChip>?>(null) }
+    var claudeSteps by remember { mutableStateOf(0) }
+    LaunchedEffect(assist?.id, assist?.revision, d, claudeOpen, claudeSteps) {
+        val a = assist ?: return@LaunchedEffect
+        if (!claudeOpen || c.repo.demo) return@LaunchedEffect
+        delay(1000)
+        val q = studio.muse.core.claude.ClaudeSuggestQuery("suite", d.tool.id, mapOf("assistId" to a.id))
+        runCatching { c.repo.api.claudeSuggestions(q) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { liveChips = studio.muse.core.claude.ClaudeSuggest.steady(liveChips.orEmpty(), it) }
+    }
     val canClaude = owner || c.repo.demo
     LaunchedEffect(Unit) {
         c.repo.live.collect { ev ->
@@ -425,7 +436,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
             assist?.let { a ->
                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
-                    hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope) },
+                    hooks = store.claudeHooks(scope), onToolDone = { name -> store.claudeToolDone(name, scope); claudeSteps++ },
                     answerSuite = { _, pid, yes -> store.answerClaude(yes, pid) },
                     above = {
                         // What Claude sees on this composer now (the same screen the server reads).
@@ -435,7 +446,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
                                 outfit = { id -> st.outfits.firstOrNull { it.id == id }?.let { o -> o.name to o.angles.firstNotNullOfOrNull { it?.url } } },
                             ))
                         })
-                        SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
+                        val live = liveChips
+                        SuiteClaudeTop(a, showChips = live != null || !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } },
+                            chips = live?.map { it.label to it.prompt } ?: studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions)
                         if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     })
             }

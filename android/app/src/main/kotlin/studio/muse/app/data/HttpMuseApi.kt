@@ -233,6 +233,7 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/suite/assist") suspend fun createSuiteAssist(@Body r: JsonObject): SuiteAssist
     @GET("v1/suite/assist/{id}") suspend fun suiteAssist(@Path("id") id: String): SuiteAssist
+    @GET("v1/claude/suggestions") suspend fun claudeSuggestions(@QueryMap q: Map<String, String>): JsonObject
     @PATCH("v1/suite/assist/{id}") suspend fun patchSuiteAssist(@Path("id") id: String, @Body r: JsonObject): SuiteAssist
     @POST("v1/suite/assist/{id}/pending/{pid}") suspend fun answerSuitePending(@Path("id") id: String, @Path("pid") pid: String, @Body r: JsonObject): SuitePending
     @GET("v1/recreate/settings") suspend fun recreateSettings(): RecreateLinkSettings
@@ -579,6 +580,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         createSuiteAssist(buildJsonObject { draft?.let { put("draft", it.json) }; fromJobId?.let { put("fromJobId", JsonPrimitive(it)) } })
     }
     override suspend fun suiteAssist(id: String) = call { suiteAssist(id) }
+    override suspend fun claudeSuggestions(q: studio.muse.core.claude.ClaudeSuggestQuery) =
+        studio.muse.core.claude.ClaudeSuggest.parse(call { claudeSuggestions(q.params()) })
     override suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?) = call {
         patchSuiteAssist(id, buildJsonObject { put("draft", draft.json); baseRevision?.let { put("baseRevision", JsonPrimitive(it)) } })
     }

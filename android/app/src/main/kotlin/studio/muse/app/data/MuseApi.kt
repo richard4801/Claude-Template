@@ -359,6 +359,8 @@ interface MuseApi {
     /** A shared draft: the composer's current [draft], or a job's ([fromJobId]). */
     suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String? = null): SuiteAssist = throw ApiException("not_found", "This studio server doesn't have Claude in the Suite yet")
     suspend fun suiteAssist(id: String): SuiteAssist = throw ApiException("not_found", "Assist not found")
+    /** Live chips (owner 2026-11-12): the chips for what is on screen now (GET v1/claude/suggestions). An older server: not_found. */
+    suspend fun claudeSuggestions(q: studio.muse.core.claude.ClaudeSuggestQuery): List<studio.muse.core.claude.ClaudeChip> = throw ApiException("not_found", "This server has no live chips yet")
     /** The owner's own composer edits, so Claude sees them. `stale` (409): Claude changed it since; re-read it. */
     suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?): SuiteAssist = throw ApiException("not_found", "Assist not found")
     /** The owner's answer to Claude's Generate. `price_changed` (409): the price rose above the approved one; nothing ran. */

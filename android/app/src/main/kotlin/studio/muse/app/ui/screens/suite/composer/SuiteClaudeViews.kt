@@ -122,19 +122,25 @@ fun SuiteReferenceChips(refs: List<DraftReference>, onRemove: (DraftReference) -
     }
 }
 
-/** The top of the Suite's Claude sheet: "Fills in this composer", and the three chips until one is used. */
+/**
+ * The top of the Suite's Claude sheet: "Fills in this composer", and three chips. Live chips (owner 2026-11-12) follow the
+ * composer and crossfade when they change; without them (offline, an older server) the fixed three until one is used.
+ */
 @Composable
-fun SuiteClaudeTop(a: SuiteAssistUi, showChips: Boolean, onChip: (String) -> Unit) {
+fun SuiteClaudeTop(a: SuiteAssistUi, showChips: Boolean, onChip: (String) -> Unit,
+                   chips: List<Pair<String, String>> = studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions) {
     val m = muse
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T(studio.muse.app.ui.screens.suite.SuiteClaudeWords.SUBTITLE, m.scale.caption, m.roles.ink2, maxLines = 1)
-        if (showChips && a.pending == null) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions.forEach { (label, prompt) ->
+        if (showChips && a.pending == null) androidx.compose.animation.Crossfade(targetState = chips, animationSpec = androidx.compose.animation.core.tween(200), label = "chips") { shown ->
+          androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            shown.forEach { (label, prompt) ->
                 Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.control))
                     .press { onChip(prompt) }.padding(horizontal = 14.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
                     T(label, m.scale.label, m.roles.ink, maxLines = 1)
                 }
             }
+          }
         }
     }
 }
