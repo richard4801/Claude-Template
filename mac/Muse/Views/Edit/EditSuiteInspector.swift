@@ -253,6 +253,8 @@ struct TextPanel: View {
     var body: some View {
         if let tx = session.state.selectedItem?.textItem {
             editor(tx)
+            // Layers: the text follows a tracked layer.
+            PinTextRow(session: session, text: tx)
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 InspectorEmpty(text: "Select a text or hook on the timeline, or add one.")

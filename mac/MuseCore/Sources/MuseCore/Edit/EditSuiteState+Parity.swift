@@ -90,7 +90,7 @@ extension EditSuiteState {
             let len = c.holdSec != nil ? E.minClipSourceSec : min(c.outSec - c.inSec, d)
             q = q.updating(c.id) { it in
                 guard case .video(var v) = it else { return }
-                v.asset = aid; v.inSec = 0; v.outSec = Self.r3(len); v.audioAsset = nil; v.alphaMatte = nil
+                v.asset = aid; v.inSec = 0; v.outSec = Self.r3(len); v.audioAsset = nil; v.alphaMatte = nil; E.dropLayers(&v)
                 it = .video(v)
             } ?? q
             return q

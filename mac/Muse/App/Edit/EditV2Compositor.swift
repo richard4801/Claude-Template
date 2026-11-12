@@ -109,6 +109,9 @@ final class EditV2Scene: @unchecked Sendable {
     private let lock = NSLock()
     private var textCache: [String: CIImage] = [:]
     private var cubeCache: [E.Chroma: Data] = [:]
+    private var recolorCache: [E.Recolor: Data] = [:]
+    /// Layers: the matte track of each "<lane>/<itemId>/<layerId>", and a swapped background video ("<lane>/<itemId>/base").
+    let layerTracks: [String: CMPersistentTrackID]
     /// The items' looks (filter stack) in Core Image.
     private let looks: EditV2LookRenderer
     /// Edit suite: false when captions go out as an .srt instead of being drawn.
@@ -118,7 +121,8 @@ final class EditV2Scene: @unchecked Sendable {
     private let outSpace: CGColorSpace
 
     init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], matteTracks: [Int: CMPersistentTrackID] = [:],
-         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false) {
+         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false, layerTracks: [String: CMPersistentTrackID] = [:]) {
+        self.layerTracks = layerTracks
         self.burnCaptions = burnCaptions
         self.hdr = hdr
         outSpace = hdr ? (CGColorSpace(name: CGColorSpace.itur_2100_HLG) ?? CGColorSpace(name: CGColorSpace.sRGB)!) : CGColorSpace(name: CGColorSpace.sRGB)!
@@ -164,14 +168,26 @@ final class EditV2Scene: @unchecked Sendable {
         }
         if let dip = main.dip { image = CIImage(color: color(dip)).cropped(to: canvas).composited(over: image) }
         let clips = project.mainClips
+        // Layers (plans/layers-edit.md): text goes behind aboveText layers while their clip is steady (drawn after the text).
+        let above = E.aboveTextLayersAt(project, t)
+        var later: [(E.VideoSegment, E.LayerState, E.ClipLayer, E.VideoClip, CIImage)] = []
         for layer in main.layers {
             guard let i = layer.segment.mainIndex, i < clips.count, let frame = sourceImage(request, layer.segment) else { continue }
-            let c = clips[i]
-            let pl = E.placement(c, local: t - layer.segment.timelineStart)
-            image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: E.adjustAt(c.adjust, c.keyframes, t - layer.segment.timelineStart),
-                         colorKeyed: E.hasColorKeys(c.keyframes), filter: c.filter, look: E.lookAt(c.look, c.keyframes, t - layer.segment.timelineStart),
-                         chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: E.maskAt(c.mask, c.keyframes, t - layer.segment.timelineStart), frame: frameNo, fps: fps, flip: c.transform,
-                         effect: c.effect, effectTime: t - layer.segment.timelineStart, over: image)
+            let c = clips[i], seg = layer.segment, local = t - seg.timelineStart
+            // The Background row: hidden, blurred, its own colour, or another picture instead (cover-fitted to the source frame).
+            let b = E.baseClip(c)
+            if c.layerBase?.hidden != true {
+                let pic = baseSwap(request, seg, c, like: frame) ?? frame
+                image = draw(pic, crop: b.crop, fit: b.fit ?? .cover, placement: E.placement(b, local: local), state: layer.state, adjust: E.adjustAt(b.adjust, b.keyframes, local),
+                             colorKeyed: E.hasColorKeys(b.keyframes), filter: b.filter, look: E.lookAt(b.look, b.keyframes, local),
+                             chroma: b.chroma, matte: matteImage(request, seg, b), mask: E.maskAt(b.mask, b.keyframes, local), frame: frameNo, fps: fps, flip: b.transform,
+                             effect: b.effect, effectTime: local, blurPx: E.layerBlurPx(width: Double(size.width), height: Double(size.height), c.layerBase?.blur), over: image)
+            }
+            for l in (c.layers ?? []).prefix(E.maxLayers) where l.hidden != true {
+                guard let m = layerMatte(request, seg, l) else { continue }
+                if l.aboveText == true, above.contains(where: { $0.clipId == c.id && $0.layerId == l.id }) { later.append((seg, layer.state, l, c, frame)); continue }
+                image = drawLayer(frame, matte: m, layer: l, clip: c, local: local, state: layer.state, frame: frameNo, fps: fps, over: image)
+            }
         }
 
         // Other tracks, bottom to top: pictures first (video and image tracks), then the adjustment layers' colour over the
@@ -216,7 +232,7 @@ final class EditV2Scene: @unchecked Sendable {
             switch track.kind {
             case .text:
                 for case .text(let tx) in track.items where t >= tx.startSec && t < tx.startSec + tx.durationSec {
-                    image = drawText(tx, local: t - tx.startSec, over: image)
+                    image = drawText(tx, local: t - tx.startSec, at: t, over: image)
                 }
             case .caption:
                 if burnCaptions, let ct = track.caption { image = drawCaption(ct, at: t, over: image) }
@@ -224,7 +240,61 @@ final class EditV2Scene: @unchecked Sendable {
                 break
             }
         }
+        for (seg, state, l, c, frame) in later {
+            guard let m = layerMatte(request, seg, l) else { continue }
+            image = drawLayer(frame, matte: m, layer: l, clip: c, local: t - seg.timelineStart, state: state, frame: frameNo, fps: fps, over: image)
+        }
         ci.render(image.cropped(to: canvas), to: out, bounds: canvas, colorSpace: outSpace)
+    }
+
+    // MARK: Layers
+
+    private func layerMatte(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment, _ l: E.ClipLayer) -> CIImage? {
+        guard let id = layerTracks["\(seg.lane)/\(seg.itemId)/\(l.id)"], let buf = request.sourceFrame(byTrackID: id) else { return nil }
+        return CIImage(cvPixelBuffer: buf).transformed(by: sources.media[l.matte]?.orient ?? .identity)
+    }
+
+    /// The Background row's other picture, cover-fitted to the clip's own source frame (so it crops and places like the clip).
+    private func baseSwap(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment, _ c: E.VideoClip, like frame: CIImage) -> CIImage? {
+        guard let a = c.layerBase?.asset else { return nil }
+        var pic: CIImage?
+        if let img = sources.images[a] { pic = img }
+        else if let id = layerTracks["\(seg.lane)/\(seg.itemId)/base"], let buf = request.sourceFrame(byTrackID: id) {
+            pic = CIImage(cvPixelBuffer: buf).transformed(by: sources.media[a]?.orient ?? .identity)
+        }
+        guard var p = pic, p.extent.width > 0, p.extent.height > 0, frame.extent.width > 0 else { return nil }
+        let e = frame.extent
+        let k = max(e.width / p.extent.width, e.height / p.extent.height)
+        p = p.transformed(by: CGAffineTransform(translationX: -p.extent.minX, y: -p.extent.minY).concatenating(CGAffineTransform(scaleX: k, y: k)))
+        let dx = (p.extent.width - e.width) / 2, dy = (p.extent.height - e.height) / 2
+        return p.transformed(by: CGAffineTransform(translationX: e.minX - dx, y: e.minY - dy)).cropped(to: e)
+    }
+
+    /// One layer: the clip's frame again with the layer's matte as alpha, the layer's colour, recolour, blur and feather.
+    private func drawLayer(_ frame: CIImage, matte: CIImage, layer l: E.ClipLayer, clip c0: E.VideoClip, local: Double, state: E.LayerState, frame frameNo: Int, fps: Double,
+                           over base: CIImage) -> CIImage {
+        let c = E.layerClip(c0, l), w = Double(size.width), h = Double(size.height)
+        return draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: E.placement(c, local: local), state: state, adjust: E.adjustAt(c.adjust, c.keyframes, local),
+                    colorKeyed: E.hasColorKeys(c.keyframes), filter: c.filter, look: E.lookAt(c.look, c.keyframes, local), chroma: nil, matte: matte,
+                    mask: E.maskAt(c.mask, c.keyframes, local), frame: frameNo, fps: fps, flip: c.transform, effect: c.effect, effectTime: local,
+                    blurPx: E.layerBlurPx(width: w, height: h, l.blur), featherPx: E.layerFeatherPx(width: w, height: h, l.feather), recolor: l.recolor, over: base)
+    }
+
+    /// A layer's recolour as a 32³ colour cube (model.ts recolorPixel), made once per colour and amount.
+    private func recolorCube(_ rc: E.Recolor) -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        if let d = recolorCache[rc] { return d }
+        let n = 32
+        var f = [Float](repeating: 1, count: n * n * n * 4)
+        for b in 0..<n { for g in 0..<n { for r in 0..<n {
+            let o = E.recolorPixel((Double(r) / Double(n - 1), Double(g) / Double(n - 1), Double(b) / Double(n - 1)), rc)
+            let i = ((b * n + g) * n + r) * 4
+            f[i] = Float(o.0); f[i + 1] = Float(o.1); f[i + 2] = Float(o.2)
+        } } }
+        let d = f.withUnsafeBufferPointer { Data(buffer: $0) }
+        recolorCache[rc] = d
+        return d
     }
 
     private func sourceImage(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment) -> CIImage? {
@@ -248,7 +318,8 @@ final class EditV2Scene: @unchecked Sendable {
     /// halation, leak, vignette, grain; just the colour matrix without a look) → fit → scale/rotate/move → opacity, over `base`.
     private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, colorKeyed: Bool = false, filter: E.FilterRef?,
                       look: E.Look?, chroma: E.Chroma?, matte: CIImage? = nil, mask: E.Mask? = nil, frame: Int, fps: Double,
-                      flip: E.Transform? = nil, blend: E.BlendMode? = nil, effect: E.Effect? = nil, effectTime: Double = 0, over base: CIImage) -> CIImage {
+                      flip: E.Transform? = nil, blend: E.BlendMode? = nil, effect: E.Effect? = nil, effectTime: Double = 0,
+                      blurPx: Double = 0, featherPx: Double = 0, recolor: E.Recolor? = nil, over base: CIImage) -> CIImage {
         let opacity = pl.opacity * state.opacity
         guard opacity > 0.001 else { return base }
         var img = src
@@ -274,6 +345,18 @@ final class EditV2Scene: @unchecked Sendable {
         if let chroma, let cube = cube(chroma) {
             img = img.applyingFilter("CIColorCube", parameters: ["inputCubeDimension": 32, "inputCubeData": cube])
         }
+        // Layers: blur and feather are canvas pixels (model.ts layerBlurPx / layerFeatherPx), here in the picture's own pixels.
+        let perCanvas = { () -> Double in
+            let (fw, _) = E.fittedSize(width: Double(w), height: Double(h), crop: nil, fit: fit, canvasWidth: Double(self.size.width), canvasHeight: Double(self.size.height))
+            return fw > 0 ? Double(w) / fw / max(0.05, pl.scale) : 1
+        }
+        if blurPx > 0.05 {
+            let ext = img.extent
+            img = img.clampedToExtent().applyingGaussianBlur(sigma: blurPx * perCanvas()).cropped(to: ext)
+        }
+        if featherPx > 0.05, let a = alpha {
+            alpha = a.clampedToExtent().applyingGaussianBlur(sigma: featherPx * perCanvas()).cropped(to: a.extent)
+        }
         // Remove background: the matte's luma is the alpha (white = keep), before the look, mask and transform.
         if let alpha {
             img = img.applyingFilter("CIBlendWithMask", parameters: [
@@ -282,6 +365,10 @@ final class EditV2Scene: @unchecked Sendable {
             ]).cropped(to: img.extent)
         }
         img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), tone: E.Tone(adjust), keyed: colorKeyed, to: img, frame: frame, fps: fps)
+        if let recolor, recolor.amount > 0 {
+            // On straight colour: the cube runs on unpremultiplied values, then the alpha goes back on.
+            img = img.unpremultiplyingAlpha().applyingFilter("CIColorCube", parameters: ["inputCubeDimension": 32, "inputCubeData": recolorCube(recolor)]).premultiplyingAlpha()
+        }
         // The effects library (WS8 f7226f2): after the look, before the mask and transform, in the picture's own frame.
         if let effect, effect.amount > 0 { img = EditV2EffectRenderer.apply(effect, to: img, t: effectTime) }
         // Edit suite: the mask multiplies the alpha (after the chroma key).
@@ -437,8 +524,13 @@ final class EditV2Scene: @unchecked Sendable {
         return faded(img.transformed(by: tf), opacity).composited(over: base)
     }
 
-    private func drawText(_ tx: E.TextItem, local: Double, over base: CIImage) -> CIImage {
-        let pl = E.placement(tx, local: local)
+    private func drawText(_ tx: E.TextItem, local: Double, at t: Double, over base: CIImage) -> CIImage {
+        var pl = E.placement(tx, local: local)
+        // Layers: a pinned text's centre follows its layer while the layer is seen (model.ts pinPoint).
+        if let pin = tx.pin, let pt = E.pinPoint(project, pin, t, size: { id in
+            self.sources.media[id].map { (Double($0.info.width), Double($0.info.height)) } }) {
+            pl.x = pt.x; pl.y = pt.y
+        }
         // Drawn at the static scale (sharp), animated/keyframed scale on top of that.
         let k = max(1, tx.transform?.scale ?? 1)
         var text = tx.text

@@ -17,15 +17,24 @@ public enum BlenderError: Error, Equatable, Sendable, LocalizedError {
     /// The add-on answered `{"status": "error", "message"}`.
     case command(String)
     case badReply(String)
+    /// Port 9876 answers, but not with the MCP for Blender protocol. Seen in the wild: Blender's official MCP add-on
+    /// (Blender Lab, same default port) ends each reply with a NUL byte and evicts clients after 10 s, which the
+    /// `uvx mcp-for-blender` server reports as "Incomplete JSON response received".
+    case otherServer
 
     public var errorDescription: String? {
         switch self {
         case .notConnected: return "Blender isn't connected (open Blender and start the MCP add-on's server on port 9876)"
         case .timedOut: return "Blender didn't answer in time"
+        case .otherServer: return BlenderError.otherServerText
         case .command(let m): return "Blender: \(m)"
         case .badReply(let m): return "Unexpected reply from Blender (\(m))"
         }
     }
+
+    public static let otherServerText = "Another program is using Blender's port 9876, not the MCP for Blender add-on. "
+        + "Most likely Blender's official MCP add-on (Blender Lab): turn it off in Blender → Preferences → Add-ons, restart Blender, "
+        + "then press Start MCP Server in the MCP for Blender panel (N sidebar)."
 
     /// The add-on reports a Python exception as a JSON string {exception_type, message, traceback}: keep it short.
     public static func shortMessage(_ raw: String) -> String {
@@ -67,14 +76,19 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
     public static func unwrap(_ reply: Data) throws -> JSONValue {
         guard case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: reply) else { throw BlenderError.badReply("not a JSON object") }
         if case .string("success")? = o["status"] { return o["result"] ?? .null }
-        if case .string(let m)? = o["message"] { throw BlenderError.command(BlenderError.shortMessage(m)) }
+        if case .string(let m)? = o["message"] {
+            // Blender Lab's MCP add-on: its words, not MCP for Blender's ("Unknown command type: …").
+            if m == "Client timed out" || m.hasPrefix("Unknown request type") { throw BlenderError.otherServer }
+            throw BlenderError.command(BlenderError.shortMessage(m))
+        }
         throw BlenderError.badReply("no status")
     }
 
-    /// True once the bytes so far are one complete JSON value (split UTF-8 or a half object just fails to parse).
+    /// True once the bytes so far are one complete JSON object.
     static func isComplete(_ buf: Data) -> Bool {
-        guard let last = buf.last(where: { !($0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09) }), last == UInt8(ascii: "}") else { return false }
-        return (try? JSONSerialization.jsonObject(with: buf)) != nil
+        var r = ReplyReader(maxReply: Int.max)
+        if case .done? = try? r.feed(buf) { return true }
+        return false
     }
 
     // MARK: POSIX socket (Linux and macOS)
@@ -124,8 +138,8 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
             }
         }
 
-        // Read until the bytes parse as one JSON object.
-        var buf = Data()
+        // Read until the braces close (the add-on sends no framing), then parse once.
+        var reader = ReplyReader(maxReply: maxReply)
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
             guard try wait(fd, events: Int16(POLLIN), until: deadline) else { throw BlenderError.timedOut }
@@ -134,13 +148,8 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
                 if errno == EINTR || errno == EAGAIN { continue }
                 throw BlenderError.notConnected
             }
-            if n == 0 {
-                if isComplete(buf) { return buf }
-                throw buf.isEmpty ? BlenderError.notConnected : BlenderError.badReply("connection closed mid-reply")
-            }
-            buf.append(contentsOf: chunk[0..<n])
-            if buf.count > maxReply { throw BlenderError.badReply("reply too large") }
-            if isComplete(buf) { return buf }
+            if n == 0 { return try reader.finish() }
+            if case .done(let reply) = try reader.feed(Data(chunk[0..<n])) { return reply }
         }
     }
 
@@ -155,4 +164,63 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
             if r < 0, errno != EINTR { throw BlenderError.notConnected }
         }
     }
+}
+
+/// Reads one unframed JSON object from a byte stream, chunk by chunk, in linear time: it tracks brace depth outside
+/// strings (UTF-8 continuation bytes are never `"`, `\\`, `{` or `}`), and parses once when the top-level object closes.
+struct ReplyReader {
+    enum Step: Equatable { case needMore, done(Data) }
+
+    let maxReply: Int
+    private(set) var buffer = Data()
+    private var depth = 0
+    private var started = false
+    private var inString = false
+    private var escaped = false
+
+    init(maxReply: Int) { self.maxReply = maxReply }
+
+    /// Adds bytes; `.done(object)` once they hold one complete JSON object. Only the new bytes are scanned.
+    mutating func feed(_ bytes: Data) throws -> Step {
+        let start = buffer.count
+        buffer.append(bytes)
+        if buffer.count > maxReply { throw BlenderError.badReply("reply over \(maxReply / 1_048_576) MB") }
+        var end: Int?
+        for (i, b) in bytes.enumerated() {
+            // JSON never carries a raw NUL; a NUL-terminated reply is another MCP server's protocol.
+            if b == 0 { throw BlenderError.otherServer }
+            if end != nil { continue } // past the object: only look for that NUL
+            if !started {
+                if b == 0x20 || b == 0x0A || b == 0x0D || b == 0x09 { continue }
+                guard b == UInt8(ascii: "{") else { throw BlenderError.badReply("not a JSON object: \(preview)") }
+                started = true
+                depth = 1
+                continue
+            }
+            if inString {
+                if escaped { escaped = false } else if b == UInt8(ascii: "\\") { escaped = true } else if b == UInt8(ascii: "\"") { inString = false }
+                continue
+            }
+            switch b {
+            case UInt8(ascii: "\""): inString = true
+            case UInt8(ascii: "{"), UInt8(ascii: "["): depth += 1
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                depth -= 1
+                if depth == 0 { end = start + i + 1 }
+            default: break
+            }
+        }
+        guard let end else { return .needMore }
+        let reply = buffer.prefix(end)
+        guard (try? JSONSerialization.jsonObject(with: reply)) != nil else { throw BlenderError.badReply("not valid JSON: \(preview)") }
+        return .done(Data(reply))
+    }
+
+    /// The connection closed: an empty stream means nobody answered; a partial object says how much arrived.
+    func finish() throws -> Data {
+        if buffer.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) { throw BlenderError.notConnected }
+        throw BlenderError.badReply("connection closed mid-reply after \(buffer.count) bytes")
+    }
+
+    private var preview: String { String(decoding: buffer.prefix(80), as: UTF8.self) }
 }

@@ -43,4 +43,18 @@ final class ScreenCopyTests: XCTestCase {
         XCTAssertEqual(ScreenCopy.retryLabel(cost: 0.91, estimate: 0.67), "Retry · $0.91")
         XCTAssertEqual(ScreenCopy.retryLabel(cost: 0, estimate: 0.67), "Retry · $0.67")
     }
+
+    /// A job the provider made and charged for but the server couldn't save: Recover (free, owner), never "not charged".
+    func testPaidUnsavedJobOffersRecover() throws {
+        let json = #"{"id":"j9","state":"failed","request":{"engine":"replicate","quality":"hd"},"errorCode":"provider_paid_unsaved","error":"Your video was made (the provider charged the studio) but MUSE couldn't save it · it can be recovered for free"}"#
+        let j = try JSONDecoder().decode(Job.self, from: Data(json.utf8))
+        XCTAssertTrue(j.canRecover)
+        XCTAssertEqual(ScreenCopy.failure(j.failureLine, charged: false), MemberText.paidUnsaved)
+        XCTAssertFalse(ScreenCopy.failure(j.failureLine, charged: false).contains("weren't charged"))
+        XCTAssertEqual(Job.defaultFailure("provider_unconfirmed"), MemberText.paidUnconfirmed)
+        var other = j
+        other.errorCode = "provider_failed"
+        XCTAssertFalse(other.canRecover)
+        XCTAssertEqual(ScreenCopy.recoverLabel, "Recover")
+    }
 }

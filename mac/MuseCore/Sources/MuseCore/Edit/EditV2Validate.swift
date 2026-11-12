@@ -240,6 +240,7 @@ private struct Validator {
                     if let m = c.alphaMatte {
                         if let a = assets[m.asset], a.kind == .video {} else { throw bad("\(g).alphaMatte.asset", "must be a video asset") }
                     }
+                    try layers(g, c, main: t.kind == .main, len: len)
                     try anim("\(g).animIn", c.animIn, text: false)
                     try anim("\(g).animOut", c.animOut, text: false)
                     if c.animLoop != nil && t.kind == .main { throw bad("\(g).animLoop", "loop animations are for overlays, images and text") }
@@ -286,6 +287,11 @@ private struct Validator {
                     try anim("\(g).animIn", tx.animIn, text: true)
                     try anim("\(g).animOut", tx.animOut, text: true)
                     try loop("\(g).animLoop", tx.animLoop)
+                    if let pn = tx.pin {
+                        if let o = pn.offset { try num("\(g).pin.offset.x", o.x, -1, 1, optional: false); try num("\(g).pin.offset.y", o.y, -1, 1, optional: false) }
+                        guard let mc = p.tracks.first?.items.first(where: { $0.id == pn.clip }), case .video(let v) = mc else { throw bad("\(g).pin.clip", "must be a main clip") }
+                        if !(v.layers ?? []).contains(where: { $0.id == pn.layer }) { throw bad("\(g).pin.layer", "must be a layer of that clip") }
+                    }
                 case (.music, .audio(let c)), (.voice, .audio(let c)), (.sfx, .audio(let c)):
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video],
                                  voice: c.voiceEffect)
@@ -342,6 +348,40 @@ private struct Validator {
         try num("\(f).fadeInSec", fadeIn, 0, 10)
         try num("\(f).fadeOutSec", fadeOut, 0, 10)
         if let v = voice, !EditV2.VoiceEffect.all.contains(v) { throw bad("\(f).voiceEffect", "one of " + EditV2.VoiceEffect.all.map(\.rawValue).joined(separator: ", ")) }
+    }
+
+    /// Layers (model.ts validate → layers): main clips only, at most 5, each with a video matte and values in range.
+    func layers(_ g: String, _ c: EditV2.VideoClip, main: Bool, len: Double) throws {
+        if c.layers == nil && c.layerBase == nil && c.layerSource == nil { return }
+        if !main { throw bad("\(g).layers", "layers are on main-track clips") }
+        if let s = c.layerSource, s.job.isEmpty || s.job.utf16.count > 64 { throw bad("\(g).layerSource.job", "must be a job id") }
+        let ls = c.layers ?? []
+        if ls.count > E.maxLayers { throw bad("\(g).layers", "at most \(E.maxLayers) layers") }
+        var seen = Set<String>()
+        for (j, l) in ls.enumerated() {
+            let f = "\(g).layers.\(j)"
+            try id("\(f).id", l.id)
+            if seen.contains(l.id) { throw bad("\(f).id", "is used twice") }
+            seen.insert(l.id)
+            if l.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || l.name.utf16.count > E.maxLayerName { throw bad("\(f).name", "must be 1–\(E.maxLayerName) characters") }
+            if assets[l.matte]?.kind != .video { throw bad("\(f).matte", "must be a video asset") }
+            try num("\(f).blur", l.blur, 0, 1); try num("\(f).feather", l.feather, 0, 1)
+            try visual(f, fit: nil, transform: nil, crop: nil, opacity: l.opacity, adjust: l.adjust, filter: l.filter, look: l.look)
+            if let rc = l.recolor { try color("\(f).recolor.color", rc.color, optional: false); try num("\(f).recolor.amount", rc.amount, 0, 1, optional: false) }
+            if let tr = l.track {
+                try num("\(f).track.fps", tr.fps, 1, E.maxTrackFps, optional: false)
+                if tr.boxes.count > E.maxTrackSamples { throw bad("\(f).track.boxes", "at most \(E.maxTrackSamples) boxes") }
+                for (k, b) in tr.boxes.enumerated() {
+                    if let b, b.count != 4 || b.contains(where: { !$0.isFinite || $0 < 0 || $0 > 1 }) { throw bad("\(f).track.boxes.\(k)", "must be [x, y, w, h] from 0 to 1, or null") }
+                }
+            }
+        }
+        if let b = c.layerBase {
+            let f = "\(g).layerBase"
+            try num("\(f).blur", b.blur, 0, 1)
+            try visual(f, fit: nil, transform: nil, crop: nil, opacity: nil, adjust: b.adjust, filter: b.filter, look: b.look)
+            if let a = b.asset { let k = assets[a]?.kind; if k != .image && k != .video { throw bad("\(f).asset", "must be an image or video asset") } }
+        }
     }
 
     func visual(_ f: String, fit: EditV2.Fit?, transform: EditV2.Transform?, crop: EditV2.Crop?, opacity: Double?, adjust: EditV2.Adjust?, filter: EditV2.FilterRef?,

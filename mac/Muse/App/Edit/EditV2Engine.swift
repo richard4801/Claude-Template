@@ -202,6 +202,36 @@ enum EditV2Engine {
             matted.insert("\(seg.lane)/\(seg.itemId)")
         }
 
+        // Layers (plans/layers-edit.md): each main clip's layer mattes on a track per lane and slot, timed like the clip's
+        // own source (as the alpha matte above); a background swapped for another video plays from its start at 1×.
+        var layerLanes: [Int: AVMutableCompositionTrack] = [:]
+        var layerIds: [String: CMPersistentTrackID] = [:]   // "<lane>/<itemId>/<layerId>" or "<lane>/<itemId>/base"
+        let mainClips = project.mainClips
+        for seg in plan.video {
+            guard let i = seg.mainIndex, i < mainClips.count, sources.media[seg.assetId]?.videoTrack != nil else { continue }
+            let c = mainClips[i]
+            for (k, l) in (c.layers ?? []).prefix(EditV2.maxLayers).enumerated() where l.hidden != true {
+                guard let mm = sources.media[l.matte], let src = mm.videoTrack else { continue }
+                let end = mm.info.durationSec > 0 ? mm.info.durationSec - 0.001 : .infinity
+                let pieces = seg.pieces.compactMap { pc -> EditV2.Piece? in pc.inSec >= end ? nil : EditV2.Piece(inSec: pc.inSec, outSec: min(pc.outSec, end), speed: pc.speed) }
+                guard seg.sourceStart < end else { continue }
+                let t = try lane(seg.lane * 8 + k, .video, &layerLanes)
+                try placePieces(src, on: t, pieces: pieces, source: seg.sourceStart, min(seg.sourceEnd, end), at: seg.timelineStart, seg.timelineEnd)
+                layerIds["\(seg.lane)/\(seg.itemId)/\(l.id)"] = t.trackID
+            }
+            if let b = c.layerBase, b.hidden != true, let a = b.asset, let mm = sources.media[a], let src = mm.videoTrack, mm.info.durationSec > 0 {
+                let len = min(mm.info.durationSec, seg.timelineLength)
+                let t = try lane(seg.lane * 8 + 7, .video, &layerLanes)
+                try t.insertTimeRange(CMTimeRange(start: .zero, duration: time(len)), of: src, at: time(seg.timelineStart))
+                // Shorter than the clip: its last frame is held to the clip's end.
+                if seg.timelineLength > len + 0.04 {
+                    let last = CMTimeRange(start: time(seg.timelineStart + len - 1.0 / 30), duration: time(1.0 / 30))
+                    t.scaleTimeRange(last, toDuration: time(seg.timelineLength - len + 1.0 / 30))
+                }
+                layerIds["\(seg.lane)/\(seg.itemId)/base"] = t.trackID
+            }
+        }
+
         var params: [Int: AVMutableAudioMixInputParameters] = [:]
         var voiceSpans: [Int: [EditV2VoiceTap.Span]] = [:]
         for seg in plan.audio {
@@ -238,7 +268,7 @@ enum EditV2Engine {
         }
 
         let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, matteTracks: matteIds, matted: matted, sources: sources,
-                                burnCaptions: burnCaptions, hdr: hdr)
+                                burnCaptions: burnCaptions, hdr: hdr, layerTracks: layerIds)
         let vc = AVMutableVideoComposition()
         vc.customVideoCompositorClass = hdr ? EditV2HDRCompositor.self : EditV2Compositor.self
         if hdr {
@@ -259,6 +289,7 @@ enum EditV2Engine {
             guard stop > start else { continue }
             let segs = plan.videoSegments(from: a, to: b)
             var ids = Set(segs.compactMap { trackIds[$0.lane] } + segs.filter { matted.contains("\($0.lane)/\($0.itemId)") }.compactMap { matteIds[$0.lane] })
+            for sg in segs { for (key, id) in layerIds where key.hasPrefix("\(sg.lane)/\(sg.itemId)/") { ids.insert(id) } }
             if let fillerId { ids.insert(fillerId) }
             instructions.append(EditV2Instruction(timeRange: CMTimeRange(start: start, end: stop), trackIDs: ids.sorted(), scene: scene))
         }

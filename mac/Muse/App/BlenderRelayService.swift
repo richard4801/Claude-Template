@@ -207,9 +207,11 @@ final class BlenderRelayService: ObservableObject {
         while !Task.isCancelled {
             var link = BlenderLink(connected: blenderConnected, addonVersion: addonVersion)
             if !busy {
-                link = await relay.link()
+                let probe = await relay.probe()
+                link = probe.link
                 blenderConnected = link.connected
                 addonVersion = link.addonVersion
+                if let problem = probe.problem { lastError = problem } else if lastError == BlenderError.otherServerText || lastError == BlenderRelay.silentPortText { lastError = nil }
             }
             do {
                 enqueue(try await api.heartbeat(BlenderRelayStatus(online: true, blender: link)).pending)

@@ -10,7 +10,7 @@ extension EditV2 {
     public static func deriveClip(_ c: VideoClip, copy: String, op: DerivedOp?) -> VideoClip {
         var out = c
         out.asset = copy
-        if op == .stabilize { out.alphaMatte = nil }
+        if op == .stabilize { out.alphaMatte = nil; dropLayers(&out) }
         return out
     }
 
@@ -63,7 +63,7 @@ extension EditV2 {
         var pieces: [VideoClip] = []
         if hasBefore { var v = base; v.outSec = r6(start); pieces.append(withKeys(v, 0, la, 1)) }
         var plain = base
-        plain.alphaMatte = nil; plain.audioAsset = nil
+        plain.alphaMatte = nil; plain.audioAsset = nil; dropLayers(&plain)
         let midId = hasBefore ? nextId() : c.id
         plain.id = midId; plain.asset = slowId; plain.inSec = 0; plain.outSec = midLen; plain.speed = 1; plain.muted = true
         pieces.append(withKeys(plain, la, lb, lb > la ? midLen / (lb - la) : 1))

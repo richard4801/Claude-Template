@@ -18,6 +18,8 @@ public enum EditorJobKind: String, Codable, Hashable, Sendable, CaseIterable {
     case separate
     /// Cut out a picture (WS16 b1fa8715): the person, or what the taps pick, as a trimmed PNG; paid.
     case cutout
+    /// Layers (plans/layers-edit.md): up to 5 tapped or boxed things followed through a main clip (≤ 60 s), one matte each.
+    case layers
 }
 
 /// The media a job works on: a video take of the studio, or an upload of the studio (+ its length).
@@ -60,6 +62,8 @@ public struct EditorJobOptions: Codable, Hashable, Sendable {
     public var analyzeOnly: Bool?
     /// matte: tap to keep.
     public var points: [KeepPoint]?
+    /// layers: the things to find, each named and tapped or boxed.
+    public var objects: [LayerObject]?
     /// slowmo: 2 or 4, and the source range (0.3–10 s).
     public var factor: Double?
     public var startSec: Double?
@@ -96,6 +100,8 @@ public struct EditorJobRequest: Codable, Hashable, Sendable {
     public var options: EditorJobOptions?
     /// Owner only (WS13): the helper's model, checked by the server against its candidates; nil = the studio's default.
     public var engineModel: String?
+    /// layers: the price the owner accepted (a run above $1 needs it; the server answers 409 price_confirm otherwise).
+    public var acceptUsd: Double?
     public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, engineModel: String? = nil) {
         self.kind = kind; self.source = source; self.options = options; self.engineModel = engineModel
     }
@@ -108,6 +114,7 @@ extension EditorJobKind {
         switch self {
         case .captions, .cuts: return .captions
         case .matte: return options?.points != nil ? .track : .matte
+        case .layers: return .track
         case .denoise: return .denoise
         case .beats, .reverse, .stabilize, .slowmo, .translate, .separate, .cutout: return nil
         }
@@ -139,6 +146,8 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
     /// Split voice and music, and cut out a picture (paid).
     public var separate: Helper?
     public var cutout: Helper?
+    /// Layers (paid, clips up to `maxSec`).
+    public var layers: Helper?
     public struct Translate: Codable, Hashable, Sendable {
         public var available: Bool?
         public var reason: String?
@@ -172,6 +181,7 @@ public struct EditorFeatures: Codable, Hashable, Sendable {
         case .stabilize: return stabilize
         case .separate: return separate
         case .cutout: return cutout
+        case .layers: return layers
         case .translate: return translate.map { Helper(available: $0.available, reason: $0.reason) }
         case .slowmo: return slowmo.map { Helper(available: $0.available, reason: $0.reason, maxSec: $0.maxRangeSec) }
         case .cuts, .beats, .reverse: return nil   // the free passes are always offered
@@ -211,6 +221,25 @@ public struct EditorEstimate: Codable, Hashable, Sendable {
 }
 
 /// A media asset a job made (the cut-out person, the voice alone).
+/// A thing to find (layers): a name, taps (KeepPoint) and/or a box, all 0–1 of the frame at `t` seconds of the source.
+public struct LayerObject: Codable, Hashable, Sendable {
+    public struct Box: Codable, Hashable, Sendable {
+        public var x: Double, y: Double, w: Double, h: Double, t: Double?
+        public init(x: Double, y: Double, w: Double, h: Double, t: Double? = nil) { self.x = x; self.y = y; self.w = w; self.h = h; self.t = t }
+    }
+    public var name: String
+    public var points: [KeepPoint]?
+    public var box: Box?
+    public init(name: String, points: [KeepPoint]? = nil, box: Box? = nil) { self.name = name; self.points = points; self.box = box }
+}
+/// One layer a layers job found.
+public struct LayerResult: Codable, Hashable, Sendable {
+    public var name: String
+    public var asset: EditorResultAsset
+    public var track: EditV2.LayerTrack?
+    public init(name: String, asset: EditorResultAsset, track: EditV2.LayerTrack? = nil) { self.name = name; self.asset = asset; self.track = track }
+}
+
 public struct EditorResultAsset: Codable, Hashable, Sendable {
     public var kind: String
     public var upload: String?
@@ -257,6 +286,8 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var sourceWidth: Double?
     public var sourceHeight: Double?
     public var points: [KeepPoint]?
+    /// layers: one matte per thing found, with where it is over time.
+    public var layers: [LayerResult]?
     public var suggestion: DenoiseSuggestion?
     // translate: the source language, the lines as translated, how many stayed as they were, the quality used
     public var sourceLanguage: String?

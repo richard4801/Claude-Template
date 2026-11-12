@@ -408,6 +408,12 @@ extension EditV2 {
         public var enhance: Bool?
         /// Remove background (workstream 1 contract, 2026-11-08): a grey matte video aligned with `asset`; its luma is the alpha.
         public var alphaMatte: AlphaMatte?
+        /// Layers (plans/layers-edit.md, Phase 1; main clips only): tracked objects drawn again over the clip (EditV2Layers.swift).
+        public var layers: [ClipLayer]?
+        /// The "Background" row of a clip with layers.
+        public var layerBase: LayerBase?
+        /// The Find layers job the layers came from (not drawn).
+        public var layerSource: LayerSource?
         /// Wave 1, freeze frame: the clip shows the single source frame at inSec for holdSec seconds, silent (clipLength = holdSec).
         public var holdSec: Double?
         /// Wave 1: overlay tracks only.
@@ -566,6 +572,8 @@ extension EditV2 {
         public var animLoop: AnimLoop?
         /// The hook template it was made from.
         public var template: String?
+        /// Layers: the text's centre follows a tracked layer (pinPoint).
+        public var pin: TextPin?
         public init(id: String, startSec: Double, durationSec: Double, text: String, style: TextStyle, transform: Transform? = nil,
                     opacity: Double? = nil, keyframes: Keyframes? = nil, animIn: Anim? = nil, animOut: Anim? = nil, template: String? = nil) {
             self.id = id; self.startSec = startSec; self.durationSec = durationSec; self.text = text; self.style = style

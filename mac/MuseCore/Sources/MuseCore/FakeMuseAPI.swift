@@ -816,6 +816,15 @@ public actor FakeMuseAPI: MuseAPI {
         return ids
     }
 
+    /// Recover (owner, free): the fake has the video, so the job is simply done again with no new charge.
+    public func recoverJob(id: String) throws {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can do that") }
+        guard let i = jobs.firstIndex(where: { $0.id == id }), jobs[i].canRecover else { throw ApiError("bad_request", "Nothing to recover") }
+        jobs[i].state = "done"
+        jobs[i].error = nil
+        jobs[i].errorCode = nil
+    }
+
     public func removeJob(id: String) {
         if runningId == id {
             runner?.cancel()

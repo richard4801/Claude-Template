@@ -340,7 +340,7 @@ extension EditV2 {
         var out = c
         out.asset = reversed
         out.inSec = r6(max(0, d - c.outSec)); out.outSec = r6(min(d, d - c.inSec))
-        out.alphaMatte = nil; out.audioAsset = nil
+        out.alphaMatte = nil; out.audioAsset = nil; dropLayers(&out)
         if let sc = c.speedCurve {
             let pts = sc.points.map { [r6(1 - $0[0]), $0[1]] }.sorted { $0[0] < $1[0] }
             out.speedCurve = SpeedCurve(preset: pts == sc.points ? sc.preset : .custom, points: pts)

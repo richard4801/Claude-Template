@@ -743,11 +743,17 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         case "provider_rate_limited": return "Busy right now · you weren't charged. Try again in a minute."
         case "provider_timeout": return "This took too long and was stopped · you weren't charged"
         case "provider_out_of_credit": return MemberText.ownerTold
+        case "provider_paid_unsaved": return MemberText.paidUnsaved
+        case "provider_unconfirmed": return MemberText.paidUnconfirmed
         default: return MemberText.wentWrong
         }
     }
     /// Refused by the provider's safety filter.
     public var isRefused: Bool { errorCode == "provider_refused" }
+    /// The provider made (and charged for) the video but the server couldn't save it, or may still finish it: the owner
+    /// brings it back with Recover (free, POST /v1/jobs/:id/recover). Retry would pay for it again.
+    public var canRecover: Bool { isFailed && Job.recoverCodes.contains(errorCode ?? "") }
+    public static let recoverCodes: Set<String> = ["provider_paid_unsaved", "provider_unconfirmed"]
     public var isActive: Bool { state == "running" || state == "queued" }
     public var isRunning: Bool { state == "running" }
     public var isQueued: Bool { state == "queued" }

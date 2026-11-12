@@ -174,6 +174,21 @@ extension AppStore {
         }
     }
 
+    /// Recover (owner only, free): a job the provider made and charged for but the server couldn't save is fetched again
+    /// by its saved request id (POST /v1/jobs/:id/recover). Never a new run; the take arrives as usual.
+    func recover(_ j: Job) {
+        guard isOwner, j.canRecover else { return }
+        perform { [self] in
+            try await api.recoverJob(id: j.id)
+            if let i = jobs.firstIndex(where: { $0.id == j.id }) {
+                jobs[i].state = "running"
+                jobs[i].error = nil
+                jobs[i].errorCode = nil
+            }
+            showToast("Recovering \(TakeText.displayTitle(j.title)) · free")
+        }
+    }
+
     /// Dismiss is stored on the server (the job's hiddenAt), so it holds after a relaunch or a deploy. It used to hide the
     /// row in memory only, and every failure came back on the next launch (owner bug 2026-11-11).
     func dismissFailure(_ j: Job) {

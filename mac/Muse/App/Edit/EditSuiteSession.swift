@@ -76,6 +76,12 @@ final class EditSuiteSession {
     func helperNote(_ k: EditorJobKind) -> String? { features?.note(k) ?? helperNotes[k] }
     private(set) var keepFrame: CGImage?
     private(set) var keepEstimate: EditorEstimate?
+    /// Layers → "Find layers": the things marked on a frame of the selected main clip, the frame and the price.
+    var layersPick: EditSuite.LayersPick?
+    private(set) var layersFrame: CGImage?
+    private(set) var layersEstimate: EditorEstimate?
+    /// The layer selected in the Layers panel (its id, of the selected clip); nil = the Background row.
+    var layerSelection: String?
     /// The newest transcript job (fillers / silences reuse it for free).
     private(set) var transcriptJobId: String?
     var lastError: String?
@@ -797,6 +803,7 @@ final class EditSuiteSession {
         case .translate: return "Translate captions"
         case .separate: return "Split voice and music"
         case .cutout: return "Cut out"
+        case .layers: return "Find layers"
         }
     }
 
@@ -824,7 +831,7 @@ final class EditSuiteSession {
     /// The model a helper job asks for (nil = the studio's default).
     private func model(_ k: EditorJobKind, _ options: EditorJobOptions?) -> String? { k.enginePurpose(options).flatMap { helperModels[$0] } }
 
-    private func run(_ k: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, confirmed: Bool = false,
+    private func run(_ k: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, confirmed: Bool = false, acceptUsd: Double? = nil,
                      apply: @escaping (EditorJobResult) -> Void) async {
         guard !isRunning(k) else { return }
         helperNotes[k] = nil
@@ -844,7 +851,9 @@ final class EditSuiteSession {
             }
         }
         do {
-            var job = try await api.startEditorJob(EditorJobRequest(kind: k, source: source, options: options, engineModel: model(k, options)))
+            var req = EditorJobRequest(kind: k, source: source, options: options, engineModel: model(k, options))
+            req.acceptUsd = acceptUsd
+            var job = try await api.startEditorJob(req)
             jobs[k] = job
             while job.isRunning {
                 try await Task.sleep(nanoseconds: 700_000_000)
@@ -1262,6 +1271,99 @@ final class EditSuiteSession {
                 }
             }
         }
+    }
+
+    // MARK: Layers (plans/layers-edit.md, Phase 1)
+
+    /// Starts "Find layers" on the selected main clip, on the frame under the playhead.
+    func startLayersPick() async {
+        guard state.selectedIsMain, let c = state.selectedVideo else { lastError = "Layers are on clips of the main row"; return }
+        guard let url = files[c.asset] else { lastError = "Find layers needs the clip's video"; return }
+        if let d = project.asset(c.asset)?.durationSec, d > EditSuite.layersMaxSec + 0.05 { lastError = "Layers work on clips up to 60 s · trim the source first"; return }
+        pause()
+        let plan = E.renderPlan(project, media: sources.infos)
+        let seg = plan.video.first { $0.itemId == c.id && $0.contains(playhead) } ?? plan.video.first { $0.itemId == c.id }
+        let sec = seg.map { E.sourceTime($0, at: playhead) } ?? c.inSec
+        layersPick = EditSuite.LayersPick(clipId: c.id, assetId: c.asset, sourceSec: sec)
+        layersEstimate = nil
+        layersFrame = nil
+        let frame = await EditSuiteMedia.frame(url, at: sec, maxSide: 720)
+        guard layersPick?.clipId == c.id else { return }
+        layersFrame = frame
+        if frame == nil { lastError = "Couldn't show that frame · move the playhead and try again"; layersPick = nil }
+    }
+
+    /// Changes what is being marked (a tap, a box, a name, another thing) and asks the price again.
+    func changeLayersPick(_ f: (inout EditSuite.LayersPick) -> Bool) {
+        guard var k = layersPick, f(&k) else { return }
+        layersPick = k
+        layersEstimate = nil
+        Task { await loadLayersEstimate() }
+    }
+    var layersFrameAspect: Double { layersFrame.map { Double($0.width) / Double(max(1, $0.height)) } ?? 1 }
+
+    func cancelLayersPick() { layersPick = nil; layersFrame = nil; layersEstimate = nil }
+
+    func loadLayersEstimate() async {
+        guard let k = layersPick, k.canRun, let a = project.asset(k.assetId), let src = EditorSource(a) else { layersEstimate = nil; return }
+        let e = try? await api.editorEstimate(EditorJobRequest(kind: .layers, source: src, options: k.options))
+        if layersPick?.objects == k.objects { layersEstimate = e }
+    }
+
+    /// The price on the button runs at once; above $1 a clip it is confirmed once more first (owner, 2026-11-11).
+    func findLayers() async {
+        guard let k = layersPick, k.canRun, let a = project.asset(k.assetId), let src = EditorSource(a) else { return }
+        if layersEstimate == nil { await loadLayersEstimate() }
+        guard let price = layersEstimate else { lastError = "Couldn't get the price · try again"; return }
+        if EditSuite.layersNeedAsk(price.usd) && !k.confirming { layersPick?.confirming = true; return }
+        layersPick?.confirming = false
+        let clipId = k.clipId
+        await run(.layers, source: src, options: k.options, confirmed: true, acceptUsd: price.usd) { [weak self] r in
+            guard let self, let found = r.layers, !found.isEmpty else { self?.lastError = "Nothing was found · mark it again"; return }
+            let jobId = self.jobs[.layers]?.id
+            if self.edit({ s in s.apply { E.applyLayerResults($0, clipId: clipId, jobId: jobId, found: found, sourceAsset: a) } }) {
+                self.notice = found.count == 1 ? "Found 1 layer" : "Found \(found.count) layers"
+                self.layerSelection = "l1"
+                self.cancelLayersPick()
+                Task { await self.ensureFiles(); self.rebuild(immediately: true) }
+            }
+        }
+    }
+
+    /// Changes one layer of the selected clip.
+    func changeLayer(_ id: String, _ f: @escaping (inout E.ClipLayer) -> Void) {
+        edit { s in s.changeVideo { v in
+            guard let i = v.layers?.firstIndex(where: { $0.id == id }) else { return }
+            f(&v.layers![i])
+        } }
+    }
+    /// Changes the selected clip's Background row (an empty one is removed).
+    func changeLayerBase(_ f: @escaping (inout E.LayerBase) -> Void) {
+        edit { s in s.changeVideo { v in
+            var b = v.layerBase ?? E.LayerBase()
+            f(&b)
+            v.layerBase = b.isEmpty ? nil : b
+        } }
+    }
+    /// Removes the selected clip's layers (pins to them come off too).
+    func removeLayers() {
+        guard let c = state.selectedVideo else { return }
+        edit { s in s.apply { p in
+            guard var q = p.updating(c.id, { it in if case .video(var v) = it { v.layers = nil; v.layerBase = nil; v.layerSource = nil; it = .video(v) } }) else { return nil }
+            for ti in q.tracks.indices where q.tracks[ti].kind == .text {
+                for ii in q.tracks[ti].items.indices { if case .text(var tx) = q.tracks[ti].items[ii], tx.pin?.clip == c.id { tx.pin = nil; q.tracks[ti].items[ii] = .text(tx) } }
+            }
+            return q
+        } }
+        layerSelection = nil
+    }
+    /// The main clips' layers a text can be pinned to (those with tracking): (clip, layer).
+    var pinTargets: [(clip: E.VideoClip, layer: E.ClipLayer)] {
+        project.mainClips.flatMap { c in (c.layers ?? []).filter { $0.track != nil }.map { (clip: c, layer: $0) } }
+    }
+    /// Pins (or with nil unpins) the selected text.
+    func pinSelectedText(_ pin: E.TextPin?) {
+        edit { s in s.changeSelected { it in if case .text(var tx) = it { tx.pin = pin; it = .text(tx) } } }
     }
 
     // MARK: Pick what to keep (tap to keep)
