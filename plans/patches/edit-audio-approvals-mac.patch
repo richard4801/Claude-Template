@@ -1,0 +1,973 @@
+diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
+index 9bf7c436..72efddc5 100644
+--- a/mac/Muse/App/AppStore+OneClaude.swift
++++ b/mac/Muse/App/AppStore+OneClaude.swift
+@@ -31,6 +31,10 @@ final class OneClaudeState {
+     var suggestion: ClaudeUI?
+     /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
+     var approvals: [ClaudeUI] = []
++    /// Paid helpers Claude asked for on ANY of the owner's edits (ci_e546642a4026): shown whichever edit is open, each
++    /// naming its edit, answered here by session id.
++    var editApprovals = EditApprovalList()
++    var answeringEdit: Set<String> = []
+     /// Cards (ChatCards.swift): Approve cards answered here ("Approved, rendering"), answers and Undos in flight.
+     var answeredCards: [String: String] = [:]
+     var answering: Set<String> = []
+@@ -112,6 +116,7 @@ extension AppStore {
+ 
+     func startOneClaude() async {
+         listenOneClaude()
++        await loadEditApprovals()
+         await loadClaudeModels()
+         await refreshOneClaudeChats()
+         if oneClaude.chatId == nil || !oneClaude.chats.contains(where: { $0.id == oneClaude.chatId }) {
+@@ -230,6 +235,8 @@ extension AppStore {
+             for await f in feed {
+                 guard let self, !Task.isCancelled else { break }
+                 if case .live(.ui(let tid, let name, let ui)) = f { self.oneClaudeUI(threadId: tid, name: name, ui) }
++                if case .live(.editPending(let sid, let p)) = f { await self.editPendingChanged(sessionId: sid, p) }
++                if case .live(.connected) = f { await self.loadEditApprovals() }
+                 if case .live(.threadDeleted(let tid)) = f, self.oneClaude.chats.contains(where: { $0.id == tid }) {
+                     let wasOpen = self.oneClaude.chatId == tid
+                     self.oneClaudeForget([tid])
+@@ -379,9 +386,49 @@ extension AppStore {
+         switch t { case .action(let id): id; case .suite(_, let p): p }
+     }
+ 
++    // MARK: Paid helpers of every edit (ci_e546642a4026)
++
++    /// Everything waiting on the owner's open edits (GET /v1/edit-sessions). Owner only: members don't edit with Claude.
++    func loadEditApprovals() async {
++        guard isOwner, let list = try? await api.recentEditSessions(limit: 50) else { return }
++        oneClaude.editApprovals.replace(sessions: list)
++    }
++
++    /// A live `pending` event of any edit session: listed, updated or gone. A session the list doesn't know yet (Claude
++    /// opened a new edit) is named after the next reload.
++    func editPendingChanged(sessionId: String, _ p: EditPending) async {
++        guard isOwner else { return }
++        let known = oneClaude.editApprovals.items.contains { $0.sessionId == sessionId }
++        oneClaude.editApprovals.apply(sessionId: sessionId, takeId: nil, p)
++        if p.isWaiting, !known { await loadEditApprovals() }
++    }
++
++    /// The edit a card names: its take's title, "New project" for a blank one.
++    func editApprovalName(_ a: EditApproval) -> String {
++        let take = takes.first { $0.id == a.takeId }
++        return EditApprovalList.editName(takeId: a.takeId, title: take.flatMap { $0.title.isEmpty ? nil : $0.displayTitle })
++    }
++
++    /// Allow / Not now from the Claude panel: answered on that edit's session, without switching edits.
++    func answerEditApproval(_ a: EditApproval, approve: Bool) async {
++        guard !oneClaude.answeringEdit.contains(a.id) else { return }
++        oneClaude.answeringEdit.insert(a.id)
++        defer { oneClaude.answeringEdit.remove(a.id) }
++        do {
++            _ = try await api.answerEditPending(sessionId: a.sessionId, pendingId: a.pending.id, approve: approve)
++            oneClaude.editApprovals.remove(a.id)
++            showToast(approve ? "\(a.pending.label) started in “\(editApprovalName(a))”. Claude's change lands when it's done." : "Told Claude not now")
++        } catch let e as ApiError where e.code == "not_found" || e.code == "already_answered" || e.code == "expired" {
++            oneClaude.editApprovals.remove(a.id)
++            showToast("That was already answered")
++        } catch {
++            showToast("Couldn't answer Claude. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
++        }
++    }
++
+     /// What waits for the person now (Approve cards, Open?, Remember?, file questions): the orb's "waiting".
+     var claudeWaitingCount: Int {
+-        oneClaude.approvals.count + oneClaude.waitingCards.count + (oneClaude.askOpen != nil ? 1 : 0) + (oneClaude.suggestion != nil ? 1 : 0)
++        oneClaude.approvals.count + oneClaude.editApprovals.count + oneClaude.waitingCards.count + (oneClaude.askOpen != nil ? 1 : 0) + (oneClaude.suggestion != nil ? 1 : 0)
+             + ClaudeCodeService.shared.fileAsks.count
+     }
+ 
+diff --git a/mac/Muse/App/ClaudeCodeService.swift b/mac/Muse/App/ClaudeCodeService.swift
+index da8afdc8..7774bf2c 100644
+--- a/mac/Muse/App/ClaudeCodeService.swift
++++ b/mac/Muse/App/ClaudeCodeService.swift
+@@ -4,6 +4,7 @@
+ // Demo mode (no HTTP API) runs a scripted Claude Code stream against FakeClaudeAPI; a member never runs it.
+ 
+ import AppKit
++import AVFoundation
+ import Combine
+ import Foundation
+ import MuseCore
+@@ -464,7 +465,8 @@ final class ClaudeCodeService: ObservableObject {
+     }
+ 
+     /// upload_local_file, after the yes: the file goes up the chat's way (an image: presign, PUT, confirm, so the server
+-    /// strips its metadata; a video as a clip with its length and size), and the upload goes back to Claude.
++    /// strips its metadata; a video as a clip with its length and size; a sound as an editor audio upload, ci_de89873ab1de),
++    /// and the upload goes back to Claude. A video or sound is read first: an .mp4 with sound only goes up as audio.
+     private func uploadLocal(_ a: ClaudePermissionAsk, cwd: String) async {
+         guard let api else { return }
+         var raw = ""
+@@ -474,21 +476,39 @@ final class ClaudeCodeService: ObservableObject {
+         let name = url.lastPathComponent
+         func fail(_ why: String) async { try? await api.answerPermission(a.id, allow: false, message: why) }
+         guard !ClaudeFilePolicy.isSecret(path) else { return await fail(ClaudeFilePolicy.credentialRefusal) }
+-        guard let type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
++        guard var type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+         let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue
+         guard let size else { return await fail("There's no file at \(path).") }
++        var file = url
++        if type.kind != .image {
++            // What it really is: an audio-only .mp4 is a sound; raw AAC named .mp4 is read through a copy named .aac.
++            let probed = await EditMediaProbe.probe(url)
++            guard let p = probed, let t = ClaudeFilePolicy.uploadType(sniffed: p.verdict) else { return await fail(MediaSniff.unreadable) }
++            type = t
++            file = p.url
++        }
+         do {
+-            let att: ClaudeAttachment
+-            if type.video {
++            let result: ClaudeLocalUpload
++            switch type.kind {
++            case .video:
+                 guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+-                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(url) else { return await fail("That video can't be read.") }
+-                att = try await up.uploadClaudeVideo(url, meta: info.meta(name: name), contentType: type.mime, progress: nil)
+-            } else {
++                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(file) else { return await fail(MediaSniff.unreadable) }
++                let att = try await up.uploadClaudeVideo(file, meta: info.meta(name: name), contentType: type.mime, progress: nil)
++                result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
++            case .audio:
++                guard size <= ClaudeFilePolicy.uploadAudioMaxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
++                guard let up = api as? any ClaudeAudioUploading else { return await fail("This server can't take sound from Claude yet.") }
++                // The server fills the file's link (an editor upload has no confirm step).
++                guard let d = try? await AVURLAsset(url: file).load(.duration).seconds, d.isFinite, d > 0 else { return await fail(MediaSniff.unreadable) }
++                let id = try await up.uploadClaudeAudio(file, contentType: type.mime)
++                result = ClaudeLocalUpload(uploadId: id, kind: type.resultKind, url: nil, name: name, durationSec: (d * 1000).rounded() / 1000)
++            case .image:
+                 guard size <= SuiteClaudeAttachments.maxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                 guard let up = api as? any ClaudeImageUploading else { return await fail("This server can't take images from Claude yet.") }
+-                att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
++                let att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
++                result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
+             }
+-            try await api.finishUpload(a.id, ClaudeLocalUpload(uploadId: att.uploadId, kind: type.video ? "clip" : "image", url: att.url, name: name))
++            try await api.finishUpload(a.id, result)
+         } catch {
+             await fail("Couldn't upload \(name): \((error as? ApiError)?.message ?? error.localizedDescription)")
+         }
+diff --git a/mac/Muse/App/Edit/EditMediaProbe.swift b/mac/Muse/App/Edit/EditMediaProbe.swift
+new file mode 100644
+index 00000000..e8ea17cd
+--- /dev/null
++++ b/mac/Muse/App/Edit/EditMediaProbe.swift
+@@ -0,0 +1,49 @@
++import AVFoundation
++import Foundation
++import MuseCore
++
++/// What a file on this Mac really is (owner issue ci_f99f93616ece, 2026-11-12): its first bytes (MuseCore MediaSniff), and
++/// for an MP4/MOV container its tracks, decide video, picture or sound; never the name alone. A file whose name hides what
++/// it is (raw AAC named .mp4) is read through a copy named right, because AVFoundation picks its reader by extension.
++/// Used by Edit's Add (Uploads, Music, Record voice-over) and by Claude's upload_local_file.
++enum EditMediaProbe {
++    struct Probed {
++        let verdict: MediaSniff.Verdict
++        /// The file to read and upload (the original, or the renamed copy).
++        let url: URL
++        /// The name to show (the original file's, without extension).
++        let name: String
++    }
++
++    /// Nil when MUSE can't use the file (MediaSniff.unreadable says why).
++    static func probe(_ url: URL) async -> Probed? {
++        let head: Data = {
++            guard let h = try? FileHandle(forReadingFrom: url) else { return Data() }
++            defer { try? h.close() }
++            return (try? h.read(upToCount: MediaSniff.headerBytes)) ?? Data()
++        }()
++        let format = MediaSniff.format(head)
++        var hasVideo: Bool?, hasAudio: Bool?
++        if case .isoMedia = format {
++            let asset = AVURLAsset(url: url)
++            let v = try? await asset.loadTracks(withMediaType: .video)
++            let a = try? await asset.loadTracks(withMediaType: .audio)
++            if v != nil || a != nil {
++                hasVideo = !(v ?? []).isEmpty
++                hasAudio = !(a ?? []).isEmpty
++            }
++        }
++        guard let verdict = MediaSniff.verdict(format, fileExtension: url.pathExtension, hasVideo: hasVideo, hasAudio: hasAudio) else { return nil }
++        let name = url.deletingPathExtension().lastPathComponent
++        guard MediaSniff.needsRename(fileExtension: url.pathExtension, verdict) else { return Probed(verdict: verdict, url: url, name: name) }
++        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("muse-probe-\(UUID().uuidString)", isDirectory: true)
++        let copy = dir.appendingPathComponent(name.isEmpty ? "file" : name).appendingPathExtension(verdict.ext)
++        do {
++            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
++            do { try FileManager.default.linkItem(at: url, to: copy) } catch { try FileManager.default.copyItem(at: url, to: copy) }
++        } catch {
++            return nil
++        }
++        return Probed(verdict: verdict, url: copy, name: name)
++    }
++}
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index 644d0f0a..487fa93c 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -592,11 +592,13 @@ final class EditSuiteSession {
+     func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
+         guard isReady else { return }
+         do {
+-            let a = try await uploadAudio(url)
++            // What the file is, from its bytes (ci_f99f93616ece): a song named .mp4 is still a song.
++            guard let p = await EditMediaProbe.probe(url), p.verdict.kind == .audio else { throw ApiError("bad_media", MediaSniff.unreadable) }
++            let a = try await uploadAudio(p)
+             edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
+         } catch {
+             notice = nil
+-            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
++            lastError = (error as? ApiError)?.message ?? MediaSniff.unreadable
+         }
+     }
+ 
+@@ -606,19 +608,19 @@ final class EditSuiteSession {
+         guard isReady else { return }
+         var added = 0
+         for url in urls {
+-            let ext = url.pathExtension.lowercased()
+             do {
++                // The kind comes from the file's bytes and tracks, not its name (ci_f99f93616ece): an audio-only .mp4 is a sound.
++                guard let p = await EditMediaProbe.probe(url) else { throw ApiError("bad_media", MediaSniff.unreadable) }
+                 let a: E.Asset
+-                switch EditSuite.UploadBin.kind(ofExtension: ext) {
+-                case .video: a = try await uploadVideo(url)
+-                case .picture: a = try await uploadPicture(url)
+-                case .audio: a = try await uploadAudio(url)
+-                case nil: throw ApiError("bad_media", ext.isEmpty ? "MUSE can't use that file. Add a video, picture or sound." : "MUSE can't use .\(ext) files. Add a video, picture or sound.")
++                switch p.verdict.kind {
++                case .video: a = try await uploadVideo(p)
++                case .picture: a = try await uploadPicture(p)
++                case .audio: a = try await uploadAudio(p)
+                 }
+                 if edit({ $0.addToBin(a) }) { added += 1 }
+             } catch {
+                 notice = nil
+-                lastError = (error as? ApiError)?.message ?? "Couldn't add \(url.lastPathComponent)"
++                lastError = (error as? ApiError)?.message ?? MediaSniff.unreadable
+             }
+         }
+         if added > 0 { binTab = .uploads }
+@@ -647,41 +649,45 @@ final class EditSuiteSession {
+         if edit({ $0.placeUpload(id, at: at, lane: lane, audioKind: audioKind) }), picture { view { $0.tab = .video } }
+     }
+ 
+-    private func uploadAudio(_ url: URL) async throws -> E.Asset {
+-        let d = try await AVURLAsset(url: url).load(.duration).seconds
+-        guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
+-        notice = "Uploading \(url.lastPathComponent)…"
+-        let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
++    private func uploadAudio(_ p: EditMediaProbe.Probed) async throws -> E.Asset {
++        let url = p.url
++        guard let d = try? await AVURLAsset(url: url).load(.duration).seconds, d.isFinite, d >= E.minClipSourceSec else {
++            throw ApiError("bad_media", MediaSniff.unreadable)
++        }
++        notice = "Uploading \(p.name)…"
++        let up = try await api.uploadEditorFile(url, contentType: p.verdict.contentType, purpose: nil, progress: nil)
+         let id = project.newId("a")
+         files[id] = url
+-        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        state.assetNames[id] = p.name
+         notice = nil
+         return E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
+     }
+ 
+-    private func uploadPicture(_ url: URL) async throws -> E.Asset {
++    private func uploadPicture(_ p: EditMediaProbe.Probed) async throws -> E.Asset {
++        let url = p.url
+         guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
+         // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
+-        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: url.pathExtension.lowercased())
+-        notice = "Uploading \(url.lastPathComponent)…"
++        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: p.verdict.ext)
++        notice = "Uploading \(p.name)…"
+         let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+         let id = project.newId("p")
+         files[id] = file
+-        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        state.assetNames[id] = p.name
+         notice = nil
+         return E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
+     }
+ 
+-    private func uploadVideo(_ url: URL) async throws -> E.Asset {
+-        let info = try await VideoEditEngine.info(AVURLAsset(url: url))
+-        guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
+-        notice = "Uploading \(url.lastPathComponent)…"
+-        let ext = url.pathExtension.lowercased()
+-        let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
++    private func uploadVideo(_ p: EditMediaProbe.Probed) async throws -> E.Asset {
++        let url = p.url
++        guard let info = try? await VideoEditEngine.info(AVURLAsset(url: url)), info.duration >= E.minClipSourceSec else {
++            throw ApiError("bad_media", MediaSniff.unreadable)
++        }
++        notice = "Uploading \(p.name)…"
++        let up = try await api.uploadEditorFile(url, contentType: p.verdict.contentType, purpose: nil, progress: nil)
+         let id = project.newId("v")
+-        let sound = !(try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)).isEmpty
++        let sound = !((try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio)) ?? []).isEmpty
+         files[id] = url
+-        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        state.assetNames[id] = p.name
+         notice = nil
+         return E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
+                        hasAudio: sound)
+diff --git a/mac/Muse/App/SnapshotRunner+Edit.swift b/mac/Muse/App/SnapshotRunner+Edit.swift
+index c1731f6b..319c65ab 100644
+--- a/mac/Muse/App/SnapshotRunner+Edit.swift
++++ b/mac/Muse/App/SnapshotRunner+Edit.swift
+@@ -93,6 +93,8 @@ extension SnapshotRunner {
+         await paidHelpersCheck(store, takeId: "rx_full", note: note)
+         // Edit → Uploads as a media bin (owner 2026-11-12): empty and with six uploads, dark and light (SnapshotRunner+Uploads.swift).
+         await uploadsShots(store, media: media, dir: dir, note: note)
++        // Owner issues 2026-11-12: a song that is raw AAC named .mp4, upload_local_file sound, another edit's Approve (SnapshotRunner+EditAudio.swift).
++        await editAudioApprovalsCheck(store, media: media, note: note)
+         store.takes.removeAll { $0.id.hasPrefix("rx_") }
+         store.go(.home)
+         // Round 2's new screens (outfit full view, Settings, the model picker): every control pressed once.
+diff --git a/mac/Muse/App/SnapshotRunner+EditAudio.swift b/mac/Muse/App/SnapshotRunner+EditAudio.swift
+new file mode 100644
+index 00000000..680b7f42
+--- /dev/null
++++ b/mac/Muse/App/SnapshotRunner+EditAudio.swift
+@@ -0,0 +1,107 @@
++import AppKit
++import AVFoundation
++import MuseCore
++
++/// Owner issues of 2026-11-12, checked in the real app (review mode, demo API); every failure is a FAIL line in
++/// edit-check.txt, which fails Mac CI:
++/// - ci_f99f93616ece: a song that is raw ADTS AAC named .mp4 (made with macOS's afconvert), and an M4A renamed .mp4, go
++///   into Edit's Uploads as sound; a text file named .mp4 is refused with the one plain line.
++/// - ci_de89873ab1de: upload_local_file's decision for those files (sound by content, at most 200 MB).
++/// - ci_e546642a4026: a paid helper Claude asked for on ANOTHER edit session is listed for the Claude panel (named after
++///   its edit) while a different edit is open, and Allow answers it on its own session.
++extension SnapshotRunner {
++    static func editAudioApprovalsCheck(_ store: AppStore, media: URL, note: (String) -> Void) async {
++        note("START edit_audio_approvals")
++        let dir = media.appendingPathComponent("audio-check", isDirectory: true)
++        try? FileManager.default.removeItem(at: dir)
++        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
++        let wav = dir.appendingPathComponent("tone.wav"), adts = dir.appendingPathComponent("Night drive.mp4")
++        let m4a = dir.appendingPathComponent("voice.m4a"), m4aAsMp4 = dir.appendingPathComponent("Voice note.mp4")
++        let text = dir.appendingPathComponent("notes.mp4")
++        do {
++            try writeTone(m4a, seconds: 4, rate: 44_100, channels: 1)
++            try FileManager.default.copyItem(at: m4a, to: m4aAsMp4)
++            try Data("not a video".utf8).write(to: text)
++            try writePCM(wav, seconds: 6)
++            let p = Process()
++            p.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
++            p.arguments = ["-f", "adts", "-d", "aac", wav.path, adts.path]
++            try p.run()
++            p.waitUntilExit()
++            guard p.terminationStatus == 0 else { throw ApiError("edit_check", "afconvert \(p.terminationStatus)") }
++        } catch {
++            note("FAIL edit_audio_approvals: test files (\(error.localizedDescription))")
++            return
++        }
++        // The file really is raw AAC: the check means nothing otherwise.
++        let head = (try? FileHandle(forReadingFrom: adts)).flatMap { h in defer { try? h.close() }; return try? h.read(upToCount: 64) } ?? Data()
++        if MediaSniff.format(head) != .adts { note("FAIL edit_audio_approvals: afconvert didn't write ADTS (\(MediaSniff.format(head)))") }
++
++        // ci_de89873ab1de: what upload_local_file sends for each.
++        for (url, mime) in [(adts, "audio/aac"), (m4aAsMp4, "audio/mp4")] {
++            let t = ClaudeFilePolicy.uploadType(sniffed: await EditMediaProbe.probe(url)?.verdict)
++            if t?.kind != .audio || t?.mime != mime { note("FAIL upload_local_file \(url.lastPathComponent): \(String(describing: t)), wanted audio \(mime)") }
++        }
++        if await EditMediaProbe.probe(text) != nil { note("FAIL upload_local_file notes.mp4: a text file was taken") }
++
++        // ci_f99f93616ece: Edit's Add.
++        guard let s = store.makeEditSuiteSession(takeId: "rx_full") else { note("FAIL edit_audio_approvals: no editor session"); return }
++        await s.load()
++        defer { s.close() }
++        let before = Set(s.uploads.map(\.id))
++        await s.addFiles([adts, m4aAsMp4])
++        let added = s.uploads.filter { !before.contains($0.id) }
++        if added.count != 2 || added.contains(where: { $0.kind != .audio }) {
++            note("FAIL edit_add: \(added.map { "\($0.name) \($0.kind)" }) (\(s.lastError ?? "no error")), wanted 2 sounds")
++        }
++        if let song = added.first(where: { $0.name == "Night drive" }) {
++            if (song.durationSec ?? 0) < 5 { note("FAIL edit_add: Night drive is \(song.durationSec ?? 0) s, wanted about 6") }
++        } else {
++            note("FAIL edit_add: Night drive (raw AAC named .mp4) isn't in Uploads")
++        }
++        s.lastError = nil
++        await s.addFiles([text])
++        if s.lastError != MediaSniff.unreadable { note("FAIL edit_add notes.mp4: said \(s.lastError ?? "nothing"), wanted \(MediaSniff.unreadable)") }
++        if s.uploads.count != before.count + 2 { note("FAIL edit_add notes.mp4: something was added") }
++
++        // ci_e546642a4026: a helper on another edit, while this one is open.
++        guard let fake = store.api as? FakeMuseAPI else { note("FAIL edit_approvals: not the demo API"); return }
++        do {
++            let open = try await fake.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId))
++            let other = try await fake.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId))
++            let p = try await fake.fakeClaudePending(sessionId: other.id, kind: "matte", label: "Remove background", estimateUsd: 0.4)
++            await store.loadEditApprovals()
++            let mine = store.oneClaude.editApprovals.items.filter { $0.sessionId == other.id }
++            guard let a = mine.first, mine.count == 1 else {
++                note("FAIL edit_approvals: \(store.oneClaude.editApprovals.count) listed, none for the other edit (open: \(open.id))")
++                return
++            }
++            if store.editApprovalName(a) != "New project" { note("FAIL edit_approvals: the card names \(store.editApprovalName(a))") }
++            if a.allowLabel != "Allow · $0.40" { note("FAIL edit_approvals: button \(a.allowLabel)") }
++            await store.answerEditApproval(a, approve: true)
++            let after = try await fake.editSession(id: other.id)
++            if after.pending.contains(where: { $0.id == p.id && $0.isWaiting }) { note("FAIL edit_approvals: Allow didn't answer it on its own session") }
++            if store.oneClaude.editApprovals.items.contains(where: { $0.id == a.id }) { note("FAIL edit_approvals: still listed after Allow") }
++            try? await fake.closeEditSession(id: open.id)
++            try? await fake.closeEditSession(id: other.id)
++        } catch {
++            note("FAIL edit_approvals: \(error.localizedDescription)")
++            return
++        }
++        note("DONE edit_audio_approvals (\(added.map(\.name).joined(separator: ", ")) as sound; another edit's helper allowed from the panel)")
++    }
++
++    /// A 16-bit PCM WAV of a tone (afconvert's input).
++    private static func writePCM(_ url: URL, seconds: Double) throws {
++        let rate = 44_100.0
++        guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false),
++              let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(seconds * rate)), let data = buf.floatChannelData else {
++            throw ApiError("edit_check", "Couldn't make the test sound")
++        }
++        buf.frameLength = buf.frameCapacity
++        for i in 0..<Int(buf.frameLength) { data[0][i] = Float(sin(2 * Double.pi * 330 * Double(i) / rate) * 0.6) }
++        let file = try AVAudioFile(forWriting: url, settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1,
++                                                              AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false])
++        try file.write(from: buf)
++    }
++}
+diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
+index 67fc7d69..53372bab 100644
+--- a/mac/Muse/Views/Claude/OneClaudePanel.swift
++++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
+@@ -252,6 +252,24 @@ struct OneClaudePanel: View {
+             .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
+             .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+         }
++        // Paid helpers on any edit (ci_e546642a4026): here whichever edit is open, each naming its edit.
++        ForEach(o.editApprovals.items) { a in
++            let busy = o.answeringEdit.contains(a.id)
++            VStack(alignment: .leading, spacing: Space.s2) {
++                Text("Claude needs your go-ahead").scaled(t.scale.label, r.ink)
++                Text("Run \(a.pending.label) in “\(store.editApprovalName(a))”").scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
++                HStack(spacing: Space.s2) {
++                    SuiteToolButton(title: a.allowLabel, filled: true, disabled: busy) { Task { await store.answerEditApproval(a, approve: true) } }
++                    SuiteToolButton(title: "Not now", disabled: busy, plain: true) { Task { await store.answerEditApproval(a, approve: false) } }
++                }
++            }
++            .padding(Space.s3)
++            .frame(maxWidth: .infinity, alignment: .leading)
++            .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
++            .padding(.horizontal, Space.s4).padding(.top, Space.s3)
++            .accessibilityElement(children: .contain)
++            .accessibilityLabel("Claude asks to run \(a.pending.label) in \(store.editApprovalName(a))")
++        }
+         ClaudeEditNoticeLine()
+         if let m = o.remembered, let text = m.text {
+             HStack(alignment: .top, spacing: Space.s1) {
+diff --git a/mac/Muse/Views/Edit/EditSuiteBin.swift b/mac/Muse/Views/Edit/EditSuiteBin.swift
+index 163c253c..247dfc31 100644
+--- a/mac/Muse/Views/Edit/EditSuiteBin.swift
++++ b/mac/Muse/Views/Edit/EditSuiteBin.swift
+@@ -402,7 +402,8 @@ struct EditSuiteBin: View {
+ 
+     private func chooseSong() {
+         let panel = NSOpenPanel()
+-        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
++        // .mp4 too: a song can be an audio-only MP4 (ci_f99f93616ece); the file's content decides, not its name.
++        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio, .mpeg4Movie]
+         panel.allowsMultipleSelection = false
+         guard panel.runModal() == .OK, let url = panel.url else { return }
+         Task { await session.importAudio(url, kind: .music) }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAttachments.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAttachments.swift
+index 65eb1bc7..02bb7a1b 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAttachments.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAttachments.swift
+@@ -102,6 +102,22 @@ extension FakeClaudeAPI: ClaudeImageUploading {
+     }
+ }
+ 
++/// upload_local_file: a sound from the Mac (ci_de89873ab1de), uploaded as an editor audio upload (POST
++/// /v1/editor/uploads/presign + PUT), so Edit and Claude's edit tools take it as an audio asset. → its upload id.
++public protocol ClaudeAudioUploading: Sendable {
++    func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String
++}
++extension HTTPClaudeAPI: ClaudeAudioUploading {
++    public func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String {
++        let http = HTTPMuseAPI(baseURL: baseURL)
++        if let tok = currentToken { await http.setToken(tok) }
++        return try await http.uploadEditorFile(file, contentType: contentType, purpose: nil, progress: nil)
++    }
++}
++extension FakeClaudeAPI: ClaudeAudioUploading {
++    public func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String { "up_" + shortId() }
++}
++
+ /// Demo mode: nothing leaves this Mac; the video gets a made-up upload id.
+ extension FakeClaudeAPI: ClaudeVideoUploading {
+     public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment {
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift
+index f4056194..af61d67e 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeFileAccess.swift
+@@ -99,17 +99,43 @@ public enum ClaudeFilePolicy {
+ 
+     /// The tools a file-enabled run lets Claude ask for (Web stays off).
+     public static let fileTools: Set<String> = ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "Bash", "Upload"]
+-    /// upload_local_file: what can go up (the chat's own limits).
++    /// upload_local_file: what can go up (the chat's own limits; sound as an editor audio upload, ci_de89873ab1de).
+     public static let uploadImageTypes = SuiteClaudeAttachments.extensions
+     public static let uploadVideoTypes: [String: String] = ["mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime"]
+-    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB) and videos (MP4, MOV, up to 500 MB) can be uploaded."
+-    /// The upload type of a file name, or nil.
+-    public static func uploadType(_ path: String) -> (mime: String, video: Bool)? {
++    public static let uploadAudioTypes: [String: String] = ["mp3": "audio/mpeg", "m4a": "audio/mp4", "aac": "audio/aac", "wav": "audio/wav"]
++    /// Sound up to 200 MB (the editor's audio upload limit).
++    public static let uploadAudioMaxBytes = 200 * 1024 * 1024
++    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 500 MB) and sound (MP3, M4A, AAC, WAV, up to 200 MB) can be uploaded."
++
++    public enum UploadKind: String, Sendable { case image, video, audio }
++    public struct UploadType: Equatable, Sendable {
++        public var mime: String
++        public var kind: UploadKind
++        public var video: Bool { kind == .video }
++        /// What the server's answer calls it: "image", "clip" (a video) or "audio".
++        public var resultKind: String { kind == .video ? "clip" : kind.rawValue }
++    }
++
++    /// The upload type of a file name, or nil. An .mp4 is a video by name; the Mac reads its tracks before uploading, and
++    /// one with sound only goes up as audio (`contentType(_:)`).
++    public static func uploadType(_ path: String) -> UploadType? {
+         let ext = (path as NSString).pathExtension.lowercased()
+-        if let m = uploadImageTypes[ext] { return (m, false) }
+-        if let m = uploadVideoTypes[ext] { return (m, true) }
++        if let m = uploadImageTypes[ext] { return UploadType(mime: m, kind: .image) }
++        if let m = uploadVideoTypes[ext] { return UploadType(mime: m, kind: .video) }
++        if let m = uploadAudioTypes[ext] { return UploadType(mime: m, kind: .audio) }
+         return nil
+     }
++
++    /// The upload type from what the file is (MediaSniff's verdict), for a video or sound by name: nil when it is a
++    /// picture or unreadable (the card said video or sound).
++    public static func uploadType(sniffed v: MediaSniff.Verdict?) -> UploadType? {
++        guard let v else { return nil }
++        switch v.kind {
++        case .video: return UploadType(mime: v.contentType, kind: .video)
++        case .audio: return UploadType(mime: v.contentType, kind: .audio)
++        case .picture: return nil
++        }
++    }
+     static let writeTools: Set<String> = ["Write", "Edit", "MultiEdit"]
+ 
+     private static let secretDirs = [".ssh", ".aws", ".gnupg", ".kube", ".docker", ".claude", ".password-store", "Keychains"]
+@@ -232,13 +258,17 @@ public enum ClaudePermissionAnswer: Hashable, Sendable {
+ /// What upload_local_file's Mac side sends back once the file is up.
+ public struct ClaudeLocalUpload: Codable, Hashable, Sendable {
+     public var uploadId: String
++    /// "image", "clip" (a video) or "audio".
+     public var kind: String
+     public var url: String?
+     public var name: String?
+-    public init(uploadId: String, kind: String, url: String? = nil, name: String? = nil) {
++    /// A sound's length (add_music needs it; ci_de89873ab1de).
++    public var durationSec: Double?
++    public init(uploadId: String, kind: String, url: String? = nil, name: String? = nil, durationSec: Double? = nil) {
+         self.uploadId = uploadId
+         self.kind = kind
+         self.url = url
+         self.name = name
++        self.durationSec = durationSec
+     }
+ }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
+index 11b5d066..cbee313d 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
+@@ -26,9 +26,12 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
+     case uiCallEnd(id: String)
+     /// A card changed in place (a plan ticked, an Undo pressed): replace the message's card.
+     case card(threadId: String, messageId: String, ClaudeCardBox)
++    /// A paid helper Claude asked for on an edit session changed (`{type: "edit", op: "pending", sessionId, pending}`, sent
++    /// to the owner's devices): the Claude panel lists waiting ones whichever edit is open (ci_e546642a4026).
++    case editPending(sessionId: String, EditPending)
+ }
+ 
+-/// SSE lines → `claude` live events; everything else on the stream is ignored.
++/// SSE lines → `claude` live events (and edit sessions' paid-helper `pending` events); everything else is ignored.
+ public struct ClaudeLiveEventFilter: Sendable {
+     private var parser = SSEParser()
+ 
+@@ -57,8 +60,10 @@ public struct ClaudeLiveEventFilter: Sendable {
+         var call: UiCall?
+         var messageId: String?
+         var card: ClaudeCardBox?
++        var sessionId: String?
++        var pending: EditPending?
+ 
+-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call, messageId, card }
++        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call, messageId, card, sessionId, pending }
+         init(from d: Decoder) throws {
+             let c = try d.container(keyedBy: K.self)
+             type = try c.decode(String.self, forKey: .type)
+@@ -78,12 +83,19 @@ public struct ClaudeLiveEventFilter: Sendable {
+             call = try? c.decodeIfPresent(UiCall.self, forKey: .call)
+             messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
+             card = try? c.decodeIfPresent(ClaudeCardBox.self, forKey: .card)
++            sessionId = try? c.decodeIfPresent(String.self, forKey: .sessionId)
++            pending = try? c.decodeIfPresent(EditPending.self, forKey: .pending)
+         }
+     }
+ 
+     /// One event's JSON, e.g. `{type: "claude", op: "turn", turn}`. Unknown ops and malformed bodies are nil.
+     public static func parse(_ json: Data) -> ClaudeLiveEvent? {
+-        guard let e = try? JSONDecoder().decode(Envelope.self, from: json), e.type == "claude" else { return nil }
++        guard let e = try? JSONDecoder().decode(Envelope.self, from: json) else { return nil }
++        if e.type == "edit" {
++            guard e.op == "pending", let sid = e.sessionId, let p = e.pending else { return nil }
++            return .editPending(sessionId: sid, p)
++        }
++        guard e.type == "claude" else { return nil }
+         switch e.op {
+         case "thread": return e.thread.map { .thread($0) }
+         case "threadDeleted": return e.threadId.map { .threadDeleted(threadId: $0) }
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditApprovals.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditApprovals.swift
+new file mode 100644
+index 00000000..b25a358e
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditApprovals.swift
+@@ -0,0 +1,61 @@
++import Foundation
++
++// Paid helpers Claude asked for, across ALL of the owner's open edit sessions (owner issue ci_e546642a4026, 2026-11-12:
++// an Approve card for a helper on another edit never showed while the Edit page had a different session open). The
++// Claude panel lists them whichever edit is open, each naming its edit, and answers them by session id
++// (POST /v1/edit-sessions/{id}/pending/{pid}) without switching edits.
++
++/// One paid helper waiting for the owner's yes, and the edit it belongs to.
++public struct EditApproval: Identifiable, Hashable, Sendable {
++    public var sessionId: String
++    public var takeId: String
++    public var pending: EditPending
++    public var id: String { "\(sessionId)/\(pending.id)" }
++    public init(sessionId: String, takeId: String, pending: EditPending) {
++        self.sessionId = sessionId; self.takeId = takeId; self.pending = pending
++    }
++
++    /// "Allow · $0.40": the price on the action.
++    public var allowLabel: String { "Allow · $" + String(format: "%.2f", pending.estimateUsd) }
++}
++
++/// The waiting ones, oldest first (the order Claude asked).
++public struct EditApprovalList: Hashable, Sendable {
++    public private(set) var items: [EditApproval] = []
++    public init() {}
++
++    /// Everything waiting in these sessions (GET /v1/edit-sessions: open sessions with their pending helpers).
++    public mutating func replace(sessions: [EditSession]) {
++        items = sessions.flatMap { s in s.pending.filter(\.isWaiting).map { EditApproval(sessionId: s.id, takeId: s.takeId, pending: $0) } }
++        sort()
++    }
++
++    /// A live `pending` event of a session: waiting → listed (or updated), anything else → gone. `takeId` names the edit
++    /// when the session isn't listed yet (nil: keep what is known, else unnamed until the next reload).
++    public mutating func apply(sessionId: String, takeId: String?, _ p: EditPending) {
++        let key = "\(sessionId)/\(p.id)"
++        guard p.isWaiting else { items.removeAll { $0.id == key }; return }
++        if let i = items.firstIndex(where: { $0.id == key }) {
++            items[i].pending = p
++        } else {
++            let tid = takeId ?? items.first { $0.sessionId == sessionId }?.takeId ?? ""
++            items.append(EditApproval(sessionId: sessionId, takeId: tid, pending: p))
++            sort()
++        }
++    }
++
++    /// Answered here (or elsewhere): off the list.
++    public mutating func remove(_ id: String) { items.removeAll { $0.id == id } }
++
++    public var count: Int { items.count }
++    public var isEmpty: Bool { items.isEmpty }
++
++    private mutating func sort() { items.sort { ($0.pending.createdAt, $0.id) < ($1.pending.createdAt, $1.id) } }
++
++    /// The edit's name as the card says it: the take's title, "New project" for a blank one, "an edit" when unknown.
++    public static func editName(takeId: String, title: String?) -> String {
++        if takeId == EditV2.blankSourceId { return "New project" }
++        if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
++        return "an edit"
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/MediaSniff.swift b/mac/MuseCore/Sources/MuseCore/Edit/MediaSniff.swift
+new file mode 100644
+index 00000000..a67a4808
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Edit/MediaSniff.swift
+@@ -0,0 +1,99 @@
++import Foundation
++
++// What a file really is, from its first bytes, not its name (owner issue ci_f99f93616ece, 2026-11-12: a song that was raw
++// ADTS AAC, sound only, named .mp4, was read as a video and Edit said only "Couldn't add that file"). Used by Edit's Add
++// (Uploads, Music) and by upload_local_file. An MP4 container needs its tracks to decide: the app reads them
++// (AVFoundation) and passes `hasVideo` / `hasAudio`.
++
++public enum MediaSniff {
++    /// Enough of the file's start for every check here.
++    public static let headerBytes = 64
++
++    public enum Format: Equatable, Sendable {
++        case adts, mp3, wav, aiff, flac
++        /// ISO base media (MP4, M4A, MOV, HEIC): the `ftyp` brand decides pictures; tracks decide video vs sound.
++        case isoMedia(brand: String)
++        case png, jpeg, webp
++        case unknown
++    }
++
++    /// The format of a file from its first bytes.
++    public static func format(_ data: Data) -> Format {
++        let b = [UInt8](data.prefix(headerBytes))
++        func ascii(_ at: Int, _ n: Int) -> String? {
++            guard b.count >= at + n else { return nil }
++            return String(bytes: b[at..<at + n], encoding: .ascii)
++        }
++        if b.count >= 8, ascii(4, 4) == "ftyp" { return .isoMedia(brand: ascii(8, 4) ?? "") }
++        if b.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return .png }
++        if b.starts(with: [0xFF, 0xD8, 0xFF]) { return .jpeg }
++        if ascii(0, 4) == "RIFF", ascii(8, 4) == "WAVE" { return .wav }
++        if ascii(0, 4) == "RIFF", ascii(8, 4) == "WEBP" { return .webp }
++        if ascii(0, 4) == "FORM", let t = ascii(8, 4), t == "AIFF" || t == "AIFC" { return .aiff }
++        if ascii(0, 4) == "fLaC" { return .flac }
++        if ascii(0, 3) == "ID3" { return .mp3 }
++        if b.count >= 2, b[0] == 0xFF {
++            // ADTS (AAC): 12-bit sync 0xFFF, layer 00. MPEG audio (MP3): 11-bit sync, layer not 00.
++            if b[1] & 0xF6 == 0xF0 { return .adts }
++            if b[1] & 0xE0 == 0xE0, (b[1] >> 1) & 0x3 != 0 { return .mp3 }
++        }
++        return .unknown
++    }
++
++    /// What MUSE does with a file: its kind, the content type it is uploaded as and the extension it must carry on this
++    /// Mac (AVFoundation reads by extension).
++    public struct Verdict: Equatable, Sendable {
++        public var kind: EditSuite.UploadKind
++        public var contentType: String
++        public var ext: String
++        public init(_ kind: EditSuite.UploadKind, _ contentType: String, _ ext: String) {
++            self.kind = kind; self.contentType = contentType; self.ext = ext
++        }
++    }
++
++    /// The one line when a file can't be used.
++    public static let unreadable = "This file has no video or sound MUSE can read."
++
++    private static let heicBrands: Set<String> = ["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]
++    private static let audioBrands: Set<String> = ["M4A ", "M4B ", "M4P "]
++
++    /// The verdict, from the format and (for an MP4 container) its tracks; `fileExtension` only when the bytes say
++    /// nothing (nil when MUSE can't use the file).
++    public static func verdict(_ f: Format, fileExtension: String, hasVideo: Bool? = nil, hasAudio: Bool? = nil) -> Verdict? {
++        switch f {
++        case .adts: return Verdict(.audio, "audio/aac", "aac")
++        case .mp3: return Verdict(.audio, "audio/mpeg", "mp3")
++        case .wav: return Verdict(.audio, "audio/wav", "wav")
++        case .aiff: return Verdict(.audio, "audio/aiff", "aiff")
++        case .flac: return Verdict(.audio, "audio/flac", "flac")
++        case .png: return Verdict(.picture, "image/png", "png")
++        case .jpeg: return Verdict(.picture, "image/jpeg", "jpg")
++        case .webp: return Verdict(.picture, "image/webp", "webp")
++        case .isoMedia(let brand):
++            if heicBrands.contains(brand) { return Verdict(.picture, "image/heic", "heic") }
++            let mov = brand == "qt  "
++            if hasVideo == true { return Verdict(.video, mov ? "video/quicktime" : "video/mp4", mov ? "mov" : "mp4") }
++            if hasAudio == true { return Verdict(.audio, "audio/mp4", "m4a") }
++            if hasVideo == false && hasAudio == false { return nil }
++            // Tracks not read: the brand's word.
++            return audioBrands.contains(brand) ? Verdict(.audio, "audio/mp4", "m4a") : Verdict(.video, mov ? "video/quicktime" : "video/mp4", mov ? "mov" : "mp4")
++        case .unknown:
++            let e = fileExtension.lowercased()
++            switch EditSuite.UploadBin.kind(ofExtension: e) {
++            case .video: return Verdict(.video, e == "mov" ? "video/quicktime" : "video/mp4", e == "mov" ? "mov" : "mp4")
++            case .picture: return e == "heic" ? Verdict(.picture, "image/heic", "heic") : nil // other pictures have magic bytes
++            case .audio: return nil // every sound format MUSE takes has magic bytes (an AAC/M4A without them isn't readable)
++            case nil: return nil
++            }
++        }
++    }
++
++    /// True when the file must be read through a copy named with the verdict's extension (AVFoundation picks its reader
++    /// from the name: raw AAC named .mp4 won't open, an M4A named .mp4 will).
++    public static func needsRename(fileExtension: String, _ v: Verdict) -> Bool {
++        let e = fileExtension.lowercased()
++        let families: [Set<String>] = [["jpg", "jpeg"], ["mp4", "m4v", "m4a", "mov"], ["aif", "aiff", "aifc"], ["heic", "heif"]]
++        if e == v.ext { return false }
++        return !families.contains { $0.contains(e) && $0.contains(v.ext) }
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditAudioApprovalsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditAudioApprovalsTests.swift
+new file mode 100644
+index 00000000..82247ad7
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditAudioApprovalsTests.swift
+@@ -0,0 +1,156 @@
++import XCTest
++@testable import MuseCore
++
++/// Owner issues of 2026-11-12: a song that is raw ADTS AAC named .mp4 (ci_f99f93616ece), upload_local_file refusing sound
++/// (ci_de89873ab1de), and paid-helper approvals of another edit that never showed (ci_e546642a4026).
++final class EditAudioApprovalsTests: XCTestCase {
++    typealias S = MediaSniff
++
++    private func bytes(_ b: [UInt8], pad: Int = 64) -> Data { Data(b + [UInt8](repeating: 0, count: max(0, pad - b.count))) }
++    private func ascii(_ s: String) -> [UInt8] { Array(s.utf8) }
++    private func iso(_ brand: String) -> Data { bytes([0, 0, 0, 0x20] + ascii("ftyp") + ascii(brand)) }
++
++    // MARK: What a file is (ci_f99f93616ece)
++
++    func testFormatFromTheBytesNotTheName() {
++        XCTAssertEqual(S.format(bytes([0xFF, 0xF1, 0x50, 0x80])), .adts, "MPEG-4 AAC ADTS")
++        XCTAssertEqual(S.format(bytes([0xFF, 0xF9, 0x50, 0x80])), .adts, "MPEG-2 AAC ADTS")
++        XCTAssertEqual(S.format(bytes([0xFF, 0xFB, 0x90, 0x64])), .mp3, "MPEG-1 layer III frame")
++        XCTAssertEqual(S.format(bytes(ascii("ID3") + [4, 0])), .mp3)
++        XCTAssertEqual(S.format(bytes(ascii("RIFF") + [0, 0, 0, 0] + ascii("WAVE"))), .wav)
++        XCTAssertEqual(S.format(bytes(ascii("RIFF") + [0, 0, 0, 0] + ascii("WEBP"))), .webp)
++        XCTAssertEqual(S.format(bytes(ascii("FORM") + [0, 0, 0, 0] + ascii("AIFF"))), .aiff)
++        XCTAssertEqual(S.format(bytes(ascii("fLaC"))), .flac)
++        XCTAssertEqual(S.format(bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A])), .png)
++        XCTAssertEqual(S.format(bytes([0xFF, 0xD8, 0xFF, 0xE0])), .jpeg)
++        XCTAssertEqual(S.format(iso("isom")), .isoMedia(brand: "isom"))
++        XCTAssertEqual(S.format(iso("M4A ")), .isoMedia(brand: "M4A "))
++        XCTAssertEqual(S.format(Data(ascii("hello, a text file"))), .unknown)
++        XCTAssertEqual(S.format(Data()), .unknown)
++    }
++
++    func testRawAACNamedMp4IsASongAndIsReadThroughAnAacCopy() throws {
++        let v = try XCTUnwrap(S.verdict(S.format(bytes([0xFF, 0xF1, 0x50, 0x80])), fileExtension: "mp4"))
++        XCTAssertEqual(v, S.Verdict(.audio, "audio/aac", "aac"))
++        XCTAssertTrue(S.needsRename(fileExtension: "mp4", v), "AVFoundation won't open raw AAC named .mp4")
++        XCTAssertFalse(S.needsRename(fileExtension: "AAC", v))
++    }
++
++    func testAnMp4WithSoundOnlyIsAudioAndWithAPictureIsVideo() {
++        let f = S.format(iso("isom"))
++        XCTAssertEqual(S.verdict(f, fileExtension: "mp4", hasVideo: false, hasAudio: true), S.Verdict(.audio, "audio/mp4", "m4a"))
++        XCTAssertEqual(S.verdict(f, fileExtension: "mp4", hasVideo: true, hasAudio: true), S.Verdict(.video, "video/mp4", "mp4"))
++        XCTAssertEqual(S.verdict(S.format(iso("qt  ")), fileExtension: "mov", hasVideo: true, hasAudio: false), S.Verdict(.video, "video/quicktime", "mov"))
++        XCTAssertNil(S.verdict(f, fileExtension: "mp4", hasVideo: false, hasAudio: false), "no video and no sound: unusable")
++        XCTAssertEqual(S.verdict(S.format(iso("M4A ")), fileExtension: "mp4"), S.Verdict(.audio, "audio/mp4", "m4a"), "tracks unread: the brand's word")
++        XCTAssertEqual(S.verdict(S.format(iso("heic")), fileExtension: "mp4"), S.Verdict(.picture, "image/heic", "heic"))
++        // An M4A named .mp4 opens as it is (same container family).
++        XCTAssertFalse(S.needsRename(fileExtension: "mp4", S.Verdict(.audio, "audio/mp4", "m4a")))
++        XCTAssertTrue(S.needsRename(fileExtension: "mp4", S.Verdict(.audio, "audio/mpeg", "mp3")))
++    }
++
++    func testUnreadableFilesSayWhyInOnePlainLine() {
++        XCTAssertNil(S.verdict(.unknown, fileExtension: "pdf"))
++        XCTAssertNil(S.verdict(.unknown, fileExtension: "mp3"), "an .mp3 with no MPEG audio inside")
++        XCTAssertEqual(S.verdict(.unknown, fileExtension: "mov"), S.Verdict(.video, "video/quicktime", "mov"))
++        XCTAssertEqual(S.unreadable, "This file has no video or sound MUSE can read.")
++        XCTAssertFalse(S.unreadable.contains("·"))
++    }
++
++    // MARK: upload_local_file takes sound (ci_de89873ab1de)
++
++    func testUploadPolicyTakesSound() {
++        for (f, mime) in [("a.mp3", "audio/mpeg"), ("a.M4A", "audio/mp4"), ("a.aac", "audio/aac"), ("a.wav", "audio/wav")] {
++            let t = ClaudeFilePolicy.uploadType(f)
++            XCTAssertEqual(t?.mime, mime, f)
++            XCTAssertEqual(t?.kind, .audio, f)
++            XCTAssertEqual(t?.resultKind, "audio", f)
++        }
++        XCTAssertEqual(ClaudeFilePolicy.uploadType("a.mp4")?.resultKind, "clip", "an .mp4 is a video by name")
++        XCTAssertEqual(ClaudeFilePolicy.uploadType("a.png")?.resultKind, "image")
++        XCTAssertNil(ClaudeFilePolicy.uploadType("a.flac"))
++        XCTAssertEqual(ClaudeFilePolicy.uploadAudioMaxBytes, 200 * 1024 * 1024)
++        XCTAssertTrue(ClaudeFilePolicy.uploadRefusal.contains("MP3, M4A, AAC, WAV, up to 200 MB"))
++        // An audio-only .mp4 goes up as audio once its content is read.
++        let sniffed = ClaudeFilePolicy.uploadType(sniffed: S.verdict(S.format(iso("isom")), fileExtension: "mp4", hasVideo: false, hasAudio: true))
++        XCTAssertEqual(sniffed, ClaudeFilePolicy.UploadType(mime: "audio/mp4", kind: .audio))
++        XCTAssertEqual(ClaudeFilePolicy.uploadType(sniffed: S.verdict(.adts, fileExtension: "mp4"))?.mime, "audio/aac")
++        XCTAssertNil(ClaudeFilePolicy.uploadType(sniffed: nil))
++        XCTAssertNil(ClaudeFilePolicy.uploadType(sniffed: S.Verdict(.picture, "image/png", "png")))
++    }
++
++    func testAUploadCardForSoundIsAskedNotRefused() {
++        let ask = ClaudePermissionAsk(id: "p1", toolName: "Upload", input: .object(["file_path": .string("~/Music/song.m4a")]))
++        guard case .ask = ClaudeFilePolicy.verdict(ask, mode: .ask, folders: [], cwd: "/Users/me", home: "/Users/me") else {
++            return XCTFail("a sound must be asked about, not refused")
++        }
++    }
++
++    // MARK: Approvals of every edit (ci_e546642a4026)
++
++    private func session(_ id: String, take: String, _ pending: [EditPending]) throws -> EditSession {
++        let json = """
++        {"id":"\(id)","takeId":"\(take)","revision":1,"project":{},"status":"open","pending":[],"online":[],"requests":[]}
++        """
++        var s = try JSONDecoder().decode(EditSession.self, from: Data(json.utf8))
++        s.pending = pending
++        return s
++    }
++
++    func testEveryEditsWaitingHelpersAreListedOldestFirst() throws {
++        var list = EditApprovalList()
++        let a = EditPending(id: "pd_1", kind: "matte", label: "Remove background", estimateUsd: 0.4, createdAt: 20)
++        let b = EditPending(id: "pd_2", kind: "captions", label: "Captions", estimateUsd: 0.05, createdAt: 10)
++        let running = EditPending(id: "pd_3", kind: "denoise", label: "Clean up sound", estimateUsd: 0.1, status: "running", createdAt: 5)
++        list.replace(sessions: [try session("es_open", take: "tk_a", [a]), try session("es_other", take: "tk_b", [b, running])])
++        XCTAssertEqual(list.items.map(\.id), ["es_other/pd_2", "es_open/pd_1"], "waiting only, oldest first, from both edits")
++        XCTAssertEqual(list.items.first?.takeId, "tk_b")
++        XCTAssertEqual(list.items.last?.allowLabel, "Allow · $0.40")
++    }
++
++    func testLiveEventsAddUpdateAndRemove() throws {
++        var list = EditApprovalList()
++        list.replace(sessions: [try session("es_1", take: "tk_1", [])])
++        let p = EditPending(id: "pd_9", kind: "cuts", label: "Cut silences", estimateUsd: 0.12, createdAt: 3)
++        list.apply(sessionId: "es_2", takeId: "tk_2", p)
++        XCTAssertEqual(list.items.map(\.id), ["es_2/pd_9"])
++        var approved = p
++        approved.status = "approved"
++        list.apply(sessionId: "es_2", takeId: nil, approved)
++        XCTAssertTrue(list.isEmpty, "answered on another device: gone here too")
++        list.apply(sessionId: "es_2", takeId: nil, p)
++        XCTAssertEqual(list.items.first?.takeId, "", "unknown edit until the next reload")
++        list.remove("es_2/pd_9")
++        XCTAssertEqual(list.count, 0)
++    }
++
++    func testTheCardNamesItsEdit() {
++        XCTAssertEqual(EditApprovalList.editName(takeId: "tk_1", title: " Living room dance "), "Living room dance")
++        XCTAssertEqual(EditApprovalList.editName(takeId: EditV2.blankSourceId, title: nil), "New project")
++        XCTAssertEqual(EditApprovalList.editName(takeId: "tk_gone", title: nil), "an edit")
++    }
++
++    func testTheLiveStreamCarriesEditPendingEvents() throws {
++        let json = #"{"type":"edit","sessionId":"es_7","op":"pending","pending":{"id":"pd_1","kind":"matte","label":"Remove background","estimateUsd":0.4,"status":"waiting","createdAt":1}}"#
++        guard case .editPending(let sid, let p)? = ClaudeLiveEventFilter.parse(Data(json.utf8)) else { return XCTFail("not parsed") }
++        XCTAssertEqual(sid, "es_7")
++        XCTAssertEqual(p.label, "Remove background")
++        XCTAssertNil(ClaudeLiveEventFilter.parse(Data(#"{"type":"edit","sessionId":"es_7","op":"patch","revision":2}"#.utf8)), "other edit events stay with the editor")
++        XCTAssertNil(ClaudeLiveEventFilter.parse(Data(#"{"type":"jobs","op":"pending"}"#.utf8)))
++    }
++
++    func testTheDemoApiAnswersAHelperOfAnotherEditBySessionId() async throws {
++        let api = FakeMuseAPI()
++        let s1 = try await api.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId))
++        let s2 = try await api.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId))
++        _ = try await api.fakeClaudePending(sessionId: s2.id, kind: "matte", label: "Remove background", estimateUsd: 0.4)
++        var list = EditApprovalList()
++        list.replace(sessions: try await api.recentEditSessions(limit: 50))
++        XCTAssertEqual(list.items.map(\.sessionId), [s2.id], "the other edit's helper, while \(s1.id) is the one open")
++        let a = try XCTUnwrap(list.items.first)
++        let answered = try await api.answerEditPending(sessionId: a.sessionId, pendingId: a.pending.id, approve: true)
++        XCTAssertFalse(answered.isWaiting)
++        list.replace(sessions: try await api.recentEditSessions(limit: 50))
++        XCTAssertTrue(list.isEmpty)
++    }
++}
