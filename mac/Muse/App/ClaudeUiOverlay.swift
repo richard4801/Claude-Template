@@ -91,10 +91,11 @@ final class ClaudeUiOverlay {
         rings.append(win)
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
-            NSAnimationContext.runAnimationGroup { ctx in
+            // The completion-handler form: inside a Task the trailing-closure call picks the async overload.
+            NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.35
                 win.animator().alphaValue = 0
-            }
+            }, completionHandler: nil)
             try? await Task.sleep(nanoseconds: 400_000_000)
             win.parent?.removeChildWindow(win)
             win.orderOut(nil)

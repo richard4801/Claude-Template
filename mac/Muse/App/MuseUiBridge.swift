@@ -60,7 +60,7 @@ final class MuseUiBridge {
             }
             // Off-screen leaves (rows scrolled away) are left out; containers stay for their visible children.
             if !onScreen && kids.isEmpty && f.width > 0 { return nil }
-            let ident = obj.accessibilityIdentifier()
+            let ident = obj.accessibilityIdentifier() ?? ""
             let label = obj.accessibilityLabel() ?? obj.accessibilityTitle() ?? obj.accessibilityPlaceholderValue()
             let el = UiElement(identifier: ident.isEmpty ? nil : ident, role: role, label: label, value: Self.text(obj.accessibilityValue()),
                                enabled: obj.isAccessibilityEnabled(), selected: role == .tab || role == .row ? obj.isAccessibilitySelected() : nil,

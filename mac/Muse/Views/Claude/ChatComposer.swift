@@ -322,7 +322,7 @@ struct ChatComposerBar: View {
         // squares of it, so on one line all three share a centre, and as the field grows they stay on its bottom line.
         let lineH = ceil(font.boundingRectForFont.height) + 12
         let rowH = lineH + 2 * Space.s1
-        VStack(alignment: .leading, spacing: Space.s2) {
+        return VStack(alignment: .leading, spacing: Space.s2) {
             if !suggestions.isEmpty {
                 FlowLayout(spacing: Space.s1) {
                     ForEach(suggestions) { s in
