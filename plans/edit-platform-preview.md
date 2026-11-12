@@ -132,3 +132,19 @@ Tests: `PlatformPreviewTest` (6), on the shared fixtures.
 
 **TakeViewer on Android:** nothing to remove. Android never got the viewer's skins, frames or safe zones (the swap-viewer work stopped at the Mac), so its viewer is already a clean player. When the Android TakeViewer is built, it must not get platform previews.
 
+
+### Fix: the View bar with the Claude panel open (run 587, `plans/patches/edit-preview-bar-fit-mac.patch`)
+This is a follow-up on top of `claude/mac-bundle-8` @94c78af5. With the Claude panel open, the viewer narrowed and the bar was cut: "Safe area" showed as "S" and "Fit · 20…" lost its end.
+
+The bar is now a `ViewThatFits` with three forms, widest first:
+1. every view as chips, the "Safe area" switch with its label, and "Fit · 43%";
+2. "View: TikTok ▾" (a button with a popover of the views, not a Menu), the switch with its label, and "Fit · 43%";
+3. "View: TikTok ▾", the Safe area switch as an icon toggle (`selection`, accent when on) with its tooltip, and "43%".
+
+Every label is `.fixedSize()` and probed (`preview view`, `preview view menu`, `safe area`, `preview fit`), so it shows whole or not at all.
+
+**New review state:**
+- Edit with the Claude panel open, in TikTok view, at 1280 × 800 and at 1000 × 700, in light and dark: `mac_editpreview_claude_<a|b>_<w>x<h>.png`.
+- Each writes `FITS` or `CUT edit preview bar …` to `fit-check.txt`, and Mac CI fails on any `CUT` line. A bar that wasn't drawn is also a `CUT`.
+
+Checks: `swiftc -parse` passes on both files. SwiftUI can't be built on Linux, so the Mac CI run is the real check.
