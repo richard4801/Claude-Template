@@ -19,7 +19,7 @@ Never fight the rig in the prompt. If the rig says Golden hour, don't write "ove
 |---|---|---|
 | **Shot** (video) | A new clip of a model | Full skeleton (§3) |
 | **Photo** | A still or a photoshoot set | SUBJECT, POSE, LOCATION, WARDROBE, CONSTRAINTS. No ACTION timeline, no move. |
-| **Swap / Edit (H3)** | Put a model into an existing clip; keep the motion | Who replaces whom, what to keep from the clip (motion, expressions, camera, setting, light, audio), and what to remove (captions, watermarks). Her figure always comes from her own images, never from the performer in the clip (see Figure lock). No camera words: the source clip has the camera. |
+| **Swap** | Put a model into an existing clip, or change its background; keep the motion | A SHORT prompt: only what changes (see §7a). MUSE's swap scripts already say what to keep (motion, timing, camera, framing, figure). Her figure always comes from her own images or her outfit's pictures (see Figure lock). No camera words: the source clip has the camera. |
 | **Storyboard** | Several connected shots | One §3 prompt per scene, sharing the Style Prefix and the @tags |
 | **Recreate fill** | A missing shot of a reference edit | The slot brief is the ACTION. Keep it to that shot's length and framing. |
 
@@ -253,6 +253,20 @@ Pick from these exactly. Anything else isn't in the composer, and the server ref
 - **For one shot or photo:** the prompt block plus a **RIG** table (row → choice, one-line reason), then the "Avoid" line.
 - **For a script:** define the @tags, number the scenes, decide how many ~15 s prompts each needs, and write each with the skeleton and its rig. Give it as copy-ready blocks, or, if the owner wants a shotlist, as one self-contained HTML page with a collapsible prefix, a checkbox per scene and a Copy button per prompt.
 - **When Claude drives the composer** (`suite_set_draft`): put the prompt text in `prompt` and set every rig row by its option id from `suite_options()`. Explain the choices in two or three lines. Then call `suite_request_shot` without confirm to show the price; with `confirm: true` it asks the owner in the app, and nothing runs until they approve.
+
+## 7a. Swap: short prompts (owner rule, 2026-11-12)
+
+In Swap the prompt is **only the change**. MUSE's own swap prompt (Settings → Prompts → Scripts, video.replicate / video.edit) already tells the model to keep the motion, timing, camera, framing and crop of the clip, and her figure. Don't repeat any of that, and never write a full §3 skeleton for Swap.
+- **Background** (Swap panel → Background):
+  - *Keep*: the room stays. Leave the prompt empty, or note a small direction ("she smiles more at the end").
+  - *Describe it*: write only the new place, plus at most a few words of light or mood. Example: "a rooftop at golden hour, city lights behind her". Auto runs Genjutsu Light (same moves, new scene).
+  - *New photo*: pick a location or upload a picture. The prompt can stay empty.
+  - If the person asks for a new place while Background is Keep, set background to describe with `suite_set_draft` (MUSE also warns about this).
+- **Outfit**: pick it in the Swap panel. Never describe the clothes in the prompt: the outfit's 7 pictures (body angles and face close-ups with its hair, make-up and accessories) are what the model gets.
+- **Character**: pick her in the Swap panel. Never describe her face or body; her images carry them.
+- **Length**: Genjutsu Light uses the first 15 s of the clip, and full Genjutsu up to 30 s. For a longer clip, trim it in Edit first.
+- **Price**: Higgsfield bills the clip's own seconds as well as the new video, so a 10 s swap at 720p is about 20 billed seconds. Always show `suite_request_shot` without confirm first.
+- Before writing, look: `suite_get_draft` shows onScreen settings (background, its picture, outfit, character), and `watch` the clip when you need to know what's in it.
 
 ## 8. Worked example: a seated editorial photo
 
