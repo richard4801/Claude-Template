@@ -250,8 +250,8 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'auto_captions', title: 'Auto-captions', scope: 'edit:write',
-    description: 'Transcribes the main video\'s speech into word-timed captions on the edit (replacing existing captions). Free when the video already has a transcript; otherwise it costs a little: without confirm you get the estimate; with confirm: true the owner is asked in the app.',
-    inputSchema: obj({ sessionId: SID, language: str('Two-letter language code, or "auto"', 4), confirm: bool('Ask the owner to approve the cost') }, ['sessionId']),
+    description: 'Transcribes speech or sung lyrics into word-timed captions on the edit (replacing existing captions): the main video by default, or any timeline item with itemId (a music track, a voice-over, another clip) for lyric captions that follow that item on the timeline. Free when that media already has a transcript; otherwise it costs a little: without confirm you get the estimate; with confirm: true the owner is asked in the app.',
+    inputSchema: obj({ sessionId: SID, itemId: str('A timeline item to transcribe (a music track for lyrics, a voice-over, a clip); default the main video'), language: str('Two-letter language code, or "auto"', 4), confirm: bool('Ask the owner to approve the cost') }, ['sessionId']),
     run: (env, a) => helper(env, a, { kind: 'captions', label: 'Auto-captions', options: a.language ? { language: a.language } : {} }),
   },
   {

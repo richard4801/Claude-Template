@@ -204,4 +204,17 @@ describe.skipIf(!hasFfmpeg)('Claude tools on an Edit upload (new edit, no take)'
     await tool('undo_edit').run(env(), { sessionId: sid });
     expect(M.durationSec((await get()).project)).toBeCloseTo(before, 1);
   }, 120_000);
+
+  it('auto_captions takes a music item (lyric captions on a song), not only the main video', async () => {
+    const s = (await owner.req('GET', `/v1/edit-sessions/${sid}`)).body;
+    const r = await owner.req('POST', `/v1/edit-sessions/${sid}/patch`, { baseRevision: s.revision, patch: [
+      { op: 'add', path: '/assets/-', value: { id: 'm1', kind: 'audio', upload: uploadId, durationSec: 23 } },
+      { op: 'add', path: '/tracks/-', value: { id: 'music', kind: 'music', items: [{ id: 'mu1', asset: 'm1', inSec: 0, outSec: 10, startSec: 2, volume: 1 }] } }] });
+    expect(r.body.error ?? null, JSON.stringify(r.body)).toBeNull();
+    const out = await tool('auto_captions').run(env(), { sessionId: sid, itemId: 'mu1' }) as any;
+    // Paid transcription: the estimate comes back for the song (no error about the main video).
+    expect(out.error ?? null).toBeNull();
+    expect(out.needsConfirmation === true || typeof out.state === 'string').toBe(true);
+    await expect(tool('auto_captions').run(env(), { sessionId: sid, itemId: 'nope' })).rejects.toThrow(/no item nope/);
+  }, 60_000);
 });
