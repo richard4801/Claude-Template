@@ -1,0 +1,551 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/ClaudeEditUi.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/ClaudeEditUi.kt
+index 3d26720e..6a9a1770 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/ClaudeEditUi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/ClaudeEditUi.kt
+@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.layout.size
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.runtime.Composable
++import kotlinx.coroutines.launch
++import androidx.compose.runtime.collectAsState
+ import androidx.compose.ui.draw.alpha
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+@@ -31,6 +33,7 @@ import studio.muse.app.ui.components.Ink
+ import studio.muse.app.ui.theme.muse
+ import studio.muse.app.ui.theme.scale
+ import studio.muse.app.ui.theme.roles
++import studio.muse.app.ui.theme.radii
+ import androidx.compose.runtime.setValue
+ import androidx.compose.runtime.getValue
+ import androidx.compose.ui.draw.drawBehind
+@@ -193,6 +196,7 @@ private fun ChatAndPlaybook(sessionId: String, title: String, modifier: Modifier
+     var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+     val store = studio.muse.app.ui.screens.claude.rememberClaudeChatStore("edit", sessionId)
+     Column(modifier) {
++        OtherEditApprovals(sessionId)
+         studio.muse.app.ui.screens.edit.learn.LearnSegmented(listOf("Chat", "Playbook"), tab, Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) { tab = it }
+         Box(Modifier.weight(1f).fillMaxWidth()) {
+             if (tab == 0) studio.muse.app.ui.screens.claude.ClaudeChat(store, title, Modifier.fillMaxSize())
+@@ -235,3 +239,89 @@ internal fun Scrim(onClose: () -> Unit) {
+     Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0x40141210)).press(onClick = onClose))
+ }
+ 
++
++/**
++ * Paid helpers Claude asked for on the owner's OTHER edits (owner issue ci_e546642a4026, 2026-11-12): listed at the top
++ * of this edit's Claude sheet, each naming its edit, and answered on that edit's own session without switching edits.
++ * This edit's own ask has its own sheet ("Claude asks"). Owner only, like the server's events.
++ */
++@Composable
++internal fun OtherEditApprovals(openSessionId: String) {
++    val m = muse
++    val c = studio.muse.app.ui.LocalContainer.current
++    val scope = androidx.compose.runtime.rememberCoroutineScope()
++    var list by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(studio.muse.core.edit.EditApprovalList()) }
++    var busy by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(emptySet<String>()) }
++    val studioState by c.repo.state.collectAsState()
++    suspend fun reload() { loadEditApprovals(c.repo.api)?.let { list = it } }
++    androidx.compose.runtime.LaunchedEffect(Unit) {
++        if (!c.repo.ownerNow()) return@LaunchedEffect
++        reload()
++        c.repo.live.collect { ev ->
++            if (ev.type != "edit" || ev.op != "pending") return@collect
++            val sid = ev.sessionId ?: return@collect
++            val p = ev.pending ?: return@collect
++            val known = list.items.any { it.sessionId == sid }
++            list = editApprovalEvent(list, ev) ?: return@collect
++            if (p.status == "waiting" && !known) reload()
++        }
++    }
++    val shown = list.except(openSessionId)
++    if (shown.isEmpty()) return
++    fun nameOf(a: studio.muse.core.edit.EditApproval) =
++        studio.muse.core.edit.EditApprovalList.editName(a.takeId, studioState.takes.firstOrNull { it.id == a.takeId }?.title)
++    fun answer(a: studio.muse.core.edit.EditApproval, approve: Boolean) {
++        if (a.id in busy) return
++        busy = busy + a.id
++        scope.launch {
++            val (gone, said) = answerEditApproval(c.repo.api, a, approve, nameOf(a))
++            if (gone) list = list.remove(a.id)
++            c.repo.toast(said)
++            busy = busy - a.id
++        }
++    }
++    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
++        shown.forEach { a ->
++            val name = nameOf(a)
++            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.container))
++                .padding(12.dp).semantics { contentDescription = "Claude asks to run ${a.label} in $name" },
++                verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                T("Claude needs your go-ahead", m.scale.label, m.roles.ink)
++                T("Run ${a.label} in “$name”", m.scale.caption, m.roles.ink2)
++                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    SuiteButton("Not now", { answer(a, false) }, Modifier.weight(1f), enabled = a.id !in busy)
++                    SuiteButton(a.allowLabel, { answer(a, true) }, Modifier.weight(1f), primary = true, enabled = a.id !in busy)
++                }
++            }
++        }
++    }
++}
++
++/** Every open edit's waiting paid helpers (GET /v1/edit-sessions); null when they couldn't load (keep what is shown). */
++internal suspend fun loadEditApprovals(api: studio.muse.app.data.MuseApi): studio.muse.core.edit.EditApprovalList? =
++    runCatching { api.recentEditSessions(50) }
++        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
++        .getOrNull()
++        ?.let { all -> studio.muse.core.edit.EditApprovalList.of(all.flatMap { d -> d.pending.map { p ->
++            studio.muse.core.edit.SessionPending(d.id, d.takeId, p.id, p.label, p.estimateUsd, p.createdAt, p.status) } }) }
++
++/** A live `edit` `pending` event applied to the list (null: not one). */
++internal fun editApprovalEvent(list: studio.muse.core.edit.EditApprovalList, ev: studio.muse.app.data.ApiEvent): studio.muse.core.edit.EditApprovalList? {
++    if (ev.type != "edit" || ev.op != "pending") return null
++    val sid = ev.sessionId ?: return null
++    val p = ev.pending ?: return null
++    return list.apply(studio.muse.core.edit.SessionPending(sid, "", p.id, p.label, p.estimateUsd, p.createdAt, p.status), takeIdKnown = false)
++}
++
++/** Allow / Not now on another edit's helper, on that edit's own session. → (off the list?, what to say). */
++internal suspend fun answerEditApproval(api: studio.muse.app.data.MuseApi, a: studio.muse.core.edit.EditApproval, approve: Boolean, editName: String): Pair<Boolean, String> =
++    try {
++        api.answerEditPending(a.sessionId, a.pendingId, approve)
++        true to (if (approve) "${a.label} started in “$editName”. Claude's change lands when it's done." else "Told Claude not now")
++    } catch (e: kotlinx.coroutines.CancellationException) {
++        throw e
++    } catch (e: studio.muse.app.data.ApiException) {
++        if (e.code == "not_found") true to "That was already answered" else false to "Couldn't answer Claude · try again"
++    } catch (e: Exception) {
++        false to "Couldn't answer Claude · try again"
++    }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+index 14749076..11fd10aa 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+@@ -111,6 +111,7 @@ import studio.muse.core.edit.locate
+ import studio.muse.core.edit.fromV1
+ import studio.muse.core.edit.problemOf
+ import studio.muse.core.edit.toSrt
++import studio.muse.core.edit.MediaSniff
+ import java.io.File
+ import kotlin.math.roundToInt
+ import kotlin.math.roundToLong
+@@ -316,7 +317,8 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
+     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); vm.controller.act(EditAction.ClearMessage) } }
+     LaunchedEffect(ui.panel) { if (ui.panel == Panel.FILTERS) vm.renderLookThumbs() }
+     androidx.lifecycle.compose.LifecycleResumeEffect(vm) { onPauseOrDispose { vm.pause() } }
+-    val audio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { vm.addAudio(it, voiceOver = false) } }
++    // Music: sound files and MP4s (a song can be an audio-only MP4, ci_f99f93616ece); the file's bytes decide, not its type.
++    val audio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.addAudio(it, voiceOver = false) } }
+     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+         if (ok) vm.startVoiceOver() else c.repo.toast("Record VO needs the microphone · allow it in the phone's settings")
+     }
+@@ -324,7 +326,10 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
+     // "Add a video from a link": WS7's import screen; when the link can't be fetched, the saved video is picked and imported there too.
+     var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+     var savedVideo by remember { mutableStateOf<Uri?>(null) }
+-    val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { savedVideo = uri; importing = true } }
++    // A saved video: one that is really sound (an audio-only MP4) goes in as music instead (ci_f99f93616ece).
++    val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
++        if (uri != null) vm.routePickedVideo(uri) { savedVideo = uri; importing = true }
++    }
+     // "Add a photo": the system photo picker (images only; no storage permission).
+     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.addPhoto(it) } }
+     // "Your font": the system file picker (fonts have no reliable MIME type, so any file; the view model checks it).
+@@ -334,7 +339,7 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
+         importing = false; savedVideo = null; vm.addImported(v)
+     }
+     val host = SuiteHost(
+-        pickAudio = { audio.launch("audio/*") },
++        pickAudio = { audio.launch(arrayOf("audio/*", "video/mp4")) },
+         // Record VO: records in the editor from the playhead (the phone's own recorder app isn't there on most phones).
+         recordVo = {
+             when {
+@@ -816,6 +821,43 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+         }
+     }
+ 
++    /**
++     * What a file really is (ci_f99f93616ece): its first bytes, and for an MP4 its tracks (MediaExtractor); never its name
++     * or the picker's MIME type. Null when MUSE can't use it.
++     */
++    private suspend fun sniff(f: File): MediaSniff.Verdict? = withContext(Dispatchers.IO) {
++        val head = runCatching { f.inputStream().use { s -> val b = ByteArray(MediaSniff.HEADER_BYTES); val n = s.read(b); if (n <= 0) ByteArray(0) else b.copyOf(n) } }
++            .getOrDefault(ByteArray(0))
++        val fmt = MediaSniff.format(head)
++        var hasVideo: Boolean? = null
++        var hasAudio: Boolean? = null
++        if (fmt is MediaSniff.Format.IsoMedia) runCatching {
++            val x = android.media.MediaExtractor()
++            try {
++                x.setDataSource(f.absolutePath)
++                val mimes = (0 until x.trackCount).mapNotNull { x.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME) }
++                hasVideo = mimes.any { it.startsWith("video/") }
++                hasAudio = mimes.any { it.startsWith("audio/") }
++            } finally { x.release() }
++        }
++        MediaSniff.verdict(fmt, "", hasVideo, hasAudio)
++    }
++
++    /** A saved video picked for Edit: a real video goes on to the import ([onVideo]); sound only goes in as music. */
++    fun routePickedVideo(uri: Uri, onVideo: () -> Unit) {
++        viewModelScope.launch {
++            val f = copyIn(uri, "picked_${System.currentTimeMillis()}") ?: return@launch c.repo.toast("Couldn't read that file")
++            val v = sniff(f)
++            withContext(Dispatchers.IO) { f.delete() }
++            when (v?.kind) {
++                MediaSniff.Kind.VIDEO -> onVideo()
++                MediaSniff.Kind.AUDIO -> addAudio(uri, voiceOver = false)
++                MediaSniff.Kind.PICTURE -> c.repo.toast("This file is a picture. Add it with Add a photo.")
++                null -> c.repo.toast(MediaSniff.UNREADABLE)
++            }
++        }
++    }
++
+     private suspend fun copyIn(uri: Uri, name: String): File? = withContext(Dispatchers.IO) {
+         runCatching {
+             val f = File(app.cacheDir, "edit-suite/$name").apply { parentFile?.mkdirs() }
+@@ -827,10 +869,17 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+     fun addAudio(uri: Uri, voiceOver: Boolean, atSec: Double? = null) {
+         viewModelScope.launch {
+             val f = copyIn(uri, "audio_${System.currentTimeMillis()}") ?: return@launch c.repo.toast("Couldn't read that file")
++            // What the file is, from its bytes (ci_f99f93616ece): raw AAC named .mp4 is a song and goes up as audio/aac.
++            val v = sniff(f) ?: return@launch c.repo.toast(MediaSniff.UNREADABLE)
++            when (v.kind) {
++                MediaSniff.Kind.VIDEO -> return@launch c.repo.toast("This file is a video. Add it as a video instead.")
++                MediaSniff.Kind.PICTURE -> return@launch c.repo.toast("This file is a picture. Add it with Add a photo.")
++                MediaSniff.Kind.AUDIO -> Unit
++            }
+             val dur = withContext(Dispatchers.IO) {
+                 runCatching { MediaMetadataRetriever().run { setDataSource(f.absolutePath); val d = extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDouble(); release(); d } }.getOrNull()
+-            }?.div(1000) ?: return@launch c.repo.toast("That isn't an audio file this phone can read")
+-            val mime = app.contentResolver.getType(uri) ?: "audio/mp4"
++            }?.div(1000)?.takeIf { it > 0 } ?: return@launch c.repo.toast(MediaSniff.UNREADABLE)
++            val mime = v.contentType
+             val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, mime) } }.getOrElse { null to "Couldn't upload · try again" }
+             if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
+             controller.act(EditAction.AddAudio(id, (dur * 1000).roundToInt() / 1000.0, voiceOver, atSec))
+diff --git a/android/app/src/test/kotlin/studio/muse/app/EditApprovalsTest.kt b/android/app/src/test/kotlin/studio/muse/app/EditApprovalsTest.kt
+new file mode 100644
+index 00000000..0c14cc4f
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/EditApprovalsTest.kt
+@@ -0,0 +1,66 @@
++package studio.muse.app
++
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.cancel
++import kotlinx.coroutines.runBlocking
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.annotation.Config
++import studio.muse.app.data.ApiEvent
++import studio.muse.app.data.FakeMuseApi
++import studio.muse.app.data.OpenEditSessionRequest
++import studio.muse.app.ui.screens.edit.answerEditApproval
++import studio.muse.app.ui.screens.edit.editApprovalEvent
++import studio.muse.app.ui.screens.edit.loadEditApprovals
++import studio.muse.core.edit.BLANK_SOURCE
++import studio.muse.core.edit.EditApprovalList
++
++/**
++ * Owner issue ci_e546642a4026 (2026-11-12) on Android, demo mode: a paid helper Claude asked for on ANOTHER edit session
++ * is listed in the open edit's Claude sheet, named after its edit, and Allow answers it on its own session.
++ */
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35])
++class EditApprovalsTest {
++    private fun <T> withFake(f: suspend (FakeMuseApi) -> T): T = runBlocking {
++        val work = CoroutineScope(Dispatchers.Default)
++        try { f(FakeMuseApi(work, null, speed = 0.0, genDelayMs = 0)) } finally { work.cancel() }
++    }
++
++    @Test fun anotherEditsHelperIsListedAndAllowedOnItsOwnSession() = withFake { fake ->
++        val open = fake.openEditSession(OpenEditSessionRequest(BLANK_SOURCE))
++        val other = fake.openEditSession(OpenEditSessionRequest(BLANK_SOURCE))
++        val p = fake.claudeAsk(other.id, "matte", "Remove background", 0.4)
++        val list = loadEditApprovals(fake)
++        assertNotNull(list)
++        val shown = list!!.except(open.id)
++        assertEquals(listOf(other.id), shown.map { it.sessionId })
++        val a = shown.single()
++        assertEquals("Allow · $0.40", a.allowLabel)
++        assertEquals("New project", EditApprovalList.editName(a.takeId, null))
++        val (gone, said) = answerEditApproval(fake, a, approve = true, editName = "New project")
++        assertTrue(gone)
++        assertEquals("Remove background started in “New project”. Claude's change lands when it's done.", said)
++        assertTrue("answered on its own session", fake.recentEditSessions(50).first { it.id == other.id }.pending.none { it.id == p.id && it.status == "waiting" })
++        assertTrue(loadEditApprovals(fake)!!.except(open.id).isEmpty())
++        // Answered again (another phone got there first): off the list, said plainly.
++        assertEquals(true to "That was already answered", answerEditApproval(fake, a, approve = false, editName = "New project"))
++    }
++
++    @Test fun liveEventsKeepTheListCurrent() = withFake { fake ->
++        val s = fake.openEditSession(OpenEditSessionRequest(BLANK_SOURCE))
++        val p = fake.claudeAsk(s.id, "captions", "Captions", 0.05)
++        val listed = editApprovalEvent(EditApprovalList(), ApiEvent("edit", sessionId = s.id, op = "pending", pending = p))
++        assertEquals(listOf("${s.id}/${p.id}"), listed?.items?.map { it.id })
++        val gone = editApprovalEvent(listed!!, ApiEvent("edit", sessionId = s.id, op = "pending", pending = p.copy(status = "running")))
++        assertTrue(gone!!.isEmpty())
++        assertNull(editApprovalEvent(listed, ApiEvent("edit", sessionId = s.id, op = "patch")))
++        assertNull(editApprovalEvent(listed, ApiEvent("jobs")))
++    }
++}
+diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/EditApprovals.kt b/android/core/src/main/kotlin/studio/muse/core/edit/EditApprovals.kt
+new file mode 100644
+index 00000000..55c910bc
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/edit/EditApprovals.kt
+@@ -0,0 +1,64 @@
++package studio.muse.core.edit
++
++import java.util.Locale
++
++// Paid helpers Claude asked for, across ALL of the owner's open edit sessions (owner issue ci_e546642a4026, 2026-11-12:
++// an Approve card for a helper on another edit never showed while a different edit was open). Edit's Claude sheet lists
++// the other edits' waiting helpers, each naming its edit, and answers them by session id
++// (POST /v1/edit-sessions/{id}/pending/{pid}) without switching edits. The Mac twin is MuseCore EditApprovals.swift.
++
++/** One paid helper waiting for the owner's yes, and the edit it belongs to. */
++data class EditApproval(
++    val sessionId: String,
++    val takeId: String,
++    val pendingId: String,
++    val label: String,
++    val estimateUsd: Double,
++    val createdAt: Long,
++) {
++    val id: String get() = "$sessionId/$pendingId"
++
++    /** "Allow · $0.40": the price on the action. */
++    val allowLabel: String get() = "Allow · $" + String.format(Locale.US, "%.2f", estimateUsd)
++}
++
++/** One session's paid helper as the API sends it (status: waiting | approved | declined | running | done | failed). */
++data class SessionPending(val sessionId: String, val takeId: String, val pendingId: String, val label: String,
++    val estimateUsd: Double, val createdAt: Long, val status: String) {
++    val waiting: Boolean get() = status == "waiting"
++}
++
++/** The waiting ones, oldest first (the order Claude asked). */
++data class EditApprovalList(val items: List<EditApproval> = emptyList()) {
++    val size: Int get() = items.size
++    fun isEmpty() = items.isEmpty()
++
++    /** Those of every edit except [sessionId] (the open edit asks with its own sheet). */
++    fun except(sessionId: String?): List<EditApproval> = items.filter { it.sessionId != sessionId }
++
++    /** A live `pending` event: waiting → listed (or updated), anything else → gone. [takeIdKnown] false: the event had no take, keep the one listed. */
++    fun apply(p: SessionPending, takeIdKnown: Boolean = true): EditApprovalList {
++        val key = "${p.sessionId}/${p.pendingId}"
++        val rest = items.filter { it.id != key }
++        if (!p.waiting) return copy(items = rest)
++        val take = if (takeIdKnown) p.takeId else items.firstOrNull { it.sessionId == p.sessionId }?.takeId ?: p.takeId
++        return copy(items = sorted(rest + EditApproval(p.sessionId, take, p.pendingId, p.label, p.estimateUsd, p.createdAt)))
++    }
++
++    fun remove(id: String): EditApprovalList = copy(items = items.filter { it.id != id })
++
++    companion object {
++        /** Everything waiting in these sessions (GET /v1/edit-sessions: open sessions with their pending helpers). */
++        fun of(all: List<SessionPending>): EditApprovalList =
++            EditApprovalList(sorted(all.filter { it.waiting }.map { EditApproval(it.sessionId, it.takeId, it.pendingId, it.label, it.estimateUsd, it.createdAt) }))
++
++        private fun sorted(l: List<EditApproval>) = l.sortedWith(compareBy<EditApproval>({ it.createdAt }, { it.id }))
++
++        /** The edit's name as the card says it: the take's title, "New project" for a blank one, "an edit" when unknown. */
++        fun editName(takeId: String, title: String?): String = when {
++            takeId == BLANK_SOURCE -> "New project"
++            !title.isNullOrBlank() -> title.trim()
++            else -> "an edit"
++        }
++    }
++}
+diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt b/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt
+new file mode 100644
+index 00000000..6aa02941
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt
+@@ -0,0 +1,84 @@
++package studio.muse.core.edit
++
++// What a file really is, from its first bytes, not its name or the picker's MIME type (owner issue ci_f99f93616ece,
++// 2026-11-12: a song that was raw ADTS AAC, sound only, named .mp4, was taken for a video). The Mac twin is MuseCore
++// MediaSniff.swift; keep them in step. An MP4 container needs its tracks to decide: the app reads them
++// (MediaExtractor) and passes hasVideo / hasAudio.
++
++object MediaSniff {
++    /** Enough of the file's start for every check here. */
++    const val HEADER_BYTES = 64
++
++    /** The one line when a file can't be used. */
++    const val UNREADABLE = "This file has no video or sound MUSE can read."
++
++    sealed interface Format {
++        data object Adts : Format
++        data object Mp3 : Format
++        data object Wav : Format
++        data object Aiff : Format
++        data object Flac : Format
++        /** ISO base media (MP4, M4A, MOV, HEIC): the `ftyp` brand decides pictures; tracks decide video vs sound. */
++        data class IsoMedia(val brand: String) : Format
++        data object Png : Format
++        data object Jpeg : Format
++        data object Webp : Format
++        data object Unknown : Format
++    }
++
++    enum class Kind { VIDEO, PICTURE, AUDIO }
++
++    /** What MUSE does with a file: its kind and the content type it is uploaded as. */
++    data class Verdict(val kind: Kind, val contentType: String, val ext: String)
++
++    fun format(data: ByteArray): Format {
++        val b = if (data.size > HEADER_BYTES) data.copyOf(HEADER_BYTES) else data
++        fun ascii(at: Int, n: Int): String? = if (b.size >= at + n) String(b, at, n, Charsets.ISO_8859_1) else null
++        fun u(i: Int) = b[i].toInt() and 0xFF
++        if (ascii(4, 4) == "ftyp") return Format.IsoMedia(ascii(8, 4) ?: "")
++        if (b.size >= 4 && u(0) == 0x89 && u(1) == 0x50 && u(2) == 0x4E && u(3) == 0x47) return Format.Png
++        if (b.size >= 3 && u(0) == 0xFF && u(1) == 0xD8 && u(2) == 0xFF) return Format.Jpeg
++        if (ascii(0, 4) == "RIFF" && ascii(8, 4) == "WAVE") return Format.Wav
++        if (ascii(0, 4) == "RIFF" && ascii(8, 4) == "WEBP") return Format.Webp
++        if (ascii(0, 4) == "FORM" && (ascii(8, 4) == "AIFF" || ascii(8, 4) == "AIFC")) return Format.Aiff
++        if (ascii(0, 4) == "fLaC") return Format.Flac
++        if (ascii(0, 3) == "ID3") return Format.Mp3
++        if (b.size >= 2 && u(0) == 0xFF) {
++            // ADTS (AAC): 12-bit sync 0xFFF, layer 00. MPEG audio (MP3): 11-bit sync, layer not 00.
++            if (u(1) and 0xF6 == 0xF0) return Format.Adts
++            if (u(1) and 0xE0 == 0xE0 && (u(1) shr 1) and 0x3 != 0) return Format.Mp3
++        }
++        return Format.Unknown
++    }
++
++    private val heicBrands = setOf("heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1")
++    private val audioBrands = setOf("M4A ", "M4B ", "M4P ")
++    private val videoExts = setOf("mp4", "mov", "m4v")
++
++    /** The verdict, from the format and (for an MP4 container) its tracks; the extension only when the bytes say nothing. */
++    fun verdict(f: Format, fileExtension: String = "", hasVideo: Boolean? = null, hasAudio: Boolean? = null): Verdict? = when (f) {
++        Format.Adts -> Verdict(Kind.AUDIO, "audio/aac", "aac")
++        Format.Mp3 -> Verdict(Kind.AUDIO, "audio/mpeg", "mp3")
++        Format.Wav -> Verdict(Kind.AUDIO, "audio/wav", "wav")
++        Format.Aiff -> Verdict(Kind.AUDIO, "audio/aiff", "aiff")
++        Format.Flac -> Verdict(Kind.AUDIO, "audio/flac", "flac")
++        Format.Png -> Verdict(Kind.PICTURE, "image/png", "png")
++        Format.Jpeg -> Verdict(Kind.PICTURE, "image/jpeg", "jpg")
++        Format.Webp -> Verdict(Kind.PICTURE, "image/webp", "webp")
++        is Format.IsoMedia -> {
++            val mov = f.brand == "qt  "
++            val video = Verdict(Kind.VIDEO, if (mov) "video/quicktime" else "video/mp4", if (mov) "mov" else "mp4")
++            when {
++                f.brand in heicBrands -> Verdict(Kind.PICTURE, "image/heic", "heic")
++                hasVideo == true -> video
++                hasAudio == true -> Verdict(Kind.AUDIO, "audio/mp4", "m4a")
++                hasVideo == false && hasAudio == false -> null
++                f.brand in audioBrands -> Verdict(Kind.AUDIO, "audio/mp4", "m4a") // tracks not read: the brand's word
++                else -> video
++            }
++        }
++        Format.Unknown -> fileExtension.lowercase().let { e ->
++            if (e in videoExts) Verdict(Kind.VIDEO, if (e == "mov") "video/quicktime" else "video/mp4", if (e == "mov") "mov" else "mp4") else null
++        }
++    }
++}
+diff --git a/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt b/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt
+new file mode 100644
+index 00000000..ba822216
+--- /dev/null
++++ b/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt
+@@ -0,0 +1,87 @@
++package studio.muse.core.edit
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++/** Owner issues of 2026-11-12 on Android: a song that is raw AAC named .mp4 (ci_f99f93616ece), and another edit's Approve card (ci_e546642a4026). */
++class EditAudioApprovalsTest {
++    private fun bytes(vararg b: Int, pad: Int = 64) = ByteArray(maxOf(pad, b.size)) { i -> if (i < b.size) b[i].toByte() else 0 }
++    private fun ascii(s: String) = s.toByteArray(Charsets.ISO_8859_1).map { it.toInt() and 0xFF }.toIntArray()
++    private fun iso(brand: String) = bytes(0, 0, 0, 0x20, *ascii("ftyp"), *ascii(brand))
++
++    @Test fun theFormatComesFromTheBytes() {
++        assertEquals(MediaSniff.Format.Adts, MediaSniff.format(bytes(0xFF, 0xF1, 0x50, 0x80)))
++        assertEquals(MediaSniff.Format.Adts, MediaSniff.format(bytes(0xFF, 0xF9, 0x50, 0x80)))
++        assertEquals(MediaSniff.Format.Mp3, MediaSniff.format(bytes(0xFF, 0xFB, 0x90, 0x64)))
++        assertEquals(MediaSniff.Format.Mp3, MediaSniff.format(bytes(*ascii("ID3"), 4, 0)))
++        assertEquals(MediaSniff.Format.Wav, MediaSniff.format(bytes(*ascii("RIFF"), 0, 0, 0, 0, *ascii("WAVE"))))
++        assertEquals(MediaSniff.Format.Webp, MediaSniff.format(bytes(*ascii("RIFF"), 0, 0, 0, 0, *ascii("WEBP"))))
++        assertEquals(MediaSniff.Format.Aiff, MediaSniff.format(bytes(*ascii("FORM"), 0, 0, 0, 0, *ascii("AIFF"))))
++        assertEquals(MediaSniff.Format.Flac, MediaSniff.format(bytes(*ascii("fLaC"))))
++        assertEquals(MediaSniff.Format.Png, MediaSniff.format(bytes(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A)))
++        assertEquals(MediaSniff.Format.Jpeg, MediaSniff.format(bytes(0xFF, 0xD8, 0xFF, 0xE0)))
++        assertEquals(MediaSniff.Format.IsoMedia("isom"), MediaSniff.format(iso("isom")))
++        assertEquals(MediaSniff.Format.Unknown, MediaSniff.format("just text".toByteArray()))
++        assertEquals(MediaSniff.Format.Unknown, MediaSniff.format(ByteArray(0)))
++    }
++
++    @Test fun rawAacNamedMp4IsASong() {
++        assertEquals(MediaSniff.Verdict(MediaSniff.Kind.AUDIO, "audio/aac", "aac"), MediaSniff.verdict(MediaSniff.format(bytes(0xFF, 0xF1, 0x50, 0x80)), "mp4"))
++    }
++
++    @Test fun anMp4IsDecidedByItsTracks() {
++        val f = MediaSniff.format(iso("isom"))
++        assertEquals(MediaSniff.Verdict(MediaSniff.Kind.AUDIO, "audio/mp4", "m4a"), MediaSniff.verdict(f, "mp4", hasVideo = false, hasAudio = true))
++        assertEquals(MediaSniff.Verdict(MediaSniff.Kind.VIDEO, "video/mp4", "mp4"), MediaSniff.verdict(f, "mp4", hasVideo = true, hasAudio = true))
++        assertEquals("video/quicktime", MediaSniff.verdict(MediaSniff.format(iso("qt  ")), "mov", hasVideo = true)?.contentType)
++        assertNull(MediaSniff.verdict(f, "mp4", hasVideo = false, hasAudio = false))
++        assertEquals(MediaSniff.Kind.AUDIO, MediaSniff.verdict(MediaSniff.format(iso("M4A ")), "mp4")?.kind)
++        assertEquals(MediaSniff.Kind.PICTURE, MediaSniff.verdict(MediaSniff.format(iso("heic")), "mp4")?.kind)
++    }
++
++    @Test fun anUnreadableFileSaysWhyInOnePlainLine() {
++        assertNull(MediaSniff.verdict(MediaSniff.Format.Unknown, "pdf"))
++        assertNull("an .mp3 with no MPEG audio inside", MediaSniff.verdict(MediaSniff.Format.Unknown, "mp3"))
++        assertEquals("This file has no video or sound MUSE can read.", MediaSniff.UNREADABLE)
++        assertFalse(MediaSniff.UNREADABLE.contains("·"))
++    }
++
++    @Test fun theSameAnswersAsTheMac() {
++        // MuseCore MediaSniff.swift's verdicts for the same inputs (keep the twins in step).
++        assertEquals("audio/mpeg", MediaSniff.verdict(MediaSniff.Format.Mp3)?.contentType)
++        assertEquals("audio/wav", MediaSniff.verdict(MediaSniff.Format.Wav)?.contentType)
++        assertEquals("image/jpeg", MediaSniff.verdict(MediaSniff.Format.Jpeg)?.contentType)
++    }
++
++    private fun sp(session: String, take: String, id: String, created: Long, status: String = "waiting", label: String = "Remove background", usd: Double = 0.4) =
++        SessionPending(session, take, id, label, usd, created, status)
++
++    @Test fun everyEditsWaitingHelpersOldestFirst() {
++        val list = EditApprovalList.of(listOf(sp("es_open", "tk_a", "pd_1", 20), sp("es_other", "tk_b", "pd_2", 10, label = "Captions", usd = 0.05),
++            sp("es_other", "tk_b", "pd_3", 5, status = "running")))
++        assertEquals(listOf("es_other/pd_2", "es_open/pd_1"), list.items.map { it.id })
++        assertEquals("the open edit asks with its own sheet", listOf("es_other/pd_2"), list.except("es_open").map { it.id })
++        assertEquals("Allow · $0.40", list.items.last().allowLabel)
++        assertEquals("Allow · $0.05", list.items.first().allowLabel)
++    }
++
++    @Test fun liveEventsAddUpdateAndRemove() {
++        var list = EditApprovalList()
++        list = list.apply(sp("es_2", "tk_2", "pd_9", 3))
++        assertEquals(listOf("es_2/pd_9"), list.items.map { it.id })
++        list = list.apply(sp("es_2", "", "pd_9", 3, status = "approved"), takeIdKnown = false)
++        assertTrue("answered elsewhere: gone", list.isEmpty())
++        list = list.apply(sp("es_2", "tk_2", "pd_9", 3)).apply(sp("es_2", "", "pd_10", 4), takeIdKnown = false)
++        assertEquals("tk_2", list.items.last().takeId)
++        assertEquals(1, list.remove("es_2/pd_9").size)
++    }
++
++    @Test fun theCardNamesItsEdit() {
++        assertEquals("Living room dance", EditApprovalList.editName("tk_1", " Living room dance "))
++        assertEquals("New project", EditApprovalList.editName(BLANK_SOURCE, null))
++        assertEquals("an edit", EditApprovalList.editName("tk_gone", null))
++    }
++}
