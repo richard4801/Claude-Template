@@ -9,6 +9,7 @@ import studio.muse.app.data.ApiException
 import studio.muse.app.data.SuiteAssist
 import studio.muse.app.data.SuitePending
 import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
+import studio.muse.app.ui.screens.suite.composer.ComposerTool
 
 /**
  * Claude in the AI Suite (owner-approved 2026-11-08; WS1 1eda187, plans/api.md "Claude in the AI Suite"). The owner
@@ -81,6 +82,17 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
         assistSynced = null // the composer as Claude left it goes back up with its screen
         // "Claude set Camera and Light", with Undo (the Rigs row's Undo; undoing goes back to Claude as the owner's edit).
         SuiteClaudeWords.claudeSet(SuiteClaudeWords.changed(before, composer.value))?.let { rigUndo.value = it to before }
+        // Swap / Recast's Background, set by Claude (suite_set_draft background): the panel takes it, as the model is taken.
+        val bg = (a.draft.json["background"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        if ((before.tool == ComposerTool.SWAP || before.tool == ComposerTool.RECAST) && bg in setOf("keep", "photo", "describe") && bg != recast.value.background) {
+            val r = recast.value.copy(background = bg!!)
+            recast.value = r
+            app.repo.toast(when {
+                bg == "photo" && r.backgroundImage == null -> "Claude set Background: New photo · pick the picture"
+                bg == "describe" && r.place.isBlank() -> "Claude set Background: Describe it · write the new place"
+                else -> "Claude set Background: ${SuiteClaudeWords.background(bg)}"
+            })
+        }
     }
     assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting) }
 }
@@ -130,6 +142,7 @@ object SuiteClaudeWords {
     const val SUBTITLE = "Fills in this composer"
     const val NOT_NOW = "Told Claude not now"
     fun toggle(open: Boolean) = if (open) "Hide Claude" else "Show Claude"
+    fun background(b: String) = when (b) { "photo" -> "New photo"; "describe" -> "Describe it"; else -> "Keep" }
 
     /** The chips: what each sends to Claude. */
     val suggestions = listOf(

@@ -432,6 +432,11 @@ class MuseRepository(
         return attempt { redoOutfit(id, key) }.also { r -> if (r == null) making(id, null) else refreshBalance() }
     }
 
+    /** Swap pictures between slots (free; "the picture in Side is actually the back"). The outfit event follows too. */
+    suspend fun reorderOutfit(id: String, moves: List<OutfitMove>) = attempt { reorderOutfit(id, moves) }?.also { r ->
+        _state.update { s -> s.copy(outfits = s.outfits.upsert(r.outfit) { it.id == r.outfit.id }) }
+    }
+
     suspend fun saveOutfit(id: String, name: String? = null) = attempt { saveOutfit(id, name) }?.also { o ->
         _state.update { s ->
             s.copy(
