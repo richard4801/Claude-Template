@@ -51,7 +51,13 @@ struct QueueView: View {
                         Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: Space.s3)
-                    RButton(f.isPhoto ? "Make again" : ScreenCopy.retryLabel(cost: f.cost, estimate: Pricing.totalCost(f.request.spec)), small: true) { store.retry(f) }
+                    if f.canRecover {
+                        // Already made and charged at the provider: Recover is free (owner only); Retry would pay again.
+                        if store.isOwner { RButton(ScreenCopy.recoverLabel, small: true) { store.recover(f) } }
+                        else { Text(ScreenCopy.recoverByOwner).scaled(t.scale.caption, t.roles.ink2) }
+                    } else {
+                        RButton(f.isPhoto ? "Make again" : ScreenCopy.retryLabel(cost: f.cost, estimate: Pricing.totalCost(f.request.spec)), small: true) { store.retry(f) }
+                    }
                     RButton("Dismiss", kind: .plain, small: true) { store.dismissFailure(f) }
                 }
                 .padding(.horizontal, Space.s4)

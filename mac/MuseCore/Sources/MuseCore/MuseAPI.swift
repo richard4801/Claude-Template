@@ -91,6 +91,9 @@ public protocol MuseAPI: AnyObject, Sendable {
     func removeJob(id: String) async throws
     /// POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own).
     func clearFailedJobs() async throws -> [String]
+    /// POST /v1/jobs/:id/recover (owner only, free): a job the provider made and charged for but the server couldn't save
+    /// (errorCode provider_paid_unsaved / provider_unconfirmed) is fetched again by its saved request id. Never a new run.
+    func recoverJob(id: String) async throws
     /// POST /v1/queue/run: starts the GPU on queued jobs ("Run queue"). Servers that start jobs on their own treat it as a no-op.
     func runQueue() async throws
     func listTakes() async throws -> [Take]

@@ -307,7 +307,17 @@ struct SuiteResultPane: View {
             VStack(spacing: 10) {
                 Text("That take didn't work").font(t.isA ? Fonts.font("Instrument Serif", 26, .regular) : t.display(20)).foregroundStyle(.white)
                 Text(message).font(t.body(12)).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                if let j = job {
+                if let j = job, j.canRecover {
+                    // Already made and charged at the provider: Recover is free (owner only); Retry would pay again.
+                    if store.isOwner {
+                        Button { store.recover(j) } label: {
+                            Text(ScreenCopy.recoverLabel).font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(ScreenCopy.recoverByOwner).font(t.body(11)).foregroundStyle(.white.opacity(0.8))
+                    }
+                } else if let j = job {
                     Button { store.retakeShot(j) } label: {
                         // Not free: the failed run was refunded and the retry is a new run (owner bug 2026-11-11).
                         Text(j.isPhoto ? "Make again" : j.cost > 0 ? ScreenCopy.retryLabel(cost: j.cost, estimate: 0) : "Retry").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)

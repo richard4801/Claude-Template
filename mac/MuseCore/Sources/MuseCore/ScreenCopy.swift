@@ -36,4 +36,9 @@ public enum ScreenCopy {
     public static func retryLabel(cost: Double, estimate: Double) -> String {
         "Retry · \(Pricing.money(cost > 0 ? cost : estimate))"
     }
+
+    /// A failed job the provider already made (and charged for): the owner's free Recover instead of a paid Retry.
+    public static let recoverLabel = "Recover"
+    /// What a member sees instead of Retry on such a job (Recover is owner-only on the server).
+    public static let recoverByOwner = "The studio owner can recover it for free"
 }
