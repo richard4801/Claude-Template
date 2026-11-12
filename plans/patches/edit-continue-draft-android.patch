@@ -1,0 +1,895 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+index a14058b3..6ca3060a 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+@@ -915,6 +915,7 @@ class FakeMuseApi(
+         val history: MutableList<Triple<EditHistoryEntry, List<EdPatchOp>, List<EdPatchOp>>> = mutableListOf(),
+         val pending: MutableList<EditPending> = mutableListOf(), val requests: MutableList<EditAppRequest> = mutableListOf(),
+         val online: MutableMap<String, EditPresence> = mutableMapOf(),
++        var view: kotlinx.serialization.json.JsonObject? = null, var updatedAt: Long = 0, var status: String = "open",
+     )
+     private val editSessions = mutableMapOf<String, FakeEditSession>()
+     private var editSessionSeq = 0
+@@ -930,8 +931,12 @@ class FakeMuseApi(
+         s.id, s.takeId, null, s.revision, s.project, durationSec = runCatching { edDurationSec(EdEditJson.parse(s.project)) }.getOrDefault(0.0),
+         pending = s.pending.filter { it.status == "waiting" || it.status == "running" }, online = s.online.values.toList(), requests = s.requests.takeLast(10),
+         history = s.history.asReversed().take(60).map { it.first },
++        view = s.view, lastTouchedAt = editTouched(s),
+     )
+ 
++    private fun editTouched(s: FakeEditSession): Long =
++        maxOf(s.updatedAt, ((s.view?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0).toLong())
++
+     private fun editRow(id: String) = editSessions[id] ?: throw ApiException("not_found", "Edit session not found")
+ 
+     private fun editCheck(p: kotlinx.serialization.json.JsonElement, takeId: String): kotlinx.serialization.json.JsonObject {
+@@ -947,7 +952,7 @@ class FakeMuseApi(
+         val inverse = EdJsonPatch.diff(next, s.project)
+         if (patch.isEmpty()) return null
+         val base = s.revision
+-        s.project = next; s.revision++
++        s.project = next; s.revision++; s.updatedAt = now()
+         val entry = EditHistoryEntry(++editEntrySeq, s.revision, author, author == "claude", kind, label.take(200), undoes, false, now())
+         s.history += Triple(entry, patch, inverse)
+         if (undoes != null) s.history.replaceAll { if (it.first.id == undoes) it.copy(first = it.first.copy(undone = true)) else it }
+@@ -967,7 +972,7 @@ class FakeMuseApi(
+                 listOf(EdTrack("main", EdTrackKind.MAIN, items = listOf(EdVideoClip("c1", "src", 0.0, t.durationSec ?: 8.0, 1.0,
+                     look = t.look?.lut?.takeIf { it.isNotBlank() }?.let { EdLook(lut = it, strength = 1.0) })))),
+             ))
+-        val s = FakeEditSession("es_${++editSessionSeq}", t.id, project)
++        val s = FakeEditSession("es_${++editSessionSeq}", t.id, project, updatedAt = now())
+         editSessions[s.id] = s
+         editView(s)
+     }
+@@ -998,6 +1003,18 @@ class FakeMuseApi(
+     override suspend fun editPresence(id: String, presence: EditPresence) { lock.withLock { editRow(id).online[presence.device] = presence } }
+     override suspend fun leaveEditSession(id: String, device: String) { lock.withLock { editSessions[id]?.online?.remove(device) } }
+ 
++    override suspend fun recentEditSessions(limit: Int): List<EditSessionDto> = lock.withLock {
++        editSessions.values.filter { it.status == "open" }.sortedByDescending { editTouched(it) }.take(limit.coerceIn(1, 50))
++            .map { editView(it).copy(history = emptyList()) }
++    }
++
++    /** Like the server: the place is kept as sent (clamped), stamped strictly after the last change. */
++    override suspend fun saveEditView(id: String, view: kotlinx.serialization.json.JsonObject) = lock.withLock {
++        val s = editRow(id)
++        val at = maxOf(now(), s.updatedAt + 1)
++        s.view = kotlinx.serialization.json.JsonObject(view + ("at" to kotlinx.serialization.json.JsonPrimitive(at)))
++    }
++
+     override suspend fun uploadEditFrame(png: ByteArray): String = lock.withLock { "up_frame_${++editorSeq}".also { editUploads[it] = png } }
+ 
+     override suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) {
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+index c845b95d..9fff35ef 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+@@ -169,6 +169,8 @@ interface MuseService {
+     @POST("v1/edit-sessions/{id}/undo") suspend fun undoEditEntry(@Path("id") id: String, @Body r: EditUndoRequest): EditChangeResult
+     @POST("v1/edit-sessions/{id}/presence") suspend fun editPresence(@Path("id") id: String, @Body r: EditPresence): JsonObject
+     @GET("v1/preview/layouts") suspend fun previewLayouts(): JsonObject
++    @GET("v1/edit-sessions") suspend fun recentEditSessions(@retrofit2.http.Query("recent") recent: Int, @retrofit2.http.Query("limit") limit: Int): List<EditSessionDto>
++    @POST("v1/edit-sessions/{id}/view") suspend fun saveEditView(@Path("id") id: String, @Body r: EditViewRequest): JsonObject
+     @DELETE("v1/edit-sessions/{id}/presence/{device}") suspend fun leaveEditSession(@Path("id") id: String, @Path("device") device: String): retrofit2.Response<Unit>
+     @POST("v1/edit-sessions/{id}/frames/{rid}") suspend fun answerEditFrame(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditFrameAnswer): JsonObject
+     @POST("v1/edit-sessions/{id}/requests/{rid}") suspend fun answerEditRequest(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditRequestAnswer): JsonObject
+@@ -676,6 +678,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
+     override suspend fun editPresence(id: String, presence: EditPresence) { call { editPresence(id, presence) } }
+     override suspend fun previewLayouts(): JsonObject? = runCatching { call { previewLayouts() } }.getOrNull()
+     override suspend fun leaveEditSession(id: String, device: String) { call { leaveEditSession(id, device) } }
++    override suspend fun recentEditSessions(limit: Int) = call { recentEditSessions(1, limit.coerceIn(1, 50)) }
++    override suspend fun saveEditView(id: String, view: JsonObject) { call { saveEditView(id, EditViewRequest(view)) } }
+     /** Always the image presign + PUT (the server checks the upload is an image of the studio; no confirm step). */
+     override suspend fun uploadEditFrame(png: ByteArray): String = putPresigned("image", "image/png", png) {}
+     override suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) { call { answerEditFrame(id, requestId, EditFrameAnswer(uploadId)) } }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index fc143c24..8f44c3bf 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -1362,8 +1362,16 @@ data class EditSessionDto(
+     val durationSec: Double = 0.0, val status: String = "open", val updatedBy: String = "", val updatedAt: Long = 0,
+     val pending: List<EditPending> = emptyList(), val online: List<EditPresence> = emptyList(), val requests: List<EditAppRequest> = emptyList(),
+     val history: List<EditHistoryEntry> = emptyList(),
++    /** Continue a draft: where an editor was last left on this session (server 0035; Mac and Android share it). Absent on older servers. */
++    val view: JsonObject? = null,
++    /** GET /v1/edit-sessions?recent=1: the later of the last change and `view.at` (ms). */
++    val lastTouchedAt: Long? = null,
+ )
+ 
++/** POST /v1/edit-sessions/{id}/view */
++@Serializable
++data class EditViewRequest(val view: JsonObject)
++
+ @Serializable
+ data class OpenEditSessionRequest(val takeId: String, val project: JsonObject? = null, val baseVersionId: String? = null, val device: String? = null, val fresh: Boolean? = null)
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+index 86cb83e2..ed0266a6 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+@@ -224,6 +224,10 @@ interface MuseApi {
+     /** GET /v1/preview/layouts: Edit's platform views' safe zones (null: the defaults, e.g. offline or a demo). */
+     suspend fun previewLayouts(): kotlinx.serialization.json.JsonObject? = null
+     suspend fun leaveEditSession(id: String, device: String) {}
++    /** Continue a draft: open sessions, the last worked on first (GET /v1/edit-sessions?recent=1). Default: none (members, older servers). */
++    suspend fun recentEditSessions(limit: Int = 20): List<EditSessionDto> = emptyList()
++    /** Continue a draft: where the editor was left (POST …/{id}/view; no revision, no history). Default: not kept. */
++    suspend fun saveEditView(id: String, view: kotlinx.serialization.json.JsonObject) {}
+     /** A PNG of a frame Claude asked for, uploaded with the image presign (`POST /v1/uploads/presign {kind:"image"}` + PUT): the upload id. */
+     suspend fun uploadEditFrame(png: ByteArray): String = throw ApiException("unsupported", "Uploading frames needs the studio server")
+     suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) {}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditResume.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditResume.kt
+new file mode 100644
+index 00000000..219e4465
+--- /dev/null
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditResume.kt
+@@ -0,0 +1,56 @@
++package studio.muse.app.ui.screens.edit
++
++import studio.muse.app.AppContainer
++import studio.muse.core.edit.EditPlace
++import studio.muse.core.edit.EditRecent
++import studio.muse.core.edit.EditRecentEntry
++import studio.muse.core.edit.EditRecentItem
++import studio.muse.core.edit.PreviewView
++import studio.muse.core.edit.RecentSession
++import java.io.File
++
++/*
++ * Continue a draft (owner, 2026-11-12; plans/edit-continue-draft.md): "When you click on Edit, you should see the last draft
++ * you were editing." The owner's recent edits come from the server (they match the Mac), a member's from this phone (their
++ * editor is local). The rules are core's [EditRecent].
++ */
++
++/** This phone's recent edits (a member's projects; the owner's own record of where each session was left). */
++class EditRecentFile(private val file: File) {
++    @Synchronized fun load(): List<EditRecentEntry> = EditRecent.decode(runCatching { file.readText() }.getOrNull())
++    @Synchronized fun save(e: EditRecentEntry) {
++        val next = EditRecent.saved(load(), e)
++        runCatching { file.parentFile?.mkdirs(); val tmp = File(file.path + ".tmp"); tmp.writeText(EditRecent.encode(next)); tmp.renameTo(file) }
++    }
++    companion object { fun of(dir: File) = EditRecentFile(File(dir, "edit-recent.json")) }
++}
++
++/** Recent edits, the last worked on first (owner: the server's sessions joined with this phone's record; member: this phone's). */
++suspend fun recentEdits(c: AppContainer, dir: File): List<EditRecentItem> {
++    val owner = c.repo.demo || c.prefs.value.owner
++    val sessions = if (!owner) emptyList() else runCatching { c.repo.api.recentEditSessions(20) }.getOrDefault(emptyList()).map {
++        RecentSession(it.id, it.takeId, it.status, it.updatedAt, it.lastTouchedAt, EditPlace.of(it.view))
++    }
++    val takes = c.repo.state.value.takes
++    return EditRecent.items(sessions, EditRecentFile.of(dir).load()) { id -> takes.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } }
++}
++
++/** Where the editor is now, on top of [base] (fields this app doesn't show, such as the Mac's media bin tab, are kept). */
++fun placeOf(u: EditSuiteUi, base: EditPlace?): EditPlace = (base ?: EditPlace()).copy(
++    playhead = (u.playheadSec * 1000).let { kotlin.math.round(it) / 1000 },
++    zoom = u.pxPerSec.toDouble(),
++    tab = u.panel?.takeIf { it != Panel.EXPORT && it != Panel.HISTORY }?.name?.lowercase(),
++    selection = u.selectedId,
++    safeArea = if (u.preview.view == PreviewView.CLEAN) "off" else u.preview.view.id,
++    title = u.title.ifBlank { null },
++    at = null,
++)
++
++/** Puts the editor back where [p] says (anything the edit no longer has is skipped, so a saved place never breaks opening). */
++fun EditSuiteController.restorePlace(p: EditPlace) {
++    p.zoom?.let { act(EditAction.Zoom(it.toFloat())) }
++    p.selection?.let { id -> if (project?.tracks?.any { t -> t.items.any { it.id == id } } == true) act(EditAction.Select(id)) }
++    p.view?.let { v -> act(EditAction.PreviewOf(ui.value.preview.copy(view = v))) }
++    p.playhead?.let { act(EditAction.Seek(it)) }
++    p.tab?.let { t -> Panel.entries.firstOrNull { it.name.equals(t, ignoreCase = true) && it != Panel.EXPORT && it != Panel.HISTORY }?.let { act(EditAction.Open(it)) } }
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+index 0b41630d..b9b8700e 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+@@ -119,8 +119,13 @@ import kotlin.math.roundToLong
+  * the app shell's (workstream 1).
+  */
+ @Composable
+-fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
++fun EditSuiteScreen(takeId: String?, onBack: () -> Unit, resumeLast: Boolean = true) {
+     var open by rememberSaveable(takeId) { mutableStateOf(takeId) }
++    // Continue a draft (owner, 2026-11-12): Edit opens the last edit where it was left; the home lists Recent edits.
++    val filesDir = LocalContext.current.filesDir
++    var resume by remember { mutableStateOf<studio.muse.core.edit.EditRecentItem?>(null) }
++    var recent by remember { mutableStateOf<List<studio.muse.core.edit.EditRecentItem>>(emptyList()) }
++    var findingLast by remember(takeId) { mutableStateOf(takeId == null && resumeLast) }
+     var recreating by rememberSaveable { mutableStateOf(false) } // "Recreate an edit" (plans/recreate-edit.md)
+     var reference by rememberSaveable { mutableStateOf<String?>(null) } // a library reference opened in the Recipe view
+     var learn by rememberSaveable { mutableStateOf<String?>(null) } // "playbook" | "recipes" (plans/learning-editor-ui.md), owner only
+@@ -129,18 +134,30 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
+     val sharedNow by c.shared.collectAsState()
+     var shared by remember { mutableStateOf<studio.muse.app.data.SharedReference?>(null) }
+     LaunchedEffect(sharedNow) { sharedNow?.let { shared = it; c.shared.value = null; open = null; learn = null; reference = null; recreating = true } }
++    LaunchedEffect(takeId) {
++        recent = recentEdits(c, filesDir)
++        if (findingLast && open == null && !recreating && learn == null) recent.firstOrNull()?.let { resume = it; open = it.takeId }
++        findingLast = false
++    }
++    // Back on the home: Recent edits show where the edit now stands.
++    LaunchedEffect(open) { if (open == null && !findingLast) recent = recentEdits(c, filesDir) }
++    val openTake: (String) -> Unit = { t -> resume = recent.firstOrNull { it.takeId == t }; open = t }
+     val id = open
+-    if (recreating) androidx.compose.runtime.key(shared) {
++    if (findingLast) Box(Modifier.fillMaxSize().background(muse.t.bg), contentAlignment = Alignment.Center) {
++        T("Opening your last edit…", muse.type.body, muse.t.muted)
++    }
++    else if (recreating) androidx.compose.runtime.key(shared) {
+         RecipeScreen(onBack = { recreating = false; reference = null; shared = null }, referenceId = reference, shared = shared,
+             onOpenTake = { recreating = false; reference = null; shared = null; open = it })
+     }
+     else if (id == null && learn == "playbook") studio.muse.app.ui.screens.edit.learn.PlaybookScreen(onBack = { learn = null }, onOpenTake = { open = it })
+     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
+         onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
+-    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }) { open = it }
++    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }, recent = recent,
++        onResume = { r -> resume = r; open = r.takeId }, onOpen = openTake)
+     // "Open playbook" in the editor's Claude sheet leaves the editor for the Playbook.
+     else androidx.compose.runtime.CompositionLocalProvider(LocalOpenPlaybook provides { open = null; learn = "playbook" }) {
+-        EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
++        EditSuiteEditor(id, resume?.takeIf { it.takeId == id }, onBack = { if (takeId == null) { open = null; resume = null } else onBack() })
+     }
+ }
+ 
+@@ -151,17 +168,22 @@ fun editableTakes(takes: List<Take>): List<TakeChoice> = takes.filter { it.kind
+ }
+ 
+ @Composable
+-fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onLearn: (String) -> Unit = {}, onOpen: (String) -> Unit) {
++fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onLearn: (String) -> Unit = {}, recent: List<studio.muse.core.edit.EditRecentItem> = emptyList(),
++             onResume: (studio.muse.core.edit.EditRecentItem) -> Unit = {}, onOpen: (String) -> Unit) {
+     val c = LocalContainer.current
+     val state by c.repo.state.collectAsState()
+     val prefs by c.prefs.collectAsState()
+     val owner = c.repo.demo || prefs.owner // the learning editor is the owner's (the server answers members 403)
+     // "Recreate an edit": WS1's /v1/recreate/references (demo mode: FakeMuseApi's).
+-    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate, onLearn = onLearn.takeIf { owner })
++    val rows = recent.take(studio.muse.core.edit.EditRecent.SHOWN).map { r ->
++        RecentRow(r, state.takes.firstOrNull { it.id == r.takeId }?.thumb, studio.muse.core.edit.EditRecent.lastEditedText(r.lastEditedAt, System.currentTimeMillis()))
++    }
++    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate, onLearn = onLearn.takeIf { owner }, recent = rows, onResume = onResume)
+ }
+ 
+ @Composable
+-fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null, onLearn: ((String) -> Unit)? = null) {
++fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null, onLearn: ((String) -> Unit)? = null,
++                    recent: List<RecentRow> = emptyList(), onResume: (studio.muse.core.edit.EditRecentItem) -> Unit = {}) {
+     val m = muse
+     ScreenBox(statusPad = true) {
+         Column(Modifier.fillMaxSize()) {
+@@ -190,6 +212,8 @@ fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String
+                         studio.muse.app.ui.screens.edit.learn.LearnQuiet("Recipes", "stack") { onLearn("recipes") }
+                     }
+                 }
++                // Continue a draft: the edits last worked on, each opening where it was left.
++                if (recent.isNotEmpty()) { item { SuiteLabel("Recent edits", color = m.t.muted) }; recent.forEach { r -> item("recent-${r.item.id}") { RecentEditRow(r, onResume) } } }
+                 val edited = takes.filter { it.edited }; val renders = takes.filter { !it.edited }
+                 if (takes.isEmpty()) item { T("No videos yet · make one in the Video suite", m.type.body, m.t.muted) }
+                 if (edited.isNotEmpty()) { item { SuiteLabel("Edited versions", color = m.t.muted) }; edited.forEach { t -> item(t.id) { HomeRow(t, onOpen) } } }
+@@ -199,6 +223,28 @@ fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String
+     }
+ }
+ 
++/** A row of Recent edits: its picture (none when the take is gone), its name and when it was last worked on. */
++data class RecentRow(val item: studio.muse.core.edit.EditRecentItem, val thumb: studio.muse.app.data.ImageRef?, val whenText: String)
++
++@Composable
++private fun RecentEditRow(r: RecentRow, onResume: (studio.muse.core.edit.EditRecentItem) -> Unit) {
++    val m = muse
++    Row(
++        Modifier.fillMaxWidth().clip(RoundedCornerShape(m.t.r)).background(m.t.surface).press { onResume(r.item) }.padding(10.dp)
++            .semantics(mergeDescendants = true) { contentDescription = "Continue ${r.item.title}, edited ${r.whenText}" },
++        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
++    ) {
++        Box(Modifier.size(44.dp, 62.dp).clip(RoundedCornerShape(2.dp)).background(m.t.surface2), contentAlignment = Alignment.Center) {
++            if (r.thumb != null) RefImage(r.thumb, Modifier.fillMaxSize()) else EIc("film-strip", 18.dp, m.t.muted)
++        }
++        Column(Modifier.weight(1f)) {
++            T(r.item.title, m.type.body.copy(fontSize = 14.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
++            T(r.whenText, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
++        }
++        EIc("chev-r", 16.dp, m.t.muted)
++    }
++}
++
+ @Composable
+ private fun HomeRow(t: TakeChoice, onOpen: (String) -> Unit) {
+     val m = muse
+@@ -219,10 +265,10 @@ private fun HomeRow(t: TakeChoice, onOpen: (String) -> Unit) {
+ // ======================================================================= editor
+ @androidx.annotation.OptIn(UnstableApi::class)
+ @Composable
+-private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
++private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRecentItem?, onBack: () -> Unit) {
+     val c = LocalContainer.current
+     val context = LocalContext.current
+-    val vm: EditSuiteViewModel = viewModel(key = "edit-suite-$takeId") { EditSuiteViewModel(c, takeId, context) }
++    val vm: EditSuiteViewModel = viewModel(key = "edit-suite-$takeId") { EditSuiteViewModel(c, takeId, context, resume) }
+     val ui by vm.controller.ui.collectAsState()
+     val soundPlaying by vm.soundPlaying.collectAsState()
+     val frames by vm.frames.collectAsState()
+@@ -392,7 +438,9 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
+  */
+ @androidx.annotation.OptIn(UnstableApi::class)
+ @OptIn(FlowPreview::class)
+-class EditSuiteViewModel(private val c: AppContainer, private val takeId: String, context: Context) : ViewModel() {
++class EditSuiteViewModel(private val c: AppContainer, private val takeId: String, context: Context,
++                         /** Continue a draft: the recent edit this opens, as it was left (null: opened from a take as usual). */
++                         private val resume: studio.muse.core.edit.EditRecentItem? = null) : ViewModel() {
+     private val app = context.applicationContext
+     private val looks = LookLibrary(app)
+     val controller = EditSuiteController(viewModelScope, RepoEditBackend(c, onAsset = { id, url -> fetchAsset(id, url) }), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
+@@ -418,6 +466,14 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+ 
+     /** Edit's preview choice per project (plans/edit-platform-preview.md), on this device. */
+     private val previewStore = app.getSharedPreferences("edit-preview", Context.MODE_PRIVATE)
++    /** Continue a draft: this phone's recent edits, whether the place is being saved yet, and the last place sent to the session. */
++    private val recentFile = EditRecentFile.of(app.filesDir)
++    private var placeTracking = false
++    private var lastSentPlace: studio.muse.core.edit.EditPlace? = null
++    /** A member's (or an unshared) edit kept on this phone: what the editor reopens instead of the take's saved edit. */
++    private val localResume: EditProject? get() = resume?.takeIf { it.sessionId == null }?.let { r ->
++        recentFile.load().firstOrNull { "local:${it.key}" == r.id }?.project?.let { runCatching { EditJson.parse(it) }.getOrNull() }
++    }
+     private var previewKey: String? = null
+     private fun previewPrefs() = studio.muse.core.edit.EditPreviewPrefs.decode(previewStore.getString("prefs", null))
+ 
+@@ -427,6 +483,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+         }
+         load()
+         loadKits()
++        // Continue a draft: where the editor stands (and a member's edit) is saved shortly after it changes.
++        viewModelScope.launch {
++            controller.ui.map { u -> if (u.phase is SuitePhase.Ready) placeOf(u, resume?.place) to u.project else null }.distinctUntilChanged().debounce(800)
++                .collect { if (it != null) savePlace() }
++        }
+         viewModelScope.launch {
+             controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
+                 if (p == null) return@collect
+@@ -474,7 +535,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+         work = viewModelScope.launch {
+             controller.setPhase(SuitePhase.Loading())
+             val takes = c.repo.state.value.takes
+-            val take = takes.firstOrNull { it.id == takeId } ?: return@launch controller.setPhase(SuitePhase.Failed("This video isn't in your studio any more", canRetry = false))
++            val take = takes.firstOrNull { it.id == takeId } ?: run {
++                // Continue a draft: an edit whose take was deleted still opens (its clips read "Missing").
++                if (resume != null && loadWithoutTake(resume)) return@launch
++                return@launch controller.setPhase(SuitePhase.Failed("This video isn't in your studio any more", canRetry = false))
++            }
+             val target = editTargetFor(take, takes)
+             val source = target?.source ?: take
+             controller.update { u ->
+@@ -490,7 +555,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+                     val f = engine.fetchSource(url) { p -> controller.setPhase(SuitePhase.Loading(p)) }
+                     sourceFile = f; sourceInfo = engine.probe(f)
+                 }
+-                val project = projectFor(source, target?.initial)
++                val project = localResume?.takeIf { it.sourceTakeId == source.id } ?: projectFor(source, target?.initial)
+                 for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
+                 controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
+                 // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
+@@ -501,6 +566,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+                 loadFrames(project)
+                 fetchTakeAssets(controller.project ?: project)
+                 fetchFonts(controller.project ?: project)
++                startPlace()
+                 loadContent()
+                 loadWaves(controller.project ?: project)
+             } catch (e: kotlinx.coroutines.CancellationException) { throw e
+@@ -566,6 +632,51 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+             } ?: continue
+             runCatching { engine.fetchSource(url) {} }.getOrNull()?.let { files[a.id] = it }
+         }
++        // Continue a draft: what still has no file is marked "Missing" (the edit opens anyway).
++        val gone = studio.muse.core.edit.EditRecent.missingAssets(p, files.keys)
++        if (gone != controller.ui.value.missing) controller.update { it.copy(missing = gone) }
++    }
++
++    /**
++     * Continue a draft, the take deleted: the edit as it was left (the session's, or the one kept on this phone) opens
++     * without its source. False when there is nothing to open.
++     */
++    private suspend fun loadWithoutTake(r: studio.muse.core.edit.EditRecentItem): Boolean {
++        // This phone's copy first (changes made here since the take went), else the session's.
++        val json = recentFile.load().firstOrNull { it.key == r.takeId && it.project != null }?.project
++            ?: r.sessionId?.let { sid -> runCatching { c.repo.api.editSession(sid).project }.getOrNull() }
++        val project = json?.let { runCatching { EditJson.parse(it) }.getOrNull() } ?: return false
++        controller.load(project, r.title, project.sourceTakeId, null, reopened = true)
++        fetchTakeAssets(project)
++        fetchFonts(project)
++        startPlace()
++        return true
++    }
++
++    /** Continue a draft: back where the edit was left, then where the editor stands is saved as it changes. */
++    private fun startPlace() {
++        resume?.place?.let { controller.restorePlace(it) }
++        placeTracking = true
++        savePlace()
++    }
++
++    /** Saves where the editor stands: on this phone (with a member's project) and, for the owner, on the session. */
++    private fun savePlace() {
++        if (!placeTracking) return
++        val u = controller.ui.value
++        val project = u.project ?: return
++        val place = placeOf(u, resume?.place)
++        // The owner's live session (or, its take deleted, the session it was opened from); a member's edit has none.
++        val live = sync
++        val sid = live?.sessionId ?: resume?.sessionId?.takeIf { live == null }
++        if (live != null && sid == null) return // the owner's session is still connecting: saved once it's there
++        // Kept here when no session shares it: a member's edit, or one whose take was deleted (it can't be shared any more).
++        recentFile.save(studio.muse.core.edit.EditRecentEntry(takeId, sid, if (live == null) EditJson.encode(project) else null, place,
++            u.title, System.currentTimeMillis()))
++        if (sid != null && lastSentPlace?.samePlace(place) != true) {
++            lastSentPlace = place
++            c.scope.launch { runCatching { c.repo.api.saveEditView(sid, place.toJson()) } }
++        }
+     }
+ 
+     private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
+@@ -1146,6 +1257,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+     }
+ 
+     override fun onCleared() {
++        savePlace()
++        placeTracking = false
+         recorder?.let { runCatching { it.stop() }; it.release() }; recorder = null
+         work?.cancel(); exporting?.cancel()
+         sync?.stop(c.scope); sync = null
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
+index 966becd4..9c532e14 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
+@@ -161,6 +161,8 @@ data class EditSuiteUi(
+     val previewLayouts: studio.muse.core.edit.PreviewLayouts = studio.muse.core.edit.PreviewLayouts.DEFAULTS,
+     /** Timeline zoom: dp per second (pinch). */
+     val pxPerSec: Float = 34f,
++    /** Continue a draft: assets whose file isn't on the phone and couldn't be fetched (a deleted take, a lost upload); their clips read "Missing". */
++    val missing: Set<String> = emptySet(),
+     val phase: SuitePhase = SuitePhase.Loading(),
+     val ai: Map<String, AiTask> = emptyMap(),
+     /** Sheet tabs. */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteTimeline.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteTimeline.kt
+index 77774d21..b9088c35 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteTimeline.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuiteTimeline.kt
+@@ -391,6 +391,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
+                             val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
+                             if (r < 0 || l > w) return@forEachIndexed
+                             clipTile(c, l, r, top, h, frames[c.asset].orEmpty(), p.asset(c.asset)?.durationSec ?: 1.0, ppsPx, m.t.surface2)
++                            if (c.asset in ui.missing) missingMark(measurer, l, r, top, m.t.body)
+                             // Helper steps on the clip's video, in order ("Steadied, reversed"), then its speed.
+                             val steps = studio.muse.core.edit.derivedLabel(p, c.asset)
+                             if (c.speedCurve != null || c.speed != 1.0 || c.holdSec != null || steps.isNotEmpty()) {
+@@ -426,6 +427,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
+                             fadeRamps(c, l, r, top, h, ppsPx, wave)
+                             val label = when (t.kind) { TrackKind.MUSIC -> "Music"; TrackKind.SFX -> "Sound effect"; else -> if (t.name == SuiteOps.CLIP_SOUND_TRACK) "Detached sound" else "Voice-over" } + if (muted) " · muted" else ""
+                             laneLabel(measurer, label, l, r, top, h, m.t.ink, m.t.body, if (muted) m.t.surface2 else bg)
++                            if (c.asset in ui.missing) missingMark(measurer, l, r, top, m.t.body)
+                             if (ui.selectedId == it.id) drawRoundRect(m.t.accent, Offset(l, top), Size(r - l, h), CornerRadius(4 * dp), style = Stroke(2 * dp))
+                             if (t.kind == TrackKind.MUSIC) for (b in beats) { val x = xOf(b); if (x in l..r) drawRect(m.t.accent, Offset(x, top), Size(2 * dp, 5 * dp)) }
+                         }
+@@ -668,6 +670,16 @@ private fun DrawScope.clipTile(c: VideoClip, l: Float, r: Float, top: Float, h:
+     }
+ }
+ 
++/** Continue a draft: this clip's file is gone (a deleted take, a lost upload); the edit still opens. */
++private fun DrawScope.missingMark(measurer: TextMeasurer, l: Float, r: Float, top: Float, font: androidx.compose.ui.text.font.FontFamily) {
++    clipRect(max(l, 0f), top, min(r, size.width), size.height) {
++        val tl = measurer.measure("Missing", TextStyle(fontFamily = font, fontSize = 11.sp, color = Color.White), maxLines = 1, softWrap = false)
++        val x = max(l, 0f) + 4 * density; val y = top + 4 * density
++        drawRoundRect(Color.Black.copy(alpha = .6f), Offset(x, y), Size(tl.size.width + 8 * density, tl.size.height.toFloat()), CornerRadius(3 * density))
++        drawText(tl, topLeft = Offset(x + 4 * density, y))
++    }
++}
++
+ /** A labelled chip clipped to its span. */
+ private fun DrawScope.chip(
+     measurer: TextMeasurer, text: String, l: Float, r: Float, top: Float, h: Float, bg: Color, border: Color, ink: Color, font: androidx.compose.ui.text.font.FontFamily,
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditResumeTest.kt b/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditResumeTest.kt
+new file mode 100644
+index 00000000..10000d50
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditResumeTest.kt
+@@ -0,0 +1,106 @@
++package studio.muse.app.ui.screens.edit
++
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.test.runTest
++import kotlinx.serialization.json.JsonObject
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Rule
++import org.junit.Test
++import org.junit.rules.TemporaryFolder
++import studio.muse.app.data.EditorJob
++import studio.muse.app.data.EditorSourceDto
++import studio.muse.app.data.FakeMuseApi
++import studio.muse.app.data.OpenEditSessionRequest
++import studio.muse.core.edit.EditJson
++import studio.muse.core.edit.EditPlace
++import studio.muse.core.edit.EditRecent
++import studio.muse.core.edit.EditRecentEntry
++import studio.muse.core.edit.PreviewView
++import studio.muse.core.edit.RecentSession
++import studio.muse.core.edit.SourceSize
++
++/**
++ * Continue a draft (owner, 2026-11-12): where the editor was left goes out and comes back through the real controller, the
++ * demo server keeps it and lists the last worked on first, and the phone's file keeps a member's edit across a restart.
++ */
++@OptIn(ExperimentalCoroutinesApi::class)
++class EditResumeTest {
++    @get:Rule val tmp = TemporaryFolder()
++
++    private class NoAi : EditBackend {
++        override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?) = null to "off"
++        override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> = null to "off"
++    }
++
++    private fun project() = EditSuiteViewModel.newProject("t_j1", 12.0, SourceSize(1080, 1920, 30.0, true))
++
++    @Test fun thePlaceComesBackWhereItWasLeft() = runTest {
++        val a = EditSuiteController(backgroundScope, NoAi())
++        a.load(project(), "Kick test", "t_j1", null, reopened = true)
++        a.act(EditAction.Seek(4.5)); a.act(EditAction.Zoom(80f)); a.act(EditAction.Open(Panel.AUDIO))
++        a.act(EditAction.PreviewOf(a.ui.value.preview.copy(view = PreviewView.REELS)))
++        val clip = a.project!!.tracks.first().items.first().id
++        a.act(EditAction.Select(clip))
++        // A field this app doesn't show (the Mac's media bin tab) is kept.
++        val place = placeOf(a.ui.value, EditPlace(binTab = "uploads"))
++        assertEquals("audio", place.tab)
++        assertEquals("reels", place.safeArea)
++        assertEquals("uploads", place.binTab)
++
++        // Another editor (the app reopened) on the same edit: back to the same place.
++        val b = EditSuiteController(backgroundScope, NoAi())
++        b.load(project(), "Kick test", "t_j1", null, reopened = true)
++        b.restorePlace(EditPlace.of(place.toJson())!!)
++        val u = b.ui.value
++        assertEquals(4.5, u.playheadSec, 1e-6)
++        assertEquals(80f, u.pxPerSec)
++        assertEquals(Panel.AUDIO, u.panel)
++        assertEquals(PreviewView.REELS, u.preview.view)
++        assertEquals(clip, u.selectedId)
++    }
++
++    @Test fun aStaleOrForeignPlaceNeverBreaksOpening() = runTest {
++        val c = EditSuiteController(backgroundScope, NoAi())
++        c.load(project(), "Kick test", "t_j1", null, reopened = true)
++        val before = c.ui.value
++        // From the Mac (an inspector tab Android has no panel for), a deleted clip, a playhead past the end, "off".
++        c.restorePlace(EditPlace(playhead = 999.0, tab = "anim", selection = "gone", safeArea = "off", zoom = 9999.0))
++        val u = c.ui.value
++        assertEquals(u.duration, u.playheadSec, 1e-6)
++        assertNull(u.panel)
++        assertEquals(before.selectedId, u.selectedId)
++        assertEquals(PreviewView.CLEAN, u.preview.view)
++        assertEquals(240f, u.pxPerSec)
++    }
++
++    @Test fun theDemoServerKeepsThePlaceAndListsTheLastWorkedOnFirst() = runTest {
++        val api = FakeMuseApi(backgroundScope, null, speed = 0.0, genDelayMs = 0)
++        val takes = api.listTakes().take(2)
++        assertEquals(2, takes.size)
++        val s1 = api.openEditSession(OpenEditSessionRequest(takes[0].id))
++        val s2 = api.openEditSession(OpenEditSessionRequest(takes[1].id))
++        api.saveEditView(s1.id, EditPlace(playhead = 2.0, binTab = "uploads").toJson())
++        val recent = api.recentEditSessions()
++        assertEquals(listOf(s1.id, s2.id), recent.map { it.id })
++        assertEquals(2.0, EditPlace.of(recent[0].view)!!.playhead!!, 1e-9)
++        assertTrue(recent[0].history.isEmpty())
++        assertEquals("uploads", EditPlace.of(api.editSession(s1.id).view)!!.binTab)
++        val items = EditRecent.items(recent.map { RecentSession(it.id, it.takeId, it.status, it.updatedAt, it.lastTouchedAt, EditPlace.of(it.view)) }, emptyList()) { null }
++        assertEquals(s1.id, items.first().sessionId)
++    }
++
++    @Test fun thePhonesFileKeepsAMembersEditAcrossARestart() {
++        val dir = tmp.newFolder()
++        val p = EditJson.encode(project())
++        EditRecentFile.of(dir).save(EditRecentEntry("t_j1", project = p, place = EditPlace(playhead = 3.0), title = "Kick test", savedAt = 1))
++        EditRecentFile.of(dir).save(EditRecentEntry("t_j2", project = p, title = "Other", savedAt = 2))
++        val again = EditRecentFile.of(dir).load() // a new file object: the app restarted
++        assertEquals(listOf("Other", "Kick test"), again.map { it.title })
++        assertEquals(project(), EditJson.parse(again[1].project!!))
++        val items = EditRecent.items(emptyList(), again) { null }
++        assertEquals("local:t_j2", items.first().id)
++    }
++
++}
+diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt b/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
+new file mode 100644
+index 00000000..ac122ccd
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
+@@ -0,0 +1,176 @@
++package studio.muse.core.edit
++
++import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.JsonArray
++import kotlinx.serialization.json.JsonElement
++import kotlinx.serialization.json.JsonNull
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import kotlinx.serialization.json.doubleOrNull
++import kotlinx.serialization.json.longOrNull
++import java.time.Instant
++import java.time.LocalDate
++import java.time.ZoneId
++import java.time.format.DateTimeFormatter
++import java.util.Locale
++
++/*
++ * Continue a draft (owner, 2026-11-12; plans/edit-continue-draft.md): opening Edit reopens the last edit where it was left.
++ * The owner's edits are server sessions; each also keeps where an editor was left ([EditPlace], POST …/{id}/view, shared
++ * with the Mac). Members' editors are local, so their last edits (project and place) are kept on the phone
++ * ([EditRecentEntry], [EditRecent.encode]). Pure, so the rules are unit-tested.
++ */
++
++/**
++ * Where the editor was left. The same JSON as the Mac and the server (`view`): `playhead`, `zoom` (timeline dp / points
++ * per second), `tab` (the open panel, lower case: Mac inspector tabs "captions"/"text"/"audio" match), `selection`,
++ * `safeArea` (the platform view: "tiktok", "reels", …; "off" or null = Clean), `title`, `at` (ms, set by the server).
++ */
++data class EditPlace(
++    val playhead: Double? = null,
++    val zoom: Double? = null,
++    val tab: String? = null,
++    val binTab: String? = null,
++    val mode: String? = null,
++    val selection: String? = null,
++    val safeArea: String? = null,
++    val title: String? = null,
++    val at: Long? = null,
++) {
++    fun toJson(): JsonObject = JsonObject(buildMap {
++        playhead?.let { put("playhead", JsonPrimitive(it)) }
++        zoom?.let { put("zoom", JsonPrimitive(it)) }
++        tab?.let { put("tab", JsonPrimitive(it)) }
++        binTab?.let { put("binTab", JsonPrimitive(it)) }
++        mode?.let { put("mode", JsonPrimitive(it)) }
++        selection?.let { put("selection", JsonPrimitive(it)) }
++        safeArea?.let { put("safeArea", JsonPrimitive(it)) }
++        title?.let { put("title", JsonPrimitive(it)) }
++        at?.let { put("at", JsonPrimitive(it)) }
++    })
++
++    /** The same place (when it was saved aside). */
++    fun samePlace(o: EditPlace): Boolean = copy(at = null) == o.copy(at = null)
++
++    /** The platform view it names (null: not saved; Clean for "off"). */
++    val view: PreviewView? get() = when (safeArea) { null -> null; "off" -> PreviewView.CLEAN; else -> PreviewView.of(safeArea) }
++
++    companion object {
++        /** Lenient: odd types are dropped, a non-object is no place. A present `safeArea: null` (the server's "off") reads "off". */
++        fun of(e: JsonElement?): EditPlace? {
++            val o = e as? JsonObject ?: return null
++            fun num(k: String) = (o[k] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull?.takeIf { it.isFinite() }
++            fun str(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
++            return EditPlace(
++                playhead = num("playhead"), zoom = num("zoom"), tab = str("tab"), binTab = str("binTab"), mode = str("mode"), selection = str("selection"),
++                safeArea = if (o.containsKey("safeArea") && o["safeArea"] is JsonNull) "off" else str("safeArea"),
++                title = str("title"), at = (o["at"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: num("at")?.toLong(),
++            )
++        }
++    }
++}
++
++/** One open server session as the recent list needs it (the app maps its DTO). */
++data class RecentSession(val id: String, val takeId: String, val status: String = "open", val updatedAt: Long = 0, val lastTouchedAt: Long? = null,
++                         val place: EditPlace? = null)
++
++/** A member's edit kept on this phone (the project and where it was left), or the owner's own record of a session's place. */
++data class EditRecentEntry(
++    val takeId: String,
++    val sessionId: String? = null,
++    /** Members: the edit itself. Null for the owner (the server holds the project). */
++    val project: JsonObject? = null,
++    val place: EditPlace = EditPlace(),
++    val title: String = "",
++    val savedAt: Long = 0,
++) {
++    val key: String get() = takeId
++}
++
++/** A row of Recent edits. [sessionId] for the owner's server edits, else an edit kept on this phone. */
++data class EditRecentItem(val id: String, val takeId: String, val sessionId: String?, val title: String, val lastEditedAt: Long, val place: EditPlace?)
++
++object EditRecent {
++    const val SHOWN = 8
++    const val KEPT = 12
++    const val UNTITLED = "Untitled edit"
++
++    /** The server's sessions and this phone's entries, the last worked on first. A session's newer local place wins. */
++    fun items(sessions: List<RecentSession>, local: List<EditRecentEntry>, takeTitle: (String) -> String?): List<EditRecentItem> {
++        val out = LinkedHashMap<String, EditRecentItem>()
++        for (s in sessions) {
++            if (s.status != "open") continue
++            val at = maxOf(s.lastTouchedAt ?: 0, s.updatedAt, s.place?.at ?: 0)
++            out[s.id] = EditRecentItem(s.id, s.takeId, s.id, title(s.place, s.takeId, takeTitle), at, s.place)
++        }
++        for (d in local) {
++            val sid = d.sessionId
++            if (sid != null) {
++                val it = out[sid] ?: continue // a session the server no longer lists is closed
++                if (d.savedAt > it.lastEditedAt) out[sid] = it.copy(place = d.place.copy(at = d.savedAt), lastEditedAt = d.savedAt)
++                continue
++            }
++            if (d.project == null) continue
++            val id = "local:${d.key}"
++            out[id] = EditRecentItem(id, d.takeId, null, d.title.ifBlank { title(d.place, d.takeId, takeTitle) }, d.savedAt, d.place.copy(at = d.savedAt))
++        }
++        return out.values.sortedWith(compareByDescending<EditRecentItem> { it.lastEditedAt }.thenBy { it.id })
++    }
++
++    private fun title(p: EditPlace?, takeId: String, takeTitle: (String) -> String?): String =
++        p?.title?.trim()?.takeIf { it.isNotEmpty() } ?: takeTitle(takeId) ?: UNTITLED
++
++    /** This phone's entries with [e] as the newest (the same edit's older one replaced), at most [KEPT]. */
++    fun saved(list: List<EditRecentEntry>, e: EditRecentEntry): List<EditRecentEntry> = (listOf(e) + list.filter { it.key != e.key }).take(KEPT)
++
++    fun encode(list: List<EditRecentEntry>): String = JsonArray(list.map { e ->
++        JsonObject(buildMap {
++            put("takeId", JsonPrimitive(e.takeId))
++            e.sessionId?.let { put("sessionId", JsonPrimitive(it)) }
++            e.project?.let { put("project", it) }
++            put("place", e.place.toJson())
++            put("title", JsonPrimitive(e.title))
++            put("savedAt", JsonPrimitive(e.savedAt))
++        })
++    }).toString()
++
++    /** A damaged or missing file reads as empty. */
++    fun decode(text: String?): List<EditRecentEntry> {
++        if (text.isNullOrBlank()) return emptyList()
++        val arr = runCatching { Json.parseToJsonElement(text) as? JsonArray }.getOrNull() ?: return emptyList()
++        return arr.mapNotNull { el ->
++            val o = el as? JsonObject ?: return@mapNotNull null
++            val take = (o["takeId"] as? JsonPrimitive)?.content ?: return@mapNotNull null
++            EditRecentEntry(take, (o["sessionId"] as? JsonPrimitive)?.content, o["project"] as? JsonObject, EditPlace.of(o["place"]) ?: EditPlace(),
++                (o["title"] as? JsonPrimitive)?.content ?: "", (o["savedAt"] as? JsonPrimitive)?.longOrNull ?: 0)
++        }
++    }
++
++    /** Assets a clip uses (a take's or an upload's video, picture or sound; not library items or LUTs) with no file here: shown "Missing". */
++    fun missingAssets(p: EditProject, have: Set<String>): Set<String> {
++        val used = p.tracks.flatMap { it.items }.mapNotNull {
++            when (it) { is VideoClip -> it.asset; is ImageItem -> it.asset; is AudioClip -> it.asset; else -> null }
++        }.toSet()
++        return p.assets.filter { a ->
++            a.id in used && (a.take != null || a.upload != null) && (a.kind == AssetKind.VIDEO || a.kind == AssetKind.IMAGE || a.kind == AssetKind.AUDIO) && a.id !in have
++        }.map { it.id }.toSet()
++    }
++
++    /** "Just now", "5 min ago", "3 h ago", "Yesterday", "Monday", "13 Oct", "8 Oct 2025". */
++    fun lastEditedText(atMs: Long, nowMs: Long, zone: ZoneId = ZoneId.systemDefault()): String {
++        val s = (nowMs - atMs) / 1000
++        if (s < 60) return "Just now"
++        if (s < 3600) return "${s / 60} min ago"
++        val at = Instant.ofEpochMilli(atMs).atZone(zone); val now = Instant.ofEpochMilli(nowMs).atZone(zone)
++        val day: LocalDate = at.toLocalDate()
++        if (day == now.toLocalDate()) return "${s / 3600} h ago"
++        if (day == now.toLocalDate().minusDays(1)) return "Yesterday"
++        val f = when {
++            s < 6 * 86_400 -> "EEEE"
++            at.year == now.year -> "d MMM"
++            else -> "d MMM yyyy"
++        }
++        return DateTimeFormatter.ofPattern(f, Locale.UK).format(at)
++    }
++}
++
+diff --git a/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt b/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
+new file mode 100644
+index 00000000..1ed93d75
+--- /dev/null
++++ b/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
+@@ -0,0 +1,104 @@
++package studio.muse.core.edit
++
++import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.JsonObject
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import java.time.ZoneOffset
++
++/** Continue a draft (owner, 2026-11-12): the place's JSON matches the Mac and the server, the recent list, the phone's store, missing media. */
++class EditRecentTest {
++    private fun project(name: String = "pip text image look"): EditProject =
++        EditJson.parse(Fixtures.load("projects.json").arr.first { it.obj["name"]!!.str == name }.obj["project"]!!)
++
++    @Test fun placeRoundTripsAndReadsTheMacAndServerShape() {
++        val p = EditPlace(playhead = 2.5, zoom = 120.0, tab = "audio", selection = "c1", safeArea = "reels", title = "Beach walk")
++        assertEquals(p, EditPlace.of(Json.parseToJsonElement(p.toJson().toString())))
++        // As the server sends it: "off" stored as null, `at` stamped, unknown fields and odd types ignored.
++        val server = EditPlace.of(Json.parseToJsonElement("""{"playhead":1.25,"zoom":"x","binTab":"uploads","safeArea":null,"at":1794500000000,"extra":[1]}"""))!!
++        assertEquals(1.25, server.playhead!!, 1e-9)
++        assertNull(server.zoom)
++        assertEquals("uploads", server.binTab)
++        assertEquals("off", server.safeArea)
++        assertEquals(PreviewView.CLEAN, server.view)
++        assertEquals(1794500000000L, server.at)
++        assertNull(EditPlace.of(Json.parseToJsonElement("[1]")))
++        assertNull(EditPlace(zoom = 1.0).view) // not saved: keep the device's own choice
++        assertEquals(PreviewView.TIKTOK, EditPlace(safeArea = "tiktok").view)
++        assertTrue(p.copy(at = 5).samePlace(p))
++    }
++
++    @Test fun recentListsTheLastWorkedOnFirst() {
++        val titles = mapOf("take_a" to "Café review")
++        val sessions = listOf(
++            RecentSession("es_1", "take_a", updatedAt = 1_000),
++            RecentSession("es_2", "take_gone", updatedAt = 500, place = EditPlace(at = 3_000)), // left later than es_1 changed
++            RecentSession("es_3", "take_a", status = "closed", updatedAt = 9_000),
++        )
++        val items = EditRecent.items(sessions, emptyList()) { titles[it] }
++        assertEquals(listOf("es_2", "es_1"), items.map { it.id })
++        assertEquals(EditRecent.UNTITLED, items[0].title) // its take is gone: still listed
++        assertEquals("Café review", items[1].title)
++        assertEquals("es_1", items[1].sessionId)
++    }
++
++    @Test fun thePhonesEntriesJoinTheList() {
++        val p = EditJson.encode(project())
++        val items = EditRecent.items(
++            listOf(RecentSession("es_1", "take_a", updatedAt = 1_000)),
++            listOf(
++                EditRecentEntry("take_a", sessionId = "es_1", place = EditPlace(playhead = 4.0), savedAt = 5_000),
++                EditRecentEntry("take_x", sessionId = "es_closed", savedAt = 9_000),
++                EditRecentEntry("take_m", project = p, title = "Member cut", savedAt = 4_000),
++                EditRecentEntry("take_n", savedAt = 8_000), // nothing to reopen
++            ),
++        ) { null }
++        assertEquals(listOf("es_1", "local:take_m"), items.map { it.id })
++        assertEquals(5_000L, items[0].lastEditedAt)
++        assertEquals(4.0, items[0].place!!.playhead!!, 1e-9)
++        assertEquals(5_000L, items[0].place!!.at)
++        assertEquals("Member cut", items[1].title)
++        assertNull(items[1].sessionId)
++    }
++
++    @Test fun theStoreKeepsTheNewestPerEditAndSurvivesARestart() {
++        val p = EditJson.encode(project())
++        var list = emptyList<EditRecentEntry>()
++        list = EditRecent.saved(list, EditRecentEntry("take_a", project = p, place = EditPlace(playhead = 1.0), title = "A", savedAt = 1))
++        list = EditRecent.saved(list, EditRecentEntry("take_b", project = p, title = "B", savedAt = 2))
++        list = EditRecent.saved(list, EditRecentEntry("take_a", project = p, place = EditPlace(playhead = 3.0), title = "A", savedAt = 3))
++        val again = EditRecent.decode(EditRecent.encode(list)) // the file read back after the app restarted
++        assertEquals(listOf("A", "B"), again.map { it.title })
++        assertEquals(3.0, again[0].place.playhead!!, 1e-9)
++        assertEquals(project(), EditJson.parse(again[0].project as JsonObject))
++        repeat(20) { i -> list = EditRecent.saved(list, EditRecentEntry("t$i", savedAt = 10L + i)) }
++        assertEquals(EditRecent.KEPT, list.size)
++        assertEquals(emptyList<EditRecentEntry>(), EditRecent.decode("not json"))
++        assertEquals(emptyList<EditRecentEntry>(), EditRecent.decode(null))
++    }
++
++    @Test fun missingMediaIsMarkedNotFatal() {
++        val p = project()
++        val used = p.tracks.flatMap { it.items }.mapNotNull { when (it) { is VideoClip -> it.asset; is ImageItem -> it.asset; is AudioClip -> it.asset; else -> null } }.toSet()
++        val media = p.assets.filter { it.id in used && (it.take != null || it.upload != null) && it.kind != AssetKind.LUT }.map { it.id }
++        assertTrue(media.isNotEmpty())
++        assertEquals(emptySet<String>(), EditRecent.missingAssets(p, media.toSet()))
++        assertEquals(setOf(media.first()), EditRecent.missingAssets(p, media.drop(1).toSet()))
++        val extra = p.copy(assets = p.assets + Asset("unused", AssetKind.VIDEO, upload = "u9", durationSec = 3.0))
++        assertTrue("unused" !in EditRecent.missingAssets(extra, media.toSet()))
++    }
++
++    @Test fun lastEditedText() {
++        val now = 1_794_500_000_000L // Thu 12 Nov 2026, 16:13 UTC
++        fun ago(s: Long) = EditRecent.lastEditedText(now - s * 1000, now, ZoneOffset.UTC)
++        assertEquals("Just now", ago(20))
++        assertEquals("5 min ago", ago(300))
++        assertEquals("3 h ago", ago(3 * 3600))
++        assertEquals("Yesterday", ago(20 * 3600))
++        assertEquals("Monday", ago(3 * 86_400))
++        assertEquals("13 Oct", ago(30 * 86_400))
++        assertEquals("8 Oct 2025", ago(400 * 86_400))
++    }
++}
