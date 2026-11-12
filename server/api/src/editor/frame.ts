@@ -133,7 +133,10 @@ export async function contactSheet(ctx: Ctx, studioId: string, p: M.EditProject,
   const d = M.durationSec(p), step = Math.max(0.25, everySec, d / 40);
   const times: number[] = [];
   for (let t = 0; t < d - 1e-6 && times.length < 40; t += step) times.push(Math.round(t * 100) / 100);
-  const tiles = await Promise.all(times.map(t => approximateFrame(ctx, studioId, p, t, 160)));
+  // Two at a time: each frame is an ffmpeg decode of the source, and 40 at once ran the small box out of memory (502s).
+  const tiles: Awaited<ReturnType<typeof approximateFrame>>[] = new Array(times.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(2, times.length) }, async () => { while (next < times.length) { const i = next++; tiles[i] = await approximateFrame(ctx, studioId, p, times[i]!, 160); } }));
   const tw = 160, th = tiles[0]?.height ?? 284, cols = Math.min(6, times.length), rows = Math.ceil(times.length / 6), lab = 18;
   const comps = await Promise.all(tiles.map(async (tl, i) => {
     const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="${lab}"><rect width="100%" height="100%" fill="#111"/><text x="4" y="13" font-size="12" fill="#fff" font-family="DejaVu Sans Mono, monospace">${times[i]!.toFixed(1)} s</text></svg>`);

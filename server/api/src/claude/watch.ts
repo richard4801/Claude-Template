@@ -69,7 +69,13 @@ export async function videoOf(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: unkno
   const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
   if (up) {
     if (!/^video\//i.test(up.contentType)) throw badRequest(`${id} is not a video (${up.contentType})`);
-    if (up.state !== 'ready') throw new ApiError(409, 'not_ready', `${id}: the upload hasn't finished`);
+    if (up.state !== 'ready') {
+      // Editor uploads (Edit's Uploads / timeline) are PUT straight to storage and never told "done": the row stays
+      // pending although the file is there and plays. If the file has arrived, it is ready: mark it and watch it.
+      const h = await ctx.storage.head(up.storageKey).catch(() => null);
+      if (!h || !(h.size > 0)) throw new ApiError(409, 'not_ready', `${id}: the upload hasn't finished`);
+      await ctx.db.update(uploads).set({ state: 'ready', bytes: h.size }).where(eq(uploads.id, up.id));
+    }
     return { id, kind: 'upload', key: up.storageKey };
   }
   const [c] = await ctx.db.select().from(clips).where(and(eq(clips.id, id), eq(clips.studioId, u.studioId)));
@@ -191,17 +197,28 @@ function run(bin: string, args: string[], timeoutMs: number): Promise<{ stdout: 
  */
 async function grab(ffmpeg: string, input: string, frames: number[], edge: number, fromSec = 0, lenSec?: number): Promise<Map<number, Buffer>> {
   const want = [...new Set(frames)].sort((a, b) => a - b);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-watch-'));
-  try {
-    const sel = want.map(f => `eq(n,${f})`).join('+');
-    await run(ffmpeg, ['-v', 'error', '-threads', '2', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-i', input, ...(lenSec ? ['-t', lenSec.toFixed(3)] : []), '-an', '-sn',
-      '-vf', `select='${sel}',scale=${edge}:${edge}:force_original_aspect_ratio=decrease:flags=bicubic`, '-fps_mode', 'vfr', '-q:v', '5', path.join(dir, 'f%04d.jpg')], 180_000);
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).sort();
-    const out = new Map<number, Buffer>();
-    files.forEach((f, i) => { if (want[i] !== undefined) out.set(want[i]!, fs.readFileSync(path.join(dir, f))); });
-    return out;
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // The box is small (~512 MB shared with the API): one decode thread, one filter thread, and at most GRAB_CHUNK frames
+  // per ffmpeg run, so a big source (4K, 10-bit HEVC, 60 fps) never holds many full-size frames at once. A run that
+  // still fails for memory is retried once in smaller chunks.
+  const runChunk = async (part: number[], out: Map<number, Buffer>) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-watch-'));
+    try {
+      const sel = part.map(f => `eq(n,${f})`).join('+');
+      await run(ffmpeg, ['-v', 'error', '-threads', '1', '-filter_threads', '1', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-i', input, ...(lenSec ? ['-t', lenSec.toFixed(3)] : []), '-an', '-sn', '-dn',
+        '-vf', `select='${sel}',scale=${edge}:${edge}:force_original_aspect_ratio=decrease:flags=bilinear`, '-fps_mode', 'vfr', '-frames:v', String(part.length), '-q:v', '5', path.join(dir, 'f%04d.jpg')], 180_000);
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).sort();
+      files.forEach((f, i) => { if (part[i] !== undefined) out.set(part[i]!, fs.readFileSync(path.join(dir, f))); });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  };
+  const out = new Map<number, Buffer>();
+  const pass = async (size: number) => { for (let i = 0; i < want.length; i += size) { const part = want.slice(i, i + size).filter(f => !out.has(f)); if (part.length) await runChunk(part, out); } };
+  try { await pass(GRAB_CHUNK); } catch (e) {
+    if (!/alloc|memory|killed|SIGKILL/i.test(String((e as Error)?.message ?? e))) throw e;
+    await pass(Math.max(8, GRAB_CHUNK >> 2));
+  }
+  return out;
 }
+const GRAB_CHUNK = 64;
 
 /** Sound: present or not, its level, and how long it is active in the voice range (200–3500 Hz). Not words. */
 async function soundOf(ffmpeg: string, input: string, info: MediaInfo) {
@@ -269,7 +286,7 @@ export async function watchVideo(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: un
     const dur = Number.isFinite(info.duration) ? info.duration : 0;
     // Short videos: every frame up to 30 fps; long ones a lighter pass (the overview, then watch_closer on parts).
     const mfps = dur > 600 ? 1 : dur > 120 ? 4 : undefined;
-    const m = await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { width: 64, maxSec: MAX_WATCH_SEC, inputArgs: ['-threads', '2'], ...(mfps ? { fps: mfps } : {}) });
+    const m = await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { width: 64, maxSec: MAX_WATCH_SEC, inputArgs: ['-threads', '1'], ...(mfps ? { fps: mfps } : {}) });
     const picks = pickFrames(m, budgetFor(dur));
     const fps = info.fps || m.fps, last = Math.max(0, Math.floor(dur * fps) - 1);
     const frameOf = (t: number) => Math.min(last, Math.max(0, Math.round(t * fps)));

@@ -8,6 +8,7 @@ import { RECREATE_TOOLS } from '../recreate/mcpTools.js';
 import { SUITE_TOOLS } from '../suite/mcpTools.js';
 import { CHAT_TOOLS } from './chatTools.js';
 import { WATCH_TOOLS } from './watch.js';
+import { LISTEN_TOOLS } from './listen.js';
 import { ISSUE_TOOLS } from './issues.js';
 import { CARD_TOOLS } from './cards.js';
 import { APP_TOOLS } from './appTools.js';
@@ -37,6 +38,7 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(CHAT_TOOLS, ['any'], () => true),
   // Claude watches videos (plans/claude-video-vision.md Stage 1): free, studio-scoped, on every page.
   ...tag(WATCH_TOOLS, ['any'], () => true),
+  ...tag(LISTEN_TOOLS, ['any'], () => true),
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
   // Chat cards (claude/cards.ts): a plan checklist and a clip's key moments, drawn as cards in the person's panel; free.
