@@ -171,12 +171,7 @@ public enum EditSuite {
         public var bitrate: Bitrate = .recommended
         /// XL (owner-approved 2026-11-09, Mac first): HDR video, HEVC 10-bit HLG (BT.2020). A video only; always HEVC.
         public var hdr = false
-        /// With HDR: Dolby Vision 8.4 metadata on top of HLG (owner 2026-11-12: keep it, on by default). Off: plain HLG.
-        public var dolbyVision = true
         public init() {}
-
-        /// Whether the file gets Dolby Vision metadata: an HDR video with the switch on.
-        public var writesDolbyVision: Bool { hdr && format == .video && dolbyVision }
         public static let frameRates = [24, 30, 60]
 
         /// The codec the file is written with: HDR is HEVC whatever `codec` says.
