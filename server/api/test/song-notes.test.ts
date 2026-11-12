@@ -14,6 +14,7 @@ import { editSessionsOf } from '../src/editor/sessions.js';
 import { SYNC_LIMITS, SYNC_TOOLS } from '../src/editor/syncHits.js';
 import { registryByName } from '../src/claude/registry.js';
 import { analyseSong, clearSongCache, geminiListening, SONG_TOOLS } from '../src/claude/songNotes.js';
+import { SYNC_MAP_TOOLS } from '../src/claude/syncMap.js';
 import { makeApp, people, type Client } from './helpers.js';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
@@ -87,9 +88,9 @@ describe.skipIf(!hasFfmpeg)('find_impacts', () => {
 
 describe.skipIf(!hasFfmpeg)('sync_hits and song_notes in Edit', () => {
   type App = Awaited<ReturnType<typeof makeApp>>;
-  let a: App, owner: Client, u: AuthUser, sid: string;
+  let a: App, owner: Client, u: AuthUser, sid: string, refId = '';
   const env = () => ({ ctx: a.ctx, user: u, source: 'mcp' as const });
-  const tool = (n: string) => [...SYNC_TOOLS, ...SONG_TOOLS].find(t => t.name === n)!;
+  const tool = (n: string) => [...SYNC_TOOLS, ...SONG_TOOLS, ...SYNC_MAP_TOOLS].find(t => t.name === n)!;
   const NOTES = [0.8, 1.7, 2.9, 3.6];
   const upload = async (file: string, contentType: string) => {
     const buf = fs.readFileSync(file);
@@ -168,6 +169,34 @@ describe.skipIf(!hasFfmpeg)('sync_hits and song_notes in Edit', () => {
     expect(ok.landings[0].landedSec).toBeCloseTo(0.6, 3);
   }, 60_000);
 
+  it('sync_map pairs a reference\'s landings with its notes, reads the style, and its template re-lands new footage', async () => {
+    // The reference: the falling box lands at 0.5, 1.5, 2.5, 3.5 s, on plucks at those times; one more strong pluck at 2.75 gets no action.
+    const notes = notesFile('refsound', 4, [0.5, 1.5, 2.5, 3.5].map(at => ({ at, dur: 0.2, m: 64 })).concat([{ at: 2.75, dur: 0.2, m: 67 }]));
+    const ref = path.join(dir, 'ref.mp4');
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', landingsVideo(), '-i', notes, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', ref]);
+    refId = await upload(ref, 'video/mp4');
+    const m = await tool('sync_map').run(env(), { id: refId }) as any;
+    expect(registryByName.get('sync_map')?.members).toBe(true);
+    const stops = m.pairs.filter((p: any) => p.kind === 'stop');
+    expect(stops.map((p: any) => p.t)).toEqual([0.5, 1.5, 2.5, 3.5]);
+    for (const p of stops) { expect(Math.abs(p.offsetMs)).toBeLessThanOrEqual(60); expect(p.pitch).toBe('E'); }
+    expect(m.unmatchedStrongOnsets.map((o: any) => o.t).some((t: number) => Math.abs(t - 2.75) <= 0.015)).toBe(true);
+    expect(m.unmatchedImpacts.map((x: any) => x.kind)).toContain('start'); // the jumps back up play no note
+    expect(m.style.kinds.stop).toBe(4);
+    expect(m.style.strongOnsetsWithAction).toBeCloseTo(0.8, 1);
+    expect(m.template.gapsSec.every((g: number) => Math.abs(g - 1) <= 0.03)).toBe(true);
+    expect(m.labels).toBeUndefined();
+    // The template on the owner's footage (the same landings, a fresh edit), stretched 1.2× so it really retimes.
+    const project = M.blankProject();
+    project.assets.push({ id: 'v1', kind: 'video', upload: refId, durationSec: 4, width: 192, height: 192, hasAudio: true });
+    (project.tracks[0]!.items as M.VideoClip[]).push({ id: 'c1', asset: 'v1', inSec: 0, outSec: 4, speed: 1 });
+    const sid2 = (await owner.req('POST', '/v1/edit-sessions', { takeId: M.BLANK_SOURCE, project })).body.id;
+    const targets = m.template.targets.map((x: any) => x.t * 1.2);
+    const r = await tool('sync_hits').run(env(), { sessionId: sid2, clipId: 'c1', impacts: stops.map((p: any) => p.t), targets }) as any;
+    expect(r.applied).toBe(true);
+    r.landings.forEach((l: any, i: number) => expect(Math.abs(l.landedSec - targets[i])).toBeLessThanOrEqual(1 / 30));
+  }, 60_000);
+
   it('song_notes listening: a note without GEMINI_API_KEY; with one, Gemini is asked once (mocked) and its key never shows', async () => {
     const r = await tool('song_notes').run(env(), { sessionId: sid, listening: true }) as any;
     expect(r.listening.note).toMatch(/GEMINI_API_KEY/);
@@ -189,6 +218,15 @@ describe.skipIf(!hasFfmpeg)('sync_hits and song_notes in Edit', () => {
       const body = JSON.parse(String(init.body));
       expect(body.contents[0].parts[1].inline_data.data.length).toBeGreaterThan(100);
       expect(JSON.stringify(r2)).not.toContain('test-gemini-key');
+      // sync_map labels: one call on the video (mocked), merged into the pairs by time.
+      fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ actions: [{ t: 0.55, label: 'box lands' }, { t: 1.5, label: 'box lands' }] }) }] } }] }), { status: 200 }));
+      const sm = await tool('sync_map').run(env(), { id: refId, labels: true }) as any;
+      expect(sm.labels.actions).toHaveLength(2);
+      expect(sm.pairs.filter((p: any) => p.label === 'box lands').map((p: any) => p.t)).toEqual([0.5, 1.5]);
+      // A silent clip has no notes to map: a plain refusal, not an ffmpeg error.
+      await expect(tool('sync_map').run(env(), { sessionId: sid, itemId: 'c1' })).rejects.toThrow(/no sound/);
+      expect(String(fetchMock.mock.calls.at(-1)![0])).toContain(':generateContent');
+      expect(JSON.parse(String(fetchMock.mock.calls.at(-1)![1].body)).contents[0].parts[1].inline_data.mime_type).toBe('video/mp4');
       // A failed call is a note, never an error.
       fetchMock.mockImplementationOnce(async () => new Response('nope', { status: 500 }));
       const failed = await geminiListening(a.ctx, path.join(dir, 'music.m4a'));

@@ -10,6 +10,7 @@ import { CHAT_TOOLS } from './chatTools.js';
 import { WATCH_TOOLS } from './watch.js';
 import { LISTEN_TOOLS } from './listen.js';
 import { SONG_TOOLS } from './songNotes.js';
+import { SYNC_MAP_TOOLS } from './syncMap.js';
 import { SYNC_TOOLS } from '../editor/syncHits.js';
 import { ISSUE_TOOLS } from './issues.js';
 import { CARD_TOOLS } from './cards.js';
@@ -43,6 +44,7 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(LISTEN_TOOLS, ['any'], () => true),
   // Editing to individual notes (claude/songNotes.ts): song_notes and find_impacts are free reads, everyone, own studio.
   ...tag(SONG_TOOLS, ['any'], () => true),
+  ...tag(SYNC_MAP_TOOLS, ['any'], () => true),
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
   // Chat cards (claude/cards.ts): a plan checklist and a clip's key moments, drawn as cards in the person's panel; free.

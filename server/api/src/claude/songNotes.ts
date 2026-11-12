@@ -75,27 +75,29 @@ function encodeForListening(ffmpeg: string, input: string): Promise<{ data: Buff
     { encoding: 'buffer', timeout: 120_000, maxBuffer: 20 * 1024 * 1024 }, (err, out) => (err ? reject(err) : resolve({ data: out as Buffer, mime }))));
   return run(['-c:a', 'libmp3lame', '-b:a', '32k', '-f', 'mp3'], 'audio/mp3').catch(() => run(['-c:a', 'aac', '-b:a', '32k', '-f', 'adts'], 'audio/aac'));
 }
-/** Gemini's listening as JSON, or { note } when there is no key or it failed. The key goes in a header, never in logs or results. */
-export async function geminiListening(ctx: Ctx, input: string): Promise<Record<string, unknown>> {
+/** One Gemini call: a prompt and one media part, answered as JSON. The key goes in a header, never in logs or results.
+ * Never throws: { note } when there is no key, it failed or the answer was unreadable. */
+export async function geminiJson(ctx: Ctx, prompt: string, media: () => Promise<{ data: Buffer; mime: string }>, what: string): Promise<Record<string, unknown>> {
   const c = ctx.config;
-  if (!c.GEMINI_API_KEY) return { note: 'Listening (mood, genre, instruments, vocal spans) is off: the server has no GEMINI_API_KEY. The numbers above are complete without it.' };
+  if (!c.GEMINI_API_KEY) return { note: `${what} is off: the server has no GEMINI_API_KEY. The numbers are complete without it.` };
   try {
-    const audio = await encodeForListening(c.FFMPEG_PATH, input);
+    const m = await media();
     const res = await fetch(`${c.GEMINI_API_URL.replace(/\/+$/, '')}/v1beta/models/${encodeURIComponent(c.GEMINI_MODEL)}:generateContent`, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': c.GEMINI_API_KEY },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: LISTENING_PROMPT }, { inline_data: { mime_type: audio.mime, data: audio.data.toString('base64') } }] }],
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: m.mime, data: m.data.toString('base64') } }] }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0.2 } }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!res.ok) return { note: `Listening failed (Gemini answered ${res.status}); the numbers above are complete without it.` };
+    if (!res.ok) return { note: `${what} failed (Gemini answered ${res.status}); the numbers are complete without it.` };
     const j = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
     const text = (j.candidates?.[0]?.content?.parts ?? []).map(p => p.text ?? '').join('').trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    return { ...parsed, by: c.GEMINI_MODEL };
+    return { ...(JSON.parse(text) as Record<string, unknown>), by: c.GEMINI_MODEL };
   } catch (e) {
-    return { note: `Listening failed (${e instanceof SyntaxError ? 'an unreadable answer' : 'no answer'}); the numbers above are complete without it.` };
+    return { note: `${what} failed (${e instanceof SyntaxError ? 'an unreadable answer' : 'no answer'}); the numbers are complete without it.` };
   }
 }
+/** Gemini's listening to a file's sound (mood, genre, instruments, vocal spans, arc, moments). */
+export const geminiListening = (ctx: Ctx, input: string) => geminiJson(ctx, LISTENING_PROMPT, () => encodeForListening(ctx.config.FFMPEG_PATH, input), 'Listening (mood, genre, instruments, vocal spans)');
 
 // ---- where an item sits on the timeline -----------------------------------------------------------------------------
 export type Placement = { itemId: string; trackKind: M.TrackKind; startSec: number; endSec: number; toTimeline: (fileSec: number) => number | null };
@@ -117,7 +119,7 @@ export async function songOf(ctx: Ctx, u: AuthUser, a: Record<string, unknown>):
   if (!(await mediaToolsAvailable(ctx.config.FFMPEG_PATH, ctx.config.FFPROBE_PATH))) throw new ApiError(503, 'unavailable', 'song_notes needs ffmpeg on the server, which is missing here');
   const f = await soundFileOf(ctx, u, a);
   const song = await cached(ctx, f.key, 'dsp', () => oneAtATime(() => editorAi(ctx).withLocalInput(f.key, async input => {
-    const x = await decodeMono(ctx.config.FFMPEG_PATH, input, MAX_SEC);
+    const x = await decodeMono(ctx.config.FFMPEG_PATH, input, MAX_SEC).catch(() => new Float32Array(0)); // no sound track at all
     if (x.length < BEAT_SR * 0.5) throw badRequest(`${f.id} has no sound to analyse`);
     return analyseSong(x);
   })));
@@ -204,7 +206,7 @@ export async function impactsOf(env: ToolEnv, a: Record<string, unknown>) {
   const all = findImpacts(m, { cuts: findCuts(m), sensitivity: Number(a.sensitivity) || undefined });
   const list = all.filter(x => x.t >= from && x.t <= to && (!kinds || kinds.has(x.kind))).slice(0, Math.min(300, Number(a.max) || 100))
     .map(x => { const tl = place?.toTimeline(x.t); return tl === null || tl === undefined ? x : { ...x, tl }; });
-  return { id, fps: m.fps, durationSec: r3(m.energy.length / m.fps), impacts: list,
+  return { id, mediaKey, fps: m.fps, durationSec: r3(m.energy.length / m.fps), impacts: list,
     howToRead: `t is the clip's own (source) seconds, on its ${m.fps} fps frame grid; tl, when present, is the timeline time now. kind stop = motion ends sharply (a landing, a hand reaching the tray, a contact): t is the frame where it comes to rest. start = motion begins suddenly: t is the first moving frame. cut = a hard cut. strength 0–1. Confirm each with watch_closer (around t ± 0.2 s) before sync_hits.` };
 }
 
