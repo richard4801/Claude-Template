@@ -49,12 +49,19 @@ const sec = (v: number) => v.toFixed(3);
  * Pads `src` to exactly `seconds` by holding the last frame (and adding silence when it has audio), so Replicate's
  * whole-second output covers the full clip. Very large sources are scaled down to 1440 wide (2K's width).
  */
-export async function padTo(ffmpeg: string, src: string, out: string, seconds: number, info: MediaInfo, o: { mute?: boolean } = {}) {
+export async function padTo(ffmpeg: string, src: string, out: string, seconds: number, info: MediaInfo,
+  o: { mute?: boolean; /** a silent track when the clip has none (Genjutsu keeps the source sound) */ silentAudio?: boolean; /** scaled up to at least this many pixels a frame */ minPixels?: number } = {}) {
   const extra = Math.max(0, seconds - info.duration) + 0.1;
-  const args = ['-y', '-v', 'error', '-i', src,
-    '-vf', `scale='min(1440,iw)':-2,tpad=stop_mode=clone:stop_duration=${sec(extra)}`];
+  const px = (info.width || 0) * (info.height || 0);
+  // Small clips scaled up (even sizes) to at least minPixels a frame (Genjutsu wants ≥ 409,600); large ones down to 1440 wide.
+  const up = o.minPixels && px > 0 && px < o.minPixels ? Math.sqrt(o.minPixels / px) : 0;
+  const scale = up ? `scale=trunc(iw*${up.toFixed(4)}/2+1)*2:trunc(ih*${up.toFixed(4)}/2+1)*2` : `scale='min(1440,iw)':-2`;
+  const silent = !!o.silentAudio && !info.audioCodec;
+  const args = ['-y', '-v', 'error', '-i', src, ...(silent ? ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100'] : []),
+    '-vf', `${scale},tpad=stop_mode=clone:stop_duration=${sec(extra)}`];
   // mute: the model gets no sound, so it can't lip-sync to music or speech the performer isn't making.
   if (info.audioCodec && !o.mute) args.push('-af', `apad=pad_dur=${sec(extra)}`, '-c:a', 'aac', '-b:a', '192k');
+  else if (silent) args.push('-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-b:a', '128k');
   else args.push('-an');
   args.push('-t', String(seconds), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', out);
   await run(ffmpeg, args);
