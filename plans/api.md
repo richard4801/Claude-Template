@@ -1913,3 +1913,12 @@ The estimate is priced on the chosen model, so the confirm shows the right price
 
 ### `/v1/suite/catalog`
 `engines[]` entries (owner) gain `purposes[]`.
+
+### `GET /v1/claude/suggestions` (live chips, 2026-11-12)
+The three chips over Claude's input for what is on screen now (`server/api/src/claude/suggest.ts`, plans/claude-live-suggestions.md).
+Query (all optional): `page`, `tool`, `sessionId`, `assistId`, `takeId`, `referenceId`, `chatId`; what only the app knows:
+`selKind` (video|audio|text|image|caption) + `selId`, `view` (tiktok|reels|shorts|off), `unsaved=1`, `overlap=1`,
+`imported` (video|image|audio) + `importedId`; the open edit as the app sees it (wins over the server's copy): `clips`,
+`captions=0|1`, `musicId`, `beats=0|1`, `blank=0|1`, `offSafe=id,id`. → `{chips: [{id, label, prompt, icon, why}], key}`
+(always 3; `key` = the chip ids joined by `|`). Free, deterministic rules (no model call). 400 on a bad value. Apps fall
+back to `GET /v1/claude/chips` (older server) or their own copy (offline).

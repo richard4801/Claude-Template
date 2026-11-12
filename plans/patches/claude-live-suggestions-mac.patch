@@ -1,0 +1,710 @@
+diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
+index 20e91e0..5e54825 100644
+--- a/.github/workflows/mac.yml
++++ b/.github/workflows/mac.yml
+@@ -163,6 +163,19 @@ jobs:
+           if grep -q '^FAIL' "$f"; then exit 1; fi
+           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+ 
++      # Live chips (owner 2026-11-12): the chips over Claude's input follow the screen. Edit without captions offers "Add
++      # captions"; with captions the row changes ("Restyle the captions") within the ~1 s refresh, a chip that stays keeps
++      # its place (SnapshotRunner+ClaudeChips.swift; shots mac_a_edit_chips_no_captions/captions.png). Fails on any FAIL
++      # line or a missing ALL DONE.
++      - name: Claude live chips check
++        working-directory: mac
++        run: |
++          f=snapshots/claude-chips-check.txt
++          if [ ! -f "$f" ]; then echo "no claude-chips-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
++          cat "$f"
++          if grep -q '^FAIL' "$f"; then exit 1; fi
++          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
++
+       # Every Edit operation must WORK, not just not crash (Mac Edit audit 2026-11-08, plans/mac-edit-audit.md): each runs
+       # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
+       # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
+diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
+index 9bf7c43..1c3cda7 100644
+--- a/mac/Muse/App/AppStore+OneClaude.swift
++++ b/mac/Muse/App/AppStore+OneClaude.swift
+@@ -35,6 +35,8 @@ final class OneClaudeState {
+     var answeredCards: [String: String] = [:]
+     var answering: Set<String> = []
+     var undoing: Set<String> = []
++    /// The Suite's own Claude panel's live chips (nil: its fixed ones, SuiteAssistClaude.suggestions).
++    var suiteChips: [ClaudeChip]?
+     /// The quick-action chips over the composer, for the page Claude sees.
+     var chips: [ClaudeChip] = ClaudeChip.fallback(page: nil, tool: nil)
+     /// A job started from a card (its progress fills the activity strip until it ends).
+@@ -49,6 +51,13 @@ final class OneClaudeState {
+     var models: ClaudeModelList?
+ 
+     @ObservationIgnored var feedTask: Task<Void, Never>?
++    /// Live chips (owner 2026-11-12): the pending refresh, the Edit page's facts as it sees them, the edit's assets (a new
++    /// video or sound = "just imported" for two minutes) and the page the chips are for (their places stay steady there).
++    @ObservationIgnored var chipsTask: Task<Void, Never>?
++    @ObservationIgnored var editFacts: ClaudeSuggestQuery?
++    @ObservationIgnored var editAssets: Set<String>?
++    @ObservationIgnored var imported: ClaudeImported?
++    @ObservationIgnored var chipsPage: String?
+     @ObservationIgnored var pageTask: Task<Void, Never>?
+     @ObservationIgnored var lastSentPage: ClaudePage?
+     @ObservationIgnored var lastSentChat: String?
+@@ -59,6 +68,13 @@ final class OneClaudeState {
+     var current: ClaudeChatSummary? { chats.first { $0.id == chatId } }
+ }
+ 
++/// A video or sound that just came into the open edit (the chips offer to watch or listen to it for two minutes).
++struct ClaudeImported {
++    var kind: String
++    var id: String
++    var at: Date
++}
++
+ extension AppStore {
+     // MARK: The page the person is on
+ 
+@@ -200,7 +216,7 @@ extension AppStore {
+             guard let self, !Task.isCancelled else { return }
+             await self.oneClaudeLinkSuite()
+             let p = self.claudePage
+-            if p.name != self.oneClaude.lastSentPage?.name || p.tool != self.oneClaude.lastSentPage?.tool { await self.loadClaudeChips() }
++            if p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat { await self.loadClaudeChips() }
+             guard p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat else { return }
+             try? await api.setChatPage(id, page: p)
+             self.oneClaude.lastSentPage = p
+@@ -392,16 +408,75 @@ extension AppStore {
+         return min(1, max(0, j.progress > 1 ? j.progress / 100 : j.progress))
+     }
+ 
+-    /// The chips for the page Claude sees (the server's list; this app's copy when it is older or offline).
+-    func loadClaudeChips() async {
++    /// What is on screen changed (the edit, the composer, a reply, a job): new live chips after a moment (~1 s), so a
++    /// burst of changes asks once.
++    func claudeChipsChanged(now: Bool = false) {
++        guard oneClaude.open else { return }
++        oneClaude.chipsTask?.cancel()
++        oneClaude.chipsTask = Task { [weak self] in
++            if !now { try? await Task.sleep(nanoseconds: 1_000_000_000) }
++            guard let self, !Task.isCancelled else { return }
++            await self.loadClaudeChips()
++        }
++    }
++
++    /// The Edit page's facts (EditSuiteView): asks for new chips when they change; a new video or sound in the edit is
++    /// "just imported".
++    func claudeEditChanged(_ facts: ClaudeSuggestQuery?, assets: [String: String] = [:]) {
++        guard let facts else {
++            oneClaude.editFacts = nil
++            oneClaude.editAssets = nil
++            oneClaude.imported = nil
++            return
++        }
++        if let known = oneClaude.editAssets,
++           let new = assets.filter({ !known.contains($0.key) && ($0.value == "video" || $0.value == "audio") }).min(by: { $0.key < $1.key }) {
++            oneClaude.imported = ClaudeImported(kind: new.value, id: new.key, at: Date())
++        }
++        oneClaude.editAssets = Set(assets.keys)
++        guard facts != oneClaude.editFacts else { return }
++        oneClaude.editFacts = facts
++        claudeChipsChanged()
++    }
++
++    /// Jobs that ended (done or failed): a change asks for new chips ("Why did it fail?", "Watch the new take").
++    var claudeJobsEnded: String {
++        let ended = jobs.filter { $0.isDone || $0.isFailed }
++        return "\(ended.count)·\(ended.filter(\.isFailed).count)"
++    }
++
++    /// The Suite's own Claude panel (Shot composer): its chips follow the composer too (same server rules, page suite).
++    func loadSuiteSuggestions() async {
++        guard let api = oneClaudeAPI, let a = suite.claude.assist else { return }
++        let q = ClaudeSuggestQuery(page: ClaudePage(name: "suite", tool: suite.composer.tool.rawValue, ids: ["assistId": a.id]), chatId: nil)
++        guard let list = try? await api.claudeSuggestions(q), !list.isEmpty else { return }
++        let old = oneClaude.suiteChips ?? []
++        let next = ClaudeChip.steady(old: old, new: list)
++        if oneClaude.suiteChips != next { oneClaude.suiteChips = next }
++    }
++
++    /// What the server needs for the live chips: the page Claude sees, the chat, and on Edit what is on screen there.
++    var claudeSuggestQuery: ClaudeSuggestQuery {
+         let p = claudePage
+-        var list = ClaudeChip.fallback(page: p.name, tool: p.tool)
++        var q = (p.name == "edit" ? oneClaude.editFacts : nil)?.on(p, chatId: oneClaude.chatId) ?? ClaudeSuggestQuery(page: p, chatId: oneClaude.chatId)
++        if p.name == "edit", let i = oneClaude.imported, Date().timeIntervalSince(i.at) < 120 { q.imported = i.kind; q.importedId = i.id }
++        return q
++    }
++
++    /// The chips for what Claude sees now (the server's live list; the page's fixed copy when it is older or offline).
++    /// On the same page a chip that stays keeps its place, so the row doesn't jump.
++    func loadClaudeChips() async {
++        let q = claudeSuggestQuery
++        var list = ClaudeChip.fallback(page: q.page, tool: q.tool)
+         if let api = oneClaudeAPI {
+-            do { list = try await api.claudeChips(page: p.name, tool: p.tool); oneClaude.serverCards = true }
++            do { list = try await api.claudeSuggestions(q); oneClaude.serverCards = true }
+             catch let e as ApiError where e.code == "not_found" { oneClaude.serverCards = false }
+             catch {}
+         }
+-        if oneClaude.chips != list { oneClaude.chips = list }
++        let samePage = oneClaude.chipsPage == q.page
++        let next = samePage ? ClaudeChip.steady(old: oneClaude.chips, new: list) : list
++        oneClaude.chipsPage = q.page
++        if oneClaude.chips != next { oneClaude.chips = next }
+     }
+ 
+     /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.
+diff --git a/mac/Muse/App/ClaudeCodeService.swift b/mac/Muse/App/ClaudeCodeService.swift
+index da8afdc..a8054d8 100644
+--- a/mac/Muse/App/ClaudeCodeService.swift
++++ b/mac/Muse/App/ClaudeCodeService.swift
+@@ -530,6 +530,8 @@ final class ClaudeCodeService: ObservableObject {
+     // MARK: Claude's orb (one state machine, MuseCore ClaudeOrb): fed by real events only
+ 
+     @Published private(set) var orb = ClaudeOrb()
++    /// Claude's finished turns in the open chat (live chips ask again after each reply).
++    @Published private(set) var turnsEnded = 0
+     static var now: Double { Date().timeIntervalSinceReferenceDate }
+ 
+     /// The open chat's stream (this Mac's own turns and other devices' turns).
+@@ -540,6 +542,7 @@ final class ClaudeCodeService: ObservableObject {
+         case .text, .assistant, .tool, .image: orb.chunk(at: now)
+         case .done(let ok, _, _):
+             orb.turnEnded(ok: ok, at: now)
++            turnsEnded &+= 1
+             if !ok { orbErrorEnds() }
+         }
+     }
+diff --git a/mac/Muse/App/SnapshotRunner+ClaudeChips.swift b/mac/Muse/App/SnapshotRunner+ClaudeChips.swift
+new file mode 100644
+index 0000000..4efaf07
+--- /dev/null
++++ b/mac/Muse/App/SnapshotRunner+ClaudeChips.swift
+@@ -0,0 +1,92 @@
++import AppKit
++import MuseCore
++
++/// Live chips check (Mac CI, owner 2026-11-12: "make the chips real-time suggestions that fit what is on screen"). In review
++/// mode, through the real Edit page and the one-Claude panel: an edit without captions must offer "Add captions"; once
++/// captions are on, the row must change ("Restyle the captions", no "Add captions") within the ~1 s refresh, a chip that
++/// stays must keep its place, and the app must have sent what it sees (clips, captions) to the suggestions call. Shots:
++/// `mac_a_edit_chips_no_captions.png` and `mac_a_edit_chips_captions.png`. Writes `claude-chips-check.txt`; CI fails on
++/// any FAIL line or a missing ALL DONE. (Demo mode answers with MuseCore's copy of the server's Edit rules.)
++extension SnapshotRunner {
++    static func claudeChipsCheck(_ store: AppStore, dir: URL) async {
++        let log = dir.appendingPathComponent("claude-chips-check.txt")
++        try? Data().write(to: log)
++        func note(_ s: String) {
++            guard let h = try? FileHandle(forWritingTo: log) else { return }
++            h.seekToEndOfFile()
++            h.write(Data((s + "\n").utf8))
++            try? h.synchronize()
++            try? h.close()
++            print("claude-chips-check: \(s)")
++        }
++        func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
++            note(ok ? "DONE \(name)" : "FAIL \(name)\(detail().isEmpty ? "" : ": \(detail())")")
++        }
++        func wait(_ seconds: Double, _ ok: () -> Bool) async -> Bool {
++            let end = Date().addingTimeInterval(seconds)
++            while Date() < end { if ok() { return true }; try? await Task.sleep(for: .milliseconds(200)) }
++            return ok()
++        }
++        guard let fake = store.api as? FakeMuseAPI else { note("FAIL not in demo mode"); note("ALL DONE"); return }
++        _ = await wait(15) { ClaudeCodeService.shared.configured }
++        let fakeClaude = ClaudeCodeService.shared.api as? FakeClaudeAPI
++        store.themeID = .a
++        let media = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-claude-chips", isDirectory: true)
++        try? FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
++        let clip = media.appendingPathComponent("chips.mp4")
++        do { try await makeVideo(clip, seconds: 6, fps: 30, width: 360, height: 640, audio: (48_000, 2)) } catch {
++            note("FAIL making the test video: \(error.localizedDescription)"); note("ALL DONE"); return
++        }
++        let raw: [String: Any] = ["id": "rz_chips", "kind": "take", "title": "Chips walk", "videoUrl": clip.absoluteString, "durationSec": 6,
++                                  "width": 360, "height": 640, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
++        guard let data = try? JSONSerialization.data(withJSONObject: raw), let take = try? JSONDecoder().decode(Take.self, from: data) else {
++            note("FAIL decoding the test take"); note("ALL DONE"); return
++        }
++        store.takes.removeAll { $0.id == take.id }
++        store.takes.insert(take, at: 0)
++        await fake.adoptTakes([take])
++
++        note("START open_edit")
++        store.openEdit(takeId: take.id)
++        guard await wait(25, { store.suite.editCurrent?.isReady == true && store.suite.editCurrent?.take.id == take.id }),
++              let s = store.suite.editCurrent else {
++            note("FAIL open_edit: the editor didn't open (\(String(describing: store.suite.editCurrent?.phase)))"); note("ALL DONE"); return
++        }
++        // No platform view (its safe-area chip would lead), no text, no captions, no music.
++        s.view { $0.safeArea = nil }
++        store.showOneClaude()
++        _ = await wait(10) { store.oneClaude.chatId != nil }
++        store.claudeChipsChanged(now: true)
++
++        note("START no_captions")
++        let before = await wait(10) { store.oneClaude.chips.contains { $0.label == "Add captions" } }
++        let first = store.oneClaude.chips.map(\.label)
++        check("no_captions_chips", before && !first.contains("Restyle the captions"), "chips \(first)")
++        if let fc = fakeClaude {
++            let q = fc.suggestionQueries.last
++            check("query_sent", q?.page == "edit" && q?.captions == false && (q?.clips ?? 0) > 0, "last query \(q?.queryString ?? "none")")
++        }
++        try? await Task.sleep(for: .seconds(0.5))   // the crossfade has ended
++        capture(dir.appendingPathComponent("mac_a_edit_chips_no_captions.png"))
++
++        note("START captions")
++        if let asset = s.project.mainClips.first?.asset {
++            s.edit { $0.setCaptions(words: [EditV2.Word(text: "Hello", startSec: 0.2, endSec: 0.6), EditV2.Word(text: "world", startSec: 0.6, endSec: 1.1)], assetId: asset) }
++        } else { note("FAIL captions: the edit has no main clip") }
++        let changed = await wait(10) { store.oneClaude.chips.contains { $0.label == "Restyle the captions" } }
++        let second = store.oneClaude.chips.map(\.label)
++        check("captions_chips", changed && !second.contains("Add captions"), "chips \(second)")
++        check("chips_changed", first != second, "before \(first), after \(second)")
++        // Steady: a chip in both rows keeps its place.
++        let kept = first.filter(second.contains)
++        check("steady_order", kept.allSatisfy { first.firstIndex(of: $0) == second.firstIndex(of: $0) }, "before \(first), after \(second)")
++        check("three_chips", first.count == 3 && second.count == 3, "\(first.count) and \(second.count)")
++        try? await Task.sleep(for: .seconds(0.5))
++        capture(dir.appendingPathComponent("mac_a_edit_chips_captions.png"))
++
++        store.oneClaude.open = false
++        store.go(.home)
++        try? await Task.sleep(for: .seconds(1))
++        note("ALL DONE")
++    }
++}
+diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
+index c89ac23..7059c35 100644
+--- a/mac/Muse/App/SnapshotRunner.swift
++++ b/mac/Muse/App/SnapshotRunner.swift
+@@ -180,6 +180,7 @@ enum SnapshotRunner {
+             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
+             await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
++            await claudeChipsCheck(store, dir: dir)   // Live chips (owner 2026-11-12): Edit without vs with captions, different chips
+             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
+             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
+             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
+diff --git a/mac/Muse/Views/Claude/ChatComposer.swift b/mac/Muse/Views/Claude/ChatComposer.swift
+index a123493..1e9a780 100644
+--- a/mac/Muse/Views/Claude/ChatComposer.swift
++++ b/mac/Muse/Views/Claude/ChatComposer.swift
+@@ -316,6 +316,7 @@ struct ChatComposerBar: View {
+     var chips: [ClaudeChip] = []
+     var onPick: ((ChatAttachKind) -> Void)?
+     @State private var height: CGFloat = 0
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+     @State private var focus = 0
+     @State private var focused = false
+ 
+@@ -342,8 +343,11 @@ struct ChatComposerBar: View {
+                             .disabled(busy || held)
+                             .help(s.label)
+                             .accessibilityLabel("Ask Claude: \(s.label)")
++                            .transition(.opacity)
+                     }
+                 }
++                // Live chips change with the screen: a short crossfade, none with Reduce Motion.
++                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: suggestions)
+             }
+             if !chips.isEmpty {
+                 ScrollView(.horizontal, showsIndicators: false) {
+@@ -360,8 +364,10 @@ struct ChatComposerBar: View {
+                             .disabled(busy || held)
+                             .help(c.prompt)
+                             .accessibilityLabel("Ask Claude: \(c.label)")
++                            .transition(.opacity)
+                         }
+                     }
++                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: chips)
+                 }
+             }
+             if let top { top }
+diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
+index 67fc7d6..614c49a 100644
+--- a/mac/Muse/Views/Claude/OneClaudePanel.swift
++++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
+@@ -57,6 +57,10 @@ struct OneClaudePanel: View {
+             Button("Cancel", role: .cancel) {}
+         } message: { Text(OneClaudeDeleteAsk.keeps) }
+         .onChange(of: store.claudePage) { _, _ in store.oneClaudePageChanged() }
++        // Live chips: after each Claude reply, when one of the person's jobs ends, when the Suite composer changes.
++        .onChange(of: service.turnsEnded) { _, _ in store.claudeChipsChanged() }
++        .onChange(of: store.claudeJobsEnded) { _, _ in store.claudeChipsChanged() }
++        .onChange(of: store.suite.composer) { _, _ in if store.screen == .suite { store.claudeChipsChanged() } }
+         // Claude's orb (MuseCore ClaudeOrb) hears what waits for the person and the job Claude started.
+         .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
+         .onChange(of: store.claudeJobProgress, initial: true) { _, p in
+diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
+index b461df8..5402871 100644
+--- a/mac/Muse/Views/Edit/EditSuiteView.swift
++++ b/mac/Muse/Views/Edit/EditSuiteView.swift
+@@ -375,7 +375,12 @@ struct EditSuiteEditor: View {
+         }
+         // One Claude: Claude sees this edit (its take and live session).
+         .onChange(of: session.liveConnected) { _, _ in reportClaudePage() }
+-        .onDisappear { store.oneClaude.viewPage = nil }
++        .onDisappear { store.oneClaude.viewPage = nil; store.claudeEditChanged(nil) }
++        // Live chips (owner 2026-11-12): what is on the timeline now (captions, music and beats, the selection, text
++        // outside the platform view's safe area, unsaved); the store asks the server again after a moment.
++        .onChange(of: claudeFacts, initial: true) { _, q in
++            store.claudeEditChanged(q, assets: Dictionary(session.state.project.assets.map { ($0.id, $0.kind.rawValue) }, uniquingKeysWith: { a, _ in a }))
++        }
+         // Shortcuts are off while a text box has the cursor (owner bug 2026-11-11: typing in Claude chat played,
+         // split or deleted clips). The table lives in MuseCore (EditShortcuts) with its tests.
+         .onKeyPress(.space) { shortcut(.space) }
+@@ -468,6 +473,14 @@ struct EditSuiteEditor: View {
+         return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
+     }
+ 
++    /// The edit as the live chips need it (ClaudeSuggestQuery.edit in MuseCore).
++    private var claudeFacts: ClaudeSuggestQuery {
++        var q = ClaudeSuggestQuery(page: nil)
++        q.edit(project: session.state.project, selection: session.state.selection, safeArea: session.state.safeArea,
++               unsaved: session.state.hasUnsavedChanges)
++        return q
++    }
++
+     private func reportClaudePage() {
+         var ids = ["takeId": session.take.id]
+         if let s = session.live?.sessionId { ids["sessionId"] = s }
+diff --git a/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift b/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift
+index 57ff9fb..39d7e4e 100644
+--- a/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift
++++ b/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift
+@@ -11,6 +11,16 @@ import UniformTypeIdentifiers
+ struct SuiteClaudePanel: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
++    @ObservedObject private var service: ClaudeCodeService = .shared
++
++    /// Live chips (owner 2026-11-12): the server's chips for this composer now; the fixed ones until they come or offline.
++    private var liveSuggestions: [RecreateClaude.Suggestion] {
++        guard !store.isDemo, let live = store.oneClaude.suiteChips, !live.isEmpty else { return SuiteAssistClaude.suggestions }
++        return live.map { RecreateClaude.Suggestion(label: $0.label, prompt: $0.prompt) }
++    }
++
++    /// What the chips depend on: the composer, the shared draft's revision, Claude's replies.
++    private struct ChipsKey: Hashable { var composer: ComposerDraft; var assist: String?; var revision: Int?; var turns: Int }
+ 
+     var body: some View {
+         let c = store.suite.claude
+@@ -39,6 +49,13 @@ struct SuiteClaudePanel: View {
+         .overlay(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, lineWidth: 1))
+         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude panel") } }
+         .accessibilityElement(children: .contain)
++        // Asked again ~1 s after the composer, the shared draft or Claude's last reply changes (the change cancels the wait).
++        .task(id: ChipsKey(composer: store.suite.composer, assist: store.suite.claude.assist?.id,
++                           revision: store.suite.claude.assist?.revision, turns: service.turnsEnded)) {
++            try? await Task.sleep(nanoseconds: 1_000_000_000)
++            guard !Task.isCancelled, !store.isDemo else { return }
++            await store.loadSuiteSuggestions()
++        }
+         // Reference images dropped anywhere on the panel attach to the next message.
+         .dropDestination(for: URL.self) { urls, _ in
+             let files = urls.filter(\.isFileURL)
+@@ -61,7 +78,7 @@ struct SuiteClaudePanel: View {
+         } else if let a = c.assist {
+             ClaudeChatView(contextKind: "suite", contextId: a.id, title: "Claude", showsHeader: false,
+                            placeholder: "Describe the shot…",
+-                           suggestions: SuiteAssistClaude.suggestions,
++                           suggestions: liveSuggestions,
+                            emptyHint: SuiteClaudeWords.emptyHint,
+                            wrapOutgoing: { [store] text in store.suiteClaudeOutgoing(text) },
+                            unwrapShown: SuiteAssistClaude.stripContext, sendShortcut: false)
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+index bab45f0..db23a55 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+@@ -86,6 +86,8 @@ public protocol ClaudeAPI: Sendable {
+     /// Cards: Undo one row of a "What I changed" card; the page's quick-action chips.
+     func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo
+     func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip]
++    /// Live chips for what is on screen now (GET v1/claude/suggestions); the page's fixed chips from an older server.
++    func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip]
+ }
+ 
+ /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
+@@ -117,6 +119,7 @@ public extension ClaudeAPI {
+     func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {}
+     func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo { throw ApiError("not_found", "This server can't undo from the chat yet") }
+     func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip] { ClaudeChip.fallback(page: page, tool: tool) }
++    func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] { try await claudeChips(page: q.page, tool: q.tool) }
+ }
+ 
+ enum ClaudeIds {
+@@ -314,6 +317,17 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+             return ClaudeChip.fallback(page: page, tool: tool) // no server now: this app's own copy (not_found: an older server, the caller decides)
+         }
+     }
++    public func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] {
++        do {
++            let l: ClaudeSuggestionList = try await call("GET", "v1/claude/suggestions?" + q.queryString)
++            if l.chips.isEmpty { return try await claudeChips(page: q.page, tool: q.tool) }
++            return l.chips
++        } catch let e as ApiError where e.code == "not_found" {
++            return try await claudeChips(page: q.page, tool: q.tool)   // an older server: the page's fixed chips
++        } catch let e as ApiError where e.code == "offline" {
++            return ClaudeChip.fallback(page: q.page, tool: q.tool)
++        }
++    }
+     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
+         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeSuggest.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeSuggest.swift
+new file mode 100644
+index 0000000..9abe9b5
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeSuggest.swift
+@@ -0,0 +1,151 @@
++import Foundation
++
++/// Live suggestion chips (owner request 2026-11-12): the chips over Claude's input follow what is on screen and what just
++/// happened. The server holds the rules (server/api/src/claude/suggest.ts, GET v1/claude/suggestions); the app tells it
++/// what only the app knows (the selection, the platform view, unsaved changes, a clip just imported, and the open edit as
++/// it is on screen now, which the server's copy can lag), and keeps the chips' order steady while they change.
++public struct ClaudeSuggestQuery: Hashable, Sendable {
++    public var page: String?
++    public var tool: String?
++    /// The page's open ids (sessionId, assistId, takeId, referenceId) and the chat (for follow-ups on Claude's last reply).
++    public var ids: [String: String] = [:]
++    public var chatId: String?
++    // The Edit page, as the app sees it.
++    public var selKind: String?
++    public var selId: String?
++    /// Platform view ("tiktok", "reels", "shorts"); nil = none.
++    public var view: String?
++    public var unsaved = false
++    public var imported: String?
++    public var importedId: String?
++    public var clips: Int?
++    public var captions: Bool?
++    public var musicId: String?
++    public var beats: Bool?
++    public var blank: Bool?
++    /// Text ids outside the platform view's safe area.
++    public var offSafe: [String] = []
++
++    public init(page: ClaudePage?, chatId: String? = nil) {
++        self.page = page?.name
++        self.tool = page?.tool
++        self.ids = (page?.ids ?? [:]).filter { ["sessionId", "assistId", "takeId", "referenceId"].contains($0.key) }
++        self.chatId = chatId
++    }
++
++    /// These facts on another page and chat (the Edit page's facts are kept while its page is the one shown).
++    public func on(_ page: ClaudePage?, chatId: String?) -> ClaudeSuggestQuery {
++        var q = self
++        let fresh = ClaudeSuggestQuery(page: page, chatId: chatId)
++        q.page = fresh.page; q.tool = fresh.tool; q.ids = fresh.ids; q.chatId = fresh.chatId
++        return q
++    }
++
++    /// The query string (sorted, so the same facts always make the same request). Ids that aren't plain are left out.
++    public var queryString: String {
++        var q: [(String, String)] = []
++        func add(_ k: String, _ v: String?) { if let v, Self.plain(v) { q.append((k, v)) } }
++        add("page", page); add("tool", tool)
++        for (k, v) in ids { add(k, v) }
++        add("chatId", chatId); add("selKind", selKind); add("selId", selId); add("view", view)
++        if unsaved { q.append(("unsaved", "1")) }
++        add("imported", imported); add("importedId", importedId)
++        if let clips { q.append(("clips", String(max(0, min(9999, clips))))) }
++        if let captions { q.append(("captions", captions ? "1" : "0")) }
++        add("musicId", musicId)
++        if let beats { q.append(("beats", beats ? "1" : "0")) }
++        if let blank { q.append(("blank", blank ? "1" : "0")) }
++        let off = offSafe.filter(Self.plain).prefix(20)
++        if !off.isEmpty { q.append(("offSafe", off.joined(separator: ","))) }
++        return q.sorted { $0.0 < $1.0 }.map { "\($0.0)=\($0.1)" }.joined(separator: "&")
++    }
++
++    static func plain(_ s: String) -> Bool {
++        !s.isEmpty && s.count <= 80 && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
++    }
++
++    /// The open edit's facts: main clips, captions, the music and its marked beats, the selection, the platform view and
++    /// the text outside its safe area (`EditSuite.SafeArea.insets`), unsaved changes.
++    public mutating func edit(project p: EditV2.Project, selection: String?, safeArea: EditSuite.SafeArea?, unsaved: Bool) {
++        var clips = 0, captions = false, music: String?, beats = false, texts: [(String, Double, Double)] = []
++        var kinds: [String: EditV2.TrackKind] = [:]
++        for t in p.tracks {
++            if t.kind == .caption, let c = t.caption, !c.words.isEmpty { captions = true }
++            for it in t.items {
++                kinds[it.id] = t.kind
++                if t.kind == .main { clips += 1 }
++                if t.kind == .music, music == nil, case .audio(let a) = it { music = a.id; beats = !(a.strongBeats ?? []).isEmpty }
++                if t.kind == .text, case .text(let x) = it, x.pin == nil { texts.append((x.id, x.transform?.x ?? 0.5, x.transform?.y ?? 0.5)) }
++            }
++        }
++        self.clips = clips
++        self.captions = captions
++        self.musicId = music
++        self.beats = music == nil ? nil : beats
++        self.blank = p.isBlank && clips == 0
++        self.unsaved = unsaved
++        self.view = safeArea?.rawValue
++        if let s = safeArea {
++            let i = s.insets
++            offSafe = texts.filter { $0.1 < i.left || $0.1 > 1 - i.right || $0.2 < i.top || $0.2 > 1 - i.bottom }.map { $0.0 }
++        } else { offSafe = [] }
++        if let sel = selection, let k = kinds[sel] {
++            selId = sel
++            switch k {
++            case .main, .video: selKind = "video"
++            case .image: selKind = "image"
++            case .text: selKind = "text"
++            case .music, .voice, .sfx: selKind = "audio"
++            case .caption: selKind = "caption"
++            case .adjust: selKind = nil; selId = nil
++            }
++        } else { selKind = nil; selId = nil }
++    }
++}
++
++public extension ClaudeChip {
++    /// Steady chips: a chip that stays keeps its place, new ones take the freed places in the server's order, so the row
++    /// doesn't jump about when one chip changes.
++    static func steady(old: [ClaudeChip], new: [ClaudeChip]) -> [ClaudeChip] {
++        guard !old.isEmpty else { return new }
++        var rest = new.filter { n in !old.contains { $0.label == n.label } }
++        var out: [ClaudeChip] = []
++        for o in old {
++            if let n = new.first(where: { $0.label == o.label }) { out.append(n) }
++            else if !rest.isEmpty { out.append(rest.removeFirst()) }
++        }
++        out.append(contentsOf: rest)
++        return Array(out.prefix(new.count))
++    }
++}
++
++/// GET v1/claude/suggestions → `{chips, key}`.
++public struct ClaudeSuggestionList: Codable, Hashable, Sendable {
++    public var chips: [ClaudeChip]
++    public var key: String?
++}
++
++public extension ClaudeChip {
++    /// Demo mode and tests only (FakeClaudeAPI): a small copy of the server's Edit rules, same labels and prompts. The
++    /// server's rules (suggest.ts) are the real ones; this only lets review mode show the row changing without a server.
++    static func demoSuggestions(_ q: ClaudeSuggestQuery) -> [ClaudeChip] {
++        guard q.page == "edit", let clips = q.clips else { return fallback(page: q.page, tool: q.tool) }
++        var out: [ClaudeChip] = []
++        if let v = q.view, !q.offSafe.isEmpty, let s = EditSuite.SafeArea(rawValue: v) {
++            out.append(ClaudeChip(label: "Fix the safe area", prompt: "In the \(s.label) view, my text \(q.offSafe.prefix(6).joined(separator: ", ")) sits outside the safe area (under the app's buttons). Move it inside the safe area with apply_edit_ops, keeping its look.", icon: "frame-corners"))
++        }
++        if q.blank == true, clips == 0 {
++            out.append(ClaudeChip(label: "Find takes to use", prompt: "This edit is empty. Find takes in my library that would work for it (library_find) and suggest which to add.", icon: "magnifying-glass"))
++        } else {
++            if q.captions != true, clips > 0 { out.append(ClaudeChip(label: "Add captions", prompt: "Add captions to this edit (auto_captions). Tell me the price first if it isn't free.", icon: "text-aa")) }
++            if let m = q.musicId, q.beats != true { out.append(ClaudeChip(label: "Cut to the beat", prompt: "Find the beats in my music \(m) (detect_beats) and cut the clips to them (apply_edit_ops).", icon: "scissors")) }
++            if let m = q.musicId, q.beats == true { out.append(ClaudeChip(label: "Cut to the drop", prompt: "Cut my edit so its biggest moment lands on the drop: use the strong beats marked on \(m) and the action peaks (find_action_peaks), then apply_edit_ops.", icon: "lightning")) }
++            if q.musicId == nil, q.captions != true, clips > 0 { out.append(ClaudeChip(label: "Cut the silences", prompt: "Cut the quiet parts out of my main video (cut_silences, free). Tell me how much shorter it is.", icon: "waveform")) }
++            if q.captions == true { out.append(ClaudeChip(label: "Restyle the captions", prompt: "Pick a caption style that fits this edit (list_caption_styles) and apply it (apply_edit_ops). Tell me which one and why.", icon: "text-aa")) }
++            out.append(ClaudeChip(label: "Watch my edit", prompt: "Watch my edit and tell me what to fix.", icon: "play-circle"))
++        }
++        // Like the server: with the edit's facts known, only the general chips fill (never "Cut to the beat" with no music).
++        for c in fallback(page: nil, tool: nil) where out.count < 3 && !out.contains(where: { $0.label == c.label }) { out.append(c) }
++        return Array(out.prefix(3))
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
+index d0fded3..e0d58e5 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
+@@ -25,6 +25,14 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
+ 
+     public init(now: @escaping () -> Double = { Date().timeIntervalSince1970 * 1000 }) { self.now = now }
+ 
++    /// Live chips (GET v1/claude/suggestions): the queries asked, for review-mode checks; answered by the demo copy of
++    /// the server's Edit rules.
++    public private(set) var suggestionQueries: [ClaudeSuggestQuery] = []
++    public func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] {
++        locked { suggestionQueries.append(q) }
++        return ClaudeChip.demoSuggestions(q)
++    }
++
+     private func locked<T>(_ f: () throws -> T) rethrows -> T {
+         lock.lock()
+         defer { lock.unlock() }
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeSuggestTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeSuggestTests.swift
+new file mode 100644
+index 0000000..9b70465
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeSuggestTests.swift
+@@ -0,0 +1,76 @@
++import XCTest
++@testable import MuseCore
++
++/// Live suggestion chips (owner 2026-11-12): what the Mac tells the server about the open edit, the steady order, and the
++/// demo copy of the server's Edit rules (server/api/src/claude/suggest.ts is the real one).
++final class ClaudeSuggestTests: XCTestCase {
++    typealias E = EditV2
++
++    private func project(captions: Bool = false, music: Bool = false, beats: Bool = false, textAt: (Double, Double)? = nil) -> E.Project {
++        let a = E.Asset(id: "src", kind: .video, take: "t1", durationSec: 8, width: 1080, height: 1920, hasAudio: true)
++        var tracks = [E.Track(id: "main", kind: .main, items: [.video(E.VideoClip(id: "c1", asset: "src", inSec: 0, outSec: 8))])]
++        if music { tracks.append(E.Track(id: "mu", kind: .music, items: [.audio(E.AudioClip(id: "mus_1", asset: "src", startSec: 0, inSec: 0, outSec: 8, strongBeats: beats ? [1, 2] : nil))])) }
++        if let at = textAt {
++            tracks.append(E.Track(id: "tx", kind: .text, items: [.text(E.TextItem(id: "txt_1", startSec: 0, durationSec: 2, text: "Hi",
++                style: E.TextStyle(font: .sans, weight: 700, sizePct: 0.06, color: "#FFFFFF", align: .center), transform: E.Transform(x: at.0, y: at.1)))]))
++        }
++        if captions, let style = E.captionStyles[.plain] {
++            tracks.append(E.Track(id: "cap", kind: .caption, items: [], caption: E.CaptionTrack(asset: "src", words: [E.CaptionWord(text: "hi", startSec: 0, endSec: 0.4)], style: style)))
++        }
++        return E.Project(sourceTakeId: "t1", canvas: E.Canvas(width: 1080, height: 1920, fps: 30), assets: [a], tracks: tracks)
++    }
++
++    private func facts(_ p: E.Project, selection: String? = nil, safe: EditSuite.SafeArea? = nil, unsaved: Bool = false) -> ClaudeSuggestQuery {
++        var q = ClaudeSuggestQuery(page: ClaudePage(name: "edit", ids: ["sessionId": "es_1", "takeId": "t1"]), chatId: "ct_1")
++        q.edit(project: p, selection: selection, safeArea: safe, unsaved: unsaved)
++        return q
++    }
++
++    func testEditFactsAndQueryString() {
++        let q = facts(project(music: true), selection: "c1", safe: .tiktok, unsaved: true)
++        XCTAssertEqual(q.clips, 1)
++        XCTAssertEqual(q.captions, false)
++        XCTAssertEqual(q.musicId, "mus_1")
++        XCTAssertEqual(q.beats, false)
++        XCTAssertEqual(q.selKind, "video")
++        XCTAssertEqual(q.queryString,
++                       "beats=0&blank=0&captions=0&chatId=ct_1&clips=1&musicId=mus_1&page=edit&selId=c1&selKind=video&sessionId=es_1&takeId=t1&unsaved=1&view=tiktok")
++        XCTAssertEqual(facts(project(captions: true)).captions, true)
++        XCTAssertEqual(facts(project(music: true), selection: "mus_1").selKind, "audio")
++        XCTAssertNil(facts(project(), selection: "nope").selKind)
++    }
++
++    func testTextOutsideTheSafeArea() {
++        XCTAssertEqual(facts(project(textAt: (0.5, 0.95)), safe: .tiktok).offSafe, ["txt_1"])
++        XCTAssertEqual(facts(project(textAt: (0.5, 0.5)), safe: .tiktok).offSafe, [])
++        XCTAssertEqual(facts(project(textAt: (0.5, 0.95)), safe: nil).offSafe, [])   // no platform view, nothing to fix
++    }
++
++    func testOnAnotherPageKeepsTheEditFacts() {
++        let q = facts(project(captions: true)).on(ClaudePage(name: "edit", ids: ["sessionId": "es_2"]), chatId: nil)
++        XCTAssertEqual(q.ids, ["sessionId": "es_2"])
++        XCTAssertNil(q.chatId)
++        XCTAssertEqual(q.captions, true)
++    }
++
++    func testSteadyKeepsChipsInTheirPlaces() {
++        let c = { (l: String) in ClaudeChip(label: l, prompt: l, icon: "x") }
++        let old = [c("A"), c("B"), c("C")]
++        XCTAssertEqual(ClaudeChip.steady(old: old, new: [c("B"), c("D"), c("C")]).map(\.label), ["D", "B", "C"])
++        XCTAssertEqual(ClaudeChip.steady(old: old, new: [c("C"), c("B"), c("A")]).map(\.label), ["A", "B", "C"])
++        XCTAssertEqual(ClaudeChip.steady(old: [], new: [c("X"), c("Y")]).map(\.label), ["X", "Y"])
++        XCTAssertEqual(ClaudeChip.steady(old: old, new: [c("Z")]).map(\.label), ["Z"])
++    }
++
++    func testDemoChipsDifferWithCaptions() {
++        let without = ClaudeChip.demoSuggestions(facts(project(music: true))).map(\.label)
++        let with = ClaudeChip.demoSuggestions(facts(project(captions: true, music: true, beats: true))).map(\.label)
++        XCTAssertEqual(without, ["Add captions", "Cut to the beat", "Watch my edit"])
++        XCTAssertEqual(with, ["Cut to the drop", "Restyle the captions", "Watch my edit"])
++        XCTAssertNotEqual(without, with)
++        // No music, no captions: the free silence cut instead of beats; captions on: no "Add captions", no beats.
++        XCTAssertEqual(ClaudeChip.demoSuggestions(facts(project())).map(\.label), ["Add captions", "Cut the silences", "Watch my edit"])
++        XCTAssertEqual(ClaudeChip.demoSuggestions(facts(project(captions: true))).map(\.label), ["Restyle the captions", "Watch my edit", "What can you do"])
++        for l in without + with { XCTAssertLessThanOrEqual(l.split(separator: " ").count, 4, l) }
++    }
++}
