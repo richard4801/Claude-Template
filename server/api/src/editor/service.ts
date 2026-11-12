@@ -648,7 +648,8 @@ export class EditorAiService {
       const cancelled = e instanceof ReplicateError && e.kind === 'cancelled';
       if (row.holdTokens) await this.ctx.money.release(u.studioId, u.id, id, row.holdTokens, cancelled ? 'editor job cancelled' : 'editor job failed').catch(() => {});
       if (!cancelled) this.ctx.log.warn({ err: (e as Error).message, job: id, kind: row.kind }, 'editor job failed');
-      const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.message === GENJUTSU_NO_ACCESS ? GENJUTSU_NO_ACCESS : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
+      const msg = cancelled ? 'Cancelled' : e instanceof ReplicateError && e.message === GENJUTSU_NO_ACCESS ? GENJUTSU_NO_ACCESS
+        : e instanceof ReplicateError && /^Higgsfield/.test(e.message) && e.kind !== 'refused' ? `${e.message.replace(/https?:\/\/\S+/g, '<link>').slice(0, 300)} · you weren't charged` : e instanceof ReplicateError && e.kind === 'refused' ? 'This video was refused by the safety check'
         : e instanceof ReplicateError && e.kind === 'out_of_credit' ? 'The studio is out of AI credit · ask the owner'
         : e instanceof TranslateError ? (e.kind === 'refused' ? 'These captions couldn’t be translated · you weren’t charged' : 'Couldn’t translate these captions this time · you weren’t charged')
         : e instanceof ReplicateError && (row.kind === 'reverse' || row.kind === 'stabilize' || row.kind === 'slowmo') && /^(Reverse|Stabilise|Slow motion) works/.test(e.message) ? e.message : 'Something went wrong · try again';
