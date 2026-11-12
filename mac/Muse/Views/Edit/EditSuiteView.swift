@@ -391,16 +391,18 @@ struct EditSuiteEditor: View {
 
     @ViewBuilder private var messages: some View {
         if let e = session.lastError {
-            message(e, warn: true) { session.lastError = nil }
+            message(e, warn: true, recover: session.recoverOffer != nil ? { Task { await session.recover() } } : nil) { session.lastError = nil }
         } else if let n = session.notice {
             message(n, warn: false, file: session.noticeFile) { session.notice = nil }
         }
     }
 
-    private func message(_ text: String, warn: Bool, file: URL? = nil, dismiss: @escaping () -> Void) -> some View {
+    private func message(_ text: String, warn: Bool, file: URL? = nil, recover: (() -> Void)? = nil, dismiss: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             Ph(warn ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(warn ? t.roles.caution : t.roles.positive)
             Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(2)
+            // Already made and charged at the provider: Recover is free (owner only); running the helper again would pay again.
+            if let recover { MButton(ScreenCopy.recoverLabel, size: .small, action: recover) }
             if let file {
                 MButton("Show in Finder", size: .small) { NSWorkspace.shared.activateFileViewerSelecting([file]) }
             }

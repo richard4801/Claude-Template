@@ -85,6 +85,13 @@ final class EditSuiteSession {
     /// The newest transcript job (fillers / silences reuse it for free).
     private(set) var transcriptJobId: String?
     var lastError: String?
+    /// A helper the provider made but the server couldn't save: the owner's free Recover (shown with the error).
+    private(set) var recoverOffer: RecoverOffer?
+    struct RecoverOffer {
+        let kind: EditorJobKind
+        let jobId: String
+        let apply: (EditorJobResult) -> Void
+    }
     var notice: String? { didSet { if notice == nil { noticeFile = nil } } }
     /// The file the current notice is about (an export saved on this Mac): the notice offers "Show in Finder".
     var noticeFile: URL?
@@ -866,6 +873,7 @@ final class EditSuiteSession {
                 apply(r)
             } else if job.state == "failed" {
                 lastError = job.error ?? "That didn't work · try again"
+                if isOwner && job.canRecover { recoverOffer = RecoverOffer(kind: k, jobId: job.id, apply: apply) }
             }
         } catch {
             if var j = jobs[k], j.isRunning {
@@ -873,6 +881,27 @@ final class EditSuiteSession {
                 jobs[k] = j
             }
             if helperRefused(k, error) { return }
+            if !(error is CancellationError) { lastError = (error as? ApiError)?.message ?? "That didn't work · try again" }
+        }
+    }
+
+    /// Recover (owner, free): the saved provider request is fetched again and the result applied as usual.
+    func recover() async {
+        guard let offer = recoverOffer else { return }
+        recoverOffer = nil
+        lastError = nil
+        do {
+            try await api.recoverJob(id: offer.jobId)
+            var job = try await api.editorJob(id: offer.jobId)
+            jobs[offer.kind] = job
+            while job.isRunning {
+                try await Task.sleep(nanoseconds: 700_000_000)
+                job = try await api.editorJob(id: offer.jobId)
+                jobs[offer.kind] = job
+            }
+            if job.isDone, let r = job.result { offer.apply(r) }
+            else if job.state == "failed" { lastError = job.error ?? "That didn't work · try again" }
+        } catch {
             if !(error is CancellationError) { lastError = (error as? ApiError)?.message ?? "That didn't work · try again" }
         }
     }
