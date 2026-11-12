@@ -1,0 +1,1499 @@
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index 1f948b6b..07c6d7a3 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -536,6 +536,14 @@ final class EditSuiteSession {
+         edit { $0.addVideo(a, overlay: overlay) }
+     }
+ 
++    /// A take from the bin's "+" or dragged onto the timeline: placed like an upload (into the sequence at the playhead,
++    /// or where it was dropped).
++    func placeTake(_ t: Take, at: Double? = nil, lane: E.TrackKind? = nil) {
++        guard let a = takeAsset(t) else { return }
++        if let at { seek(at) }
++        edit { $0.place(a, at: at, lane: lane) }
++    }
++
+     /// A take as an asset of this edit (named after it).
+     private func takeAsset(_ t: Take) -> E.Asset? {
+         guard let d = t.durationSec, d > 0 else { lastError = "That take has no video yet"; return nil }
+@@ -556,20 +564,12 @@ final class EditSuiteSession {
+         if edit({ $0.replaceClip(with: a) }) { notice = "Clip replaced · its edits stay" }
+     }
+ 
+-    /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row.
++    /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row (Record
++    /// voice-over and Music → Add).
+     func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
+         guard isReady else { return }
+         do {
+-            let asset = AVURLAsset(url: url)
+-            let d = try await asset.load(.duration).seconds
+-            guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
+-            notice = "Uploading \(url.lastPathComponent)…"
+-            let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
+-            let id = project.newId("a")
+-            let a = E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
+-            files[id] = url
+-            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+-            notice = nil
++            let a = try await uploadAudio(url)
+             edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
+         } catch {
+             notice = nil
+@@ -577,45 +577,76 @@ final class EditSuiteSession {
+         }
+     }
+ 
+-    /// A video or picture from this Mac (Uploads / Stickers): uploaded as an editor upload, then added like a take (a video at
+-    /// the end of the main track, or as an overlay at the playhead) or as a picture at the playhead (Mac Edit audit: the
+-    /// Uploads tab could only take sounds, and pictures had no way in).
+-    func importMedia(_ url: URL, overlay: Bool = false) async {
++    /// Files from this Mac (Uploads → Add → From this Mac, or dropped on the media panel): each goes into Uploads as what
++    /// its file is (video, picture or sound); nothing is placed until "+" or a drag onto the timeline.
++    func addFiles(_ urls: [URL]) async {
+         guard isReady else { return }
+-        let ext = url.pathExtension.lowercased()
+-        do {
+-            if Self.pictureTypes[ext] != nil {
+-                guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
+-                // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
+-                let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: ext)
+-                notice = "Uploading \(url.lastPathComponent)…"
+-                let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+-                let id = project.newId("p")
+-                let a = E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
+-                files[id] = file
+-                state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        var added = 0
++        for url in urls {
++            let ext = url.pathExtension.lowercased()
++            do {
++                let a: E.Asset
++                switch EditSuite.UploadBin.kind(ofExtension: ext) {
++                case .video: a = try await uploadVideo(url)
++                case .picture: a = try await uploadPicture(url)
++                case .audio: a = try await uploadAudio(url)
++                case nil: throw ApiError("bad_media", ext.isEmpty ? "MUSE can't use that file. Add a video, picture or sound." : "MUSE can't use .\(ext) files. Add a video, picture or sound.")
++                }
++                if edit({ $0.addToBin(a) }) { added += 1 }
++            } catch {
+                 notice = nil
+-                // Selected, with the Video tab (Transform, blend, keyframes) open so it can be placed straight away.
+-                if edit({ $0.addImage(a) }) { view { $0.tab = .video } }
+-                return
++                lastError = (error as? ApiError)?.message ?? "Couldn't add \(url.lastPathComponent)"
+             }
+-            let info = try await VideoEditEngine.info(AVURLAsset(url: url))
+-            guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
+-            notice = "Uploading \(url.lastPathComponent)…"
+-            let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
+-            let id = project.newId("v")
+-            let audioTracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
+-            let sound = !audioTracks.isEmpty
+-            let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
+-                            hasAudio: sound)
+-            files[id] = url
+-            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+-            notice = nil
+-            edit { $0.addVideo(a, overlay: overlay) }
+-        } catch {
+-            notice = nil
+-            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
+         }
++        if added > 0 { binTab = .uploads }
++    }
++
++    /// An upload from the bin onto the timeline: at the playhead ("+"), or where it was dropped (`at`, on row `lane`).
++    func placeUpload(_ id: String, at: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) {
++        if let at { seek(at) }
++        let picture = project.asset(id)?.kind == .image
++        // A picture is selected with the Video tab (Transform, blend, keyframes) open, so it can be placed straight away.
++        if edit({ $0.placeUpload(id, at: at, lane: lane, audioKind: audioKind) }), picture { view { $0.tab = .video } }
++    }
++
++    private func uploadAudio(_ url: URL) async throws -> E.Asset {
++        let d = try await AVURLAsset(url: url).load(.duration).seconds
++        guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
++        notice = "Uploading \(url.lastPathComponent)…"
++        let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
++        let id = project.newId("a")
++        files[id] = url
++        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        notice = nil
++        return E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
++    }
++
++    private func uploadPicture(_ url: URL) async throws -> E.Asset {
++        guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
++        // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
++        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: url.pathExtension.lowercased())
++        notice = "Uploading \(url.lastPathComponent)…"
++        let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
++        let id = project.newId("p")
++        files[id] = file
++        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        notice = nil
++        return E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
++    }
++
++    private func uploadVideo(_ url: URL) async throws -> E.Asset {
++        let info = try await VideoEditEngine.info(AVURLAsset(url: url))
++        guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
++        notice = "Uploading \(url.lastPathComponent)…"
++        let ext = url.pathExtension.lowercased()
++        let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
++        let id = project.newId("v")
++        let sound = !(try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)).isEmpty
++        files[id] = url
++        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
++        notice = nil
++        return E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
++                       hasAudio: sound)
+     }
+ 
+     /// Picture types an editor upload takes (server `/v1/editor/uploads/presign`).
+@@ -644,7 +675,10 @@ final class EditSuiteSession {
+     static let pictureTypes: [String: String] = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "webp": "image/webp"]
+ 
+     /// Pictures in this edit (the Stickers tab lists them to add again).
+-    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image } }
++    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image && $0.library == nil } }
++
++    /// Uploads → the bin's tiles, newest first.
++    var uploads: [EditSuite.Upload] { EditSuite.UploadBin.items(project, names: state.assetNames) }
+ 
+     // MARK: Record VO (Edit suite, workstream 3)
+ 
+diff --git a/mac/Muse/App/SnapshotRunner+Edit.swift b/mac/Muse/App/SnapshotRunner+Edit.swift
+index 6eff9877..c1731f6b 100644
+--- a/mac/Muse/App/SnapshotRunner+Edit.swift
++++ b/mac/Muse/App/SnapshotRunner+Edit.swift
+@@ -91,6 +91,8 @@ extension SnapshotRunner {
+         await controlsCheck(store, takeId: "rx_full", note: note)
+         // Real AI editing (2026-11-08): paid helpers ask first with their price; the guardrails' answers show at the button.
+         await paidHelpersCheck(store, takeId: "rx_full", note: note)
++        // Edit → Uploads as a media bin (owner 2026-11-12): empty and with six uploads, dark and light (SnapshotRunner+Uploads.swift).
++        await uploadsShots(store, media: media, dir: dir, note: note)
+         store.takes.removeAll { $0.id.hasPrefix("rx_") }
+         store.go(.home)
+         // Round 2's new screens (outfit full view, Settings, the model picker): every control pressed once.
+@@ -309,7 +311,9 @@ extension SnapshotRunner {
+         let st = await ax.stats()
+         note("AX nodes \(st.nodes), actionable \(st.actionable), error \(st.error), screen \(store.screen), sample: \(st.sample)")
+         guard ready else { note("FAIL controls: the editor (\(editorMarker)) never appeared to accessibility on \(takeId)"); return }
+-        let deny: Set<String> = ["Import", ".cube import", "Import video or picture", "Import picture", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
++        let deny: Set<String> = [".cube import",
++                                 // The media panel (owner 2026-11-12): its Add menus and the empty drop zone open file panels or the microphone.
++                                 "Add to Uploads", "Add a sticker", "Add a song from this Mac", "Add files from this Mac", "Stop recording the voice-over",
+                                  "Back", "Close the editor", "Translate…",
+                                  // The Claude chat's "+" opens a file panel (a modal that would stop the walk).
+                                  "Attach images",
+diff --git a/mac/Muse/App/SnapshotRunner+Uploads.swift b/mac/Muse/App/SnapshotRunner+Uploads.swift
+new file mode 100644
+index 00000000..179866aa
+--- /dev/null
++++ b/mac/Muse/App/SnapshotRunner+Uploads.swift
+@@ -0,0 +1,93 @@
++import AppKit
++import AVFoundation
++import MuseCore
++import SwiftUI
++
++/// Edit → Uploads as a media bin (owner, 2026-11-12; mockups plans/design/edit-panels/uploads-{b,a}.png): the media panel
++/// drawn on its own at its real size (304 × 760 pt), empty and with six uploads of mixed kinds (three videos, a picture,
++/// a song, a short sound), in Camera Body and Editorial: `mac_edit_uploads_{empty,filled}_{b,a}.png`. The six go in
++/// through the panel's own path (addFiles, as Add → From this Mac and a drop do), then "+" on a video is checked to put
++/// it into the sequence and undone. Runs inside editCheck, while its rx_* takes and test files exist.
++extension SnapshotRunner {
++    static func uploadsShots(_ store: AppStore, media: URL, dir: URL, note: (String) -> Void) async {
++        note("START uploads_bin")
++        guard let s = store.makeEditSuiteSession(takeId: "rx_full") else { note("FAIL uploads_bin: no editor session"); return }
++        await s.load()
++        defer { s.close() }
++        s.binTab = .uploads
++        for theme in [ThemeID.b, .a] { await drawBin(s, store: store, theme: theme, to: dir.appendingPathComponent("mac_edit_uploads_empty_\(theme.rawValue).png")) }
++        if !s.uploads.isEmpty { note("FAIL uploads_bin: a new edit's Uploads isn't empty (\(s.uploads.count))") }
++
++        let picture = media.appendingPathComponent("Studio logo.png"), song = media.appendingPathComponent("Night drive.m4a")
++        let blip = media.appendingPathComponent("Click.m4a")
++        do {
++            try writePicture(picture)
++            try writeTone(song, seconds: 40, rate: 44_100, channels: 2)
++            try writeTone(blip, seconds: 1.5, rate: 48_000, channels: 1)
++        } catch {
++            note("FAIL uploads_bin: test files (\(error.localizedDescription))")
++            return
++        }
++        let videos = ["short.mp4", "long.mp4", "turned.mp4"].map { media.appendingPathComponent($0) }
++        let mainBefore = s.project.mainClips.count
++        await s.addFiles([videos[0], picture, song, videos[1], blip, videos[2]])
++        let items = s.uploads
++        let chips = EditSuite.UploadBin.filters(items)
++        if items.count != 6 { note("FAIL uploads_bin: \(items.count) uploads after adding 6 (\(s.lastError ?? "no error"))") }
++        if chips != [.all, .video, .pictures, .audio] { note("FAIL uploads_bin: chips \(chips.map(\.label))") }
++        if s.project.mainClips.count != mainBefore { note("FAIL uploads_bin: adding files placed something (\(s.project.mainClips.count) main clips)") }
++        for theme in [ThemeID.b, .a] { await drawBin(s, store: store, theme: theme, to: dir.appendingPathComponent("mac_edit_uploads_filled_\(theme.rawValue).png")) }
++
++        // "+" on a video: into the sequence at the playhead, one undo step.
++        if let v = items.first(where: { $0.kind == .video }) {
++            let before = s.project.mainClips.count
++            s.placeUpload(v.id)
++            if s.project.mainClips.count != before + 1 { note("FAIL uploads_bin: + didn't place the video") }
++            s.undo()
++            if s.project.mainClips.count != before { note("FAIL uploads_bin: undo after + left \(s.project.mainClips.count) clips") }
++        }
++        note("DONE uploads_bin (\(items.count) uploads, chips \(chips.map(\.label).joined(separator: " ")))")
++    }
++
++    /// The panel alone in an off-screen window, drawn from its view (the window can sit anywhere on the runner's screen).
++    private static func drawBin(_ s: EditSuiteSession, store: AppStore, theme: ThemeID, to url: URL) async {
++        let t = Theme.get(theme)
++        let size = NSSize(width: EditSuiteView.mediaWidth, height: 760)
++        let root = EditSuiteBin(session: s, hide: {})
++            .frame(width: size.width, height: size.height)
++            .environment(store)
++            .environment(\.theme, t)
++            .font(t.body(14))
++        let host = NSHostingView(rootView: root)
++        host.frame = NSRect(origin: .zero, size: size)
++        let w = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
++        w.appearance = NSAppearance(named: t.isDark ? .darkAqua : .aqua)
++        w.contentView = host
++        w.setFrameOrigin(NSPoint(x: -6000, y: -6000))
++        w.orderFrontRegardless()
++        // Thumbnails and waveforms are read in the background.
++        try? await Task.sleep(for: .seconds(2.5))
++        host.layoutSubtreeIfNeeded()
++        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
++            host.cacheDisplay(in: host.bounds, to: rep)
++            try? rep.representation(using: .png, properties: [:])?.write(to: url)
++        }
++        w.orderOut(nil)
++    }
++
++    /// A 600 × 600 PNG: a soft square mark on a dark ground (a stand-in logo, no text).
++    private static func writePicture(_ url: URL) throws {
++        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 600, bitsPerSample: 8, samplesPerPixel: 4,
++                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
++              let ctx = NSGraphicsContext(bitmapImageRep: rep) else { throw ApiError("edit_check", "Couldn't make the test picture") }
++        NSGraphicsContext.saveGraphicsState()
++        NSGraphicsContext.current = ctx
++        NSColor(calibratedRed: 0.11, green: 0.12, blue: 0.13, alpha: 1).setFill()
++        NSRect(x: 0, y: 0, width: 600, height: 600).fill()
++        NSColor(calibratedRed: 0.95, green: 0.66, blue: 0.23, alpha: 1).setFill()
++        NSBezierPath(roundedRect: NSRect(x: 170, y: 170, width: 260, height: 260), xRadius: 48, yRadius: 48).fill()
++        NSGraphicsContext.restoreGraphicsState()
++        guard let data = rep.representation(using: .png, properties: [:]) else { throw ApiError("edit_check", "Couldn't make the test picture") }
++        try data.write(to: url)
++    }
++}
+diff --git a/mac/Muse/Views/Edit/EditSuiteBin.swift b/mac/Muse/Views/Edit/EditSuiteBin.swift
+index fba6836b..163c253c 100644
+--- a/mac/Muse/Views/Edit/EditSuiteBin.swift
++++ b/mac/Muse/Views/Edit/EditSuiteBin.swift
+@@ -1,92 +1,130 @@
+ import AppKit
++import ImageIO
+ import MuseCore
+ import SwiftUI
+ import UniformTypeIdentifiers
+ 
+ /// The media panel (E1, plans/edit-layout.md): a 72 pt rail of tabs with icon and label (Takes, Uploads, Music, Text,
+-/// Stickers, Templates), then the tab's panel: a heading with "Hide media", its content, and Import / Record VO.
++/// Stickers, Templates), then the tab's panel: one header (the tab's name, at most one "Add", "Hide media") and its content.
++///
++/// Owner, 2026-11-12 ("redundant features, and the AI-ish info… not properly visually optimised"): Uploads is a media bin
++/// (plans/design/edit-panels/uploads-{b,a}.png). One "Add" (From this Mac, From a link, Record voice-over; the file decides
++/// the kind), drop anywhere on the panel, a grid of thumbnails with "+" and drag-to-place, filter chips only when the kinds
++/// are mixed, and an empty state of one drop zone and one line. The import bar that sat under every tab is gone; each tab
++/// that adds something has its own "Add" in the header.
+ struct EditSuiteBin: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+     @Bindable var session: EditSuiteSession
+     var hide: () -> Void
++    @State private var filter: EditSuite.UploadFilter = .all
++    @State private var dropping = false
+ 
+     var body: some View {
+         HStack(spacing: 0) {
+             rail
+             SuiteRule(vertical: true)
+             VStack(alignment: .leading, spacing: 0) {
+-                HStack(spacing: Space.s2) {
+-                    Text(session.binTab.label).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("media heading")
+-                    Spacer(minLength: 0)
+-                    SuiteIconButton(systemName: "caret-double-left", label: "Hide media", tint: t.roles.ink2, action: hide)
+-                }
+-                .padding(.horizontal, Space.s4)
+-                .padding(.top, Space.s3)
+-                .padding(.bottom, Space.s2)
+-                ScrollView {
+-                    VStack(alignment: .leading, spacing: Space.s3) { content }
+-                        .padding(.horizontal, Space.s4)
+-                        .padding(.bottom, Space.s4)
+-                        .frame(maxWidth: .infinity, alignment: .leading)
+-                }
+-                VStack(alignment: .leading, spacing: Space.s2) {
+-                    ViewThatFits(in: .horizontal) {
+-                        HStack(spacing: Space.s2) { importButton; linkButton; recordButton }
+-                        VStack(alignment: .leading, spacing: Space.s2) { importButton; linkButton; recordButton }
++                header
++                if session.binTab == .uploads, session.isRecordingVO { recordingStrip }
++                if session.binTab == .uploads, session.uploads.isEmpty {
++                    dropZone
++                } else {
++                    ScrollView {
++                        VStack(alignment: .leading, spacing: Space.s3) { content }
++                            .padding(.horizontal, Space.s3)
++                            .padding(.bottom, Space.s4)
++                            .frame(maxWidth: .infinity, alignment: .leading)
+                     }
+-                    // Design pass (owner-approved): hear the edit while recording a voice-over; off on the speakers by default.
+-                    Toggle("Play the video while recording", isOn: $session.voPlayback)
+-                        .toggleStyle(.checkbox)
+-                        .font(t.scale.caption.font)
+-                        .foregroundStyle(t.roles.ink2)
+-                        .disabled(session.isRecordingVO)
+-                        .help("Use headphones so the microphone doesn't pick up the video's sound")
+                 }
+-                .padding(Space.s4)
+             }
++            .overlay {
++                // Dropping files anywhere on the panel: one outline in the selection colour, nothing else.
++                if dropping {
++                    RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
++                        .strokeBorder(t.roles.accent, lineWidth: 2)
++                        .padding(Space.s1)
++                        .allowsHitTesting(false)
++                }
++            }
++            .dropDestination(for: URL.self) { urls, _ in
++                let files = urls.filter(\.isFileURL)
++                guard !files.isEmpty else {
++                    // A link dropped on the panel imports like From a link.
++                    return urls.first.map { store.importDroppedLink($0, for: .edit) } ?? false
++                }
++                Task { await session.addFiles(files) }
++                return true
++            } isTargeted: { dropping = $0 }
+         }
+         .background(t.roles.canvas)
+     }
+ 
+-    /// Import what the tab is for (Mac Edit audit 2026-11-08: it always imported a sound as a voice-over): videos and
+-    /// pictures on Takes / Uploads, pictures on Stickers, songs on Music, voice-overs elsewhere.
+-    private var importButton: some View {
+-        SuiteToolButton(title: "Import", icon: "upload-simple") {
+-            switch session.binTab {
+-            case .takes, .uploads: importMedia(pictures: true, videos: true)
+-            case .stickers: importMedia(pictures: true, videos: false)
+-            case .music: importAudio(kind: .music)
+-            default: importAudio(kind: .voice)
+-            }
++    // MARK: Header
++
++    private var header: some View {
++        HStack(spacing: Space.s2) {
++            Text(session.binTab.label).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("media heading")
++            Spacer(minLength: 0)
++            headerAction
++            SuiteIconButton(systemName: "caret-double-left", label: "Hide media", size: 28, tint: t.roles.ink2, action: hide)
+         }
+-        .help(importHelp)
++        .padding(.leading, Space.s4)
++        .padding(.trailing, Space.s2)
++        .frame(height: 48)
+     }
+ 
+-    private var importHelp: String {
++    @ViewBuilder private var headerAction: some View {
+         switch session.binTab {
+-        case .takes, .uploads: return "Add a video or picture from this Mac"
+-        case .stickers: return "Add a picture from this Mac"
+-        case .music: return "Add a song from this Mac"
+-        default: return "Add a voice-over from this Mac"
++        case .uploads:
++            if !session.isRecordingVO {
++                AddMenu(label: "Add to Uploads") {
++                    Button("From this Mac…") { chooseFiles() }.keyboardShortcut("i", modifiers: .command)
++                    Button("From a link…") { store.openLinkImport(.edit) }
++                    Button("Record voice-over") { Task { await session.toggleRecordVO() } }
++                    Divider()
++                    Toggle("Play the video while recording", isOn: $session.voPlayback)
++                }
++            }
++        case .music:
++            AddButton(label: "Add a song from this Mac") { chooseSong() }
++        case .text:
++            AddButton(label: "Add text at the playhead") { session.edit { $0.addText() } }
++        case .stickers:
++            AddMenu(label: "Add a sticker") {
++                Button("Picture from this Mac…") { choosePicture() }
++                Button(session.isRunning(.cutout) ? "Cutting out…" : "Cut out a picture…") { chooseCutout() }
++                    .disabled(session.isRunning(.cutout))
++            }
++        case .takes, .templates:
++            EmptyView()
+         }
+     }
+ 
+-    /// Import a video from a link (WS6, owner 2026-11-08): the shared sheet; the clip lands in Uploads.
+-    private var linkButton: some View {
+-        SuiteToolButton(title: "From a link", icon: "link") { store.openLinkImport(.edit) }
+-            .help("Import a video from a link")
+-            .accessibilityLabel("Import a video from a link")
+-    }
+-
+-    private var recordButton: some View {
+-        SuiteToolButton(title: session.isRecordingVO ? "Stop recording" : "Record VO", icon: session.isRecordingVO ? "stop.circle.fill" : "microphone") {
+-            Task { await session.toggleRecordVO() }
++    /// Recording a voice-over: the header's Add gives way to the live strip.
++    private var recordingStrip: some View {
++        TimelineView(.periodic(from: .now, by: 1)) { ctx in
++            let secs = session.voStartedAt.map { max(0, ctx.date.timeIntervalSince($0)) } ?? 0
++            HStack(spacing: Space.s2) {
++                Circle().fill(t.roles.danger).frame(width: 8, height: 8).accessibilityHidden(true)
++                Text("Recording").font(t.scale.label.font).foregroundStyle(t.roles.ink)
++                Text(EditSuite.UploadBin.length(secs) ?? "0:00").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
++                Spacer(minLength: 0)
++                SuiteToolButton(title: "Stop", plain: true) { Task { await session.toggleRecordVO() } }
++                    .help("Stop and add the voice-over to the voice row")
++                    .accessibilityLabel("Stop recording the voice-over")
++            }
++            .padding(.leading, Space.s3)
++            .padding(.trailing, Space.s1)
++            .frame(height: 40)
++            .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
++            .padding(.horizontal, Space.s3)
++            .padding(.bottom, Space.s3)
+         }
+-        .help(session.isRecordingVO ? "Stop and add the voice-over to the voice row" : "Record a voice-over with the microphone")
+-        .accessibilityLabel(session.isRecordingVO ? "Stop recording the voice-over" : "Record a voice-over")
+     }
+ 
++    // MARK: Rail
++
+     private var rail: some View {
+         VStack(spacing: Space.s1) {
+             ForEach(EditSuite.BinTab.allCases) { tab in
+@@ -125,207 +163,177 @@ struct EditSuiteBin: View {
+     @ViewBuilder private var content: some View {
+         switch session.binTab {
+         case .takes: takes
+-        case .uploads: VStack(alignment: .leading, spacing: Space.s3) { mediaList; audioList }
+-        case .music: VStack(alignment: .leading, spacing: Space.s5) { audioList; ContentSounds(session: session) }
++        case .uploads: uploads
++        case .music: music
+         case .text: textList
+         case .stickers: stickers
+         case .templates: templates
+         }
+     }
+ 
++    private let grid = [GridItem(.flexible(), spacing: Space.s2), GridItem(.flexible(), spacing: Space.s2)]
++
+     // MARK: Takes
+ 
+-    /// Two columns: picture, name, duration in tabular figures. Double-click adds a take to the end.
++    /// The studio's video takes as tiles: "+" puts one into the sequence at the playhead, dragging places it.
+     private var takes: some View {
+         let list = store.editSuiteTakes
+-        return VStack(alignment: .leading, spacing: Space.s3) {
+-            if list.isEmpty { Note("No video takes yet.") }
+-            LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s2), GridItem(.flexible(), spacing: Space.s2)], alignment: .leading, spacing: Space.s3) {
+-                ForEach(list) { tk in
+-                    let used = session.project.assets.contains { $0.take == tk.id }
+-                    VStack(alignment: .leading, spacing: Space.s1) {
+-                        Color.clear
+-                            .frame(height: 112)
+-                            .frame(maxWidth: .infinity)
+-                            .overlay { MuseImage(ref: tk.thumb, symbol: "film") }
+-                            .clipShape(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous))
+-                            .overlay(alignment: .topLeading) {
+-                                if used {
+-                                    Ph("check", 10).foregroundStyle(t.roles.onAction)
+-                                        .frame(width: 18, height: 18)
+-                                        .background(Circle().fill(t.roles.action))
+-                                        .padding(Space.s1 + 2)
+-                                        .accessibilityHidden(true)
+-                                }
+-                            }
+-                        Text(tk.title).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(2)
+-                            .fixedSize(horizontal: false, vertical: true)
+-                        if let d = tk.durationSec {
+-                            Text(String(format: "%.1f s", d)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(t.roles.ink2)
++        return Group {
++            if list.isEmpty {
++                Text("No video takes yet").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++            } else {
++                LazyVGrid(columns: grid, alignment: .leading, spacing: Space.s3) {
++                    ForEach(list) { tk in
++                        MediaTile(name: tk.title.isEmpty ? "Take" : tk.displayTitle, mark: "film-strip", length: EditSuite.UploadBin.length(tk.durationSec),
++                                  used: session.project.assets.contains { $0.take == tk.id }, drag: BinDrag.take(tk.id),
++                                  plusHelp: "Add at the playhead") {
++                            session.placeTake(tk)
++                        } thumb: {
++                            MuseImage(ref: tk.thumb, symbol: "film")
+                         }
++                        .contextMenu {
++                            Button("Add at the playhead") { session.placeTake(tk) }
++                            Button("Add to the end") { session.addTake(tk) }
++                            Button("Add as overlay at the playhead") { session.addTake(tk, overlay: true) }
++                            Button("Add its sound at the playhead") { session.addTakeSound(tk) }
++                            Button("Replace the clip with this take") { session.replaceClip(with: tk) }
++                        }
++                        .accessibilityLabel("Take \(tk.title)")
+                     }
+-                    .contentShape(Rectangle())
+-                    .onTapGesture(count: 2) { session.addTake(tk) }
+-                    .contextMenu {
+-                        Button("Add to the end") { session.addTake(tk) }
+-                        Button("Add as overlay at the playhead") { session.addTake(tk, overlay: true) }
+-                        Button("Add its sound at the playhead") { session.addTakeSound(tk) }
+-                        Button("Replace the clip with this take") { session.replaceClip(with: tk) }
+-                    }
+-                    .help("Double-click to add to the end, right-click for an overlay")
+-                    .accessibilityElement(children: .ignore)
+-                    .accessibilityLabel("Take \(tk.title)")
+-                    .accessibilityAction(named: "Add to the end") { session.addTake(tk) }
+                 }
+             }
+         }
+     }
+ 
+-    // MARK: Uploads (videos, pictures) and stickers
++    // MARK: Uploads
+ 
+-    /// Videos and pictures brought in from this Mac, to add again.
+-    private var mediaList: some View {
+-        let media = session.project.assets.filter { ($0.kind == .video && $0.upload != nil) || $0.kind == .image }
+-        return VStack(alignment: .leading, spacing: Space.s2) {
+-            if media.isEmpty { Note("Import videos and pictures from this Mac.") }
+-            ForEach(media) { a in
+-                HStack(spacing: Space.s2) {
+-                    Ph(a.kind == .image ? "image" : "film-strip", 15).foregroundStyle(t.roles.ink2)
+-                    Text(session.state.assetNames[a.id] ?? a.id).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
+-                    Spacer()
+-                    if let d = a.durationSec, a.kind == .video { Text(EditSuite.clock(d)).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2) }
+-                    if a.kind == .image {
+-                        SuiteIconButton(systemName: "plus", label: "Add \(session.state.assetNames[a.id] ?? "picture") at the playhead", size: 28) {
+-                            session.edit { $0.addImage(a) }
+-                        }
+-                    } else {
+-                        SuiteIconButton(systemName: "plus", label: "Add \(session.state.assetNames[a.id] ?? "video") to the end", size: 28) {
+-                            session.edit { $0.addVideo(a) }
+-                        }
+-                        SuiteIconButton(systemName: "stack", label: "Add \(session.state.assetNames[a.id] ?? "video") as an overlay", size: 28) {
+-                            session.edit { $0.addVideo(a, overlay: true) }
+-                        }
++    private var uploads: some View {
++        let all = session.uploads
++        let chips = EditSuite.UploadBin.filters(all)
++        let shown = EditSuite.UploadBin.filtered(all, by: filter)
++        return VStack(alignment: .leading, spacing: Space.s3) {
++            if !chips.isEmpty {
++                HStack(spacing: Space.s1) {
++                    ForEach(chips) { f in
++                        Chip(f.label, on: (chips.contains(filter) ? filter : .all) == f) { filter = f }
++                            .accessibilityLabel("Show \(f.label.lowercased())")
+                     }
+                 }
+             }
+-            SuiteToolButton(title: "Import video or picture", icon: "upload-simple") { importMedia(pictures: true, videos: true) }
++            LazyVGrid(columns: grid, alignment: .leading, spacing: Space.s3) {
++                ForEach(shown) { u in uploadTile(u) }
++            }
+         }
+     }
+ 
+-    /// The content library's emoji stickers, then pictures from this Mac (PNG with transparency works as a sticker).
+-    private var stickers: some View {
+-        let pics = session.pictureAssets
+-        return VStack(alignment: .leading, spacing: Space.s3) {
+-            // The content library's stickers (WS8 84df583), then this edit's own pictures.
+-            ContentStickers(session: session)
+-            SuiteLabel("Your pictures").padding(.top, Space.s2)
+-            Text("Add your own pictures and logos. PNGs keep their transparency. They go on the Stickers row at the playhead.")
+-                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+-            LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s2), GridItem(.flexible(), spacing: Space.s2)], spacing: Space.s2) {
+-                ForEach(pics) { a in
+-                    Button { session.edit { $0.addImage(a) } } label: {
+-                        VStack(alignment: .leading, spacing: Space.s1) {
+-                            Group {
+-                                if let url = session.files[a.id], let img = NSImage(contentsOf: url) {
+-                                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+-                                } else { Ph("image", 20).foregroundStyle(t.roles.ink2) }
+-                            }
+-                            .frame(height: 72).frame(maxWidth: .infinity)
+-                            .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+-                            Text(session.state.assetNames[a.id] ?? "Picture").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
+-                        }
+-                    }
+-                    .buttonStyle(.plain)
+-                    .accessibilityLabel("Add sticker \(session.state.assetNames[a.id] ?? "picture")")
+-                }
++    private func uploadTile(_ u: EditSuite.Upload) -> some View {
++        let mark = u.kind == .video ? "film-strip" : u.kind == .picture ? "image" : "waveform"
++        let file = session.files[u.id]
++        return MediaTile(name: u.name, mark: mark, length: EditSuite.UploadBin.length(u.durationSec), drag: BinDrag.upload(u.id),
++                         plusHelp: "Add at the playhead") {
++            session.placeUpload(u.id)
++        } thumb: {
++            switch u.kind {
++            case .audio: WaveTile(url: file)
++            case .video: FrameTile(url: file, video: true, at: min(1, (u.durationSec ?? 0) / 2))
++            case .picture: FrameTile(url: file, video: false, at: 0)
+             }
+-            HStack(spacing: Space.s2) {
+-                SuiteToolButton(title: "Import picture", icon: "image") { importMedia(pictures: true, videos: false) }
+-                CutoutPictureButton(session: session)
++        }
++        .contextMenu {
++            Button("Add at the playhead") { session.placeUpload(u.id) }
++            switch u.kind {
++            case .video:
++                Button("Add as overlay at the playhead") { session.placeUpload(u.id, lane: .video) }
++            case .audio:
++                Button("Add as music") { session.placeUpload(u.id, audioKind: .music) }
++                Button("Add as voice-over") { session.placeUpload(u.id, audioKind: .voice) }
++                Button("Add as sound effect") { session.placeUpload(u.id, audioKind: .sfx) }
++            case .picture:
++                EmptyView()
+             }
+         }
++        .accessibilityLabel(u.name)
+     }
+ 
+-    private func importMedia(pictures: Bool, videos: Bool) {
+-        let panel = NSOpenPanel()
+-        var types: [UTType] = []
+-        if videos { types += [.mpeg4Movie, .quickTimeMovie] }
+-        if pictures { types += [.png, .jpeg, .heic, .webP] }
+-        panel.allowedContentTypes = types
+-        panel.allowsMultipleSelection = false
+-        panel.message = videos ? "Choose a video or a picture" : "Choose a picture"
+-        guard panel.runModal() == .OK, let url = panel.url else { return }
+-        Task { await session.importMedia(url) }
++    /// Nothing uploaded yet: one drop zone and one line.
++    private var dropZone: some View {
++        Button { chooseFiles() } label: {
++            VStack(spacing: Space.s2) {
++                Ph("upload-simple", 24)
++                Text("Drop files here or Add").font(t.scale.caption.font)
++            }
++            .foregroundStyle(t.roles.ink2)
++            .frame(maxWidth: .infinity, maxHeight: .infinity)
++            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
++                .strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .padding(.horizontal, Space.s3)
++        .padding(.top, Space.s1)
++        .padding(.bottom, Space.s3)
++        .accessibilityLabel("Add files from this Mac")
+     }
+ 
+-    // MARK: Uploads / music
++    // MARK: Music
+ 
+-    private var audioList: some View {
+-        let audio = session.project.assets.filter { $0.kind == .audio }
+-        return VStack(alignment: .leading, spacing: Space.s3) {
+-            if audio.isEmpty {
+-                Note(session.binTab == .music ? "Import a song (MP3, M4A, WAV) to put it under the video." : "Import voice-overs and sounds from this Mac.")
+-            }
+-            ForEach(audio) { a in
+-                HStack(spacing: Space.s2) {
+-                    Ph("waveform", 15).foregroundStyle(t.roles.ink2)
+-                    Text(session.state.assetNames[a.id] ?? a.id).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
+-                    Spacer()
+-                    if let d = a.durationSec { Text(EditSuite.clock(d)).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2) }
+-                    Menu {
+-                        Button("Add as music") { session.edit { $0.addAudio(a, kind: .music) } }
+-                        Button("Add as voice-over") { session.edit { $0.addAudio(a, kind: .voice) } }
+-                        Button("Add as sound effect") { session.edit { $0.addAudio(a, kind: .sfx) } }
+-                    } label: { Image(nsImage: Ph.menuImage("plus", 16)) } // a Menu label ignores frames; the image comes at its size
+-                        .menuStyle(.borderlessButton)
+-                        .menuIndicator(.hidden)
+-                        .fixedSize()
+-                        .frame(width: 28, height: 28)
+-                        .help("Add")
+-                        .accessibilityLabel("Add \(session.state.assetNames[a.id] ?? "audio")")
++    /// Songs in this edit, then the sound effects library.
++    private var music: some View {
++        let songs = session.uploads.filter { $0.kind == .audio }
++        return VStack(alignment: .leading, spacing: Space.s5) {
++            if !songs.isEmpty {
++                VStack(alignment: .leading, spacing: 0) {
++                    ForEach(songs) { a in
++                        HStack(spacing: Space.s2) {
++                            Ph("waveform", 16).foregroundStyle(t.roles.ink2).frame(width: 28)
++                            Text(a.name).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle).help(a.name)
++                            Spacer(minLength: Space.s2)
++                            if let l = EditSuite.UploadBin.length(a.durationSec) {
++                                Text(l).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
++                            }
++                            SuiteIconButton(systemName: "plus", label: "Add \(a.name) as music", size: 28) { session.placeUpload(a.id, audioKind: .music) }
++                        }
++                        .frame(height: 36)
++                        .contextMenu {
++                            Button("Add as music") { session.placeUpload(a.id, audioKind: .music) }
++                            Button("Add as voice-over") { session.placeUpload(a.id, audioKind: .voice) }
++                            Button("Add as sound effect") { session.placeUpload(a.id, audioKind: .sfx) }
++                        }
++                    }
+                 }
+             }
+-            VStack(alignment: .leading, spacing: Space.s2) {
+-                SuiteToolButton(title: "Import music", icon: "music-notes") { importAudio(kind: .music) }
+-                SuiteToolButton(title: "Import sound", icon: "speaker-high") { importAudio(kind: .sfx) }
+-            }
++            ContentSounds(session: session)
+         }
+     }
+ 
+-    private func importAudio(kind: EditV2.TrackKind) {
+-        let panel = NSOpenPanel()
+-        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
+-        panel.allowsMultipleSelection = false
+-        panel.message = "Choose a sound file"
+-        guard panel.runModal() == .OK, let url = panel.url else { return }
+-        Task { await session.importAudio(url, kind: kind) }
+-    }
+-
+     // MARK: Text and templates
+ 
+     private var textList: some View {
+         VStack(alignment: .leading, spacing: Space.s3) {
+-            SuiteToolButton(title: "Add text", icon: "plus") { session.edit { $0.addText() } }
+-                .help("Add text at the playhead")
+             SuiteLabel("Hooks")
+             ForEach(EditV2.hooks) { h in hookRow(h) }
+         }
+     }
+ 
++    /// Caption styles (the hooks live in Text: they were listed twice).
+     private var templates: some View {
+-        VStack(alignment: .leading, spacing: Space.s3) {
+-            VStack(alignment: .leading, spacing: 2) {
+-                SuiteLabel("Hook templates")
+-                Text("For the first 2 seconds").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++        VStack(alignment: .leading, spacing: Space.s2) {
++            SuiteLabel("Caption styles")
++            if session.project.captionTrack == nil {
++                HStack(spacing: Space.s2) {
++                    SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
++                                    disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
++                        .help(session.helperNote(.captions) ?? session.estimateLabel(.captions).map { "Word-timed captions from what's said, \($0)" } ?? "Word-timed captions from what's said")
++                    if session.isRunning(.captions) { ProgressView().controlSize(.small) }
++                }
++                .padding(.bottom, Space.s1)
+             }
+-            ForEach(EditV2.hooks) { h in hookRow(h) }
+-            SuiteLabel("Caption styles").padding(.top, Space.s2)
+             ForEach(EditV2.suiteCaptionStyles, id: \.self) { p in
+                 Button { session.edit { $0.setCaptionPreset(p) } } label: {
+                     HStack {
+                         Text(EditV2.captionStyleLabel(p)).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                         Spacer()
+-                        if session.state.captionStyle?.preset == p { Ph("check", 15).foregroundStyle(t.roles.accent) }
++                        if session.state.captionStyle?.preset == p { Ph("check", 16).foregroundStyle(t.roles.accent) }
+                     }
+                     .frame(minHeight: 32)
+                     .contentShape(Rectangle())
+@@ -333,7 +341,6 @@ struct EditSuiteBin: View {
+                 .buttonStyle(.plain)
+                 .disabled(session.project.captionTrack == nil)
+             }
+-            if session.project.captionTrack == nil { Note("Add captions first (Make captions in the inspector).") }
+         }
+     }
+ 
+@@ -347,7 +354,7 @@ struct EditSuiteBin: View {
+                 HStack(spacing: Space.s2) {
+                     Text(h.label).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(2)
+                     Spacer(minLength: 0)
+-                    Ph("plus", 14).foregroundStyle(t.roles.ink2)
++                    Ph("plus", 16).foregroundStyle(t.roles.ink2)
+                 }
+             }
+             .contentShape(Rectangle())
+@@ -355,6 +362,268 @@ struct EditSuiteBin: View {
+         .buttonStyle(.plain)
+         .accessibilityLabel("Add hook \(h.label)")
+     }
++
++    // MARK: Stickers
++
++    /// The content library's stickers, then this edit's own pictures (shown once there are some).
++    private var stickers: some View {
++        let pics = session.pictureAssets
++        return VStack(alignment: .leading, spacing: Space.s3) {
++            ContentStickers(session: session)
++            if !pics.isEmpty {
++                SuiteLabel("Your pictures").padding(.top, Space.s2)
++                LazyVGrid(columns: grid, spacing: Space.s2) {
++                    ForEach(pics) { a in
++                        let name = session.state.assetNames[a.id] ?? "Picture"
++                        Button { session.edit { $0.addImage(a) } } label: {
++                            FrameTile(url: session.files[a.id], video: false, at: 0, fit: true)
++                                .frame(height: 72).frame(maxWidth: .infinity)
++                                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
++                        }
++                        .buttonStyle(.plain)
++                        .help(name)
++                        .accessibilityLabel("Add sticker \(name)")
++                    }
++                }
++            }
++        }
++    }
++
++    // MARK: Files
++
++    private func chooseFiles() {
++        let panel = NSOpenPanel()
++        panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie, .png, .jpeg, .heic, .webP, .audio, .mp3, .wav, .aiff, .mpeg4Audio]
++        panel.allowsMultipleSelection = true
++        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
++        let urls = panel.urls
++        Task { await session.addFiles(urls) }
++    }
++
++    private func chooseSong() {
++        let panel = NSOpenPanel()
++        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
++        panel.allowsMultipleSelection = false
++        guard panel.runModal() == .OK, let url = panel.url else { return }
++        Task { await session.importAudio(url, kind: .music) }
++    }
++
++    private func choosePicture() {
++        let panel = NSOpenPanel()
++        panel.allowedContentTypes = [.png, .jpeg, .heic, .webP]
++        panel.allowsMultipleSelection = true
++        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
++        let urls = panel.urls
++        // From Stickers each picture also goes on at the playhead (Stickers row), as it did before the bin.
++        Task {
++            for url in urls {
++                let before = Set(session.uploads.map(\.id))
++                await session.addFiles([url])
++                if let added = session.uploads.first(where: { !before.contains($0.id) }) { session.placeUpload(added.id) }
++            }
++            session.binTab = .stickers
++        }
++    }
++
++    private func chooseCutout() {
++        let panel = NSOpenPanel()
++        panel.allowedContentTypes = [.png, .jpeg, .heic, .webP]
++        panel.allowsMultipleSelection = false
++        guard panel.runModal() == .OK, let url = panel.url else { return }
++        Task { await session.cutoutPicture(url) }
++    }
++}
++
++// MARK: - Pieces
++
++/// What a tile carries when dragged to the timeline (TimelineCanvas reads it back).
++enum BinDrag {
++    static func upload(_ id: String) -> String { "muse-upload:\(id)" }
++    static func take(_ id: String) -> String { "muse-take:\(id)" }
++    /// (kind, id) of a dragged string, or nil when it isn't one of ours.
++    static func parse(_ s: String) -> (take: Bool, id: String)? {
++        if s.hasPrefix("muse-upload:") { return (false, String(s.dropFirst("muse-upload:".count))) }
++        if s.hasPrefix("muse-take:") { return (true, String(s.dropFirst("muse-take:".count))) }
++        return nil
++    }
++}
++
++/// The header's one "Add", as a plain button.
++private struct AddButton: View {
++    var label: String
++    var action: () -> Void
++    var body: some View {
++        SuiteToolButton(title: "Add", icon: "plus", action: action)
++            .help(label)
++            .accessibilityLabel(label)
++    }
++}
++
++/// The header's one "Add", opening a small menu.
++private struct AddMenu<Items: View>: View {
++    @Environment(\.theme) private var t
++    var label: String
++    @ViewBuilder var items: () -> Items
++    @State private var hover = false
++
++    var body: some View {
++        Menu(content: items) {
++            Label { Text("Add") } icon: { Image(nsImage: Ph.menuImage("plus", 14)) }
++                .labelStyle(.titleAndIcon)
++                .font(t.scale.label.font)
++                .foregroundStyle(t.roles.ink)
++        }
++        .menuStyle(.borderlessButton)
++        .menuIndicator(.hidden)
++        .fixedSize()
++        .padding(.horizontal, Space.s2)
++        .frame(height: 28)
++        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(hover ? t.roles.hairline : t.roles.field))
++        .onHover { hover = $0 }
++        .help(label)
++        .accessibilityLabel(label)
++    }
++}
++
++/// A media tile: the picture (or waveform) with its type mark and length on a scrim, the name under it (the full name
++/// on hover), "+" while the pointer is over it, and dragging onto the timeline places it.
++private struct MediaTile<Thumb: View>: View {
++    @Environment(\.theme) private var t
++    var name: String
++    var mark: String
++    var length: String?
++    var used = false
++    var drag: String
++    var plusHelp: String
++    var onPlus: () -> Void
++    @ViewBuilder var thumb: () -> Thumb
++    @State private var hover = false
++
++    var body: some View {
++        let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
++        VStack(alignment: .leading, spacing: Space.s1) {
++            Color.clear
++                .frame(height: 124)
++                .frame(maxWidth: .infinity)
++                .overlay { thumb() }
++                .background(t.roles.field)
++                .clipShape(shape)
++                .overlay(alignment: .bottomLeading) {
++                    HStack(spacing: Space.s1) {
++                        Ph(mark, 12)
++                        if let length { Text(length).font(t.scale.micro.font).monospacedDigit() }
++                        if used { Ph("check", 12).accessibilityLabel("In this edit") }
++                    }
++                    .foregroundStyle(.white)
++                    .padding(.horizontal, 5)
++                    .frame(height: 18)
++                    .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(Color.black.opacity(0.55)))
++                    .padding(6)
++                }
++                .overlay(alignment: .topTrailing) {
++                    if hover {
++                        Button(action: onPlus) {
++                            Ph("plus", 16).foregroundStyle(.white)
++                                .frame(width: 28, height: 28)
++                                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(Color.black.opacity(0.55)))
++                                .contentShape(Rectangle())
++                        }
++                        .buttonStyle(.plain)
++                        .help(plusHelp)
++                        .padding(6)
++                    }
++                }
++            Text(name).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
++        }
++        .contentShape(Rectangle())
++        .onHover { hover = $0 }
++        .onTapGesture(count: 2, perform: onPlus)
++        .help(name)
++        .draggable(drag)
++        .accessibilityElement(children: .ignore)
++        .accessibilityAddTraits(.isButton)
++        .accessibilityAction(named: plusHelp, onPlus)
++    }
++}
++
++/// A video's frame or a picture, read small (thumbnails, not full files) and kept for the session.
++private struct FrameTile: View {
++    @Environment(\.theme) private var t
++    var url: URL?
++    var video: Bool
++    var at: Double
++    var fit = false
++    @State private var image: NSImage?
++
++    var body: some View {
++        Group {
++            if let image {
++                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: fit ? .fit : .fill)
++            } else {
++                Ph(video ? "film-strip" : "image", 20).foregroundStyle(t.roles.ink2).frame(maxWidth: .infinity, maxHeight: .infinity)
++            }
++        }
++        .task(id: url) {
++            guard let url else { return }
++            let key = "\(url.path)#\(video ? at : -1)" as NSString
++            if let hit = BinThumbs.images.object(forKey: key) { image = hit; return }
++            let cg: CGImage?
++            if video {
++                cg = await EditSuiteMedia.frame(url, at: at, maxSide: 320)
++            } else {
++                cg = await Task.detached(priority: .utility) { () -> CGImage? in
++                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
++                    let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
++                                                 kCGImageSourceThumbnailMaxPixelSize: 320]
++                    return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
++                }.value
++            }
++            guard let cg, !Task.isCancelled else { return }
++            let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
++            BinThumbs.images.setObject(img, forKey: key)
++            image = img
++        }
++    }
++}
++
++/// A sound as a waveform tile.
++private struct WaveTile: View {
++    @Environment(\.theme) private var t
++    var url: URL?
++    @State private var peaks: [Float] = []
++    private static let bars = 24
++
++    var body: some View {
++        GeometryReader { g in
++            HStack(alignment: .center, spacing: 2) {
++                ForEach(0..<Self.bars, id: \.self) { i in
++                    let v = peaks.isEmpty ? 0.08 : CGFloat(peaks[min(i, peaks.count - 1)])
++                    RoundedRectangle(cornerRadius: 1).fill(t.roles.ink2.opacity(0.85))
++                        .frame(height: max(2, (g.size.height - 52) * min(1, max(0.06, v))))
++                }
++            }
++            .padding(.horizontal, 10)
++            .frame(width: g.size.width, height: g.size.height)
++            .offset(y: -6)
++        }
++        .accessibilityHidden(true)
++        .task(id: url) {
++            guard let url else { return }
++            if let hit = BinThumbs.peaks.object(forKey: url.path as NSString) as? [Float] { peaks = hit; return }
++            let w = await EditSuiteMedia.waveform(url, count: Self.bars)
++            guard !Task.isCancelled, !w.isEmpty else { return }
++            let top = max(w.max() ?? 1, 0.0001)
++            let norm = w.map { $0 / top }
++            BinThumbs.peaks.setObject(norm as NSArray, forKey: url.path as NSString)
++            peaks = norm
++        }
++    }
++}
++
++/// Thumbnails and waveforms already read, by file (the grid scrolls back over them).
++private enum BinThumbs {
++    static let images: NSCache<NSString, NSImage> = { let c = NSCache<NSString, NSImage>(); c.countLimit = 300; return c }()
++    static let peaks: NSCache<NSString, NSArray> = { let c = NSCache<NSString, NSArray>(); c.countLimit = 300; return c }()
+ }
+ 
+ /// A hook template drawn small, on black (its font, colours and background).
+diff --git a/mac/Muse/Views/Edit/EditSuiteContent.swift b/mac/Muse/Views/Edit/EditSuiteContent.swift
+index 94520703..ca2c8653 100644
+--- a/mac/Muse/Views/Edit/EditSuiteContent.swift
++++ b/mac/Muse/Views/Edit/EditSuiteContent.swift
+@@ -138,7 +138,7 @@ struct ContentSounds: View {
+                 let packs = c.packs(.sfx)
+                 let all: [(ContentPack, ContentItem)] = packs.flatMap { p in p.items.map { (p, $0) } }
+                 let hits = all.filter { (category == nil || $0.1.category == category) && $0.1.matches(query) }
+-                SuiteLabel("Sound effects", trailing: "\(all.count)")
++                SuiteLabel("Sound effects")
+                 ContentSearchField(prompt: "Search sound effects", text: $query)
+                 CategoryChips(categories: packs.flatMap { $0.categories ?? [] }, selection: $category)
+                 if hits.isEmpty {
+diff --git a/mac/Muse/Views/Edit/EditSuiteTimeline.swift b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+index 53f281c8..ae68d0a6 100644
+--- a/mac/Muse/Views/Edit/EditSuiteTimeline.swift
++++ b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+@@ -173,6 +173,7 @@ struct EditSuiteTimeline: View {
+ /// The time-scaled part of the timeline (inside the horizontal scroll view).
+ struct TimelineCanvas: View {
+     @Environment(\.theme) private var t
++    @Environment(AppStore.self) private var store
+     @Bindable var session: EditSuiteSession
+     var lanes: [Lane]
+     @State private var drag: DragState?
+@@ -281,6 +282,37 @@ struct TimelineCanvas: View {
+         }
+         .frame(width: width, alignment: .leading)
+         .overlay(alignment: .topLeading) { playhead }
++        // A tile from Takes or Uploads dropped here (owner, 2026-11-12): placed at that time, on that row.
++        .dropDestination(for: String.self) { items, loc in
++            guard let raw = items.first, let d = BinDrag.parse(raw) else { return false }
++            let at = Double(max(0, loc.x) / max(z, 0.0001))
++            let lane = Self.laneKind(atY: loc.y, lanes: lanes)
++            if d.take {
++                guard let tk = store.takes.first(where: { $0.id == d.id }) else { return false }
++                session.placeTake(tk, at: at, lane: lane)
++            } else {
++                session.placeUpload(d.id, at: at, lane: lane)
++            }
++            return true
++        }
++    }
++
++    /// The row under `y` (canvas coordinates): its track kind; the ruler, the Captions lane and below the rows give nil,
++    /// and the main video's Sound lane counts as the main row.
++    static func laneKind(atY y: CGFloat, lanes: [Lane]) -> EditV2.TrackKind? {
++        var top = rulerHeight + 1
++        for l in lanes {
++            let h = laneHeight(l)
++            if y >= top, y < top + h {
++                switch l {
++                case .track(let r): return r.kind
++                case .sound: return .main
++                case .noCaptions: return nil
++                }
++            }
++            top += h + 1
++        }
++        return nil
+     }
+ 
+     // MARK: Ruler and playhead
+diff --git a/mac/Muse/Views/Edit/EditSuiteXLPanels.swift b/mac/Muse/Views/Edit/EditSuiteXLPanels.swift
+index 7c7f6aac..a39bfcf8 100644
+--- a/mac/Muse/Views/Edit/EditSuiteXLPanels.swift
++++ b/mac/Muse/Views/Edit/EditSuiteXLPanels.swift
+@@ -123,20 +123,3 @@ struct CutoutRow: View {
+         }
+     }
+ }
+-
+-/// Stickers → "Cut out a picture…": a photo from this Mac, cut out and added at the playhead.
+-struct CutoutPictureButton: View {
+-    @Bindable var session: EditSuiteSession
+-
+-    var body: some View {
+-        SuiteToolButton(title: session.isRunning(.cutout) ? "Cutting out…" : "Cut out a picture…", icon: "scissors", disabled: session.isRunning(.cutout)) {
+-            let panel = NSOpenPanel()
+-            panel.allowedContentTypes = [.png, .jpeg, .heic, .webP]
+-            panel.allowsMultipleSelection = false
+-            panel.message = "Choose a photo to cut out"
+-            guard panel.runModal() == .OK, let url = panel.url else { return }
+-            Task { await session.cutoutPicture(url) }
+-        }
+-        .help("The person in the photo, on a clear background, at the playhead")
+-    }
+-}
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditUploadBin.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditUploadBin.swift
+new file mode 100644
+index 00000000..8164cfdb
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditUploadBin.swift
+@@ -0,0 +1,159 @@
++import Foundation
++
++// Edit → Uploads as a media bin (owner, 2026-11-12; plans/design/edit-panels/uploads-{b,a}.png): files from this Mac (or a
++// link, or the microphone) land in the bin first; "+" puts one on the timeline at the playhead and dragging places it.
++// The kind comes from the file, so one "Add" covers videos, pictures and sounds.
++
++extension EditSuite {
++    /// What an upload is, from its file.
++    public enum UploadKind: String, CaseIterable, Hashable, Sendable {
++        case video, picture, audio
++    }
++
++    /// The bin's filter chips (shown only when the bin holds more than one kind).
++    public enum UploadFilter: String, CaseIterable, Hashable, Sendable, Identifiable {
++        case all, video, pictures, audio
++        public var id: String { rawValue }
++        public var label: String {
++            switch self {
++            case .all: return "All"
++            case .video: return "Video"
++            case .pictures: return "Images"
++            case .audio: return "Audio"
++            }
++        }
++        public func includes(_ k: UploadKind) -> Bool {
++            switch self {
++            case .all: return true
++            case .video: return k == .video
++            case .pictures: return k == .picture
++            case .audio: return k == .audio
++            }
++        }
++    }
++
++    /// One tile of the bin.
++    public struct Upload: Identifiable, Hashable, Sendable {
++        public var id: String
++        public var kind: UploadKind
++        public var name: String
++        public var durationSec: Double?
++    }
++
++    public enum UploadBin {
++        public static let videoExtensions: Set<String> = ["mp4", "mov", "m4v"]
++        public static let pictureExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp"]
++        public static let audioExtensions: Set<String> = ["mp3", "m4a", "wav", "aif", "aiff", "aac"]
++
++        /// The kind a file becomes, from its extension (nil: MUSE can't use it).
++        public static func kind(ofExtension ext: String) -> UploadKind? {
++            let e = ext.lowercased()
++            if videoExtensions.contains(e) { return .video }
++            if pictureExtensions.contains(e) { return .picture }
++            if audioExtensions.contains(e) { return .audio }
++            return nil
++        }
++
++        /// The edit's own uploads (not takes, not the content library, not helper copies such as reversed or stabilized
++        /// videos), newest first. `names` are the display names the app keeps per asset.
++        public static func items(_ p: EditV2.Project, names: [String: String]) -> [Upload] {
++            p.assets.compactMap { a -> Upload? in
++                guard a.upload != nil, a.reverseOf == nil, a.derivedFrom == nil else { return nil }
++                let kind: UploadKind
++                switch a.kind {
++                case .video: kind = .video
++                case .image: kind = .picture
++                case .audio: kind = .audio
++                default: return nil
++                }
++                let fallback = kind == .video ? "Video" : kind == .picture ? "Picture" : "Sound"
++                let name = (names[a.id] ?? a.name).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? fallback
++                return Upload(id: a.id, kind: kind, name: name, durationSec: kind == .picture ? nil : a.durationSec)
++            }
++            .reversed()
++        }
++
++        /// The chips to show: none while the bin holds one kind (or nothing), else All and each kind present.
++        public static func filters(_ items: [Upload]) -> [UploadFilter] {
++            let kinds = Set(items.map(\.kind))
++            guard kinds.count > 1 else { return [] }
++            return [.all] + UploadFilter.allCases.filter { f in f != .all && kinds.contains { f.includes($0) } }
++        }
++
++        /// The items under a chip; a chip that no longer applies (its kind is gone) shows everything.
++        public static func filtered(_ items: [Upload], by f: UploadFilter) -> [Upload] {
++            guard filters(items).contains(f) else { return items }
++            return items.filter { f.includes($0.kind) }
++        }
++
++        /// The length on a tile: "0:23", "2:48", "1:02:05" (never "0:00" for a real clip).
++        public static func length(_ seconds: Double?) -> String? {
++            guard let s = seconds, s.isFinite, s > 0 else { return nil }
++            let total = max(1, Int(s.rounded()))
++            let h = total / 3600, m = (total / 60) % 60, sec = total % 60
++            return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%d:%02d", m, sec)
++        }
++
++        /// The row a sound goes on: the audio row it was dropped on, else music for a long file (a song) and a sound
++        /// effect for a short one.
++        public static func audioKind(lane: EditV2.TrackKind?, durationSec: Double?) -> EditV2.TrackKind {
++            if let lane, lane.isAudio { return lane }
++            return (durationSec ?? 0) >= songSec ? .music : .sfx
++        }
++
++        /// A sound this long or longer is taken as a song.
++        public static let songSec: Double = 30
++    }
++}
++
++extension EditSuiteState {
++    /// Puts an upload in the bin without placing it (undoable; an unused asset is valid in the shared contract).
++    @discardableResult
++    public mutating func addToBin(_ asset: E.Asset) -> Bool {
++        guard project.asset(asset.id) == nil else { return false }
++        return apply { $0.addingAsset(asset) }
++    }
++
++    /// Places an upload from the bin: at `t` (a drop) or the playhead ("+"). `lane` is the row it was dropped on: a video
++    /// goes into the main sequence (at the cut nearest that time) unless dropped on an overlay row; a sound goes on the
++    /// audio row it was dropped on (`audioKind` overrides, from the "+" menu); a picture goes on the Stickers row.
++    @discardableResult
++    public mutating func placeUpload(_ assetId: String, at t: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) -> Bool {
++        guard let a = project.asset(assetId) else { return false }
++        return place(a, at: t, lane: lane, audioKind: audioKind)
++    }
++
++    /// Places any media asset the same way (a take from Takes, or an upload); the asset joins the project if it isn't in it.
++    @discardableResult
++    public mutating func place(_ a: E.Asset, at t: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) -> Bool {
++        if let t { playhead = min(max(0, EditSuite.finiteSeconds(t)), duration) }
++        switch a.kind {
++        case .image:
++            return addImage(a)
++        case .audio:
++            let kind = audioKind.flatMap { $0.isAudio ? $0 : nil } ?? EditSuite.UploadBin.audioKind(lane: lane, durationSec: a.durationSec)
++            return addAudio(a, kind: kind, at: playhead)
++        case .video:
++            if let lane, lane != .main { return addVideo(a, overlay: true) }
++            return insertMain(a, at: playhead)
++        default:
++            return false
++        }
++    }
++
++    /// A video into the main sequence at the cut nearest `at` (before the clip whose middle is after it).
++    private mutating func insertMain(_ a: E.Asset, at: Double) -> Bool {
++        guard let d = a.durationSec, d >= E.minClipSourceSec else { return false }
++        var newId: String?
++        let ok = apply { p in
++            let q = p.addingAsset(a)
++            guard let main = q.mainTrack else { return nil }
++            let index = E.timeline(q).filter { ($0.startSec + $0.endSec) / 2 < at }.count
++            let id = q.newId("c")
++            newId = id
++            return q.adding(.video(E.VideoClip(id: id, asset: a.id, inSec: 0, outSec: E.r6(d))), toTrack: main.id, index: index)
++        }
++        if ok { selection = newId }
++        return ok
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditUploadBinTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditUploadBinTests.swift
+new file mode 100644
+index 00000000..7a783cd1
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditUploadBinTests.swift
+@@ -0,0 +1,148 @@
++import XCTest
++@testable import MuseCore
++
++/// Edit → Uploads as a media bin (owner, 2026-11-12): the kind from the file, the tiles, the chips, and placing an upload.
++final class EditUploadBinTests: XCTestCase {
++    typealias E = EditV2
++    typealias Bin = EditSuite.UploadBin
++
++    private func fixture(_ name: String) throws -> E.Project {
++        let c = try XCTUnwrap(editorFixture("projects").array.first { $0["name"].string == name }, name)
++        return try c["project"].decode(E.Project.self)
++    }
++
++    private func assertValid(_ s: EditSuiteState, file: StaticString = #filePath, line: UInt = #line) {
++        let p = E.problem(s.project)
++        XCTAssertNil(p, p?.description ?? "", file: file, line: line)
++    }
++
++    private let video = E.Asset(id: "up_v", kind: .video, upload: "u1", durationSec: 4, width: 720, height: 1280, hasAudio: true)
++    private let picture = E.Asset(id: "up_p", kind: .image, upload: "u2", width: 800, height: 800)
++    private let song = E.Asset(id: "up_s", kind: .audio, upload: "u3", durationSec: 168, hasAudio: true)
++    private let blip = E.Asset(id: "up_b", kind: .audio, upload: "u4", durationSec: 1.5, hasAudio: true)
++
++    func testKindComesFromTheFile() {
++        XCTAssertEqual(Bin.kind(ofExtension: "MOV"), .video)
++        XCTAssertEqual(Bin.kind(ofExtension: "mp4"), .video)
++        XCTAssertEqual(Bin.kind(ofExtension: "heic"), .picture)
++        XCTAssertEqual(Bin.kind(ofExtension: "png"), .picture)
++        XCTAssertEqual(Bin.kind(ofExtension: "m4a"), .audio)
++        XCTAssertEqual(Bin.kind(ofExtension: "wav"), .audio)
++        XCTAssertNil(Bin.kind(ofExtension: "pdf"))
++        XCTAssertNil(Bin.kind(ofExtension: "cube"))
++    }
++
++    func testItemsAreTheEditsOwnUploadsNewestFirst() throws {
++        var p = try fixture("single clip")
++        let takeAssets = p.assets.count
++        p = p.addingAsset(video).addingAsset(picture).addingAsset(song)
++        p = p.addingAsset(E.Asset(id: "lib", kind: .image, library: "content:emoji/1f600"))
++        var reversed = E.Asset(id: "rev", kind: .video, upload: "u9", durationSec: 4)
++        reversed.reverseOf = "up_v"
++        p = p.addingAsset(reversed)
++        let items = Bin.items(p, names: ["up_v": "Living room dance", "up_s": "  "])
++        XCTAssertEqual(items.map(\.id), ["up_s", "up_p", "up_v"], "uploads only (no takes \(takeAssets), no library, no helper copies), newest first")
++        XCTAssertEqual(items.map(\.name), ["Sound", "Picture", "Living room dance"])
++        XCTAssertNil(items[1].durationSec, "a picture has no length")
++    }
++
++    func testChipsOnlyWhenKindsAreMixed() {
++        let v = EditSuite.Upload(id: "a", kind: .video, name: "A", durationSec: 3)
++        let v2 = EditSuite.Upload(id: "b", kind: .video, name: "B", durationSec: 5)
++        let s = EditSuite.Upload(id: "c", kind: .audio, name: "C", durationSec: 9)
++        XCTAssertEqual(Bin.filters([]), [])
++        XCTAssertEqual(Bin.filters([v, v2]), [])
++        XCTAssertEqual(Bin.filters([v, s]), [.all, .video, .audio])
++        XCTAssertEqual(Bin.filtered([v, v2, s], by: .audio).map(\.id), ["c"])
++        XCTAssertEqual(Bin.filtered([v, v2], by: .audio).map(\.id), ["a", "b"], "a chip that no longer applies shows everything")
++        XCTAssertEqual(EditSuite.UploadFilter.allCases.map(\.label), ["All", "Video", "Images", "Audio"])
++    }
++
++    func testLengthLabel() {
++        XCTAssertEqual(Bin.length(23.4), "0:23")
++        XCTAssertEqual(Bin.length(168), "2:48")
++        XCTAssertEqual(Bin.length(0.3), "0:01", "never 0:00 for a real clip")
++        XCTAssertEqual(Bin.length(3725), "1:02:05")
++        XCTAssertNil(Bin.length(nil))
++        XCTAssertNil(Bin.length(.infinity))
++        XCTAssertNil(Bin.length(0))
++    }
++
++    func testAddToBinIsUndoableAndValid() throws {
++        var s = EditSuiteState(try fixture("single clip"))
++        let before = s.project
++        XCTAssertTrue(s.addToBin(video))
++        XCTAssertFalse(s.addToBin(video), "already in the bin")
++        XCTAssertEqual(s.project.tracks, before.tracks, "nothing placed")
++        assertValid(s)
++        XCTAssertTrue(s.undo())
++        XCTAssertNil(s.project.asset("up_v"))
++    }
++
++    func testPlusPutsAVideoIntoTheSequenceAtThePlayhead() throws {
++        var s = EditSuiteState(try fixture("single clip"))
++        let first = try XCTUnwrap(s.project.mainClips.first?.id)
++        XCTAssertTrue(s.addToBin(video))
++        // Playhead in the first half of the only clip: the new clip goes before it.
++        s.playhead = 0.2
++        XCTAssertTrue(s.placeUpload("up_v"))
++        XCTAssertEqual(s.project.mainClips.map(\.asset).first, "up_v")
++        XCTAssertEqual(s.project.mainClips.last?.id, first)
++        assertValid(s)
++        // At the end: after everything.
++        XCTAssertTrue(s.placeUpload("up_v", at: s.duration))
++        XCTAssertEqual(s.project.mainClips.last?.asset, "up_v")
++        XCTAssertEqual(s.project.mainClips.count, 3)
++        assertValid(s)
++        XCTAssertTrue(s.undo())
++        XCTAssertEqual(s.project.mainClips.count, 2, "one placement, one undo step")
++    }
++
++    func testDroppedOnAnOverlayRowItBecomesAnOverlayAtThatTime() throws {
++        var s = EditSuiteState(try fixture("single clip"))
++        XCTAssertTrue(s.addToBin(video))
++        let main = s.project.mainClips.count
++        XCTAssertTrue(s.placeUpload("up_v", at: 1, lane: .video))
++        XCTAssertEqual(s.project.mainClips.count, main)
++        let overlay = try XCTUnwrap(s.project.tracks.first { $0.kind == .video }?.items.first?.videoClip)
++        XCTAssertEqual(overlay.startSec ?? -1, 1, accuracy: 1e-6)
++        assertValid(s)
++    }
++
++    func testSoundsGoOnTheRowTheyWereDroppedOnElseByLength() throws {
++        var s = EditSuiteState(try fixture("single clip"))
++        XCTAssertTrue(s.addToBin(song))
++        XCTAssertTrue(s.addToBin(blip))
++        XCTAssertTrue(s.placeUpload("up_s", at: 0))
++        XCTAssertNotNil(s.project.tracks.first { $0.kind == .music }, "a long file is a song")
++        XCTAssertTrue(s.placeUpload("up_b", at: 1))
++        XCTAssertEqual(s.project.tracks.first { $0.kind == .sfx }?.items.first?.startSec ?? -1, 1, accuracy: 1e-6, "a short one a sound effect, at the drop")
++        XCTAssertTrue(s.placeUpload("up_b", at: 0.5, lane: .voice))
++        XCTAssertNotNil(s.project.tracks.first { $0.kind == .voice }, "dropped on the voice row")
++        XCTAssertTrue(s.placeUpload("up_s", audioKind: .voice))
++        XCTAssertEqual(s.project.tracks.filter { $0.kind == .voice }.flatMap(\.items).count, 2, "the + menu's choice wins (an overlap takes a second voice row)")
++        assertValid(s)
++        XCTAssertEqual(Bin.audioKind(lane: .main, durationSec: 5), .sfx)
++        XCTAssertEqual(Bin.audioKind(lane: nil, durationSec: 30), .music)
++    }
++
++    func testAPictureGoesOnTheStickersRowAtTheDrop() throws {
++        var s = EditSuiteState(try fixture("single clip"))
++        XCTAssertTrue(s.addToBin(picture))
++        XCTAssertTrue(s.placeUpload("up_p", at: 0.5, lane: .music))
++        let item = try XCTUnwrap(s.project.tracks.first { $0.kind == .image }?.items.first)
++        XCTAssertEqual(item.startSec, 0.5, accuracy: 1e-6)
++        assertValid(s)
++        XCTAssertFalse(s.placeUpload("nope"))
++    }
++
++    func testATakeIsPlacedLikeAnUpload() throws {
++        var s = EditSuiteState(try fixture("single clip"))
++        let take = E.Asset(id: "t9", kind: .video, take: "tk_9", durationSec: 3, width: 720, height: 1280, hasAudio: true)
++        XCTAssertTrue(s.place(take, at: 0))
++        XCTAssertEqual(s.project.mainClips.first?.asset, "t9")
++        XCTAssertNotNil(s.project.asset("t9"))
++        XCTAssertTrue(Bin.items(s.project, names: [:]).isEmpty, "a take is not an upload")
++        assertValid(s)
++    }
++}

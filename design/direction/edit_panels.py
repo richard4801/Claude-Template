@@ -67,7 +67,6 @@ def css(t, k):
 .badge{{position:absolute;left:6px;bottom:6px;height:18px;padding:0 5px;border-radius:var(--rp);background:var(--scrim);color:#fff;display:flex;align-items:center;gap:4px;font:500 11px/14px "{f}"}}
 .plus{{position:absolute;right:6px;top:6px;width:28px;height:28px;border-radius:var(--rk);background:var(--scrim);color:#fff;display:grid;place-items:center}}
 .nm{{font:400 12px/16px "{f}";color:var(--ink);white-space:nowrap;overflow:hidden}}
-.hover .th{{box-shadow:inset 0 0 0 2px var(--accent)}}
 .tip{{position:absolute;z-index:3;background:{'#2A2D30' if k == 'b' else '#FBF9F5'};color:var(--ink);font:400 12px/16px "{f}";padding:4px 8px;border-radius:4px;
   box-shadow:{'0 0 0 1px #3A3E42' if k == 'b' else '0 4px 12px rgba(20,18,16,.18),0 0 0 .5px rgba(20,18,16,.2)'};white-space:nowrap}}
 .wave{{position:absolute;inset:22px 10px 30px;display:flex;align-items:center;gap:2px}}
