@@ -1,0 +1,314 @@
+From b0f904b4a0c49c504f7d82672251441d5dd9f8e8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 11 Nov 2026 09:55:25 +0000
+Subject: [PATCH] Blender relay: recognise another MCP server on port 9876,
+ linear reply reader
+
+The owner's 'Incomplete JSON response received' comes from the uvx
+mcp-for-blender server when the bytes on 9876 never parse as one JSON
+object. Blender Lab's official MCP add-on (same default port) does
+exactly that: it ignores our unframed request, evicts the client after
+10 s with an error object plus a NUL byte, and closes.
+
+- ReplyReader: scans brace depth outside strings once per byte, parses
+  once when the object closes; NUL or Blender Lab's words -> otherServer
+  with a plain fix; clear messages for non-JSON and mid-reply closes.
+- Heartbeat probe waits 15 s (past the 10 s eviction) and shows why the
+  link is down in Last error; blender_status returns it as 'problem'.
+- Tests: partial chunks (1..64 bytes), braces/quotes in strings, split
+  UTF-8, 2 MB reply, size cap, NUL-terminated reply, end of stream.
+- plans/mcp-bridge.md: troubleshooting section.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoY8SKt1vFyFyBATyE
+---
+ mac/Muse/App/BlenderRelayService.swift        |  4 +-
+ .../Sources/MuseCore/BlenderRelay.swift       | 25 +++--
+ .../Sources/MuseCore/BlenderSocket.swift      | 94 ++++++++++++++++---
+ .../MuseCoreTests/BlenderRelayTests.swift     | 62 ++++++++++++
+ 4 files changed, 165 insertions(+), 20 deletions(-)
+
+diff --git a/mac/Muse/App/BlenderRelayService.swift b/mac/Muse/App/BlenderRelayService.swift
+index ffd322c..2c00b51 100644
+--- a/mac/Muse/App/BlenderRelayService.swift
++++ b/mac/Muse/App/BlenderRelayService.swift
+@@ -207,9 +207,11 @@ final class BlenderRelayService: ObservableObject {
+         while !Task.isCancelled {
+             var link = BlenderLink(connected: blenderConnected, addonVersion: addonVersion)
+             if !busy {
+-                link = await relay.link()
++                let probe = await relay.probe()
++                link = probe.link
+                 blenderConnected = link.connected
+                 addonVersion = link.addonVersion
++                if let problem = probe.problem { lastError = problem } else if lastError == BlenderError.otherServerText || lastError == BlenderRelay.silentPortText { lastError = nil }
+             }
+             do {
+                 enqueue(try await api.heartbeat(BlenderRelayStatus(online: true, blender: link)).pending)
+diff --git a/mac/MuseCore/Sources/MuseCore/BlenderRelay.swift b/mac/MuseCore/Sources/MuseCore/BlenderRelay.swift
+index dfd7f4a..c742121 100644
+--- a/mac/MuseCore/Sources/MuseCore/BlenderRelay.swift
++++ b/mac/MuseCore/Sources/MuseCore/BlenderRelay.swift
+@@ -65,14 +65,26 @@ public actor BlenderRelay {
+     // MARK: Heartbeat
+ 
+     /// Is the add-on there, and which version (for POST /v1/blender/relay).
+-    public func link() async -> BlenderLink {
++    public func link() async -> BlenderLink { await probe().link }
++
++    public static let silentPortText = "Something is listening on port 9876 but didn't answer a ping in 15 s: Blender may be busy, "
++        + "or another MCP server (such as Blender's official MCP add-on) holds the port."
++
++    /// The link plus why it's down, when that's worth showing (e.g. another MCP server holds port 9876).
++    /// The ping waits 15 s: Blender's official MCP add-on only answers a foreign request when it evicts the client
++    /// after 10 s, and that answer is how we tell it apart from "Blender is busy".
++    public func probe() async -> (link: BlenderLink, problem: String?) {
+         do {
+-            _ = try await transport.send("ping", [:], timeout: 5)
++            _ = try await transport.send("ping", [:], timeout: 15)
++        } catch BlenderError.notConnected {
++            return (BlenderLink(connected: false), nil)
++        } catch BlenderError.timedOut {
++            return (BlenderLink(connected: false), BlenderRelay.silentPortText)
+         } catch {
+-            return BlenderLink(connected: false)
++            return (BlenderLink(connected: false), (error as? LocalizedError)?.errorDescription ?? "\(error)")
+         }
+-        guard let info = try? await transport.send("get_addon_info", [:], timeout: 5) else { return BlenderLink(connected: true) }
+-        return BlenderRelay.link(fromAddonInfo: info)
++        guard let info = try? await transport.send("get_addon_info", [:], timeout: 5) else { return (BlenderLink(connected: true), nil) }
++        return (BlenderRelay.link(fromAddonInfo: info), nil)
+     }
+ 
+     static func link(fromAddonInfo info: JSONValue) -> BlenderLink {
+@@ -148,8 +160,9 @@ public actor BlenderRelay {
+         do {
+             switch prepared {
+             case .status:
+-                let link = await self.link()
++                let (link, problem) = await self.probe()
+                 var o: [String: JSONValue] = ["connected": .bool(link.connected)]
++                if let problem { o["problem"] = .string(problem) }
+                 if let v = link.addonVersion { o["addonVersion"] = .string(v) }
+                 if let p = link.protocol { o["protocol"] = .number(Double(p)) }
+                 if link.connected { o["scene"] = try await transport.send("get_scene_info", [:], timeout: timeout) }
+diff --git a/mac/MuseCore/Sources/MuseCore/BlenderSocket.swift b/mac/MuseCore/Sources/MuseCore/BlenderSocket.swift
+index 259b19d..a85d890 100644
+--- a/mac/MuseCore/Sources/MuseCore/BlenderSocket.swift
++++ b/mac/MuseCore/Sources/MuseCore/BlenderSocket.swift
+@@ -17,16 +17,25 @@ public enum BlenderError: Error, Equatable, Sendable, LocalizedError {
+     /// The add-on answered `{"status": "error", "message"}`.
+     case command(String)
+     case badReply(String)
++    /// Port 9876 answers, but not with the MCP for Blender protocol. Seen in the wild: Blender's official MCP add-on
++    /// (Blender Lab, same default port) ends each reply with a NUL byte and evicts clients after 10 s, which the
++    /// `uvx mcp-for-blender` server reports as "Incomplete JSON response received".
++    case otherServer
+ 
+     public var errorDescription: String? {
+         switch self {
+         case .notConnected: return "Blender isn't connected (open Blender and start the MCP add-on's server on port 9876)"
+         case .timedOut: return "Blender didn't answer in time"
++        case .otherServer: return BlenderError.otherServerText
+         case .command(let m): return "Blender: \(m)"
+         case .badReply(let m): return "Unexpected reply from Blender (\(m))"
+         }
+     }
+ 
++    public static let otherServerText = "Another program is using Blender's port 9876, not the MCP for Blender add-on. "
++        + "Most likely Blender's official MCP add-on (Blender Lab): turn it off in Blender → Preferences → Add-ons, restart Blender, "
++        + "then press Start MCP Server in the MCP for Blender panel (N sidebar)."
++
+     /// The add-on reports a Python exception as a JSON string {exception_type, message, traceback}: keep it short.
+     public static func shortMessage(_ raw: String) -> String {
+         if let d = raw.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+@@ -67,14 +76,19 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
+     public static func unwrap(_ reply: Data) throws -> JSONValue {
+         guard case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: reply) else { throw BlenderError.badReply("not a JSON object") }
+         if case .string("success")? = o["status"] { return o["result"] ?? .null }
+-        if case .string(let m)? = o["message"] { throw BlenderError.command(BlenderError.shortMessage(m)) }
++        if case .string(let m)? = o["message"] {
++            // Blender Lab's MCP add-on: its words, not MCP for Blender's ("Unknown command type: …").
++            if m == "Client timed out" || m.hasPrefix("Unknown request type") { throw BlenderError.otherServer }
++            throw BlenderError.command(BlenderError.shortMessage(m))
++        }
+         throw BlenderError.badReply("no status")
+     }
+ 
+-    /// True once the bytes so far are one complete JSON value (split UTF-8 or a half object just fails to parse).
++    /// True once the bytes so far are one complete JSON object.
+     static func isComplete(_ buf: Data) -> Bool {
+-        guard let last = buf.last(where: { !($0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09) }), last == UInt8(ascii: "}") else { return false }
+-        return (try? JSONSerialization.jsonObject(with: buf)) != nil
++        var r = ReplyReader(maxReply: Int.max)
++        if case .done? = try? r.feed(buf) { return true }
++        return false
+     }
+ 
+     // MARK: POSIX socket (Linux and macOS)
+@@ -124,8 +138,8 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
+             }
+         }
+ 
+-        // Read until the bytes parse as one JSON object.
+-        var buf = Data()
++        // Read until the braces close (the add-on sends no framing), then parse once.
++        var reader = ReplyReader(maxReply: maxReply)
+         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+         while true {
+             guard try wait(fd, events: Int16(POLLIN), until: deadline) else { throw BlenderError.timedOut }
+@@ -134,13 +148,8 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
+                 if errno == EINTR || errno == EAGAIN { continue }
+                 throw BlenderError.notConnected
+             }
+-            if n == 0 {
+-                if isComplete(buf) { return buf }
+-                throw buf.isEmpty ? BlenderError.notConnected : BlenderError.badReply("connection closed mid-reply")
+-            }
+-            buf.append(contentsOf: chunk[0..<n])
+-            if buf.count > maxReply { throw BlenderError.badReply("reply too large") }
+-            if isComplete(buf) { return buf }
++            if n == 0 { return try reader.finish() }
++            if case .done(let reply) = try reader.feed(Data(chunk[0..<n])) { return reply }
+         }
+     }
+ 
+@@ -156,3 +165,62 @@ public final class BlenderSocket: BlenderTransport, @unchecked Sendable {
+         }
+     }
+ }
++
++/// Reads one unframed JSON object from a byte stream, chunk by chunk, in linear time: it tracks brace depth outside
++/// strings (UTF-8 continuation bytes are never `"`, `\\`, `{` or `}`), and parses once when the top-level object closes.
++struct ReplyReader {
++    enum Step: Equatable { case needMore, done(Data) }
++
++    let maxReply: Int
++    private(set) var buffer = Data()
++    private var depth = 0
++    private var started = false
++    private var inString = false
++    private var escaped = false
++
++    init(maxReply: Int) { self.maxReply = maxReply }
++
++    /// Adds bytes; `.done(object)` once they hold one complete JSON object. Only the new bytes are scanned.
++    mutating func feed(_ bytes: Data) throws -> Step {
++        let start = buffer.count
++        buffer.append(bytes)
++        if buffer.count > maxReply { throw BlenderError.badReply("reply over \(maxReply / 1_048_576) MB") }
++        var end: Int?
++        for (i, b) in bytes.enumerated() {
++            // JSON never carries a raw NUL; a NUL-terminated reply is another MCP server's protocol.
++            if b == 0 { throw BlenderError.otherServer }
++            if end != nil { continue } // past the object: only look for that NUL
++            if !started {
++                if b == 0x20 || b == 0x0A || b == 0x0D || b == 0x09 { continue }
++                guard b == UInt8(ascii: "{") else { throw BlenderError.badReply("not a JSON object: \(preview)") }
++                started = true
++                depth = 1
++                continue
++            }
++            if inString {
++                if escaped { escaped = false } else if b == UInt8(ascii: "\\") { escaped = true } else if b == UInt8(ascii: "\"") { inString = false }
++                continue
++            }
++            switch b {
++            case UInt8(ascii: "\""): inString = true
++            case UInt8(ascii: "{"), UInt8(ascii: "["): depth += 1
++            case UInt8(ascii: "}"), UInt8(ascii: "]"):
++                depth -= 1
++                if depth == 0 { end = start + i + 1 }
++            default: break
++            }
++        }
++        guard let end else { return .needMore }
++        let reply = buffer.prefix(end)
++        guard (try? JSONSerialization.jsonObject(with: reply)) != nil else { throw BlenderError.badReply("not valid JSON: \(preview)") }
++        return .done(Data(reply))
++    }
++
++    /// The connection closed: an empty stream means nobody answered; a partial object says how much arrived.
++    func finish() throws -> Data {
++        if buffer.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) { throw BlenderError.notConnected }
++        throw BlenderError.badReply("connection closed mid-reply after \(buffer.count) bytes")
++    }
++
++    private var preview: String { String(decoding: buffer.prefix(80), as: UTF8.self) }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/BlenderRelayTests.swift b/mac/MuseCore/Tests/MuseCoreTests/BlenderRelayTests.swift
+index 9625f7c..ce0b4a9 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/BlenderRelayTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/BlenderRelayTests.swift
+@@ -474,6 +474,68 @@ final class BlenderRelayTests: XCTestCase {
+         }
+     }
+ 
++    // MARK: Reply reader (the add-on sends one JSON object with no framing)
++
++    private func feedAll(_ chunks: [Data], max: Int = 32 * 1024 * 1024) throws -> Data? {
++        var r = ReplyReader(maxReply: max)
++        for c in chunks { if case .done(let d) = try r.feed(c) { return d } }
++        return nil
++    }
++
++    private func chunks(_ d: Data, size: Int) -> [Data] {
++        stride(from: 0, to: d.count, by: size).map { d.subdata(in: $0..<min($0 + size, d.count)) }
++    }
++
++    func testReaderWaitsForTheWholeObjectAcrossChunks() throws {
++        // Braces and quotes inside strings don't close the object; a split "é" doesn't either.
++        let reply = Data(#"{"status":"success","result":{"name":"Caf\#u{e9} {x} \"}\" ]","list":[1,{"a":[]}]}}"#.utf8)
++        for size in [1, 2, 3, 7, 64] {
++            XCTAssertEqual(try feedAll(chunks(reply, size: size)), reply, "chunk size \(size)")
++        }
++        XCTAssertNil(try feedAll([reply.prefix(reply.count - 1)]))
++    }
++
++    func testReaderHandlesALargeReply() throws {
++        let items = (0..<40_000).map { #"{"name":"MUSE_obj_\#($0)","location":[1.25,-2.5,0.0]}"# }.joined(separator: ",")
++        let reply = Data(#"{"status":"success","result":{"objects":["#.utf8 + Data(items.utf8) + Data("]}}".utf8)
++        XCTAssertGreaterThan(reply.count, 1_500_000)
++        XCTAssertEqual(try feedAll(chunks(reply, size: 64 * 1024)), reply)
++        XCTAssertThrowsError(try feedAll(chunks(reply, size: 64 * 1024), max: 1_048_576)) {
++            guard case .badReply? = $0 as? BlenderError else { return XCTFail("\($0)") }
++        }
++    }
++
++    func testReaderRecognisesBlenderLabsServer() throws {
++        // Blender's official MCP add-on (same port) answers a foreign request after 10 s with a NUL-terminated object.
++        let lab = Data("{\"status\": \"error\", \"message\": \"Client timed out\"}\0".utf8)
++        XCTAssertThrowsError(try feedAll([lab])) { XCTAssertEqual($0 as? BlenderError, .otherServer) }
++        XCTAssertThrowsError(try feedAll(chunks(lab, size: 7))) { XCTAssertEqual($0 as? BlenderError, .otherServer) }
++        // NUL in a later packet: the object is read, and its words give it away.
++        let first = try XCTUnwrap(try feedAll(chunks(lab, size: 5)))
++        XCTAssertThrowsError(try BlenderSocket.unwrap(first)) { XCTAssertEqual($0 as? BlenderError, .otherServer) }
++        XCTAssertThrowsError(try BlenderSocket.unwrap(Data(#"{"status":"error","message":"Unknown request type: 'ping'"}"#.utf8))) {
++            XCTAssertEqual($0 as? BlenderError, .otherServer)
++        }
++    }
++
++    func testReaderEndOfStream() {
++        XCTAssertThrowsError(try ReplyReader(maxReply: 100).finish()) { XCTAssertEqual($0 as? BlenderError, .notConnected) }
++        var r = ReplyReader(maxReply: 100)
++        XCTAssertEqual(try r.feed(Data(#"{"status":"succ"#.utf8)), .needMore)
++        XCTAssertThrowsError(try r.finish()) { XCTAssertEqual($0 as? BlenderError, .badReply("connection closed mid-reply after 15 bytes")) }
++        var http = ReplyReader(maxReply: 100)
++        XCTAssertThrowsError(try http.feed(Data("HTTP/1.1 400 Bad Request\r\n".utf8))) {
++            guard case .badReply(let m)? = $0 as? BlenderError else { return XCTFail("\($0)") }
++            XCTAssertTrue(m.hasPrefix("not a JSON object"))
++        }
++    }
++
++    func testStatusExplainsAnotherServerOnThePort() async {
++        let t = FakeTransport { _, _ in throw BlenderError.otherServer }
++        let r = posted(await relay(t, FakeAPI()).handle(call("blender_status")))
++        XCTAssertEqual(r?.result, .object(["connected": .bool(false), "problem": .string(BlenderError.otherServerText)]))
++    }
++
+     /// Against a closed port: notConnected, quickly.
+     func testSocketWithNoBlender() async throws {
+         let s = try BlenderSocket(port: 1)
+-- 
+2.43.0
+
