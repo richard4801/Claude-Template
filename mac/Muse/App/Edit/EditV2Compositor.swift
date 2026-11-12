@@ -244,7 +244,36 @@ final class EditV2Scene: @unchecked Sendable {
             guard let m = layerMatte(request, seg, l) else { continue }
             image = drawLayer(frame, matte: m, layer: l, clip: c, local: t - seg.timelineStart, state: state, frame: frameNo, fps: fps, over: image)
         }
+        if hdr { Self.stamp(out, EditV2.HDRColor.output) }
         ci.render(image.cropped(to: canvas), to: out, bounds: canvas, colorSpace: outSpace)
+    }
+
+    // MARK: HDR colour (owner bug 2026-11-12)
+
+    /// Sets a buffer's colour attachments (propagated, so the writer and encoder see them too).
+    static func stamp(_ buf: CVPixelBuffer, _ tags: EditV2.HDRColor.Tags) {
+        if let v = tags.primaries { CVBufferSetAttachment(buf, kCVImageBufferColorPrimariesKey, v as CFString, .shouldPropagate) }
+        if let v = tags.transfer { CVBufferSetAttachment(buf, kCVImageBufferTransferFunctionKey, v as CFString, .shouldPropagate) }
+        if let v = tags.matrix { CVBufferSetAttachment(buf, kCVImageBufferYCbCrMatrixKey, v as CFString, .shouldPropagate) }
+    }
+
+    /// A buffer's own colour attachments.
+    static func tags(of buf: CVPixelBuffer) -> EditV2.HDRColor.Tags {
+        func get(_ key: CFString) -> String? { CVBufferCopyAttachment(buf, key, nil) as? String }
+        return EditV2.HDRColor.Tags(primaries: get(kCVImageBufferColorPrimariesKey), transfer: get(kCVImageBufferTransferFunctionKey),
+                                    matrix: get(kCVImageBufferYCbCrMatrixKey))
+    }
+
+    /// A source picture frame as a CIImage. HDR: every frame is read with resolved tags (its own complete ones, else its
+    /// track's, else BT.709 SDR). Before, a frame that arrived without primaries was taken as already BT.2020 and skipped
+    /// the 709 → 2020 conversion (orange, oversaturated skin at the start and now and then). SDR export is unchanged.
+    private func picture(_ buf: CVPixelBuffer, asset: String) -> CIImage {
+        if hdr {
+            let own = Self.tags(of: buf)
+            let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags)
+            if resolved != own { Self.stamp(buf, resolved) }
+        }
+        return CIImage(cvPixelBuffer: buf)
     }
 
     // MARK: Layers
@@ -260,7 +289,7 @@ final class EditV2Scene: @unchecked Sendable {
         var pic: CIImage?
         if let img = sources.images[a] { pic = img }
         else if let id = layerTracks["\(seg.lane)/\(seg.itemId)/base"], let buf = request.sourceFrame(byTrackID: id) {
-            pic = CIImage(cvPixelBuffer: buf).transformed(by: sources.media[a]?.orient ?? .identity)
+            pic = picture(buf, asset: a).transformed(by: sources.media[a]?.orient ?? .identity)
         }
         guard var p = pic, p.extent.width > 0, p.extent.height > 0, frame.extent.width > 0 else { return nil }
         let e = frame.extent
@@ -300,7 +329,7 @@ final class EditV2Scene: @unchecked Sendable {
     private func sourceImage(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment) -> CIImage? {
         guard let id = laneTracks[seg.lane], let buf = request.sourceFrame(byTrackID: id) else { return nil }
         let orient = sources.media[seg.assetId]?.orient ?? .identity
-        return CIImage(cvPixelBuffer: buf).transformed(by: orient)
+        return picture(buf, asset: seg.assetId).transformed(by: orient)
     }
 
     /// The clip's alpha matte frame at this time (upright, as its own file stores it; inverted when asked), or nil.

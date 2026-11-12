@@ -45,6 +45,7 @@ extension SnapshotRunner {
         await exportCheck(s, media: media, log: log)
         await formatsCheck(s, media: media, log: log)
         s.close()
+        await hdrConsistencyCheck(store, media: media, log: log)
         note("ALL DONE")
     }
 
@@ -674,6 +675,106 @@ extension SnapshotRunner {
             // SDR (rgb(150, 1, 10) on CI): check the hue, not the brightness.
             check("export HDR: the picture", px.map { $0.r > 100 && $0.g < 50 && $0.b < 50 } ?? false, describe(px))
         }
+    }
+
+    /// Owner bug 2026-11-12: HDR (HLG) exports turned skin warmer / orange at the start and now and then. An untagged
+    /// SDR take (as AI takes come) in a skin tone, captions on its first second only, exported SDR and HDR. Every HDR
+    /// frame's skin patch (decoded from the file's own 10-bit codes with BT.2020 / HLG, tone-mapped to SDR) must match
+    /// every other frame's (caption vs plain, first vs middle) and the SDR export's.
+    @MainActor
+    static func hdrConsistencyCheck(_ store: AppStore, media: URL, log: OpsLog) async {
+        typealias H = EditV2.HDRColor
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check(name, ok, detail) }
+        log.note("STEP export HDR: same colour on every frame")
+        let skinRGB = (224, 172, 140)
+        let url = media.appendingPathComponent("skin.mp4")
+        do { try await makeSolidVideo(url, seconds: 3, rgb: skinRGB, tone: nil) } catch {
+            check("export HDR colour: test video", false, error.localizedDescription); return
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let raw: [String: Any] = ["id": "ops_skin", "kind": "take", "title": "Skin", "videoUrl": url.absoluteString, "durationSec": 3,
+                                  "width": 360, "height": 640, "fps": 30, "createdAt": now]
+        guard let take = (try? JSONSerialization.data(withJSONObject: raw)).flatMap({ try? JSONDecoder().decode(Take.self, from: $0) }) else {
+            check("export HDR colour: test take", false); return
+        }
+        store.takes.insert(take, at: 0)
+        await (store.api as? FakeMuseAPI)?.adoptTakes([take])
+        guard let s = store.makeEditSuiteSession(takeId: take.id) else { check("export HDR colour: editor session", false); return }
+        defer { s.close() }
+        await s.load()
+        guard s.isReady, let asset = s.project.mainClips.first?.asset else { check("export HDR colour: the edit opened", false, "\(s.phase)"); return }
+        // Burned-in captions on 0.1–1.0 s; plain frames after.
+        s.edit { $0.setCaptions(words: [EditV2.Word(text: "Hello", startSec: 0.1, endSec: 0.5), EditV2.Word(text: "there", startSec: 0.5, endSec: 1.0)], assetId: asset) }
+        s.edit { $0.changeCaptionStyle { $0.y = 0.85 } }
+        guard let sdr = await exportFile(s, media: media, name: "skin-sdr", labelAI: false, note: log.note),
+              let hdr = await exportFile(s, media: media, name: "skin-hdr", labelAI: false, hdr: true, note: log.note) else { return }
+        let sdrPx = await framePatches(sdr.url, hdr: false)
+        let hdrPx = await framePatches(hdr.url, hdr: true)
+        func nearest(_ px: [Double: (r: Int, g: Int, b: Int)], _ t: Double) -> (r: Int, g: Int, b: Int)? { px.min { abs($0.key - t) < abs($1.key - t) }?.value }
+        guard hdrPx.count > 60, let ref = nearest(sdrPx, 1.5) else {
+            check("export HDR colour: read the frames", false, "\(hdrPx.count) HDR, \(sdrPx.count) SDR"); return
+        }
+        func at(_ t: Double) -> (r: Int, g: Int, b: Int)? { nearest(hdrPx, t) }
+        let all = hdrPx.sorted { $0.key < $1.key }
+        let first = all[0].value, caption = at(0.5), plain = at(2.0), middle = at(1.5)
+        let worst = all.max { H.distance($0.value, first) < H.distance($1.value, first) }!
+        check("export HDR colour: caption frame = plain frame", caption.map { c in plain.map { H.distance(c, $0) <= 3 } ?? false } ?? false,
+              "caption \(describe(caption)) plain \(describe(plain))")
+        check("export HDR colour: first frame = middle", middle.map { H.distance(first, $0) <= 3 } ?? false, "first \(describe(first)) middle \(describe(middle))")
+        check("export HDR colour: every frame the same", H.distance(worst.value, first) <= 3,
+              String(format: "worst at %.2f s: ", worst.key) + describe(worst.value) + " vs first " + describe(first))
+        // The SDR export shows the source colour; HDR, tone-mapped back, within a viewer's rounding of it.
+        check("export HDR colour: matches the SDR export", H.distance(first, ref) <= 10 && H.distance(ref, (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)) <= 6,
+              "HDR \(describe(first)) SDR \(describe(ref)) source rgb\(skinRGB)")
+    }
+
+    /// The mean colour of a 16 × 16 patch at (0.5, 0.3) of every frame of a file, by time. HDR files are read as their
+    /// raw 10-bit Y′CbCr codes (no conversion by the reader) and decoded with EditV2.HDRColor; SDR files as BGRA.
+    static func framePatches(_ url: URL, hdr: Bool) async -> [Double: (r: Int, g: Int, b: Int)] {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first, let reader = try? AVAssetReader(asset: asset) else { return [:] }
+        let format = hdr ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_32BGRA
+        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: format])
+        guard reader.canAdd(out) else { return [:] }
+        reader.add(out)
+        guard reader.startReading() else { return [:] }
+        var result: [Double: (r: Int, g: Int, b: Int)] = [:]
+        while let sb = out.copyNextSampleBuffer() {
+            guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
+            let t = CMSampleBufferGetPresentationTimeStamp(sb).seconds
+            CVPixelBufferLockBaseAddress(pb, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+            let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb)
+            let x0 = w / 2 - 8, y0 = Int(Double(h) * 0.3) - 8
+            var sum = (0.0, 0.0, 0.0), n = 0.0
+            if hdr {
+                guard let yb = CVPixelBufferGetBaseAddressOfPlane(pb, 0), let cb = CVPixelBufferGetBaseAddressOfPlane(pb, 1) else { continue }
+                let yRow = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), cRow = CVPixelBufferGetBytesPerRowOfPlane(pb, 1)
+                for y in y0..<(y0 + 16) {
+                    for x in x0..<(x0 + 16) {
+                        // 10-bit samples sit in the top bits of 16-bit words.
+                        let luma = Int(yb.load(fromByteOffset: y * yRow + x * 2, as: UInt16.self) >> 6)
+                        let co = (y / 2) * cRow + (x / 2) * 4
+                        let u = Int(cb.load(fromByteOffset: co, as: UInt16.self) >> 6), v = Int(cb.load(fromByteOffset: co + 2, as: UInt16.self) >> 6)
+                        let p = EditV2.HDRColor.sdr255(fromHLGCodes: (luma, u, v))
+                        sum.0 += Double(p.r); sum.1 += Double(p.g); sum.2 += Double(p.b); n += 1
+                    }
+                }
+            } else {
+                guard let base = CVPixelBufferGetBaseAddress(pb) else { continue }
+                let row = CVPixelBufferGetBytesPerRow(pb)
+                for y in y0..<(y0 + 16) {
+                    for x in x0..<(x0 + 16) {
+                        let o = y * row + x * 4
+                        sum.0 += Double(base.load(fromByteOffset: o + 2, as: UInt8.self))
+                        sum.1 += Double(base.load(fromByteOffset: o + 1, as: UInt8.self))
+                        sum.2 += Double(base.load(fromByteOffset: o, as: UInt8.self)); n += 1
+                    }
+                }
+            }
+            if n > 0 { result[t] = (Int((sum.0 / n).rounded()), Int((sum.1 / n).rounded()), Int((sum.2 / n).rounded())) }
+        }
+        return result
     }
 
     /// Parity formats: a video at a chosen bitrate (the reader → writer path), Sound only (.m4a) and GIF.

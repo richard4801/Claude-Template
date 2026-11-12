@@ -17,6 +17,9 @@ enum EditV2Engine {
         let audioTrack: AVAssetTrack?
         /// Turns the decoded frame (natural orientation, Core Image coordinates) upright with its origin at 0,0.
         let orient: CGAffineTransform
+        /// HDR export: the video track's colour tags from its format description (nil keys when the file has none; AI
+        /// takes often lack primaries). Untagged frames of this source are read with these (EditV2.HDRColor.resolve).
+        var colorTags = EditV2.HDRColor.Tags()
     }
 
     /// Every source of a project by asset id: video/audio files, and pictures for image items.
@@ -83,7 +86,19 @@ enum EditV2Engine {
             h = Int(shown.height.rounded())
         }
         let info = EditV2.MediaInfo(durationSec: duration.isFinite ? duration : 0, hasVideo: video != nil, hasAudio: audio != nil, width: w, height: h)
-        return Media(asset: asset, info: info, videoTrack: video, audioTrack: audio, orient: orient)
+        var media = Media(asset: asset, info: info, videoTrack: video, audioTrack: audio, orient: orient)
+        if let video, let desc = try? await video.load(.formatDescriptions).first {
+            media.colorTags = colorTags(desc)
+        }
+        return media
+    }
+
+    /// A video format description's colour primaries, transfer function and YCbCr matrix (CoreVideo's spellings).
+    static func colorTags(_ desc: CMFormatDescription) -> EditV2.HDRColor.Tags {
+        func ext(_ key: CFString) -> String? { CMFormatDescriptionGetExtension(desc, extensionKey: key) as? String }
+        return EditV2.HDRColor.Tags(primaries: ext(kCMFormatDescriptionExtension_ColorPrimaries),
+                                    transfer: ext(kCMFormatDescriptionExtension_TransferFunction),
+                                    matrix: ext(kCMFormatDescriptionExtension_YCbCrMatrix))
     }
 
     /// The track's preferredTransform (a y-down transform) in Core Image's y-up coordinates, moved so the upright frame
