@@ -168,3 +168,18 @@ This is a follow-up on top of `claude/mac-bundle-8` @fc2c144a. At 1000 × 700 th
 - the result is `FITS` or `CUT edit claude panel …` in `fit-check.txt`, and a CUT fails Mac CI.
 
 Checks: `swiftc -parse` passes. The Mac CI run is the real check.
+
+### Review state: the warning line on camera (for Mac bundle-10, `plans/patches/edit-safe-warning-shots-mac.patch`)
+The coordinator asked for it after run 595: the review take had no captions, so the warning never showed. On the Mac the line sits under the viewer on the page background, never over the picture, so Android's see-through problem doesn't apply.
+
+**What the state does:** a stand-in take (`rx_safewarn`) gets word captions at y 0.86, under TikTok's caption and buttons. It is shown in TikTok view with the red box, at 1440 × 900 and 1280 × 800, light and dark: `mac_editpreview_warning_<a|b>_<w>x<h>.png`.
+
+**Fit check:** the warning line and its "Move into the safe area" must be drawn and whole, giving `FITS` or `CUT edit safe warning …` in `fit-check.txt`. A CUT fails Mac CI.
+
+**Files:**
+- the new `SnapshotRunner+EditSafeWarning.swift`;
+- a one-line call after `editLayoutShots`;
+- two fit probes and a review-only notification hook in `EditSuitePreview.swift`;
+- `EditSuiteSession.reviewLowCaptions()` (review mode only).
+
+**Base:** the patch is made on `claude/mac-bundle-8` @53987bd8 with one line of context. It also applies with bundle-9's extra calls (`editResumeCheck`, `claudeChipsCheck`) before `editLayoutShots`. `swiftc -parse` passes.
