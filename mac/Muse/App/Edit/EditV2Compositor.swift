@@ -244,12 +244,7 @@ final class EditV2Scene: @unchecked Sendable {
             guard let m = layerMatte(request, seg, l) else { continue }
             image = drawLayer(frame, matte: m, layer: l, clip: c, local: t - seg.timelineStart, state: state, frame: frameNo, fps: fps, over: image)
         }
-        if hdr {
-            // Round 2: a pooled buffer can carry a CGColorSpace attachment from elsewhere, which outranks the three tags.
-            EditV2HDRTrace.output(out, own: Self.tags(of: out), at: t)   // as the pool gave it
-            CVBufferRemoveAttachment(out, kCVImageBufferCGColorSpaceKey)
-            Self.stamp(out, EditV2.HDRColor.output)
-        }
+        if hdr { Self.stamp(out, EditV2.HDRColor.output) }
         ci.render(image.cropped(to: canvas), to: out, bounds: canvas, colorSpace: outSpace)
     }
 
@@ -272,38 +267,13 @@ final class EditV2Scene: @unchecked Sendable {
     /// A source picture frame as a CIImage. HDR: every frame is read with resolved tags (its own complete ones, else its
     /// track's, else BT.709 SDR). Before, a frame that arrived without primaries was taken as already BT.2020 and skipped
     /// the 709 → 2020 conversion (orange, oversaturated skin at the start and now and then). SDR export is unchanged.
-    ///
-    /// Round 2 (build 582, still orange at the start): the frame's own tags count only when they describe its track's space
-    /// or the composition's (EditV2.HDRColor.resolve(frame:track:composition:)). A frame that isn't trusted is retagged and
-    /// its CIImage made with the resolved colour space explicitly, so a stray CGColorSpace attachment (which Core Image
-    /// prefers to the tags) can't decide for it. Trusted frames are read exactly as in build 582.
-    private func picture(_ buf: CVPixelBuffer, asset: String, at t: Double) -> CIImage {
-        guard hdr else { return CIImage(cvPixelBuffer: buf) }
-        let own = Self.tags(of: buf)
-        let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags, composition: EditV2.HDRColor.output)
-        EditV2HDRTrace.source(buf, asset: asset, own: own, resolved: resolved, at: t)
-        // Trusted tags: read exactly as before (the frames that already looked right stay as they are).
-        // (The matrix doesn't count: half-float RGBA frames have none.)
-        guard resolved.primaries != own.primaries || resolved.transfer != own.transfer else { return CIImage(cvPixelBuffer: buf) }
-        CVBufferRemoveAttachment(buf, kCVImageBufferCGColorSpaceKey)
-        Self.stamp(buf, resolved)
-        guard let space = colorSpace(resolved) else { return CIImage(cvPixelBuffer: buf) }
-        return CIImage(cvPixelBuffer: buf, options: [.colorSpace: space])
-    }
-
-    private var spaces: [EditV2.HDRColor.Tags: CGColorSpace] = [:]
-    /// The CGColorSpace CoreVideo makes for a set of tags (cached).
-    private func colorSpace(_ tags: EditV2.HDRColor.Tags) -> CGColorSpace? {
-        lock.lock()
-        defer { lock.unlock() }
-        if let s = spaces[tags] { return s }
-        var d: [String: Any] = [:]
-        if let v = tags.primaries { d[kCVImageBufferColorPrimariesKey as String] = v }
-        if let v = tags.transfer { d[kCVImageBufferTransferFunctionKey as String] = v }
-        if let v = tags.matrix { d[kCVImageBufferYCbCrMatrixKey as String] = v }
-        guard let s = CVImageBufferCreateColorSpaceFromAttachments(d as CFDictionary)?.takeRetainedValue() else { return nil }
-        spaces[tags] = s
-        return s
+    private func picture(_ buf: CVPixelBuffer, asset: String) -> CIImage {
+        if hdr {
+            let own = Self.tags(of: buf)
+            let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags)
+            if resolved != own { Self.stamp(buf, resolved) }
+        }
+        return CIImage(cvPixelBuffer: buf)
     }
 
     // MARK: Layers
@@ -319,7 +289,7 @@ final class EditV2Scene: @unchecked Sendable {
         var pic: CIImage?
         if let img = sources.images[a] { pic = img }
         else if let id = layerTracks["\(seg.lane)/\(seg.itemId)/base"], let buf = request.sourceFrame(byTrackID: id) {
-            pic = picture(buf, asset: a, at: request.compositionTime.seconds).transformed(by: sources.media[a]?.orient ?? .identity)
+            pic = picture(buf, asset: a).transformed(by: sources.media[a]?.orient ?? .identity)
         }
         guard var p = pic, p.extent.width > 0, p.extent.height > 0, frame.extent.width > 0 else { return nil }
         let e = frame.extent
@@ -359,7 +329,7 @@ final class EditV2Scene: @unchecked Sendable {
     private func sourceImage(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment) -> CIImage? {
         guard let id = laneTracks[seg.lane], let buf = request.sourceFrame(byTrackID: id) else { return nil }
         let orient = sources.media[seg.assetId]?.orient ?? .identity
-        return picture(buf, asset: seg.assetId, at: request.compositionTime.seconds).transformed(by: orient)
+        return picture(buf, asset: seg.assetId).transformed(by: orient)
     }
 
     /// The clip's alpha matte frame at this time (upright, as its own file stores it; inverted when asked), or nil.
@@ -640,47 +610,5 @@ final class EditV2Scene: @unchecked Sendable {
             scale = 0.6 + 0.4 * E.ease(.easeOut, min(1, max(0, (t - page.startSec) / 0.15)))
         }
         return place(img, x: 0.5, y: st.y ?? 0.72, scale: scale, rotation: 0, opacity: 1, over: base)
-    }
-}
-
-/// HDR export diagnostics (owner bug 2026-11-12, round 2): what colour tags each frame really arrives with. Per source, the
-/// first 12 frames and every frame whose tags differ from the one before; output buffers the same. The Mac check prints it.
-enum EditV2HDRTrace {
-    private static let lock = NSLock()
-    nonisolated(unsafe) private static var lines: [String] = []
-    nonisolated(unsafe) private static var count: [String: Int] = [:]
-    nonisolated(unsafe) private static var last: [String: String] = [:]
-
-    static func reset() { lock.lock(); lines = []; count = [:]; last = [:]; lock.unlock() }
-    static func dump() -> [String] { lock.lock(); defer { lock.unlock() }; return lines }
-
-    private static func describe(_ buf: CVPixelBuffer) -> String {
-        let f = CVPixelBufferGetPixelFormatType(buf)
-        let fourcc = String(bytes: [24, 16, 8, 0].map { UInt8((f >> $0) & 0xff) }, encoding: .ascii) ?? "\(f)"
-        let cs = CVBufferCopyAttachment(buf, kCVImageBufferCGColorSpaceKey, nil).map { v -> String in
-            guard CFGetTypeID(v) == CGColorSpace.typeID else { return "other" }
-            return (unsafeBitCast(v, to: CGColorSpace.self).name as String?) ?? "unnamed"
-        } ?? "-"
-        return "\(fourcc) cgspace=\(cs)"
-    }
-    private static func tags(_ t: EditV2.HDRColor.Tags) -> String { "\(t.primaries ?? "-")/\(t.transfer ?? "-")/\(t.matrix ?? "-")" }
-
-    private static func add(_ key: String, _ sig: String, _ line: String) {
-        lock.lock(); defer { lock.unlock() }
-        let n = count[key, default: 0]
-        count[key] = n + 1
-        guard lines.count < 200, n < 12 || last[key] != sig else { return }
-        last[key] = sig
-        lines.append("#\(n) " + line)
-    }
-
-    static func source(_ buf: CVPixelBuffer, asset: String, own: EditV2.HDRColor.Tags, resolved: EditV2.HDRColor.Tags, at t: Double) {
-        let sig = describe(buf) + " " + tags(own)
-        add("src:" + asset, sig, String(format: "%.3f s src %@ ", t, asset) + sig + " -> " + tags(resolved))
-    }
-
-    static func output(_ buf: CVPixelBuffer, own: EditV2.HDRColor.Tags, at t: Double) {
-        let sig = describe(buf) + " " + tags(own)
-        add("out", sig, String(format: "%.3f s out ", t) + sig)
     }
 }
