@@ -1,0 +1,101 @@
+diff --git a/mac/Muse/Views/OutfitPageViews.swift b/mac/Muse/Views/OutfitPageViews.swift
+index 49c4ee1f..d494d400 100644
+--- a/mac/Muse/Views/OutfitPageViews.swift
++++ b/mac/Muse/Views/OutfitPageViews.swift
+@@ -126,6 +126,8 @@ struct OutfitOpenView: View {
+                         VStack(alignment: .leading, spacing: 2) {
+                             title(o)
+                             Text(subtitle(o, model)).scaled(t.scale.caption, t.roles.ink2)
++                            // A set that came out partly: what was made, and that each missing picture has its own Redo.
++                            if let p = o.partial { Text(p.label).scaled(t.scale.caption, t.roles.caution) }
+                         }
+                         Spacer(minLength: Space.s3)
+                         RIconButton(systemName: "xmark", help: "Close (Esc)") { store.closeOutfit() }
+@@ -227,6 +229,14 @@ struct OutfitOpenView: View {
+                               redo: store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
+                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
+                               onRedo: { store.redoOutfitPicture(o, k) })
++        } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
++            // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged).
++            Color.clear.aspectRatio(0.75, contentMode: .fit)
++                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
++                .overlay {
++                    RButton("Redo · \(Pricing.money(store.outfitRedoEstimate(k)))", small: true) { store.redoOutfitPicture(o, k) }
++                }
++                .accessibilityLabel("\(label) missing")
+         } else {
+             Color.clear.aspectRatio(0.75, contentMode: .fit)
+                 .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
+diff --git a/mac/MuseCore/Sources/MuseCore/Models.swift b/mac/MuseCore/Sources/MuseCore/Models.swift
+index d1df8359..6919a0ab 100644
+--- a/mac/MuseCore/Sources/MuseCore/Models.swift
++++ b/mac/MuseCore/Sources/MuseCore/Models.swift
+@@ -230,6 +230,16 @@ public struct SetSlotRequest: Codable, Sendable {
+ }
+ 
+ /// Outfit set: front, ¾, side, back. mode: describe | photo | own. state: ready | generating | preview.
++/// A set that came out partly (server outfitView `partial`).
++public struct OutfitPartial: Codable, Hashable, Sendable {
++    public var made: Int
++    public var of: Int
++    public var missing: [String]
++    /// "5 of 7 made · Redo the missing ones"
++    public var label: String
++    public init(made: Int, of: Int, missing: [String], label: String) { self.made = made; self.of = of; self.missing = missing; self.label = label }
++}
++
+ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
+     public var id: String
+     public var modelId: String
+@@ -245,6 +255,9 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
+     /// When it was made (ms; the folder's date on the outfit page) and who made it (they or the owner may rename/delete it).
+     public var createdAt: Int64?
+     public var createdBy: String?
++    /// A set that came out partly (some pictures failed while making it; owner 2026-11-12): "5 of 7 made · Redo the missing
++    /// ones", and which of the seven are missing (OutfitPictures.keys names). Nil when it's complete or still being made.
++    public var partial: OutfitPartial?
+ 
+     public init(id: String, modelId: String, name: String, mode: String = "describe", description: String = "", angles: [ImageRef?] = [nil, nil, nil, nil],
+                 state: String = "ready", prompt: String = "", faces: [ImageRef?]? = nil, createdAt: Int64? = nil, createdBy: String? = nil) {
+@@ -261,7 +274,7 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
+         self.prompt = prompt
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy }
++    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy, partial }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         id = try c.decode(String.self, forKey: .id)
+@@ -275,9 +288,12 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
+         faces = c.o(.faces)
+         createdAt = c.o(.createdAt)
+         createdBy = c.o(.createdBy)
++        partial = c.o(.partial)
+     }
+ 
+     public var front: ImageRef? { angles.first ?? nil }
++    /// One of its 7 pictures (0–3 angles, 4–6 faces) is missing from a partial set: it gets its own Redo with its price.
++    public func isMissing(_ k: Int) -> Bool { OutfitPictures.keys.indices.contains(k) && partial?.missing.contains(OutfitPictures.keys[k]) == true }
+     /// How many of the four angles have a picture (a set can come back with some empty).
+     public var madeAngles: Int { (0..<4).filter { angles.indices.contains($0) && angles[$0] != nil }.count }
+     /// Made with Dress up (removed 2026-11-11; its outfits keep working).
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift b/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift
+index 230a3bb9..cf2e3326 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/OutfitPagesTests.swift
+@@ -48,4 +48,15 @@ final class OutfitPagesTests: XCTestCase {
+         XCTAssertFalse(o.hasFaces)
+         XCTAssertEqual(OutfitPictures.shown(o).count, 3)
+     }
++
++    /// A set that came out partly (owner 2026-11-12): the label, and each missing picture has its own Redo.
++    func testPartialOutfitDecodesAndNamesMissingPictures() throws {
++        let json = #"{"id":"o1","modelId":"m","name":"Red","angles":[{"asset":"c_front"},{"asset":"c_tq"},null,null],"faces":[{"asset":"face"},{"asset":"face"},{"asset":"face"}],"state":"preview","partial":{"made":5,"of":7,"missing":["side","back"],"label":"5 of 7 made · Redo the missing ones"}}"#
++        let o = try JSONDecoder().decode(Outfit.self, from: Data(json.utf8))
++        XCTAssertEqual(o.partial?.label, "5 of 7 made · Redo the missing ones")
++        XCTAssertEqual((0..<7).filter { o.isMissing($0) }, [2, 3])
++        let whole = try JSONDecoder().decode(Outfit.self, from: Data(#"{"id":"o2","angles":[null,null,null,null]}"#.utf8))
++        XCTAssertNil(whole.partial)
++        XCTAssertFalse(whole.isMissing(2))
++    }
+ }

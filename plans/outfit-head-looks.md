@@ -99,3 +99,13 @@ make-up and accessories.
 between the 7 slots (front, tq, side, back, face, faceTq, profile); free; the owner or the outfit's maker. Claude:
 `outfit_reorder` (preview without confirm, then an Approve card), and suite_see labels each picture with its slot. Apps:
 drag a picture onto another slot in the open outfit, or "Move to…" on each picture. Fixes Claude issue ci_cf8c3c8ee924.
+app design: `plans/outfit-faces.md`. (Whether §2 Head looks is still wanted on top of this is the owner's call.)
+
+## §7 Partial results (owner 2026-11-12, branch claude/outfit-partial)
+When making a set fails partway, the pictures already made are kept:
+- New outfit (describe / product photo / Keep from base), My own set faces, Add face close-ups, Fill, and Redo all work this way. The outfit is saved with the missing pictures empty. The member pays only for what was made: each picture's cost is added on success, and the rest of the hold goes back. A picture the provider billed but that wasn't kept goes on studio overhead.
+- If the front angle fails while making a new set, nothing can be built from it. The whole set fails and is refunded, as before.
+- The outfit view gains `partial: { made, of: 7, missing: [front|tq|side|back|face|faceTq|profile], label: "N of 7 made · Redo the missing ones" }`. Each missing picture has POST /v1/outfits/:id/redo {angle}, priced with `dryRun: true`.
+- Shots with a partial outfit send only the pictures that exist. The first outfit picture's sent-images "why" names what's missing.
+- Character sheet fill (/v1/models/:id/fill-angles) already kept partial results (one try per angle). The LoRA training set now keeps the candidates made; training still needs LORA_MIN_KEEP.
+- Unchanged on purpose: Enhance (a realism then upscale chain of one image, where a half result isn't useful) and the other single-image tools. Their failures are refunded, and the spend goes on overhead.

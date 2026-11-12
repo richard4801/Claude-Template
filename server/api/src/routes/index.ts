@@ -61,8 +61,23 @@ export function modelView(m: typeof models.$inferSelect) {
     identityBodySlot: bodySlotOf(m), archived: !!m.archivedAt, archivedAt: m.archivedAt ?? undefined,
     defaultRig: m.defaultRig ?? undefined /* AI suite (workstream 1): filled into rows still on Auto when she's @-mentioned */ });
 }
+/** The outfit's seven pictures (4 body angles, 3 face close-ups) by the redo route's names. */
+const OUTFIT_PICTURES = ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'] as const;
+/**
+ * A set that came out partly (a picture failed while making it): which of the seven are made and which are missing
+ * ("N of 7 made · Redo the missing ones"; each missing one has POST /v1/outfits/:id/redo {angle}, its price with dryRun).
+ * Older outfits without face close-ups count only their angles (Add face close-ups makes those).
+ */
+export function outfitMade(o: Pick<typeof outfits.$inferSelect, 'angles' | 'faces' | 'state'>) {
+  if (o.state === 'generating') return null;
+  const pics = [...[0, 1, 2, 3].map(i => o.angles?.[i] ?? null), ...(o.faces ? [0, 1, 2].map(i => o.faces?.[i] ?? null) : [])];
+  const missing = pics.map((p, i) => (p ? null : OUTFIT_PICTURES[i]!)).filter((x): x is (typeof OUTFIT_PICTURES)[number] => !!x);
+  const made = pics.length - missing.length;
+  return missing.length && made ? { made, of: pics.length, missing, label: `${made} of ${pics.length} made · Redo the missing ones` } : null;
+}
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined,
+    /* a set that came out partly (owner 2026-11-12) */ partial: outfitMade(o) ?? undefined,
     /* outfit page (plans/outfit-head-looks.md §4/§5): the folder's date; who may rename/delete it */ createdAt: o.createdAt, createdBy: o.createdBy ?? undefined });
 setViews(modelView, outfitView);
 const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: P.wireFps(c.fps), checks: c.checks,
@@ -378,6 +393,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     resultsOf(ctx).link(user, `outfit-${id}`); // results arrive in the chat
     const outfitResult = (status: 'done' | 'failed') => resultsOf(ctx).report(`outfit-${id}`, { kind: 'outfit', status, title: `Outfit · ${spec.name}`, modelId: m.id, outfitId: id,
       ...(status === 'failed' ? { error: 'The outfit pictures didn’t come out' } : {}) }).catch(() => undefined);
+    /** One angle that fails stays empty: logged, its spend recorded on the bill; the set keeps what was made. */
+    const angleFailed = (i: number) => (e: unknown) => { ctx.log.warn({ err: (e as Error).message, outfit: id, angle: i }, 'outfit angle failed'); return null; };
     ctx.later(async () => {
       let angles: (ImageRef | null)[];
       if (mode === 'own' && b.images?.length) angles = [0, 1, 2, 3].map(i => (b.images![i] as ImageRef) ?? null);
@@ -399,12 +416,21 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             for (const [i, a] of OUTFIT_ANGLES.slice(1).entries()) {
               const body = baseSet[i + 1] ?? null; // a missing angle uses the front (the edit starts from it)
               const prompt = outfitEditPrompt(a, texts) + (body ? ' ' + outfitKeepAngle(k, texts) : '');
-              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
-                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null);
+              // One angle that fails stays empty (the set keeps what was made; Redo makes it later).
+              angles.push(await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
+                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })
+                .then(r => r.images[0] ?? null, angleFailed(i + 1)));
             }
           } else if (sel.provider === 'simulated') {
-            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
-              req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
+            angles = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
+              req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })
+              .then(r => r.images as (ImageRef | null)[], e => {
+                // The pictures made before one failed are kept (charged); the rest stay empty.
+                const pe = e instanceof PhotoError ? e.partial : undefined;
+                if (!pe?.images.length) throw e;
+                bill.keep(pe.costs.reduce((x, c) => x + c, 0));
+                return [0, 1, 2, 3].map(i => pe.images[i] ?? null);
+              });
           } else if (sel.provider === 'replicate') {
             // A new front shot, then the ¾, side and back as edits of it, so all four show the same clothes.
             const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
@@ -414,17 +440,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
               // Her face, then her own body photo from this angle: the edit takes her figure from it, never its clothes.
               const body = angleBody(BODY_SLOTS[i + 1]!);
               const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
-              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
-                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0] ?? null);
+              angles.push(await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
+                editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })
+                .then(r => r.images[0] ?? null, angleFailed(i + 1)));
             }
           } else {
             // New shots (a custom model): each angle with her body photo of that angle.
             angles = await Promise.all(set.map((p, i) => {
               const plan = anglePlans?.[i] ?? outfitPlan!;
               return ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
-                req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0] ?? null);
+                req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0] ?? null, angleFailed(i));
             }));
           }
+          // Without its front nothing can be made from it (and nothing is kept): the whole set fails, as before.
+          if (!angles[0]) throw new Error('no front');
         } catch (e) {
           await bill.fail();
           const [f] = await db.update(outfits).set({ state: 'preview', angles: [null, null, null, null] }).where(eq(outfits.id, id)).returning();
@@ -513,6 +542,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, angles: wantAngles.length, faces: faceJob.which.length, images, cost, faceCost: faceJob.cost };
     const bill = await new PhotoBill(ctx, whoOf(user), uid('of'), cost, what).start();
     filling.add(o.id);
+    /** One picture that fails stays as it was (empty): the others are kept and charged, its spend recorded on the bill. */
+    const remakeFailed = (i: number) => (e: unknown) => { ctx.log.warn({ err: (e as Error).message, outfit: o.id, angle: i }, 'outfit picture failed'); return null; };
     ctx.later(async () => {
       const made = new Map<number, ImageRef | null>();
       let faces: (ImageRef | null)[] = [null, null, null];
@@ -524,13 +555,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             const { ids, plan } = plans[k]!;
             const spec = { name: o.name, description: o.description || undefined, source: 'reference-set' as const };
             const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts)[i]!;
-            made.set(i, (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
-              req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } })).images[0] ?? null);
+            made.set(i, await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
+              req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0] ?? null, remakeFailed(i)));
             if (i === 0 && made.get(0)) front = made.get(0)!;
           } else {
+            if (!front) continue; // no front to edit from: this angle stays empty
             const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
-            made.set(i, (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, bill,
-              editOf: front!, refs: [slotOf('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: o.seed ?? undefined } })).images[0] ?? null);
+            made.set(i, await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, bill,
+              editOf: front, refs: [slotOf('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: o.seed ?? undefined } }).then(r => r.images[0] ?? null, remakeFailed(i)));
           }
         }
         if (faceJob.which.length && front) faces = await faceJob.run(o.id, front, bill, o.seed);
