@@ -104,6 +104,8 @@ class QueueViewModel(private val c: AppContainer) : ViewModel() {
         c.drafts.dismissedFails.update { it + j.id }
         if (c.repo.removeJob(j.id) == null) c.drafts.dismissedFails.update { it - j.id }
     }
+    fun owner() = c.repo.ownerNow()
+    fun recover(j: Job) = viewModelScope.launch { c.repo.recoverJob(j.id) }
     fun clearFailed() = viewModelScope.launch { c.repo.clearFailedJobs()?.let { c.repo.toast("Cleared ${it.size} failed") } }
 
     fun rerun(j: Job, nav: Nav) { c.drafts.loadJob(j); c.repo.toast("Settings loaded · tap Generate"); nav.go(Routes.DIRECT) }
@@ -167,8 +169,12 @@ private fun FailCard(vm: QueueViewModel, j: Job, count: Int) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 T("${j.title} didn't render", m.scale.heading, m.roles.danger)
                 Caption(j.failLine())
+                if (j.canRecover && !vm.owner()) Caption(Job.RECOVER_BY_OWNER)
             }
-            SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
+            if (j.canRecover) {
+                // Already made and charged at the provider: Recover is free (owner only); Try again would pay again.
+                if (vm.owner()) SecondaryButton(Job.RECOVER, { vm.recover(j) }, height = 48.dp)
+            } else SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
             SecondaryButton("Dismiss", { vm.dismiss(j) }, height = 48.dp)
         }
         if (count > 1) Caption("Clear all $count failed", Modifier.press { vm.clearFailed() }.padding(vertical = MuseSpace.s2))

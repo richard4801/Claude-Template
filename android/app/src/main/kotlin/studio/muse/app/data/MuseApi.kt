@@ -60,6 +60,9 @@ interface MuseApi {
     suspend fun removeJob(jobId: String)
     /** POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own). */
     suspend fun clearFailedJobs(): List<String>
+    /** POST /v1/jobs/:id/recover (owner only, free): a job the provider made and charged for but the server couldn't save
+     *  (errorCode provider_paid_unsaved / provider_unconfirmed) is fetched again by its saved request id. Never a new run. */
+    suspend fun recoverJob(jobId: String)
     /** Starts queued jobs, oldest first, charging each. Returns the jobs it started. */
     suspend fun runQueue(): List<Job>
     suspend fun listTakes(): List<Take>

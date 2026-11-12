@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import studio.muse.app.data.ImageRef
+import studio.muse.app.data.Job
+import kotlinx.coroutines.launch
 import studio.muse.app.ui.components.Bar
 import studio.muse.app.ui.components.Ink
 import studio.muse.app.ui.components.RefImage
@@ -247,9 +249,18 @@ fun BoxScope.SuiteResultPane(
             Column(Modifier.align(Alignment.Center).padding(20.dp).widthIn(max = 300.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 T("This take didn't work", m.type.h2.copy(fontSize = 26.sp, lineHeight = 28.sp), Color.White, align = TextAlign.Center)
                 T(pane.failure ?: "We stopped early. You weren't charged.", m.type.tiny, Color.White.copy(alpha = .92f), align = TextAlign.Center, maxLines = 3)
-                // Not free: the failed run was refunded and a retry is a new run at the same price (owner bug 2026-11-11).
-                StageButton(if (pane.price.isBlank() || pane.price == "$0.00") "Retry" else "Retry · ${pane.price}", onRetry, primary = true, icon = "retry")
-                if (onTry != null && tryLabel != null) StageButton(tryLabel, onTry)
+                val recoverId = pane.recoverJobId
+                if (recoverId != null) {
+                    // Already made and charged at the provider: Recover is free (owner only); Retry would pay again.
+                    val repo = studio.muse.app.ui.LocalContainer.current.repo
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    if (repo.ownerNow()) StageButton(Job.RECOVER, { scope.launch { repo.recoverJob(recoverId) } }, primary = true, icon = "retry")
+                    else T(Job.RECOVER_BY_OWNER, m.type.tiny, Color.White.copy(alpha = .8f), align = TextAlign.Center)
+                } else {
+                    // Not free: the failed run was refunded and a retry is a new run at the same price (owner bug 2026-11-11).
+                    StageButton(if (pane.price.isBlank() || pane.price == "$0.00") "Retry" else "Retry · ${pane.price}", onRetry, primary = true, icon = "retry")
+                    if (onTry != null && tryLabel != null) StageButton(tryLabel, onTry)
+                }
             }
         }
     }

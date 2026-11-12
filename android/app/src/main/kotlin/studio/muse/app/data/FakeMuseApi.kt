@@ -612,6 +612,13 @@ class FakeMuseApi(
         ids
     }
 
+    /** Recover (owner, free): the fake has the video, so the job is simply done again with no new charge. */
+    override suspend fun recoverJob(jobId: String) = lock.withLock {
+        val i = jobs.indexOfFirst { it.id == jobId }
+        if (i < 0 || !jobs[i].canRecover) throw ApiException("bad_request", "Nothing to recover")
+        jobs[i] = jobs[i].copy(state = "done", error = null, errorCode = null)
+    }
+
     override suspend fun removeJob(jobId: String) {
         lock.withLock { jobs.removeAll { it.id == jobId }; hiddenJobs += jobId }
         runners.remove(jobId)?.cancel()
