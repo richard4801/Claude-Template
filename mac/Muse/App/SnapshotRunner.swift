@@ -526,6 +526,7 @@ enum SnapshotRunner {
             state.editCollapsed = false
             state.editPreview = nil
             state.claudeTab = 0
+            state.chatSample = true   // the chat (its "+" row and composer) stands in for a live session, as in the panel shots
             if !store.takes.contains(where: { $0.id == take.id }) { store.takes.insert(take, at: 0) }
             store.openEdit(takeId: take.id)
             try? await Task.sleep(for: .seconds(8))
@@ -544,9 +545,25 @@ enum SnapshotRunner {
                 } else {
                     lines.append(contentsOf: cut.map { "CUT edit preview bar \(width)x\(height) \(theme.rawValue) with Claude \($0)" })
                 }
+                // The docked Claude panel (owner review, run 591: at 1000 × 700 it ran off the right edge): its header with
+                // the ✕, the tabs, the chat row with "+", and the composer with Send must be drawn and lie inside the window;
+                // the header's status and the tab labels must be whole.
+                state.probeTick += 1
+                try? await Task.sleep(for: .seconds(0.3))
+                let winW = w.contentLayoutRect.width
+                let panelKeys = ["edit claude panel", "edit claude header", "edit claude close", "edit claude tabs", "chat sessions", "chat composer"]
+                var panelCut: [String] = []
+                for key in panelKeys {
+                    guard let f = state.composerFrames[key], f.width > 0 else { panelCut.append("\(key) not drawn"); continue }
+                    if f.minX < -0.5 || f.maxX > winW + 0.5 { panelCut.append("\(key) at \(Int(f.minX))–\(Int(f.maxX)) of \(Int(winW)) pt") }
+                }
+                panelCut += truncatedLabels().filter { l in ["claude panel status", "segment Chat", "segment History", "segment Playbook"].contains { l.hasPrefix($0) } }
+                lines.append(contentsOf: panelCut.isEmpty ? ["FITS edit claude panel \(width)x\(height) \(theme.rawValue) (\(panelKeys.count) parts inside \(Int(winW)) pt)"]
+                                                         : panelCut.map { "CUT edit claude panel \(width)x\(height) \(theme.rawValue) \($0)" })
             }
             state.editPreview = nil
             state.claudeTab = nil
+            state.chatSample = false
             w.setFrame(original, display: true)
             store.openEdit(takeId: nil)
             try? await Task.sleep(for: .seconds(1))

@@ -166,6 +166,9 @@ struct EditSuiteEditor: View {
     /// the 72 pt sidebar rail).
     static let mediaFits: CGFloat = 1108
     static let inspectorFits: CGFloat = 880
+    /// With the Claude panel open: the editor's least width (the preview and the narrow timeline toolbar) and the panel's.
+    static let editorMin: CGFloat = 560
+    static let claudeMin: CGFloat = 300
 
     /// Runs an editor shortcut unless the person is typing (then the key goes to the text box).
     private func shortcut(_ key: EditShortcuts.Key, plain: Bool = true) -> KeyPress.Result {
@@ -206,9 +209,10 @@ struct EditSuiteEditor: View {
     private var editor: some View {
         GeometryReader { g in
             let full = g.size.width
-            let claudeW: CGFloat = full >= 1300 ? 360 : 320
-            // The Claude panel takes its width from the editor.
-            let w = claudeOpen ? full - claudeW - 1 : full
+            // The Claude panel takes its width from the editor, clamped so both fit the window (owner review, run 591: at
+            // 1000 × 700 the panel ran off the right edge): the editor keeps at least `editorMin`, the panel at least 300.
+            let claudeW: CGFloat = max(Self.claudeMin, min(full >= 1300 ? 360 : 320, full - 1 - Self.editorMin))
+            let w = claudeOpen ? max(0, full - claudeW - 1) : full
             VStack(spacing: 0) {
                 topBar(width: w)
                 SuiteRule()
@@ -237,6 +241,9 @@ struct EditSuiteEditor: View {
                                 .frame(height: Self.timelineHeight)
                         }
                     }
+                    // The editor gets exactly its share, so the panel beside it always ends at the window's edge.
+                    .frame(width: w)
+                    .clipped()
                     if claudeOpen {
                         SuiteRule(vertical: true)
                         EditSuiteClaudePanel(session: session, openPlaybook: {

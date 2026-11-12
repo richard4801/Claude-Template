@@ -202,14 +202,18 @@ struct EditSuiteClaudePanel: View {
             HStack(spacing: 8) {
                 ClaudeBadge()
                 Text(session.liveConnected ? "Shared with Claude" : "Not shared").font(t.body(12.5)).foregroundStyle(t.muted)
-                Spacer()
+                    .lineLimit(1).fitProbe("claude panel status")
+                Spacer(minLength: 4)
                 SuiteIconButton(systemName: "xmark", label: "Hide Claude", size: 26, action: close)
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude close") } }
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude header") } }
             EditSeg(options: [(0, "Chat"), (1, "History"), (2, "Playbook")], selection: tab) { tab = $0 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude tabs") } }
             SuiteRule()
             if tab == 0 {
                 // Review mode: the sample thread stands in for a live session (demo mode has none).
@@ -228,6 +232,7 @@ struct EditSuiteClaudePanel: View {
             }
         }
         .background(t.chrome)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude panel") } }
         .onAppear { if let x = SnapshotRunner.state.claudeTab { tab = x } } // review mode: the Playbook tab's shot
     }
 
