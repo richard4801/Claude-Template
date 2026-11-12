@@ -1891,7 +1891,7 @@ final class EditSuiteSession {
                 } else {
                     // A chosen bitrate (parity), or HDR (HEVC Main 10, HLG): reader → writer at the size estimate's rate.
                     try await EditV2Engine.write(built, to: file, hevc: settings.effectiveCodec == .hevc, bitrate: settings.videoBitrate,
-                                                 hdr: settings.hdr, aiLabel: settings.labelAI, progress: onProgress)
+                                                 hdr: settings.hdr, dolbyVision: settings.writesDolbyVision, aiLabel: settings.labelAI, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)

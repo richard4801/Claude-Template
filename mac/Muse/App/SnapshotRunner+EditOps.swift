@@ -697,7 +697,9 @@ extension SnapshotRunner {
     @MainActor
     static func hdrConsistencyCheck(_ store: AppStore, media: URL, log: OpsLog, tagged: Bool) async {
         typealias H = EditV2.HDRColor
-        let kind = tagged ? "tagged 709" : "untagged"
+        // The untagged take exports with Dolby Vision (the default), the tagged one as plain HLG: both ways checked.
+        let dolbyVision = !tagged
+        let kind = (tagged ? "tagged 709" : "untagged") + (dolbyVision ? ", Dolby Vision" : ", plain HLG")
         func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check("export HDR colour (\(kind)): \(name)", ok, detail) }
         log.note("STEP export HDR: same colour on every frame, \(kind) take")
         let skinRGB = (224, 172, 140)
@@ -722,7 +724,7 @@ extension SnapshotRunner {
         s.edit { $0.changeCaptionStyle { $0.y = 0.85 } }
         guard let sdr = await exportFile(s, media: media, name: tagged ? "skin709-sdr" : "skin-sdr", labelAI: false, fps: 60, note: log.note) else { return }
         EditV2HDRTrace.reset()
-        let hdrFile = await exportFile(s, media: media, name: tagged ? "skin709-hdr" : "skin-hdr", labelAI: false, hdr: true, fps: 60, note: log.note)
+        let hdrFile = await exportFile(s, media: media, name: tagged ? "skin709-hdr" : "skin-hdr", labelAI: false, hdr: true, dolbyVision: dolbyVision, fps: 60, note: log.note)
         for line in EditV2HDRTrace.dump() { log.note("TRACE \(line)") }
         if let vt = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
            let desc = (try? await vt.load(.formatDescriptions))?.first {
@@ -745,13 +747,10 @@ extension SnapshotRunner {
         // Owner's 582 export: frames 0–2 (the first source frame at 24 → 60 fps) hotter than the rest.
         check("frame 0 = frame 10", all.count > 10 && H.distance(all[0].value, all[10].value) <= 3,
               "frame 0 " + describe(all[0].value) + " frame 10 " + describe(all.count > 10 ? all[10].value : nil))
-        if let vt = try? await AVURLAsset(url: hdr.url).loadTracks(withMediaType: .video).first,
-           let desc = (try? await vt.load(.formatDescriptions))?.first {
-            let atoms = (CMFormatDescriptionGetExtension(desc, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any])?.keys.sorted() ?? []
-            let sub = CMFormatDescriptionGetMediaSubType(desc)
-            let dv = atoms.contains { $0.hasPrefix("dv") } || sub == 0x64766831 || sub == 0x64766865   // dvh1 / dvhe
-            check("pure HLG, no Dolby Vision", !dv, "atoms \(atoms) codec " + String(format: "%08x", sub))
-        }
+        // Dolby Vision (owner keeps it, on by default): on → the dvcC/dvvC record and an RPU in the samples; off → neither.
+        let dv = await dolbyVisionIn(hdr.url)
+        check(dolbyVision ? "Dolby Vision record and RPU" : "plain HLG, no Dolby Vision",
+              dolbyVision ? (dv.record && dv.rpu) : (!dv.record && !dv.rpu), "record \(dv.record) rpu \(dv.rpu) atoms \(dv.atoms)")
         let head = all.prefix(15).map(\.value)
         let headWorst = head.map { m in middle.map { H.distance(m, $0) } ?? 99 }.max() ?? 99
         check("first 15 frames = middle", headWorst <= 3, "frames 0–14 " + head.map { describe($0) }.joined(separator: " ") + " middle " + describe(middle))
@@ -761,6 +760,40 @@ extension SnapshotRunner {
         // The SDR export shows the source colour; HDR, tone-mapped back, within a viewer's rounding of it.
         check("matches the SDR export", H.distance(first, ref) <= 10 && H.distance(ref, (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)) <= 6,
               "HDR \(describe(first)) SDR \(describe(ref)) source rgb\(skinRGB)")
+    }
+
+    /// Dolby Vision in an HEVC file: the sample description's dvcC/dvvC/dvwC record, and an RPU (HEVC NAL unit type 62)
+    /// in the first video sample.
+    static func dolbyVisionIn(_ url: URL) async -> (record: Bool, rpu: Bool, atoms: [String]) {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first else { return (false, false, []) }
+        var atoms: [String] = []
+        if let desc = (try? await track.load(.formatDescriptions))?.first {
+            atoms = (CMFormatDescriptionGetExtension(desc, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any])?.keys.sorted() ?? []
+        }
+        let record = atoms.contains { ["dvcC", "dvvC", "dvwC"].contains($0) }
+        var rpu = false
+        if let reader = try? AVAssetReader(asset: asset) {
+            let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+            if reader.canAdd(out) {
+                reader.add(out)
+                if reader.startReading(), let sb = out.copyNextSampleBuffer(), let bb = CMSampleBufferGetDataBuffer(sb) {
+                    let len = CMBlockBufferGetDataLength(bb)
+                    var data = [UInt8](repeating: 0, count: len)
+                    _ = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: $0.baseAddress!) }
+                    var i = 0
+                    // Length-prefixed NAL units (4-byte lengths in MP4).
+                    while i + 5 <= len {
+                        let n = Int(data[i]) << 24 | Int(data[i + 1]) << 16 | Int(data[i + 2]) << 8 | Int(data[i + 3])
+                        if (data[i + 4] >> 1) & 0x3f == 62 { rpu = true; break }
+                        guard n > 0 else { break }
+                        i += 4 + n
+                    }
+                }
+                reader.cancelReading()
+            }
+        }
+        return (record, rpu, atoms)
     }
 
     /// The mean colour of a 16 × 16 patch at (0.5, 0.3) of every frame of a file, by time. HDR files are read as their
@@ -873,7 +906,8 @@ extension SnapshotRunner {
 
     /// Runs the session's export to a file next to the check's media; returns the file and the saved version.
     @MainActor
-    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, hdr: Bool = false, fps: Int = 30, note: (String) -> Void) async -> (url: URL, take: Take?)? {
+    static func exportFile(_ s: EditSuiteSession, media: URL, name: String, labelAI: Bool, hdr: Bool = false, dolbyVision: Bool = true, fps: Int = 30,
+                           note: (String) -> Void) async -> (url: URL, take: Take?)? {
         var settings = s.state.export
         settings.ratio = .portrait
         settings.resolution = .p720
@@ -881,6 +915,7 @@ extension SnapshotRunner {
         settings.codec = .h264
         settings.labelAI = labelAI
         settings.hdr = hdr
+        settings.dolbyVision = dolbyVision
         let url = media.appendingPathComponent("export-\(name).mp4")
         try? FileManager.default.removeItem(at: url)
         var saved: Take?
