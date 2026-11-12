@@ -183,8 +183,10 @@ extension SnapshotRunner {
         store.oneClaude.open = true
         _ = await until(5) { SnapshotRunner.state.composerFrames["claude model line"] != nil }
         if let h = SnapshotRunner.state.composerFrames["claude header"], let ml = SnapshotRunner.state.composerFrames["claude model line"] {
-            line(h.width <= OneClaudePanel.width + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
-                 "header \(Int(h.width))×\(Int(h.height)), model line height \(Int(ml.height))")
+            // The panel floats and resizes (bundle-7): the header must fit the panel as drawn, not the old docked 380.
+            let panelWidth = SnapshotRunner.state.composerFrames["one claude panel"]?.width ?? CGFloat(FloatingClaudePanel.defaultWidth)
+            line(h.width <= panelWidth + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
+                 "header \(Int(h.width))×\(Int(h.height)) in a panel \(Int(panelWidth)) wide, model line height \(Int(ml.height))")
         } else {
             line(true, "panel header fits", "not measured (the panel wasn't drawn in this run)")
         }

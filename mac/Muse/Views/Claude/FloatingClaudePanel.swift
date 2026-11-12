@@ -10,11 +10,12 @@ struct FloatingClaudePanel: View {
     /// Distance from the window's right and top edges, the width, and the height (0: the window's height less margins).
     @AppStorage("claudePanel.right") private var right: Double = Double(Space.s4)
     @AppStorage("claudePanel.top") private var top: Double = Double(Space.s4)
-    @AppStorage("claudePanel.width") private var width: Double = 400
+    @AppStorage("claudePanel.width") private var width: Double = Self.defaultWidth
     @AppStorage("claudePanel.height") private var height: Double = 0
     @State private var moving: CGSize = .zero
     @State private var sizing: CGSize = .zero
 
+    static let defaultWidth: Double = 400
     static let minSize = CGSize(width: 340, height: 420)
     static let margin: CGFloat = Space.s4
 
@@ -27,6 +28,8 @@ struct FloatingClaudePanel: View {
                 if ended { commitMove(d, in: g.size) } else { moving = d }
             })
             .frame(width: f.width, height: f.height)
+            // The checks compare the header with the panel's real width (it floats and resizes; 400 by default).
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "one claude panel") } }
             .background(t.roles.canvas)
             .clipShape(shape)
             .overlay(ClaudeLivingEdge(cornerRadius: radius))
