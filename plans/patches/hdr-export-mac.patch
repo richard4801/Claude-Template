@@ -1,0 +1,463 @@
+From 2131fa1cc1e2b62a398541d9842c500b2902a190 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 12:52:13 +0000
+Subject: [PATCH] Mac HDR export: one colour path for every frame (owner bug
+ 2026-11-12, orange skin at the start and now and then)
+
+Source frames without colour primaries were read as if already BT.2020, skipping the BT.709 to BT.2020 conversion. Now every
+source frame is read with resolved tags (its own complete ones, else its track's, else BT.709 SDR), and every composed output
+buffer is stamped BT.2020 / HLG / BT.2020 matrix before Core Image draws it. MuseCore EditV2.HDRColor holds the rule and the
+SDR/HLG maths (4 tests); the Edit ops snapshot check exports an untagged skin-tone take with captions in SDR and HDR and compares
+every frame's decoded skin patch.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoCcw28R6FBjPPp318
+---
+ mac/Muse/App/Edit/EditV2Compositor.swift      |  33 +++-
+ mac/Muse/App/Edit/EditV2Engine.swift          |  17 +-
+ mac/Muse/App/SnapshotRunner+EditOps.swift     | 101 ++++++++++++
+ .../MuseCore/Edit/EditV2HDRColor.swift        | 147 ++++++++++++++++++
+ .../Edit/EditV2HDRColorTests.swift            |  62 ++++++++
+ 5 files changed, 357 insertions(+), 3 deletions(-)
+ create mode 100644 mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift
+ create mode 100644 mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift
+
+diff --git a/mac/Muse/App/Edit/EditV2Compositor.swift b/mac/Muse/App/Edit/EditV2Compositor.swift
+index b68e8b84..2ed0562b 100644
+--- a/mac/Muse/App/Edit/EditV2Compositor.swift
++++ b/mac/Muse/App/Edit/EditV2Compositor.swift
+@@ -244,9 +244,38 @@ final class EditV2Scene: @unchecked Sendable {
+             guard let m = layerMatte(request, seg, l) else { continue }
+             image = drawLayer(frame, matte: m, layer: l, clip: c, local: t - seg.timelineStart, state: state, frame: frameNo, fps: fps, over: image)
+         }
++        if hdr { Self.stamp(out, EditV2.HDRColor.output) }
+         ci.render(image.cropped(to: canvas), to: out, bounds: canvas, colorSpace: outSpace)
+     }
+ 
++    // MARK: HDR colour (owner bug 2026-11-12)
++
++    /// Sets a buffer's colour attachments (propagated, so the writer and encoder see them too).
++    static func stamp(_ buf: CVPixelBuffer, _ tags: EditV2.HDRColor.Tags) {
++        if let v = tags.primaries { CVBufferSetAttachment(buf, kCVImageBufferColorPrimariesKey, v as CFString, .shouldPropagate) }
++        if let v = tags.transfer { CVBufferSetAttachment(buf, kCVImageBufferTransferFunctionKey, v as CFString, .shouldPropagate) }
++        if let v = tags.matrix { CVBufferSetAttachment(buf, kCVImageBufferYCbCrMatrixKey, v as CFString, .shouldPropagate) }
++    }
++
++    /// A buffer's own colour attachments.
++    static func tags(of buf: CVPixelBuffer) -> EditV2.HDRColor.Tags {
++        func get(_ key: CFString) -> String? { CVBufferCopyAttachment(buf, key, nil) as? String }
++        return EditV2.HDRColor.Tags(primaries: get(kCVImageBufferColorPrimariesKey), transfer: get(kCVImageBufferTransferFunctionKey),
++                                    matrix: get(kCVImageBufferYCbCrMatrixKey))
++    }
++
++    /// A source picture frame as a CIImage. HDR: every frame is read with resolved tags (its own complete ones, else its
++    /// track's, else BT.709 SDR). Before, a frame that arrived without primaries was taken as already BT.2020 and skipped
++    /// the 709 → 2020 conversion (orange, oversaturated skin at the start and now and then). SDR export is unchanged.
++    private func picture(_ buf: CVPixelBuffer, asset: String) -> CIImage {
++        if hdr {
++            let own = Self.tags(of: buf)
++            let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags)
++            if resolved != own { Self.stamp(buf, resolved) }
++        }
++        return CIImage(cvPixelBuffer: buf)
++    }
++
+     // MARK: Layers
+ 
+     private func layerMatte(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment, _ l: E.ClipLayer) -> CIImage? {
+@@ -260,7 +289,7 @@ final class EditV2Scene: @unchecked Sendable {
+         var pic: CIImage?
+         if let img = sources.images[a] { pic = img }
+         else if let id = layerTracks["\(seg.lane)/\(seg.itemId)/base"], let buf = request.sourceFrame(byTrackID: id) {
+-            pic = CIImage(cvPixelBuffer: buf).transformed(by: sources.media[a]?.orient ?? .identity)
++            pic = picture(buf, asset: a).transformed(by: sources.media[a]?.orient ?? .identity)
+         }
+         guard var p = pic, p.extent.width > 0, p.extent.height > 0, frame.extent.width > 0 else { return nil }
+         let e = frame.extent
+@@ -300,7 +329,7 @@ final class EditV2Scene: @unchecked Sendable {
+     private func sourceImage(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment) -> CIImage? {
+         guard let id = laneTracks[seg.lane], let buf = request.sourceFrame(byTrackID: id) else { return nil }
+         let orient = sources.media[seg.assetId]?.orient ?? .identity
+-        return CIImage(cvPixelBuffer: buf).transformed(by: orient)
++        return picture(buf, asset: seg.assetId).transformed(by: orient)
+     }
+ 
+     /// The clip's alpha matte frame at this time (upright, as its own file stores it; inverted when asked), or nil.
+diff --git a/mac/Muse/App/Edit/EditV2Engine.swift b/mac/Muse/App/Edit/EditV2Engine.swift
+index f9391320..da7ba5cb 100644
+--- a/mac/Muse/App/Edit/EditV2Engine.swift
++++ b/mac/Muse/App/Edit/EditV2Engine.swift
+@@ -17,6 +17,9 @@ enum EditV2Engine {
+         let audioTrack: AVAssetTrack?
+         /// Turns the decoded frame (natural orientation, Core Image coordinates) upright with its origin at 0,0.
+         let orient: CGAffineTransform
++        /// HDR export: the video track's colour tags from its format description (nil keys when the file has none; AI
++        /// takes often lack primaries). Untagged frames of this source are read with these (EditV2.HDRColor.resolve).
++        var colorTags = EditV2.HDRColor.Tags()
+     }
+ 
+     /// Every source of a project by asset id: video/audio files, and pictures for image items.
+@@ -83,7 +86,19 @@ enum EditV2Engine {
+             h = Int(shown.height.rounded())
+         }
+         let info = EditV2.MediaInfo(durationSec: duration.isFinite ? duration : 0, hasVideo: video != nil, hasAudio: audio != nil, width: w, height: h)
+-        return Media(asset: asset, info: info, videoTrack: video, audioTrack: audio, orient: orient)
++        var media = Media(asset: asset, info: info, videoTrack: video, audioTrack: audio, orient: orient)
++        if let video, let desc = try? await video.load(.formatDescriptions).first {
++            media.colorTags = colorTags(desc)
++        }
++        return media
++    }
++
++    /// A video format description's colour primaries, transfer function and YCbCr matrix (CoreVideo's spellings).
++    static func colorTags(_ desc: CMFormatDescription) -> EditV2.HDRColor.Tags {
++        func ext(_ key: CFString) -> String? { CMFormatDescriptionGetExtension(desc, extensionKey: key) as? String }
++        return EditV2.HDRColor.Tags(primaries: ext(kCMFormatDescriptionExtension_ColorPrimaries),
++                                    transfer: ext(kCMFormatDescriptionExtension_TransferFunction),
++                                    matrix: ext(kCMFormatDescriptionExtension_YCbCrMatrix))
+     }
+ 
+     /// The track's preferredTransform (a y-down transform) in Core Image's y-up coordinates, moved so the upright frame
+diff --git a/mac/Muse/App/SnapshotRunner+EditOps.swift b/mac/Muse/App/SnapshotRunner+EditOps.swift
+index 20ffc87c..63e48997 100644
+--- a/mac/Muse/App/SnapshotRunner+EditOps.swift
++++ b/mac/Muse/App/SnapshotRunner+EditOps.swift
+@@ -45,6 +45,7 @@ extension SnapshotRunner {
+         await exportCheck(s, media: media, log: log)
+         await formatsCheck(s, media: media, log: log)
+         s.close()
++        await hdrConsistencyCheck(store, media: media, log: log)
+         note("ALL DONE")
+     }
+ 
+@@ -676,6 +677,106 @@ extension SnapshotRunner {
+         }
+     }
+ 
++    /// Owner bug 2026-11-12: HDR (HLG) exports turned skin warmer / orange at the start and now and then. An untagged
++    /// SDR take (as AI takes come) in a skin tone, captions on its first second only, exported SDR and HDR. Every HDR
++    /// frame's skin patch (decoded from the file's own 10-bit codes with BT.2020 / HLG, tone-mapped to SDR) must match
++    /// every other frame's (caption vs plain, first vs middle) and the SDR export's.
++    @MainActor
++    static func hdrConsistencyCheck(_ store: AppStore, media: URL, log: OpsLog) async {
++        typealias H = EditV2.HDRColor
++        func check(_ name: String, _ ok: Bool, _ detail: String = "") { log.check(name, ok, detail) }
++        log.note("STEP export HDR: same colour on every frame")
++        let skinRGB = (224, 172, 140)
++        let url = media.appendingPathComponent("skin.mp4")
++        do { try await makeSolidVideo(url, seconds: 3, rgb: skinRGB, tone: nil) } catch {
++            check("export HDR colour: test video", false, error.localizedDescription); return
++        }
++        let now = Int64(Date().timeIntervalSince1970 * 1000)
++        let raw: [String: Any] = ["id": "ops_skin", "kind": "take", "title": "Skin", "videoUrl": url.absoluteString, "durationSec": 3,
++                                  "width": 360, "height": 640, "fps": 30, "createdAt": now]
++        guard let take = (try? JSONSerialization.data(withJSONObject: raw)).flatMap({ try? JSONDecoder().decode(Take.self, from: $0) }) else {
++            check("export HDR colour: test take", false); return
++        }
++        store.takes.insert(take, at: 0)
++        await (store.api as? FakeMuseAPI)?.adoptTakes([take])
++        guard let s = store.makeEditSuiteSession(takeId: take.id) else { check("export HDR colour: editor session", false); return }
++        defer { s.close() }
++        await s.load()
++        guard s.isReady, let asset = s.project.mainClips.first?.asset else { check("export HDR colour: the edit opened", false, "\(s.phase)"); return }
++        // Burned-in captions on 0.1–1.0 s; plain frames after.
++        s.edit { $0.setCaptions(words: [EditV2.Word(text: "Hello", startSec: 0.1, endSec: 0.5), EditV2.Word(text: "there", startSec: 0.5, endSec: 1.0)], assetId: asset) }
++        s.edit { $0.changeCaptionStyle { $0.y = 0.85 } }
++        guard let sdr = await exportFile(s, media: media, name: "skin-sdr", labelAI: false, note: log.note),
++              let hdr = await exportFile(s, media: media, name: "skin-hdr", labelAI: false, hdr: true, note: log.note) else { return }
++        let sdrPx = await framePatches(sdr.url, hdr: false)
++        let hdrPx = await framePatches(hdr.url, hdr: true)
++        func nearest(_ px: [Double: (r: Int, g: Int, b: Int)], _ t: Double) -> (r: Int, g: Int, b: Int)? { px.min { abs($0.key - t) < abs($1.key - t) }?.value }
++        guard hdrPx.count > 60, let ref = nearest(sdrPx, 1.5) else {
++            check("export HDR colour: read the frames", false, "\(hdrPx.count) HDR, \(sdrPx.count) SDR"); return
++        }
++        func at(_ t: Double) -> (r: Int, g: Int, b: Int)? { nearest(hdrPx, t) }
++        let all = hdrPx.sorted { $0.key < $1.key }
++        let first = all[0].value, caption = at(0.5), plain = at(2.0), middle = at(1.5)
++        let worst = all.max { H.distance($0.value, first) < H.distance($1.value, first) }!
++        check("export HDR colour: caption frame = plain frame", caption.map { c in plain.map { H.distance(c, $0) <= 3 } ?? false } ?? false,
++              "caption \(describe(caption)) plain \(describe(plain))")
++        check("export HDR colour: first frame = middle", middle.map { H.distance(first, $0) <= 3 } ?? false, "first \(describe(first)) middle \(describe(middle))")
++        check("export HDR colour: every frame the same", H.distance(worst.value, first) <= 3,
++              String(format: "worst at %.2f s: ", worst.key) + describe(worst.value) + " vs first " + describe(first))
++        // The SDR export shows the source colour; HDR, tone-mapped back, within a viewer's rounding of it.
++        check("export HDR colour: matches the SDR export", H.distance(first, ref) <= 10 && H.distance(ref, (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)) <= 6,
++              "HDR \(describe(first)) SDR \(describe(ref)) source rgb\(skinRGB)")
++    }
++
++    /// The mean colour of a 16 × 16 patch at (0.5, 0.3) of every frame of a file, by time. HDR files are read as their
++    /// raw 10-bit Y′CbCr codes (no conversion by the reader) and decoded with EditV2.HDRColor; SDR files as BGRA.
++    static func framePatches(_ url: URL, hdr: Bool) async -> [Double: (r: Int, g: Int, b: Int)] {
++        let asset = AVURLAsset(url: url)
++        guard let track = try? await asset.loadTracks(withMediaType: .video).first, let reader = try? AVAssetReader(asset: asset) else { return [:] }
++        let format = hdr ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_32BGRA
++        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: format])
++        guard reader.canAdd(out) else { return [:] }
++        reader.add(out)
++        guard reader.startReading() else { return [:] }
++        var result: [Double: (r: Int, g: Int, b: Int)] = [:]
++        while let sb = out.copyNextSampleBuffer() {
++            guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
++            let t = CMSampleBufferGetPresentationTimeStamp(sb).seconds
++            CVPixelBufferLockBaseAddress(pb, .readOnly)
++            defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
++            let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb)
++            let x0 = w / 2 - 8, y0 = Int(Double(h) * 0.3) - 8
++            var sum = (0.0, 0.0, 0.0), n = 0.0
++            if hdr {
++                guard let yb = CVPixelBufferGetBaseAddressOfPlane(pb, 0), let cb = CVPixelBufferGetBaseAddressOfPlane(pb, 1) else { continue }
++                let yRow = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), cRow = CVPixelBufferGetBytesPerRowOfPlane(pb, 1)
++                for y in y0..<(y0 + 16) {
++                    for x in x0..<(x0 + 16) {
++                        // 10-bit samples sit in the top bits of 16-bit words.
++                        let luma = Int(yb.load(fromByteOffset: y * yRow + x * 2, as: UInt16.self) >> 6)
++                        let co = (y / 2) * cRow + (x / 2) * 4
++                        let u = Int(cb.load(fromByteOffset: co, as: UInt16.self) >> 6), v = Int(cb.load(fromByteOffset: co + 2, as: UInt16.self) >> 6)
++                        let p = EditV2.HDRColor.sdr255(fromHLGCodes: (luma, u, v))
++                        sum.0 += Double(p.r); sum.1 += Double(p.g); sum.2 += Double(p.b); n += 1
++                    }
++                }
++            } else {
++                guard let base = CVPixelBufferGetBaseAddress(pb) else { continue }
++                let row = CVPixelBufferGetBytesPerRow(pb)
++                for y in y0..<(y0 + 16) {
++                    for x in x0..<(x0 + 16) {
++                        let o = y * row + x * 4
++                        sum.0 += Double(base.load(fromByteOffset: o + 2, as: UInt8.self))
++                        sum.1 += Double(base.load(fromByteOffset: o + 1, as: UInt8.self))
++                        sum.2 += Double(base.load(fromByteOffset: o, as: UInt8.self)); n += 1
++                    }
++                }
++            }
++            if n > 0 { result[t] = (Int((sum.0 / n).rounded()), Int((sum.1 / n).rounded()), Int((sum.2 / n).rounded())) }
++        }
++        return result
++    }
++
+     /// Parity formats: a video at a chosen bitrate (the reader → writer path), Sound only (.m4a) and GIF.
+     @MainActor
+     static func formatsCheck(_ s: EditSuiteSession, media: URL, log: OpsLog) async {
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift
+new file mode 100644
+index 00000000..7a4d09b1
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift
+@@ -0,0 +1,147 @@
++import Foundation
++
++/// XL HDR export colour (owner bug 2026-11-12: "HDR (HLG)" exports looked warmer, more saturated and orange at the start
++/// and now and then, in the file itself).
++///
++/// The Mac's HDR compositor gets each source frame as a half-float buffer and reads its colour from the buffer's own
++/// attachments. A frame that arrives without colour primaries (an AI take is often written without them) was taken as
++/// already being in the output's BT.2020 primaries, so BT.709 colour skipped its 709 → 2020 conversion: skin went orange
++/// and oversaturated. Frames that did carry the tags were converted correctly, so the file mixed the two looks.
++/// The composed output buffers had the same gap for the YCbCr matrix (Core Image used its default instead of BT.2020).
++///
++/// The fix: every frame's colour is resolved by `resolve` (the frame's own complete tags, else the source track's, else
++/// BT.709 SDR), and every output buffer carries `output` before it is drawn. This file holds that rule and the
++/// BT.709 SDR ↔ BT.2100 HLG maths the Mac check uses to read the colour back out of an exported file.
++public extension EditV2 {
++    enum HDRColor {
++        /// A frame's or track's colour tags, spelled as CoreVideo spells them (kCVImageBufferColorPrimaries_… values).
++        public struct Tags: Equatable, Hashable, Sendable {
++            public var primaries: String?
++            public var transfer: String?
++            public var matrix: String?
++            public init(primaries: String? = nil, transfer: String? = nil, matrix: String? = nil) {
++                self.primaries = primaries; self.transfer = transfer; self.matrix = matrix
++            }
++            /// Primaries and transfer both known: enough to place the frame's colour.
++            public var isComplete: Bool { primaries?.isEmpty == false && transfer?.isEmpty == false }
++        }
++
++        // CoreVideo's spellings (kCVImageBufferColorPrimaries_ITU_R_709_2 etc.).
++        public static let bt709 = "ITU_R_709_2"
++        public static let bt2020 = "ITU_R_2020"
++        public static let hlg = "ITU_R_2100_HLG"
++
++        /// What an untagged SDR source is: BT.709 primaries, transfer and matrix (as the SDR export treats it).
++        public static let sdrDefault = Tags(primaries: bt709, transfer: bt709, matrix: bt709)
++        /// What every HDR output frame is, and what the file says it is.
++        public static let output = Tags(primaries: bt2020, transfer: hlg, matrix: bt2020)
++
++        /// The colour a source frame is read with. A frame with complete tags keeps them (they describe its pixels);
++        /// otherwise the source track's complete tags; otherwise BT.709 SDR. Never a mix of a frame's partial tags and
++        /// a fallback (a lone HLG transfer with 709 primaries would be wrong both ways). The matrix comes along from the
++        /// same place, falling back the same way.
++        public static func resolve(frame: Tags, track: Tags?) -> Tags {
++            let base: Tags
++            if frame.isComplete { base = frame } else if let track, track.isComplete { base = track } else { base = sdrDefault }
++            let matrix = base.matrix ?? frame.matrix ?? track?.matrix ?? sdrDefault.matrix
++            return Tags(primaries: base.primaries, transfer: base.transfer, matrix: matrix)
++        }
++
++        // MARK: Maths (BT.709, BT.2020, BT.2100 HLG, BT.2408 SDR placement)
++
++        public typealias RGB = (r: Double, g: Double, b: Double)
++
++        /// Linear BT.709 → linear BT.2020 (BT.2087).
++        static let m709to2020: [Double] = [0.627404, 0.329283, 0.043313,
++                                           0.069097, 0.919540, 0.011362,
++                                           0.016391, 0.088013, 0.895595]
++        static let m2020to709: [Double] = [1.660491, -0.587641, -0.072850,
++                                           -0.124550, 1.132900, -0.008349,
++                                           -0.018151, -0.100579, 1.118730]
++        static func mul(_ m: [Double], _ c: RGB) -> RGB {
++            (m[0] * c.r + m[1] * c.g + m[2] * c.b, m[3] * c.r + m[4] * c.g + m[5] * c.b, m[6] * c.r + m[7] * c.g + m[8] * c.b)
++        }
++
++        /// BT.709 OETF and its inverse (signal 0…1 ↔ linear 0…1).
++        public static func oetf709(_ l: Double) -> Double { let l = max(0, l); return l < 0.018 ? 4.5 * l : 1.099 * pow(l, 0.45) - 0.099 }
++        public static func eotf709(_ v: Double) -> Double { let v = max(0, v); return v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1 / 0.45) }
++
++        static let a = 0.17883277, b = 0.28466892, c = 0.55991073
++        /// BT.2100 HLG OETF (scene linear 0…1 → signal) and inverse.
++        public static func hlgOETF(_ e: Double) -> Double { let e = max(0, e); return e <= 1.0 / 12 ? (3 * e).squareRoot() : a * log(12 * e - b) + c }
++        public static func hlgInverseOETF(_ v: Double) -> Double { let v = max(0, v); return v <= 0.5 ? v * v / 3 : (exp((v - c) / a) + b) / 12 }
++
++        /// HLG system gamma at a 1000 cd/m² display, and SDR reference white's display level (203 / 1000, BT.2408).
++        static let gamma = 1.2
++        static let refWhite = 0.203
++        static func lum2020(_ c: RGB) -> Double { 0.2627 * c.r + 0.6780 * c.g + 0.0593 * c.b }
++
++        /// An SDR BT.709 pixel (signal 0…1) as HLG BT.2020 signal (0…1): SDR white lands on HLG reference white (75 %).
++        /// `convertPrimaries` false is the bug: BT.709 colour placed in BT.2020 as if it were already there.
++        public static func hlgSignal(sdr p: RGB, convertPrimaries: Bool = true) -> RGB {
++            let lin: RGB = (eotf709(p.r) * refWhite, eotf709(p.g) * refWhite, eotf709(p.b) * refWhite)
++            let d = convertPrimaries ? mul(m709to2020, lin) : lin
++            // Inverse OOTF (display → scene light) on luminance, as BT.2100 defines it.
++            let y = lum2020(d)
++            let k = y > 0 ? pow(y, (1 - gamma) / gamma) : 0
++            return (hlgOETF(d.r * k), hlgOETF(d.g * k), hlgOETF(d.b * k))
++        }
++
++        /// HLG BT.2020 signal back to SDR BT.709 signal (0…1, clipped): the inverse of `hlgSignal`.
++        public static func sdrSignal(hlg v: RGB) -> RGB {
++            let s: RGB = (hlgInverseOETF(v.r), hlgInverseOETF(v.g), hlgInverseOETF(v.b))
++            let ys = lum2020(s)
++            let k = ys > 0 ? pow(ys, gamma - 1) : 0   // OOTF
++            let d = mul(m2020to709, (s.r * k / refWhite, s.g * k / refWhite, s.b * k / refWhite))
++            func clip(_ x: Double) -> Double { min(1, max(0, oetf709(x))) }
++            return (clip(d.r), clip(d.g), clip(d.b))
++        }
++
++        /// Kr, Kb of a YCbCr matrix by CoreVideo name (BT.601 when unknown, as Core Image assumes for an untagged buffer).
++        public static func kr(_ matrix: String) -> (kr: Double, kb: Double) {
++            switch matrix {
++            case bt2020: return (0.2627, 0.0593)
++            case bt709: return (0.2126, 0.0722)
++            default: return (0.299, 0.114)
++            }
++        }
++
++        /// R'G'B' signal → 10-bit video-range Y'CbCr codes with `matrix`.
++        public static func codes10(_ p: RGB, matrix: String) -> (y: Int, cb: Int, cr: Int) {
++            let (kr, kb) = kr(matrix), kg = 1 - kr - kb
++            let y = kr * p.r + kg * p.g + kb * p.b
++            let cb = (p.b - y) / (2 * (1 - kb)), cr = (p.r - y) / (2 * (1 - kr))
++            func q(_ v: Double, _ lo: Int, _ hi: Int) -> Int { min(hi, max(lo, Int(v.rounded()))) }
++            return (q(64 + 876 * y, 4, 1019), q(512 + 896 * cb, 4, 1019), q(512 + 896 * cr, 4, 1019))
++        }
++
++        /// 10-bit video-range Y'CbCr codes → R'G'B' signal with `matrix`.
++        public static func signal(codes c: (y: Int, cb: Int, cr: Int), matrix: String) -> RGB {
++            let (kr, kb) = kr(matrix), kg = 1 - kr - kb
++            let y = (Double(c.y) - 64) / 876, cb = (Double(c.cb) - 512) / 896, cr = (Double(c.cr) - 512) / 896
++            let r = y + 2 * (1 - kr) * cr, b = y + 2 * (1 - kb) * cb
++            return (r, (y - kr * r - kb * b) / kg, b)
++        }
++
++        /// What a viewer shows for a pixel of an HDR (BT.2020 HLG) file, as SDR 0…255: decoded with the file's BT.2020
++        /// matrix and tone-mapped back so SDR content compares with the SDR export.
++        public static func sdr255(fromHLGCodes c: (y: Int, cb: Int, cr: Int)) -> (r: Int, g: Int, b: Int) {
++            let s = sdrSignal(hlg: signal(codes: c, matrix: bt2020))
++            return (Int((s.r * 255).rounded()), Int((s.g * 255).rounded()), Int((s.b * 255).rounded()))
++        }
++
++        /// The HDR file's codes for an SDR pixel (0…255) drawn with `source` tags read for the frame, written with
++        /// `matrix` (the output buffer's), and how a viewer then shows it. `resolve` + `output` give the SDR colour back.
++        public static func shown(sdr255 p: (r: Int, g: Int, b: Int), readAs source: Tags, writtenWith matrix: String) -> (r: Int, g: Int, b: Int) {
++            let s: RGB = (Double(p.r) / 255, Double(p.g) / 255, Double(p.b) / 255)
++            // A frame read as BT.2020 is not converted from 709; read as 709 it is.
++            let v = hlgSignal(sdr: s, convertPrimaries: source.primaries != bt2020)
++            return sdr255(fromHLGCodes: codes10(v, matrix: matrix))
++        }
++
++        /// The largest channel difference of two pixels.
++        public static func distance(_ x: (r: Int, g: Int, b: Int), _ y: (r: Int, g: Int, b: Int)) -> Int {
++            max(abs(x.r - y.r), abs(x.g - y.g), abs(x.b - y.b))
++        }
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift
+new file mode 100644
+index 00000000..b6ec6dc5
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift
+@@ -0,0 +1,62 @@
++import XCTest
++@testable import MuseCore
++
++/// Owner bug 2026-11-12: HDR (HLG) exports turned skin warmer / orange at the start and now and then. Every frame must
++/// take the same colour path, whatever tags its buffer happens to carry.
++final class EditV2HDRColorTests: XCTestCase {
++    typealias H = EditV2.HDRColor
++    let skin = (r: 224, g: 172, b: 140)
++    let wall = (r: 200, g: 150, b: 110)
++
++    /// A decoder buffer (tagged 709), a converted buffer without tags (as on caption frames / the first frames), and an
++    /// AI take whose file has no primaries: all read the same way.
++    func testEveryFrameResolvesTheSame() {
++        let aiTake = H.Tags(primaries: nil, transfer: nil, matrix: H.bt709)
++        let tagged = H.resolve(frame: H.Tags(primaries: H.bt709, transfer: H.bt709, matrix: H.bt709), track: aiTake)
++        let untagged = H.resolve(frame: H.Tags(), track: aiTake)
++        let partial = H.resolve(frame: H.Tags(primaries: nil, transfer: H.bt709), track: aiTake)
++        XCTAssertEqual(tagged, H.sdrDefault)
++        XCTAssertEqual(untagged, H.sdrDefault)
++        XCTAssertEqual(partial, H.sdrDefault)
++        // An HDR source frame keeps its own tags (they describe its pixels).
++        let hdrFrame = H.Tags(primaries: H.bt2020, transfer: H.hlg, matrix: H.bt2020)
++        XCTAssertEqual(H.resolve(frame: hdrFrame, track: nil), hdrFrame)
++        // A tagged track fills in for an untagged frame.
++        let p3 = H.Tags(primaries: "P3_D65", transfer: H.bt709, matrix: H.bt709)
++        XCTAssertEqual(H.resolve(frame: H.Tags(), track: p3), p3)
++    }
++
++    /// The bug, measured: a frame read as if already BT.2020 (no 709 → 2020) comes out warmer and more saturated than a
++    /// correctly read frame; the BT.601 default matrix on a fresh output buffer shifts it too.
++    func testTheShiftTheOwnerSaw() {
++        let good = H.shown(sdr255: skin, readAs: H.sdrDefault, writtenWith: H.bt2020)
++        let noConversion = H.shown(sdr255: skin, readAs: H.Tags(primaries: H.bt2020, transfer: H.bt709), writtenWith: H.bt2020)
++        let wrongMatrix = H.shown(sdr255: skin, readAs: H.sdrDefault, writtenWith: "")
++        XCTAssertGreaterThan(noConversion.r - good.r, 15, "warmer: \(noConversion) vs \(good)")
++        XCTAssertLessThan(noConversion.b, good.b, "more saturated: \(noConversion) vs \(good)")
++        XCTAssertGreaterThan(H.distance(wrongMatrix, good), 1, "matrix: \(wrongMatrix) vs \(good)")
++    }
++
++    /// Fixed path: caption frame vs plain frame, first frame vs middle frame, all within 1/255 of each other and of the
++    /// SDR export's colour once tone-mapped back.
++    func testFixedPathMatchesSDR() {
++        let aiTake = H.Tags(matrix: H.bt709)
++        let frames: [H.Tags] = [H.Tags(), H.Tags(primaries: H.bt709, transfer: H.bt709, matrix: H.bt709), H.Tags(transfer: H.bt709)]
++        for px in [skin, wall, (r: 128, g: 128, b: 128), (r: 220, g: 30, b: 30)] {
++            let shown = frames.map { H.shown(sdr255: px, readAs: H.resolve(frame: $0, track: aiTake), writtenWith: H.output.matrix!) }
++            for s in shown {
++                XCTAssertLessThanOrEqual(H.distance(s, shown[0]), 1, "\(px): \(shown)")
++                XCTAssertLessThanOrEqual(H.distance(s, px), 1, "\(px) → \(s)")
++            }
++        }
++    }
++
++    /// SDR white is HLG reference white (BT.2408: 75 %), grey stays neutral.
++    func testReferenceWhite() {
++        let w = H.hlgSignal(sdr: (1, 1, 1))
++        XCTAssertEqual(w.r, 0.75, accuracy: 0.002)
++        XCTAssertEqual(w.g, w.b, accuracy: 1e-9)
++        let c = H.codes10(w, matrix: H.bt2020)
++        XCTAssertEqual(c.cb, 512); XCTAssertEqual(c.cr, 512)
++    }
++}
+-- 
+2.43.0
+
