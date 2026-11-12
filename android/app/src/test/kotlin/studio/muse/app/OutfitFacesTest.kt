@@ -2,6 +2,8 @@ package studio.muse.app
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import studio.muse.app.data.CreateOutfitRequest
@@ -66,5 +68,13 @@ class OutfitFacesTest {
         assertEquals(3, OutfitPictures.madeFaces(api.listOutfits().first { it.id == SampleData.CRYSTAL }))
         // Redo one face: one edit.
         assertEquals(PhotoPrices().perEdit, api.redoOutfit(SampleData.CRYSTAL, "faceTq").cost, 1e-9)
+    }
+
+    /** A set that came out partly (owner 2026-11-12): its label, and each missing picture has its own Redo. */
+    @Test fun `a partial outfit decodes its label and names the missing pictures`() {
+        val o = Json { ignoreUnknownKeys = true }.decodeFromString(Outfit.serializer(), """{"id":"o1","modelId":"m","name":"Red","angles":[{"asset":"c_front"},{"asset":"c_tq"},null,null],"partial":{"made":5,"of":7,"missing":["side","back"],"label":"5 of 7 made · Redo the missing ones"}}""")
+        assertEquals("5 of 7 made · Redo the missing ones", o.partial?.label)
+        assertEquals(listOf(2, 3), (0 until 7).filter { o.isMissing(it) })
+        assertFalse(o.copy(partial = null).isMissing(2))
     }
 }

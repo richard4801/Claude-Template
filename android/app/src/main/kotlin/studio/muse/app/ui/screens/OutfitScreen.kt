@@ -199,6 +199,8 @@ fun OutfitScreen() {
                 if (s.draft.mode != "own") ModelChoiceRow(studio.muse.app.data.ModelPurpose.OUTFIT, ModelPick(s.draft.imageModel), { p -> vm.edit { it.copy(imageModel = p.model) } })
                 if (!ownPicking) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
                     OutfitPictureGrid(pictures, emptyList(), busy = s.busy) { i -> viewing = OutfitPictures.pageOf(pictures, i) }
+                    // A set that came out partly: the pictures made are kept; the outfit page redoes the missing ones.
+                    s.preview?.partial?.takeIf { s.done }?.let { Notice(it.label, tone = NoticeTone.CAUTION) }
                     Caption("Plain, unbranded clothes work best. Visible logos carry into the video.")
                 } else Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
                     OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->

@@ -104,11 +104,20 @@ data class Outfit(
     /** When it was made (ms; the folder's date) and who made it (they or the owner may rename/delete it). */
     val createdAt: Long? = null,
     val createdBy: String? = null,
+    /** A set that came out partly (some pictures failed while making it; owner 2026-11-12): "5 of 7 made · Redo the
+     *  missing ones" and which are missing (OutfitPictures.KEYS names). Null when complete or still being made. */
+    val partial: OutfitPartial? = null,
 ) {
     val front: ImageRef? get() = angles.firstOrNull()
+    /** One of its 7 pictures (0–3 angles, 4–6 faces) is missing from a partial set: it gets its own Redo with its price. */
+    fun isMissing(i: Int): Boolean = partial?.missing?.contains(OutfitPictures.KEYS.getOrNull(i)) == true
     /** How many of the four angles have a picture (a set can come back with some empty). */
     val madeAngles: Int get() = (0 until 4).count { angles.getOrNull(it) != null }
 }
+
+/** A set that came out partly (server outfitView `partial`). */
+@Serializable
+data class OutfitPartial(val made: Int = 0, val of: Int = 7, val missing: List<String> = emptyList(), val label: String = "")
 
 /** PATCH /v1/outfits/{id}, POST /v1/outfits/{id}/save: the outfit's name (save: null keeps it). */
 @Serializable

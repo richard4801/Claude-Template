@@ -330,12 +330,15 @@ fun OutfitOpenScreen(id: String) {
                     DisplayTitle(o.name)
                     Caption(listOfNotNull(s.model?.name?.substringBefore(' ')?.let { "For $it" }, outfitDate(o.createdAt)?.let { "made $it" }).joinToString(", "))
                 }
-                OutfitPictureGrid(pictures, making + fillingAt, busy = false, onMove = onMove) { i ->
+                // A set that came out partly: what was made; each missing picture has its own Redo with its price.
+                o.partial?.let { if (!filling && making.isEmpty()) Notice(it.label, tone = NoticeTone.CAUTION) }
+                OutfitPictureGrid(pictures, making + fillingAt, busy = false, onMove = onMove,
+                    redo = if (canChange && !filling && making.isEmpty()) ({ i -> if (o.isMissing(i)) Pair<String, () -> Unit>("Redo · ${Pricing.money(vm.redoEstimate(i))}") { vm.redo(o, i) } else null }) else null) { i ->
                     viewing = OutfitPictures.pageOf(pictures, i)
                 }
                 if (filling) Notice("Making the missing angles from the front.")
                 else if (o.madeAngles < 4 && o.front != null && canChange) {
-                    Notice("${o.madeAngles} of 4 angles. The others came back empty.", tone = NoticeTone.CAUTION)
+                    if (o.partial == null) Notice("${o.madeAngles} of 4 angles. The others came back empty.", tone = NoticeTone.CAUTION)
                     SecondaryButton("Make missing angles · ${studio.muse.core.PhotoPricing.about(vm.fillEstimate(o))}", { vm.fill(o) }, Modifier.fillMaxWidth())
                 }
                 // An older outfit (made before every outfit had face close-ups), or faces that came back empty.
@@ -371,7 +374,9 @@ fun OutfitOpenScreen(id: String) {
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onMove: ((from: Int, to: Int) -> Unit)? = null, onOpen: (Int) -> Unit) {
+fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onMove: ((from: Int, to: Int) -> Unit)? = null,
+    /** A missing picture's Redo ("Redo · $0.04" and its action), or null for none. */
+    redo: ((Int) -> Pair<String, () -> Unit>?)? = null, onOpen: (Int) -> Unit) {
     val m = muse
     val density = LocalDensity.current
     val canMove = onMove != null && !busy && making.isEmpty()
@@ -437,9 +442,11 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: 
                                                 }.semantics { contentDescription = "$label, view full size" }
                                                 else -> t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
                                             }
-                                        }
+                                        },
+                                        contentAlignment = androidx.compose.ui.Alignment.Center,
                                     ) {
                                         if (ref != null) RefImage(ref, Modifier.fillMaxSize())
+                                        else redo?.invoke(i)?.let { (text, go) -> TextAction(text, go) }
                                         if (canMove && ref != null) MuseMenu(menuFor == i, { menuFor = null }, outfitMoveMenu(pictures, i) { to -> move?.invoke(i, to) })
                                     }
                                     Caption(label, maxLines = 1)
