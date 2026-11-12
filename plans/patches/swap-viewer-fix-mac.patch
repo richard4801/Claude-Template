@@ -1,0 +1,981 @@
+diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
+index f02e37a6..a90ec7f1 100644
+--- a/mac/Muse/App/SnapshotRunner.swift
++++ b/mac/Muse/App/SnapshotRunner.swift
+@@ -193,6 +193,11 @@ enum SnapshotRunner {
+ 
+     /// The render's draft (design/direction/render.py `composer_mac`): @Demo in a café, 16:9, 8 s, 35 mm film with an
+     /// anamorphic lens, window light, Golden warmth, UGC · Calm, and a #Dolly in. Options the catalog doesn't have stay Auto.
++    /// The take viewer's per-device choices for a review shot (nil: the defaults, Clean with no frame).
++    static func viewerPrefs(_ json: String?) {
++        if let json { UserDefaults.standard.set(json, forKey: "viewer.prefs") } else { UserDefaults.standard.removeObject(forKey: "viewer.prefs") }
++    }
++
+     static func fillDemoDraft(_ store: AppStore) {
+         let cam = store.suite.camera
+         func pick(_ list: [SuiteOption], _ words: [String]) -> String? {
+@@ -345,8 +350,28 @@ enum SnapshotRunner {
+             ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                 let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
+                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
++            // The swap viewer fix (plans/swap-viewer-build.md; owner, build 582): the real views for the side-by-side with
++            // the approved mockups. A finished take on the Shot stage; the take viewer Clean, then with the TikTok layout
++            // (YouTube for a landscape take) in the device frame; New Swap empty and with a clip.
++            ("stage_take", { viewerPrefs(nil); store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
++                if let j = store.suiteTakes(photo: false).compactMap(\.jobId).first { store.rememberStage(j, tool: .shot) } }),
++            ("viewer_clean", { viewerPrefs(nil); store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
++                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
++            ("viewer_tiktok", { viewerPrefs("{\"portraitSkin\":\"tiktok\",\"landscapeSkin\":\"youtube\",\"deviceFrame\":true,\"safeZones\":true}")
++                store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
++                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
++            ("newswap_empty", { viewerPrefs(nil); store.suite.feedOpen = false; store.suite.viewerTakeId = nil
++                store.openTool(.swap); store.setSwapVariant(.remix); store.clip = nil; store.clipVideo = nil }),
++            ("newswap_filled", { store.suite.feedOpen = false; store.openTool(.swap); store.setSwapVariant(.remix)
++                store.suite.remix.backgroundOn = true; store.suite.remix.backgroundMode = .describe
++                store.suite.remix.backgroundWords = "A rooftop at golden hour, city lights behind her"
++                store.suite.remix.lookOn = true; store.suite.remix.lookWords = "Warmer, soft window light"
++                Task { await store.useSampleClip(bad: false, quiet: true) } }),
+         ]
+         await run([.c, .a, .b, .d], [(1280, 800), (1000, 700)], feedScreens)
++        // Back to the defaults after the swap viewer shots: the classic Swap, Clean, no device frame.
++        store.setSwapVariant(.classic)
++        viewerPrefs(nil)
+         // The last screen was the comparison: two takes were on screen (the demo has video takes).
+         let compared = store.suiteComparing.count
+         lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerStage.swift b/mac/Muse/Views/Suite/Composer/ComposerStage.swift
+index 3c88fc8d..8c2dab2b 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerStage.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerStage.swift
+@@ -26,20 +26,33 @@ struct ComposerStage: View {
+         }
+     }
+ 
++    /// A finished take on the stage: the take viewer sizes it to its own shape and puts its actions under it, so the stage
++    /// gives it the whole width (build 582: inside the tool's 9:16 box the actions were cut and the take squeezed out).
++    private var showsTake: Bool {
++        guard !store.suite.generating else { return false }
++        let job = pinned.flatMap { id in store.jobs.first { $0.id == id } } ?? store.stageJob(store.suite.composer.tool)
++        if case .ready = SuiteResultState.of(job) { return true }
++        return false
++    }
++
+     var body: some View {
+-        let width = ratio.map { maxPictureHeight * $0 }
++        let width = showsTake ? nil : ratio.map { maxPictureHeight * $0 }
+         VStack(spacing: Space.s3) {
+             Spacer(minLength: 0)
+             Group {
+-                if let r = ratio {
++                if showsTake {
++                    ComposerMediaPane(pinned: pinned)
++                        .frame(maxHeight: maxPictureHeight + ViewerActionRow.height + Space.s3 + 40)
++                } else if let r = ratio {
+                     ComposerMediaPane(pinned: pinned).aspectRatio(r, contentMode: .fit)
+                 } else {
+                     ComposerMediaPane(pinned: pinned)
+                 }
+             }
+-            .frame(maxWidth: width ?? .infinity, maxHeight: maxPictureHeight)
++            .frame(maxWidth: width ?? .infinity, maxHeight: showsTake ? maxPictureHeight + ViewerActionRow.height + Space.s3 + 40 : maxPictureHeight)
++            // The strip of this tool's takes: never narrower than its thumbnails need (build 582 cut it at the 9:16 width).
+             ComposerTakesStrip(pinned: $pinned)
+-                .frame(maxWidth: width ?? .infinity, alignment: .leading)
++                .frame(maxWidth: max(width ?? .infinity, 560), alignment: .center)
+             Spacer(minLength: 0)
+         }
+         .frame(maxWidth: .infinity, maxHeight: .infinity)
+diff --git a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
+index 451487b2..e886549d 100644
+--- a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
++++ b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
+@@ -28,6 +28,8 @@ struct NewSwapPanel: View {
+     @State private var libraryOpen = false
+     /// Outfit "Her outfit" while Character isn't her: whose outfits are listed.
+     @State private var outfitOwner: String?
++    /// Character: the list of her characters is open (Change).
++    @State private var pickHer = false
+     /// New Swap's own screen (plans/swap-viewer-design.md §A): the video and the trimmer are on the stage, so this column
+     /// holds only the changes.
+     var onScreen = false
+@@ -51,14 +53,16 @@ struct NewSwapPanel: View {
+                 if let c = store.clip { trimmer(c) }
+             }
+             VStack(alignment: .leading, spacing: Space.s3) {
+-                toggleRow("Background", isOn: bind(\.backgroundOn), help: "A new place: describe it, or a location or photo") { backgroundField }
+-                toggleRow("Outfit", isOn: bind(\.outfitOn), help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
+-                toggleRow("Character", isOn: bind(\.characterOn), help: "Who the person becomes: her, or a face swap from a photo") { characterField }
+-                toggleRow("Look & light", isOn: bind(\.lookOn), help: "Time of day, light and colour grade") { lookField }
++                toggleRow("Background", isOn: bind(\.backgroundOn), state: d.backgroundMode == .describe ? "Describe the new place" : "A new place from a picture",
++                          help: "A new place: describe it, or a location or photo") { backgroundField }
++                toggleRow("Outfit", isOn: bind(\.outfitOn), state: "New clothes", help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
++                toggleRow("Character", isOn: bind(\.characterOn), state: d.characterKind == .model ? "Her, with the figure lock" : "Face swap from a photo",
++                          help: "Who the person becomes: her, or a face swap from a photo") { characterField }
++                toggleRow("Look & light", isOn: bind(\.lookOn), state: "Time of day, light, grade", help: "Time of day, light and colour grade") { lookField }
+             }
+             Text(d.keptLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                 .fixedSize(horizontal: false, vertical: true)
+-            if d.engineModel == nil, let why = store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why {
++            if !onScreen, d.engineModel == nil, let why = store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why {
+                 Text("Auto: \(why)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                     .fixedSize(horizontal: false, vertical: true)
+             }
+@@ -162,26 +166,44 @@ struct NewSwapPanel: View {
+ 
+     // MARK: Toggles
+ 
+-    @ViewBuilder private func toggleRow<F: View>(_ title: String, isOn: Binding<Bool>, help: String, @ViewBuilder field: () -> F) -> some View {
++    /// One change (approved mockup): its name and a state line on the left, the switch on the right; when on, its one
++    /// field under it.
++    @ViewBuilder private func toggleRow<F: View>(_ title: String, isOn: Binding<Bool>, state: String, help: String, @ViewBuilder field: () -> F) -> some View {
+         VStack(alignment: .leading, spacing: Space.s2) {
+-            Toggle(isOn: isOn) {
+-                Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
++            HStack(alignment: .center, spacing: Space.s3) {
++                VStack(alignment: .leading, spacing: 2) {
++                    Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
++                    Text(isOn.wrappedValue ? state : "Kept from the clip").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++                }
++                Spacer(minLength: Space.s2)
++                Toggle(title, isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small)
+             }
+-            .toggleStyle(.switch)
+-            .controlSize(.small)
++            .frame(minHeight: 44)
++            .contentShape(Rectangle())
+             .help(help)
+-            if isOn.wrappedValue { field() }
++            if isOn.wrappedValue { field().padding(.bottom, Space.s1) }
+         }
+     }
+ 
++    /// A text field on the field tone (the mockup's fields), 1–3 lines.
++    private func wordsField(_ placeholder: String, _ text: Binding<String>) -> some View {
++        TextField(placeholder, text: text, axis: .vertical)
++            .textFieldStyle(.plain)
++            .lineLimit(1...3)
++            .font(t.scale.body.font)
++            .foregroundStyle(t.roles.ink)
++            .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
++            .frame(minHeight: 36)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++    }
++
+     @ViewBuilder private var backgroundField: some View {
+         Picker("Background", selection: bind(\.backgroundMode)) {
+             ForEach(RemixBackgroundMode.allCases, id: \.self) { Text($0.label).tag($0) }
+         }
+         .pickerStyle(.segmented).labelsHidden()
+         if d.backgroundMode == .describe {
+-            TextField("A rooftop at golden hour, city lights behind", text: bind(\.backgroundWords), axis: .vertical)
+-                .textFieldStyle(.roundedBorder).lineLimit(1...3).font(t.body(12.5))
++            wordsField("A rooftop at golden hour, city lights behind", bind(\.backgroundWords))
+         } else {
+             HStack(spacing: Space.s2) {
+                 Menu(d.backgroundImage == nil ? "Pick a picture" : (d.backgroundName ?? "New background")) {
+@@ -234,34 +256,81 @@ struct NewSwapPanel: View {
+             Button(d.productImage == nil ? "Upload the product photo…" : (d.productName ?? "Product photo")) { store.pickRemixPhoto(.product) }
+                 .controlSize(.small)
+         case .words:
+-            TextField("A black linen two-piece", text: bind(\.outfitWords), axis: .vertical)
+-                .textFieldStyle(.roundedBorder).lineLimit(1...3).font(t.body(12.5))
++            wordsField("A black linen two-piece", bind(\.outfitWords))
+         }
+     }
+ 
++    /// Her (the default): her chip with her face, her name, where her look comes from and Change; a link to a face swap
++    /// instead. A face swap: the photo and the consent line, and a link back to her.
+     @ViewBuilder private var characterField: some View {
+-        Picker("Character", selection: bind(\.characterKind)) {
+-            ForEach(RemixCharacterKind.allCases, id: \.self) { Text($0.label).tag($0) }
+-        }
+-        .pickerStyle(.segmented).labelsHidden()
+         if d.characterKind == .model {
+-            Menu(d.modelId.flatMap { store.character($0)?.name } ?? "Pick her") {
+-                ForEach(store.suiteCharacters) { m in Button(m.name) { store.suite.remix.modelId = m.id } }
++            let her = d.modelId.flatMap { store.character($0) }
++            HStack(spacing: Space.s3) {
++                MuseImage(ref: her?.cover)
++                    .frame(width: 36, height: 36)
++                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
++                VStack(alignment: .leading, spacing: 2) {
++                    Text(her?.name ?? "Pick her").font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
++                    Text("Face and figure from her pictures").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++                }
++                Spacer(minLength: Space.s2)
++                Button(her == nil ? "Pick" : "Change") { pickHer = true }
++                    .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
++                    .popover(isPresented: $pickHer, arrowEdge: .bottom) { herList }
+             }
+-            .fixedSize().controlSize(.small)
+-            Text("Her face and figure come only from her images. The clip gives only the motion and facial gestures.")
+-                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
++            .padding(.vertical, 6).padding(.leading, 6).padding(.trailing, Space.s3)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++            Button("Face swap from a photo instead") { store.suite.remix.characterKind = .face }
++                .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.ink2).fixedSize()
++                .help("Only the face changes; their hair, body and figure stay as in the video")
+         } else {
+-            Button(d.faceImage == nil ? "Add a face photo…" : (d.faceName ?? "Face photo")) { store.pickRemixPhoto(.face) }
+-                .controlSize(.small)
++            HStack(spacing: Space.s3) {
++                MuseImage(ref: d.faceImage)
++                    .frame(width: 36, height: 36)
++                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
++                    .opacity(d.faceImage == nil ? 0.4 : 1)
++                Text(d.faceImage == nil ? "Add a face photo" : (d.faceName ?? "Face photo")).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
++                Spacer(minLength: Space.s2)
++                Button(d.faceImage == nil ? "Upload…" : "Change") { store.pickRemixPhoto(.face) }
++                    .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
++            }
++            .padding(.vertical, 6).padding(.leading, 6).padding(.trailing, Space.s3)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+             Text("Face swap: only the face changes. Their hair, body and figure stay as in the video. Use a photo of someone who agreed to this.")
+                 .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
++            Button("Use her instead") { store.suite.remix.characterKind = .model }
++                .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.ink2).fixedSize()
++        }
++    }
++
++    /// Her characters, to pick who she is.
++    private var herList: some View {
++        ScrollView {
++            VStack(alignment: .leading, spacing: 0) {
++                ForEach(store.suiteCharacters) { m in
++                    Button {
++                        store.suite.remix.modelId = m.id
++                        pickHer = false
++                    } label: {
++                        HStack(spacing: Space.s2) {
++                            MuseImage(ref: m.cover).frame(width: 28, height: 28).clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
++                            Text(m.name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
++                            Spacer(minLength: 0)
++                            if m.id == d.modelId { Ph("check", 13).frame(width: 16, height: 16).foregroundStyle(t.roles.accent) }
++                        }
++                        .padding(.horizontal, Space.s3).frame(height: 36).contentShape(Rectangle())
++                    }
++                    .buttonStyle(.plain)
++                }
++            }
++            .padding(.vertical, Space.s2)
+         }
++        .frame(width: 260).frame(maxHeight: 320)
++        .environment(\.theme, t)
+     }
+ 
+     private var lookField: some View {
+-        TextField("Night, neon signs, teal grade", text: bind(\.lookWords), axis: .vertical)
+-            .textFieldStyle(.roundedBorder).lineLimit(1...3).font(t.body(12.5))
++        wordsField("Night, neon signs, teal grade", bind(\.lookWords))
+     }
+ }
+ 
+diff --git a/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift b/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
+index d37e8ac1..cac99c43 100644
+--- a/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
++++ b/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
+@@ -37,8 +37,8 @@ struct NewSwapScreen: View {
+             .frame(minHeight: 0, maxHeight: .infinity)
+             .padding(.bottom, Space.s4)
+             Rectangle().fill(t.roles.hairline).frame(height: 1)
+-            ComposerBottomBar()
+-                .padding(.top, Space.s3)
++            NewSwapBar()
++                .frame(height: 64)
+                 .accessibilityIdentifier("newSwap.bottomBar")
+         }
+     }
+@@ -53,6 +53,18 @@ struct NewSwapStage: View {
+     @State private var showResult = false
+     @State private var dropping = false
+     @State private var replaceLibrary = false
++    @State private var replaceOpen = false
++
++    private func replaceItem(_ title: String, _ run: @escaping () -> Void) -> some View {
++        Button {
++            replaceOpen = false
++            run()
++        } label: {
++            Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
++                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading).padding(.horizontal, Space.s3).contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++    }
+ 
+     var body: some View {
+         Group {
+@@ -100,24 +112,33 @@ struct NewSwapStage: View {
+                 Spacer(minLength: Space.s2)
+                 Text("\(Take.clock(c.durationSec)), \(c.width) × \(c.height)").font(t.scale.caption.font).monospacedDigit()
+                     .foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+-                Menu {
+-                    Button("From the Library…") { replaceLibrary = true }
+-                    Button("Upload a file…") { store.pickClip() }
+-                    Button("Paste a link…") { store.openLinkImport(.swap) }
+-                } label: {
+-                    HStack(spacing: Space.s1) { Text("Replace").font(t.scale.label.font); Ph("caret-down", 12) }.foregroundStyle(t.roles.ink)
++                // A button with a popover, not a Menu (a menu label draws its icon unsized).
++                Button { replaceOpen.toggle() } label: {
++                    HStack(spacing: Space.s1) {
++                        Text("Replace").font(t.scale.label.font)
++                        Ph("caret-down", 12).frame(width: 14, height: 14)
++                    }
++                    .foregroundStyle(t.roles.ink)
++                    .padding(.horizontal, Space.s3).frame(height: 32)
++                    .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
++                    .contentShape(Rectangle())
+                 }
+-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
++                .buttonStyle(.plain).fixedSize()
+                 .help("Use another video")
+-                .popover(isPresented: $replaceLibrary, arrowEdge: .bottom) {
+-                    NewSwapLibraryPicker { replaceLibrary = false }
+-                        .environment(store)
+-                        .environment(\.theme, PickerTheme.dark)
+-                        .environment(\.colorScheme, .dark)
++                .popover(isPresented: $replaceOpen, arrowEdge: .bottom) {
++                    VStack(alignment: .leading, spacing: 0) {
++                        replaceItem("From the Library…") { replaceLibrary = true }
++                        replaceItem("Upload a file…") { store.pickClip() }
++                        replaceItem("Paste a link…") { store.openLinkImport(.swap) }
++                    }
++                    .padding(.vertical, Space.s2).frame(width: 200)
++                    .environment(\.theme, t)
+                 }
++                .sheet(isPresented: $replaceLibrary) { NewSwapLibrarySheet { replaceLibrary = false }.environment(store).environment(\.theme, t) }
+             }
+             .frame(maxWidth: 600)
+             .frame(height: 32)
++            .padding(.top, Space.s2)
+             TakeViewer(media: ViewerMedia(id: c.id, videoURL: store.clipVideo, poster: store.clipPoster, width: c.width, height: c.height, label: c.name),
+                        context: .source, autoplay: false, startMuted: true, previewControls: false)
+                 .id(c.id)
+@@ -130,67 +151,97 @@ struct NewSwapStage: View {
+ 
+ // MARK: The source (empty state)
+ 
++/// Before a video (approved mockup newswap-mac-empty): a centred drop zone with one line of what this is and the three
++/// ways in. Library opens a picker sheet; it never fills the stage.
+ struct NewSwapSourcePicker: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+-    enum Tab: String, CaseIterable { case library = "Library", upload = "Upload", link = "Paste link" }
+-    @State private var tab: Tab = .library
++    @State private var libraryOpen = false
+ 
+     var body: some View {
+-        VStack(alignment: .leading, spacing: Space.s4) {
+-            VStack(alignment: .leading, spacing: Space.s1) {
++        VStack(spacing: Space.s4) {
++            VStack(spacing: Space.s1) {
+                 Text("Add the video to remix").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
+-                Text("Pick a take from your Library, upload a file, or paste a link. You can also drop a file anywhere here.")
+-                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
++                Text("Drop a video here, or pick one. Then switch on what should change.")
++                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).multilineTextAlignment(.center)
++                    .fixedSize(horizontal: false, vertical: true)
+             }
+-            Picker("Source", selection: $tab) {
+-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
++            HStack(spacing: Space.s2) {
++                source("From the Library", icon: "squares-four") { libraryOpen = true }
++                source("Upload a file", icon: "upload-simple") { store.pickClip() }
++                source("Paste a link", icon: "link") { store.openLinkImport(.swap) }
+             }
+-            .pickerStyle(.segmented).labelsHidden().fixedSize()
+-            switch tab {
+-            case .library: library
+-            case .upload: upload
+-            case .link: link
++            Text("MP4 or MOV. MUSE checks the clip after it arrives.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
++        }
++        .padding(Space.s6)
++        .frame(maxWidth: 560)
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
++        .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
++        .overlay(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
++        .sheet(isPresented: $libraryOpen) { NewSwapLibrarySheet { libraryOpen = false }.environment(store).environment(\.theme, t) }
++    }
++
++    private func source(_ title: String, icon: String, _ run: @escaping () -> Void) -> some View {
++        Button(action: run) {
++            HStack(spacing: Space.s2) {
++                Ph(icon, 15).frame(width: 18, height: 18)
++                Text(title).font(t.scale.label.font).lineLimit(1).fixedSize()
+             }
++            .foregroundStyle(t.roles.ink)
++            .padding(.horizontal, Space.s3).frame(height: 36)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++            .contentShape(Rectangle())
+         }
+-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
++        .buttonStyle(.plain)
++        .help(title)
+     }
++}
++
++/// The Library as a sheet: finished video takes as 9:16 tiles with their length and name; one click uses it.
++struct NewSwapLibrarySheet: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var onDone: () -> Void
+ 
+-    private var library: some View {
++    var body: some View {
+         let list = store.extendableTakes
+-        return Group {
++        VStack(alignment: .leading, spacing: Space.s4) {
++            HStack {
++                Text("Pick a video from your Library").font(t.scale.title.font).foregroundStyle(t.roles.ink)
++                Spacer()
++                MButton("Cancel") { onDone() }.keyboardShortcut(.cancelAction)
++            }
+             if list.isEmpty {
+-                VStack(alignment: .leading, spacing: Space.s2) {
+-                    Text("No finished videos yet. Upload one, or paste a link.").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+-                    MButton("Upload a file…") { tab = .upload; store.pickClip() }
+-                }
++                Text("No finished videos yet. Upload one, or paste a link.").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
++                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+             } else {
+                 ScrollView {
+-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 120), spacing: Space.s4, alignment: .top)], alignment: .leading,
++                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(104), spacing: Space.s4, alignment: .top), count: 5), alignment: .leading,
+                               spacing: Space.s5) {
+                         ForEach(list) { item in
+-                            Button { store.useTakeAsRemixSource(item.take) } label: { tile(item) }
+-                                .buttonStyle(.plain)
+-                                .help("Use \(item.take.caption)")
+-                                .accessibilityLabel("Use \(item.take.caption)")
++                            Button {
++                                store.useTakeAsRemixSource(item.take)
++                                onDone()
++                            } label: { tile(item) }
++                            .buttonStyle(.plain)
++                            .help("Use \(item.take.caption)")
++                            .accessibilityLabel("Use \(item.take.caption)")
+                         }
+                     }
+                     .padding(.vertical, 2)
+                 }
+             }
+         }
++        .padding(Space.s5)
++        .frame(width: 5 * 104 + 4 * Space.s4 + 2 * Space.s5 + 16, height: 560)
++        .background(t.roles.canvas)
+     }
+ 
+     private func tile(_ item: ExtendTakeOption) -> some View {
+-        let r = ViewerFrame.aspect(width: item.take.width, height: item.take.height, isVideo: true)
+-        return VStack(alignment: .leading, spacing: Space.s1) {
+-            Color.clear
+-                .aspectRatio(9.0 / 16.0, contentMode: .fit)
+-                .overlay {
+-                    // The take at its own shape inside the tile's 9:16 cell, centred on the page tone.
+-                    MuseImage(ref: item.take.thumb).aspectRatio(r, contentMode: .fit)
+-                        .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+-                }
++        VStack(alignment: .leading, spacing: Space.s1) {
++            MuseImage(ref: item.take.thumb)
++                .frame(width: 104, height: 185)
++                .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+                 .overlay(alignment: .bottomLeading) {
+                     if let s = item.source.seconds {
+                         Text(Take.clock(s)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
+@@ -199,28 +250,83 @@ struct NewSwapSourcePicker: View {
+                             .padding(Space.s2)
+                     }
+                 }
+-            Text(item.take.caption).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++            Text(item.take.caption).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).frame(width: 104, alignment: .leading)
+         }
+         .contentShape(Rectangle())
+     }
++}
+ 
+-    private var upload: some View {
+-        VStack(spacing: Space.s3) {
+-            Text("Drop a video here, or").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+-            MButton("Choose a file…") { store.pickClip() }
+-            Text("MP4 or MOV. MUSE checks it after the upload.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+-        }
+-        .frame(maxWidth: .infinity, maxHeight: 280)
+-        .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
++// MARK: The bottom bar
++
++/// Approved mockup: Clip sound, the model (text, bordered, with a caret), why Auto picked it, then the length and
++/// resolution and Generate · $x. Nothing else: no quality pill, no prompt box.
++struct NewSwapBar: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++
++    private var d: RemixDraft { store.suite.remix }
++    private var row: RemixModels.Row? { store.suite.remixModels?.models.first { d.engineModel == nil ? $0.auto : $0.model == d.engineModel } }
++    private var price: GeneratePrice { GeneratePrice.of(store.suite.remixEstimate) }
++    private var pricing: Bool { store.suite.remixEstimate == nil && store.suite.remixError == nil && store.remixRequest != nil }
++    private var canGenerate: Bool { store.suite.remixEstimate?.remix?.trim.needed != true && price.canGenerate }
++
++    private var label: String {
++        if store.clip == nil { return "Generate" }
++        if pricing { return "Generate · Pricing…" }
++        return price.buttonText
+     }
+ 
+-    private var link: some View {
+-        VStack(alignment: .leading, spacing: Space.s3) {
+-            Text("A link to a video on the web. MUSE downloads it and checks it, as with an upload.")
+-                .font(t.scale.body.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+-            MButton("Paste a link…") { store.openLinkImport(.swap) }
++    /// "10 s, 1080p": the part used and the model's resolution.
++    private var spec: String? {
++        guard let c = store.clip else { return nil }
++        let secs = d.range.map { $0.to - $0.from } ?? min(c.durationSec, row?.limits.maxSeconds ?? c.durationSec)
++        let res = row?.price.resolution
++        return ["\(Pricing.trimNum(secs)) s", res].compactMap { $0 }.joined(separator: ", ")
++    }
++
++    /// The one line under the model: why Auto picked it, what's missing, or the price problem.
++    private var why: String {
++        if store.clip == nil { return "The model and price show once a video is added" }
++        if let m = d.missing { return m }
++        if let e = store.suite.remixError { return e }
++        if let p = price.problem { return p }
++        if d.engineModel == nil { return store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why ?? "" }
++        return row?.adaptedLine ?? row?.detail ?? ""
++    }
++
++    var body: some View {
++        HStack(spacing: Space.s3) {
++            Button { store.suite.remix.keepAudio.toggle() } label: {
++                HStack(spacing: Space.s2) {
++                    Ph(d.keepAudio ? "speaker-high" : "speaker-slash", 15).frame(width: 18, height: 18)
++                    Text("Clip sound").font(t.scale.label.font).lineLimit(1).fixedSize()
++                }
++                .foregroundStyle(d.keepAudio ? t.roles.ink : t.roles.ink2)
++                .padding(.horizontal, Space.s3).frame(height: 32)
++                .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
++                .contentShape(Rectangle())
++            }
++            .buttonStyle(.plain).fixedSize()
++            .help(d.keepAudio ? "The clip's own sound goes back on the take (click to turn off)" : "No sound from the clip (click to keep it)")
++            .accessibilityLabel(d.keepAudio ? "Clip sound on" : "Clip sound off")
++            RemixModelPill()
++                .padding(.horizontal, Space.s1)
++                .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
++                .fixedSize()
++            Text(why).font(t.scale.caption.font).foregroundStyle(d.missing != nil ? t.roles.caution : t.roles.ink2)
++                .lineLimit(1).truncationMode(.tail)
++                .help(why)
++                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
++                .layoutPriority(-1)
++            if let spec { Text(spec).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize() }
++            GenerateButton(label: label, accessibility: label, enabled: store.clip != nil && canGenerate, busy: store.suite.generating, height: 40) {
++                store.generateRemix()
++            }
++            .background { if SnapshotRunner.dir != nil { GenerateFrameProbe(label: label) } } // CI fit check: Generate on screen
++            .fixedSize()
++            .layoutPriority(2)
+         }
+-        .frame(maxWidth: 560, alignment: .leading)
++        .padding(.top, Space.s3)
+     }
+ }
+ 
+diff --git a/mac/Muse/Views/Viewer/TakeViewer.swift b/mac/Muse/Views/Viewer/TakeViewer.swift
+index 63e9bb28..b891bcb9 100644
+--- a/mac/Muse/Views/Viewer/TakeViewer.swift
++++ b/mac/Muse/Views/Viewer/TakeViewer.swift
+@@ -284,7 +284,7 @@ struct TakeViewer: View {
+ 
+     var body: some View {
+         VStack(spacing: compact ? Space.s2 : Space.s3) {
+-            if !compact && previewControls { previewBar.frame(maxWidth: .infinity) }
++            if !compact && previewControls { previewBar.frame(maxWidth: .infinity).frame(height: 32) }
+             GeometryReader { g in
+                 // Beside portrait media when there's room for it and a 240 pt picture; otherwise the row under it.
+                 let rail = !compact && !landscape && !actions.isEmpty && g.size.width >= 2 * (Self.railWidth + Space.s7) + 240
+@@ -297,18 +297,23 @@ struct TakeViewer: View {
+                     }
+                     .frame(width: g.size.width, height: g.size.height)
+                 } else {
+-                    let rowH: CGFloat = actions.isEmpty ? 0 : 36 + Space.s4
+-                    VStack(spacing: Space.s4) {
++                    // The row has a fixed height, so the media always gets the rest (build 582: a menu label grew and
++                    // pushed the take off the stage).
++                    let rowH: CGFloat = actions.isEmpty ? 0 : ViewerActionRow.height + Space.s3
++                    VStack(spacing: Space.s3) {
+                         mediaArea(width: g.size.width, height: g.size.height - rowH)
+                         if let take, !actions.isEmpty {
+                             ViewerActionRow(take: take, job: job, actions: actions, more: context != .compare, time: { playback.time })
++                                .frame(width: g.size.width, height: ViewerActionRow.height)
+                         }
+                     }
+-                    .frame(width: g.size.width, height: g.size.height)
++                    .frame(width: g.size.width, height: g.size.height, alignment: .top)
+                 }
+             }
+-            if compact && previewControls { compactPreviewMenu.frame(maxWidth: .infinity, alignment: .leading) }
++            .frame(minHeight: 160)
++            .layoutPriority(1)
+         }
++        .clipped()
+         .focusable()
+         .focused($focused)
+         .focusEffectDisabled()
+@@ -352,6 +357,12 @@ struct TakeViewer: View {
+             focused = true
+             if media.videoURL != nil { playback.togglePlay() }
+         }
++        .overlay(alignment: .topTrailing) {
++            if compact && previewControls {
++                ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil, onMedia: true)
++                    .padding(Space.s2)
++            }
++        }
+     }
+ 
+     /// The media itself: the poster, the video over it, the slow-load ring in the corner.
+@@ -414,48 +425,39 @@ struct TakeViewer: View {
+     // MARK: Preview controls
+ 
+     /// Clean · TikTok · Reels · Shorts · Facebook (or Clean · YouTube · Facebook), the frame switch and the safe zones.
++    /// Narrow: the switches fold into the Preview button, then the whole bar does.
+     private var previewBar: some View {
+-        HStack(spacing: Space.s4) {
+-            Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
+-                ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
+-            }
+-            .pickerStyle(.segmented)
+-            .labelsHidden()
+-            .fixedSize()
+-            .help("Preview as it would look on each app (a generic drawing of its layout)")
+-            Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
+-                .toggleStyle(.switch).controlSize(.small)
+-                .font(t.scale.label.font)
+-            Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
+-                .toggleStyle(.switch).controlSize(.small)
+-                .font(t.scale.label.font)
+-                .disabled(layouts.zone(skin) == nil)
+-                .help(layouts.note ?? "Where each app's own buttons and captions sit")
+-        }
+-        .frame(height: 32)
+-    }
+-
+-    /// A small pane's one menu: "Preview: Clean ▾".
+-    private var compactPreviewMenu: some View {
+-        Menu {
+-            Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
+-                ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
+-            }
+-            .pickerStyle(.inline)
+-            Divider()
+-            Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
+-            Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
+-                .disabled(layouts.zone(skin) == nil)
+-        } label: {
+-            HStack(spacing: 4) {
+-                Text("Preview: \(skin.label)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+-                Ph("caret-down", 11).foregroundStyle(t.roles.ink2)
+-            }
++        ViewThatFits(in: .horizontal) {
++            HStack(spacing: Space.s4) { skinPicker; frameToggle; zonesToggle }.fixedSize()
++            HStack(spacing: Space.s3) { skinPicker; ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil, switchesOnly: true) }.fixedSize()
++            ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil).fixedSize()
+         }
+-        .menuStyle(.borderlessButton)
+-        .menuIndicator(.hidden)
++    }
++
++    private var skinPicker: some View {
++        Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
++            ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
++        }
++        .pickerStyle(.segmented)
++        .labelsHidden()
+         .fixedSize()
+-        .help("Preview as it would look on each app")
++        .help("Preview as it would look on each app (a generic drawing of its layout)")
++    }
++
++    private var frameToggle: some View {
++        Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
++            .toggleStyle(.switch).controlSize(.small)
++            .font(t.scale.label.font)
++            .fixedSize()
++    }
++
++    private var zonesToggle: some View {
++        Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
++            .toggleStyle(.switch).controlSize(.small)
++            .font(t.scale.label.font)
++            .fixedSize()
++            .disabled(layouts.zone(skin) == nil)
++            .help(layouts.note ?? "Where each app's own buttons and captions sit")
+     }
+ 
+     // MARK: Keys
+@@ -862,7 +864,9 @@ private struct ViewerActionRunner {
+     }
+ }
+ 
+-/// More: everything else this take can do, and why a hidden action isn't offered.
++/// More: everything else this take can do (in a small pane, also the actions that didn't fit), and why a hidden action
++/// isn't offered. A button with a popover, never a `Menu`: a macOS menu label drops the icon's frame and draws it huge
++/// (build 582's giant chevron and dots).
+ struct ViewerMoreMenu: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+@@ -870,37 +874,155 @@ struct ViewerMoreMenu: View {
+     var job: Job?
+     var fullWidth = false
+     var iconOnly = false
++    /// Actions shown here because the row had no room for them (Redo, Extend, Split).
++    var extra: [TakeViewerAction] = []
++    var time: () -> Double = { 0 }
++    @State private var open = false
+ 
+     var body: some View {
+-        Menu {
+-            Button("Vary") { store.vary(take) }
+-            Button("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
+-            if take.isVideo { Button("Use as start frame") { store.useAsStartFrame(take) } }
+-            Button(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
+-            if take.isVideo { Button("Open in Edit") { store.openEdit(takeId: take.id) } }
+-            Button("Download") { store.export(take) }
+-            let why = TakeViewerActions.hiddenReasons(isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
+-                                                      canUpscale: take.canUpscale, isMaxResolution: (take.height ?? 0) >= 2160 || (take.width ?? 0) >= 2160)
+-            if !why.isEmpty {
+-                Divider()
+-                ForEach(why, id: \.self) { Text($0) }
+-            }
+-        } label: {
++        Button { open.toggle() } label: {
+             HStack(spacing: Space.s2) {
+-                Ph("dots-three", 15)
++                Ph("dots-three", 15).frame(width: 18, height: 18)
+                 if !iconOnly { Text("More").font(t.scale.label.font).lineLimit(1).fixedSize() }
+                 if fullWidth { Spacer(minLength: 0) }
+             }
+             .foregroundStyle(t.roles.ink2)
+-            .padding(.horizontal, Space.s3)
+-            .frame(height: 36)
++            .padding(.horizontal, iconOnly ? 0 : Space.s3)
++            .frame(width: iconOnly ? 36 : nil, height: 36)
++            .frame(maxWidth: fullWidth ? .infinity : nil, alignment: .leading)
+             .contentShape(Rectangle())
+         }
+-        .menuStyle(.borderlessButton)
+-        .menuIndicator(.hidden)
++        .buttonStyle(.plain)
+         .fixedSize(horizontal: !fullWidth, vertical: true)
+         .help("More for this take")
+         .accessibilityLabel("More for this take")
++        .popover(isPresented: $open, arrowEdge: .bottom) { list.environment(store).environment(\.theme, t) }
++    }
++
++    private var list: some View {
++        let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
++        let why = TakeViewerActions.hiddenReasons(isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
++                                                  canUpscale: take.canUpscale, isMaxResolution: (take.height ?? 0) >= 2160 || (take.width ?? 0) >= 2160)
++        return VStack(alignment: .leading, spacing: 0) {
++            ForEach(extra.filter { $0 != .upscale && $0 != .keep }, id: \.self) { a in item(a.title) { runner.run(a) } }
++            if !extra.isEmpty { Divider().padding(.vertical, Space.s1) }
++            item("Vary") { store.vary(take) }
++            item("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
++            if take.isVideo { item("Use as start frame") { store.useAsStartFrame(take) } }
++            item(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
++            if take.isVideo { item("Open in Edit") { store.openEdit(takeId: take.id) } }
++            item("Download") { store.export(take) }
++            if !why.isEmpty {
++                Divider().padding(.vertical, Space.s1)
++                ForEach(why, id: \.self) { Text($0).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).padding(.horizontal, Space.s3).padding(.vertical, 2)
++                    .fixedSize(horizontal: false, vertical: true) }
++            }
++        }
++        .padding(.vertical, Space.s2)
++        .frame(width: 240, alignment: .leading)
++    }
++
++    private func item(_ title: String, _ run: @escaping () -> Void) -> some View {
++        Button {
++            open = false
++            run()
++        } label: {
++            Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
++                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
++                .padding(.horizontal, Space.s3)
++                .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++    }
++}
++
++/// The preview choices in a popover: Clean or a platform layout, the device frame, the safe zones. Used in small panes
++/// (over the media's corner) and when the preview bar has no room.
++struct ViewerPreviewButton: View {
++    @Environment(\.theme) private var t
++    var skin: PreviewSkin
++    var aspect: Double
++    @Binding var prefsRaw: String
++    var hasZones: Bool
++    /// Over the media: a 28 pt icon on a scrim.
++    var onMedia = false
++    /// Beside the segmented skins: only the two switches.
++    var switchesOnly = false
++    @State private var open = false
++
++    private var prefs: ViewerPrefs { ViewerPrefsKey.read(prefsRaw) }
++    private func update(_ f: (inout ViewerPrefs) -> Void) {
++        var p = prefs
++        f(&p)
++        prefsRaw = ViewerPrefsKey.write(p)
++    }
++
++    var body: some View {
++        Button { open.toggle() } label: {
++            Group {
++                if onMedia {
++                    Ph("device-mobile", 14).frame(width: 16, height: 16).foregroundStyle(.white)
++                        .frame(width: 28, height: 28)
++                        .background(Circle().fill(.black.opacity(0.5)))
++                } else {
++                    HStack(spacing: Space.s1) {
++                        Ph("device-mobile", 14).frame(width: 16, height: 16)
++                        Text(switchesOnly ? "Frame" : "Preview: \(skin.label)").font(t.scale.label.font).lineLimit(1).fixedSize()
++                        Ph("caret-down", 11).frame(width: 12, height: 12)
++                    }
++                    .foregroundStyle(t.roles.ink)
++                    .padding(.horizontal, Space.s2).frame(height: 28)
++                    .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
++                }
++            }
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .help("Preview as it would look on each app")
++        .accessibilityLabel("Preview: \(skin.label)")
++        .popover(isPresented: $open, arrowEdge: .bottom) {
++            VStack(alignment: .leading, spacing: Space.s3) {
++                if !switchesOnly {
++                    Text("Preview as").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
++                    Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
++                        ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
++                    }
++                    .pickerStyle(.radioGroup)
++                    .labelsHidden()
++                    Divider()
++                }
++                Toggle(PreviewSkin.isLandscape(aspect) ? "Laptop frame" : "Phone frame",
++                       isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
++                    .toggleStyle(.switch).controlSize(.small)
++                Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
++                    .toggleStyle(.switch).controlSize(.small)
++                    .disabled(!hasZones)
++            }
++            .font(t.scale.label.font)
++            .padding(Space.s4)
++            .frame(width: 220, alignment: .leading)
++        }
++    }
++}
++
++/// Upscale in the viewer's own button style (the shared UpscaleButton draws an SF Symbol in another style); its picker
++/// opens in a popover as before.
++struct ViewerUpscaleButton: View {
++    @Environment(AppStore.self) private var store
++    var take: Take
++    var iconOnly = false
++    var fullWidth = false
++    @State private var open = false
++
++    var body: some View {
++        ViewerActionButton(action: .upscale, title: store.upscaleLive ? "Upscale" : "Upscale · soon", iconOnly: iconOnly, off: store.upscaling,
++                           fullWidth: fullWidth) { open = true }
++            .popover(isPresented: $open, arrowEdge: .bottom) {
++                UpscalePicker(take: take) { open = false }
++                    .environment(store)
++                    .environment(\.theme, PickerTheme.dark)
++                    .environment(\.colorScheme, .dark)
++            }
+     }
+ }
+ 
+@@ -918,14 +1040,14 @@ struct ViewerActionRail: View {
+         VStack(alignment: .leading, spacing: Space.s2) {
+             ForEach(actions, id: \.self) { a in
+                 if a == .upscale {
+-                    UpscaleButton(take: take, size: .regular, fill: true)
++                    ViewerUpscaleButton(take: take, fullWidth: true)
+                 } else if a == .keep {
+                     ViewerActionButton(action: a, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal, fullWidth: true) { runner.run(a) }
+                 } else {
+                     ViewerActionButton(action: a, fullWidth: true) { runner.run(a) }
+                 }
+             }
+-            ViewerMoreMenu(take: take, job: job, fullWidth: true)
++            ViewerMoreMenu(take: take, job: job, fullWidth: true, time: time)
+             Text(details).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                 .fixedSize(horizontal: false, vertical: true)
+                 .padding(.top, Space.s4)
+@@ -948,6 +1070,7 @@ struct ViewerActionRail: View {
+ /// Upscale, Extend, Redo); Keep and Share always keep theirs.
+ struct ViewerActionRow: View {
+     @Environment(AppStore.self) private var store
++    static let height: CGFloat = 40
+     var take: Take
+     var job: Job?
+     var actions: [TakeViewerAction]
+@@ -956,32 +1079,46 @@ struct ViewerActionRow: View {
+ 
+     var body: some View {
+         let steps = TakeViewerActions.steps(actions)
+-        // Each step one candidate (at most five: all labels, then Split, Upscale, Extend and Redo give theirs up).
++        // Each step one candidate: all labels, then Split, Upscale, Extend and Redo give theirs up; narrowest of all,
++        // Keep and Share stay and everything else is in More. Every candidate is fixed-size, so nothing is ever cut.
+         ViewThatFits(in: .horizontal) {
+             row(iconOnly: steps[0]).fixedSize()
+             if steps.count > 1 { row(iconOnly: steps[1]).fixedSize() }
+             if steps.count > 2 { row(iconOnly: steps[2]).fixedSize() }
+             if steps.count > 3 { row(iconOnly: steps[3]).fixedSize() }
+             if steps.count > 4 { row(iconOnly: steps[4]).fixedSize() }
+-            row(iconOnly: steps[steps.count - 1], moreInline: false).fixedSize()
++            narrowest.fixedSize()
+         }
+-        .frame(maxWidth: .infinity)
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
+     }
+ 
+-    /// `moreInline` false (the narrowest): More shows only its icon.
+-    private func row(iconOnly: Set<TakeViewerAction>, moreInline: Bool = true) -> some View {
++    private func row(iconOnly: Set<TakeViewerAction>) -> some View {
+         let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
+         return HStack(spacing: Space.s2) {
+             ForEach(actions, id: \.self) { a in
+                 if a == .upscale {
+-                    UpscaleButton(take: take, size: .small, iconOnly: iconOnly.contains(a))
++                    ViewerUpscaleButton(take: take, iconOnly: iconOnly.contains(a))
+                 } else if a == .keep {
+                     ViewerActionButton(action: a, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal) { runner.run(a) }
+                 } else {
+                     ViewerActionButton(action: a, iconOnly: iconOnly.contains(a)) { runner.run(a) }
+                 }
+             }
+-            if more { ViewerMoreMenu(take: take, job: job, iconOnly: !moreInline) }
++            if more { ViewerMoreMenu(take: take, job: job, iconOnly: !iconOnly.isEmpty, time: time) }
++        }
++    }
++
++    /// Keep and Share as icons with Keep's label, and More holding the rest.
++    private var narrowest: some View {
++        let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
++        let rest = actions.filter { $0 != .keep && $0 != .share }
++        return HStack(spacing: Space.s2) {
++            if actions.contains(.keep) {
++                ViewerActionButton(action: .keep, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal) { runner.run(.keep) }
++            }
++            if actions.contains(.upscale) { ViewerUpscaleButton(take: take, iconOnly: true) }
++            if actions.contains(.share) { ViewerActionButton(action: .share, iconOnly: true) { runner.run(.share) } }
++            if more || !rest.isEmpty { ViewerMoreMenu(take: take, job: job, iconOnly: true, extra: rest, time: time) }
+         }
+     }
+ }
