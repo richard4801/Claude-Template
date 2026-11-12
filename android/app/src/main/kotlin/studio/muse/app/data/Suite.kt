@@ -218,6 +218,12 @@ data class SuiteCatalogEngine(
     val purposes: List<String> = emptyList(),
     /** The server's display label, "MiniMax H3 · Higgsfield" (server/api/src/engines/labels.ts); blank on older servers. */
     val label: String = "",
+    /** Owner 2026-11-12, every model on every mode (GET /v1/engines?purpose=): "native" or "adapted", and for an adapted one
+     *  the server's line saying what MUSE does with it there. */
+    val fit: String? = null,
+    val fitNote: String? = null,
+    /** Priced live by the provider when a request is planned (Wan 3.0 on Higgsfield): no price in the list. */
+    val livePrice: Boolean = false,
 ) {
     /** What to show for the model: the server's label, else its name. */
     val shownName: String get() = label.ifBlank { name }
