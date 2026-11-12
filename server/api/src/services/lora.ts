@@ -1,6 +1,7 @@
 // Identity LoRA (plans/lora-training.md): build a 30-shot training set with the image engine, the user reviews it,
 // then training runs on the GPU controller as job kind "lora-train". Same states and prices as the mock.
 import { eq } from 'drizzle-orm';
+import { PhotoError } from '../images/service.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { loras, models, type ImageRef, type LoraCandidate } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -89,11 +90,18 @@ export class LoraService {
       const identity = { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd, referenceCount: Math.max(1, refs.length) };
       const texts = await this.ctx.prompts.texts(user.studioId);
       const variations = loraVariations(texts);
-      let images: ImageRef[];
+      // A set that comes out partly (owner 2026-11-12): the shots made are kept (and charged), a failed one is left out;
+      // review then keeps what's good, and training still needs at least LORA_MIN_KEEP of them.
+      let images: (ImageRef | null)[];
       if (sel.provider === 'simulated') {
-        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, maxImages: refs.length, panels, bill,
-          req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2], texts).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
-        images = r.images;
+        images = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, maxImages: refs.length, panels, bill,
+          req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2], texts).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } })
+          .then(r => r.images as (ImageRef | null)[], e => {
+            const pe = e instanceof PhotoError ? e.partial : undefined;
+            if (!pe?.images.length) throw e;
+            bill.keep(pe.costs.reduce((x, c) => x + c, 0));
+            return pe.images;
+          });
       } else {
         images = [];
         for (let i = 0; i < P.LORA_CANDIDATES; i += 4) {
@@ -101,13 +109,14 @@ export class LoraService {
             const n = i + k, angle = SHEET_ANGLES[n % SHEET_ANGLES.length]!;
             const prompt = loraCandidate(identity, angle, n, texts).text;
             return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, maxImages: refs.length, panels, bill,
-              req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
+              req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0] ?? null, e => { this.ctx.log.warn({ err: (e as Error).message, n }, 'LoRA candidate failed'); return null; });
           }));
           images.push(...batch);
         }
       }
+      if (!images.some(Boolean)) throw new Error('no candidates came out');
       const simulated = sel.provider === 'simulated';
-      const candidates: LoraCandidate[] = images.slice(0, P.LORA_CANDIDATES).map((image, i) => {
+      const candidates: LoraCandidate[] = images.slice(0, P.LORA_CANDIDATES).flatMap((image, i) => image ? [{ image, i }] : []).map(({ image, i }) => {
         const [asset, label] = LORA_POOL[i % LORA_POOL.length]!;
         // Simulated sets pre-flag 3 risky shots like the prototype. Real sets aren't auto-checked yet: nothing is flagged.
         const flag = simulated && SIM_FLAGGED.includes(i) ? (asset === 'c_face' ? 'choker' : 'face drift') : undefined;

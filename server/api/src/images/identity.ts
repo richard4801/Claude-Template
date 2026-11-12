@@ -3,6 +3,7 @@
 // then any product photo. When the step wears an outfit, the outfit's own images go instead (outfitRefs). The studio's `identityRefs`
 // (1–7) widens or narrows the person part; the face front is always first and never dropped.
 import type { ImageRef, SheetSlot } from '../db/schema.js';
+import { whyOf } from './sent.js';
 
 export const BODY_SLOTS = ['front', 'tq', 'side', 'back'] as const;
 export type BodySlot = (typeof BODY_SLOTS)[number];
@@ -69,5 +70,12 @@ export function outfitRefs(o: NonNullable<OutfitLike>, baseFace: ImageRef | null
   };
   const angle = (i: number): IdentityRef | null => (angles[i] ? { image: angles[i]!, label: ANGLE_LABELS[i]!, role: 'outfit' } : null);
   const first = own ? face(0) : baseFace ? { image: baseFace, label: 'face', role: 'person' as const, why: 'her base face, front · this outfit has no face close-ups yet (Add face close-ups)' } : null;
-  return [first, angle(0), own ? face(1) : null, own ? face(2) : null, angle(1), angle(2), angle(3)].filter((x): x is IdentityRef => !!x);
+  const list = [first, angle(0), own ? face(1) : null, own ? face(2) : null, angle(1), angle(2), angle(3)].filter((x): x is IdentityRef => !!x);
+  // A set that came out partly (owner 2026-11-12): only the pictures that exist are sent, and the first outfit picture
+  // says which are missing (Redo makes them on the outfit).
+  const gone = [...[0, 1, 2, 3].filter(i => !angles[i]).map(i => ANGLE_LABELS[i]!.replace('outfit, ', '')),
+    ...(own ? [1, 2].filter(i => !faces[i]).map(i => FACE_LABELS[i]!) : [])];
+  const note = list.find(x => x.role === 'outfit') ?? list[0];
+  if (gone.length && note) note.why = `${note.why ?? whyOf(note.label, note.role)} · this outfit is missing its ${gone.join(', ')} (Redo them on the outfit)`;
+  return list;
 }
