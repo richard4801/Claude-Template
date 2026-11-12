@@ -109,3 +109,20 @@ export async function cleanUploadedPhoto(ctx: Pick<Ctx, 'db' | 'storage'>, up: t
   const body = c?.body ?? raw;
   await ctx.db.update(uploads).set({ state: 'ready', bytes: body.length, sha256: sha256Of(body), contentType: c?.contentType ?? up.contentType }).where(eq(uploads.id, up.id));
 }
+
+/**
+ * A presigned upload that arrived but was never confirmed, made ready (2026-11-12). Edit's uploads
+ * (POST /v1/editor/uploads/presign: music, voice-over, videos, stickers) have no confirm step: the apps PUT the file and
+ * put the uploadId on the timeline, so the row stays 'pending' although the file is there. A reader that needs the file
+ * calls this: when the object is stored, a video or audio row becomes ready with its size (nothing is read into memory;
+ * a member's own clip is kept as sent, like /v1/uploads confirm), a photo is cleaned first (no EXIF/GPS) as before.
+ * Returns whether the file is there. Never throws for a missing object.
+ */
+export async function readyIfStored(ctx: Pick<Ctx, 'db' | 'storage'>, up: typeof uploads.$inferSelect): Promise<boolean> {
+  if (up.state === 'ready') return true;
+  const head = await ctx.storage.head(up.storageKey).catch(() => null);
+  if (!head || !(head.size > 0)) return false;
+  if (/^image\//i.test(up.contentType)) await cleanUploadedPhoto(ctx, up);
+  else await ctx.db.update(uploads).set({ state: 'ready', bytes: head.size }).where(eq(uploads.id, up.id));
+  return true;
+}

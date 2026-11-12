@@ -17,10 +17,14 @@ import sharp from 'sharp';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
+import { readyIfStored } from '../storage/objects.js';
+import { assetIn } from '../editor/assetMedia.js';
+import type * as EM from '../editor/model.js';
 import { findCuts, findPeaks, measureMotion, type MotionFrames } from '../editor/motion.js';
 import type { EditTool } from '../editor/mcpTools.js';
 import { editorAi } from '../editor/service.js';
 import { mediaToolsAvailable, probe, type MediaInfo } from '../replicate/media.js';
+import { LEAN_DECODE, laneConcurrency, oneAtATime } from '../lib/mediaLane.js';
 
 export const SHEET_COLS = 4, SHEET_TILES = 16, MAX_SHEETS = 3, TILE_EDGE = 256, CLOSER_EDGE = 400, CLOSER_MAX = 16, SINGLE_EDGE = 1024;
 // The full sweep: every part of the video at an even rate, beside the motion-picked overview. 24 frames a sheet, 4
@@ -69,13 +73,8 @@ export async function videoOf(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: unkno
   const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
   if (up) {
     if (!/^video\//i.test(up.contentType)) throw badRequest(`${id} is not a video (${up.contentType})`);
-    if (up.state !== 'ready') {
-      // Editor uploads (Edit's Uploads / timeline) are PUT straight to storage and never told "done": the row stays
-      // pending although the file is there and plays. If the file has arrived, it is ready: mark it and watch it.
-      const h = await ctx.storage.head(up.storageKey).catch(() => null);
-      if (!h || !(h.size > 0)) throw new ApiError(409, 'not_ready', `${id}: the upload hasn't finished`);
-      await ctx.db.update(uploads).set({ state: 'ready', bytes: h.size }).where(eq(uploads.id, up.id));
-    }
+    // Edit's uploads are never confirmed by the apps: a pending row whose file is stored is ready (and recorded so).
+    if (!(await readyIfStored(ctx, up))) throw new ApiError(409, 'not_ready', `${id}: the upload hasn't arrived on the server yet (the app is still sending it)`);
     return { id, kind: 'upload', key: up.storageKey };
   }
   const [c] = await ctx.db.select().from(clips).where(and(eq(clips.id, id), eq(clips.studioId, u.studioId)));
@@ -88,7 +87,11 @@ async function videoByKey(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, raw: string):
   const key = (/\/uploads\/([A-Za-z0-9][A-Za-z0-9._/-]*)/.exec(raw)?.[1] ?? raw).replace(/^\/+/, '');
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,299}$/.test(key) || key.includes('..')) throw badRequest('id: a studio video link (/uploads/…)');
   const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, u.studioId)));
-  if (up) { if (!/^video\//i.test(up.contentType)) throw badRequest(`${raw} is not a video (${up.contentType})`); return { id: up.id, kind: 'upload', key }; }
+  if (up) {
+    if (!/^video\//i.test(up.contentType)) throw badRequest(`${raw} is not a video (${up.contentType})`);
+    if (!(await readyIfStored(ctx, up))) throw new ApiError(409, 'not_ready', `${raw}: the upload hasn't arrived on the server yet (the app is still sending it)`);
+    return { id: up.id, kind: 'upload', key };
+  }
   const [c] = await ctx.db.select().from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, u.studioId)));
   if (c) return { id: c.id, kind: 'clip', key, title: c.name };
   const [t] = await ctx.db.select().from(takes).where(and(eq(takes.mediaKey, key), eq(takes.studioId, u.studioId)));
@@ -98,18 +101,46 @@ async function videoByKey(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, raw: string):
   throw notFound('Video');
 }
 
+/**
+ * The id watch reads, from a call made in Edit: `id` as given when it names a video by itself; else a timeline id of the
+ * edit `sessionId` (a clip, music or voice-over item, or an asset id: c1, v2, src) as its take or upload; with no id at
+ * all, the edit's main video. Edit sessions are the owner's (sessions.ts row()).
+ */
+export async function watchTarget(env: { ctx: Ctx; user: AuthUser }, a: Record<string, unknown>): Promise<unknown> {
+  const sid = typeof a.sessionId === 'string' && a.sessionId ? a.sessionId : undefined;
+  const item = typeof a.itemId === 'string' && a.itemId ? a.itemId : undefined;
+  const given = a.id ?? a.takeId;
+  if (!sid || (given !== undefined && !item && !/^[A-Za-z0-9-]{1,24}$/.test(String(given)))) return item && !given ? item : given;
+  const fromEdit = async (want?: string) => {
+    const { editSessionsOf } = await import('../editor/sessions.js');
+    const s = await editSessionsOf(env.ctx).row(env.user, sid);
+    const p = s.project as unknown as EM.EditProject;
+    const asset = want ? assetIn(p, want) : editorAiSource(p, s.takeId);
+    if (!asset) return null;
+    const file = asset.take ?? asset.upload;
+    if (!file) throw badRequest(`${want ?? asset.id} has no stored file to watch (a built-in ${asset.kind})`);
+    return file;
+  };
+  if (item) return (await fromEdit(item)) ?? (() => { throw badRequest(`itemId: the edit has no item or asset ${item}`); })();
+  if (given === undefined) return (await fromEdit()) ?? given;
+  // A short id (c1, v2, src, take_…): the video itself when it is one, else the edit's item of that id.
+  try { await videoOf(env.ctx, env.user, given); return given; } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 404) throw e;
+    return (await fromEdit(String(given))) ?? given;
+  }
+}
+/** The edit's main video asset (its source take's, else the first main clip's). */
+function editorAiSource(p: EM.EditProject, takeId: string): EM.Asset | null {
+  const main = p.tracks.find(t => t.kind === 'main')?.items[0] as { asset?: string } | undefined;
+  return p.assets.find(x => x.take === takeId && x.kind === 'video') ?? p.assets.find(x => x.id === main?.asset) ?? null;
+}
+
 // ---- one at a time ---------------------------------------------------------------------------------------------
 
-let busy: Promise<unknown> = Promise.resolve();
-let running = 0, maxRunning = 0;
-/** Runs `fn` after every earlier watch has finished (one ffmpeg pipeline at a time on the small box). */
-export function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
-  const next = busy.then(async () => { running++; maxRunning = Math.max(maxRunning, running); try { return await fn(); } finally { running--; } });
-  busy = next.catch(() => {});
-  return next;
-}
+/** Runs `fn` after every earlier watch (and every other heavy ffmpeg pass: frames, peaks, audio) has finished. */
+export { oneAtATime };
 /** For tests: the most watches that ever ran at once. */
-export const watchConcurrency = () => maxRunning;
+export const watchConcurrency = laneConcurrency;
 
 // ---- picking frames by motion --------------------------------------------------------------------------------------
 
@@ -360,7 +391,10 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const num = (d: string, min?: number, max?: number) => ({ type: 'number', description: d, ...(min !== undefined ? { minimum: min } : {}), ...(max !== undefined ? { maximum: max } : {}) });
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
-const ID = str('A take id (Suite feed, Library, list_takes, an edited version), a Suite job id with one take, an imported clip id (a Swap/Recast source, uploaded or attached by link), the uploadId of a video attached to the chat, a camera session (cs_…: its Blender guide clip), or a video on screen by its /uploads/… link (suite_get_draft onScreen gives each one\'s id)', 300);
+const ID = str('A take id (Suite feed, Library, list_takes, an edited version), a Suite job id with one take, an imported clip id (a Swap/Recast source, uploaded or attached by link), the uploadId of a video attached to the chat or uploaded in Edit (get_edit\'s watchId), a camera session (cs_…: its Blender guide clip), or a video on screen by its /uploads/… link (suite_get_draft onScreen gives each one\'s id). In Edit a timeline id (c1, v2) works too; with no id, the edit\'s main video.', 300);
+/** In Edit: the open edit (filled in) and one of its timeline items, so a clip is watched by the id get_edit shows. */
+export const IN_EDIT = { sessionId: str('The edit open on the page (filled in for you in Edit)', 80),
+  itemId: str('In Edit: a clip, music or voice-over item id (c1…) or asset id from get_edit; its file is watched (get_edit\'s watchId is the same file)', 80) };
 const result = (o: Overview) => ({ ...o.meta, mcpContent: o.blocks, structuredContent: o.meta });
 
 const PHOTOS_MAX = 6;
@@ -368,15 +402,15 @@ export const WATCH_TOOLS: EditTool[] = [
   {
     name: 'watch', title: 'Watch a video (free)', scope: 'edit:read', readOnly: true, idempotent: true,
     description: `Watch a video yourself: a take, a Library item, a clip or a video attached to the chat. Returns its length, frame rate, size and sound (present, level, how much is in the voice range; not the words), the hard cuts, and two flip books, each frame labelled with its time: an overview of frames picked by motion (every cut, the motion peaks, more frames where it moves fast) and a FULL SWEEP of the whole video at an even rate (about ${SWEEP_FPS} frames a second up to ${SWEEP_MAX / SWEEP_FPS} s, ${SWEEP_MAX} frames up to ${SWEEP_MAX_SEC} s). ALWAYS watch a video before you judge, compare, describe or edit it: never work from the person\'s description, the title or the prompt alone. Cover every second: go through every sheet of the sweep, then watch_closer on every fast moment (hands, a face, text, a quick move); never summarise from a few frames. Over ${SWEEP_MAX_SEC} s there is no sweep: sweep it yourself with watch_closer in the consecutive windows the result lists. Free; can take a few seconds.`,
-    inputSchema: obj({ id: ID, takeId: str('The take open on the page (filled in for you)', 80) }),
-    run: async (env, a) => result(await watchVideo(env.ctx, env.user, a.id ?? a.takeId)),
+    inputSchema: obj({ id: ID, takeId: str('The take open on the page (filled in for you)', 80), ...IN_EDIT }),
+    run: async (env, a) => result(await watchVideo(env.ctx, env.user, await watchTarget(env, a))),
   },
   {
     name: 'watch_closer', title: 'Look closer at part of a video (free)', scope: 'edit:read', readOnly: true, idempotent: true,
     description: `Every frame of a short window of a video (${CLOSER_MAX} frames by default, larger than watch's; an even run when the window has more), each labelled with its time: for a fast move, a hand, a face, text, a glitch. Use it on every fast moment of a video you are studying. frames up to ${CLOSER_SWEEP_MAX} (smaller tiles) sweeps a window of up to ${SWEEP_WINDOW_SEC} s: for a video too long for watch's sweep, call it on consecutive windows that cover every second. One frame at full detail when toSec is left out. Seconds from the video's start, as watch labels them. Free.`,
-    inputSchema: obj({ id: ID, takeId: str('The take open on the page (filled in for you)', 80), fromSec: num('Start of the window (s)', 0), toSec: num('End of the window (s); leave out for one frame', 0),
+    inputSchema: obj({ id: ID, takeId: str('The take open on the page (filled in for you)', 80), ...IN_EDIT, fromSec: num('Start of the window (s)', 0), toSec: num('End of the window (s); leave out for one frame', 0),
       frames: num(`At most this many frames (default ${CLOSER_MAX}; up to ${CLOSER_SWEEP_MAX} to sweep a window)`, 1, CLOSER_SWEEP_MAX) }, ['fromSec']),
-    run: async (env, a) => result(await watchCloser(env.ctx, env.user, a.id ?? a.takeId, a.fromSec, a.toSec, a.frames)),
+    run: async (env, a) => result(await watchCloser(env.ctx, env.user, await watchTarget(env, a), a.fromSec, a.toSec, a.frames)),
   },
   {
     name: 'see_photos', title: 'See photos (free)', scope: 'edit:read', readOnly: true, idempotent: true,

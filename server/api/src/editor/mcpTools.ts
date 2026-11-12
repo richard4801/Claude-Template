@@ -17,6 +17,8 @@ import { editorAi } from './service.js';
 import { editSessionsOf } from './sessions.js';
 import { canvasToSource } from './layers.js';
 import { probe } from '../replicate/media.js';
+import { LEAN_DECODE, oneAtATime } from '../lib/mediaLane.js';
+import { requireAssetMedia } from './assetMedia.js';
 
 const num = (d?: string, min?: number, max?: number) => ({ type: 'number', ...(d ? { description: d } : {}), ...(min !== undefined ? { minimum: min } : {}), ...(max !== undefined ? { maximum: max } : {}) });
 const str = (d?: string, max?: number) => ({ type: 'string', ...(d ? { description: d } : {}), ...(max ? { maxLength: max } : {}) });
@@ -45,6 +47,8 @@ export const withImage = (png: Buffer, meta: Record<string, unknown>) => ({ mcpC
 export function summary(p: M.EditProject) {
   const spans = M.timeline(p);
   const name = (a?: M.Asset) => (a ? (a.take ? `take ${a.take}` : a.upload ? `upload ${a.upload}` : `library ${a.library}`) : '?');
+  // The id watch / watch_closer / listen take for this item's file (its take or upload).
+  const watchId = (a?: M.Asset) => (a && (a.kind === 'video' || a.kind === 'audio') ? (a.take ?? a.upload) : undefined);
   return {
     canvas: p.canvas, durationSec: M.durationSec(p),
     tracks: p.tracks.map(t => ({
@@ -54,7 +58,8 @@ export function summary(p: M.EditProject) {
         const span = M.itemSpan(p, t, it), base = { id: it.id, at: `${t2(span.startSec)}–${t2(span.endSec)}` };
         if (t.kind === 'text') return { ...base, text: (it as M.TextItem).text, template: (it as M.TextItem).template, ...((it as M.TextItem).pin ? { pinnedTo: (it as M.TextItem).pin } : {}) };
         const c = it as M.VideoClip;
-        return { ...base, ...(c.asset ? { source: name(p.assets.find(a => a.id === c.asset)) } : {}), ...(c.inSec !== undefined ? { sourceRange: `${t2(c.inSec)}–${t2(c.outSec)}` } : {}),
+        const src = c.asset ? p.assets.find(a => a.id === c.asset) : undefined, w = watchId(src);
+        return { ...base, ...(c.asset ? { source: name(src) } : {}), ...(w ? { watchId: w } : {}), ...(c.inSec !== undefined ? { sourceRange: `${t2(c.inSec)}–${t2(c.outSec)}` } : {}),
           ...(c.speed !== undefined && c.speed !== 1 ? { speed: c.speed } : {}), ...(c.speedCurve ? { speedCurve: c.speedCurve.preset } : {}),
           ...(c.transitionIn ? { transitionIn: `${c.transitionIn.kind} ${c.transitionIn.durationSec}s` } : {}), ...(c.look ? { look: c.look } : {}),
           ...(c.adjust ? { adjust: c.adjust } : {}), ...(c.mask ? { mask: c.mask.shape } : {}), ...(c.volume !== undefined ? { volume: c.volume } : {}),
@@ -329,9 +334,10 @@ const TOOLS: EditTool[] = [
       const s = await svc.row(env.user, sessionId(env, a));
       const asset = svc.sourceAsset(s.project as M.EditProject, s.takeId, typeof a.itemId === 'string' ? a.itemId : undefined);
       if (asset.kind !== 'video' || !(asset.take || asset.upload)) throw badRequest('That item has no stored video to analyse');
-      const src = await ai.source(env.user, asset.take ? { takeId: asset.take } : { uploadId: asset.upload, durationSec: asset.durationSec });
+      // The asset's own file (a take or an Edit upload, made ready when it arrived unconfirmed), one decode at a time, two threads.
+      const media = await requireAssetMedia(env.ctx, s.studioId, asset);
       const c = env.ctx.config;
-      const m = await ai.withLocalInput(src.key, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: 600 }));
+      const m = await oneAtATime(() => ai.withLocalInput(media.key, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: 600, inputArgs: LEAN_DECODE })));
       const cuts = findCuts(m);
       const peaks = findPeaks(m, { cuts, minGapSec: Number(a.minGapSec) || undefined, sensitivity: Number(a.sensitivity) || undefined, max: Number(a.max) || undefined });
       await svc.log(s, `Found ${peaks.length} action peak${peaks.length === 1 ? '' : 's'}`);
@@ -375,7 +381,7 @@ const TOOLS: EditTool[] = [
       const svc = editSessionsOf(env.ctx), s = await svc.row(env.user, sessionId(env, a));
       const c = await contactSheet(env.ctx, s.studioId, s.project as M.EditProject, Number(a.everySec) || 1);
       await svc.log(s, `Looked at a contact sheet (${c.times.length} frames)`);
-      return withImage(c.png, { times: c.times, revision: s.revision, approximate: true });
+      return withImage(c.png, { times: c.times, revision: s.revision, approximate: true, ...(c.unread ? { unread: c.unread, note: `${c.unread} frame(s) could not be read from the source here (drawn black); watch the clip itself for its real frames` } : {}) });
     },
   },
   {

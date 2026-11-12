@@ -5,13 +5,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
-import { and, eq } from 'drizzle-orm';
 import sharp from 'sharp';
 import type { Ctx } from '../ctx.js';
-import { takes, uploads } from '../db/schema.js';
 import { uid } from '../lib/util.js';
-import { mediaToolsAvailable, thumbnail } from '../replicate/media.js';
+import { mediaToolsAvailable } from '../replicate/media.js';
+import { LEAN_DECODE, oneAtATime } from '../lib/mediaLane.js';
+import { assetMedia } from './assetMedia.js';
 import { renderLook, type Lut } from './look.js';
 import * as M from './model.js';
 import { packLut } from './photo.js';
@@ -22,26 +23,31 @@ const xml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 const FONT: Record<string, string> = { sans: 'DejaVu Sans, Arial, sans-serif', serif: 'DejaVu Serif, Georgia, serif', rounded: 'DejaVu Sans, Arial, sans-serif',
   condensed: 'DejaVu Sans Condensed, Arial Narrow, sans-serif', mono: 'DejaVu Sans Mono, monospace', marker: 'DejaVu Sans, cursive' };
 
-/** The key of an asset's stored media (a take's video or an upload), or null. */
-async function mediaKey(ctx: Ctx, studioId: string, a: M.Asset): Promise<string | null> {
-  if (a.take) { const [t] = await ctx.db.select({ k: takes.mediaKey }).from(takes).where(and(eq(takes.id, a.take), eq(takes.studioId, studioId))); return t?.k ?? null; }
-  if (a.upload) { const [u] = await ctx.db.select({ k: uploads.storageKey }).from(uploads).where(and(eq(uploads.id, a.upload), eq(uploads.studioId, studioId))); return u?.k ?? null; }
-  return null;
-}
-
-/** One still at `sec` of the stored media, as raw RGB at the given box (cover/contain), or null. */
+/** One still at `sec` of the stored media, as raw RGB at the given box (cover/contain), or null. One decode at a time on
+ * the server (lib/mediaLane.ts), two threads, so a contact sheet's many stills never decode side by side. */
 async function still(ctx: Ctx, key: string, sec: number, w: number, h: number, fit: M.Fit): Promise<Buffer | null> {
   if (!(await mediaToolsAvailable(ctx.config.FFMPEG_PATH, ctx.config.FFPROBE_PATH))) return null;
-  const tmp = path.join(os.tmpdir(), uid('frm')), jpg = `${tmp}.jpg`;
-  let input = `${tmp}${path.extname(key)}`;
-  try {
-    if (ctx.storage.kind === 's3') input = await ctx.storage.presignGet(key, 600);
-    else { const o = await ctx.storage.get(key); if (!o) return null; await pipeline(o.body as NodeJS.ReadableStream, fs.createWriteStream(input)); }
-    await thumbnail(ctx.config.FFMPEG_PATH, input, jpg, sec);
-    return await sharp(jpg).resize(w, h, { fit: fit === 'contain' ? 'contain' : 'cover', background: '#000000' }).removeAlpha().raw().toBuffer();
-  } catch { return null; } finally {
-    for (const f of [jpg, `${tmp}${path.extname(key)}`]) await fs.promises.rm(f, { force: true }).catch(() => {});
-  }
+  return oneAtATime(async () => {
+    const tmp = path.join(os.tmpdir(), uid('frm')), jpg = `${tmp}.jpg`;
+    let input = `${tmp}${path.extname(key)}`;
+    try {
+      if (ctx.storage.kind === 's3') input = await ctx.storage.presignGet(key, 600);
+      else { const o = await ctx.storage.get(key); if (!o) return null; await pipeline(o.body as NodeJS.ReadableStream, fs.createWriteStream(input)); }
+      await stillJpeg(ctx.config.FFMPEG_PATH, input, jpg, sec, Math.max(w, h));
+      return await sharp(jpg).resize(w, h, { fit: fit === 'contain' ? 'contain' : 'cover', background: '#000000' }).removeAlpha().raw().toBuffer();
+    } catch { return null; } finally {
+      for (const f of [jpg, `${tmp}${path.extname(key)}`]) await fs.promises.rm(f, { force: true }).catch(() => {});
+    }
+  });
+}
+
+/** A JPEG of the frame at `sec` (the last frame when `sec` is just past the end), its long side at most 2×`edge` (≥ 320). */
+function stillJpeg(ffmpeg: string, input: string, out: string, sec: number, edge: number): Promise<void> {
+  const box = Math.max(320, Math.min(1080, Math.round(edge * 2)));
+  const args = (at: number) => ['-y', '-v', 'error', ...LEAN_DECODE, '-ss', Math.max(0, at).toFixed(3), '-i', input, '-an', '-sn', '-dn', '-frames:v', '1',
+    '-vf', `scale=${box}:${box}:force_original_aspect_ratio=decrease:flags=bilinear`, '-q:v', '3', out];
+  const go = (a: string[]) => new Promise<void>((resolve, reject) => execFile(ffmpeg, a, { timeout: 60_000 }, (err, _o, stderr) => (err ? reject(new Error(String(stderr || err.message).slice(0, 300))) : resolve())));
+  return go(args(sec)).then(() => { if (!fs.existsSync(out)) return go(args(Math.max(0, sec - 0.25))); });
 }
 
 /** SVG for the text items and the caption page showing at t. */
@@ -73,7 +79,7 @@ function overlaySvg(p: M.EditProject, t: number, W: number, H: number): string {
 }
 
 /** An approximate PNG of the edit at timeline second t, `width` px wide. */
-export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProject, t: number, width = 540): Promise<{ png: Buffer; width: number; height: number; note: string }> {
+export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProject, t: number, width = 540): Promise<{ png: Buffer; width: number; height: number; note: string; read: boolean }> {
   const W = Math.max(32, Math.min(Math.round(width), p.canvas.width)), H = Math.max(32, Math.round((W * p.canvas.height) / p.canvas.width));
   const d = M.durationSec(p);
   t = Math.min(Math.max(0, t), Math.max(0, d - 1e-3));
@@ -85,7 +91,7 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
     let img = sharp(rgb, { raw: { width: W, height: H, channels: 3 } });
     const svg = overlaySvg(p, t, W, H);
     if (svg) img = img.composite([{ input: Buffer.from(svg) }]);
-    return { png: await img.png().toBuffer(), width: W, height: H, note: 'approximate: the edit has no clip yet, so only its background is shown' };
+    return { png: await img.png().toBuffer(), width: W, height: H, note: 'approximate: the edit has no clip yet, so only its background is shown', read: true };
   }
   let k = spans.length - 1;
   for (let i = spans.length - 1; i >= 0; i--) if (t >= spans[i]!.startSec) { k = i; break; }
@@ -93,8 +99,9 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
   const src = M.clipSourceAt(clip, t - spans[k]!.startSec);
   let note = 'approximate: the source frame with its look, text and captions; no overlays, transitions, masks or keyframes';
   let rgb: Buffer | null = null;
-  const key = asset ? await mediaKey(ctx, studioId, asset) : null;
-  if (key) rgb = await still(ctx, key, src, W, H, clip.fit ?? 'cover');
+  const media = asset ? await assetMedia(ctx, studioId, asset) : null;
+  if (media) rgb = await still(ctx, media.key, src, W, H, clip.fit ?? 'cover');
+  const read = !!rgb;
   if (!rgb) { rgb = Buffer.alloc(W * H * 3, 0); note = 'approximate: the source frame could not be read here, so only text and captions are drawn'; }
   // Colour and look.
   const lookRef = clip.look?.lut;
@@ -125,11 +132,11 @@ export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProj
   let img = sharp(rgb, { raw: { width: W, height: H, channels: 3 } });
   const svg = overlaySvg(p, t, W, H);
   if (svg) img = img.composite([{ input: Buffer.from(svg) }]);
-  return { png: await img.png().toBuffer(), width: W, height: H, note };
+  return { png: await img.png().toBuffer(), width: W, height: H, note, read };
 }
 
 /** A strip of approximate frames every `everySec` (at most 40), 6 per row, each 160 px wide with its time. */
-export async function contactSheet(ctx: Ctx, studioId: string, p: M.EditProject, everySec = 1): Promise<{ png: Buffer; times: number[] }> {
+export async function contactSheet(ctx: Ctx, studioId: string, p: M.EditProject, everySec = 1): Promise<{ png: Buffer; times: number[]; unread: number }> {
   const d = M.durationSec(p), step = Math.max(0.25, everySec, d / 40);
   const times: number[] = [];
   for (let t = 0; t < d - 1e-6 && times.length < 40; t += step) times.push(Math.round(t * 100) / 100);
@@ -143,5 +150,5 @@ export async function contactSheet(ctx: Ctx, studioId: string, p: M.EditProject,
     return { input: await sharp(tl.png).extend({ bottom: lab, background: '#111111' }).composite([{ input: label, top: th, left: 0 }]).png().toBuffer(), left: (i % 6) * tw, top: Math.floor(i / 6) * (th + lab) };
   }));
   const png = await sharp({ create: { width: Math.max(1, cols) * tw, height: Math.max(1, rows) * (th + lab), channels: 3, background: '#111111' } }).composite(comps).png().toBuffer();
-  return { png, times };
+  return { png, times, unread: tiles.filter(x => !x.read).length };
 }

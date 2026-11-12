@@ -873,3 +873,27 @@ export async function renderProject(cfg: { ffmpeg: string; ffprobe: string }, p:
   } finally { for (const t of plan.temp) fs.rmSync(t, { force: true, recursive: true }); }
   return { durationSec: plan.durationSec, width: plan.width, height: plan.height, unsupported: plan.unsupported };
 }
+
+/**
+ * Only the edit's sound, mixed as the export mixes it (every clip's sound cut and timed like its picture, music, voice,
+ * fades, ducking), into `out` (FLAC). Nothing is drawn. Returns the edit's length and whether anything was audible.
+ * For Claude's listen (claude/listen.ts).
+ */
+export async function renderSound(cfg: { ffmpeg: string; ffprobe: string }, p: M.EditProject, files: Record<string, string>, out: string): Promise<{ durationSec: number; hasAudio: boolean }> {
+  const sizes: Record<string, { width: number; height: number; hasAudio: boolean }> = {};
+  for (const [id, file] of Object.entries(files)) {
+    const a = p.assets.find(x => x.id === id);
+    if (!a || (a.kind !== 'video' && a.kind !== 'audio')) continue;
+    const info = await probeStreams(cfg.ffprobe, file);
+    if (info) sizes[id] = { width: info.width || a.width || 1080, height: info.height || a.height || 1920, hasAudio: info.hasAudio };
+  }
+  const plan = planRender(p, files, sizes, `${out}.unused.mp4`); // only its sound pass runs
+  try {
+    if (!plan.soundArgs) return { durationSec: plan.durationSec, hasAudio: false };
+    const sound = plan.soundArgs[plan.soundArgs.length - 1]!;
+    await new Promise<void>((resolve, reject) => execFile(cfg.ffmpeg, plan.soundArgs!, { timeout: 5 * 60_000, maxBuffer: 8 * 1024 * 1024 },
+      (err, _o, e) => (err ? reject(new Error(`sound mix failed: ${String(e ?? err.message).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`)) : resolve())));
+    fs.renameSync(sound, out);
+    return { durationSec: plan.durationSec, hasAudio: true };
+  } finally { for (const t of plan.temp) fs.rmSync(t, { force: true, recursive: true }); }
+}

@@ -127,9 +127,9 @@ export function detectBeats(x: Float32Array, sr = BEAT_SR): Beats {
 }
 
 /** Decodes a file or URL's audio (first 10 min) to 11025 Hz mono floats with ffmpeg (analysis only; nothing encoded). */
-export function decodeMono(ffmpeg: string, input: string, maxSec = 600): Promise<Float32Array> {
+export function decodeMono(ffmpeg: string, input: string, maxSec = 600, fromSec = 0): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
-    execFile(ffmpeg, ['-v', 'error', '-i', input, '-vn', '-ac', '1', '-ar', String(BEAT_SR), '-t', String(maxSec), '-f', 'f32le', 'pipe:1'],
+    execFile(ffmpeg, ['-v', 'error', '-threads', '1', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-vn', '-sn', '-dn', '-i', input, '-ac', '1', '-ar', String(BEAT_SR), '-t', String(maxSec), '-f', 'f32le', 'pipe:1'],
       { encoding: 'buffer', timeout: 180_000, maxBuffer: BEAT_SR * 4 * maxSec + 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) return reject(new Error(`ffmpeg failed: ${String(stderr ?? '').trim().split('\n').slice(-1)[0]?.slice(0, 200) || err.message}`));
         const b = stdout as Buffer;

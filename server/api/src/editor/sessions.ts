@@ -1,11 +1,12 @@
 // Edit sessions (plans/claude-editing.md A, plans/api.md "Edit sessions"): a live, revisioned working copy of an
 // EditProject v2 per take, shared by the owner's apps and Claude. Every change is a JSON Patch with its inverse, so
 // every change (Claude's too) is undoable; changes reach the apps as `edit` events. Owner only.
-import { and, desc, eq, lte } from 'drizzle-orm';
+import { and, desc, eq, inArray, lte } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
+import { readyIfStored } from '../storage/objects.js';
 import { applyPatch, diff, PatchError, type PatchOp } from './jsonpatch.js';
 import * as M from './model.js';
 import { applyOps, type EditOp } from './ops.js';
@@ -80,6 +81,7 @@ export class EditSessions {
       const now = Date.now();
       const [s] = await this.ctx.db.insert(editSessions).values({ id: uid('es'), studioId: u.studioId, ownerId: u.id, takeId: M.BLANK_SOURCE,
         baseVersionId: null, project: project as unknown as Record<string, unknown>, revision: 0, updatedBy: this.author(b.device), createdAt: now, updatedAt: now }).returning();
+      void this.settleUploads(u.studioId, project);
       return this.view(s!);
     }
     const [t] = await this.ctx.db.select().from(takes).where(and(eq(takes.id, b.takeId), eq(takes.studioId, u.studioId)));
@@ -97,6 +99,7 @@ export class EditSessions {
     const [s] = await this.ctx.db.insert(editSessions).values({ id: uid('es'), studioId: u.studioId, ownerId: u.id, takeId: t.id,
       baseVersionId: typeof b.baseVersionId === 'string' ? b.baseVersionId : null, project: project as unknown as Record<string, unknown>, revision: 0,
       updatedBy: by, createdAt: now, updatedAt: now }).returning();
+    void this.settleUploads(u.studioId, project);
     return this.view(s!);
   }
   /** A take's starting project: an edited version's v2 project or v1 list (on its source take), else the untouched take. */
@@ -125,6 +128,20 @@ export class EditSessions {
     if (takeId && p.sourceTakeId !== takeId) throw badRequest('project.sourceTakeId: must be the session\'s take');
     return p;
   }
+  /**
+   * Edit's uploads (presign + PUT, never confirmed by the apps) put on the timeline: each new video or audio upload whose
+   * file is stored is recorded ready (storage/objects.ts readyIfStored), so every reader sees it as finished. Background,
+   * never blocks or fails a change.
+   */
+  private async settleUploads(studioId: string, next: M.EditProject, prev?: M.EditProject) {
+    const had = new Set((prev?.assets ?? []).map(a => a.upload));
+    const ids = [...new Set(next.assets.filter(a => a.upload && !had.has(a.upload) && (a.kind === 'video' || a.kind === 'audio')).map(a => a.upload!))];
+    if (!ids.length) return;
+    try {
+      const rows = await this.ctx.db.select().from(uploads).where(and(eq(uploads.studioId, studioId), inArray(uploads.id, ids)));
+      for (const up of rows) if (up.state !== 'ready') await readyIfStored(this.ctx, up);
+    } catch (e) { this.ctx.log.warn({ err: (e as Error).message }, 'edit uploads: could not record them ready'); }
+  }
   private author(device: unknown) { return typeof device === 'string' && device ? `app:${device.slice(0, 40)}` : 'app'; }
 
   // ------------------------------------------------------------------ changes
@@ -143,6 +160,7 @@ export class EditSessions {
     if (o.undoes) await this.ctx.db.update(editOps).set({ undone: 1 }).where(eq(editOps.id, o.undoes));
     await this.prune(s.id);
     if (patch.length) this.emit(u, { op: 'patch', revision: rev, baseRevision: s.revision, patch, entry: this.entryView(entry!) });
+    if (patch.length) void this.settleUploads(s.studioId, next, s.project as M.EditProject);
     // The learning editor (workstream 3): the owner's change to one of Claude's becomes a correction. Never blocks.
     if (patch.length && o.author !== 'claude' && !o.author.startsWith('system:')) void learningOf(this.ctx).observe(s, s.project as M.EditProject, next, entry!);
     return { session: u, entry: entry!, patch };
