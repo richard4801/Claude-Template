@@ -102,3 +102,12 @@ jobs:
             android/core/build/reports/tests
             android/app/build/reports/tests
           if-no-files-found: ignore
+
+      # Edit's screenshots (Robolectric + Roborazzi), so a reviewer can look at them without a phone.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-edit-screenshots
+          path: android/app/build/outputs/roborazzi/edit_*.png
+          if-no-files-found: ignore
+          retention-days: 14
