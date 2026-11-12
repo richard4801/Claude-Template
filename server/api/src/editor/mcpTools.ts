@@ -214,7 +214,7 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'apply_edit_ops', title: 'Change the edit', scope: 'edit:write',
-    description: `Applies changes to the edit as one undoable step. Send the revision you last read as baseRevision (a stale one is refused with the current revision: get_edit and try again). Ops (see plans/video-editor.md "Edit ops"): ${OP_NAMES.join(', ')}; layers: ${LAYER_OP_NAMES.join(', ')}. Examples: {"op":"trim","clipId":"c1","inSec":0.5,"outSec":6}, {"op":"split","at":3.2}, {"op":"delete","itemId":"c2"}, {"op":"speed","clipId":"c1","curve":"hero"}, {"op":"add_hook","template":"hook-bold","text":"Wait for it…"}, {"op":"caption_style","preset":"pop"}, {"op":"look","itemId":"all","look":"film-gold","strength":0.7}, {"op":"transition","clipId":"all","kind":"fade","durationSec":0.3}, {"op":"duck","levelDb":-12}, {"op":"ratio","ratio":"9:16"}. Times are seconds; timeline times for split/startSec, source times for trim. When the result has a notice (a mask, Invert, green-screen key or cut-out changed), tell the person that line plainly.`,
+    description: `Applies changes to the edit as one undoable step. Send the revision you last read as baseRevision (a stale one is refused with the current revision: get_edit and try again). Ops (see plans/video-editor.md "Edit ops"): ${OP_NAMES.join(', ')}; layers: ${LAYER_OP_NAMES.join(', ')}. Examples: {"op":"trim","clipId":"c1","inSec":0.5,"outSec":6}, {"op":"split","at":3.2}, {"op":"delete","itemId":"c2"}, {"op":"speed","clipId":"c1","curve":"hero"}, {"op":"add_hook","template":"hook-bold","text":"Wait for it…"}, {"op":"caption_style","preset":"pop"}, {"op":"look","itemId":"all","look":"film-gold","strength":0.7}, {"op":"transition","clipId":"all","kind":"fade","durationSec":0.3}, {"op":"duck","levelDb":-12}, {"op":"ratio","ratio":"9:16"}. Times are seconds; timeline times for split/startSec, source times for trim. When the result has a notice (a mask, Invert, green-screen key or cut-out changed), tell the person that line plainly. To play part of a clip backwards (reverse, rewind before a drop) use reverse_clip, not speed.`,
     inputSchema: obj({ sessionId: SID, baseRevision: num('The revision your change is based on'), ops: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object' }, description: 'Operations, applied in order' } }, ['sessionId', 'baseRevision', 'ops']),
     run: async (env, a) => editSessionsOf(env.ctx).applyClaude(env.user, sessionId(env, a), a),
   },
@@ -322,6 +322,71 @@ const TOOLS: EditTool[] = [
     description: 'Finds the tempo and beats of a music clip and marks them on the timeline (for cutting to the beat). Returns bpm, beatTimes and strongTimes (the downbeats) in the clip\'s own seconds: add the clip\'s start on the timeline (minus its trim-in) for timeline seconds.',
     inputSchema: obj({ sessionId: SID, itemId: str('The music clip') }, ['sessionId', 'itemId']),
     run: (env, a) => helper(env, a, { kind: 'beats', label: 'Detect beats' }),
+  },
+  {
+    // Owner report ci_0d15c8435187 (2026-11-12): no way to play a piece backwards. One free, undoable step: the clip's
+    // source is reversed once on the server (the Reverse helper's job, reused when done before), then the piece plays the
+    // reversed copy (reverse), or a reversed copy of the piece is put right after it (rewind: forward, then back).
+    name: 'reverse_clip', title: 'Reverse or rewind part of a clip (free)', scope: 'edit:write',
+    description: 'Plays a piece of a main-track clip backwards. mode "reverse" (default): the piece itself plays backwards. mode "rewind": the piece plays forward, then a reversed copy right after it plays it back (a rewind/stutter before a drop); everything after moves later by the piece\'s length. fromSec/toSec are timeline seconds inside the clip (leave both out for the whole clip). Free, one undoable step; the first reverse of a clip takes a few seconds (the copy is made on the server, videos up to 60 s). Then listen/watch to check it lands on the beat.',
+    inputSchema: obj({ sessionId: SID, baseRevision: num('The revision your change is based on'), clipId: str('The main-track clip (c1, …)'), fromSec: num('Timeline start of the piece (s)', 0), toSec: num('Timeline end of the piece (s)', 0),
+      mode: { type: 'string', enum: ['reverse', 'rewind'], description: 'reverse (default) or rewind' } }, ['sessionId', 'clipId']),
+    run: async (env, a) => {
+      const svc = editSessionsOf(env.ctx), ai = editorAi(env.ctx), id = sessionId(env, a);
+      const s = await svc.row(env.user, id);
+      if (a.baseRevision !== undefined && Number(a.baseRevision) !== s.revision) throw new ApiError(409, 'stale_revision', `The edit moved on (revision ${s.revision}, you sent ${a.baseRevision}) · get it again and re-apply`);
+      const mode = a.mode === 'rewind' ? 'rewind' : 'reverse';
+      let p = JSON.parse(JSON.stringify(s.project)) as M.EditProject;
+      const spans = M.timeline(p), main = M.mainTrack(p);
+      const k0 = main.items.findIndex(x => x.id === a.clipId);
+      if (k0 < 0) throw badRequest(`clipId: ${String(a.clipId)} is not a clip on the main track (get_edit lists them)`);
+      const c0 = main.items[k0] as M.VideoClip;
+      if (c0.holdSec !== undefined) throw badRequest('That clip is a freeze frame: there is nothing to play backwards');
+      const span = spans[k0]!;
+      const from = a.fromSec === undefined ? span.startSec : Number(a.fromSec), to = a.toSec === undefined ? span.endSec : Number(a.toSec);
+      if (!(to - from >= 0.1)) throw badRequest('fromSec/toSec: the piece must be at least 0.1 s');
+      if (from < span.startSec - 0.01 || to > span.endSec + 0.01) throw badRequest(`fromSec/toSec: must be inside ${String(a.clipId)} (${span.startSec.toFixed(2)}–${span.endSec.toFixed(2)} s on the timeline)`);
+      const asset = p.assets.find(x => x.id === c0.asset);
+      if (!asset || asset.kind !== 'video') throw badRequest('That clip has no video to reverse');
+      // The reversed copy: already in the edit, or this clip is itself a reversed copy (reverse it back), or made now.
+      let revId = asset.reverseOf ?? p.assets.find(x => x.reverseOf === asset.id)?.id;
+      let D = asset.durationSec ?? 0;
+      if (!revId) {
+        if (!asset.take && !asset.upload) throw badRequest('That clip has no stored video to reverse');
+        const media = await requireAssetMedia(env.ctx, s.studioId, asset);
+        if (!(D > 0)) { const info = await ai.withLocalInput(media.key, f => probe(env.ctx.config.FFPROBE_PATH, f)); D = info.duration; }
+        const job = await ai.start(env.user, { kind: 'reverse', source: asset.take ? { takeId: asset.take } : { uploadId: asset.upload, durationSec: D } }) as { id: string };
+        const until = Date.now() + 150_000;
+        let row = await ai.get(env.user, job.id);
+        while (row.state !== 'done' && row.state !== 'failed' && Date.now() < until) { await new Promise(r => setTimeout(r, 1000)); row = await ai.get(env.user, job.id); }
+        if (row.state !== 'done') throw new ApiError(502, 'reverse_failed', row.state === 'failed' ? `Reverse failed: ${row.error ?? 'try again'}` : 'Reversing is taking long · try again in a minute (it will be reused)');
+        const r = row.result as { asset: { upload?: string; take?: string; durationSec?: number }; width?: number; height?: number; hasAudio?: boolean };
+        const ids = new Set(p.assets.map(x => x.id)); let n = 1; while (ids.has(`${asset.id}r${n}`)) n++;
+        revId = `${asset.id}r${n}`;
+        p.assets.push({ id: revId, kind: 'video', ...(r.asset.upload ? { upload: r.asset.upload } : { take: r.asset.take }), durationSec: D,
+          ...(r.width ? { width: r.width } : {}), ...(r.height ? { height: r.height } : {}), ...(r.hasAudio !== undefined ? { hasAudio: r.hasAudio } : {}), reverseOf: asset.id });
+      }
+      const rev = p.assets.find(x => x.id === revId)!;
+      const total = rev.reverseOf === asset.id ? (rev.durationSec ?? D) : (asset.durationSec ?? D);
+      // Cut the piece out (split at its edges inside the clip), then switch or copy it.
+      const { applyOps } = await import('./ops.js');
+      const cuts = [to, from].filter(t => t > span.startSec + 0.06 && t < span.endSec - 0.06).map(at => ({ op: 'split', at }));
+      if (cuts.length) p = applyOps(p, cuts as never).project;
+      const m2 = M.mainTrack(p), sp2 = M.timeline(p);
+      const k = sp2.findIndex(x => Math.abs(x.startSec - Math.max(from, span.startSec)) < 0.06);
+      const piece = m2.items[k] as M.VideoClip | undefined;
+      if (!piece) throw new ApiError(500, 'server_error', 'Could not isolate that piece');
+      const flipped = M.reverseClip(piece, revId, total);
+      if (!flipped) throw badRequest('That piece cannot be reversed');
+      if (mode === 'reverse') m2.items.splice(k, 1, flipped);
+      else {
+        const all = new Set(p.tracks.flatMap(t => t.items.map(x => x.id))); let n = 2; while (all.has(`${piece.id}.${n}`)) n++;
+        const { transitionIn: _t, fadeInSec: _f, ...rest } = flipped;
+        m2.items.splice(k + 1, 0, { ...rest, id: `${piece.id}.${n}` });
+      }
+      const label = mode === 'reverse' ? `Reversed ${from.toFixed(2)}–${to.toFixed(2)} s` : `Rewind after ${from.toFixed(2)}–${to.toFixed(2)} s`;
+      return svc.applyClaude(env.user, id, { baseRevision: s.revision, label, ops: [{ op: 'patch', patch: [{ op: 'replace', path: '/assets', value: p.assets }, { op: 'replace', path: '/tracks', value: p.tracks }] }] });
+    },
   },
   {
     // Workstream 1 (plans/recreate-edit.md "Action peaks"): frame-difference energy on a small grey proxy. Free.

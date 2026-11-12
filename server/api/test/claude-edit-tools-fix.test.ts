@@ -174,4 +174,30 @@ describe.skipIf(!hasFfmpeg)('Claude tools on an Edit upload (new edit, no take)'
     const v = await Promise.race([oneAtATime(() => oneAtATime(async () => 7)), new Promise(res => setTimeout(() => res('deadlock'), 2000))]);
     expect(v).toBe(7);
   });
+
+  it('reverse_clip: a piece plays backwards, rewind adds a reversed copy after it; one undoable step, copy reused', async () => {
+    const get = async () => (await owner.req('GET', `/v1/edit-sessions/${sid}`)).body;
+    let s = await get();
+    const before = M.durationSec(s.project);
+    const r1 = await tool('reverse_clip').run(env(), { sessionId: sid, baseRevision: s.revision, clipId: 'c1', fromSec: 2, toSec: 3 }) as any;
+    expect(r1.changes.join(' ')).toMatch(/Changed the project|Reversed/);
+    s = await get();
+    const rev = s.project.assets.find((x: any) => x.reverseOf === 'v1');
+    expect(rev?.upload).toBeTruthy();
+    const main = s.project.tracks.find((t: any) => t.kind === 'main').items;
+    const piece = main.find((x: any) => x.asset === rev.id);
+    expect(piece.inSec).toBeCloseTo(23 - 3, 2);
+    expect(piece.outSec).toBeCloseTo(23 - 2, 2);
+    expect(M.durationSec(s.project)).toBeCloseTo(before, 2);
+    // Rewind on the piece after it: a reversed copy is inserted, the edit gets longer by the piece; the copy is reused.
+    const later = main.find((x: any) => x.asset === 'v1' && x.inSec >= 2.9);
+    const r2 = await tool('reverse_clip').run(env(), { sessionId: sid, baseRevision: s.revision, clipId: later.id, fromSec: 3, toSec: 3.5, mode: 'rewind' }) as any;
+    expect(r2.revision).toBe(s.revision + 1);
+    const s2 = await get();
+    expect(s2.project.assets.filter((x: any) => x.reverseOf === 'v1').length).toBe(1);
+    expect(M.durationSec(s2.project)).toBeCloseTo(before + 0.5, 1);
+    // One step each: undo puts it back.
+    await tool('undo_edit').run(env(), { sessionId: sid });
+    expect(M.durationSec((await get()).project)).toBeCloseTo(before, 1);
+  }, 120_000);
 });

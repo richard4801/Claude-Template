@@ -395,6 +395,6 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       tx.pin = { clip: clip.id, layer: layer.id, anchor, ...(o.offset !== undefined ? { offset: o.offset as { x: number; y: number } } : {}) };
       return `Pinned text to ${layer.name}`;
     }
-    default: throw badRequest(`op: one of ${[...OP_NAMES, ...LAYER_OP_NAMES].join(', ')}`);
+    default: throw badRequest(`op: one of ${[...OP_NAMES, ...LAYER_OP_NAMES].join(", ")}${/rev|rewind|backward/i.test(String(o.op)) ? " · to play part of a clip backwards use the reverse_clip tool" : ""}`);
   }
 }
