@@ -25,18 +25,19 @@ covered questions itself, so Claude Code gets an allow without a card.
   path it names (arguments, `key=/path` and `scheme:/path` parts, redirect targets) is inside an allowed folder or the
   chat's own run folder. A path outside: the card offers Always and names the folder it would add.
 - Scripts are read: delete/move/run/network calls, `expanduser`/`environ`, or a written path outside the folders → asks.
+- Two shapes around a covered command stay covered (coordinator, 2026-11-12): a leading `cd <dir> &&` (dir inside the
+  folders, or Always adds it; relative paths then resolve in dir) and a trailing pipe into head, tail, grep/egrep/fgrep,
+  wc, sort, uniq, cut, tr (their file arguments checked like any path; `2>&1`, `>/dev/null` fine).
 - Never Always (card shows Allow once / Deny + why): rm/rmdir/unlink/trash/`find -delete`, mv, sudo/su, chmod/chown,
   kill/killall, curl/wget/ssh/rsync, brew/pip/npm installs, URLs/network schemes, git push/reset/clean/checkout/…,
-  osascript/open/launchctl/defaults…, ~/Library, keys, `; && || | &`, `$( )`, backticks, variables, here-documents,
+  osascript/open/launchctl/defaults…, ~/Library, keys, `;`, `||`, `&`, any other `&&` or pipe, `$( )`, backticks, variables, here-documents,
   redirects outside allowed folders, `VAR=x cmd`, xargs/env/eval/awk/sed/make, unknown programs, programs run by path.
 - Paid, delete and post actions in MUSE keep their own Approve cards (unchanged).
 
 ## Checks
-- MuseCore: whole suite green on Linux (Swift 6.0.3), incl. `ClaudeAlwaysRulesTests` (10) and `ClaudeFileAccessTests`.
+- MuseCore: whole suite green on Linux (Swift 6.0.3), incl. `ClaudeAlwaysRulesTests` (12) and `ClaudeFileAccessTests`.
 - Mac CI step "Claude allow-always check" (`SnapshotRunner+ClaudeAllowAlways.swift`, `claude-allow-check.txt`, shots
   `mac_a_claude_allow_*.png`). Not yet run on a Mac (the app target can't build on Linux).
 
 ## Known limits / follow-ups
-- Pipes (`ffmpeg … 2>&1 | tail`) and `cd dir && …` always ask, as the owner's rule says; if the owner finds that too
-  chatty, a later step could allow a pipe into tail/head/grep/wc when each part is itself covered.
 - A script's dynamic paths (built at run time) can't be checked; obvious delete/run/network calls and written paths are.

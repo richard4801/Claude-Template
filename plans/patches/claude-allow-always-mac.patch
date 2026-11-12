@@ -159,10 +159,10 @@ index 70772561..2a3432bf 100644
      private func endFileAsks(threadId: String, message: String) {
 diff --git a/mac/Muse/App/SnapshotRunner+ClaudeAllowAlways.swift b/mac/Muse/App/SnapshotRunner+ClaudeAllowAlways.swift
 new file mode 100644
-index 00000000..1e058343
+index 00000000..f517104d
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+ClaudeAllowAlways.swift
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,165 @@
 +import AppKit
 +import MuseCore
 +import SwiftUI
@@ -262,6 +262,11 @@ index 00000000..1e058343
 +        // The next ffmpeg command in that folder runs without a card; another kind still asks.
 +        let next = service.reviewShowAsk(ask("perm_review_next", "Bash", ["command": .string("ffmpeg -y -i '\(out)' -t 2 '\(shoot.path)/c.mp4'")]), threadId: tid)
 +        check("next_ffmpeg_runs", next == .allow, "\(next)")
++        // Claude Code's usual shape: cd into the folder, then a pipe into tail.
++        let piped = service.reviewShowAsk(ask("perm_review_piped", "Bash", ["command": .string("cd '\(shoot.path)' && ffmpeg -y -i b.mp4 -t 1 d.mp4 2>&1 | tail -n 40")]), threadId: tid)
++        check("cd_and_tail_runs", piped == .allow, "\(piped)")
++        let toShell = service.reviewShowAsk(ask("perm_review_sh", "Bash", ["command": .string("ffmpeg -i '\(out)' -f wav - | sh")]), threadId: tid)
++        if case .ask(let c) = toShell { check("pipe_to_shell_asks", c.alwaysLabel == nil) } else { check("pipe_to_shell_asks", false, "\(toShell)") }
 +        let probe = service.reviewShowAsk(ask("perm_review_probe", "Bash", ["command": .string("ffprobe '\(out)'")]), threadId: tid)
 +        if case .ask(let c) = probe { check("other_kind_asks", c.alwaysLabel == "Allow always: ffprobe commands", c.alwaysLabel ?? "none") }
 +        else { check("other_kind_asks", false, "\(probe)") }
@@ -485,18 +490,19 @@ index 2ddd92e3..df0baf08 100644
          }
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAlwaysRules.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAlwaysRules.swift
 new file mode 100644
-index 00000000..b7ce57d0
+index 00000000..c1c50420
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAlwaysRules.swift
-@@ -0,0 +1,399 @@
+@@ -0,0 +1,442 @@
 +import Foundation
 +
 +/// "Allow always" (owner, 2026-11-12: "When I give it access to a folder or bash once, it shouldn't ask again"). A command
 +/// rule is a kind of command: the program, plus its first subcommand where that is what decides what it does (`git status`),
 +/// or "scripts" for an interpreter (`python3 <script>`). A command matching a rule runs without a card only when every path
 +/// it names is inside an always-allowed folder (or the chat's own run folder), nothing in it can delete, move, reach the
-+/// network, install, need admin rights, stop programs, touch ~/Library or keys, and it is ONE plain command (no `;`, `&&`,
-+/// `|`, `$( )`, backticks, variables or here-documents). Everything else keeps asking; the dangerous kinds never offer
++/// network, install, need admin rights, stop programs, touch ~/Library or keys, and it is ONE plain command: no `;`, `||`,
++/// `&`, `$( )`, backticks, variables or here-documents; the only extras allowed are a leading `cd <dir> &&` (dir inside the
++/// folders) and a trailing pipe into plain filters (head, tail, grep, wc, sort, uniq, cut, tr). Everything else keeps asking; the dangerous kinds never offer
 +/// "Allow always" at all.
 +public struct ClaudeCommandRule: Codable, Hashable, Sendable, Identifiable {
 +    /// The program's name ("ffmpeg", "git", "python3").
@@ -717,6 +723,43 @@ index 00000000..b7ce57d0
 +    /// The plain command's own risks: one program, its arguments and redirects.
 +    struct Parsed { var argv: [String]; var targets: [String] }
 +
++    /// Programs a command may pipe into and still be covered by its rule: they only read their input and print.
++    static let filters: Set<String> = ["head", "tail", "grep", "egrep", "fgrep", "wc", "sort", "uniq", "cut", "tr"]
++
++    struct Why: Error { var text: String }
++    struct Segment { var argv: [Word]; var targets: [String] }
++
++    /// One simple command: its words and redirect targets (`2>&1` and `>&2` name none). Any other operator, or a
++    /// here-document, fails with the one-line why.
++    static func parseSegment(_ tokens: [Token]) -> Result<Segment, Why> {
++        var argv: [Word] = [], targets: [String] = []
++        var i = 0
++        while i < tokens.count {
++            switch tokens[i] {
++            case .word(let w): argv.append(w)
++            case .op(let op):
++                let redirect = op.last == ">" || op.last == "<" || op == ">|" || op.hasSuffix(">>") || op == "<>"
++                if op.hasPrefix("<<") { return .failure(Why(text: "it feeds text into the command")) }
++                if op.hasSuffix(">&") || op.hasSuffix("<&") {
++                    // 2>&1 is fine; >&file writes a file.
++                    guard i + 1 < tokens.count, case .word(let t) = tokens[i + 1] else { return .failure(Why(text: "MUSE can't read this command")) }
++                    if t.expands { return .failure(Why(text: "it uses shell variables or substitutions")) }
++                    if !(t.text == "-" || t.text.allSatisfy(\.isNumber)) { targets.append(t.text) }
++                    i += 2; continue
++                }
++                if redirect {
++                    guard i + 1 < tokens.count, case .word(let t) = tokens[i + 1] else { return .failure(Why(text: "MUSE can't read this command")) }
++                    if t.expands { return .failure(Why(text: "it uses shell variables or substitutions")) }
++                    targets.append(t.text)
++                    i += 2; continue
++                }
++                return .failure(Why(text: "it chains several commands"))
++            }
++            i += 1
++        }
++        return .success(Segment(argv: argv, targets: targets))
++    }
++
 +    // MARK: The check
 +
 +    /// What MUSE makes of `command`: the rule it falls under, why it always asks, and the folders it reaches outside the
@@ -729,32 +772,36 @@ index 00000000..b7ce57d0
 +        if command.contains("$(") || command.contains("`") { r.why = "it uses shell variables or substitutions"; return r }
 +        // A folder too wide to always allow never counts, however it got on the list.
 +        let folders = folders.filter { tooWide($0, home: home) == nil }
-+        guard let tokens = lex(command) else { r.why = "MUSE can't read this command"; return r }
++        guard var tokens = lex(command) else { r.why = "MUSE can't read this command"; return r }
++        // A leading `cd <dir> &&`: the rest runs in <dir>, which must be inside the folders like any other path.
++        var runCwd = cwd
++        var cdDir: String?
++        if tokens.count >= 3, case .word(let c) = tokens[0], c.text == "cd", !c.expands, case .word(let d) = tokens[1], tokens[2] == .op("&&") {
++            if d.expands { r.why = "it uses shell variables or substitutions"; return r }
++            guard let ps = paths(in: d.text, cwd: cwd, home: home), ps.count == 1 else { r.why = "MUSE can't tell which files it reaches"; return r }
++            runCwd = ps[0]
++            cdDir = ps[0]
++            tokens.removeFirst(3)
++        }
++        // A trailing pipe chain into plain filters only (`2>&1 | tail -n 40`).
++        var segments: [[Token]] = [[]]
++        for t in tokens {
++            if t == .op("|") { segments.append([]) } else { segments[segments.count - 1].append(t) }
++        }
++        guard let main = segments.first, !main.isEmpty, segments.allSatisfy({ !$0.isEmpty }) else { r.why = "it chains several commands"; return r }
 +        var argv: [Word] = [], targets: [String] = []
-+        var i = 0
-+        while i < tokens.count {
-+            switch tokens[i] {
-+            case .word(let w): argv.append(w)
-+            case .op(let op):
-+                let redirect = op.last == ">" || op.last == "<" || op == ">|" || op.hasSuffix(">>") || op == "<>"
-+                if op.hasPrefix("<<") { r.why = "it feeds text into the command"; return r }
-+                if op.hasSuffix(">&") || op.hasSuffix("<&") {
-+                    // 2>&1 is fine; >&file writes a file.
-+                    guard i + 1 < tokens.count, case .word(let t) = tokens[i + 1] else { r.why = "MUSE can't read this command"; return r }
-+                    if !(t.text == "-" || t.text.allSatisfy(\.isNumber)) { targets.append(t.text) }
-+                    if t.expands { r.why = "it uses shell variables or substitutions"; return r }
-+                    i += 2; continue
-+                }
-+                if redirect {
-+                    guard i + 1 < tokens.count, case .word(let t) = tokens[i + 1] else { r.why = "MUSE can't read this command"; return r }
-+                    if t.expands { r.why = "it uses shell variables or substitutions"; return r }
-+                    targets.append(t.text)
-+                    i += 2; continue
-+                }
-+                r.why = "it chains several commands"
-+                return r
-+            }
-+            i += 1
++        switch parseSegment(main) {
++        case .failure(let why): r.why = why.text; return r
++        case .success(let got): argv = got.argv; targets = got.targets
++        }
++        var filterArgs: [String] = []
++        for seg in segments.dropFirst() {
++            guard case .success(let got) = parseSegment(seg), let f = got.argv.first, !got.argv.contains(where: \.expands),
++                  !f.text.contains("/"), filters.contains(f.text.lowercased()),
++                  got.targets.allSatisfy({ harmless.contains($0) }) else { r.why = "it chains several commands"; return r }
++            let fname = f.text.lowercased()
++            for a in got.argv.dropFirst() { if let why = riskyOption(fname, a.text) { r.why = why; return r } }
++            filterArgs += got.argv.dropFirst().map(\.text)
 +        }
 +        guard let first = argv.first else { r.why = "MUSE can't read this command"; return r }
 +        let name = (first.text as NSString).lastPathComponent.lowercased()
@@ -808,7 +855,7 @@ index 00000000..b7ce57d0
 +            }
 +            guard j < rest.count, rest[j] != "-", rest[j] != "--" else { r.why = "it runs code typed into the command"; return r }
 +            if program == "swift", !rest[j].hasSuffix(".swift") { r.why = "MUSE can't be sure what swift \(rest[j]) does"; return r }
-+            scriptPath = ClaudeFilePolicy.resolve(rest[j], cwd: cwd, home: home)
++            scriptPath = ClaudeFilePolicy.resolve(rest[j], cwd: runCwd, home: home)
 +            r.rule = ClaudeCommandRule(program: program, sub: scriptSub)
 +        } else if plainPrograms.contains(program) {
 +            r.rule = ClaudeCommandRule(program: program)
@@ -822,11 +869,12 @@ index 00000000..b7ce57d0
 +        // Every path it names: inside the allowed folders or the chat's own folder, or a folder "Allow always" may add.
 +        var need: [String] = []
 +        let inside: (String) -> Bool = { p in harmless.contains(p) || ClaudeFilePolicy.inside(p, cwd) || folders.contains { ClaudeFilePolicy.inside(p, $0) } }
-+        for a in rest + targets {
-+            guard let ps = paths(in: a, cwd: cwd, home: home) else { r.rule = nil; r.why = "MUSE can't tell which files it reaches"; return r }
++        let named = (cdDir.map { [$0] } ?? []) + rest + targets + filterArgs
++        for a in named {
++            guard let ps = paths(in: a, cwd: runCwd, home: home) else { r.rule = nil; r.why = "MUSE can't tell which files it reaches"; return r }
 +            for p in ps where !inside(p) || ClaudeFilePolicy.inside(p, home + "/Library") {
 +                if ClaudeFilePolicy.isSecret(p) { r.rule = nil; r.why = "it names keys, passwords or tokens"; return r }
-+                let folder = isDirectory(p) ? p : (p as NSString).deletingLastPathComponent
++                let folder = isDirectory(p) || p == cdDir ? p : (p as NSString).deletingLastPathComponent
 +                if let wide = tooWide(folder, home: home) { r.rule = nil; r.why = "it reaches a folder that can't be always allowed (\(wide))"; return r }
 +                if !need.contains(where: { ClaudeFilePolicy.inside(folder, $0) }) {
 +                    need.removeAll { ClaudeFilePolicy.inside($0, folder) }
@@ -1094,10 +1142,10 @@ index af61d67e..9302de4c 100644
  }
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeAlwaysRulesTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeAlwaysRulesTests.swift
 new file mode 100644
-index 00000000..88af335a
+index 00000000..8c730608
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeAlwaysRulesTests.swift
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,305 @@
 +import Foundation
 +import XCTest
 +@testable import MuseCore
@@ -1172,6 +1220,63 @@ index 00000000..88af335a
 +        // A path inside an option's value counts too.
 +        XCTAssertEqual(check("ffmpeg -i \(movies)/a.mp4 -vf movie=/Users/me/Desktop/logo/l.png \(movies)/o.mp4").needFolders, ["/Users/me/Desktop/logo"])
 +        XCTAssertEqual(check("ffmpeg -i 'concat:\(movies)/a.ts|/Users/me/Desktop/x/b.ts' -c copy \(movies)/o.mp4").needFolders, ["/Users/me/Desktop/x"])
++    }
++
++    func testALeadingCdAndATrailingPipeIntoFiltersStayUnderTheRule() {
++        let rules = [ffmpeg, ClaudeCommandRule(program: "ffprobe"), ClaudeCommandRule(program: "ls")]
++        for cmd in [
++            "cd ~/Movies/Shoot && ffmpeg -i a.mp4 -vf scale=720:-2 out.mp4 2>&1 | tail -5",
++            "cd \(movies) && ffmpeg -y -i a.mp4 b.mp4",
++            "ffmpeg -i \(movies)/a.mp4 \(movies)/b.mp4 2>&1 | tail -n 40",
++            "ffprobe -v error -show_streams \(movies)/a.mp4 2>&1 | grep -i codec | head -3",
++            "ffprobe \(movies)/a.mp4 2>&1 | sort | uniq -c | wc -l",
++            "ls -la \(movies) | cut -c1-80 | tr -s ' ' > /dev/null",
++            "cd \(movies) && ls | grep mp4",
++        ] {
++            XCTAssertEqual(verdict(cmd, rules: rules), .allow, cmd)
++        }
++        // Relative paths after cd are inside that folder.
++        XCTAssertTrue(check("cd \(movies) && ffmpeg -i a.mp4 b.mp4").needFolders.isEmpty)
++        // A cd outside the folders asks, and Allow always names that folder.
++        let out = check("cd /Users/me/Desktop/in && ffmpeg -i a.mp4 b.mp4 2>&1 | tail -5")
++        XCTAssertEqual(out.rule, ffmpeg)
++        XCTAssertEqual(out.needFolders, ["/Users/me/Desktop/in"])
++        guard case .ask = verdict("cd /Users/me/Desktop/in && ffmpeg -i a.mp4 b.mp4", rules: rules) else { return XCTFail("ran outside") }
++        // relative "..": cd can't climb out.
++        XCTAssertNil(check("cd \(movies)/../.. && ls").rule)   // that's the home folder: never Always
++        XCTAssertEqual(check("cd \(movies)/.. && ls").needFolders, ["/Users/me/Movies"])
++    }
++
++    func testOnlyThoseTwoShapesAreAllowedAroundTheCommand() {
++        let rules = [ffmpeg, ClaudeCommandRule(program: "ls"), ClaudeCommandRule(program: "cat")]
++        let cases: [(String, String)] = [
++            ("cd / && rm -rf x", "it deletes files"),
++            ("cd / && ls", "it reaches a folder that can't be always allowed (a top-level folder is too wide to always allow)"),
++            ("cd ~ && ls", "it reaches a folder that can't be always allowed (your whole home folder is too wide to always allow)"),
++            ("ffmpeg -i \(movies)/a.mp4 -f wav - | sh", "it chains several commands"),
++            ("ffmpeg -i \(movies)/a.mp4 -f wav - | bash -s", "it chains several commands"),
++            ("ls \(movies) | xargs cat", "it chains several commands"),
++            ("ls \(movies) | tee \(movies)/list.txt", "it chains several commands"),
++            ("ls \(movies) | /usr/bin/tail", "it chains several commands"),
++            ("ls \(movies) | tail > \(movies)/x.txt", "it chains several commands"),
++            ("ls \(movies) |", "it chains several commands"),
++            ("cd \(movies) && ls && ls", "it chains several commands"),
++            ("cd \(movies) && ffmpeg -i a.mp4 b.mp4; ls", "it chains several commands"),
++            ("cd \(movies) || ls", "it chains several commands"),
++            ("ls \(movies) |& tail", "it chains several commands"),
++            ("cd $HOME && ls", "it uses shell variables or substitutions"),
++            ("ls \(movies) | sort --compress-program=gzip", "it runs other commands"),
++            ("ls \(movies) | grep -r x /Users/me/Documents", "it reaches a folder that can't be always allowed (your whole home folder is too wide to always allow)"),
++        ]
++        for (cmd, why) in cases {
++            let c = check(cmd)
++            XCTAssertEqual(c.why, why, cmd)
++            if case .allow = verdict(cmd, rules: rules) { XCTFail("ran: \(cmd)") }
++        }
++        // grep -r outside the folders: asks (Always would add that folder).
++        let g = check("ls \(movies) | grep -r x /Users/me/Documents/Notes", dirs: ["/Users/me/Documents/Notes"])
++        XCTAssertEqual(g.needFolders, ["/Users/me/Documents/Notes"])
++        guard case .ask = verdict("ls \(movies) | grep -r x /Users/me/Documents/Notes", rules: rules) else { return XCTFail() }
 +    }
 +
 +    // MARK: Never "Allow always"
