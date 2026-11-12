@@ -47,6 +47,17 @@ https://angelic-elegance-production-c42b.up.railway.app). Prod head when written
 - Claude in Edit: `detect_beats` returns beatTimes and strongTimes.
 - Check first: the Mac CI run for the last pushes (a Mac test fixture changed), and that Railway deployed.
 
+## 4a2. Late 2026-11-11 / early 11-12 (coordinator) — read first
+
+RULE (owner-approved after a lost paid job): ONLY the coordinator pushes to prod, and only after `queue_list` (owner MCP) shows no running job. Workers push to their own branches; app code stays as local commits/patches until the coordinator says go. Mac CI: ONE bundle branch at a time (claude/mac-bundle-N), integrated by session_01Py2rxnjQp7r4hK1X2A7SuZ; Android bundles by session_01Py2rxq3NrUtFVbFtuVQ3at. Artifacts are zip-in-zip: unwrap MUSE-mac.zip before sending (owner's install command expects MUSE.app inside).
+
+Live on prod (cd34b11e): hf-job-lost (paid jobs survive deploys; job_recover; owner's lost shot jl_ed1826cb6af7 recovered), Genjutsu + Genjutsu Light swap engines (Auto by intent), sticky deletes (migration 0034 studio_seeds; POST /v1/jobs/clear-failed; queue_clear_failed tool), BYO Higgsfield (83-model static catalog), provider labels "Model · Provider", claude-sees-all server (screen field, sa_/sd_/cs_ resolver), hf price fix ($1.17 was 4 paid extra images; guide stills only fill free slots), outfit faces (7 pictures; only outfit images sent; Dress up removed, 410), Mac bundle 1 (build 562, green) + Android bundle 1 (build 27). Owner has 562 + Android 27.
+
+In flight: claude/server-bundle-2 (house style split Realism/Camera feel, swap background keep/photo/describe + prompt reaches swap model, "dusk.." fix) + claude/mac-bundle-2 (claude-sees-all Mac, ui-control Mac, studio redesign, bundle-2-mac.patch; Mac run 566) + claude/android-bundle-2. Merge all three together when green, then send builds.
+
+Open questions to owner: drop "head looks" (outfit-head-looks.md §2) now that outfits carry hair/makeup? Outfit angle reorder tool (ci_cf8c3c8ee924)? Prompts preview real-prompt viewer?
+Still queued: Blender handshake (session_01Py2rxoY8SKt1vFyFyBATyE, 64c4226 local), Layers (session_01Py2rxpvNvLE5cJNBMMZ63J), Character-swap Higgsfield line resilience (hf-job-lost follow-up 1), apps "Recover" button for provider_paid_unsaved (follow-up 2), Railway 512 MB vs ffmpeg 2K (follow-up 3).
+
 ## 4a. Session of 2026-11-11 (coordinator, continued) — read first
 Owner answers at the start: keep the 4b order; the typing bug is on the Mac; push green approved fixes straight to prod.
 - Pushed (Mac, needs a new Mac build for the owner): 5A.6 typing in Claude chat inside Edit no longer fires editor
