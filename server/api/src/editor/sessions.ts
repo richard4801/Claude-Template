@@ -142,6 +142,18 @@ export class EditSessions {
       for (const up of rows) if (up.state !== 'ready') await readyIfStored(this.ctx, up);
     } catch (e) { this.ctx.log.warn({ err: (e as Error).message }, 'edit uploads: could not record them ready'); }
   }
+  /**
+   * Every upload asset carries its file link (owner report ci_36c6de4dd9cf): the apps download an upload's file from the
+   * asset's url, so an asset Claude added without one (a reversed copy) played black on the Mac. Fills the missing links
+   * in place; takes are found by the apps themselves.
+   */
+  private async linkUploads(studioId: string, p: M.EditProject) {
+    const missing = p.assets.filter(a => a.upload && !a.take && !a.url && !(a as { contentRef?: unknown }).contentRef);
+    if (!missing.length) return;
+    const rows = await this.ctx.db.select({ id: uploads.id, key: uploads.storageKey }).from(uploads).where(and(eq(uploads.studioId, studioId), inArray(uploads.id, missing.map(a => a.upload!))));
+    const base = this.ctx.config.PUBLIC_URL ?? '';
+    for (const a of missing) { const r = rows.find(x => x.id === a.upload); if (r) a.url = `${base}/uploads/${r.key}`; }
+  }
   private author(device: unknown) { return typeof device === 'string' && device ? `app:${device.slice(0, 40)}` : 'app'; }
 
   // ------------------------------------------------------------------ changes
@@ -219,6 +231,7 @@ export class EditSessions {
     if (base !== s.revision) throw await this.stale(id, base);
     this.limit(id);
     const { project, labels } = applyOps(s.project as M.EditProject, b.ops as EditOp[]);
+    await this.linkUploads(s.studioId, project);
     this.check(project, s.takeId);
     // workstream 1: the owner's pinned playbook rules (no ramps, cuts only, …) hold for every change of Claude's.
     await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, project);

@@ -184,6 +184,10 @@ describe.skipIf(!hasFfmpeg)('Claude tools on an Edit upload (new edit, no take)'
     s = await get();
     const rev = s.project.assets.find((x: any) => x.reverseOf === 'v1');
     expect(rev?.upload).toBeTruthy();
+    // The apps download an upload's file from its url: without it the reversed piece played black on the Mac.
+    expect(rev.url).toMatch(/\/uploads\/.+\.mp4$/);
+    // Every upload asset gets its link on a change of Claude's (repairs an edit made before this fix).
+    expect(s.project.assets.filter((x: any) => x.upload && !x.take).every((x: any) => typeof x.url === 'string' && x.url.includes('/uploads/'))).toBe(true);
     const main = s.project.tracks.find((t: any) => t.kind === 'main').items;
     const piece = main.find((x: any) => x.asset === rev.id);
     expect(piece.inSec).toBeCloseTo(23 - 3, 2);

@@ -360,10 +360,10 @@ const TOOLS: EditTool[] = [
         let row = await ai.get(env.user, job.id);
         while (row.state !== 'done' && row.state !== 'failed' && Date.now() < until) { await new Promise(r => setTimeout(r, 1000)); row = await ai.get(env.user, job.id); }
         if (row.state !== 'done') throw new ApiError(502, 'reverse_failed', row.state === 'failed' ? `Reverse failed: ${row.error ?? 'try again'}` : 'Reversing is taking long · try again in a minute (it will be reused)');
-        const r = row.result as { asset: { upload?: string; take?: string; durationSec?: number }; width?: number; height?: number; hasAudio?: boolean };
+        const r = row.result as { asset: { upload?: string; take?: string; url?: string; durationSec?: number }; width?: number; height?: number; hasAudio?: boolean };
         const ids = new Set(p.assets.map(x => x.id)); let n = 1; while (ids.has(`${asset.id}r${n}`)) n++;
         revId = `${asset.id}r${n}`;
-        p.assets.push({ id: revId, kind: 'video', ...(r.asset.upload ? { upload: r.asset.upload } : { take: r.asset.take }), durationSec: D,
+        p.assets.push({ id: revId, kind: 'video', ...(r.asset.upload ? { upload: r.asset.upload } : { take: r.asset.take }), ...(r.asset.url ? { url: r.asset.url } : {}), durationSec: D,
           ...(r.width ? { width: r.width } : {}), ...(r.height ? { height: r.height } : {}), ...(r.hasAudio !== undefined ? { hasAudio: r.hasAudio } : {}), reverseOf: asset.id });
       }
       const rev = p.assets.find(x => x.id === revId)!;
