@@ -208,12 +208,9 @@ struct OneClaudePanel: View {
         if let opened = o.opened, let back = o.back {
             HStack(spacing: Space.s1) {
                 Ph("arrow-square-out", 13)
-                // One event, two parts (coordinator, run 591): what Claude opened, then " · " and the way back as a real
-                // link (the link role, not ink2), so they never read as one run-on sentence. The page name truncates first.
-                Text("Opened \(opened.line) for you").lineLimit(1).truncationMode(.tail)
-                Text("·").accessibilityHidden(true)
+                Text("Opened \(opened.line) for you").lineLimit(1)
                 Button("Back to \(back.label ?? back.line)") { store.oneClaudeBack() }
-                    .buttonStyle(.plain).foregroundStyle(r.link).lineLimit(1).fixedSize().layoutPriority(1)
+                    .buttonStyle(.link).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .font(t.scale.caption.font).foregroundStyle(r.ink2)
