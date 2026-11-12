@@ -28,6 +28,7 @@ import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 import { rigCheck } from './rigcheck.js';
 import { draftOf } from './drafts.js';
+import { renderBreakdown, shotBreakdown } from './breakdown.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
@@ -678,7 +679,7 @@ export class SuiteService {
     const res = plan.resolution.replace(/P$/, 'p');
     const base = {
       quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : plan.mode === 'remix' ? 'Swap' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
-      estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
+      estimate: round2(plan.estimate), breakdown: shotBreakdown(plan), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       buttonLabel: `Generate · ${Math.round(plan.seconds * 10) / 10} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], ...(plan.adapted?.length ? { adapted: plan.adapted } : {}), camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
@@ -723,7 +724,7 @@ export class SuiteService {
     const est = P.totalCost(rr);
     const seconds = hosted ? P.hostedSeconds(rr) : Math.round(P.lengthSec(rr) * 10) / 10;
     const sentImages = (await this.ctx.jobs.swapReferences(u, { ...req, draft: r.draft }, hosted)).view;
-    const view = { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds, takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
+    const view = { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds, takes: req.takes, estimate: round2(est), breakdown: renderBreakdown(rr, seconds), priceLine: P.priceLine(rr),
       buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' && hosted ? ['Swap tops out at HD'] : [], rig: [], test: false, sentImages };
     if (u.role === 'owner' && choice) Object.assign(view, { engine: { model: choice.model, name: choice.engine.name, label: choice.engine.label, provider: choice.engine.provider, source: choice.source, perSec: (rr as { pricePerSec?: number }).pricePerSec ?? null } });
     return { req, choice, view };

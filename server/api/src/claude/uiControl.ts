@@ -12,7 +12,35 @@ import { uid } from '../lib/util.js';
 import type { EditTool } from '../editor/mcpTools.js';
 
 export type UiKind = 'snapshot' | 'act' | 'wait';
-export type UiCall = { id: string; kind: UiKind; args: Record<string, unknown>; createdAt: number; expiresAt: number };
+export type UiCall = { id: string; kind: UiKind; args: Record<string, unknown>; createdAt: number; expiresAt: number;
+  /** What the Claude panel's activity strip says while it runs ("Opening Swap…", "Setting outfit…"). */
+  step: string };
+
+/** A control's id or label as words: "suite.swap.outfitPicker" → "outfit picker". */
+export function controlWords(target: unknown): string {
+  if (typeof target !== 'string' || !target.trim()) return '';
+  const last = target.includes(' ') ? target.trim() : (target.split(/[./>]/).filter(Boolean).pop() ?? target);
+  return last.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40);
+}
+/** The activity strip's line for one call (sentence case, ends with "…"). */
+export function stepOf(kind: UiKind, args: Record<string, unknown>): string {
+  const cap = (x: string) => (x ? x[0]!.toUpperCase() + x.slice(1) : x);
+  if (kind === 'snapshot') return 'Looking at the window…';
+  if (kind === 'wait') return 'Waiting for the window…';
+  const t = controlWords(args.target), v = typeof args.value === 'string' ? args.value.trim().slice(0, 40) : '';
+  switch (args.action) {
+    case 'press': return `${cap(t ? `pressing ${t}` : 'pressing')}…`;
+    case 'set_text': return `${cap(t ? `typing in ${t}` : 'typing')}…`;
+    case 'set_value': return `${cap(t ? `setting ${t}` : 'setting a value')}${v ? ` to ${v}` : ''}…`;
+    case 'select': return `${cap(v ? `choosing ${v}` : t ? `opening ${t}` : 'choosing')}…`;
+    case 'toggle': return `${cap(`turning ${t || 'it'}${v ? ` ${v}` : ''}`)}…`;
+    case 'scroll': return 'Scrolling…';
+    case 'menu': return `Opening ${typeof args.target === 'string' ? args.target.trim().slice(0, 40) : 'a menu'}…`;
+    case 'focus': return `${cap(t ? `going to ${t}` : 'moving focus')}…`;
+    case 'key': return `Pressing ${v || 'a key'}…`;
+    default: return 'Working in the window…';
+  }
+}
 type Pending = { call: UiCall; userId: string; claimedBy?: string; resolve: (r: UiOutcome) => void; timer: NodeJS.Timeout };
 /** The Mac's reason codes: stopped (the person pressed Esc), off (their Settings toggle), protected, not_found, failed. */
 export const UI_ERROR_CODES = ['stopped', 'off', 'protected', 'not_found', 'failed'] as const;
@@ -74,7 +102,7 @@ export class UiHub {
   request(u: AuthUser, kind: UiKind, args: Record<string, unknown>, waitMs = UI_ANSWER_MS): Promise<UiOutcome> {
     if (!this.canAsk(u.id)) return Promise.resolve({ error: NEEDS_NEW_APP_UI });
     const now = Date.now();
-    const call: UiCall = { id: uid('ui'), kind, args, createdAt: now, expiresAt: now + waitMs };
+    const call: UiCall = { id: uid('ui'), kind, args, createdAt: now, expiresAt: now + waitMs, step: stepOf(kind, args) };
     return new Promise(resolve => {
       const timer = setTimeout(() => this.end(call.id, { error: 'MUSE on your Mac did not answer (is the app open and awake?). Nothing was done.' }), waitMs);
       this.calls.set(call.id, { call, userId: u.id, resolve, timer });

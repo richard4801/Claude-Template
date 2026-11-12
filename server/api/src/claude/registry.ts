@@ -9,6 +9,7 @@ import { SUITE_TOOLS } from '../suite/mcpTools.js';
 import { CHAT_TOOLS } from './chatTools.js';
 import { WATCH_TOOLS } from './watch.js';
 import { ISSUE_TOOLS } from './issues.js';
+import { CARD_TOOLS } from './cards.js';
 import { APP_TOOLS } from './appTools.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS } from './actions.js';
 import { SENT_TOOLS } from './sentTools.js';
@@ -38,6 +39,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(WATCH_TOOLS, ['any'], () => true),
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
+  // Chat cards (claude/cards.ts): a plan checklist and a clip's key moments, drawn as cards in the person's panel; free.
+  ...tag(CARD_TOOLS, ['any'], () => true),
   // Full control B1 (claude/appTools.ts): the screens' free read/organise actions, as the person (routes decide what members may do).
   ...tag(APP_TOOLS, ['any'], t => !OWNER_ONLY.has(t.name)),
   // Full control B2 (claude/actions.ts): spend/delete/post actions behind the person's Approve card.

@@ -14,11 +14,12 @@ import type { EditTool } from '../editor/mcpTools.js';
 import { appCall, slim } from './appCall.js';
 import { ownChat, uiLine } from './chatTools.js';
 import { claudeActions } from './schema.js';
+import { balance, breakdownOf, type ApproveCard, type PriceLine } from './cards.js';
 import type { Gate } from './registry.js';
 
 const EXPIRES_MS = 30 * 60_000;
 type Method = 'POST' | 'DELETE' | 'PATCH' | 'PUT';
-type Plan = { summary: string; method: Method; url: string; body?: unknown; priceUsd?: number | null };
+type Plan = { summary: string; method: Method; url: string; body?: unknown; priceUsd?: number | null; title?: string; breakdown?: { lines: PriceLine[]; totalUsd: number } | null };
 type Env = Parameters<EditTool['run']>[0];
 export type GatedTool = EditTool & { gate: Exclude<Gate, 'none'> };
 
@@ -34,6 +35,20 @@ export function priceOf(e: unknown): number | null {
   for (const k of ['estimateUsd', 'usd', 'totalUsd', 'priceUsd', 'cost', 'price', 'total']) if (typeof o[k] === 'number') return o[k] as number;
   for (const k of ['estimate', 'quote', 'price']) if (o[k] && typeof o[k] === 'object') { const p = priceOf(o[k]); if (p !== null) return p; }
   return null;
+}
+/** The price of an estimate answer, its price lines when the screen gives them, and its button's words ("Generate · 15 s · $1.17"). */
+export function priced(e: unknown): Pick<Plan, 'priceUsd' | 'breakdown' | 'title'> {
+  const label = e && typeof e === 'object' ? ((e as { buttonLabel?: unknown }).buttonLabel ?? ((e as { estimate?: { buttonLabel?: unknown } }).estimate?.buttonLabel)) : undefined;
+  return compact({ priceUsd: priceOf(e), breakdown: breakdownOf(e) ?? undefined, title: typeof label === 'string' ? label : undefined });
+}
+/** The Approve card (claude/cards.ts) for a waiting action: its title, what it does, the price lines and Total. */
+export function approveCard(actionId: string, gate: string, p: Plan): ApproveCard {
+  const verb = gate === 'delete' ? 'Delete' : gate === 'post' ? 'Post' : gate === 'spend' ? 'Approve' : 'Change';
+  const total = p.breakdown?.totalUsd ?? p.priceUsd ?? undefined;
+  const lines = p.breakdown?.lines.length ? balance(p.breakdown.lines, p.breakdown.totalUsd) : typeof total === 'number' ? [{ label: p.summary, usd: total }] : [];
+  const title = p.title ?? `${p.summary}${money(total)}`;
+  return compact({ kind: 'approve' as const, title, subtitle: title === p.summary || title.startsWith(p.summary) ? undefined : p.summary, lines, totalUsd: total,
+    answer: { actionId }, approveLabel: verb, declineLabel: 'Decline' }) as ApproveCard;
 }
 /** An outfit's 7 picture slots (POST /v1/outfits/:id/reorder) and how a person reads them. */
 const OUTFIT_SLOTS = ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'] as const;
@@ -62,7 +77,9 @@ async function requestApproval(env: Env, tool: string, gate: string, p: Plan, ch
   const chat = chatId ? await ownChat(env.ctx, u, chatId).catch(() => null) : null;
   const [row] = await env.ctx.db.insert(claudeActions).values({ id: uid('ca'), studioId: u.studioId, userId: u.id, chatId: chat?.id ?? null, tool, gate,
     summary: p.summary, priceUsd: p.priceUsd ?? null, call: { method: p.method, url: p.url, body: p.body ?? null }, status: 'waiting', createdAt: now, updatedAt: now, expiresAt: now + EXPIRES_MS }).returning();
-  const ui = compact({ approve: row!.id, gate, summary: p.summary, priceUsd: p.priceUsd ?? undefined, label: `${gate === 'delete' ? 'Delete' : gate === 'post' ? 'Post' : gate === 'spend' ? 'Approve' : 'Change'}${money(p.priceUsd)}` });
+  // ui.card: the Approve card with its price lines (newer apps); the other fields for apps that predate cards.
+  const ui = compact({ approve: row!.id, gate, summary: p.summary, priceUsd: p.priceUsd ?? undefined, label: `${gate === 'delete' ? 'Delete' : gate === 'post' ? 'Post' : gate === 'spend' ? 'Approve' : 'Change'}${money(p.priceUsd)}`,
+    card: approveCard(row!.id, gate, p) });
   if (chat) await uiLine(env.ctx, u, chat.id, 'approve', `Waiting for your go-ahead: ${p.summary}${money(p.priceUsd)}`, ui);
   else void env.ctx.hub.emitTo(u.id, { type: 'claude', op: 'ui', name: 'approve', ui });
   return { waitingForApproval: true, actionId: row!.id, would: p.summary, estimateUsd: p.priceUsd ?? undefined,
@@ -180,7 +197,7 @@ export const ACTION_TOOLS: GatedTool[] = [
     plan: async (env, a) => {
       const q = enc(id(a.queuedId, 'queuedId'));
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/suite/queue/${q}/estimate`, {});
-      return { summary: 'Run a queued AI Suite shot', method: 'POST', url: `/v1/suite/queue/${q}/run`, body: {}, priceUsd: priceOf(e) };
+      return { summary: 'Run a queued AI Suite shot', method: 'POST', url: `/v1/suite/queue/${q}/run`, body: {}, ...priced(e) };
     } }),
   gated({ name: 'post_cancel', title: 'Cancel a scheduled post', scope: 'edit:write', gate: 'delete',
     description: 'Cancels a scheduled social post (posts_list for ids). Needs the person\'s go-ahead.',
@@ -205,7 +222,7 @@ export const ACTION_TOOLS: GatedTool[] = [
     plan: async (env, a) => {
       const m = enc(id(a.modelId, 'modelId')), body = (a.options && typeof a.options === 'object' ? a.options : {}) as object;
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/models/${m}/enhance/estimate`, body);
-      return { summary: 'Enhance the character\'s pictures', method: 'POST', url: `/v1/models/${m}/enhance`, body, priceUsd: priceOf(e) };
+      return { summary: 'Enhance the character\'s pictures', method: 'POST', url: `/v1/models/${m}/enhance`, body, ...priced(e) };
     } }),
   // B3: paid makes, priced by the screen's own route with dryRun: true (nothing held or made).
   gated({ name: 'character_fill_angles', title: 'Fill a character\'s missing angles', scope: 'edit:write', gate: 'spend',
@@ -216,7 +233,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/models/${m}/fill-angles`, { dryRun: true });
       const angles = Array.isArray(e?.angles) ? e.angles as string[] : [];
       if (!angles.length) throw new ApiError(409, 'nothing_missing', 'Her sheet has no missing angles');
-      return { summary: `Fill ${angles.length} missing angle${angles.length === 1 ? '' : 's'} (${angles.join(', ')})`, method: 'POST', url: `/v1/models/${m}/fill-angles`, body: {}, priceUsd: priceOf(e) };
+      return { summary: `Fill ${angles.length} missing angle${angles.length === 1 ? '' : 's'} (${angles.join(', ')})`, method: 'POST', url: `/v1/models/${m}/fill-angles`, body: {}, ...priced(e) };
     } }),
   gated({ name: 'outfit_fill', title: 'Fill an outfit\'s missing angles', scope: 'edit:write', gate: 'spend',
     description: 'Makes an outfit\'s missing ¾, side and back pictures from its front (as on the outfit page). Paid: without confirm it gives the price.',
@@ -225,7 +242,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       const o = enc(id(a.outfitId, 'outfitId'));
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/fill`, { dryRun: true });
       if (!e?.dryRun) throw new ApiError(409, 'nothing_missing', 'This outfit has all its angles');
-      return { summary: `Make ${e.angles} missing outfit angle${e.angles === 1 ? '' : 's'}`, method: 'POST', url: `/v1/outfits/${o}/fill`, body: {}, priceUsd: priceOf(e) };
+      return { summary: `Make ${e.angles} missing outfit angle${e.angles === 1 ? '' : 's'}`, method: 'POST', url: `/v1/outfits/${o}/fill`, body: {}, ...priced(e) };
     } }),
   gated({ name: 'outfit_add_faces', title: 'Add an outfit\'s face close-ups', scope: 'edit:write', gate: 'spend',
     description: 'Makes an older outfit\'s missing face close-ups (front, ¾, side, with the outfit\'s hair, make-up and face accessories) from her base face photos and the outfit\'s front (Add face close-ups on the outfit). Until then, shots with that outfit send her base face front only. Paid: without confirm it gives the price.',
@@ -234,7 +251,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       const o = enc(id(a.outfitId, 'outfitId'));
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/faces`, { dryRun: true });
       if (!e?.dryRun) throw new ApiError(409, 'nothing_missing', 'This outfit has its face close-ups');
-      return { summary: `Add ${e.faces} face close-up${e.faces === 1 ? '' : 's'} to the outfit`, method: 'POST', url: `/v1/outfits/${o}/faces`, body: {}, priceUsd: priceOf(e) };
+      return { summary: `Add ${e.faces} face close-up${e.faces === 1 ? '' : 's'} to the outfit`, method: 'POST', url: `/v1/outfits/${o}/faces`, body: {}, ...priced(e) };
     } }),
   gated({ name: 'outfit_redo', title: 'Redo one outfit picture', scope: 'edit:write', gate: 'spend',
     description: 'Makes one of an outfit\'s 7 pictures again (Redo on the outfit): angle front, tq (¾), side or back (body), or face, faceTq or profile (face close-ups). Paid: without confirm it gives the price.',
@@ -243,7 +260,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       const o = enc(id(a.outfitId, 'outfitId')), angle = String(a.angle ?? '');
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/redo`, { angle, dryRun: true });
       if (!e?.dryRun) throw new ApiError(409, 'nothing_to_make', 'That picture can\'t be made (her base face photo is missing)');
-      return { summary: `Redo the outfit's ${angle} picture`, method: 'POST', url: `/v1/outfits/${o}/redo`, body: { angle }, priceUsd: priceOf(e) };
+      return { summary: `Redo the outfit's ${angle} picture`, method: 'POST', url: `/v1/outfits/${o}/redo`, body: { angle }, ...priced(e) };
     } }),
   gated({ name: 'outfit_reorder', title: 'Reorder an outfit\'s pictures', scope: 'edit:write', gate: 'settings',
     description: 'Fixes pictures sitting in the wrong slot of an outfit (e.g. the picture in side is really the back): each move puts the picture of `from` in `to` and the one in `to` takes `from`\'s place (a swap; nothing is lost), applied in order. Slots: front, tq (¾), side, back (body), face, faceTq, profile (face close-ups); suite_see with the outfit shows each picture with its slot. Free, but it changes the stored outfit: without confirm it shows the before and after; with confirm the person approves it.',
@@ -269,7 +286,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       const body = compact({ modelId: id(a.modelId, 'modelId'), name: typeof a.name === 'string' ? a.name : undefined, mode: typeof a.mode === 'string' ? a.mode : undefined,
         description: typeof a.description === 'string' ? a.description : undefined, images: Array.isArray(a.images) ? a.images : undefined });
       const e = await appCall(env.ctx, env.user, 'POST', '/v1/outfits', { ...body, dryRun: true });
-      return { summary: `Make the outfit “${body.name}”`, method: 'POST', url: '/v1/outfits', body, priceUsd: priceOf(e) };
+      return { summary: `Make the outfit “${body.name}”`, method: 'POST', url: '/v1/outfits', body, ...priced(e) };
     } }),
   gated({ name: 'take_upscale', title: 'Upscale a take', scope: 'edit:write', gate: 'spend',
     description: 'Upscales a finished video take to 1080p, 2k or 4k (as Upscale in the AI Suite); the result arrives as a new take. Paid: without confirm it gives the price.',
@@ -277,7 +294,7 @@ export const ACTION_TOOLS: GatedTool[] = [
     plan: async (env, a) => {
       const t = enc(id(a.takeId, 'takeId'));
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/takes/${t}/upscale`, { size: a.size, dryRun: true });
-      return { summary: `Upscale the take to ${String(a.size)}`, method: 'POST', url: `/v1/takes/${t}/upscale`, body: { size: a.size }, priceUsd: priceOf(e) };
+      return { summary: `Upscale the take to ${String(a.size)}`, method: 'POST', url: `/v1/takes/${t}/upscale`, body: { size: a.size }, ...priced(e) };
     } }),
   gated({ name: 'queue_run', title: 'Run the queue', scope: 'edit:write', gate: 'spend',
     description: 'Starts every queued generation job, as Run queue on Home/Queue. Paid: without confirm it lists them with the total.',
@@ -326,7 +343,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       const body = compact({ kind: a.kind, takeId: typeof a.takeId === 'string' ? a.takeId : undefined, uploadId: typeof a.uploadId === 'string' ? a.uploadId : undefined,
         options: a.options && typeof a.options === 'object' ? a.options : undefined });
       const e = await appCall(env.ctx, env.user, 'POST', '/v1/editor/estimate', body);
-      return { summary: `Run ${String(a.kind)} on ${String(body.takeId ?? body.uploadId ?? 'the clip')}`, method: 'POST', url: '/v1/editor/jobs', body, priceUsd: priceOf(e) };
+      return { summary: `Run ${String(a.kind)} on ${String(body.takeId ?? body.uploadId ?? 'the clip')}`, method: 'POST', url: '/v1/editor/jobs', body, ...priced(e) };
     } }),
   gated({ name: 'recreate_delete', title: 'Delete a Recreate reference', scope: 'edit:write', gate: 'delete',
     description: 'Deletes a Recreate reference and its analysis (recreate_list for ids). Needs the person\'s go-ahead.',
@@ -374,7 +391,7 @@ export const ACTION_TOOLS: GatedTool[] = [
     plan: async (env, a) => {
       const url = `/v1/tool-runs/${enc(id(a.runId, 'runId'))}/items/${enc(id(a.slot, 'slot'))}/retry`, body = a.engine ? { engine: a.engine } : {};
       const e = await appCall(env.ctx, env.user, 'POST', url, { ...body, dryRun: true });
-      return { summary: `Make the ${String(a.slot)} picture again`, method: 'POST', url, body, priceUsd: priceOf(e) };
+      return { summary: `Make the ${String(a.slot)} picture again`, method: 'POST', url, body, ...priced(e) };
     } }),
   gated({ name: 'suite_rig_delete', title: 'Delete a saved rig or location', scope: 'edit:write', gate: 'delete',
     description: 'Deletes a saved AI Suite rig (rigId) or a location (locationId). Needs the person\'s go-ahead.',
