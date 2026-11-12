@@ -284,7 +284,7 @@ struct TakeViewer: View {
 
     var body: some View {
         VStack(spacing: compact ? Space.s2 : Space.s3) {
-            if !compact && previewControls { previewBar.frame(maxWidth: .infinity) }
+            if !compact && previewControls { previewBar.frame(maxWidth: .infinity).frame(height: 32) }
             GeometryReader { g in
                 // Beside portrait media when there's room for it and a 240 pt picture; otherwise the row under it.
                 let rail = !compact && !landscape && !actions.isEmpty && g.size.width >= 2 * (Self.railWidth + Space.s7) + 240
@@ -297,18 +297,23 @@ struct TakeViewer: View {
                     }
                     .frame(width: g.size.width, height: g.size.height)
                 } else {
-                    let rowH: CGFloat = actions.isEmpty ? 0 : 36 + Space.s4
-                    VStack(spacing: Space.s4) {
+                    // The row has a fixed height, so the media always gets the rest (build 582: a menu label grew and
+                    // pushed the take off the stage).
+                    let rowH: CGFloat = actions.isEmpty ? 0 : ViewerActionRow.height + Space.s3
+                    VStack(spacing: Space.s3) {
                         mediaArea(width: g.size.width, height: g.size.height - rowH)
                         if let take, !actions.isEmpty {
                             ViewerActionRow(take: take, job: job, actions: actions, more: context != .compare, time: { playback.time })
+                                .frame(width: g.size.width, height: ViewerActionRow.height)
                         }
                     }
-                    .frame(width: g.size.width, height: g.size.height)
+                    .frame(width: g.size.width, height: g.size.height, alignment: .top)
                 }
             }
-            if compact && previewControls { compactPreviewMenu.frame(maxWidth: .infinity, alignment: .leading) }
+            .frame(minHeight: 160)
+            .layoutPriority(1)
         }
+        .clipped()
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
@@ -351,6 +356,12 @@ struct TakeViewer: View {
         .onTapGesture {
             focused = true
             if media.videoURL != nil { playback.togglePlay() }
+        }
+        .overlay(alignment: .topTrailing) {
+            if compact && previewControls {
+                ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil, onMedia: true)
+                    .padding(Space.s2)
+            }
         }
     }
 
@@ -414,48 +425,39 @@ struct TakeViewer: View {
     // MARK: Preview controls
 
     /// Clean · TikTok · Reels · Shorts · Facebook (or Clean · YouTube · Facebook), the frame switch and the safe zones.
+    /// Narrow: the switches fold into the Preview button, then the whole bar does.
     private var previewBar: some View {
-        HStack(spacing: Space.s4) {
-            Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
-                ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Preview as it would look on each app (a generic drawing of its layout)")
-            Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
-                .toggleStyle(.switch).controlSize(.small)
-                .font(t.scale.label.font)
-            Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
-                .toggleStyle(.switch).controlSize(.small)
-                .font(t.scale.label.font)
-                .disabled(layouts.zone(skin) == nil)
-                .help(layouts.note ?? "Where each app's own buttons and captions sit")
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Space.s4) { skinPicker; frameToggle; zonesToggle }.fixedSize()
+            HStack(spacing: Space.s3) { skinPicker; ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil, switchesOnly: true) }.fixedSize()
+            ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil).fixedSize()
         }
-        .frame(height: 32)
     }
 
-    /// A small pane's one menu: "Preview: Clean ▾".
-    private var compactPreviewMenu: some View {
-        Menu {
-            Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
-                ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.inline)
-            Divider()
-            Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
-            Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
-                .disabled(layouts.zone(skin) == nil)
-        } label: {
-            HStack(spacing: 4) {
-                Text("Preview: \(skin.label)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                Ph("caret-down", 11).foregroundStyle(t.roles.ink2)
-            }
+    private var skinPicker: some View {
+        Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
+            ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .pickerStyle(.segmented)
+        .labelsHidden()
         .fixedSize()
-        .help("Preview as it would look on each app")
+        .help("Preview as it would look on each app (a generic drawing of its layout)")
+    }
+
+    private var frameToggle: some View {
+        Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
+            .toggleStyle(.switch).controlSize(.small)
+            .font(t.scale.label.font)
+            .fixedSize()
+    }
+
+    private var zonesToggle: some View {
+        Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
+            .toggleStyle(.switch).controlSize(.small)
+            .font(t.scale.label.font)
+            .fixedSize()
+            .disabled(layouts.zone(skin) == nil)
+            .help(layouts.note ?? "Where each app's own buttons and captions sit")
     }
 
     // MARK: Keys
@@ -862,7 +864,9 @@ private struct ViewerActionRunner {
     }
 }
 
-/// More: everything else this take can do, and why a hidden action isn't offered.
+/// More: everything else this take can do (in a small pane, also the actions that didn't fit), and why a hidden action
+/// isn't offered. A button with a popover, never a `Menu`: a macOS menu label drops the icon's frame and draws it huge
+/// (build 582's giant chevron and dots).
 struct ViewerMoreMenu: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -870,37 +874,155 @@ struct ViewerMoreMenu: View {
     var job: Job?
     var fullWidth = false
     var iconOnly = false
+    /// Actions shown here because the row had no room for them (Redo, Extend, Split).
+    var extra: [TakeViewerAction] = []
+    var time: () -> Double = { 0 }
+    @State private var open = false
 
     var body: some View {
-        Menu {
-            Button("Vary") { store.vary(take) }
-            Button("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
-            if take.isVideo { Button("Use as start frame") { store.useAsStartFrame(take) } }
-            Button(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
-            if take.isVideo { Button("Open in Edit") { store.openEdit(takeId: take.id) } }
-            Button("Download") { store.export(take) }
-            let why = TakeViewerActions.hiddenReasons(isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
-                                                      canUpscale: take.canUpscale, isMaxResolution: (take.height ?? 0) >= 2160 || (take.width ?? 0) >= 2160)
-            if !why.isEmpty {
-                Divider()
-                ForEach(why, id: \.self) { Text($0) }
-            }
-        } label: {
+        Button { open.toggle() } label: {
             HStack(spacing: Space.s2) {
-                Ph("dots-three", 15)
+                Ph("dots-three", 15).frame(width: 18, height: 18)
                 if !iconOnly { Text("More").font(t.scale.label.font).lineLimit(1).fixedSize() }
                 if fullWidth { Spacer(minLength: 0) }
             }
             .foregroundStyle(t.roles.ink2)
-            .padding(.horizontal, Space.s3)
-            .frame(height: 36)
+            .padding(.horizontal, iconOnly ? 0 : Space.s3)
+            .frame(width: iconOnly ? 36 : nil, height: 36)
+            .frame(maxWidth: fullWidth ? .infinity : nil, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .fixedSize(horizontal: !fullWidth, vertical: true)
         .help("More for this take")
         .accessibilityLabel("More for this take")
+        .popover(isPresented: $open, arrowEdge: .bottom) { list.environment(store).environment(\.theme, t) }
+    }
+
+    private var list: some View {
+        let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
+        let why = TakeViewerActions.hiddenReasons(isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
+                                                  canUpscale: take.canUpscale, isMaxResolution: (take.height ?? 0) >= 2160 || (take.width ?? 0) >= 2160)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(extra.filter { $0 != .upscale && $0 != .keep }, id: \.self) { a in item(a.title) { runner.run(a) } }
+            if !extra.isEmpty { Divider().padding(.vertical, Space.s1) }
+            item("Vary") { store.vary(take) }
+            item("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
+            if take.isVideo { item("Use as start frame") { store.useAsStartFrame(take) } }
+            item(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
+            if take.isVideo { item("Open in Edit") { store.openEdit(takeId: take.id) } }
+            item("Download") { store.export(take) }
+            if !why.isEmpty {
+                Divider().padding(.vertical, Space.s1)
+                ForEach(why, id: \.self) { Text($0).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).padding(.horizontal, Space.s3).padding(.vertical, 2)
+                    .fixedSize(horizontal: false, vertical: true) }
+            }
+        }
+        .padding(.vertical, Space.s2)
+        .frame(width: 240, alignment: .leading)
+    }
+
+    private func item(_ title: String, _ run: @escaping () -> Void) -> some View {
+        Button {
+            open = false
+            run()
+        } label: {
+            Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                .padding(.horizontal, Space.s3)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The preview choices in a popover: Clean or a platform layout, the device frame, the safe zones. Used in small panes
+/// (over the media's corner) and when the preview bar has no room.
+struct ViewerPreviewButton: View {
+    @Environment(\.theme) private var t
+    var skin: PreviewSkin
+    var aspect: Double
+    @Binding var prefsRaw: String
+    var hasZones: Bool
+    /// Over the media: a 28 pt icon on a scrim.
+    var onMedia = false
+    /// Beside the segmented skins: only the two switches.
+    var switchesOnly = false
+    @State private var open = false
+
+    private var prefs: ViewerPrefs { ViewerPrefsKey.read(prefsRaw) }
+    private func update(_ f: (inout ViewerPrefs) -> Void) {
+        var p = prefs
+        f(&p)
+        prefsRaw = ViewerPrefsKey.write(p)
+    }
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Group {
+                if onMedia {
+                    Ph("device-mobile", 14).frame(width: 16, height: 16).foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(.black.opacity(0.5)))
+                } else {
+                    HStack(spacing: Space.s1) {
+                        Ph("device-mobile", 14).frame(width: 16, height: 16)
+                        Text(switchesOnly ? "Frame" : "Preview: \(skin.label)").font(t.scale.label.font).lineLimit(1).fixedSize()
+                        Ph("caret-down", 11).frame(width: 12, height: 12)
+                    }
+                    .foregroundStyle(t.roles.ink)
+                    .padding(.horizontal, Space.s2).frame(height: 28)
+                    .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Preview as it would look on each app")
+        .accessibilityLabel("Preview: \(skin.label)")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: Space.s3) {
+                if !switchesOnly {
+                    Text("Preview as").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                    Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
+                        ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+                    Divider()
+                }
+                Toggle(PreviewSkin.isLandscape(aspect) ? "Laptop frame" : "Phone frame",
+                       isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
+                    .toggleStyle(.switch).controlSize(.small)
+                Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
+                    .toggleStyle(.switch).controlSize(.small)
+                    .disabled(!hasZones)
+            }
+            .font(t.scale.label.font)
+            .padding(Space.s4)
+            .frame(width: 220, alignment: .leading)
+        }
+    }
+}
+
+/// Upscale in the viewer's own button style (the shared UpscaleButton draws an SF Symbol in another style); its picker
+/// opens in a popover as before.
+struct ViewerUpscaleButton: View {
+    @Environment(AppStore.self) private var store
+    var take: Take
+    var iconOnly = false
+    var fullWidth = false
+    @State private var open = false
+
+    var body: some View {
+        ViewerActionButton(action: .upscale, title: store.upscaleLive ? "Upscale" : "Upscale · soon", iconOnly: iconOnly, off: store.upscaling,
+                           fullWidth: fullWidth) { open = true }
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                UpscalePicker(take: take) { open = false }
+                    .environment(store)
+                    .environment(\.theme, PickerTheme.dark)
+                    .environment(\.colorScheme, .dark)
+            }
     }
 }
 
@@ -918,14 +1040,14 @@ struct ViewerActionRail: View {
         VStack(alignment: .leading, spacing: Space.s2) {
             ForEach(actions, id: \.self) { a in
                 if a == .upscale {
-                    UpscaleButton(take: take, size: .regular, fill: true)
+                    ViewerUpscaleButton(take: take, fullWidth: true)
                 } else if a == .keep {
                     ViewerActionButton(action: a, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal, fullWidth: true) { runner.run(a) }
                 } else {
                     ViewerActionButton(action: a, fullWidth: true) { runner.run(a) }
                 }
             }
-            ViewerMoreMenu(take: take, job: job, fullWidth: true)
+            ViewerMoreMenu(take: take, job: job, fullWidth: true, time: time)
             Text(details).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, Space.s4)
@@ -948,6 +1070,7 @@ struct ViewerActionRail: View {
 /// Upscale, Extend, Redo); Keep and Share always keep theirs.
 struct ViewerActionRow: View {
     @Environment(AppStore.self) private var store
+    static let height: CGFloat = 40
     var take: Take
     var job: Job?
     var actions: [TakeViewerAction]
@@ -956,32 +1079,46 @@ struct ViewerActionRow: View {
 
     var body: some View {
         let steps = TakeViewerActions.steps(actions)
-        // Each step one candidate (at most five: all labels, then Split, Upscale, Extend and Redo give theirs up).
+        // Each step one candidate: all labels, then Split, Upscale, Extend and Redo give theirs up; narrowest of all,
+        // Keep and Share stay and everything else is in More. Every candidate is fixed-size, so nothing is ever cut.
         ViewThatFits(in: .horizontal) {
             row(iconOnly: steps[0]).fixedSize()
             if steps.count > 1 { row(iconOnly: steps[1]).fixedSize() }
             if steps.count > 2 { row(iconOnly: steps[2]).fixedSize() }
             if steps.count > 3 { row(iconOnly: steps[3]).fixedSize() }
             if steps.count > 4 { row(iconOnly: steps[4]).fixedSize() }
-            row(iconOnly: steps[steps.count - 1], moreInline: false).fixedSize()
+            narrowest.fixedSize()
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// `moreInline` false (the narrowest): More shows only its icon.
-    private func row(iconOnly: Set<TakeViewerAction>, moreInline: Bool = true) -> some View {
+    private func row(iconOnly: Set<TakeViewerAction>) -> some View {
         let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
         return HStack(spacing: Space.s2) {
             ForEach(actions, id: \.self) { a in
                 if a == .upscale {
-                    UpscaleButton(take: take, size: .small, iconOnly: iconOnly.contains(a))
+                    ViewerUpscaleButton(take: take, iconOnly: iconOnly.contains(a))
                 } else if a == .keep {
                     ViewerActionButton(action: a, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal) { runner.run(a) }
                 } else {
                     ViewerActionButton(action: a, iconOnly: iconOnly.contains(a)) { runner.run(a) }
                 }
             }
-            if more { ViewerMoreMenu(take: take, job: job, iconOnly: !moreInline) }
+            if more { ViewerMoreMenu(take: take, job: job, iconOnly: !iconOnly.isEmpty, time: time) }
+        }
+    }
+
+    /// Keep and Share as icons with Keep's label, and More holding the rest.
+    private var narrowest: some View {
+        let runner = ViewerActionRunner(store: store, take: take, job: job, time: time)
+        let rest = actions.filter { $0 != .keep && $0 != .share }
+        return HStack(spacing: Space.s2) {
+            if actions.contains(.keep) {
+                ViewerActionButton(action: .keep, title: take.isFinal ? "Kept" : "Keep", primary: true, off: take.isFinal) { runner.run(.keep) }
+            }
+            if actions.contains(.upscale) { ViewerUpscaleButton(take: take, iconOnly: true) }
+            if actions.contains(.share) { ViewerActionButton(action: .share, iconOnly: true) { runner.run(.share) } }
+            if more || !rest.isEmpty { ViewerMoreMenu(take: take, job: job, iconOnly: true, extra: rest, time: time) }
         }
     }
 }

@@ -193,6 +193,11 @@ enum SnapshotRunner {
 
     /// The render's draft (design/direction/render.py `composer_mac`): @Demo in a café, 16:9, 8 s, 35 mm film with an
     /// anamorphic lens, window light, Golden warmth, UGC · Calm, and a #Dolly in. Options the catalog doesn't have stay Auto.
+    /// The take viewer's per-device choices for a review shot (nil: the defaults, Clean with no frame).
+    static func viewerPrefs(_ json: String?) {
+        if let json { UserDefaults.standard.set(json, forKey: "viewer.prefs") } else { UserDefaults.standard.removeObject(forKey: "viewer.prefs") }
+    }
+
     static func fillDemoDraft(_ store: AppStore) {
         let cam = store.suite.camera
         func pick(_ list: [SuiteOption], _ words: [String]) -> String? {
@@ -331,7 +336,7 @@ enum SnapshotRunner {
             ("composer_feed_viewer", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
             // Swap: Camera, Light and Style are set by the clip, shown greyed with that reason.
-            ("composer_swap", { store.openTool(.swap) }),
+            ("composer_swap", { store.setSwapVariant(.classic); store.openTool(.swap) }),
             // Build step 3: a shot added to the queue (priced, nothing held) shows in the feed's "Queued" group.
             ("composer_queue", { store.openTool(.shot); fillDemoDraft(store)
                 if store.suite.queued.isEmpty { store.addShotToQueue() }
@@ -342,11 +347,31 @@ enum SnapshotRunner {
             ("composer_claude_attach", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(attach: true) }),
             // …and after "go": Claude's ask waits in the panel for the owner's confirmation (never approved here).
             ("composer_claude_ask", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(ask: true) }),
+            // The swap viewer fix (plans/swap-viewer-build.md; owner, build 582): the real views for the side-by-side with
+            // the approved mockups. A finished take on the Shot stage; the take viewer Clean, then with the TikTok layout
+            // (YouTube for a landscape take) in the device frame; New Swap empty and with a clip.
+            ("stage_take", { viewerPrefs(nil); store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
+                if let j = store.suiteTakes(photo: false).compactMap(\.jobId).first { store.rememberStage(j, tool: .shot) } }),
+            ("viewer_clean", { viewerPrefs(nil); store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
+            ("viewer_tiktok", { viewerPrefs("{\"portraitSkin\":\"tiktok\",\"landscapeSkin\":\"youtube\",\"deviceFrame\":true,\"safeZones\":true}")
+                store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
+            ("newswap_empty", { viewerPrefs(nil); store.suite.feedOpen = false; store.suite.viewerTakeId = nil
+                store.openTool(.swap); store.setSwapVariant(.remix); store.clip = nil; store.clipVideo = nil }),
+            ("newswap_filled", { store.suite.feedOpen = false; store.openTool(.swap); store.setSwapVariant(.remix)
+                store.suite.remix.backgroundOn = true; store.suite.remix.backgroundMode = .describe
+                store.suite.remix.backgroundWords = "A rooftop at golden hour, city lights behind her"
+                store.suite.remix.lookOn = true; store.suite.remix.lookWords = "Warmer, soft window light"
+                Task { await store.useSampleClip(bad: false, quiet: true) } }),
             ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
         ]
         await run([.c, .a, .b, .d], [(1280, 800), (1000, 700)], feedScreens)
+        // Back to the defaults after the swap viewer shots: the classic Swap, Clean, no device frame.
+        store.setSwapVariant(.classic)
+        viewerPrefs(nil)
         // The last screen was the comparison: two takes were on screen (the demo has video takes).
         let compared = store.suiteComparing.count
         lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
