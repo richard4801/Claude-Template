@@ -178,6 +178,7 @@ enum SnapshotRunner {
             await linkImportShots(store, dir: dir)   // Import a video from a link (owner 2026-11-08)   // Settings redesign (owner 2026-11-08): before and the proposed mock
             await suiteStageCheck(store, dir: dir)   // WS19: generating → result on the stage, Photo × 4 carousel, back after leaving, in the Queue
             await claudeChatCheck(store, dir: dir)   // WS18: one bubble per message, chat sessions, Claude's draft in the composer
+            await claudePanelShots(store, dir: dir)   // the floating Claude panel: orb idle and thinking, the context strip filled
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
