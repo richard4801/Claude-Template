@@ -1,5 +1,5 @@
 diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
-index cd32580..9bf7c43 100644
+index cd32580..4de7e99 100644
 --- a/mac/Muse/App/AppStore+OneClaude.swift
 +++ b/mac/Muse/App/AppStore+OneClaude.swift
 @@ -31,6 +31,18 @@ final class OneClaudeState {
@@ -46,7 +46,7 @@ index cd32580..9bf7c43 100644
          default:
              break
          }
-@@ -302,11 +320,90 @@ extension AppStore {
+@@ -302,11 +320,100 @@ extension AppStore {
      func loadClaudeApprovals(_ chatId: String) async {
          guard let api = oneClaudeAPI, let list = try? await api.waitingActions() else { return }
          guard oneClaude.chatId == chatId else { return }
@@ -104,6 +104,16 @@ index cd32580..9bf7c43 100644
 +        } catch {
 +            showToast("Couldn't answer that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
 +        }
++    }
++
++    /// The live context strip (ClaudeContext): what Claude sees on this page now, from the same `screen` the composer
++    /// syncs to the server for Claude. Only the AI Suite reports a screen today; other pages show their name only.
++    var claudeContextItems: [ClaudeContextItem] {
++        guard screen == .suite else { return [] }
++        return ClaudeContext.items(screen: suiteScreen(at: nil), lookups: .init(
++            character: { [self] id in character(id).map { ($0.shortName, $0.cover) } },
++            outfit: { [self] id in outfits.first { $0.id == id }.map { ($0.name, $0.angles.first ?? nil) } },
++            clipPoster: { [self] id in clip?.id == id ? clip?.thumb : nil }))
 +    }
 +
 +    static func cardKey(_ t: ClaudeApproveTarget) -> String {
@@ -780,6 +790,85 @@ index 0d11e73..499a49b 100644
 +            onPick: attachKinds && suiteAttach == nil ? { model.pick($0) } : nil)
      }
  }
+diff --git a/mac/Muse/Views/Claude/ClaudeContextStrip.swift b/mac/Muse/Views/Claude/ClaudeContextStrip.swift
+new file mode 100644
+index 0000000..5adaa6d
+--- /dev/null
++++ b/mac/Muse/Views/Claude/ClaudeContextStrip.swift
+@@ -0,0 +1,73 @@
++import MuseCore
++import SwiftUI
++
++/// What Claude sees, live (owner, 2026-11-12): the page's name as a small leading label, then a row of 30 pt thumbnails
++/// with tiny labels (the clip, her, the outfit, the background, references, the guide, the model), from the same screen
++/// Claude reads (ClaudeContext). Calm: no chrome; it scrolls sideways when narrow; items change with a short cross-fade.
++struct ClaudeContextStrip: View {
++    @Environment(\.theme) private var t
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    @ObservedObject private var service: ClaudeCodeService = .shared
++    let page: String
++    let items: [ClaudeContextItem]
++
++    static let side: CGFloat = 30
++
++    var body: some View {
++        let r = t.roles
++        HStack(alignment: .top, spacing: Space.s2) {
++            VStack(alignment: .leading, spacing: 2) {
++                Text("Sees").scaled(t.scale.micro, r.ink2)
++                Text(page).scaled(t.scale.micro, r.ink).lineLimit(2).frame(maxWidth: items.isEmpty ? .infinity : 72, alignment: .leading)
++            }
++            .padding(.top, 2)
++            if !items.isEmpty {
++                ScrollView(.horizontal, showsIndicators: false) {
++                    HStack(alignment: .top, spacing: Space.s2) {
++                        ForEach(items) { item in tile(item).transition(.opacity) }
++                    }
++                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: items.map(\.id))
++                }
++            }
++        }
++        .frame(maxWidth: .infinity, alignment: .leading)
++        .accessibilityElement(children: .combine)
++        .accessibilityLabel("Claude sees \(page)" + (items.isEmpty ? "" : ": " + items.map { "\($0.label)\($0.detail.map { " \($0)" } ?? "")" }.joined(separator: ", ")))
++    }
++
++    private func tile(_ item: ClaudeContextItem) -> some View {
++        let r = t.roles
++        let shape = RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous)
++        return VStack(spacing: 3) {
++            ZStack {
++                shape.fill(r.field)
++                if let ref = item.image {
++                    MuseImage(ref: ImageRef(url: service.resolve(ref.url)), symbol: nil)
++                } else if item.words != nil {
++                    Ph("text-aa", 13).foregroundStyle(r.ink2)
++                } else {
++                    Ph(Self.icon(item.kind), 13).foregroundStyle(r.ink2)
++                }
++                if item.isVideo && item.image != nil {
++                    Ph("play", 9).foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 2)
++                }
++            }
++            .frame(width: Self.side, height: Self.side)
++            .clipShape(shape)
++            Text(item.label).scaled(t.scale.micro, r.ink2).lineLimit(1).fixedSize()
++        }
++        .help(item.detail.map { "\(item.label): \($0)" } ?? item.label)
++    }
++
++    static func icon(_ k: ClaudeContextItem.Kind) -> String {
++        switch k {
++        case .clip, .guide: "video-camera"
++        case .character, .face: "user"
++        case .outfit, .product: "image"
++        case .background: "image"
++        case .frame, .reference: "images"
++        case .audio: "speaker-high"
++        case .model: "aperture"
++        }
++    }
++}
 diff --git a/mac/Muse/Views/Claude/ClaudeOrbView.swift b/mac/Muse/Views/Claude/ClaudeOrbView.swift
 new file mode 100644
 index 0000000..fd65df2
@@ -1040,7 +1129,7 @@ index 0000000..2e43088
 +    }
 +}
 diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
-index 040e72a..67fc7d6 100644
+index 040e72a..526c8b8 100644
 --- a/mac/Muse/Views/Claude/OneClaudePanel.swift
 +++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
 @@ -15,6 +15,10 @@ struct OneClaudePanel: View {
@@ -1110,7 +1199,7 @@ index 040e72a..67fc7d6 100644
                  Menu {
                      Section("Chats") {
                          ForEach(o.chats) { c in
-@@ -79,40 +99,48 @@ struct OneClaudePanel: View {
+@@ -79,40 +99,40 @@ struct OneClaudePanel: View {
                      }
                      Button("Manage chats…") { showManage = true }
                  } label: {
@@ -1141,17 +1230,12 @@ index 040e72a..67fc7d6 100644
              }
 -            HStack(spacing: Space.s1) {
 -                Ph("map-pin", 13)
-+            HStack(spacing: 6) {
-+                Ph("eye", 13)
-                 Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
-             }
+-                Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
+-            }
 -            .font(t.scale.caption.font).foregroundStyle(r.ink2)
-+            .font(t.scale.micro.font).foregroundStyle(r.ink2)
-+            .padding(.horizontal, Space.s2).frame(height: 24)
-+            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(r.field))
-+            .accessibilityElement(children: .combine)
-             .accessibilityLabel("Claude sees \(store.claudePage.line)")
+-            .accessibilityLabel("Claude sees \(store.claudePage.line)")
 -            modelMenu
++            ClaudeContextStrip(page: store.claudePage.line, items: store.claudeContextItems)
          }
          .padding(.horizontal, Space.s4)
          .padding(.vertical, Space.s3)
@@ -1178,7 +1262,7 @@ index 040e72a..67fc7d6 100644
      // MARK: The chat's Claude model (step 6b): speed and cost in plain words, per chat, with your own default
  
      @ViewBuilder private var modelMenu: some View {
-@@ -138,8 +166,7 @@ struct OneClaudePanel: View {
+@@ -138,8 +158,7 @@ struct OneClaudePanel: View {
                  // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
                  // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
                  HStack(spacing: Space.s1) {
@@ -1188,7 +1272,7 @@ index 040e72a..67fc7d6 100644
                      Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                  }
                  .font(t.scale.caption.font).foregroundStyle(r.ink2)
-@@ -147,8 +174,7 @@ struct OneClaudePanel: View {
+@@ -147,8 +166,7 @@ struct OneClaudePanel: View {
              }
              .menuStyle(.borderlessButton)
              .menuIndicator(.hidden)
@@ -1198,7 +1282,7 @@ index 040e72a..67fc7d6 100644
              .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude model line") } }
              .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
              .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
-@@ -156,7 +182,7 @@ struct OneClaudePanel: View {
+@@ -156,7 +174,7 @@ struct OneClaudePanel: View {
              // The list isn't here yet (or the server is older): the line still shows, and tapping it tries again.
              Button { Task { await store.loadClaudeModels() } } label: {
                  HStack(spacing: Space.s1) {
@@ -1495,6 +1579,122 @@ index 0000000..47fbaf8
 +        if p == nil && open.isEmpty { steps.removeAll() }
 +    }
 +    public mutating func stop() { open.removeAll(); steps.removeAll(); progress = nil }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift
+new file mode 100644
+index 0000000..f259415
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift
+@@ -0,0 +1,110 @@
++import Foundation
++
++// The Claude panel's live context strip (owner, 2026-11-12: "the 'Claude sees' feature is basic"): under the header, a row
++// of small thumbnails, each with a tiny label, of what Claude can see on this page right now: the source clip, her, the
++// outfit, the background (a photo, or the words of a described one), references and frames, the Directed guide, the
++// picked model. Read from the SAME `screen` the composer syncs to the server for Claude (SuiteScreen.json → suite/screen.ts),
++// so the strip and Claude never disagree. Pure: the app passes lookups for names and pictures.
++
++public struct ClaudeContextItem: Hashable, Sendable, Identifiable {
++    public enum Kind: String, Sendable { case clip, character, outfit, background, frame, reference, guide, audio, model, product, face }
++    public var id: String
++    public var kind: Kind
++    /// The tiny label under the thumbnail ("Clip", "Her", "Outfit", "Ref 1").
++    public var label: String
++    /// What it is, for the tooltip and VoiceOver ("Beach walk.mp4", "Ava", "a grey hoodie").
++    public var detail: String?
++    public var image: ImageRef?
++    /// A clip of the studio (the app shows its poster).
++    public var clipId: String?
++    public var isVideo: Bool
++    /// A background described in words (no picture): the words.
++    public var words: String?
++}
++
++public enum ClaudeContext {
++    /// Names and pictures the strip needs, looked up by the app.
++    public struct Lookups {
++        public var character: (String) -> (name: String, image: ImageRef?)?
++        public var outfit: (String) -> (name: String, image: ImageRef?)?
++        public var clipPoster: (String) -> ImageRef?
++        public var modelLabel: (String) -> String?
++        public init(character: @escaping (String) -> (name: String, image: ImageRef?)? = { _ in nil },
++                    outfit: @escaping (String) -> (name: String, image: ImageRef?)? = { _ in nil },
++                    clipPoster: @escaping (String) -> ImageRef? = { _ in nil },
++                    modelLabel: @escaping (String) -> String? = { _ in nil }) {
++            self.character = character; self.outfit = outfit; self.clipPoster = clipPoster; self.modelLabel = modelLabel
++        }
++    }
++
++    /// The strip's items for a `screen` (SuiteScreen.json), in the order Claude reads them: the source, her, the outfit,
++    /// the background, frames and references, the guide, sound, then the model.
++    public static func items(screen: JSONValue, lookups: Lookups = Lookups()) -> [ClaudeContextItem] {
++        guard case .object(let s) = screen else { return [] }
++        let request = obj(s["request"]), settings = obj(s["settings"])
++        var out: [ClaudeContextItem] = []
++        var refs = 0, frames = 0
++
++        let inputs: [[String: JSONValue]] = { if case .array(let a)? = s["inputs"] { return a.compactMap(obj) }; return [] }()
++        // Sources first (clip, extend's video), then her and the outfit, then everything else on screen.
++        let sources = inputs.filter { isSource(str($0["slot"])) }
++        for i in sources {
++            let clip = str(i["clipId"])
++            out.append(ClaudeContextItem(id: "in:\(str(i["slot"]) ?? "")", kind: .clip, label: "Clip", detail: str(i["label"]),
++                                         image: clip.flatMap(lookups.clipPoster) ?? imageOf(i, video: true), clipId: clip, isVideo: true, words: nil))
++        }
++        if let m = str(request["modelId"]) {
++            let c = lookups.character(m)
++            out.append(ClaudeContextItem(id: "character:\(m)", kind: .character, label: "Her", detail: c?.name, image: c?.image, clipId: nil, isVideo: false, words: nil))
++        }
++        if let o = str(request["outfitId"]) {
++            let x = lookups.outfit(o)
++            out.append(ClaudeContextItem(id: "outfit:\(o)", kind: .outfit, label: "Outfit", detail: x?.name, image: x?.image, clipId: nil, isVideo: false, words: nil))
++        }
++        // New Swap's outfit in words.
++        if let w = str(obj(obj(request["remix"])["outfit"])["words"]) {
++            out.append(ClaudeContextItem(id: "outfit:words", kind: .outfit, label: "Outfit", detail: w, image: nil, clipId: nil, isVideo: false, words: w))
++        }
++        // The background: a picture on screen, or the words of a described one.
++        let bgWords = str(obj(obj(request["remix"])["background"])["words"])
++            ?? ((str(request["background"]) ?? str(settings["background"])) == "describe" ? (str(request["direction"]) ?? str(request["prompt"])) : nil)
++        if let w = bgWords, !inputs.contains(where: { str($0["slot"])?.hasSuffix("background") == true }) {
++            out.append(ClaudeContextItem(id: "background:words", kind: .background, label: "Background", detail: w, image: nil, clipId: nil, isVideo: false, words: w))
++        }
++        for i in inputs where !isSource(str(i["slot"])) {
++            let slot = str(i["slot"]) ?? ""
++            let kind = str(i["kind"]) ?? "image"
++            let label: String, k: ClaudeContextItem.Kind
++            if slot.hasSuffix("background") { label = "Background"; k = .background }
++            else if slot.hasSuffix(".outfit") { label = "Product"; k = .product }
++            else if slot.hasSuffix(".face") { label = "Face"; k = .face }
++            else if slot == "guide" { label = "Guide"; k = .guide }
++            else if slot == "start" { label = "Start"; k = .frame }
++            else if slot == "end" { label = "End"; k = .frame }
++            else if slot.hasPrefix("middle") { frames += 1; label = "Frame \(frames)"; k = .frame }
++            else if kind == "audio" { label = "Sound"; k = .audio }
++            else { refs += 1; label = str(i["role"]).map { cap($0) } ?? "Ref \(refs)"; k = .reference }
++            out.append(ClaudeContextItem(id: "in:\(slot)", kind: k, label: label, detail: str(i["label"]), image: imageOf(i, video: kind == "video"),
++                                         clipId: str(i["clipId"]), isVideo: kind == "video", words: nil))
++        }
++        if let e = str(request["engineModel"]) {
++            out.append(ClaudeContextItem(id: "model:\(e)", kind: .model, label: "Model", detail: lookups.modelLabel(e) ?? e, image: nil, clipId: nil, isVideo: false, words: nil))
++        }
++        return out
++    }
++
++    private static func isSource(_ slot: String?) -> Bool {
++        guard let s = slot else { return false }
++        return s.hasSuffix(".clip") || s == "extend.video"
++    }
++    private static func obj(_ v: JSONValue?) -> [String: JSONValue] { if case .object(let o)? = v { return o }; return [:] }
++    private static func str(_ v: JSONValue?) -> String? {
++        if case .string(let s)? = v { let t = s.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t }
++        return nil
++    }
++    private static func imageOf(_ i: [String: JSONValue], video: Bool) -> ImageRef? {
++        guard !video, let u = str(i["url"]) else { return nil }
++        return ImageRef(url: u)
++    }
++    private static func cap(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
 index 52a35ca..11b5d06 100644
@@ -1870,10 +2070,10 @@ index e457bb6..05f1617 100644
              let all = shown.joined(separator: "\n")
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
 new file mode 100644
-index 0000000..288f3f3
+index 0000000..c92b1b7
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,232 @@
 +import XCTest
 +@testable import MuseCore
 +
@@ -2076,6 +2276,34 @@ index 0000000..288f3f3
 +        let b = ClaudeOrbLiquid.blobs(phase: 1, time: 1.0, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
 +        XCTAssertGreaterThan(b, a)
 +        XCTAssertEqual(ClaudeOrbLiquid.advance(5, by: 1, look: ClaudeOrb.look(.idle)), 5 + 0.25 * 0.12, accuracy: 1e-9) // a stall never jumps
++    }
++}
++
++final class ClaudeContextTests: XCTestCase {
++    func testTheStripReadsTheScreenClaudeGets() {
++        // The same JSON the composer syncs (SuiteScreen.json): a New Swap with a clip, a product photo and a described background.
++        let remix = ShotRequest.remix(clipId: "clip_1", draft: {
++            var d = RemixDraft(); d.backgroundOn = true; d.backgroundMode = .describe; d.backgroundWords = "a beach at dusk"; return d
++        }())
++        var r = remix; r.modelId = "m_1"; r.outfitId = "of_1"; r.engineModel = "seedance-2"
++        let screen = SuiteScreen.json(tool: "remix", request: r, inputs: [
++            SuiteScreen.Input(slot: "remix.clip", kind: "video", label: "Walk.mp4", clipId: "clip_1", seconds: 12),
++            SuiteScreen.Input(slot: "remix.outfit", kind: "image", label: "Hoodie photo", url: "/uploads/p.jpg"),
++            SuiteScreen.Input(slot: "reference 1", kind: "image", label: "Look", role: "style", url: "/uploads/r.jpg"),
++            SuiteScreen.Input(slot: "guide", kind: "video", label: "Blender guide", role: "blocking", key: "g.mp4"),
++        ], at: nil)
++        let items = ClaudeContext.items(screen: screen, lookups: .init(
++            character: { $0 == "m_1" ? ("Ava", ImageRef(url: "/uploads/face.jpg")) : nil },
++            outfit: { $0 == "of_1" ? ("Hoodie", nil) : nil },
++            clipPoster: { $0 == "clip_1" ? ImageRef(url: "/uploads/poster.jpg") : nil },
++            modelLabel: { _ in "Seedance 2 · Higgsfield" }))
++        XCTAssertEqual(items.map(\.label), ["Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide", "Model"])
++        XCTAssertEqual(items[0].image?.url, "/uploads/poster.jpg")
++        XCTAssertEqual(items[1].detail, "Ava")
++        XCTAssertEqual(items[3].words, "a beach at dusk")
++        XCTAssertEqual(items.last?.detail, "Seedance 2 · Higgsfield")
++        XCTAssertEqual(Set(items.map(\.id)).count, items.count) // stable, unique ids (the strip animates by id)
++        XCTAssertTrue(ClaudeContext.items(screen: .null).isEmpty)
 +    }
 +}
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift

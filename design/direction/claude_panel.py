@@ -37,24 +37,27 @@ ORB_STATES = {
     "waiting":   dict(rot=250, band=.70, glow=.45, blur=1.6, label="Waiting for you", note="Steady glow, slow pulse"),
     "error":     dict(rot=200, band=.80, glow=.30, blur=1.0, label="Error", note="Red tint", red=True),
 }
+# The orb, second pass (owner, 2026-11-12): multicolour liquid light in dark glass (MuseCore ClaudeOrbLiquid; the
+# animated version is design/direction/orb_preview.py). Here a still: four soft blobs added together, the halo, the rim.
+BLOBS = {"idle": [(-.25, -.15, .35), (.2, .2, .3), (.1, -.3, .25), (-.2, .3, .2)],
+         "writing": [(-.2, -.1, .8), (.25, .1, .75), (0, .3, .6), (.1, -.3, .55)],
+         "operating": [(.2, -.1, .8), (.35, .15, .75), (.05, .05, .6), (.3, -.3, .55)],
+         "waiting": [(-.1, .1, .9), (.15, -.05, .85), (0, .25, .7), (-.15, -.25, .6)],
+         "error": [(-.1, .1, .7), (.2, -.15, .6), (0, .25, .5), (-.2, -.2, .45)]}
+PAL = ["255,61,168", "142,91,255", "59,130,255", "47,224,192"]
+ERRPAL = ["255,77,61", "255,138,43", "217,48,43", "255,179,71"]
 def orb(size, state, k):
     st = ORB_STATES[state]
-    red = st.get("red")
-    # Error: the whole glass takes the danger tint and the band goes grey and still, so it reads as an error even where
-    # the theme's accent is itself red (Editorial).
-    c = "#B9B6B0" if red else ACCENT[k]
-    halo = DANGER[k] if red else ACCENT[k]
-    g = st["glow"]
-    fill = f"background:radial-gradient(circle at 50% 62%,{DANGER[k]}cc,#2a0d0c 75%);" if red else ""
-    def ring(rot, alpha, w):
-        return (f'<i style="position:absolute;inset:6%;border-radius:50%;transform:rotate({rot}deg);opacity:{alpha};filter:blur({size*st["blur"]/30:.2f}px);'
-                f'background:radial-gradient(ellipse 48% 20% at 50% 54%,transparent {62-w}%,{c} 74%,#fff9 78%,{c} 82%,transparent {90+w}%)"></i>')
-    sweep = (f'<i style="position:absolute;inset:0;border-radius:50%;background:linear-gradient(100deg,transparent 30%,{c}66 50%,transparent 70%);mix-blend-mode:screen"></i>'
-             if st.get("sweep") else "")
-    return (f'<span class="orb" role="img" aria-label="Claude" style="{fill}width:{size}px;height:{size}px;box-shadow:0 0 {size*.55:.0f}px {halo}{int(g*255):02x},inset 0 0 0 .5px rgba(255,255,255,.16)">'
-            f'{ring(st["rot"] % 180 - 20, st["band"] * (.45 if red else 1), 0)}{ring(st["rot"] % 180 + 40, st["band"] * .45, 4) if not red else ""}{sweep}'
-            f'<i style="position:absolute;left:22%;top:10%;width:40%;height:26%;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.45),transparent)"></i></span>')
-ORB_CSS = ".orb{position:relative;display:inline-block;flex:none;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 50% 62%,#24272c,#0a0b0d 72%)}"
+    pal = ERRPAL if st.get("red") else PAL
+    halo = "255,90,60" if st.get("red") else "150,110,255"
+    layers = ",".join(f"radial-gradient(circle at {50 + x * 50:.0f}% {50 + y * 50:.0f}%,rgba({c},{a}) 0%,rgba({c},{a * .45:.2f}) 28%,rgba({c},0) 62%)"
+                      for (x, y, a), c in zip(BLOBS[state], pal))
+    return (f'<span class="orb" role="img" aria-label="Claude" style="width:{size}px;height:{size}px;'
+            f'box-shadow:0 0 {size * .55:.0f}px rgba({halo},{.15 + .6 * st["glow"]:.2f}),inset 0 0 {size * .18:.1f}px rgba(0,0,0,.6),inset 0 0 0 .6px rgba(255,255,255,.35)">'
+            f'<i style="position:absolute;inset:0;border-radius:50%;background:{layers};mix-blend-mode:plus-lighter"></i>'
+            f'<i style="position:absolute;left:18%;top:8%;width:44%;height:30%;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.32),transparent)"></i></span>')
+ORB_CSS = ".orb{position:relative;display:inline-block;flex:none;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 50% 62%,#17181d,#040406 75%)}"
+CTX_CSS = ".ctx{display:flex;gap:8px;align-items:flex-start}.ctx .pg{display:flex;flex-direction:column;gap:2px;padding-top:2px;width:64px;flex:none}.tile{display:flex;flex-direction:column;align-items:center;gap:3px}.tile b{width:30px;height:30px;border-radius:var(--rp);background:var(--field) center/cover;display:grid;place-items:center;color:var(--ink2);position:relative}"
 
 
 def css(t, k):
@@ -100,8 +103,18 @@ def css(t, k):
 .ph{{font:400 14px/20px "{f}";color:var(--ink2);min-height:40px}}
 .send{{width:32px;height:32px;border-radius:calc(var(--rk) * .8);background:var(--field);color:var(--ink2);display:grid;place-items:center;margin-left:auto}}
 :root{{--pos:{POSITIVE[k]}}}
-"""+ORB_CSS
+"""+ORB_CSS+CTX_CSS
 
+
+def context_strip():
+    """What Claude sees, live: the page as a small label, then 30 pt thumbnails with tiny labels (ClaudeContextStrip)."""
+    still, face, look = R.img(R.PV / "angles/ms.webp"), R.img(R.PV / "angles/cu.webp"), R.img(R.PV / "angles/full.webp")
+    def tile(label, bg=None, icon=None, play=False):
+        inner = (I(icon, 14) if icon else "") + (f'<span style="position:absolute;color:#fff">{I("play", 10, "#fff")}</span>' if play else "")
+        style = f'background-image:url({bg})' if bg else ""
+        return f'<span class="tile"><b style="{style}">{inner}</b><span class="t11 ink2">{label}</span></span>'
+    tiles = tile("Clip", still, play=True) + tile("Her", face) + tile("Outfit", look) + tile("Background", icon="text-aa") + tile("Model", icon="aperture")
+    return f'<div class="ctx"><span class="pg"><span class="t11 ink2">Sees</span><span class="t11">Suite, Swap</span></span>{tiles}</div>'
 
 def panel(t, k):
     check = I("check", 12)
@@ -115,7 +128,7 @@ def panel(t, k):
   <div class="row gap2">{orb(24, "idle", k)}<div class="t17 grow">Claude</div>
    <div class="menu">Opus 5.5{I("caret-down", 14)}</div>
    <div class="ib" title="New chat">{I("plus", 18)}</div><div class="ib" title="History">{I("clock-counter-clockwise", 18)}</div></div>
-  <div><span class="pill">{I("eye", 14)}Sees: Suite · Swap</span></div>
+  {context_strip()}
  </div>
  <div class="feed">
   <div class="you">Swap the outfit to a hoodie, keep the same scene and mood, and give me a quick plan.</div>
@@ -167,7 +180,9 @@ def floating(t, k):
     shadow = "0 24px 64px rgba(0,0,0,.55)" if k == "b" else "0 24px 64px rgba(20,18,16,.22)"
     return (app_backdrop(t) +
             f'<div style="position:absolute;right:24px;top:24px;bottom:24px;width:400px;border-radius:calc(var(--rc) + 4px);overflow:hidden;'
-            f'background:var(--canvas);box-shadow:{shadow},0 0 0 1px {c}59,0 0 28px {c}26">{panel(t, k)}</div>'
+            f'border:1.5px solid transparent;background:linear-gradient(var(--canvas),var(--canvas)) padding-box,'
+            f'conic-gradient(from 200deg,#FF3DA8aa,#8E5BFFaa,#3B82FFaa,#2FE0C0aa,#FF3DA8aa) border-box;'
+            f'box-shadow:{shadow},0 0 28px rgba(150,110,255,.22)">{panel(t, k)}</div>'
             f'<div class="t11 ink2" style="position:absolute;right:40px;bottom:30px;opacity:.0">resize</div>')
 
 def closed(t, k):
@@ -190,7 +205,6 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     pages = [(f"panel-{k}", panel, k, 400, 1040) for k in ("b", "a", "c")]
     pages += [(f"float-{k}", floating, k, 1440, 900) for k in ("b", "a", "c")]
-    pages += [(f"orb-states-{k}", states, k, 760, 200) for k in ("b", "a", "c")]
     pages += [("closed-b", closed, "b", 1440, 900)]
     with tempfile.TemporaryDirectory() as tmp:
         spec = []
