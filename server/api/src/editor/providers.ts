@@ -38,7 +38,7 @@ export interface EditorProvider {
    * Tap to keep (workstream 1, "option 2"): the subject under the owner's points, tracked through the clip, as the same
    * kind of alpha matte. Points are in pixels on the given frames; `keep: false` points mark what to leave out.
    */
-  track(mediaUrl: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced>;
+  track(mediaUrl: string, durationSec: number, points: TrackPoint[], h: Hooks, o?: { fps?: number }): Promise<Produced>;
   /** The voice alone (music and noise removed), or with `stem: "no_vocals"` everything but the voice (beat-only audio). */
   separate(mediaUrl: string, durationSec: number, h: Hooks, stem?: Stem): Promise<Produced>;
   /** Both stems of one split (the same run as `separate`, nothing extra billed): the voice and everything else. */
@@ -245,9 +245,11 @@ export class ReplicateProvider implements EditorProvider {
     if (!u) throw new ReplicateError('The background removal returned no video', 'failed');
     return { file: await this.fetch(u, 'mp4'), contentType: 'video/mp4', gpuSec: this.gpu(p) };
   }
-  async track(url: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced> {
-    // One object, the points the owner tapped (1 = keep, 0 = leave out), a black-and-white mask video back.
+  async track(url: string, durationSec: number, points: TrackPoint[], h: Hooks, o: { fps?: number } = {}): Promise<Produced> {
+    // One object, the points the owner tapped (1 = keep, 0 = leave out), a black-and-white mask video back, at the source's
+    // own frame rate (the model's default is 30 fps: a 24 or 60 fps source's matte drifted, owner report ci_f1a8073237b7).
     const p = await this.run(this.models.track, {
+      ...(o.fps && o.fps > 0 ? { video_fps: Math.round(o.fps) } : {}),
       input_video: url, click_coordinates: points.map(q => `[${Math.round(q.x)},${Math.round(q.y)}]`).join(','),
       click_labels: points.map(q => (q.keep ? 1 : 0)).join(','), click_frames: points.map(q => q.frame).join(','),
       click_object_ids: points.map(() => 'keep').join(','), mask_type: 'binary', output_video: true,

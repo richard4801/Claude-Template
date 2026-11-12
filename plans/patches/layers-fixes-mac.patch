@@ -1,0 +1,32 @@
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index b0e4f69..1f948b6 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -1351,7 +1351,9 @@ final class EditSuiteSession {
+             guard let self, let found = r.layers, !found.isEmpty else { self?.lastError = "Nothing was found · mark it again"; return }
+             let jobId = self.jobs[.layers]?.id
+             if self.edit({ s in s.apply { E.applyLayerResults($0, clipId: clipId, jobId: jobId, found: found, sourceAsset: a) } }) {
+-                self.notice = found.count == 1 ? "Found 1 layer" : "Found \(found.count) layers"
++                // A layer that missed what was marked says so (owner report ci_0e39a2b16b08), instead of "Found".
++                let warnings = found.compactMap(\.warning)
++                self.notice = !warnings.isEmpty ? warnings.joined(separator: " · ") : found.count == 1 ? "Found 1 layer" : "Found \(found.count) layers"
+                 self.layerSelection = "l1"
+                 self.cancelLayersPick()
+                 Task { await self.ensureFiles(); self.rebuild(immediately: true) }
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditorAPI.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditorAPI.swift
+index a55af66..d5e19b3 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditorAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditorAPI.swift
+@@ -237,7 +237,11 @@ public struct LayerResult: Codable, Hashable, Sendable {
+     public var name: String
+     public var asset: EditorResultAsset
+     public var track: EditV2.LayerTrack?
+-    public init(name: String, asset: EditorResultAsset, track: EditV2.LayerTrack? = nil) { self.name = name; self.asset = asset; self.track = track }
++    /// When the layer doesn't cover what was marked ("Her: the layer doesn't cover 2 of the 3 points you marked · …").
++    public var warning: String?
++    public init(name: String, asset: EditorResultAsset, track: EditV2.LayerTrack? = nil, warning: String? = nil) {
++        self.name = name; self.asset = asset; self.track = track; self.warning = warning
++    }
+ }
+ 
+ public struct EditorResultAsset: Codable, Hashable, Sendable {

@@ -440,7 +440,7 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
       'victor-upmeet/whisperx': { owner: 'victor-upmeet', name: 'whisperx', latest_version: { id: 'v_whisper', openapi_schema: schema(['audio_file', 'language', 'align_output', 'batch_size']) } },
       'arielreplicate/robust_video_matting': { owner: 'arielreplicate', name: 'robust_video_matting', latest_version: { id: 'v_rvm', openapi_schema: schema(['input_video', 'output_type']) } },
       'ryan5453/demucs': { owner: 'ryan5453', name: 'demucs', latest_version: { id: 'v_demucs', openapi_schema: schema(['audio', 'stem', 'output_format']) } },
-      'meta/sam-2-video': { owner: 'meta', name: 'sam-2-video', latest_version: { id: 'v_sam2', openapi_schema: schema(['input_video', 'click_coordinates', 'click_labels', 'click_frames', 'click_object_ids', 'mask_type', 'output_video']) } },
+      'meta/sam-2-video': { owner: 'meta', name: 'sam-2-video', latest_version: { id: 'v_sam2', openapi_schema: schema(['input_video', 'click_coordinates', 'click_labels', 'click_frames', 'click_object_ids', 'mask_type', 'output_video', 'video_fps']) } },
     };
     const preds = new Map<string, any>();
     server = http.createServer((req, res) => {
@@ -504,7 +504,7 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     expect(t.models).toEqual(['meta/sam-2-video']); // the owner sees the model
     const tr = await done(t.id);
     expect(tr.state, JSON.stringify(tr)).toBe('done');
-    expect(creates.find(x => x.version === 'v_sam2').input).toMatchObject({ click_coordinates: '[540,480],[0,1919]', click_labels: '1,0', click_frames: '60,0', mask_type: 'binary', output_video: true });
+    expect(creates.find(x => x.version === 'v_sam2').input).toMatchObject({ click_coordinates: '[540,480],[0,1919]', click_labels: '1,0', click_frames: '60,0', mask_type: 'binary', output_video: true, video_fps: 30 }); // the source's own frame rate (ci_f1a8073237b7)
     expect(tr.result).toMatchObject({ alpha: true, mode: 'tracked', asset: { kind: 'video', upload: expect.stringMatching(/^up_/) } });
     expect(tr.costUsd).toBeGreaterThan(0);
     const d = (await owner.req('POST', '/v1/editor/jobs', { kind: 'denoise', source: { takeId: src } })).body;

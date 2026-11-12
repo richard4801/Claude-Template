@@ -136,6 +136,8 @@ describe('Find layers (mock provider)', () => {
     expect(asked).toMatchObject({ waitingForOwner: true });
     const s0 = (await owner.req('GET', `/v1/edit-sessions/${sid}`)).body;
     expect(s0.pending[0]).toMatchObject({ kind: 'layers', status: 'waiting', args: { acceptUsd: price.estimateUsd } });
+    // Claude's marks are where it saw them on get_frame (canvas, timeline seconds), mapped onto the source frame.
+    expect(s0.pending[0].args.options.objects[0].points[0]).toEqual({ x: 0.4, y: 0.3, t: 1 });
     expect(await editorAi(a.ctx).list(ownerUser, { takeId: t })).toHaveLength(0); // nothing runs on Claude's word
     expect((await owner.req('POST', `/v1/edit-sessions/${sid}/pending/${asked.pendingId}`, { approve: true })).body.status).toBe('running');
     const after = await until(async () => { const s = (await owner.req('GET', `/v1/edit-sessions/${sid}`)).body; return s.revision > s0.revision ? s : null; }, 15_000);

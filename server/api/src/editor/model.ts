@@ -1463,7 +1463,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     id(`${f}.id`, t.id);
     if (ids.has(t.id)) bad(`${f}.id`, 'is used twice');
     ids.add(t.id);
-    if (!['main', 'video', 'image', 'text', 'caption', 'music', 'voice', 'sfx', 'adjust'].includes(t.kind)) bad(`${f}.kind`, 'unknown track kind');
+    // The kinds named, so a caller (Claude's patch op) can fix it at once (owner report ci_decc4aaaa9d6).
+    if (!['main', 'video', 'image', 'text', 'caption', 'music', 'voice', 'sfx', 'adjust'].includes(t.kind)) bad(`${f}.kind`, `unknown track kind${typeof t.kind === 'string' ? ` "${String(t.kind).slice(0, 20)}"` : ''} (one of main, video, image, text, caption, music, voice, sfx, adjust; captions are one caption track with words, text items go on text tracks)`);
     num(`${f}.volume`, t.volume, 0, 2);
     if (!Array.isArray(t.items) || t.items.length > LIMITS.maxItemsPerTrack) bad(`${f}.items`, `at most ${LIMITS.maxItemsPerTrack} items`);
     total += t.items.length;

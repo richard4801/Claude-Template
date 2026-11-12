@@ -15,6 +15,8 @@ import { paletteFiles } from './photo.js';
 import { CAPTION_STYLE_LABELS, CAPTION_STYLES, HOOKS, TRANSITION_LABELS } from './presets.js';
 import { editorAi } from './service.js';
 import { editSessionsOf } from './sessions.js';
+import { canvasToSource } from './layers.js';
+import { probe } from '../replicate/media.js';
 
 const num = (d?: string, min?: number, max?: number) => ({ type: 'number', ...(d ? { description: d } : {}), ...(min !== undefined ? { minimum: min } : {}), ...(max !== undefined ? { maximum: max } : {}) });
 const str = (d?: string, max?: number) => ({ type: 'string', ...(d ? { description: d } : {}), ...(max ? { maxLength: max } : {}) });
@@ -57,7 +59,7 @@ export function summary(p: M.EditProject) {
           ...(c.transitionIn ? { transitionIn: `${c.transitionIn.kind} ${c.transitionIn.durationSec}s` } : {}), ...(c.look ? { look: c.look } : {}),
           ...(c.adjust ? { adjust: c.adjust } : {}), ...(c.mask ? { mask: c.mask.shape } : {}), ...(c.volume !== undefined ? { volume: c.volume } : {}),
           ...(c.layers?.length ? { layers: c.layers.map(l => ({ id: l.id, name: l.name, ...(l.hidden ? { hidden: true } : {}), ...(l.aboveText ? { textBehind: true } : {}), ...(l.recolor ? { recolor: l.recolor } : {}),
-            ...(l.look ? { look: l.look } : {}), ...(l.adjust ? { adjust: l.adjust } : {}), ...(l.blur ? { blur: l.blur } : {}), ...(l.opacity !== undefined ? { opacity: l.opacity } : {}), pinnable: !!l.track })) } : {}),
+            ...(l.look ? { look: l.look } : {}), ...(l.adjust ? { adjust: l.adjust } : {}), ...(l.blur ? { blur: l.blur } : {}), ...(l.opacity !== undefined ? { opacity: l.opacity } : {}), pinnable: !!l.track, ...(l.track ? { size: layerSize(l.track) } : {}) })) } : {}),
           ...(c.layerBase ? { background: c.layerBase } : {}),
           ...(t.kind === 'main' ? { position: i + 1, startsAt: t2(spans[i]!.startSec) } : {}) };
       }),
@@ -101,6 +103,56 @@ async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'capt
     await new Promise(res => setTimeout(res, 250));
   }
 }
+/**
+ * find_layers: what Claude marked on get_frame's picture (canvas 0–1, timeline seconds) → the clip's own source frame and
+ * time, which the tracker works on (owner report ci_0e39a2b16b08: canvas taps on a cover-cropped clip landed elsewhere).
+ */
+async function sourceObjects(env: ToolEnv, p: M.EditProject, clip: M.VideoClip, raw: unknown): Promise<unknown> {
+  if (!Array.isArray(raw)) return raw;
+  const a = p.assets.find(x => x.id === clip.asset);
+  let size = a?.width && a.height ? { width: a.width, height: a.height } : null;
+  if (!size && a) {
+    const ai = editorAi(env.ctx);
+    const src = a.take ? { takeId: a.take } : a.upload ? { uploadId: a.upload, durationSec: a.durationSec ?? 1 } : null;
+    const s = src ? await ai.source(env.user, src).catch(() => null) : null;
+    size = s?.size ?? (s ? await ai.withLocalInput(s.key, f => probe(env.ctx.config.FFPROBE_PATH, f)).then(i => (i.width && i.height ? { width: i.width, height: i.height } : null)).catch(() => null) : null);
+  }
+  if (!size) throw badRequest('objects: couldn\'t read the clip\'s picture size · try again');
+  const span = M.timeline(p).find(x => x.id === clip.id)!;
+  const map = (f: string, x: unknown, y: unknown, t: unknown) => {
+    const tt = typeof t === 'number' ? t : span.startSec;
+    if (typeof x !== 'number' || typeof y !== 'number') throw badRequest(`${f}: x and y 0–1 of get_frame's picture`);
+    if (tt < span.startSec - 0.05 || tt > span.endSec + 0.05) throw badRequest(`${f}.t: the clip is on screen from ${span.startSec} to ${span.endSec} s (timeline seconds)`);
+    const q = canvasToSource(p, clip.id, tt, x, y, size!);
+    if (!q) throw badRequest(`${f}: that spot isn't on the clip's picture at ${tt} s`);
+    return q;
+  };
+  return raw.map((o: any, i: number) => {
+    if (!o || typeof o !== 'object') return o;
+    const out: Record<string, unknown> = { name: o.name };
+    if (Array.isArray(o.points)) out.points = o.points.map((q: any, j: number) => ({ ...map(`objects.${i}.points.${j}`, q?.x, q?.y, q?.t), ...(q?.keep === false ? { keep: false } : {}) }));
+    if (o.box && typeof o.box === 'object') {
+      const b = o.box, f = `objects.${i}.box`;
+      if ([b.x, b.y, b.w, b.h].some(v => typeof v !== 'number')) throw badRequest(`${f}: {x, y, w, h, t} 0–1 of get_frame's picture`);
+      const x0 = Math.max(0, b.x), y0 = Math.max(0, b.y), x1 = Math.min(1, b.x + b.w), y1 = Math.min(1, b.y + b.h);
+      const c0 = canvasToSource(p, clip.id, typeof b.t === 'number' ? b.t : span.startSec, x0, y0, size!), c1 = canvasToSource(p, clip.id, typeof b.t === 'number' ? b.t : span.startSec, x1, y1, size!);
+      // A box partly off the picture: its corners are clamped to the picture first (centre kept on it).
+      const lo = c0 ?? map(f, Math.min(Math.max(x0, 0.001), 0.999), Math.min(Math.max(y0, 0.001), 0.999), b.t), hi = c1 ?? map(f, Math.min(Math.max(x1, 0.001), 0.999), Math.min(Math.max(y1, 0.001), 0.999), b.t);
+      const bx = Math.min(lo.x, hi.x), by = Math.min(lo.y, hi.y);
+      out.box = { x: bx, y: by, w: Math.max(0.01, Math.abs(hi.x - lo.x)), h: Math.max(0.01, Math.abs(hi.y - lo.y)), t: lo.t };
+    }
+    return out;
+  });
+}
+
+/** How big a layer usually is on screen (its median box, % of the source frame): Claude checks it found the whole thing. */
+function layerSize(tr: M.LayerTrack): string {
+  const a = tr.boxes.filter((b): b is number[] => !!b).map(b => b[2]! * b[3]!).sort((x, y) => x - y);
+  if (!a.length) return 'never seen';
+  const seen = Math.round(100 * a.length / tr.boxes.length);
+  return `${Math.round(100 * a[Math.floor(a.length / 2)]!)}% of the frame, seen in ${seen}% of it`;
+}
+
 /** One free edit op as its own tool (layers), on the session's current revision. */
 async function oneOp(env: ToolEnv, a: Record<string, unknown>, op: string, keys: string[]) {
   const svc = editSessionsOf(env.ctx), id = sessionId(env, a), s = await svc.row(env.user, id);
@@ -219,7 +271,7 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'find_layers', title: 'Find layers', scope: 'edit:write',
-    description: 'Layers (one paid run per clip, then everything is free): finds up to 5 things in a main clip (her, the dog, the car…) and follows each through the clip, so each becomes a layer you can recolour, re-look, blur, hide, put text behind, or pin text to (set_layer, layer_base, text_behind, pin_text). Mark each thing with points [{x, y} 0–1 of the frame, t seconds into the clip, keep false for what to leave out] and/or a box {x, y, w, h, t}; use get_frame to find where things are. Clips up to 60 s. Paid: estimate first, then confirm: true; it runs after the owner approves the price in the app. Replaces the clip\'s earlier layers.',
+    description: 'Layers (one paid run per clip, then everything is free): finds up to 5 things in a main clip (her, the dog, the car…) and follows each through the clip, so each becomes a layer you can recolour, re-look, blur, hide, put text behind, or pin text to (set_layer, layer_base, text_behind, pin_text). Mark each thing where you see it in get_frame: points [{x, y, t, keep?}] and/or a box {x, y, w, h, t}, with x, y (and w, h) 0–1 of get_frame\'s picture and t in timeline seconds (the same t you gave get_frame); they are mapped onto the clip\'s own frame for you. A box round the whole thing works best; add a few taps on it, and keep false on what to leave out (never tap the background between parts of it). Clips up to 60 s. Paid: estimate first, then confirm: true; it runs after the owner approves the price in the app. Replaces the clip\'s earlier layers. Afterwards check with get_frame; the edit history says when a layer doesn\'t cover what you marked.',
     inputSchema: obj({ sessionId: SID, itemId: str('The main clip (default: the first)'),
       objects: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'object', properties: { name: str('What it is ("Her", "Dog")', 40), points: { type: 'array', items: { type: 'object' } }, box: { type: 'object' } }, required: ['name'] }, description: 'What to find: [{name, points?, box?}]' },
       confirm: bool('Ask the owner to approve the cost') }, ['sessionId', 'objects']),
@@ -228,7 +280,9 @@ const TOOLS: EditTool[] = [
       const main = M.mainTrack(s.project as M.EditProject).items;
       const clip = typeof a.itemId === 'string' ? main.find(c => c.id === a.itemId) : main[0];
       if (!clip) throw badRequest('itemId: a clip on the main track (layers are on main clips)');
-      return helper(env, { ...a, itemId: clip.id }, { kind: 'layers', label: 'Find layers', options: { objects: a.objects } });
+      const p = s.project as M.EditProject;
+      const objects = await sourceObjects(env, p, clip as M.VideoClip, a.objects);
+      return helper(env, { ...a, itemId: clip.id }, { kind: 'layers', label: 'Find layers', options: { objects } });
     },
   },
   {

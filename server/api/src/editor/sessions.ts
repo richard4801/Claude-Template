@@ -356,6 +356,8 @@ export class EditSessions {
       if (!next) { await this.log(s, `${w.label}: nothing to change`); return; }
       this.check(next, s.takeId);
       await this.commit(s, next, { author: 'claude', kind: 'edit', label: w.label });
+      // Find layers: a layer that doesn't cover what was marked is said in the history, where Claude and the owner see it.
+      if (w.kind === 'layers') for (const l of (result.layers as { warning?: string }[] | undefined) ?? []) if (l.warning) await this.log(s, `Find layers · ${l.warning}`);
     } catch (e) {
       this.ctx.log.warn({ err: (e as Error).message, session: s.id, job: jobId }, 'applying an editor job to a session failed');
       await this.log(s, `${w.label}: couldn't apply (the edit changed)`);
