@@ -1,0 +1,307 @@
+From 2be3d29de3c6b359cced1990db75d3b12b5b1f6f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 18:21:50 +0000
+Subject: [PATCH] Mac HDR export round 5: SDR edits compose in BT.709, the
+ compositor alone places SDR in HLG
+
+Mac run 587: source frames reached the compositor already converted to BT.2020 / HLG by AVFoundation (the video composition
+was set to HLG), the first one hotter (frames 0-2 at 60 fps). Now an edit whose sources are all SDR sets the composition to
+BT.709, so AVFoundation hands over the decoder's frames as they are and Core Image does the only SDR to HLG conversion, the
+same way on every frame; an edit with an HDR source keeps BT.2020 / HLG. The writer pump tags every frame BT.2020 / HLG right
+before the encoder (and traces what it got). Dolby Vision check scans 30 samples and lists NAL types. mac.yml: the HDR colour
+step comes after the other checks so its failure doesn't skip them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoCcw28R6FBjPPp318
+---
+ .github/workflows/mac.yml                     | 27 ++++++------
+ mac/Muse/App/Edit/EditV2Compositor.swift      | 14 ++++++-
+ mac/Muse/App/Edit/EditV2Engine.swift          | 18 ++++++--
+ mac/Muse/App/Edit/EditV2Export.swift          | 14 +++++--
+ mac/Muse/App/SnapshotRunner+EditOps.swift     | 41 +++++++++++--------
+ .../MuseCore/Edit/EditV2HDRColor.swift        | 13 ++++++
+ .../Edit/EditV2HDRColorTests.swift            | 11 +++++
+ 7 files changed, 98 insertions(+), 40 deletions(-)
+
+diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
+index a27a001d..619f7e32 100644
+--- a/.github/workflows/mac.yml
++++ b/.github/workflows/mac.yml
+@@ -108,19 +108,6 @@ jobs:
+           ls -la snapshots | head -100
+           tail -n 60 snapshots.log || true
+ 
+-      # HDR (HLG) export colour (owner bug 2026-11-12): every frame of an SDR skin-tone take exported in HDR shows the same
+-      # colour (first 15 frames, caption vs plain) and matches the SDR export. Review mode runs it first, on its own
+-      # (SnapshotRunner+EditOps.swift hdrColourCheck); its TRACE lines show the colour tags each frame really arrived with.
+-      - name: HDR colour check
+-        if: ${{ !cancelled() }}
+-        working-directory: mac
+-        run: |
+-          f=snapshots/hdr-colour-check.txt
+-          if [ ! -f "$f" ]; then echo "no hdr-colour-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+-          cat "$f"
+-          if grep -q '^FAIL' "$f"; then exit 1; fi
+-          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped during: $(grep '^STEP' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+-
+       # Closing a chat mid-reply in the same tick as a screen change must not freeze the app (plans/claude-chat-mac.md).
+       # Review mode runs it first (SnapshotRunner+StreamClose.swift); on a freeze it samples the app into the snapshots.
+       - name: Stream close check
+@@ -222,6 +209,20 @@ jobs:
+           if grep -q '^MOVED' "$f" && grep -q '^STUCK' "$f"; then echo "Some pages don't scroll"; exit 1; fi
+           if ! grep -q '^MOVED' "$f"; then echo "::warning::No page moved: synthetic scroll events may not reach the app on this runner"; fi
+ 
++      # HDR (HLG) export colour (owner bug 2026-11-12): every frame of an SDR skin-tone take exported in HDR shows the same
++      # colour (first 15 frames, caption vs plain) and matches the SDR export. Review mode runs it first, on its own; this step comes after the
++      # other checks so its failure doesn't skip them, and runs even when one of them failed
++      # (SnapshotRunner+EditOps.swift hdrColourCheck); its TRACE lines show the colour tags each frame really arrived with.
++      - name: HDR colour check
++        if: ${{ !cancelled() }}
++        working-directory: mac
++        run: |
++          f=snapshots/hdr-colour-check.txt
++          if [ ! -f "$f" ]; then echo "no hdr-colour-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
++          cat "$f"
++          if grep -q '^FAIL' "$f"; then exit 1; fi
++          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped during: $(grep '^STEP' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
++
+       - uses: actions/upload-artifact@v4
+         if: always()
+         with:
+diff --git a/mac/Muse/App/Edit/EditV2Compositor.swift b/mac/Muse/App/Edit/EditV2Compositor.swift
+index 6a939c8e..8330d511 100644
+--- a/mac/Muse/App/Edit/EditV2Compositor.swift
++++ b/mac/Muse/App/Edit/EditV2Compositor.swift
+@@ -124,10 +124,14 @@ final class EditV2Scene: @unchecked Sendable {
+     let burnCaptions: Bool
+     /// XL HDR export: colour work on extended sRGB values (highlights above 1 survive the matrices), frames out in HLG.
+     let hdr: Bool
++    /// HDR round 5: the video composition's colour space (BT.709 for SDR-only edits, BT.2020 / HLG with an HDR source).
++    let composition: EditV2.HDRColor.Tags
+     private let outSpace: CGColorSpace
+ 
+     init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], matteTracks: [Int: CMPersistentTrackID] = [:],
+-         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false, layerTracks: [String: CMPersistentTrackID] = [:]) {
++         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true, hdr: Bool = false, layerTracks: [String: CMPersistentTrackID] = [:],
++         composition: EditV2.HDRColor.Tags = EditV2.HDRColor.output) {
++        self.composition = composition
+         self.layerTracks = layerTracks
+         self.burnCaptions = burnCaptions
+         self.hdr = hdr
+@@ -286,7 +290,7 @@ final class EditV2Scene: @unchecked Sendable {
+     private func picture(_ buf: CVPixelBuffer, asset: String, at t: Double) -> CIImage {
+         guard hdr else { return CIImage(cvPixelBuffer: buf) }
+         let own = Self.tags(of: buf)
+-        let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags, composition: EditV2.HDRColor.output)
++        let resolved = EditV2.HDRColor.resolve(frame: own, track: sources.media[asset]?.colorTags, composition: composition)
+         EditV2HDRTrace.source(buf, asset: asset, own: own, resolved: resolved, at: t)
+         // Round 3: the decoder's own Y′CbCr (the normal case now): always the resolved tags and colour space, matrix
+         // included, on every frame, the first one too.
+@@ -666,6 +670,12 @@ enum EditV2HDRTrace {
+     nonisolated(unsafe) private static var last: [String: String] = [:]
+ 
+     static func reset() { lock.lock(); lines = []; count = [:]; last = [:]; lock.unlock() }
++    static func note(_ s: String) { lock.lock(); if lines.count < 200 { lines.append(s) }; lock.unlock() }
++    /// What the writer gets, before the pump's own stamp (did AVFoundation retag the compositor's frames?).
++    static func writer(_ buf: CVPixelBuffer, own: EditV2.HDRColor.Tags, at t: Double) {
++        let sig = describe(buf) + " " + tags(own)
++        add("writer", sig, String(format: "%.3f s writer ", t) + sig)
++    }
+     static func dump() -> [String] { lock.lock(); defer { lock.unlock() }; return lines }
+ 
+     private static func describe(_ buf: CVPixelBuffer) -> String {
+diff --git a/mac/Muse/App/Edit/EditV2Engine.swift b/mac/Muse/App/Edit/EditV2Engine.swift
+index da7ba5cb..1680d463 100644
+--- a/mac/Muse/App/Edit/EditV2Engine.swift
++++ b/mac/Muse/App/Edit/EditV2Engine.swift
+@@ -282,14 +282,24 @@ enum EditV2Engine {
+             mix = m
+         }
+ 
++        // HDR round 5: SDR-only edits compose in BT.709, so AVFoundation hands the compositor the decoder's frames untouched
++        // and the compositor alone places them in HLG; with an HDR source, BT.2020 / HLG (EditV2.HDRColor.compositionSpace).
++        let composition = EditV2.HDRColor.compositionSpace(sources.media.values.filter { $0.videoTrack != nil }.map(\.colorTags))
+         let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, matteTracks: matteIds, matted: matted, sources: sources,
+-                                burnCaptions: burnCaptions, hdr: hdr, layerTracks: layerIds)
++                                burnCaptions: burnCaptions, hdr: hdr, layerTracks: layerIds, composition: composition)
+         let vc = AVMutableVideoComposition()
+         vc.customVideoCompositorClass = hdr ? EditV2HDRCompositor.self : EditV2Compositor.self
+         if hdr {
+-            vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_2020
+-            vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_2100_HLG
+-            vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_2020
++            if composition == EditV2.HDRColor.output {
++                vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_2020
++                vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_2100_HLG
++                vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_2020
++            } else {
++                vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
++                vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
++                vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
++            }
++            EditV2HDRTrace.note("composition \(composition.primaries ?? "-")/\(composition.transfer ?? "-")/\(composition.matrix ?? "-")")
+         }
+         // A zero or odd render size makes AVFoundation refuse (or raise on) the video composition.
+         vc.renderSize = CGSize(width: max(2, plan.width / 2 * 2), height: max(2, plan.height / 2 * 2))
+diff --git a/mac/Muse/App/Edit/EditV2Export.swift b/mac/Muse/App/Edit/EditV2Export.swift
+index f8cc9d40..5aaa9ae3 100644
+--- a/mac/Muse/App/Edit/EditV2Export.swift
++++ b/mac/Muse/App/Edit/EditV2Export.swift
+@@ -14,8 +14,11 @@ extension EditV2Engine {
+         let output: AVAssetReaderOutput
+         let input: AVAssetWriterInput
+         let queue: DispatchQueue
+-        init(_ output: AVAssetReaderOutput, _ input: AVAssetWriterInput, _ label: String) {
+-            self.output = output; self.input = input; queue = DispatchQueue(label: label)
++        /// HDR: every frame is tagged BT.2020 / HLG right before the encoder (what the compositor drew), whatever AVFoundation
++        /// put on it on the way, so VideoToolbox never converts it again.
++        let hdr: Bool
++        init(_ output: AVAssetReaderOutput, _ input: AVAssetWriterInput, _ label: String, hdr: Bool = false) {
++            self.output = output; self.input = input; queue = DispatchQueue(label: label); self.hdr = hdr
+         }
+         func run(onSample: @escaping @Sendable (CMTime) -> Void) async {
+             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+@@ -24,6 +27,11 @@ extension EditV2Engine {
+                     while input.isReadyForMoreMediaData && !done {
+                         if let sb = output.copyNextSampleBuffer() {
+                             onSample(CMSampleBufferGetPresentationTimeStamp(sb))
++                            if hdr, let pb = CMSampleBufferGetImageBuffer(sb) {
++                                EditV2HDRTrace.writer(pb, own: EditV2Scene.tags(of: pb), at: CMSampleBufferGetPresentationTimeStamp(sb).seconds)
++                                CVBufferRemoveAttachment(pb, kCVImageBufferCGColorSpaceKey)
++                                EditV2Scene.stamp(pb, EditV2.HDRColor.output)
++                            }
+                             if !input.append(sb) { done = true; input.markAsFinished(); cont.resume(); return }
+                         } else {
+                             done = true
+@@ -90,7 +98,7 @@ extension EditV2Engine {
+             vIn.expectsMediaDataInRealTime = false
+             guard writer.canAdd(vIn) else { throw ApiError("edit_export_failed", "This Mac can't encode this video") }
+             writer.add(vIn)
+-            pumps.append(Pump(vOut, vIn, "studio.muse.edit.export.video"))
++            pumps.append(Pump(vOut, vIn, "studio.muse.edit.export.video", hdr: hdr))
+         }
+ 
+         let aTracks = try await asset.loadTracks(withMediaType: .audio)
+diff --git a/mac/Muse/App/SnapshotRunner+EditOps.swift b/mac/Muse/App/SnapshotRunner+EditOps.swift
+index da8ca842..aec5aa40 100644
+--- a/mac/Muse/App/SnapshotRunner+EditOps.swift
++++ b/mac/Muse/App/SnapshotRunner+EditOps.swift
+@@ -750,7 +750,7 @@ extension SnapshotRunner {
+         // Dolby Vision (owner keeps it, on by default): on → the dvcC/dvvC record and an RPU in the samples; off → neither.
+         let dv = await dolbyVisionIn(hdr.url)
+         check(dolbyVision ? "Dolby Vision record and RPU" : "plain HLG, no Dolby Vision",
+-              dolbyVision ? (dv.record && dv.rpu) : (!dv.record && !dv.rpu), "record \(dv.record) rpu \(dv.rpu) atoms \(dv.atoms)")
++              dolbyVision ? (dv.record && dv.rpu) : (!dv.record && !dv.rpu), "record \(dv.record) rpu \(dv.rpu) atoms \(dv.atoms) NAL types \(dv.nals)")
+         let head = all.prefix(15).map(\.value)
+         let headWorst = head.map { m in middle.map { H.distance(m, $0) } ?? 99 }.max() ?? 99
+         check("first 15 frames = middle", headWorst <= 3, "frames 0–14 " + head.map { describe($0) }.joined(separator: " ") + " middle " + describe(middle))
+@@ -762,38 +762,43 @@ extension SnapshotRunner {
+               "HDR \(describe(first)) SDR \(describe(ref)) source rgb\(skinRGB)")
+     }
+ 
+-    /// Dolby Vision in an HEVC file: the sample description's dvcC/dvvC/dvwC record, and an RPU (HEVC NAL unit type 62)
+-    /// in the first video sample.
+-    static func dolbyVisionIn(_ url: URL) async -> (record: Bool, rpu: Bool, atoms: [String]) {
++    /// Dolby Vision in an HEVC file: the sample description's dvcC/dvvC/dvwC record, and an RPU (HEVC NAL unit type 62) in
++    /// any of the first 30 video samples (run 587 found none in the first; `nals` lists the NAL unit types seen).
++    static func dolbyVisionIn(_ url: URL) async -> (record: Bool, rpu: Bool, atoms: [String], nals: [Int]) {
+         let asset = AVURLAsset(url: url)
+-        guard let track = try? await asset.loadTracks(withMediaType: .video).first else { return (false, false, []) }
++        guard let track = try? await asset.loadTracks(withMediaType: .video).first else { return (false, false, [], []) }
+         var atoms: [String] = []
+         if let desc = (try? await track.load(.formatDescriptions))?.first {
+             atoms = (CMFormatDescriptionGetExtension(desc, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any])?.keys.sorted() ?? []
+         }
+         let record = atoms.contains { ["dvcC", "dvvC", "dvwC"].contains($0) }
+-        var rpu = false
++        var nals = Set<Int>()
+         if let reader = try? AVAssetReader(asset: asset) {
+             let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+             if reader.canAdd(out) {
+                 reader.add(out)
+-                if reader.startReading(), let sb = out.copyNextSampleBuffer(), let bb = CMSampleBufferGetDataBuffer(sb) {
+-                    let len = CMBlockBufferGetDataLength(bb)
+-                    var data = [UInt8](repeating: 0, count: len)
+-                    _ = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: $0.baseAddress!) }
+-                    var i = 0
+-                    // Length-prefixed NAL units (4-byte lengths in MP4).
+-                    while i + 5 <= len {
+-                        let n = Int(data[i]) << 24 | Int(data[i + 1]) << 16 | Int(data[i + 2]) << 8 | Int(data[i + 3])
+-                        if (data[i + 4] >> 1) & 0x3f == 62 { rpu = true; break }
+-                        guard n > 0 else { break }
+-                        i += 4 + n
++                if reader.startReading() {
++                    var samples = 0
++                    while samples < 30, let sb = out.copyNextSampleBuffer() {
++                        samples += 1
++                        guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
++                        let len = CMBlockBufferGetDataLength(bb)
++                        var data = [UInt8](repeating: 0, count: len)
++                        _ = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: $0.baseAddress!) }
++                        var i = 0
++                        // Length-prefixed NAL units (4-byte lengths in MP4).
++                        while i + 5 <= len {
++                            let n = Int(data[i]) << 24 | Int(data[i + 1]) << 16 | Int(data[i + 2]) << 8 | Int(data[i + 3])
++                            nals.insert(Int((data[i + 4] >> 1) & 0x3f))
++                            guard n > 0 else { break }
++                            i += 4 + n
++                        }
+                     }
+                 }
+                 reader.cancelReading()
+             }
+         }
+-        return (record, rpu, atoms)
++        return (record, nals.contains(62), atoms, nals.sorted())
+     }
+ 
+     /// The mean colour of a 16 × 16 patch at (0.5, 0.3) of every frame of a file, by time. HDR files are read as their
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift
+index f7e80751..eafb407e 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditV2HDRColor.swift
+@@ -35,6 +35,19 @@ public extension EditV2 {
+         public static let sdrDefault = Tags(primaries: bt709, transfer: bt709, matrix: bt709)
+         /// What every HDR output frame is, and what the file says it is.
+         public static let output = Tags(primaries: bt2020, transfer: hlg, matrix: bt2020)
++        public static let pq = "SMPTE_ST_2084_PQ"
++
++        /// Whether a source track is HDR (HLG or PQ).
++        public static func isHDR(_ t: Tags?) -> Bool { t?.transfer == hlg || t?.transfer == pq }
++
++        /// Round 5 (Mac run 587): the colour space the HDR export's video composition works in. With it set to BT.2020 / HLG,
++        /// AVFoundation itself converted every SDR source frame to HLG before the compositor saw it, and converted the first
++        /// one differently (3 hot frames at 60 fps). So: every source SDR → BT.709, AVFoundation converts nothing and the
++        /// compositor places SDR in HLG itself, the same way on every frame. Any HDR source → BT.2020 / HLG as before (its
++        /// highlights must not be tone-mapped to SDR first).
++        public static func compositionSpace(_ sources: [Tags]) -> Tags {
++            sources.contains(where: isHDR) ? output : sdrDefault
++        }
+ 
+         /// The colour a source frame is read with. A frame with complete tags keeps them (they describe its pixels);
+         /// otherwise the source track's complete tags; otherwise BT.709 SDR. Never a mix of a frame's partial tags and
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift
+index 3ec0b0af..4abf734f 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditV2HDRColorTests.swift
+@@ -71,6 +71,17 @@ final class EditV2HDRColorTests: XCTestCase {
+         for s in shown { XCTAssertLessThanOrEqual(H.distance(s, shown[0]), 1, "\(shown)") }
+     }
+ 
++    /// Round 5: SDR-only edits compose in BT.709 (no AVFoundation conversion); any HDR source keeps BT.2020 / HLG.
++    func testCompositionSpace() {
++        let sdr = H.Tags(primaries: H.bt709, transfer: H.bt709, matrix: H.bt709)
++        XCTAssertEqual(H.compositionSpace([]), H.sdrDefault)
++        XCTAssertEqual(H.compositionSpace([sdr, H.Tags()]), H.sdrDefault)
++        XCTAssertEqual(H.compositionSpace([sdr, H.Tags(primaries: H.bt2020, transfer: H.hlg, matrix: H.bt2020)]), H.output)
++        XCTAssertEqual(H.compositionSpace([H.Tags(primaries: H.bt2020, transfer: H.pq)]), H.output)
++        // An untagged frame of an SDR-only edit is read as BT.709 (what the composition delivers).
++        XCTAssertEqual(H.resolve(frame: H.Tags(), track: H.Tags(), composition: H.sdrDefault), H.sdrDefault)
++    }
++
+     /// SDR white is HLG reference white (BT.2408: 75 %), grey stays neutral.
+     func testReferenceWhite() {
+         let w = H.hlgSignal(sdr: (1, 1, 1))
+-- 
+2.43.0
+
