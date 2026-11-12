@@ -39,10 +39,6 @@ enum class Panel(val title: String) {
         }
 }
 
-/** Platform safe areas drawn over the preview (UI chrome of each app). */
-enum class SafeArea(val label: String, val top: Float, val bottom: Float, val right: Float) {
-    TIKTOK("TikTok", .11f, .20f, .16f), REELS("Reels", .10f, .22f, .14f), SHORTS("Shorts", .09f, .18f, .15f),
-}
 
 /** An AI helper's row: what it costs (shown before running), whether it runs, how far, and what went wrong. */
 data class AiTask(
@@ -159,7 +155,10 @@ data class EditSuiteUi(
     /** The item the edit tools act on (a main clip by default: the one under the playhead). */
     val selectedId: String? = null,
     val panel: Panel? = null,
-    val safeArea: SafeArea? = SafeArea.TIKTOK,
+    /** The preview's view (Clean or an app's chrome) and the red safe-area box (plans/edit-platform-preview.md). */
+    val preview: studio.muse.core.edit.EditPreview = studio.muse.core.edit.EditPreview(),
+    /** The views' safe zones: GET /v1/preview/layouts over the defaults. */
+    val previewLayouts: studio.muse.core.edit.PreviewLayouts = studio.muse.core.edit.PreviewLayouts.DEFAULTS,
     /** Timeline zoom: dp per second (pinch). */
     val pxPerSec: Float = 34f,
     val phase: SuitePhase = SuitePhase.Loading(),

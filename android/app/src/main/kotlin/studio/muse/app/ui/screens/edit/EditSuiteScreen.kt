@@ -416,7 +416,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     /** Edit sessions (workstream 3): the owner's live session with Claude (null for members / local only). */
     private var sync: EditSessionSync? = null
 
+    /** Edit's preview choice per project (plans/edit-platform-preview.md), on this device. */
+    private val previewStore = app.getSharedPreferences("edit-preview", Context.MODE_PRIVATE)
+    private var previewKey: String? = null
+    private fun previewPrefs() = studio.muse.core.edit.EditPreviewPrefs.decode(previewStore.getString("prefs", null))
+
     init {
+        controller.onPreviewChanged = { p ->
+            previewKey?.let { k -> previewStore.edit().putString("prefs", previewPrefs().set(p, k).encode()).apply() }
+        }
         load()
         loadKits()
         viewModelScope.launch {
@@ -485,6 +493,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 val project = projectFor(source, target?.initial)
                 for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
                 controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
+                // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
+                previewKey = source.id
+                controller.act(EditAction.PreviewOf(previewPrefs().choice(source.id)))
+                viewModelScope.launch { runCatching { c.repo.api.previewLayouts() }.getOrNull()?.let { controller.act(EditAction.PreviewLayoutsOf(studio.muse.core.edit.PreviewLayouts.parse(it))) } }
                 startSession(source.id, project, fromVersion = if (target?.initial != null && take.kind == "edit") take.id else null)
                 loadFrames(project)
                 fetchTakeAssets(controller.project ?: project)

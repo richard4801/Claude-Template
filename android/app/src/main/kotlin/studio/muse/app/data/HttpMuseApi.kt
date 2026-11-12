@@ -168,6 +168,7 @@ interface MuseService {
     @POST("v1/edit-sessions/{id}/patch") suspend fun pushEditPatch(@Path("id") id: String, @Body r: EditPatchRequest): EditChangeResult
     @POST("v1/edit-sessions/{id}/undo") suspend fun undoEditEntry(@Path("id") id: String, @Body r: EditUndoRequest): EditChangeResult
     @POST("v1/edit-sessions/{id}/presence") suspend fun editPresence(@Path("id") id: String, @Body r: EditPresence): JsonObject
+    @GET("v1/preview/layouts") suspend fun previewLayouts(): JsonObject
     @DELETE("v1/edit-sessions/{id}/presence/{device}") suspend fun leaveEditSession(@Path("id") id: String, @Path("device") device: String): retrofit2.Response<Unit>
     @POST("v1/edit-sessions/{id}/frames/{rid}") suspend fun answerEditFrame(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditFrameAnswer): JsonObject
     @POST("v1/edit-sessions/{id}/requests/{rid}") suspend fun answerEditRequest(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditRequestAnswer): JsonObject
@@ -673,6 +674,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun pushEditPatch(id: String, req: EditPatchRequest) = call { pushEditPatch(id, req) }
     override suspend fun undoEditEntry(id: String, req: EditUndoRequest) = call { undoEditEntry(id, req) }
     override suspend fun editPresence(id: String, presence: EditPresence) { call { editPresence(id, presence) } }
+    override suspend fun previewLayouts(): JsonObject? = runCatching { call { previewLayouts() } }.getOrNull()
     override suspend fun leaveEditSession(id: String, device: String) { call { leaveEditSession(id, device) } }
     /** Always the image presign + PUT (the server checks the upload is an image of the studio; no confirm step). */
     override suspend fun uploadEditFrame(png: ByteArray): String = putPresigned("image", "image/png", png) {}

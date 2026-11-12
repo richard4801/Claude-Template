@@ -221,6 +221,8 @@ interface MuseApi {
     /** Undoes one history entry (anyone's) as a new change. */
     suspend fun undoEditEntry(id: String, req: EditUndoRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
     suspend fun editPresence(id: String, presence: EditPresence) {}
+    /** GET /v1/preview/layouts: Edit's platform views' safe zones (null: the defaults, e.g. offline or a demo). */
+    suspend fun previewLayouts(): kotlinx.serialization.json.JsonObject? = null
     suspend fun leaveEditSession(id: String, device: String) {}
     /** A PNG of a frame Claude asked for, uploaded with the image presign (`POST /v1/uploads/presign {kind:"image"}` + PUT): the upload id. */
     suspend fun uploadEditFrame(png: ByteArray): String = throw ApiException("unsupported", "Uploading frames needs the studio server")

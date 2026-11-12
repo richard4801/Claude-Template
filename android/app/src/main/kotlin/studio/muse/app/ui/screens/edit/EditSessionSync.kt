@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -21,6 +22,7 @@ import studio.muse.app.data.EditHistoryEntry
 import studio.muse.app.data.EditPatchRequest
 import studio.muse.app.data.EditPending
 import studio.muse.app.data.EditPresence
+import studio.muse.app.data.EditPresencePreview
 import studio.muse.app.data.EditRequestAnswer
 import studio.muse.app.data.EditSessionDto
 import studio.muse.app.data.EditUndoRequest
@@ -119,6 +121,8 @@ class EditSessionSync(
         jobs += scope.launch { events.collect { ev -> if (ev.type == "edit" && ev.sessionId == s.id) onEvent(ev) } }
         jobs += scope.launch { controller.ui.map { it.project }.distinctUntilChanged().debounce(debounceMs).collect { flush() } }
         jobs += scope.launch { while (isActive) { presence(); delay(presenceMs) } }
+        // Edit's view changed: Claude hears it at once, not at the next 30 s ping.
+        jobs += scope.launch { controller.ui.map { it.preview }.distinctUntilChanged().drop(1).collect { presence() } }
         return true
     }
 
@@ -162,7 +166,9 @@ class EditSessionSync(
 
     private suspend fun presence() {
         val id = sessionId ?: return
-        runCatching { api().editPresence(id, EditPresence(device, deviceLabel, "android", canRender = true)) }
+        val pv = controller.ui.value.preview
+        runCatching { api().editPresence(id, EditPresence(device, deviceLabel, "android", canRender = true,
+            preview = EditPresencePreview(pv.view.id, pv.safeArea))) }
     }
 
     private fun parse(el: JsonElement): EditProject? = runCatching { EditJson.parse(el) }.getOrNull()?.takeIf { problemOf(it, paletteIds = paletteIds) == null }

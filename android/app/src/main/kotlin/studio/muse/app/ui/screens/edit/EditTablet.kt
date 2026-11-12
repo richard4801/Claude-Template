@@ -173,10 +173,18 @@ private fun Segmented(labels: List<String>, picked: Int, what: String, onPick: (
 @Composable
 private fun SafeAreaRow(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
-    val options = listOf<SafeArea?>(null) + SafeArea.entries
+    val c = ui.project?.canvas
+    val options = if (c != null) studio.muse.core.edit.PreviewView.options(c.width, c.height) else studio.muse.core.edit.PreviewView.options(1080, 1920)
+    val shown = if (c != null) ui.preview.resolved(c.width, c.height) else ui.preview
+    // "View" (Clean or an app's chrome over the edit) and the Safe area switch (plans/edit-platform-preview.md).
     Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Pad), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        T("Safe area", m.scale.caption, m.t.muted, maxLines = 1)
-        Segmented(options.map { it?.label ?: "Off" }, options.indexOf(ui.safeArea), "Safe area") { i -> act(EditAction.SafeAreaOf(options[i])) }
+        T("View", m.scale.caption, m.t.muted, maxLines = 1)
+        Segmented(options.map { it.label }, options.indexOf(shown.view), "View") { i -> act(EditAction.PreviewOf(ui.preview.copy(view = options[i]))) }
+        Row(Modifier.padding(start = 4.dp).semantics(mergeDescendants = true) { contentDescription = if (shown.safeArea) "Safe area on" else "Safe area off" },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            studio.muse.app.ui.components.Toggle(shown.safeArea, { act(EditAction.PreviewOf(ui.preview.copy(safeArea = !ui.preview.safeArea))) })
+            T("Safe area", m.scale.caption, m.t.ink, maxLines = 1)
+        }
     }
 }
 

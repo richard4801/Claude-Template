@@ -1,6 +1,16 @@
 package studio.muse.app.ui.screens.edit
 
 import androidx.compose.ui.geometry.Size
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import studio.muse.core.edit.EditSafeBox
+import studio.muse.core.edit.EditSafeCheck
+import studio.muse.core.edit.PreviewView
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -78,7 +88,8 @@ val StageColor = Color(0xFF1B1916)
 /**
  * The preview (EM1): the canvas at its aspect on the dark stage, the picture from [picture] (the player on a phone, a
  * still in screenshots), and — when [drawText] — the text, hooks and captions at the playhead in Compose (the player
- * draws its own), plus the platform safe area and its switch.
+ * draws its own), plus Edit's platform view (an app's generic chrome) and the red safe box, the phone's view chip and the
+ * warning line when captions or text sit outside the box (plans/edit-platform-preview.md).
  */
 @Composable
 fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier, drawText: Boolean = true, picture: @Composable (Modifier) -> Unit,
@@ -93,13 +104,20 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
         Box(Modifier.size(w, h).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
             picture(Modifier.fillMaxSize())
             if (p != null && drawText) Overlays(p, ui.playheadSec, w, h)
-            ui.safeArea?.let { SafeAreaGuides(it) }
+            if (p != null) {
+                val pv = ui.preview.resolved(p.canvas.width, p.canvas.height)
+                EditPlatformChrome(pv.view, PreviewView.isLandscape(p.canvas.width, p.canvas.height), w, h)
+                EditSafeBox.zone(ui.preview, p.canvas.width, p.canvas.height, ui.previewLayouts)?.let { z ->
+                    SafeBoxGuide(z, EditSafeBox.name(ui.preview, p.canvas.width, p.canvas.height))
+                }
+            }
             // Remove background → tap what to keep: taps on the paused picture, and where they are.
             ui.keep?.let { k -> KeepTaps(k, act) }
             // The chroma eyedropper: touch the colour to remove; a loupe shows the source pixels under the finger.
             ui.pick?.let { pk -> PickOverlay(pk, act) }
         }
-        // Safe-area switch: TikTok → Reels → Shorts → off.
+        // Captions or text outside the red box: one line and the fix (both layouts).
+        if (p != null) SafeWarning(ui, act, Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
         if (!safeChip) return@BoxWithConstraints
         // Fullscreen (the phone): hides the timeline and tools; tap again to bring them back.
         Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(48.dp).press { act(EditAction.Fullscreen) }.semantics { contentDescription = if (ui.fullscreen) "Exit fullscreen" else "Fullscreen" },
@@ -108,29 +126,57 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
                 EIc("expand", 16.dp, Color.White)
             }
         }
-        val next = when (ui.safeArea) { SafeArea.TIKTOK -> SafeArea.REELS; SafeArea.REELS -> SafeArea.SHORTS; SafeArea.SHORTS -> null; null -> SafeArea.TIKTOK }
-        Row(
-            Modifier.align(Alignment.TopStart).padding(10.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f))
-                .border(1.dp, if (ui.safeArea != null) muse.t.accent else Color.White.copy(alpha = .3f), RoundedCornerShape(2.dp))
-                .press { act(EditAction.SafeAreaOf(next)) }.padding(horizontal = 8.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { T(ui.safeArea?.label?.let { "$it safe area" } ?: "Safe area off", muse.scale.micro, Color.White, maxLines = 1) }
+        // The phone's view chip: the view and the switch in one small menu.
+        ViewChip(ui, act, Modifier.align(Alignment.TopStart).padding(4.dp))
     }
 }
 
-/** The platform's UI zones as dashed lines and its side buttons. */
+/** The phone's view picker: a chip ("TikTok", "Clean") that opens the views and the Safe area switch. */
 @Composable
-private fun SafeAreaGuides(area: SafeArea) {
-    Canvas(Modifier.fillMaxSize()) {
-        val dash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
-        val c = Color.White.copy(alpha = .55f)
-        val top = size.height * area.top; val bottom = size.height * (1 - area.bottom); val right = size.width * (1 - area.right)
-        drawLine(c, Offset(0f, top), Offset(size.width, top), 1.dp.toPx(), pathEffect = dash)
-        drawLine(c, Offset(0f, bottom), Offset(size.width, bottom), 1.dp.toPx(), pathEffect = dash)
-        drawLine(c, Offset(right, top), Offset(right, bottom), 1.dp.toPx(), pathEffect = dash)
+private fun ViewChip(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier) {
+    val p = ui.project ?: return
+    var open by remember { mutableStateOf(false) }
+    val shown = ui.preview.resolved(p.canvas.width, p.canvas.height)
+    Box(modifier) {
+        Box(Modifier.size(width = 112.dp, height = 48.dp).press { open = true }
+            .semantics { contentDescription = "View: ${shown.view.label}${if (shown.safeArea) ", safe area on" else ""}. Change the view" },
+            contentAlignment = Alignment.CenterStart) {
+            Row(Modifier.padding(start = 6.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f))
+                .border(1.dp, if (shown.view != PreviewView.CLEAN || shown.safeArea) muse.t.accent else Color.White.copy(alpha = .3f), RoundedCornerShape(2.dp))
+                .padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                T(shown.view.label, muse.scale.micro, Color.White, maxLines = 1)
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            PreviewView.options(p.canvas.width, p.canvas.height).forEach { v ->
+                DropdownMenuItem(text = { T(v.label, muse.scale.label, muse.t.ink, maxLines = 1) },
+                    trailingIcon = { if (v == shown.view) EIc("check", 18.dp, muse.t.accent) },
+                    onClick = { act(EditAction.PreviewOf(ui.preview.copy(view = v))); open = false })
+            }
+            HorizontalDivider()
+            DropdownMenuItem(text = { T("Safe area", muse.scale.label, muse.t.ink, maxLines = 1) },
+                trailingIcon = { studio.muse.app.ui.components.Toggle(shown.safeArea, { act(EditAction.PreviewOf(ui.preview.copy(safeArea = !ui.preview.safeArea))) }) },
+                onClick = { act(EditAction.PreviewOf(ui.preview.copy(safeArea = !ui.preview.safeArea))) })
+        }
     }
-    Column(Modifier.fillMaxSize().padding(end = 6.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.Center) {
-        listOf("heart", "msg", "send").forEach { EIc(it, 15.dp, Color.White.copy(alpha = .85f), Modifier.padding(vertical = 5.dp)) }
+}
+
+/** "Captions sit under TikTok's caption and buttons (0:01–0:09)." and "Move into the safe area". */
+@Composable
+fun SafeWarning(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
+    val p = ui.project ?: return
+    val line = remember(p, ui.preview, ui.previewLayouts) {
+        val z = EditSafeBox.zone(ui.preview, p.canvas.width, p.canvas.height, ui.previewLayouts) ?: return@remember null
+        EditSafeCheck.line(EditSafeCheck.issues(p, z), EditSafeBox.covers(ui.preview, p.canvas.width, p.canvas.height))
+    } ?: return
+    Row(modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = .72f)).padding(start = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        EIc("warning", 14.dp, SafeRed)
+        T(line, muse.scale.micro, Color.White, Modifier.weight(1f, fill = false), maxLines = 2)
+        Box(Modifier.height(48.dp).press { act(EditAction.MoveIntoSafeArea) }.padding(horizontal = 10.dp)
+            .semantics { contentDescription = "Move into the safe area" }, contentAlignment = Alignment.Center) {
+            T("Move into the safe area", muse.scale.micro, muse.t.accent, maxLines = 1)
+        }
     }
 }
 

@@ -126,7 +126,11 @@ sealed interface EditAction {
     data class Zoom(val pxPerSec: Float) : EditAction
     data class Select(val id: String?) : EditAction
     data class Open(val panel: Panel?) : EditAction
-    data class SafeAreaOf(val area: SafeArea?) : EditAction
+    /** Edit's preview: the view (Clean, TikTok …) and the Safe area switch; remembered per project by the screen. */
+    data class PreviewOf(val preview: studio.muse.core.edit.EditPreview) : EditAction
+    data class PreviewLayoutsOf(val layouts: studio.muse.core.edit.PreviewLayouts) : EditAction
+    /** "Move into the safe area": captions and text just inside the red box, one undo step. */
+    data object MoveIntoSafeArea : EditAction
     data object Fullscreen : EditAction
     /** Tablet: "Hide inspector" / "Show inspector" (plans/edit-layout.md). */
     data class InspectorHidden(val hidden: Boolean) : EditAction
@@ -366,6 +370,8 @@ class EditSuiteController(
 ) {
 
     private val _ui = MutableStateFlow(initial)
+    /** Edit's preview changed by the person (the screen remembers it for the project; the session tells Claude). */
+    var onPreviewChanged: ((studio.muse.core.edit.EditPreview) -> Unit)? = null
     val ui: StateFlow<EditSuiteUi> = _ui.asStateFlow()
     private var history: ProjectHistory? = initial.project?.let { ProjectHistory(it) }
     /** The project before the current drag (null when not dragging). */
@@ -573,7 +579,17 @@ class EditSuiteController(
             is EditAction.Zoom -> _ui.update { it.copy(pxPerSec = a.pxPerSec.coerceIn(8f, 240f)) }
             is EditAction.Select -> _ui.update { it.copy(selectedId = a.id) }
             is EditAction.Open -> open(a.panel)
-            is EditAction.SafeAreaOf -> _ui.update { it.copy(safeArea = a.area) }
+            is EditAction.PreviewOf -> {
+                val c = u.project?.canvas
+                val next = if (c != null) a.preview.resolved(c.width, c.height) else a.preview
+                if (next != u.preview) { _ui.update { it.copy(preview = next) }; onPreviewChanged?.invoke(next) }
+            }
+            is EditAction.PreviewLayoutsOf -> _ui.update { it.copy(previewLayouts = a.layouts) }
+            EditAction.MoveIntoSafeArea -> {
+                val c = u.project?.canvas ?: return
+                val z = studio.muse.core.edit.EditSafeBox.zone(u.preview, c.width, c.height, u.previewLayouts) ?: return
+                if (change(refused = "Couldn't move them inside the safe area") { p -> studio.muse.core.edit.EditSafeCheck.fixed(p, z) }) say("Moved into the safe area")
+            }
             EditAction.Fullscreen -> _ui.update { it.copy(fullscreen = !it.fullscreen) }
             is EditAction.InspectorHidden -> _ui.update { it.copy(inspectorHidden = a.hidden) }
             EditAction.ClearMessage -> _ui.update { it.copy(message = null) }

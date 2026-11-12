@@ -109,7 +109,17 @@ class EditAuditTest {
         c.act(EditAction.PlayPause); assertTrue(c.ui.value.playing)
         c.act(EditAction.PlayPause); assertFalse(c.ui.value.playing)
         c.act(EditAction.Fullscreen); assertTrue(c.ui.value.fullscreen)
-        c.act(EditAction.SafeAreaOf(null)); assertNull(c.ui.value.safeArea)
+        // Edit's view (plans/edit-platform-preview.md): Clean with the box by default; a view the person picks is told
+        // to the screen (remembered per project) once; a view the canvas lacks shows as Clean.
+        val told = ArrayList<studio.muse.core.edit.EditPreview>()
+        c.onPreviewChanged = { told += it }
+        assertEquals(studio.muse.core.edit.EditPreview(), c.ui.value.preview)
+        val portrait = c.p().canvas.height > c.p().canvas.width
+        c.act(EditAction.PreviewOf(studio.muse.core.edit.EditPreview(studio.muse.core.edit.PreviewView.TIKTOK)))
+        assertEquals(if (portrait) studio.muse.core.edit.PreviewView.TIKTOK else studio.muse.core.edit.PreviewView.CLEAN, c.ui.value.preview.view)
+        c.act(EditAction.PreviewOf(c.ui.value.preview.copy(safeArea = false))); assertFalse(c.ui.value.preview.safeArea)
+        c.act(EditAction.PreviewOf(c.ui.value.preview)) // no change: not told again
+        assertEquals(if (portrait) 2 else 1, told.size)
         c.act(EditAction.Seek(7.0)); assertEquals(7.0, c.ui.value.playheadSec, 1e-9)
         c.act(EditAction.Zoom(80f)); assertEquals(80f, c.ui.value.pxPerSec)
     }
