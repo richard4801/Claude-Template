@@ -27,10 +27,6 @@ final class ClaudeUiOverlay {
 
     func checkNotStopped() throws { if stopped { throw UiError.stopped } }
 
-    /// The theme's accent and danger for the orb in the pill (a child window has no theme environment; Shell sets them).
-    var accent: Color = .accentColor
-    var danger: Color = .red
-
     /// "Esc to stop" on the Claude panel's activity strip: the same as Esc.
     func stopFromPanel() {
         stopped = true
@@ -130,8 +126,8 @@ final class ClaudeUiOverlay {
 private struct ClaudeUiPill: View {
     var body: some View {
         HStack(spacing: 6) {
-            // Claude's orb (it floats here while Claude operates MUSE, the panel open or closed), in the theme's colours.
-            ClaudeOrbView(size: 22, accent: ClaudeUiOverlay.shared.accent, danger: ClaudeUiOverlay.shared.danger)
+            // Claude's orb floats here while Claude operates MUSE, the panel open or closed.
+            ClaudeOrbView(size: 22)
             Text("Claude is using MUSE")
                 .font(.system(size: 12, weight: .medium))
             Text("·").foregroundStyle(.secondary)

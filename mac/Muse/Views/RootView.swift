@@ -127,9 +127,6 @@ struct Shell: View {
                     if store.oneClaude.open && store.user != nil { FloatingClaudePanel() }
                 }
             }
-                .onAppear { ClaudeUiOverlay.shared.accent = t.roles.accent; ClaudeUiOverlay.shared.danger = t.roles.danger }
-                .onChange(of: t.roles.accent) { _, c in ClaudeUiOverlay.shared.accent = c; ClaudeUiOverlay.shared.danger = t.roles.danger }
-            }
         }
     }
 

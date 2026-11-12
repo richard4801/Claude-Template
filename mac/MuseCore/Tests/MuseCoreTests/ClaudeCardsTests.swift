@@ -169,3 +169,36 @@ final class ClaudeOrbTests: XCTestCase {
         for s in ClaudeOrbState.allCases { XCTAssertLessThanOrEqual(ClaudeOrb.look(s).edge, 0.5) } // subtle, always
     }
 }
+
+final class ClaudeOrbLiquidTests: XCTestCase {
+    func testBlobsDriftWithoutLoopingAndStayInTheGlass() {
+        let look = ClaudeOrb.look(.thinking)
+        var seen: [Double] = []
+        var phase = 0.0
+        for k in 0..<600 {
+            phase = ClaudeOrbLiquid.advance(phase, by: 1.0 / 30, look: look)
+            let b = ClaudeOrbLiquid.blobs(phase: phase, time: Double(k) / 30, look: look, pulse: 0)
+            XCTAssertEqual(b.count, 4)
+            for x in b { XCTAssertLessThanOrEqual(abs(x.x), 0.61); XCTAssertLessThanOrEqual(abs(x.y), 0.61); XCTAssertGreaterThan(x.radius, 0.4) }
+            seen.append(b[0].x)
+        }
+        // Moves smoothly (no jumps between frames) and does not come back to the same path (no loop).
+        for (a, b) in zip(seen, seen.dropFirst()) { XCTAssertLessThan(abs(a - b), 0.05) }
+        XCTAssertNotEqual(Array(seen[0..<60]), Array(seen[300..<360]))
+    }
+
+    func testStatesChangeTheLiquid() {
+        let quiet = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 0)
+        let chunk = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 1)
+        for (a, b) in zip(quiet, chunk) { XCTAssertGreaterThan(b.radius, a.radius) } // a streamed chunk swells them
+        let err = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.error), pulse: 0)
+        XCTAssertTrue(err.allSatisfy { $0.r > $0.b }) // red and orange
+        XCTAssertGreaterThan(ClaudeOrb.look(.thinking).swirl, ClaudeOrb.look(.idle).swirl)
+        XCTAssertLessThan(ClaudeOrb.look(.error).swirl, ClaudeOrb.look(.idle).swirl) // error slows down
+        // Operating: the blobs stream one way across the glass as time moves.
+        let a = ClaudeOrbLiquid.blobs(phase: 1, time: 0.2, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
+        let b = ClaudeOrbLiquid.blobs(phase: 1, time: 1.0, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
+        XCTAssertGreaterThan(b, a)
+        XCTAssertEqual(ClaudeOrbLiquid.advance(5, by: 1, look: ClaudeOrb.look(.idle)), 5 + 0.25 * 0.12, accuracy: 1e-9) // a stall never jumps
+    }
+}

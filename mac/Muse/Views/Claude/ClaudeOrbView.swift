@@ -2,10 +2,11 @@ import AppKit
 import MuseCore
 import SwiftUI
 
-// Claude's orb (owner, 2026-11-12; plans/design/claude-panel/orb-states-*.png): our own design, a small dark glass sphere
-// with one elliptical light band in the theme's accent and a soft halo. State and rhythm come from MuseCore's ClaudeOrb
-// (real events only). Drawn with Canvas inside a TimelineView that runs at the orb's own rate (12 fps idle, 30 at most),
-// stops when nothing moves (Reduce Motion, a still state) and when the window is hidden or covered.
+// Claude's orb (owner, 2026-11-12, second pass; plans/design/claude-panel/orb-states-*.png, orb-preview.mp4): our own
+// design, a dark glass sphere with multicolour liquid light inside (MuseCore ClaudeOrbLiquid: four soft blobs added
+// together, drifting on noise), an inner shadow, a thin rim and a soft halo. State and rhythm come from ClaudeOrb (real
+// events only). Drawn with Canvas (gradients and plus-lighter blending, no blur filters) inside a TimelineView at the
+// orb's own rate (12 fps idle or error, 30 at most), paused when nothing moves (Reduce Motion) or the window is hidden.
 
 struct ClaudeOrbView: View {
     @Environment(\.theme) private var t
@@ -13,9 +14,6 @@ struct ClaudeOrbView: View {
     @ObservedObject private var service: ClaudeCodeService = .shared
     @ObservedObject private var visibility: OrbVisibility = .shared
     var size: CGFloat
-    /// Colours for windows without the theme environment (the "Claude is using MUSE" pill).
-    var accent: Color?
-    var danger: Color?
 
     var body: some View {
         let orb = service.orb
@@ -23,7 +21,7 @@ struct ClaudeOrbView: View {
         let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
         TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
             let time = ctx.date.timeIntervalSinceReferenceDate
-            Canvas(rendersAsynchronously: true) { g, sz in
+            Canvas { g, sz in
                 draw(&g, sz, orb: orb, time: time)
             }
         }
@@ -45,51 +43,64 @@ struct ClaudeOrbView: View {
     private func draw(_ g: inout GraphicsContext, _ sz: CGSize, orb: ClaudeOrb, time: Double) {
         let look = orb.look(at: time, reduceMotion: reduceMotion)
         let glow = orb.glow(at: time, reduceMotion: reduceMotion)
-        let flash = look.flashes ? orb.pulse(at: time, reduceMotion: reduceMotion) : 0
-        let accent = self.accent ?? t.roles.accent
-        let danger = self.danger ?? t.roles.danger
-        let halo = look.danger ? danger : accent
+        let pulse = look.flashes ? orb.pulse(at: time, reduceMotion: reduceMotion) : 0
+        let phase = OrbPhase.shared.phase(at: time, look: look)
         let d = min(sz.width, sz.height)
-        let inset = d * 0.14 // room for the halo
+        let inset = d * 0.16 // room for the halo
         let r = CGRect(x: inset, y: inset, width: d - 2 * inset, height: d - 2 * inset)
+        let R = r.width / 2
+        let c = CGPoint(x: r.midX, y: r.midY)
         let sphere = Path(ellipseIn: r)
 
-        // Halo: the glow, breathing and flashing with the state.
-        var h = g
-        h.addFilter(.blur(radius: d * 0.10))
-        h.fill(Path(ellipseIn: r.insetBy(dx: -d * 0.04, dy: -d * 0.04)), with: .color(halo.opacity(0.15 + 0.6 * glow)))
+        // Halo (violet, or warm on error), breathing and flashing with the state.
+        let halo = look.danger ? Color(red: 1, green: 0.35, blue: 0.24) : Color(red: 0.59, green: 0.43, blue: 1)
+        g.fill(Path(ellipseIn: r.insetBy(dx: -R * 0.6, dy: -R * 0.6)),
+               with: .radialGradient(Gradient(stops: [.init(color: halo.opacity(0.15 + 0.6 * glow), location: 0.5), .init(color: halo.opacity(0), location: 1)]),
+                                     center: c, startRadius: 0, endRadius: R * 1.6))
 
-        // The dark glass (danger-tinted on error, so it reads even where the accent is red).
-        let center = CGPoint(x: r.midX, y: r.minY + r.height * 0.62)
-        g.fill(sphere, with: .radialGradient(Gradient(colors: look.danger ? [danger.opacity(0.85), Color(white: 0.08)] : [Color(white: 0.15), Color(white: 0.04)]),
-                                              center: center, startRadius: 0, endRadius: r.width * 0.62))
-
-        // The band: an ellipse stroked in the accent (grey and still on error), turning with the swirl.
-        var b = g
-        b.clip(to: sphere)
-        b.addFilter(.blur(radius: max(0.4, d * 0.035)))
-        let angle = Angle.radians(2 * .pi * look.swirl * time) + .degrees(-20)
-        let bandColor = look.danger ? Color(white: 0.72) : accent
-        let band = Path(ellipseIn: CGRect(x: r.minX + r.width * 0.06, y: r.midY - r.height * 0.18, width: r.width * 0.88, height: r.height * 0.36))
-        let turn = CGAffineTransform(translationX: r.midX, y: r.midY).rotated(by: angle.radians).translatedBy(x: -r.midX, y: -r.midY)
-        b.stroke(band.applying(turn), with: .color(bandColor.opacity(min(1, look.band + 0.3 * flash))), lineWidth: max(1, d * 0.07))
-        if !look.danger {
-            let second = CGAffineTransform(translationX: r.midX, y: r.midY).rotated(by: angle.radians + .pi / 3).translatedBy(x: -r.midX, y: -r.midY)
-            b.stroke(band.applying(second), with: .color(accent.opacity(look.band * 0.4)), lineWidth: max(0.6, d * 0.04))
+        // The dark glass, then the liquid: four soft blobs added together (overlaps brighten), clipped to the sphere.
+        var inner = g
+        inner.clip(to: sphere)
+        inner.fill(sphere, with: .radialGradient(Gradient(colors: [Color(red: 0.09, green: 0.094, blue: 0.114), Color(red: 0.016, green: 0.016, blue: 0.024)]),
+                                                 center: CGPoint(x: c.x, y: c.y + R * 0.25), startRadius: 0, endRadius: R * 1.05))
+        inner.blendMode = .plusLighter
+        for b in ClaudeOrbLiquid.blobs(phase: phase, time: time, look: look, pulse: pulse) {
+            let col = Color(red: b.r, green: b.g, blue: b.b)
+            let at = CGPoint(x: c.x + b.x * R, y: c.y + b.y * R)
+            inner.fill(sphere, with: .radialGradient(Gradient(stops: [.init(color: col.opacity(b.alpha), location: 0),
+                                                                     .init(color: col.opacity(b.alpha * 0.45), location: 0.45),
+                                                                     .init(color: col.opacity(0), location: 1)]),
+                                                     center: at, startRadius: 0, endRadius: b.radius * R))
         }
-        // Operating: a sweep crossing the glass, left to right.
-        if look.sweep {
-            let x = r.minX + r.width * CGFloat((time * 0.8).truncatingRemainder(dividingBy: 1)) * 1.6 - r.width * 0.3
-            b.fill(Path(CGRect(x: x, y: r.minY, width: r.width * 0.28, height: r.height)),
-                   with: .linearGradient(Gradient(colors: [.clear, accent.opacity(0.45 + 0.4 * flash), .clear]),
-                                         startPoint: CGPoint(x: x, y: r.midY), endPoint: CGPoint(x: x + r.width * 0.28, y: r.midY)))
-        }
+        inner.blendMode = .normal
+        // It reads as a ball: an inner shadow at the edge and a soft highlight at the top.
+        inner.fill(sphere, with: .radialGradient(Gradient(stops: [.init(color: .clear, location: 0.62), .init(color: .black.opacity(0.55), location: 1)]),
+                                                 center: c, startRadius: 0, endRadius: R))
+        let hi = CGPoint(x: c.x - R * 0.3, y: c.y - R * 0.55)
+        inner.fill(sphere, with: .radialGradient(Gradient(colors: [.white.opacity(0.32), .clear]), center: hi, startRadius: 0, endRadius: R * 0.45))
 
-        // Glass: the highlight and the rim.
-        g.fill(Path(ellipseIn: CGRect(x: r.minX + r.width * 0.22, y: r.minY + r.height * 0.08, width: r.width * 0.40, height: r.height * 0.24)),
-               with: .radialGradient(Gradient(colors: [Color.white.opacity(0.45), .clear]), center: CGPoint(x: r.minX + r.width * 0.42, y: r.minY + r.height * 0.2),
-                                     startRadius: 0, endRadius: r.width * 0.22))
-        g.stroke(sphere, with: .color(Color.white.opacity(0.14)), lineWidth: 0.5)
+        // The thin bright glass rim.
+        let w = max(0.75, R * 0.03)
+        g.stroke(Path(ellipseIn: r.insetBy(dx: w / 2, dy: w / 2)),
+                 with: .linearGradient(Gradient(stops: [.init(color: .white.opacity(0.55), location: 0), .init(color: .white.opacity(0.08), location: 0.5),
+                                                        .init(color: .white.opacity(0.22), location: 1)]),
+                                       startPoint: CGPoint(x: c.x, y: r.minY), endPoint: CGPoint(x: c.x, y: r.maxY)),
+                 lineWidth: w)
+    }
+}
+
+/// The liquid's phase, shared by every orb and the panel's edge so they flow together. It only moves forward, at the
+/// state's flow speed (ClaudeOrbLiquid.advance), so a state change never makes the liquid jump.
+@MainActor
+final class OrbPhase {
+    static let shared = OrbPhase()
+    private var value = 0.0
+    private var last: Double?
+
+    func phase(at time: Double, look: ClaudeOrbLook) -> Double {
+        if let l = last, time > l { value = ClaudeOrbLiquid.advance(value, by: time - l, look: look) }
+        if last == nil || time > last! { last = time }
+        return value
     }
 }
 
@@ -117,7 +128,7 @@ final class OrbVisibility: ObservableObject {
     }
 }
 
-/// The floating panel's living edge: a hairline that takes the accent and glows in step with the orb (same state, same
+/// The floating panel's living edge: the orb's colours flowing round a hairline, glowing in step with the orb (same state, same
 /// rhythm); calm in idle and while the person types.
 struct ClaudeLivingEdge: View {
     @Environment(\.theme) private var t
@@ -132,13 +143,18 @@ struct ClaudeLivingEdge: View {
         let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
         TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
             let time = ctx.date.timeIntervalSinceReferenceDate
+            let look = orb.look(at: time, reduceMotion: reduceMotion)
             let e = orb.edge(at: time, reduceMotion: reduceMotion)
-            let c = orb.look(at: time, reduceMotion: reduceMotion).danger ? t.roles.danger : t.roles.accent
+            // The orb's own colours flowing round the border (the same phase as the orb, so they move together).
+            let hexes = look.danger ? ClaudeOrbLiquid.errorPalette : ClaudeOrbLiquid.palette
+            let colors = (hexes + [hexes[0]]).map { h in Color(red: Double((h >> 16) & 0xFF) / 255, green: Double((h >> 8) & 0xFF) / 255, blue: Double(h & 0xFF) / 255) }
+            let turn = Angle.degrees(OrbPhase.shared.phase(at: time, look: look) * 90)
+            let flow = AngularGradient(colors: colors, center: .center, angle: turn)
             let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             ZStack {
                 shape.strokeBorder(t.roles.hairline, lineWidth: 1)
-                shape.strokeBorder(c.opacity(0.25 + 0.75 * e), lineWidth: 1)
-                shape.stroke(c.opacity(0.6 * e), lineWidth: 6).blur(radius: 10)
+                shape.strokeBorder(flow, lineWidth: 1.5).opacity(0.2 + 0.8 * e)
+                shape.stroke(flow, lineWidth: 8).blur(radius: 12).opacity(0.7 * e)
             }
         }
         .allowsHitTesting(false)
