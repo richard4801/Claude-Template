@@ -1,5 +1,6 @@
 // Camera sessions (plans/api.md "MCP & camera sessions"): create, read, update, cast, camera path and blocking, guide
 // assets through presigned uploads, the shared transcript and Shot drafts. Used by REST, the MCP server and the chat.
+import { appTool } from '../claude/cardView.js';
 import crypto from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -23,7 +24,7 @@ const GUIDE_KEYS: Partial<Record<CameraAssetKind, string>> = {
 };
 export const DEFAULT_HEIGHT_M = 1.68;
 
-export const messageView = (m: MessageRow) => compact({ id: m.id, role: m.role, source: m.source, text: m.text, tool: m.tool ?? undefined, createdAt: m.createdAt });
+export const messageView = (m: MessageRow) => compact({ id: m.id, role: m.role, source: m.source, text: m.text, tool: m.tool ? appTool(m.tool) : undefined, createdAt: m.createdAt });
 
 export class CameraService {
   /** Set by the routes: is the in-app chat running a turn on this session? */

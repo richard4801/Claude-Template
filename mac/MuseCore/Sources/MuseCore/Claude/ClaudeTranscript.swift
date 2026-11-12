@@ -7,10 +7,12 @@ public enum ClaudeChatItem: Hashable, Sendable, Identifiable {
     case tool(id: String, name: String, summary: String, status: ClaudeToolStatus)
     /// `url` is the server's link, or a `data:` URL while the turn is live.
     case image(id: String, url: String)
+    /// A card Claude put up (claude/cards.ts): plan, clip, what changed, approve. `messageId` is the stored line (Undo).
+    case card(id: String, messageId: String, ClaudeCard)
 
     public var id: String {
         switch self {
-        case .user(let id, _, _), .assistant(let id, _, _), .tool(let id, _, _, _), .image(let id, _): return id
+        case .user(let id, _, _), .assistant(let id, _, _), .tool(let id, _, _, _), .image(let id, _), .card(let id, _, _): return id
         }
     }
 }
@@ -153,6 +155,15 @@ public struct ClaudeTranscript: Hashable, Sendable {
         var out: [ClaudeChatItem] = []
         var toolAt: [String: Int] = [:]
         for m in messages {
+            // A card line (a newer server): drawn as its card; an unknown card falls back to the tool chip.
+            if let t = m.tool, let box = t.ui?.card, box.card.kind != "", !{ if case .unknown = box.card { return true }; return false }() {
+                let item = ClaudeChatItem.card(id: t.id, messageId: m.id, box.card)
+                if let i = toolAt[t.id] { out[i] = item } else {
+                    toolAt[t.id] = out.count
+                    out.append(item)
+                }
+                continue
+            }
             if let t = m.tool {
                 let status: ClaudeToolStatus = t.ok == false ? .error : t.ok == true ? .done : .running
                 let item = ClaudeChatItem.tool(id: t.id, name: t.name, summary: t.summary ?? ClaudeChipText.words(t.name), status: status)

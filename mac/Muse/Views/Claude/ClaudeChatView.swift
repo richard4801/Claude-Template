@@ -47,12 +47,24 @@ struct ClaudeChatView: View {
     var onToolDone: ((String) -> Void)?
     /// The Suite: the model, so the bridge can follow the open chat.
     var onModel: ((ClaudeChatModel) -> Void)?
+    /// One-Claude panel (reference, 2026-11-12): chips over the composer, the four attach buttons, and the activity strip.
+    var chips: [ClaudeChip] = []
+    var attachKinds = false
+    var activity: AnyView?
 
     func sessions(_ hooks: ClaudeChatModel.SessionHooks?, onToolDone: ((String) -> Void)? = nil, onModel: ((ClaudeChatModel) -> Void)? = nil) -> ClaudeChatView {
         var c = self
         c.sessionHooks = hooks
         c.onToolDone = onToolDone
         c.onModel = onModel
+        return c
+    }
+
+    func panel(chips: [ClaudeChip], activity: AnyView?) -> ClaudeChatView {
+        var c = self
+        c.chips = chips
+        c.attachKinds = true
+        c.activity = activity
         return c
     }
 
@@ -118,6 +130,8 @@ struct ClaudeChatView: View {
             await model.attach(service, contextKind: contextKind, contextId: contextId, fallback: fallback)
         }
         .onDisappear { model.detach() }
+        // While the person types, the panel's living edge stays calm (ClaudeOrb.typing).
+        .onChange(of: model.composer.isEmpty) { _, empty in if contextKind == "chat" { service.orbTyping(!empty) } }
         // Images dropped anywhere on the chat go with the next message.
         .dropDestination(for: URL.self) { urls, _ in
             let images = urls.filter(ChatImageInput.isImage)
@@ -175,6 +189,7 @@ struct ClaudeChatView: View {
             if model.answeringPhone { phoneStrip }
             // Files on this Mac: Claude's questions before a file or command call wait here.
             if let tid = model.thread?.id { ClaudeFileApprovals(threadId: tid, chatTitle: model.thread?.title) }
+            if let activity { activity }
             composer
         }
     }
@@ -286,6 +301,8 @@ struct ClaudeChatView: View {
             onStop: { model.stop() },
             onSuggestion: { model.send($0) },
             onAttach: suiteAttach ?? { model.pickImages() },
-            onImages: suiteImages ?? { urls, data in model.addImages(urls: urls, data: data) })
+            onImages: suiteImages ?? { urls, data in model.addImages(urls: urls, data: data) },
+            chips: chips,
+            onPick: attachKinds && suiteAttach == nil ? { model.pick($0) } : nil)
     }
 }

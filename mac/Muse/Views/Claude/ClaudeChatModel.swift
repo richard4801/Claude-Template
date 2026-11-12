@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import MuseCore
 import Observation
+import UniformTypeIdentifiers
 
 /// State of one ClaudeChatView: the thread of a camera, edit, recreate or suite context, its transcript (stored messages +
 /// the live turn), the composer, images waiting to go, Stop and Try again. Turns run on this Mac through ClaudeCodeService;
@@ -259,12 +260,16 @@ final class ClaudeChatModel {
         guard let tid = thread?.id else { return }
         switch f {
         case .local(let t, _, let e) where t == tid:
+            if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
             transcript.apply(e)
             toolDone(e)
             if case .done = e { scheduleReload(); Task { await refreshThreads() } }
         case .live(.message(let t, let m)) where t == tid:
+            // A "What I changed" card (or its Undo) landed: the orb flashes.
+            if lastContext?.kind == "chat", m.tool?.ui?.card?.card.kind == "changes" { ClaudeCodeService.shared.orbChange() }
             transcript.upsert(m)
         case .live(.event(let t, let turnId, let e)) where t == tid:
+            if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
             transcript.apply(e)
             toolDone(e)
             if case .done = e {
@@ -491,6 +496,35 @@ final class ClaudeChatModel {
         videoUploads[id] = nil
         localImages.removeAll { $0.id == id }
         attachNote = nil
+    }
+
+    /// The composer's four attach buttons (one-Claude panel): photos and videos go up as today; a file or document stays
+    /// on this Mac and its path goes in the message, so Claude Code asks the person before reading it (the file cards).
+    func pick(_ kind: ChatAttachKind) {
+        if SnapshotRunner.probing { if kind == .image || kind == .video { pickImages() }; return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        switch kind {
+        case .image:
+            panel.allowedContentTypes = ChatImageInput.types
+            panel.message = "Choose up to \(Self.maxLocalImages) photos for Claude to look at."
+        case .video:
+            panel.allowedContentTypes = ChatImageInput.videoTypes
+            panel.message = "Choose a video for Claude to watch: MP4 or MOV, 500 MB at most."
+        case .document:
+            panel.allowedContentTypes = [.pdf, .plainText, .rtf, .json, .commaSeparatedText] + ["md", "docx", "srt", "vtt"].compactMap { UTType(filenameExtension: $0) }
+            panel.message = "Choose a document. Claude asks before reading it."
+        case .file:
+            panel.message = "Choose a file. Claude asks before reading it."
+        }
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        switch kind {
+        case .image, .video: addImages(urls: panel.urls, data: [])
+        case .file, .document:
+            let lines = panel.urls.map { "Attached file: \($0.path)" }.joined(separator: "\n")
+            composer = composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? lines + "\n" : composer + "\n" + lines
+        }
     }
 
     func pickImages() {

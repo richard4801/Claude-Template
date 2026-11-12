@@ -27,6 +27,12 @@ final class ClaudeUiOverlay {
 
     func checkNotStopped() throws { if stopped { throw UiError.stopped } }
 
+    /// "Esc to stop" on the Claude panel's activity strip: the same as Esc.
+    func stopFromPanel() {
+        stopped = true
+        hide()
+    }
+
     /// Shows the pill (and listens for Esc) while Claude works; hides a few seconds after the last call.
     func active(on w: NSWindow) {
         busy = true
@@ -120,7 +126,8 @@ final class ClaudeUiOverlay {
 private struct ClaudeUiPill: View {
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+            // Claude's orb floats here while Claude operates MUSE, the panel open or closed.
+            ClaudeOrbView(size: 22)
             Text("Claude is using MUSE")
                 .font(.system(size: 12, weight: .medium))
             Text("·").foregroundStyle(.secondary)

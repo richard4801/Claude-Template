@@ -83,6 +83,9 @@ public protocol ClaudeAPI: Sendable {
     func pendingUiCalls() async throws -> [UiCall]
     func claimUiCall(_ id: String, device: String) async throws -> Bool
     func answerUiCall(_ id: String, _ answer: UiAnswer) async throws
+    /// Cards: Undo one row of a "What I changed" card; the page's quick-action chips.
+    func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo
+    func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip]
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -112,6 +115,8 @@ public extension ClaudeAPI {
     func pendingUiCalls() async throws -> [UiCall] { [] }
     func claimUiCall(_ id: String, device: String) async throws -> Bool { false }
     func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {}
+    func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo { throw ApiError("not_found", "This server can't undo from the chat yet") }
+    func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip] { ClaudeChip.fallback(page: page, tool: tool) }
 }
 
 enum ClaudeIds {
@@ -293,6 +298,21 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
     public func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {
         _ = try await send(request("POST", "v1/claude/ui/\(try ClaudeIds.check(id))", body: try encoder.encode(answer), timeout: 60))
+    }
+    private struct UndoRow: Encodable { var row: Int }
+    public func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo {
+        try await call("POST", "v1/claude/cards/\(try ClaudeIds.check(messageId))/undo", UndoRow(row: row))
+    }
+    public func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip] {
+        var q: [String] = []
+        if let p = page, p.allSatisfy({ $0.isASCII && $0.isLetter }) { q.append("page=\(p)") }
+        if let t = tool, t.allSatisfy({ $0.isASCII && $0.isLowercase }) { q.append("tool=\(t)") }
+        do {
+            let l: ClaudeChipList = try await call("GET", "v1/claude/chips" + (q.isEmpty ? "" : "?" + q.joined(separator: "&")))
+            return l.chips.isEmpty ? ClaudeChip.fallback(page: page, tool: tool) : l.chips
+        } catch let e as ApiError where e.code == "offline" {
+            return ClaudeChip.fallback(page: page, tool: tool) // no server now: this app's own copy (not_found: an older server, the caller decides)
+        }
     }
     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))

@@ -118,13 +118,13 @@ struct Shell: View {
                 TitleBar()
                 HStack(spacing: 0) {
                     // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
-                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor || (store.screen == .suite && store.oneClaude.open))
+                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
                     ScreenHost()
-                    // One Claude (plans/one-claude.md): the same Claude on every page, its chat following the person.
-                    if store.oneClaude.open && store.user != nil {
-                        Rectangle().fill(t.roles.hairline).frame(width: 1)
-                        OneClaudePanel()
-                    }
+                }
+                // One Claude (owner, 2026-11-12): a floating panel over the page, never reflowing it; moved by its header,
+                // resized from its lower-left corner, remembering both. ⌘⇧C shows and hides it.
+                .overlay(alignment: .topTrailing) {
+                    if store.oneClaude.open && store.user != nil { FloatingClaudePanel() }
                 }
             }
         }

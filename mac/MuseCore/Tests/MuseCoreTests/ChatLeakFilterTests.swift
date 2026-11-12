@@ -132,6 +132,7 @@ final class ChatLeakFilterTests: XCTestCase {
                     shown.append(ChatMarkdown.plainText(ChatMarkdown.parse(ChatLeakFilter.reply(text), streaming: streaming)))
                 case .tool(_, let name, let summary, _): shown.append(ChatLeakFilter.toolSummary(summary, name: name))
                 case .image: break
+                case .card: break
                 }
             }
             let all = shown.joined(separator: "\n")

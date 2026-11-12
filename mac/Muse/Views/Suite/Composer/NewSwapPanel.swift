@@ -28,6 +28,9 @@ struct NewSwapPanel: View {
     @State private var libraryOpen = false
     /// Outfit "Her outfit" while Character isn't her: whose outfits are listed.
     @State private var outfitOwner: String?
+    /// New Swap's own screen (plans/swap-viewer-design.md §A): the video and the trimmer are on the stage, so this column
+    /// holds only the changes.
+    var onScreen = false
 
     private var d: RemixDraft { store.suite.remix }
 
@@ -37,8 +40,16 @@ struct NewSwapPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
-            source
-            if let c = store.clip { trimmer(c) }
+            if onScreen {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Text("Changes").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
+                    Text("Switch on what should change. Write only the change.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                source
+                if let c = store.clip { trimmer(c) }
+            }
             VStack(alignment: .leading, spacing: Space.s3) {
                 toggleRow("Background", isOn: bind(\.backgroundOn), help: "A new place: describe it, or a location or photo") { backgroundField }
                 toggleRow("Outfit", isOn: bind(\.outfitOn), help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
@@ -53,6 +64,29 @@ struct NewSwapPanel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { preselectHer() }
+        .onChange(of: d.characterOn) { _, on in if on && d.characterKind == .model && d.modelId == nil { store.suite.remix.modelId = defaultHer } }
+    }
+
+    /// Owner's rule: her, with the strict figure lock, is the default Character.
+    /// The one chosen in Swap or the composer, else the first character.
+    private var defaultHer: String? {
+        store.suite.swap.modelId ?? store.suite.composer.tokens.characterId ?? store.suiteCharacters.first?.id
+    }
+
+    /// A fresh draft (Character never touched) starts with Character on and her picked.
+    private func preselectHer() {
+        guard !d.characterOn, d.characterKind == .model, d.modelId == nil, let her = defaultHer else { return }
+        store.suite.remix.characterOn = true
+        store.suite.remix.modelId = her
+    }
+
+    /// Choosing her outfit (or whose outfits) turns Character on as that character, unless Character is a face swap.
+    private func characterFrom(_ id: String?) {
+        guard let id, !d.characterOn || d.characterKind == .model else { return }
+        store.suite.remix.characterOn = true
+        store.suite.remix.characterKind = .model
+        store.suite.remix.modelId = id
     }
 
     // MARK: The video
@@ -183,12 +217,12 @@ struct NewSwapPanel: View {
             HStack(spacing: Space.s2) {
                 if !(d.characterOn && d.characterKind == .model) {
                     Menu(owner?.shortName ?? "Whose") {
-                        ForEach(store.suiteCharacters) { m in Button(m.name) { outfitOwner = m.id; store.suite.remix.outfitId = nil } }
+                        ForEach(store.suiteCharacters) { m in Button(m.name) { outfitOwner = m.id; store.suite.remix.outfitId = nil; characterFrom(m.id) } }
                     }
                     .fixedSize()
                 }
                 Menu(list.first { $0.id == d.outfitId }?.name ?? (list.isEmpty ? "No outfits yet" : "Pick an outfit")) {
-                    ForEach(list) { o in Button(o.name) { store.suite.remix.outfitId = o.id } }
+                    ForEach(list) { o in Button(o.name) { store.suite.remix.outfitId = o.id; characterFrom(o.modelId) } }
                 }
                 .fixedSize()
                 .disabled(list.isEmpty)
@@ -276,13 +310,15 @@ struct NewSwapLibraryPicker: View {
     }
 }
 
-/// New Swap's model pill: Auto (with its pick) first, then every video model (owner 2026-11-12: every model on every
-/// mode), each with its limits and its price for this clip; an adapted one says what MUSE does with it. Only a model
-/// that can't run at all (its provider isn't set up) is greyed, with the reason.
+/// New Swap's model pill (owner bug 2026-11-12: "MiniMax H3 Higgsfield is not part of the models that come with New
+/// Swap"): a popover with every video model, grouped (Auto picks · Edits the clip · Uses the clip as reference · From
+/// frames · From words only) and scrollable, each with its price for this clip and one line: what MUSE does with it, a
+/// recent refusal, or why it can't run. Only a model that can't run at all is greyed. The list reloads when it opens.
 struct RemixModelPill: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var compact = false
+    @State private var open = false
 
     var body: some View {
         let list = store.suite.remixModels
@@ -290,34 +326,111 @@ struct RemixModelPill: View {
         let auto = list?.models.first { $0.auto }
         let current = picked.flatMap { p in list?.models.first { $0.model == p } }
         let title = current?.label ?? "Auto\(auto.map { " · \($0.label)" } ?? "")"
-        Menu {
-            Button {
-                store.suite.remix.engineModel = nil
-            } label: {
-                Text(auto.map { "Auto · \($0.label)" } ?? "Auto")
-                if let w = list?.auto?.why { Text(w) }
-            }
-            Divider()
-            ForEach(list?.models ?? []) { m in
-                Button {
-                    store.suite.remix.engineModel = m.model
-                } label: {
-                    Text("\(m.label)\(m.price.usd.map { " · \(Pricing.money($0))" } ?? "")")
-                    Text(m.adaptedLine ?? m.detail) // an adapted model says exactly what MUSE does with it
-                }
-                .disabled(!m.pickable)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Ph("cpu", 13)
-                if !compact { Text(title).font(t.body(12.5, .medium)).lineLimit(1).fixedSize() }
+        Button { open.toggle() } label: {
+            HStack(spacing: 4) {
+                Text(compact ? (current?.label ?? "Auto") : title).font(t.body(12.5, .medium)).lineLimit(1)
+                    .truncationMode(.tail).frame(maxWidth: compact ? 120 : 220, alignment: .leading).fixedSize(horizontal: true, vertical: false)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.roles.ink2)
             }
             .foregroundStyle(t.roles.ink)
+            .padding(.horizontal, 8).frame(height: 30).fixedSize()
+            .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(open ? t.roles.field : .clear))
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.plain)
         .help("Model: \(title)")
         .accessibilityLabel("Model: \(title)")
+        .popover(isPresented: $open, arrowEdge: .top) {
+            RemixModelList(onPick: { open = false })
+                .environment(store).environment(\.theme, t)
+                .task { await store.loadRemixModels() }
+        }
+    }
+}
+
+/// The list in New Swap's model popover.
+struct RemixModelList: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var onPick: () -> Void
+
+    var body: some View {
+        let list = store.suite.remixModels
+        let picked = store.suite.remix.engineModel
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Model for New Swap").scaled(t.scale.label, t.roles.ink)
+                .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    autoRow(list, on: picked == nil)
+                    ForEach(list?.grouped ?? [], id: \.group.id) { g in
+                        Text(g.group.label).scaled(t.scale.caption, t.roles.ink2)
+                            .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s1)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(g.rows) { m in row(m, on: picked == m.model) }
+                    }
+                    if list == nil {
+                        Text(store.suite.remix.anyOn ? "Loading models…" : "Turn on a change to see the models for it.")
+                            .scaled(t.scale.caption, t.roles.ink2).padding(Space.s4)
+                    }
+                }
+                .padding(.bottom, Space.s2)
+            }
+            .frame(maxHeight: 460)
+        }
+        .frame(width: 420, alignment: .leading)
+    }
+
+    private func autoRow(_ list: RemixModels?, on: Bool) -> some View {
+        let auto = list?.models.first { $0.auto }
+        return Button {
+            store.suite.remix.engineModel = nil
+            onPick()
+        } label: {
+            HStack(alignment: .top, spacing: Space.s2) {
+                check(on)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(auto.map { "Auto (\($0.label))" } ?? "Auto").scaled(t.scale.body, t.roles.ink)
+                    Text(list?.auto?.why ?? "MUSE picks the model for these changes").scaled(t.scale.caption, t.roles.ink2).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
+            .background(on ? t.roles.field : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Use Auto")
+    }
+
+    private func row(_ m: RemixModels.Row, on: Bool) -> some View {
+        Button {
+            store.suite.remix.engineModel = m.model
+            onPick()
+        } label: {
+            HStack(alignment: .top, spacing: Space.s2) {
+                check(on)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: Space.s2) {
+                        Text(m.label).scaled(t.scale.body, m.pickable ? t.roles.ink : t.roles.ink2).lineLimit(1)
+                        Spacer(minLength: Space.s2)
+                        if let usd = m.price.usd { Text(Pricing.money(usd)).monospacedDigit().scaled(t.scale.caption, t.roles.ink2).fixedSize() }
+                    }
+                    Text(m.line).scaled(t.scale.caption, m.warning != nil && m.pickable ? t.roles.caution : t.roles.ink2).lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
+            .background(on ? t.roles.field.opacity(0.5) : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!m.pickable)
+        .help(m.line)
+        .accessibilityLabel("\(m.label), \(m.line)")
+    }
+
+    private func check(_ on: Bool) -> some View {
+        Ph("checkmark", 11).foregroundStyle(t.roles.accent).opacity(on ? 1 : 0).frame(width: 16, height: 20)
     }
 }

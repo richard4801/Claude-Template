@@ -1,0 +1,204 @@
+import XCTest
+@testable import MuseCore
+
+// Claude panel cards (server/api/src/claude/cards.ts): the JSON the server sends decodes into the cards the panel draws,
+// unknown cards are skipped (never an error), and the activity strip reads as the owner's reference.
+final class ClaudeCardsTests: XCTestCase {
+    private func card(_ json: String) throws -> ClaudeCard {
+        try JSONDecoder().decode(ClaudeCardBox.self, from: Data(json.utf8)).card
+    }
+
+    func testPlanMediaChangesApproveDecode() throws {
+        let plan = try card(#"{"kind":"plan","planId":"swap","title":"Plan: outfit swap","steps":[{"text":"Watch the clip","done":true},{"text":"Swap the outfit","done":false},{"text":"Render"}]}"#)
+        XCTAssertEqual(plan.progress?.done, 1)
+        XCTAssertEqual(plan.progress?.of, 3)
+
+        let media = try card(#"{"kind":"media","title":"Clip analysis","summary":"Three moments","durationSec":15,"video":{"id":"tk_1","kind":"take","url":"/uploads/s/a.mp4"},"moments":[{"from":4,"to":10,"label":"Face toward camera"},{"from":11,"label":"Closing shot"}]}"#)
+        guard case .media(_, let summary, let video, let dur, let moments) = media else { return XCTFail("media") }
+        XCTAssertEqual(summary, "Three moments")
+        XCTAssertEqual(video.url, "/uploads/s/a.mp4")
+        XCTAssertEqual(dur, 15)
+        XCTAssertEqual(moments.map(\.timecode), ["0:04–0:10", "0:11"])
+
+        let changes = try card(#"{"kind":"changes","title":"What I changed","rows":[{"what":"Outfit","to":"Hoodie","undoable":true},{"what":"Background","to":"Describe it","undone":true}]}"#)
+        guard case .changes(_, let rows) = changes else { return XCTFail("changes") }
+        XCTAssertEqual(rows.map(\.undoable), [true, false])
+        XCTAssertEqual(ClaudeCardText.change(rows[0]), "Outfit changed to Hoodie")
+
+        let approve = try card(#"{"kind":"approve","title":"Generate · 15 s · $1.17","subtitle":"A new version","lines":[{"label":"Video, 15 s at $0.066/s","usd":0.99},{"label":"2 reference images past the 5 included","usd":0.18}],"totalUsd":1.17,"answer":{"assistId":"sa_1","pendingId":"sp_2"},"approveLabel":"Approve","declineLabel":"Decline"}"#)
+        guard case .approve(let title, _, let lines, let total, let target, _, _) = approve else { return XCTFail("approve") }
+        XCTAssertEqual(title, "Generate · 15 s · $1.17")
+        XCTAssertEqual(ClaudeCardText.money(ClaudeCardText.total(lines, total)), "$1.17")
+        XCTAssertEqual(ClaudeCardText.total(lines, nil), 1.17)
+        XCTAssertEqual(target, .suite(assistId: "sa_1", pendingId: "sp_2"))
+        let action = try card(#"{"kind":"approve","title":"Delete the take","answer":{"actionId":"ca_9"}}"#)
+        guard case .approve(_, _, let none, _, .action("ca_9"), "Approve", "Decline") = action else { return XCTFail("action") }
+        XCTAssertTrue(none.isEmpty)
+    }
+
+    func testUnknownOrBrokenCardsAreSkippedNotErrors() throws {
+        XCTAssertEqual(try card(#"{"kind":"poll","options":[1,2]}"#), .unknown(kind: "poll"))
+        XCTAssertEqual(try card(#"{"kind":"approve","title":"No answer"}"#), .unknown(kind: "approve"))
+        // A tool line with a card still decodes as a whole, and keeps the raw JSON when encoded again.
+        let ui = try JSONDecoder().decode(ClaudeUI.self, from: Data(#"{"card":{"kind":"plan","steps":[{"text":"A"}]},"approve":"ca_1"}"#.utf8))
+        XCTAssertEqual(ui.card?.card.kind, "plan")
+        XCTAssertEqual(ui.approve, "ca_1")
+        let again = try JSONDecoder().decode(ClaudeUI.self, from: JSONEncoder().encode(ui))
+        XCTAssertEqual(again, ui)
+    }
+
+    func testLiveCardEventAndUiCallStep() {
+        let e = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"card","threadId":"ct_1","messageId":"cm_2","card":{"kind":"plan","steps":[{"text":"A","done":true}]}}"#.utf8))
+        guard case .card("ct_1", "cm_2", let box)? = e else { return XCTFail("card event") }
+        XCTAssertEqual(box.card.progress?.done, 1)
+        let c = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"uiCall","call":{"id":"ui_1","kind":"act","args":{},"step":"Choosing Swap…"}}"#.utf8))
+        guard case .uiCall(let call)? = c else { return XCTFail("uiCall") }
+        XCTAssertEqual(call.step, "Choosing Swap…")
+    }
+
+    func testActivityStripReadsLikeTheReference() {
+        var a = ClaudeActivity()
+        XCTAssertFalse(a.isActive)
+        a.began(UiCall(id: "1", kind: "act", step: "Opening Swap…"))
+        a.began(UiCall(id: "2", kind: "act", step: "Setting outfit…"))
+        XCTAssertEqual(a.line, "Opening Swap… setting outfit…")
+        a.job(0.42)
+        XCTAssertEqual(a.percent, "42%")
+        a.ended("1"); a.ended("2")
+        XCTAssertTrue(a.isActive) // the job still runs
+        a.job(nil)
+        XCTAssertFalse(a.isActive)
+        XCTAssertEqual(a.line, "")
+        a.began(UiCall(id: "3", kind: "snapshot"))
+        XCTAssertEqual(a.line, "Working in the window…") // an older server: no step
+        a.stop()
+        XCTAssertFalse(a.isActive)
+    }
+
+    func testChipsFallbackFitsThePage() async throws {
+        XCTAssertEqual(ClaudeChip.fallback(page: "suite", tool: "remix").map(\.label), ["Watch my clip", "Write the prompt", "Check the price"])
+        XCTAssertEqual(ClaudeChip.fallback(page: "suite", tool: "shot").first?.label, "Write the prompt")
+        XCTAssertEqual(ClaudeChip.fallback(page: nil, tool: nil).count, 3)
+        XCTAssertEqual(ClaudeCardText.clock(3725), "1:02:05")
+    }
+}
+
+final class ClaudeCardsTranscriptTests: XCTestCase {
+    func testStoredCardLinesBecomeCardItemsInPlace() throws {
+        func msg(_ id: String, _ json: String, at: Double) throws -> ClaudeMessage {
+            try JSONDecoder().decode(ClaudeMessage.self, from: Data("""
+            {"id":"\(id)","threadId":"ct","role":"tool","source":"api","text":"","tool":{"id":"ui_1","name":"card","ok":true,"summary":"Plan","ui":{"card":\(json)}},"createdAt":\(at)}
+            """.utf8))
+        }
+        var tr = ClaudeTranscript(messages: [try msg("cm_1", #"{"kind":"plan","steps":[{"text":"A"},{"text":"B"}]}"#, at: 1)])
+        guard case .card(_, "cm_1", let c)? = tr.items.first else { return XCTFail("card item") }
+        XCTAssertEqual(c.progress?.done, 0)
+        // The same line again (show_plan ticked a step): replaced in place, not added.
+        tr.upsert(try msg("cm_1", #"{"kind":"plan","steps":[{"text":"A","done":true},{"text":"B"}]}"#, at: 1))
+        XCTAssertEqual(tr.items.count, 1)
+        guard case .card(_, _, let c2)? = tr.items.first else { return XCTFail("card item") }
+        XCTAssertEqual(c2.progress?.done, 1)
+        // An unknown card stays a plain tool chip.
+        tr.upsert(try msg("cm_2", #"{"kind":"poll"}"#, at: 2).withToolId("ui_2"))
+        guard case .tool? = tr.items.last else { return XCTFail("tool chip") }
+    }
+}
+
+private extension ClaudeMessage {
+    func withToolId(_ id: String) -> ClaudeMessage { var m = self; m.tool?.id = id; return m }
+}
+
+final class ClaudeOrbTests: XCTestCase {
+    func testStatesFollowRealEventsWithErrorFirst() {
+        var o = ClaudeOrb()
+        XCTAssertEqual(o.state(at: 0), .idle)
+        o.waiting(1)
+        XCTAssertEqual(o.state(at: 0), .waiting)
+        o.turnStarted()
+        XCTAssertEqual(o.state(at: 1), .thinking)
+        o.uiCallBegan("ui_1", at: 2)
+        XCTAssertEqual(o.state(at: 2), .operating)
+        o.uiCallEnded("ui_1", at: 3)
+        XCTAssertEqual(o.state(at: 3), .thinking)
+        o.turnEnded(ok: false, at: 4)
+        XCTAssertEqual(o.state(at: 5), .error)
+        XCTAssertEqual(o.state(at: 4 + ClaudeOrb.errorHold + 0.1), .waiting) // the error fades; the card still waits
+        o.waiting(0)
+        XCTAssertEqual(o.state(at: 20), .idle)
+        o.turnEnded(ok: false, at: 21)
+        o.turnStarted() // the person writes again: the error clears at once
+        XCTAssertEqual(o.state(at: 22), .thinking)
+        o.turnEnded(ok: true, at: 23)
+        o.job(running: true, at: 23)
+        XCTAssertEqual(o.state(at: 24), .thinking)
+        o.job(running: false, failed: true, at: 25)
+        XCTAssertEqual(o.state(at: 26), .error)
+        o.uiCallBegan("ui_2", at: 27); o.stopped()
+        XCTAssertEqual(o.state(at: 40), .idle)
+    }
+
+    func testPulsesFlashAndFadeEdgeFollowsOrb() {
+        var o = ClaudeOrb()
+        o.turnStarted()
+        o.chunk(at: 10)
+        XCTAssertEqual(o.pulses, 1)
+        XCTAssertEqual(o.pulse(at: 10), 1)
+        XCTAssertGreaterThan(o.pulse(at: 10.2), 0)
+        XCTAssertEqual(o.pulse(at: 10 + ClaudeOrb.flashDecay), 0)
+        XCTAssertGreaterThan(o.glow(at: 10), o.glow(at: 11))
+        XCTAssertGreaterThan(o.edge(at: 10), o.edge(at: 11)) // the edge moves with the orb
+        o.changeApplied(at: 12)
+        XCTAssertEqual(o.pulses, 2)
+    }
+
+    func testReduceMotionTypingAndFrameRate() {
+        var o = ClaudeOrb()
+        o.turnStarted(); o.chunk(at: 1)
+        let still = o.look(at: 1, reduceMotion: true)
+        XCTAssertEqual(still.swirl, 0); XCTAssertEqual(still.breath, 0); XCTAssertFalse(still.flashes)
+        XCTAssertEqual(o.pulse(at: 1, reduceMotion: true), 0)
+        XCTAssertFalse(o.animates(at: 1, reduceMotion: true))
+        XCTAssertEqual(o.frameRate(at: 1, reduceMotion: true), 0)
+        XCTAssertEqual(o.frameRate(at: 1), 30)
+        o.turnEnded(ok: true, at: 2)
+        XCTAssertEqual(o.frameRate(at: 50), 12) // idle breathes slowly, at a low rate
+        o.typing = true
+        XCTAssertLessThanOrEqual(o.look(at: 50).edge, 0.15)
+        XCTAssertTrue(ClaudeOrb.look(.error).danger)
+        XCTAssertFalse(ClaudeOrb.look(.waiting).flashes)
+        for s in ClaudeOrbState.allCases { XCTAssertLessThanOrEqual(ClaudeOrb.look(s).edge, 0.5) } // subtle, always
+    }
+}
+
+final class ClaudeOrbLiquidTests: XCTestCase {
+    func testBlobsDriftWithoutLoopingAndStayInTheGlass() {
+        let look = ClaudeOrb.look(.thinking)
+        var seen: [Double] = []
+        var phase = 0.0
+        for k in 0..<600 {
+            phase = ClaudeOrbLiquid.advance(phase, by: 1.0 / 30, look: look)
+            let b = ClaudeOrbLiquid.blobs(phase: phase, time: Double(k) / 30, look: look, pulse: 0)
+            XCTAssertEqual(b.count, 4)
+            for x in b { XCTAssertLessThanOrEqual(abs(x.x), 0.61); XCTAssertLessThanOrEqual(abs(x.y), 0.61); XCTAssertGreaterThan(x.radius, 0.4) }
+            seen.append(b[0].x)
+        }
+        // Moves smoothly (no jumps between frames) and does not come back to the same path (no loop).
+        for (a, b) in zip(seen, seen.dropFirst()) { XCTAssertLessThan(abs(a - b), 0.05) }
+        XCTAssertNotEqual(Array(seen[0..<60]), Array(seen[300..<360]))
+    }
+
+    func testStatesChangeTheLiquid() {
+        let quiet = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 0)
+        let chunk = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 1)
+        for (a, b) in zip(quiet, chunk) { XCTAssertGreaterThan(b.radius, a.radius) } // a streamed chunk swells them
+        let err = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.error), pulse: 0)
+        XCTAssertTrue(err.allSatisfy { $0.r > $0.b }) // red and orange
+        XCTAssertGreaterThan(ClaudeOrb.look(.thinking).swirl, ClaudeOrb.look(.idle).swirl)
+        XCTAssertLessThan(ClaudeOrb.look(.error).swirl, ClaudeOrb.look(.idle).swirl) // error slows down
+        // Operating: the blobs stream one way across the glass as time moves.
+        let a = ClaudeOrbLiquid.blobs(phase: 1, time: 0.2, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
+        let b = ClaudeOrbLiquid.blobs(phase: 1, time: 1.0, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
+        XCTAssertGreaterThan(b, a)
+        XCTAssertEqual(ClaudeOrbLiquid.advance(5, by: 1, look: ClaudeOrb.look(.idle)), 5 + 0.25 * 0.12, accuracy: 1e-9) // a stall never jumps
+    }
+}

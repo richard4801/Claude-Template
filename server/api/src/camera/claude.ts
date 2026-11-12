@@ -1,6 +1,7 @@
 // Claude chat threads on the owner's Claude plan (plans/api.md "Claude on the owner's plan"). The owner's Mac runs Claude
 // Code and mirrors each turn here; the phone's messages become turns the Mac claims and answers (the Blender relay's
 // queue/claim pattern). The server never runs Claude itself, except the opt-in API-key fallback (camera threads).
+import { appTool } from '../claude/cardView.js';
 import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -93,7 +94,7 @@ export class ClaudeService {
     contextKey: t.contextKey ?? undefined, title: t.title ?? undefined, // WS18: the chat's list and name
     createdAt: t.createdAt, updatedAt: t.updatedAt, model: t.model ?? undefined, brief: (b => (b && t.model ? { ...b, model: t.model } : b))(threadBrief(t.contextKind, t.contextKind === 'chat' ? t.id : t.contextId)) });
   private async messageView(m: MessageRow) {
-    return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ?? undefined,
+    return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ? appTool(m.tool) : undefined,
       image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, attachments: await attachmentViews(this.ctx, m.attachments), createdAt: m.createdAt });
   }
   turnView = async (t: TurnRow) => compact({ id: t.id, threadId: t.threadId, text: t.text, from: t.from, state: t.state, error: t.error ?? undefined,

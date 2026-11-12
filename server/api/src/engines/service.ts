@@ -127,7 +127,8 @@ export class ModelChoice {
     // The studio's custom video models, freshly loaded (an added, renamed or switched-on model shows straight away).
     await suite.byo.ensure(studioId).catch(() => {});
     const p = await suite.prefs(studioId);
-    const avail = suite.mode === 'off' ? new Set() : suite.available();
+    // Every model is listed (owner 2026-11-12): a provider that refused recently stays (Auto skips it, not the picker).
+    const avail = suite.mode === 'off' ? new Set() : suite.configured();
     const ladderRes = (id: string) => { for (const t of ['draft', 'standard', 'hd', 'cinema'] as const) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
     const out = new Map<string, Engine>();
     for (const m of [...MODELS, ...customModelsOf(studioId)]) {

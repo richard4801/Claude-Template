@@ -240,7 +240,12 @@ final class ClaudeCodeService: ObservableObject {
             case .result(let r):
                 resultArrived(r)
             case .uiCall(let c):
+                activity.began(c) // the Claude panel's activity strip
+                orb.uiCallBegan(c.id, at: Self.now)
                 Task { await handleUiCall(c) }
+            case .uiCallEnd(let id):
+                activity.ended(id)
+                orb.uiCallEnded(id, at: Self.now)
             case .turn(let t):
                 await relay.offer([t])
             case .stop(let id):
@@ -512,6 +517,51 @@ final class ClaudeCodeService: ObservableObject {
 
     var uiControlOn: Bool { fileSettings.uiOn }
 
+    /// What Claude is doing in the window now (the Claude panel's strip: "Opening Swap… setting outfit…").
+    @Published private(set) var activity = ClaudeActivity()
+
+    /// "Esc to stop" pressed on the strip: the same as Esc on the window.
+    func stopUiFromPanel() {
+        ClaudeUiOverlay.shared.stopFromPanel()
+        activity.stop()
+        orb.stopped()
+    }
+
+    // MARK: Claude's orb (one state machine, MuseCore ClaudeOrb): fed by real events only
+
+    @Published private(set) var orb = ClaudeOrb()
+    static var now: Double { Date().timeIntervalSinceReferenceDate }
+
+    /// The open chat's stream (this Mac's own turns and other devices' turns).
+    func orbEvent(_ e: ClaudeEvent) {
+        let now = Self.now
+        switch e {
+        case .user: orb.turnStarted()
+        case .text, .assistant, .tool, .image: orb.chunk(at: now)
+        case .done(let ok, _, _):
+            orb.turnEnded(ok: ok, at: now)
+            if !ok { orbErrorEnds() }
+        }
+    }
+    func orbTurnStarted() { orb.turnStarted() }
+    /// A change landed in the chat (What I changed, an applied edit): a flash.
+    func orbChange() { orb.changeApplied(at: Self.now) }
+    /// Approve cards, file questions and Claude's questions still waiting for the person.
+    func orbWaiting(_ n: Int) { if orb.waitingCount != n { orb.waiting(n) } }
+    func orbJob(running: Bool, failed: Bool) {
+        guard orb.jobRunning != running || failed else { return }
+        orb.job(running: running, failed: failed, at: Self.now)
+        if failed { orbErrorEnds() }
+    }
+    func orbTyping(_ on: Bool) { if orb.typing != on { orb.typing = on } }
+    /// The error tint ends on its own after its hold: redraw then (the orb's timeline is paused while it is still).
+    private func orbErrorEnds() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64((ClaudeOrb.errorHold + 0.1) * 1_000_000_000))
+            self?.objectWillChange.send()
+        }
+    }
+
     /// Settings → Claude: "Let Claude operate MUSE's screen" (per person, on by default).
     func setUiControl(_ on: Bool) {
         fileSettings.uiControl = on
@@ -535,6 +585,9 @@ final class ClaudeCodeService: ObservableObject {
             answer = UiAnswer(error: UiError(.failed, "MUSE couldn't do that: \(error.localizedDescription)"))
         }
         try? await api.answerUiCall(c.id, answer)
+        activity.ended(c.id)
+        orb.uiCallEnded(c.id, ok: answer.error == nil, at: Self.now)
+        if answer.error != nil { orbErrorEnds() }
     }
 
     private func runUi(_ c: UiCall) async throws -> UiAnswer {

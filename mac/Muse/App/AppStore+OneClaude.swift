@@ -31,6 +31,18 @@ final class OneClaudeState {
     var suggestion: ClaudeUI?
     /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
     var approvals: [ClaudeUI] = []
+    /// Cards (ChatCards.swift): Approve cards answered here ("Approved, rendering"), answers and Undos in flight.
+    var answeredCards: [String: String] = [:]
+    var answering: Set<String> = []
+    var undoing: Set<String> = []
+    /// The quick-action chips over the composer, for the page Claude sees.
+    var chips: [ClaudeChip] = ClaudeChip.fallback(page: nil, tool: nil)
+    /// A job started from a card (its progress fills the activity strip until it ends).
+    var watchJob: String?
+    /// The server puts cards in the chat (it answered GET v1/claude/chips): its Approve cards replace the strip's.
+    var serverCards = false
+    /// Approve cards in the chat still waiting for the person (by message id or action id): the orb shows "waiting".
+    var waitingCards: Set<String> = []
     var memory: ClaudeMemory?
     var memoryError: String?
     /// Step 6b: the models and this person's default.
@@ -188,6 +200,7 @@ extension AppStore {
             guard let self, !Task.isCancelled else { return }
             await self.oneClaudeLinkSuite()
             let p = self.claudePage
+            if p.name != self.oneClaude.lastSentPage?.name || p.tool != self.oneClaude.lastSentPage?.tool { await self.loadClaudeChips() }
             guard p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat else { return }
             try? await api.setChatPage(id, page: p)
             self.oneClaude.lastSentPage = p
@@ -236,10 +249,15 @@ extension AppStore {
             oneClaude.suggestion = nil
         case "memory_suggest":
             oneClaude.suggestion = ui
+        case "card":
+            if case .approve(_, _, _, _, let target, _, _)? = ui.card?.card { oneClaude.waitingCards.insert(Self.cardKey(target)) }
         case "approve":
-            if let id = ui.approve, !oneClaude.approvals.contains(where: { $0.approve == id }) { oneClaude.approvals.append(ui) }
+            if let box = ui.card, case .approve(_, _, _, _, let target, _, _) = box.card { oneClaude.waitingCards.insert(Self.cardKey(target)) }
+            // A newer server sends the Approve card in the chat itself (ui.card): no second card here.
+            if ui.card == nil, let id = ui.approve, !oneClaude.approvals.contains(where: { $0.approve == id }) { oneClaude.approvals.append(ui) }
         case "approve_result":
             oneClaude.approvals.removeAll { $0.approve == ui.action }
+            if let a = ui.action { oneClaude.waitingCards.remove(Self.cardKey(.action(a))) }
         default:
             break
         }
@@ -302,9 +320,88 @@ extension AppStore {
     func loadClaudeApprovals(_ chatId: String) async {
         guard let api = oneClaudeAPI, let list = try? await api.waitingActions() else { return }
         guard oneClaude.chatId == chatId else { return }
-        oneClaude.approvals = list.filter { $0.chatId == chatId }.map {
+        // Actions of this chat show as Approve cards in the chat itself (claude/cards.ts); only those without a chat stay here.
+        oneClaude.approvals = list.filter { $0.chatId == chatId && !oneClaude.serverCards }.map {
             ClaudeUI(label: $0.label, approve: $0.id, gate: $0.gate, summary: $0.summary, priceUsd: $0.priceUsd)
         }
+    }
+
+    // MARK: Cards in the chat (plan, clip, what changed, approve)
+
+    /// Undo one row of "What I changed": the server puts back only that part, as it is now, and the card shows "Undone".
+    func undoClaudeCardRow(messageId: String, row: Int, label: String) async {
+        guard let api = oneClaudeAPI else { return }
+        let key = "\(messageId)#\(row)"
+        oneClaude.undoing.insert(key)
+        defer { oneClaude.undoing.remove(key) }
+        do {
+            _ = try await api.undoCardRow(messageId: messageId, row: row)
+            showToast("\(label) put back")
+        } catch {
+            showToast("Couldn't undo \(label.lowercased()). \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
+    }
+
+    /// Approve or Decline on an Approve card in the chat: a gated action, or the Suite's waiting shot.
+    func answerClaudeCard(messageId: String, target: ClaudeApproveTarget, approve: Bool) async {
+        guard !oneClaude.answering.contains(messageId) else { return }
+        oneClaude.answering.insert(messageId)
+        defer { oneClaude.answering.remove(messageId); oneClaude.waitingCards.remove(Self.cardKey(target)) }
+        do {
+            switch target {
+            case .action(let id):
+                guard let api = oneClaudeAPI else { return }
+                oneClaude.approvals.removeAll { $0.approve == id }
+                let r = try await api.answerAction(id, approve: approve)
+                oneClaude.answeredCards[messageId] = r.status == "failed" ? "Didn't work: \(r.error ?? "try again from its screen")" : approve ? "Approved" : "Declined"
+            case .suite(let assistId, let pendingId):
+                guard let api = suiteAssistAPI else { return }
+                let r = try await api.answerSuitePending(assistId: assistId, pendingId: pendingId, approve: approve)
+                if approve, let jid = r.jobId {
+                    if let s = try? await self.api.suiteShot(id: jid) { upsert(s.job) }
+                    suite.shotJobIds.append(jid)
+                    oneClaude.watchJob = jid
+                    if let b = try? await self.api.balance() { balance = b }
+                    oneClaude.answeredCards[messageId] = "Approved, rendering"
+                } else {
+                    oneClaude.answeredCards[messageId] = approve ? "Approved" : "Declined"
+                }
+                if suite.claude.ask?.id == pendingId { suite.claude.ask = nil }
+            }
+        } catch let e as ApiError where e.code == "price_changed" || e.code == "not_found" || e.code == "already_answered" || e.code == "expired" {
+            oneClaude.answeredCards[messageId] = e.code == "price_changed" ? e.message : "Already answered"
+        } catch {
+            showToast("Couldn't answer that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
+    }
+
+    static func cardKey(_ t: ClaudeApproveTarget) -> String {
+        switch t { case .action(let id): id; case .suite(_, let p): p }
+    }
+
+    /// What waits for the person now (Approve cards, Open?, Remember?, file questions): the orb's "waiting".
+    var claudeWaitingCount: Int {
+        oneClaude.approvals.count + oneClaude.waitingCards.count + (oneClaude.askOpen != nil ? 1 : 0) + (oneClaude.suggestion != nil ? 1 : 0)
+            + ClaudeCodeService.shared.fileAsks.count
+    }
+
+    /// The watched job's progress for the activity strip (0…1), nil when none runs.
+    var claudeJobProgress: Double? {
+        guard let id = oneClaude.watchJob, let j = jobs.first(where: { $0.id == id }) else { return nil }
+        if j.isDone || j.isFailed { return nil }
+        return min(1, max(0, j.progress > 1 ? j.progress / 100 : j.progress))
+    }
+
+    /// The chips for the page Claude sees (the server's list; this app's copy when it is older or offline).
+    func loadClaudeChips() async {
+        let p = claudePage
+        var list = ClaudeChip.fallback(page: p.name, tool: p.tool)
+        if let api = oneClaudeAPI {
+            do { list = try await api.claudeChips(page: p.name, tool: p.tool); oneClaude.serverCards = true }
+            catch let e as ApiError where e.code == "not_found" { oneClaude.serverCards = false }
+            catch {}
+        }
+        if oneClaude.chips != list { oneClaude.chips = list }
     }
 
     /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.

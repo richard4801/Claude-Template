@@ -273,3 +273,15 @@ arrow-down
 paperclip
 square
 check-square
+# Take viewer (plans/swap-viewer-design.md): the platform previews' generic buttons and the viewer's own
+heart
+chat-circle-dots
+bookmark-simple
+share-fat
+paper-plane-tilt
+thumbs-up
+thumbs-down
+dots-three-vertical
+plus-square
+laptop
+check

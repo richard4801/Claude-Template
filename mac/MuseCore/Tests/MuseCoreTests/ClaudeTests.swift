@@ -192,6 +192,7 @@ final class ClaudeTests: XCTestCase {
             case .assistant(_, let text, let s): return "assistant:\(text)\(s ? "…" : "")"
             case .tool(_, let name, let summary, let st): return "tool:\(name):\(summary):\(st.rawValue)"
             case .image(_, let url): return "image:\(url.prefix(21))"
+            case .card(_, _, let c): return "card:\(c.kind)"
             }
         }
         XCTAssertEqual(kinds, [

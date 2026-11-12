@@ -124,19 +124,25 @@ struct SuiteResultPane: View {
     var takeId: String?
     var emptyTitle = "Your shot\nappears here"
     var emptyLine = "Pick a character, describe the moment, press Generate."
-    @State private var muted = true
     /// WS19: the result shown when the job made several (Photo × 4, takes): ← → / the dots move through them.
     @State private var page = 0
 
     var body: some View {
         let state = SuiteResultState.of(job)
-        Color.clear
-            .aspectRatio(9.0 / 16.0, contentMode: .fit)
-            .overlay(content(state))
-            .clipped()
-            .animation(.easeOut(duration: 0.6), value: state)
-            .accessibilityElement(children: .contain)
-            .onChange(of: job?.id) { page = 0 }
+        Group {
+            if case .ready = state {
+                // A finished take: the one take viewer, at the take's own shape (no 9:16 box around a landscape take).
+                ready
+            } else {
+                Color.clear
+                    .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                    .overlay(content(state))
+                    .clipped()
+            }
+        }
+        .animation(.easeOut(duration: 0.6), value: state)
+        .accessibilityElement(children: .contain)
+        .onChange(of: job?.id) { page = 0 }
     }
 
     @ViewBuilder private func content(_ state: SuiteResultState) -> some View {
@@ -208,96 +214,38 @@ struct SuiteResultPane: View {
         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage busy") } }
     }
 
+    /// The finished take(s) in the take viewer (plans/swap-viewer-design.md §B): its shape, the keys, the preview menu and
+    /// its actions. Several results (Photo × 4, takes): "2 of 4" with ‹ › above it, and ↑ ↓ in the viewer.
     @ViewBuilder private var ready: some View {
         let list = store.takes(of: job)
         let start = list.firstIndex { $0.id == takeId } ?? 0
         let at = list.isEmpty ? 0 : (start + page) % list.count
         let take = list.isEmpty ? nil : list[at]
-        VStack(spacing: 0) {
-            ZStack {
-                if let v = take?.videoUrl, let url = URL(string: v) {
-                    StageVideo(url: url, poster: take?.thumb, muted: muted).id(take?.id)
-                } else {
-                    MuseImage(ref: take?.thumb ?? job?.thumb ?? art).id(take?.id)
+        VStack(spacing: Space.s2) {
+            if list.count > 1 {
+                HStack(spacing: Space.s2) {
+                    Text("\(at + 1) of \(list.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                    Spacer(minLength: 0)
+                    SuiteIconButton(systemName: "caret-left", label: "Previous result") { step(-1, count: list.count) }
+                    SuiteIconButton(systemName: "caret-right", label: "Next result") { step(1, count: list.count) }
                 }
-            }
-            .overlay { if list.count > 1 { carousel(count: list.count, at: at, start: start) } }
-            .focusable(list.count > 1)
-            .focusEffectDisabled()
-            .onKeyPress(.leftArrow) { guard list.count > 1 else { return .ignored }; step(-1, count: list.count); return .handled }
-            .onKeyPress(.rightArrow) { guard list.count > 1 else { return .ignored }; step(1, count: list.count); return .handled }
-            .overlay(alignment: .topLeading) { SuiteTag(text: "Ready", color: t.goodInk, filled: true).padding(8) }
-            .overlay(alignment: .topTrailing) {
-                if take?.videoUrl != nil {
-                    Button { muted.toggle() } label: {
-                        Ph(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", 11).foregroundStyle(.white)
-                            .frame(width: 26, height: 26).background(Circle().fill(.black.opacity(0.5)))
-                    }
-                    .buttonStyle(.plain).padding(6)
-                    .accessibilityLabel(muted ? "Unmute" : "Mute")
-                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Result \(at + 1) of \(list.count)")
             }
             if let take {
-                HStack(spacing: 6) {
-                    MButton(take.isFinal ? "Kept" : "Keep", icon: "checkmark", size: .small, off: take.isFinal) { store.approve(take) }
-                    if let j = job { MButton("Retake", icon: "arrow.clockwise", size: .small) { store.retakeShot(j) } }
-                    MButton("Edit", icon: "scissors", size: .small) { store.openEdit(takeId: take.id) }
-                    MButton("Share", icon: "square.and.arrow.up", size: .small) { store.openPostSheet(take) }
-                }
-                .padding(.top, 8)
-                // Finish the take: a longer version (Extend) or a sharper one (Upscale).
-                let canExtend = ExtendSource.take(take) != nil
-                if canExtend || take.canUpscale {
-                    HStack(spacing: 6) {
-                        if canExtend { MButton("Extend", icon: "arrow.right.to.line", size: .small) { store.openExtend(take) } }
-                        if take.canUpscale { UpscaleButton(take: take, size: .small) }
-                    }
-                    .padding(.top, 6)
-                }
+                TakeViewer(media: ViewerMedia(take: take), context: .suite, take: take, job: job, compact: true, startMuted: true,
+                           onStep: list.count > 1 ? { step($0, count: list.count) } : nil)
+                    .id(take.id)
+            } else {
+                MuseImage(ref: job?.thumb ?? art).aspectRatio(9.0 / 16.0, contentMode: .fit)
             }
         }
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage ready") } }
+        .background { if SnapshotRunner.probing && list.count > 1 { ComposerBarFrame(key: "stage carousel \(at + 1)/\(list.count)") } }
     }
 
     private func step(_ d: Int, count: Int) { page = ((page + d) % count + count) % count }
 
-    /// Previous / next and one dot per result, over the picture.
-    private func carousel(count: Int, at: Int, start: Int) -> some View {
-        ZStack {
-            HStack {
-                arrow("chevron.left", "Previous") { step(-1, count: count) }
-                Spacer()
-                arrow("chevron.right", "Next") { step(1, count: count) }
-            }
-            .padding(.horizontal, 8)
-            VStack {
-                Spacer()
-                HStack(spacing: 6) {
-                    ForEach(0..<count, id: \.self) { i in
-                        Button { page = ((i - start) % count + count) % count } label: {
-                            Circle().fill(i == at ? Color.white : Color.white.opacity(0.45)).frame(width: 7, height: 7).padding(3).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Result \(i + 1) of \(count)")
-                    }
-                }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(Color.black.opacity(0.35)))
-                .padding(.bottom, 10)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Result \(at + 1) of \(count)")
-        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage carousel \(at + 1)/\(count)") } }
-    }
-
-    private func arrow(_ icon: String, _ label: String, _ run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            Ph(icon, 13).foregroundStyle(.white).frame(width: 30, height: 30).background(Circle().fill(Color.black.opacity(0.45))).contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .help(label)
-    }
 
     private func failed(_ message: String) -> some View {
         let tier = job?.request.quality ?? "draft"
@@ -382,5 +330,29 @@ struct SuiteConnectionsRow: View {
                 }
                 .frame(minWidth: 720, minHeight: 520)
             }
+    }
+}
+
+/// A small take action: icon + label, or icon only with the label as tooltip when space is short.
+struct TakeActionButton: View {
+    var title: String
+    var icon: String
+    var iconOnly: Bool
+    var off = false
+    var action: () -> Void
+
+    var body: some View {
+        if iconOnly {
+            Button(action: action) {
+                Image(systemName: icon).font(.system(size: 12, weight: .semibold)).frame(minWidth: 14)
+            }
+            .buttonStyle(MuseButtonStyle(kind: .secondary, size: .small, off: off, fill: false))
+            .help(title)
+            .accessibilityLabel(title)
+        } else {
+            MButton(title, icon: icon, size: .small, off: off, action: action)
+                .lineLimit(1)
+                .help(title)
+        }
     }
 }

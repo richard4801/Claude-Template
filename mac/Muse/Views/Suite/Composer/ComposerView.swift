@@ -76,7 +76,7 @@ struct ComposerView: View {
             ComposerPickerHost()
             // Compare in the feed: two takes side by side over the composer.
             let comparing = store.suiteComparing
-            if comparing.count == 2 { ComposerCompare(takes: comparing) }
+            if comparing.count == 2 { ComposerCompare(takes: comparing).id(comparing.map(\.id)) } // new takes: new players
             // The title's mode menu (owner decision 2026-11-08: a plain grouped list, no presets; they stay in the strip).
             if s.browserOpen { SuiteModeMenu() }
             // Review only: the big tool and preset browser it replaced, for the before shot.
@@ -99,6 +99,7 @@ struct ComposerView: View {
             }
         }
         .onAppear { presetsOpen = draftIsEmpty }
+        .task(id: s.composer.tool) { try? await Task.sleep(nanoseconds: 400_000_000); await store.shareSuiteDraft() } // Claude (in the app or over MCP) can always reach this composer
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; pinnedTake = nil; store.suiteClaudeToolChanged() }
         .onChange(of: s.generating) { _, on in if on { pinnedTake = nil } } // a new take goes on the stage
         // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.
@@ -170,43 +171,49 @@ struct ComposerView: View {
                     PresetsRow()
                 }
             }
-            HStack(alignment: .top, spacing: Space.s4) {
-                // The results feed takes the picture's place beside the rail (header "Takes"); so does Claude's panel,
-                // which keeps the rows it fills in view.
-                if store.suite.claude.open && store.isOwner {
-                    SuiteClaudePanel()
-                } else if store.suite.feedOpen {
-                    ComposerFeed()
-                } else {
-                    ComposerStage(pinned: $pinnedTake, maxPictureHeight: (height * composerPictureShare).rounded())
-                }
-                // New Swap (beta): its panel always has the column (its toggles have no strip form).
-                if !strip || store.isNewSwap {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        Group {
-                            if store.isNewSwap { NewSwapPanel() } else { ComposerRail(narrow: narrow) }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            if store.isNewSwap {
+                // New Swap's own screen (plans/swap-viewer-design.md §A): the video and its trimmer, the changes, and a
+                // bottom bar with the model, the price and Generate. No prompt box.
+                NewSwapScreen(narrow: narrow)
+                    .frame(minHeight: 0, maxHeight: .infinity)
+            } else {
+                HStack(alignment: .top, spacing: Space.s4) {
+                    // The results feed takes the picture's place beside the rail (header "Takes"); so does Claude's panel,
+                    // which keeps the rows it fills in view.
+                    if store.suite.claude.open && store.isOwner {
+                        SuiteClaudePanel()
+                    } else if store.suite.feedOpen {
+                        ComposerFeed()
+                    } else {
+                        ComposerStage(pinned: $pinnedTake, maxPictureHeight: (height * composerPictureShare).rounded())
                     }
-                    .frame(width: narrow ? 264 : 280)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    if !strip {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            Group {
+                                ComposerRail(narrow: narrow)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(width: narrow ? 264 : 280)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                    }
                 }
-            }
-            .frame(minHeight: 0, maxHeight: .infinity)
-            .zIndex(0)
-            // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
-            // full height; the row above takes what is left.
-            if strip && !store.isNewSwap {
-                ComposerSetupStrip()
+                .frame(minHeight: 0, maxHeight: .infinity)
+                .zIndex(0)
+                // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
+                // full height; the row above takes what is left.
+                if strip {
+                    ComposerSetupStrip()
+                        .layoutPriority(1)
+                        .zIndex(1)
+                }
+                // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
+                ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
+                    .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
                     .zIndex(1)
+                    .accessibilityIdentifier("composer.promptBar")
             }
-            // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
-            ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
-                .fixedSize(horizontal: false, vertical: true)
-                .layoutPriority(1)
-                .zIndex(1)
-                .accessibilityIdentifier("composer.promptBar")
         }
         .padding(.horizontal, Space.s5)
         .padding(.top, Space.s4)
@@ -344,6 +351,10 @@ struct ComposerMediaPane: View {
                 .clipShape(shape)
             } else if idle {
                 emptyCanvas
+            } else if case .ready = SuiteResultState.of(current) {
+                // A finished take: the take viewer on the page's own tone, the take at its shape (no box around it).
+                SuiteResultPane(job: current, art: art, character: store.composerCharacter)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ZStack {
                     shape.fill(t.roles.field)

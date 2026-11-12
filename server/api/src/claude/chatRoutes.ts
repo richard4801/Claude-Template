@@ -3,6 +3,7 @@
 // sees a member's, a member never sees the owner's). Old per-place chats (Suite, Edit, Recreate, Camera) are listed
 // here too, each starting on the page it belonged to. The owner's Mac still runs her turns on Claude Code through the
 // thread routes (camera/claudeRoutes.ts); members (and the owner when her Mac is away) use the in-app turn below.
+import { appTool } from './cardView.js';
 import { and, desc, eq, ilike, isNull, isNotNull, lt, ne, sql, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -197,6 +198,7 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     req.raw.on('close', () => { open = false; });
     const write = (e: unknown) => { if (open) res.write(`data: ${JSON.stringify(e)}\n\n`); };
     let uiQueue = Promise.resolve();
+    const sentCards = new Set<string>(), startedAt = Date.now();
     const send = (e: ChatEvent) => {
       if (e.type === 'text') text += e.delta;
       if (e.type === 'tool') text = '';
@@ -208,6 +210,18 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
           const [m] = await ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, t.id), eq(claudeMessages.role, 'tool')))
             .orderBy(desc(claudeMessages.createdAt)).limit(1);
           if (m?.tool?.ui && m.tool.name === ev.name) write({ type: 'ui', name: m.tool.name, ui: m.tool.ui });
+        }).catch(() => undefined);
+      } else if (ev.type === 'tool' && ev.status === 'done') {
+        // Cards (claude/cards.ts) any tool put up during this step: plan, clip, what changed, approve. Each once.
+        uiQueue = uiQueue.then(async () => {
+          const rows = await ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, t.id), eq(claudeMessages.role, 'tool')))
+            .orderBy(desc(claudeMessages.createdAt)).limit(4);
+          for (const m of rows.reverse()) {
+            if (m.tool?.name !== 'card' && m.tool?.name !== 'approve') continue;
+            if (sentCards.has(m.id) || m.createdAt < startedAt) continue;
+            sentCards.add(m.id);
+            write({ type: 'ui', name: m.tool.name, messageId: m.id, ui: appTool(m.tool).ui });
+          }
         }).catch(() => undefined);
       }
     };
