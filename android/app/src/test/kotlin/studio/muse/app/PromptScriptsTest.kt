@@ -239,7 +239,8 @@ class PromptScriptsTest {
         assertEquals("rule.1", ScriptText.newId(photo.rules))
         // Move within a place: other places keep their order.
         val moved = ScriptText.move(v.rules, "summary", -1)
-        assertEquals(listOf("subjects", "summary", "summary.silent"), moved.take(3).map { it.id })
+        assertEquals(listOf("summary.describe.silent", "summary.describe", "summary", "summary.silent"), moved.filter { it.target == "summary" }.map { it.id })
+        assertEquals(v.rules.filter { it.target != "summary" }, moved.filter { it.target != "summary" })
         assertEquals(v.rules, ScriptText.move(v.rules, "subjects", -1))
     }
 

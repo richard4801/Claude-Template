@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.update
@@ -74,7 +75,7 @@ class PromptScriptsScreenshotTest(private val theme: String, private val screen:
         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
         if (screen == "rule") {
-            compose.onNodeWithText("Not speaking: no lip-sync").performClick()
+            compose.onNodeWithText("Not speaking: no lip-sync").performScrollTo().performClick()
             repeat(3) { idle(); compose.mainClock.advanceTimeBy(400) }
             compose.onNodeWithText("Reads as", substring = true, ignoreCase = true).assertExists()
         }
