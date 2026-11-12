@@ -46,3 +46,67 @@ Mockups: `plans/design/edit-platform-preview/*.png`. To regenerate them, run
 - the `viewer.prefs` storage.
 
 It stays a clean player: the media at its own shape, the keys and readout, and the action rail or row. `ViewerPrefs` and the phone and laptop frame maths are removed from MuseCore. `PreviewSkin`, `SafeZone` and `PreviewLayouts` stay, now used by Edit.
+
+## Build (2026-11-12)
+
+### Server (branch `claude/edit-platform-preview`, not prod)
+- `src/editor/safeArea.ts`:
+  - the box per view;
+  - the caption and text estimate;
+  - `previewView` for get_edit;
+  - `newSafeIssues` for apply_edit_ops.
+- `src/suite/previewLayouts.ts` adds `landscape` (YouTube, Facebook).
+- `src/editor/sessions.ts`: presence keeps `preview`. Its `preview(id)` gives the freshest presence that sent one, and `applyClaude` adds `safeAreaWarnings`.
+- `src/editor/mcpTools.ts`: get_edit returns `preview`, and both tool descriptions tell Claude to warn in one plain line.
+- Tests:
+  - `test/edit-safe-area.test.ts` is new;
+  - `test/preview-layouts.test.ts` now checks `landscape`;
+  - `test/editor-sessions.test.ts` checks that get_edit sees the view from presence.
+- The change is additive. An older app sends no `preview`, and get_edit then says no app has reported its view.
+
+### Mac (`plans/patches/edit-platform-preview-mac.patch`)
+Apply it **on top of** `plans/patches/swap-viewer-fix-mac.patch` (branch `claude/swap-viewer-fix` @27fce1e5, in mac-bundle-8), which is on prod 31fe6868. It keeps that patch's fixes: the fixed-height action row, the More and Upscale popovers, the `.layoutPriority`/`.clipped()` layout, and the `stage_take` and `viewer_clean` states. It removes that patch's `ViewerPreviewButton`, the `skinPicker`/`frameToggle`/`zonesToggle` helpers, the `viewer_tiktok` state and the `viewerPrefs` helper.
+
+**MuseCore**
+- `Edit/EditPlatformPreview.swift`:
+  - `EditPreview` (the view and the switch);
+  - `EditSafeBox` (the box per view: every app's box in Clean, title-safe on 16:9);
+  - `EditSafeCheck` (the issues, the warning line, and "Move into the safe area");
+  - `EditPreviewPrefs` (per project, plus the device's last choice; up to 200 projects).
+- `EditSuiteState`: `preview` replaces `safeArea` (the old enum `EditSuite.SafeArea` is gone).
+- `TakeViewerCore`:
+  - `ViewerPrefs` and the phone and laptop frame maths are removed;
+  - `PreviewLayouts` gains `landscape` and `landscapeZone`.
+- `EditPresence` carries `preview`.
+- Tests: `EditPlatformPreviewTests` (5); `TakeViewerTests` is updated. **MuseCore on Linux (Swift 6.0.3): 909 tests, 0 failures.**
+
+**App**
+- `Views/Edit/EditPlatformChrome.swift`:
+  - `PhoneChrome`, moved from the viewer's `PhoneSkin`;
+  - `LandscapeChrome` (YouTube and Facebook in-player chrome);
+  - `EditSafeBoxGuide` (the red dashed box).
+- `Views/Edit/EditSuitePreview.swift`: the View picker, the Safe area switch, the chrome and the box, and the warning line with "Move into the safe area". The Captions page's preview uses the same box.
+- `App/Edit/EditSuitePlatformPreview.swift`:
+  - `setPreview` remembers the choice in UserDefaults (`edit.preview`) and pings presence at once;
+  - the layouts come from the server;
+  - the issues and `moveIntoSafeArea()` (one undoable change, labelled "Moved into the safe area").
+- `EditSuiteLive`: the 30 s presence ping carries the view.
+- `Views/Viewer/TakeViewer.swift` keeps only the clean player. These are removed:
+  - the preview bar and menu;
+  - the skins;
+  - the phone and laptop frames;
+  - the safe zones;
+  - the `viewer.prefs` storage.
+- `NewSwapScreen` drops `previewControls:`.
+- **Snapshot states** (`SnapshotRunner.editLayoutShots`, 1440 × 900):
+  - `mac_editpreview_b_tiktok.png` and `mac_editpreview_b_clean.png` (dark);
+  - `mac_editpreview_a_tiktok.png` and `mac_editpreview_a_clean.png` (light);
+  - FITS/CUT lines go to `fit-check.txt`. Review mode always starts in Clean and never saves the choice.
+- Checks:
+  - every changed app file passes `swiftc -parse`;
+  - SwiftUI can't be type-checked on Linux, so the Mac CI is the first full build;
+  - the patch applies cleanly on prod `31fe6868` with `swap-viewer-fix-mac.patch` applied.
+- **Watch on CI:** at 1000 × 700 the five-way View control plus the switch may not fit in the viewer bar. That size only gives INFO lines, not CUT lines.
+
+### Not done here
+- Android (after the Mac): the same view picker, chrome and box in Compose. The rules are in MuseCore `EditPlatformPreview.swift` and the server's `safeArea.ts`.
