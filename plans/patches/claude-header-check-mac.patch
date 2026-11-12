@@ -1,0 +1,44 @@
+diff --git a/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift b/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift
+index 3dcfe62..46f3216 100644
+--- a/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift
++++ b/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift
+@@ -183,8 +183,10 @@ extension SnapshotRunner {
+         store.oneClaude.open = true
+         _ = await until(5) { SnapshotRunner.state.composerFrames["claude model line"] != nil }
+         if let h = SnapshotRunner.state.composerFrames["claude header"], let ml = SnapshotRunner.state.composerFrames["claude model line"] {
+-            line(h.width <= OneClaudePanel.width + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
+-                 "header \(Int(h.width))×\(Int(h.height)), model line height \(Int(ml.height))")
++            // The panel floats and resizes (bundle-7): the header must fit the panel as drawn, not the old docked 380.
++            let panelWidth = SnapshotRunner.state.composerFrames["one claude panel"]?.width ?? CGFloat(FloatingClaudePanel.defaultWidth)
++            line(h.width <= panelWidth + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
++                 "header \(Int(h.width))×\(Int(h.height)) in a panel \(Int(panelWidth)) wide, model line height \(Int(ml.height))")
+         } else {
+             line(true, "panel header fits", "not measured (the panel wasn't drawn in this run)")
+         }
+diff --git a/mac/Muse/Views/Claude/FloatingClaudePanel.swift b/mac/Muse/Views/Claude/FloatingClaudePanel.swift
+index 2e43088..0af95cc 100644
+--- a/mac/Muse/Views/Claude/FloatingClaudePanel.swift
++++ b/mac/Muse/Views/Claude/FloatingClaudePanel.swift
+@@ -10,11 +10,12 @@ struct FloatingClaudePanel: View {
+     /// Distance from the window's right and top edges, the width, and the height (0: the window's height less margins).
+     @AppStorage("claudePanel.right") private var right: Double = Double(Space.s4)
+     @AppStorage("claudePanel.top") private var top: Double = Double(Space.s4)
+-    @AppStorage("claudePanel.width") private var width: Double = 400
++    @AppStorage("claudePanel.width") private var width: Double = Self.defaultWidth
+     @AppStorage("claudePanel.height") private var height: Double = 0
+     @State private var moving: CGSize = .zero
+     @State private var sizing: CGSize = .zero
+ 
++    static let defaultWidth: Double = 400
+     static let minSize = CGSize(width: 340, height: 420)
+     static let margin: CGFloat = Space.s4
+ 
+@@ -27,6 +28,8 @@ struct FloatingClaudePanel: View {
+                 if ended { commitMove(d, in: g.size) } else { moving = d }
+             })
+             .frame(width: f.width, height: f.height)
++            // The checks compare the header with the panel's real width (it floats and resizes; 400 by default).
++            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "one claude panel") } }
+             .background(t.roles.canvas)
+             .clipShape(shape)
+             .overlay(ClaudeLivingEdge(cornerRadius: radius))
