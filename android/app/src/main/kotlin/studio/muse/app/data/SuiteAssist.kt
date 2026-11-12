@@ -15,6 +15,9 @@ data class SuiteAssist(
     val revision: Int = 0,
     val pending: List<SuitePending> = emptyList(),
     val updatedAt: Long = 0,
+    /** What Generate would send and what the composer shows (the server's view): the Claude panel's context strip. */
+    val request: kotlinx.serialization.json.JsonObject? = null,
+    val onScreen: kotlinx.serialization.json.JsonObject? = null,
 ) {
     /** The approval waiting for the owner, if any (the newest). */
     val waiting: SuitePending? get() = pending.lastOrNull { it.status == "waiting" }
