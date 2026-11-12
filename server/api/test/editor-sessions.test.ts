@@ -123,6 +123,32 @@ describe('edit sessions API and Claude tools', () => {
     expect((await owner.req('GET', `/v1/edit-sessions?takeId=${takeId}`)).body).toHaveLength(1);
   });
 
+  it('continue a draft: the view (playhead, zoom, tabs, platform view) is kept, and recent lists the last worked on first', async () => {
+    const s = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body;
+    const blank = (await owner.req('POST', '/v1/edit-sessions', { takeId: M.BLANK_SOURCE })).body;
+    // The blank project was made last, so it leads; leaving the take's editor afterwards puts the take first.
+    expect((await owner.req('GET', '/v1/edit-sessions?recent=1')).body[0].id).toBe(blank.id);
+    const v = await owner.req('POST', `/v1/edit-sessions/${s.id}/view`, { view: { playhead: 2.5, zoom: 120, tab: 'video', binTab: 'uploads', safeArea: null,
+      mode: 'timeline', selection: 'c1', title: 'Café review', junk: 'x'.repeat(5000) } });
+    expect(v.body.view).toMatchObject({ playhead: 2.5, zoom: 120, tab: 'video', binTab: 'uploads', safeArea: null, mode: 'timeline', selection: 'c1' });
+    expect(v.body.view.junk).toBeUndefined();
+    const recent = (await owner.req('GET', '/v1/edit-sessions?recent=1&limit=5')).body;
+    expect(recent[0]).toMatchObject({ id: s.id, takeId, view: { playhead: 2.5, binTab: 'uploads' } });
+    expect(recent[0].lastTouchedAt).toBeGreaterThanOrEqual(recent[1].lastTouchedAt);
+    expect(recent.map((r: { id: string }) => r.id)).toContain(blank.id);
+    expect(recent[0].history).toBeUndefined();
+    // Reopening the take's session brings its view back (another device continues where this one left off).
+    expect((await owner.req('GET', `/v1/edit-sessions/${s.id}`)).body.view.zoom).toBe(120);
+    // Out-of-range values are clamped; a non-object is refused; members never see sessions.
+    expect((await owner.req('POST', `/v1/edit-sessions/${s.id}/view`, { view: { playhead: -4, zoom: 1e9 } })).body.view).toMatchObject({ playhead: 0, zoom: 2000 });
+    expect((await owner.req('POST', `/v1/edit-sessions/${s.id}/view`, { view: [1] })).status).toBe(400);
+    expect((await member.req('GET', '/v1/edit-sessions?recent=1')).status).toBe(403);
+    expect((await member.req('POST', `/v1/edit-sessions/${s.id}/view`, { view: {} })).status).toBe(403);
+    // Closed sessions drop out of the list.
+    await owner.req('POST', `/v1/edit-sessions/${blank.id}/close`);
+    expect((await owner.req('GET', '/v1/edit-sessions?recent=1')).body.map((r: { id: string }) => r.id)).not.toContain(blank.id);
+  });
+
   it('apps push patches against a revision; a stale one is 409; bad ones are refused; others see it live', async () => {
     const s = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body;
     const next = applyOps(s.project, [{ op: 'trim', clipId: 'c1', inSec: 0.5, outSec: 5.5 }]).project;

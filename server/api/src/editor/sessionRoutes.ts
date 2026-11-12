@@ -12,8 +12,10 @@ export function registerEditSessionRoutes(app: FastifyInstance, ctx: Ctx) {
   const svc = editSessionsOf(ctx);
   type P = { Params: { id: string } };
   app.post('/v1/edit-sessions', async req => svc.open(req.user, (req.body ?? {}) as Record<string, unknown>));
-  app.get<{ Querystring: { takeId?: string } }>('/v1/edit-sessions', async req => {
+  app.get<{ Querystring: { takeId?: string; recent?: string; limit?: string } }>('/v1/edit-sessions', async req => {
     svc.owner(req.user);
+    // Continue a draft: open sessions, the one last worked on (edited or looked at) first.
+    if (req.query?.recent === '1' || req.query?.recent === 'true') return svc.recent(req.user, Number(req.query?.limit) || 20);
     const conds = [eq(editSessions.studioId, req.user.studioId), eq(editSessions.status, 'open')];
     if (req.query?.takeId) conds.push(eq(editSessions.takeId, req.query.takeId));
     const rows = await ctx.db.select().from(editSessions).where(and(...conds)).orderBy(desc(editSessions.updatedAt)).limit(50);
@@ -24,6 +26,7 @@ export function registerEditSessionRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post<P>('/v1/edit-sessions/:id/patch', async req => svc.push(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/reset', async req => svc.reset(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/undo', async req => svc.undo(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
+  app.post<P>('/v1/edit-sessions/:id/view', async req => svc.saveView(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/close', async req => svc.close(req.user, req.params.id));
   app.post<P>('/v1/edit-sessions/:id/presence', async req => { await svc.row(req.user, req.params.id); return svc.touch(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>); });
   app.delete<{ Params: { id: string; device: string } }>('/v1/edit-sessions/:id/presence/:device', async req => { await svc.row(req.user, req.params.id); svc.leave(req.params.id, req.params.device); return { ok: true }; });

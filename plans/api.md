@@ -632,6 +632,7 @@ PatchOp      { op: "add"|"remove"|"replace", path /* JSON Pointer */, value? }
 |---|---|
 | `POST /v1/edit-sessions` `{takeId, project?, baseVersionId?, device?, fresh?}` | → `EditSession`: the take's open session, or a new one (from `project`, else the take's saved edit list, else untouched; a graded suite take starts with its look). |
 | `GET /v1/edit-sessions?takeId=` · `GET /v1/edit-sessions/{id}` · `GET …/{id}/history?limit=` | Sessions, one session (with history), the history. |
+| `GET /v1/edit-sessions?recent=1&limit=` · `POST /v1/edit-sessions/{id}/view` `{view}` | Continue a draft (2026-11-12, migration 0035): open sessions, the one last worked on first (the later of `updatedAt` and `view.at`; each with `view` and `lastTouchedAt`, no history). `view` is where the editor was left: `{playhead, zoom, tab, binTab, mode, selection, safeArea (null = off), title}`; cleaned and clamped, `at` set by the server, no revision, no history. Every `EditSession` carries its `view` when one was saved. Owner only. |
 | `POST …/{id}/patch` `{baseRevision, patch: PatchOp[], label, device}` | → `{revision, entry}`. `409 stale_revision` when the session moved on; `bad_request` with the field when the result breaks a rule. |
 | `POST …/{id}/reset` `{baseRevision, project, device, label?}` | Replaces the whole project (undoable). |
 | `POST …/{id}/undo` `{entryId, device}` | Applies that change's inverse as a new change; `409 already_undone` / `cannot_undo` (later changes touch the same parts). |

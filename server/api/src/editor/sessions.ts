@@ -63,7 +63,8 @@ export class EditSessions {
       durationSec: M.durationSec(s.project as M.EditProject), status: s.status, updatedBy: s.updatedBy, updatedAt: s.updatedAt,
       pending: (s.pending as Pending[]).filter(p => p.status === 'waiting' || p.status === 'running'),
       online: this.online(s.id).map(p => ({ device: p.device, label: p.label, platform: p.platform, canRender: p.canRender })),
-      requests: (this.requests.get(s.id) ?? []).slice(-10), ...(hist ? { history: hist } : {}) };
+      requests: (this.requests.get(s.id) ?? []).slice(-10), ...(s.view ? { view: s.view } : {}), lastTouchedAt: lastTouched(s),
+      ...(hist ? { history: hist } : {}) };
   }
   private emit(s: Session, ev: Record<string, unknown>) {
     void this.ctx.hub.emit(s.studioId, v => (v.role === 'owner' ? { type: 'edit', sessionId: s.id, ...ev } : null));
@@ -237,6 +238,25 @@ export class EditSessions {
   async history(u: AuthUser, id: string, limit = 100) {
     await this.row(u, id);
     return (await this.ctx.db.select().from(editOps).where(eq(editOps.sessionId, id)).orderBy(desc(editOps.id)).limit(Math.min(500, Math.max(1, limit)))).map(this.entryView);
+  }
+  /**
+   * Where the editor was left (continue a draft): playhead, zoom, tabs, platform view, the project's name. Stored as is
+   * (cleaned), no revision and no history; `at` marks the session as the one last worked on.
+   */
+  async saveView(u: AuthUser, id: string, b: Record<string, unknown>) {
+    const s = await this.row(u, id);
+    const view = cleanView(b.view ?? b);
+    await this.ctx.db.update(editSessions).set({ view }).where(eq(editSessions.id, s.id));
+    return { ok: true, view };
+  }
+  /** Open sessions, the one last worked on (edited or looked at) first: the apps' "Recent edits". */
+  async recent(u: AuthUser, limit = 20) {
+    this.owner(u);
+    const rows = await this.ctx.db.select().from(editSessions).where(and(eq(editSessions.studioId, u.studioId), eq(editSessions.status, 'open')))
+      .orderBy(desc(editSessions.updatedAt)).limit(100);
+    // A session only looked at recently (view.at) can be older by updatedAt: sort on the later of the two.
+    const top = rows.sort((a, b) => lastTouched(b) - lastTouched(a)).slice(0, Math.min(50, Math.max(1, limit)));
+    return Promise.all(top.map(r => this.view(r, { history: false })));
   }
   async close(u: AuthUser, id: string) {
     const s = await this.row(u, id);
@@ -439,4 +459,24 @@ export class EditSessions {
     }
     return null;
   }
+}
+
+/** The later of the last change and the last time an app left the editor on it. */
+export const lastTouched = (s: Pick<Session, 'updatedAt' | 'view'>) => {
+  const at = Number((s.view as { at?: unknown } | null)?.at);
+  return Math.max(s.updatedAt, Number.isFinite(at) ? at : 0);
+};
+
+/** An app's editor view, kept to known fields of sane size (an older or newer app's extra fields are dropped). */
+export function cleanView(v: unknown): Record<string, unknown> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw badRequest('view: an object');
+  const o = v as Record<string, unknown>, out: Record<string, unknown> = {};
+  const num = (k: string, min: number, max: number) => { const n = Number(o[k]); if (o[k] !== undefined && o[k] !== null && Number.isFinite(n)) out[k] = Math.min(max, Math.max(min, n)); };
+  const str = (k: string, max: number) => { if (typeof o[k] === 'string' && o[k]) out[k] = (o[k] as string).slice(0, max); };
+  num('playhead', 0, 24 * 3600); num('zoom', 1, 2000);
+  str('tab', 40); str('binTab', 40); str('mode', 40); str('selection', 120); str('title', 120); str('device', 40);
+  // The platform view ("tiktok", …); null = none (kept, so "off" is remembered).
+  if (o.safeArea === null) out.safeArea = null; else str('safeArea', 40);
+  out.at = Date.now();
+  return out;
 }
