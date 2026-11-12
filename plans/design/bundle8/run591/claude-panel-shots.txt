@@ -1,0 +1,8 @@
+INFO claude_panel_idle 1280x800 c header 400×107, context strip 2 items (Clip, Background), orb idle
+INFO claude_panel_thinking 1280x800 c orb thinking
+INFO claude_panel_idle 1280x800 a header 400×105, context strip 2 items (Clip, Background), orb idle
+INFO claude_panel_thinking 1280x800 a orb thinking
+INFO claude_panel_idle 1280x800 b header 400×106, context strip 2 items (Clip, Background), orb idle
+INFO claude_panel_thinking 1280x800 b orb thinking
+INFO claude_panel_idle 1280x800 d header 400×106, context strip 2 items (Clip, Background), orb idle
+INFO claude_panel_thinking 1280x800 d orb thinking
