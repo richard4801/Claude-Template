@@ -19,7 +19,7 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
-import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
+import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
 import { z } from 'zod';
 import { billedSeconds, buildPlan, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
@@ -31,7 +31,7 @@ import { draftOf } from './drafts.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
-import { baseName, labelList, relabelText } from '../engines/labels.js'; // owner 2026-11-11: "<Model> · <Provider>" everywhere
+import { baseName, labelList, providerLabel, relabelText } from '../engines/labels.js'; // owner 2026-11-11: "<Model> · <Provider>" everywhere
 import { placeWords, purposeOfShot, recastIntent, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
@@ -83,6 +83,17 @@ export class SuiteService {
     if (this.byo.ready) s.add('byo'); // WS5: each custom model runs on its studio's own key
     return s;
   }
+  /**
+   * Providers whose keys are set, down or not: what the pickers list (owner 2026-11-12: every model is shown). A provider
+   * that refused recently stays listed and pickable; Auto skips it (`downProviders`).
+   */
+  configured(): Set<ProviderId> {
+    const s = this.available();
+    if (this.mode === 'live' && this.providers.higgsfield.configured()) s.add('higgsfield');
+    return s;
+  }
+  /** Providers that refused a run at start in the last 30 minutes. */
+  downProviders(): Set<ProviderId> { return new Set([...this.down.keys()].filter(p => this.isDown(p))); }
   /** A provider that refused at start (out of credit, bad key, down) is skipped for new shots for a while. */
   private down = new Map<ProviderId, number>();
   markDown(p: ProviderId, ms = 30 * 60_000) { this.down.set(p, Date.now() + ms); }
@@ -419,7 +430,7 @@ export class SuiteService {
     // 4c: members pick any model the owner hasn't hidden from them; Auto skips the hidden ones too.
     const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
     if (r.engineModel && hidden.has(r.engineModel)) throw new ApiError(403, 'owner_only', 'That model isn’t offered to members');
-    const pick = pickRemix(x, { prefs, providers: this.available(), engineModel: r.engineModel, hidden, studioId: u.studioId });
+    const pick = pickRemix(x, { prefs, providers: this.configured(), down: this.downProviders(), engineModel: r.engineModel, hidden, studioId: u.studioId });
     if ('error' in pick) {
       const words = await this.wordsFor(u);
       const e = new ApiError(400, pick.error, words(pick.message));
@@ -471,7 +482,8 @@ export class SuiteService {
     }
     const prefs = await this.prefs(u.studioId);
     const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
-    const o = { prefs, providers: this.available(), hidden, studioId: u.studioId };
+    const down = this.downProviders();
+    const o = { prefs, providers: this.configured(), down, hidden, studioId: u.studioId };
     const auto = togglesOn(x).length ? pickRemix(x, o) : null;
     const autoId = auto && !('error' in auto) ? auto.model.id : null;
     const words = await this.wordsFor(u);
@@ -489,7 +501,8 @@ export class SuiteService {
       const [minS, maxS] = sourceLimits(m, route);
       const keeps = e?.keepsAudio ?? false;
       return {
-        model: m.id, label: words(specName(m)), support: support.support, reason: support.reason ? words(support.reason) : null, notes: support.notes.map(words), route,
+        model: m.id, label: words(specName(m)), support: support.support, reason: support.reason ? words(support.reason) : null, notes: support.notes.map(words), route, group: remixGroup(m, x),
+        ...(down.has(m.provider) && !unavailable ? { warning: `${providerLabel(m.provider)} refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again` } : {}),
         unavailable, tested: e?.tested ?? true, auto: m.id === autoId,
         ...(m.id === autoId && auto && !('error' in auto) ? { why: words(auto.why ?? '') } : {}),
         limits: { minSeconds: minS, maxSeconds: maxS, resolutions: m.resolutions.map(z => z.id), maxImages: pictureRoom(m, route), keepsAudio: keeps,
@@ -498,7 +511,7 @@ export class SuiteService {
           inputBilled: m.livePrice ? 'priced live by the provider when you pick it' : m.id === 'genjutsu-light' ? 'the clip’s seconds are billed too (in the rate)' : videoIn && res.perSecWithVideo != null ? 'the clip is priced into the rate' : 'only the new video is billed' },
       };
     });
-    return { toggles: togglesOn(x), auto: autoId ? { model: autoId, why: models.find(m => m.auto)?.why ?? null } : auto && 'error' in auto ? { model: null, why: words(auto.message) } : null, models };
+    return { toggles: togglesOn(x), groups: REMIX_GROUPS, auto: autoId ? { model: autoId, why: models.find(m => m.auto)?.why ?? null } : auto && 'error' in auto ? { model: null, why: words(auto.message) } : null, models };
   }
 
   /**

@@ -1,0 +1,437 @@
+diff --git a/mac/Muse/App/AppStore+NewSwap.swift b/mac/Muse/App/AppStore+NewSwap.swift
+index d8b505ee..2819a87a 100644
+--- a/mac/Muse/App/AppStore+NewSwap.swift
++++ b/mac/Muse/App/AppStore+NewSwap.swift
+@@ -27,6 +27,19 @@ extension AppStore {
+         suiteComposerChanged(now: true) // Claude sees which Swap is open
+     }
+ 
++    /**
++     * The composer always shares its draft (owner bug 2026-11-12: Claude couldn't reach New Swap, "no composer is open
++     * on the person's page"): the page then carries the draft's id, and the screen is pushed into it as it changes, whether
++     * or not Claude's panel was ever opened on this Mac. One draft per mode, as when the panel opens.
++     */
++    func shareSuiteDraft() async {
++        let c = suite.claude
++        guard screen == .suite, suite.mode != .hub, c.assist == nil || c.key != suiteClaudeKey, !c.creating, let api = suiteAssistAPI else { return }
++        c.creating = true
++        defer { c.creating = false }
++        await newSuiteAssist(api: api, key: suiteClaudeKey)
++    }
++
+     /// What Generate sends (nil until a video is in and every turned-on toggle is complete).
+     var remixRequest: ShotRequest? {
+         guard let c = clip, suite.remix.missing == nil else { return nil }
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index ba323903..f31b2108 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -99,6 +99,7 @@ struct ComposerView: View {
+             }
+         }
+         .onAppear { presetsOpen = draftIsEmpty }
++        .task(id: s.composer.tool) { try? await Task.sleep(nanoseconds: 400_000_000); await store.shareSuiteDraft() } // Claude (in the app or over MCP) can always reach this composer
+         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; pinnedTake = nil; store.suiteClaudeToolChanged() }
+         .onChange(of: s.generating) { _, on in if on { pinnedTake = nil } } // a new take goes on the stage
+         // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.
+diff --git a/mac/Muse/Views/Suite/Composer/ExtendViews.swift b/mac/Muse/Views/Suite/Composer/ExtendViews.swift
+index a6aeb509..4a7aec4a 100644
+--- a/mac/Muse/Views/Suite/Composer/ExtendViews.swift
++++ b/mac/Muse/Views/Suite/Composer/ExtendViews.swift
+@@ -245,10 +245,17 @@ struct UpscaleButton: View {
+     var take: Take
+     var size: ButtonSize = .regular
+     var fill = false
++    var iconOnly = false
+     @State private var open = false
+ 
+     var body: some View {
+-        MButton(store.upscaleLive ? "Upscale" : "Upscale · soon", icon: "arrow.up.left.and.arrow.down.right", size: size, off: store.upscaling, fill: fill) { open = true }
++        Group {
++            if iconOnly {
++                TakeActionButton(title: store.upscaleLive ? "Upscale" : "Upscale · soon", icon: "arrow.up.left.and.arrow.down.right", iconOnly: true, off: store.upscaling) { open = true }
++            } else {
++                MButton(store.upscaleLive ? "Upscale" : "Upscale · soon", icon: "arrow.up.left.and.arrow.down.right", size: size, off: store.upscaling, fill: fill) { open = true }
++            }
++        }
+             .help("Sharper 1080p, 2K or 4K from this take")
+             .popover(isPresented: $open, arrowEdge: .bottom) {
+                 UpscalePicker(take: take) { open = false }
+diff --git a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
+index 162fb18b..fbebb440 100644
+--- a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
++++ b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
+@@ -53,6 +53,29 @@ struct NewSwapPanel: View {
+             }
+         }
+         .frame(maxWidth: .infinity, alignment: .leading)
++        .onAppear { preselectHer() }
++        .onChange(of: d.characterOn) { _, on in if on && d.characterKind == .model && d.modelId == nil { store.suite.remix.modelId = defaultHer } }
++    }
++
++    /// Owner's rule: her, with the strict figure lock, is the default Character.
++    /// The one chosen in Swap or the composer, else the first character.
++    private var defaultHer: String? {
++        store.suite.swap.modelId ?? store.suite.composer.tokens.characterId ?? store.suiteCharacters.first?.id
++    }
++
++    /// A fresh draft (Character never touched) starts with Character on and her picked.
++    private func preselectHer() {
++        guard !d.characterOn, d.characterKind == .model, d.modelId == nil, let her = defaultHer else { return }
++        store.suite.remix.characterOn = true
++        store.suite.remix.modelId = her
++    }
++
++    /// Choosing her outfit (or whose outfits) turns Character on as that character, unless Character is a face swap.
++    private func characterFrom(_ id: String?) {
++        guard let id, !d.characterOn || d.characterKind == .model else { return }
++        store.suite.remix.characterOn = true
++        store.suite.remix.characterKind = .model
++        store.suite.remix.modelId = id
+     }
+ 
+     // MARK: The video
+@@ -183,12 +206,12 @@ struct NewSwapPanel: View {
+             HStack(spacing: Space.s2) {
+                 if !(d.characterOn && d.characterKind == .model) {
+                     Menu(owner?.shortName ?? "Whose") {
+-                        ForEach(store.suiteCharacters) { m in Button(m.name) { outfitOwner = m.id; store.suite.remix.outfitId = nil } }
++                        ForEach(store.suiteCharacters) { m in Button(m.name) { outfitOwner = m.id; store.suite.remix.outfitId = nil; characterFrom(m.id) } }
+                     }
+                     .fixedSize()
+                 }
+                 Menu(list.first { $0.id == d.outfitId }?.name ?? (list.isEmpty ? "No outfits yet" : "Pick an outfit")) {
+-                    ForEach(list) { o in Button(o.name) { store.suite.remix.outfitId = o.id } }
++                    ForEach(list) { o in Button(o.name) { store.suite.remix.outfitId = o.id; characterFrom(o.modelId) } }
+                 }
+                 .fixedSize()
+                 .disabled(list.isEmpty)
+@@ -276,13 +299,15 @@ struct NewSwapLibraryPicker: View {
+     }
+ }
+ 
+-/// New Swap's model pill: Auto (with its pick) first, then every video model (owner 2026-11-12: every model on every
+-/// mode), each with its limits and its price for this clip; an adapted one says what MUSE does with it. Only a model
+-/// that can't run at all (its provider isn't set up) is greyed, with the reason.
++/// New Swap's model pill (owner bug 2026-11-12: "MiniMax H3 Higgsfield is not part of the models that come with New
++/// Swap"): a popover with every video model, grouped (Auto picks · Edits the clip · Uses the clip as reference · From
++/// frames · From words only) and scrollable, each with its price for this clip and one line: what MUSE does with it, a
++/// recent refusal, or why it can't run. Only a model that can't run at all is greyed. The list reloads when it opens.
+ struct RemixModelPill: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+     var compact = false
++    @State private var open = false
+ 
+     var body: some View {
+         let list = store.suite.remixModels
+@@ -290,34 +315,111 @@ struct RemixModelPill: View {
+         let auto = list?.models.first { $0.auto }
+         let current = picked.flatMap { p in list?.models.first { $0.model == p } }
+         let title = current?.label ?? "Auto\(auto.map { " · \($0.label)" } ?? "")"
+-        Menu {
+-            Button {
+-                store.suite.remix.engineModel = nil
+-            } label: {
+-                Text(auto.map { "Auto · \($0.label)" } ?? "Auto")
+-                if let w = list?.auto?.why { Text(w) }
++        Button { open.toggle() } label: {
++            HStack(spacing: 4) {
++                Text(compact ? (current?.label ?? "Auto") : title).font(t.body(12.5, .medium)).lineLimit(1)
++                    .truncationMode(.tail).frame(maxWidth: compact ? 120 : 220, alignment: .leading).fixedSize(horizontal: true, vertical: false)
++                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.roles.ink2)
++            }
++            .foregroundStyle(t.roles.ink)
++            .padding(.horizontal, 8).frame(height: 30).fixedSize()
++            .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(open ? t.roles.field : .clear))
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .help("Model: \(title)")
++        .accessibilityLabel("Model: \(title)")
++        .popover(isPresented: $open, arrowEdge: .top) {
++            RemixModelList(onPick: { open = false })
++                .environment(store).environment(\.theme, t)
++                .task { await store.loadRemixModels() }
++        }
++    }
++}
++
++/// The list in New Swap's model popover.
++struct RemixModelList: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var onPick: () -> Void
++
++    var body: some View {
++        let list = store.suite.remixModels
++        let picked = store.suite.remix.engineModel
++        VStack(alignment: .leading, spacing: 0) {
++            Text("Model for New Swap").scaled(t.scale.label, t.roles.ink)
++                .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s2)
++            ScrollView {
++                VStack(alignment: .leading, spacing: 0) {
++                    autoRow(list, on: picked == nil)
++                    ForEach(list?.grouped ?? [], id: \.group.id) { g in
++                        Text(g.group.label).scaled(t.scale.caption, t.roles.ink2)
++                            .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s1)
++                            .accessibilityAddTraits(.isHeader)
++                        ForEach(g.rows) { m in row(m, on: picked == m.model) }
++                    }
++                    if list == nil {
++                        Text(store.suite.remix.anyOn ? "Loading models…" : "Turn on a change to see the models for it.")
++                            .scaled(t.scale.caption, t.roles.ink2).padding(Space.s4)
++                    }
++                }
++                .padding(.bottom, Space.s2)
+             }
+-            Divider()
+-            ForEach(list?.models ?? []) { m in
+-                Button {
+-                    store.suite.remix.engineModel = m.model
+-                } label: {
+-                    Text("\(m.label)\(m.price.usd.map { " · \(Pricing.money($0))" } ?? "")")
+-                    Text(m.adaptedLine ?? m.detail) // an adapted model says exactly what MUSE does with it
++            .frame(maxHeight: 460)
++        }
++        .frame(width: 420, alignment: .leading)
++    }
++
++    private func autoRow(_ list: RemixModels?, on: Bool) -> some View {
++        let auto = list?.models.first { $0.auto }
++        return Button {
++            store.suite.remix.engineModel = nil
++            onPick()
++        } label: {
++            HStack(alignment: .top, spacing: Space.s2) {
++                check(on)
++                VStack(alignment: .leading, spacing: 2) {
++                    Text(auto.map { "Auto (\($0.label))" } ?? "Auto").scaled(t.scale.body, t.roles.ink)
++                    Text(list?.auto?.why ?? "MUSE picks the model for these changes").scaled(t.scale.caption, t.roles.ink2).lineLimit(2)
+                 }
+-                .disabled(!m.pickable)
++                Spacer(minLength: 0)
+             }
++            .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
++            .background(on ? t.roles.field : .clear)
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .accessibilityLabel("Use Auto")
++    }
++
++    private func row(_ m: RemixModels.Row, on: Bool) -> some View {
++        Button {
++            store.suite.remix.engineModel = m.model
++            onPick()
+         } label: {
+-            HStack(spacing: 6) {
+-                Ph("cpu", 13)
+-                if !compact { Text(title).font(t.body(12.5, .medium)).lineLimit(1).fixedSize() }
++            HStack(alignment: .top, spacing: Space.s2) {
++                check(on)
++                VStack(alignment: .leading, spacing: 2) {
++                    HStack(spacing: Space.s2) {
++                        Text(m.label).scaled(t.scale.body, m.pickable ? t.roles.ink : t.roles.ink2).lineLimit(1)
++                        Spacer(minLength: Space.s2)
++                        if let usd = m.price.usd { Text(Pricing.money(usd)).monospacedDigit().scaled(t.scale.caption, t.roles.ink2).fixedSize() }
++                    }
++                    Text(m.line).scaled(t.scale.caption, m.warning != nil && m.pickable ? t.roles.caution : t.roles.ink2).lineLimit(3)
++                        .fixedSize(horizontal: false, vertical: true)
++                }
+             }
+-            .foregroundStyle(t.roles.ink)
++            .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
++            .background(on ? t.roles.field.opacity(0.5) : .clear)
++            .contentShape(Rectangle())
+         }
+-        .menuStyle(.borderlessButton)
+-        .menuIndicator(.hidden)
+-        .fixedSize()
+-        .help("Model: \(title)")
+-        .accessibilityLabel("Model: \(title)")
++        .buttonStyle(.plain)
++        .disabled(!m.pickable)
++        .help(m.line)
++        .accessibilityLabel("\(m.label), \(m.line)")
++    }
++
++    private func check(_ on: Bool) -> some View {
++        Ph("checkmark", 11).foregroundStyle(t.roles.accent).opacity(on ? 1 : 0).frame(width: 16, height: 20)
+     }
+ }
+diff --git a/mac/Muse/Views/Suite/SuiteComponents.swift b/mac/Muse/Views/Suite/SuiteComponents.swift
+index 7adbe837..ad59a68d 100644
+--- a/mac/Muse/Views/Suite/SuiteComponents.swift
++++ b/mac/Muse/Views/Suite/SuiteComponents.swift
+@@ -238,26 +238,43 @@ struct SuiteResultPane: View {
+                 }
+             }
+             if let take {
+-                HStack(spacing: 6) {
+-                    MButton(take.isFinal ? "Kept" : "Keep", icon: "checkmark", size: .small, off: take.isFinal) { store.approve(take) }
+-                    if let j = job { MButton("Retake", icon: "arrow.clockwise", size: .small) { store.retakeShot(j) } }
+-                    MButton("Edit", icon: "scissors", size: .small) { store.openEdit(takeId: take.id) }
+-                    MButton("Share", icon: "square.and.arrow.up", size: .small) { store.openPostSheet(take) }
++                // Full labels when they fit; otherwise icons with tooltips, never "✓ K".
++                ViewThatFits(in: .horizontal) {
++                    takeActions(take, iconOnly: false).fixedSize(horizontal: true, vertical: false)
++                    takeActions(take, iconOnly: true).fixedSize(horizontal: true, vertical: false)
+                 }
++                .frame(maxWidth: .infinity, alignment: .leading)
+                 .padding(.top, 8)
+                 // Finish the take: a longer version (Extend) or a sharper one (Upscale).
+                 let canExtend = ExtendSource.take(take) != nil
+                 if canExtend || take.canUpscale {
+-                    HStack(spacing: 6) {
+-                        if canExtend { MButton("Extend", icon: "arrow.right.to.line", size: .small) { store.openExtend(take) } }
+-                        if take.canUpscale { UpscaleButton(take: take, size: .small) }
++                    ViewThatFits(in: .horizontal) {
++                        finishActions(take, canExtend: canExtend, iconOnly: false).fixedSize(horizontal: true, vertical: false)
++                        finishActions(take, canExtend: canExtend, iconOnly: true).fixedSize(horizontal: true, vertical: false)
+                     }
++                    .frame(maxWidth: .infinity, alignment: .leading)
+                     .padding(.top, 6)
+                 }
+             }
+         }
+     }
+ 
++    private func takeActions(_ take: Take, iconOnly: Bool) -> some View {
++        HStack(spacing: 6) {
++            TakeActionButton(title: take.isFinal ? "Kept" : "Keep", icon: "checkmark", iconOnly: iconOnly, off: take.isFinal) { store.approve(take) }
++            if let j = job { TakeActionButton(title: "Retake", icon: "arrow.clockwise", iconOnly: iconOnly) { store.retakeShot(j) } }
++            TakeActionButton(title: "Edit", icon: "scissors", iconOnly: iconOnly) { store.openEdit(takeId: take.id) }
++            TakeActionButton(title: "Share", icon: "square.and.arrow.up", iconOnly: iconOnly) { store.openPostSheet(take) }
++        }
++    }
++
++    private func finishActions(_ take: Take, canExtend: Bool, iconOnly: Bool) -> some View {
++        HStack(spacing: 6) {
++            if canExtend { TakeActionButton(title: "Extend", icon: "arrow.right.to.line", iconOnly: iconOnly) { store.openExtend(take) } }
++            if take.canUpscale { UpscaleButton(take: take, size: .small, iconOnly: iconOnly) }
++        }
++    }
++
+     private func step(_ d: Int, count: Int) { page = ((page + d) % count + count) % count }
+ 
+     /// Previous / next and one dot per result, over the picture.
+@@ -384,3 +401,27 @@ struct SuiteConnectionsRow: View {
+             }
+     }
+ }
++
++/// A small take action: icon + label, or icon only with the label as tooltip when space is short.
++struct TakeActionButton: View {
++    var title: String
++    var icon: String
++    var iconOnly: Bool
++    var off = false
++    var action: () -> Void
++
++    var body: some View {
++        if iconOnly {
++            Button(action: action) {
++                Image(systemName: icon).font(.system(size: 12, weight: .semibold)).frame(minWidth: 14)
++            }
++            .buttonStyle(MuseButtonStyle(kind: .secondary, size: .small, off: off, fill: false))
++            .help(title)
++            .accessibilityLabel(title)
++        } else {
++            MButton(title, icon: icon, size: .small, off: off, action: action)
++                .lineLimit(1)
++                .help(title)
++        }
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift b/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift
+index f08bf602..6077e14f 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift
+@@ -302,7 +302,18 @@ public struct RemixModels: Codable, Hashable, Sendable {
+         public var why: String?
+         public var limits: Limits
+         public var price: Price
++        /// The list's group: "auto", "edit", "reference", "frames" or "text" (older servers: from `route`).
++        public var group: String?
++        /// Its provider refused a run recently: still pickable, it may refuse again.
++        public var warning: String?
+         public var id: String { model }
++        /// The group this row shows under.
++        public var groupId: String { group ?? (auto ? "auto" : route ?? "edit") }
++        /// The row's line under the name: why it can't run, else a recent refusal, else what MUSE does, else its limits.
++        public var line: String {
++            if unavailable != nil { return detail }
++            return warning ?? adaptedLine ?? detail
++        }
+         /// Can be picked: everything that can run (no model is greyed out for what it's made for).
+         public var pickable: Bool { unavailable == nil }
+         /// The row's second line: limits, sound, "not tested yet", or why it can't run.
+@@ -317,9 +328,40 @@ public struct RemixModels: Codable, Hashable, Sendable {
+         /// What MUSE does with an adapted model here (its first note), or nil.
+         public var adaptedLine: String? { support == "adapted" ? (notes?.first ?? reason) : nil }
+     }
++    public struct Group: Codable, Hashable, Sendable { public var id: String; public var label: String }
+     public var toggles: [String]
+     public var auto: Auto?
+     public var models: [Row]
++    /// The list's groups in order, with their names (older servers: MUSE's own).
++    public var groups: [Group]?
++
++    public static let defaultGroups = [Group(id: "auto", label: "Auto picks"), Group(id: "edit", label: "Edits the clip"),
++                                       Group(id: "reference", label: "Uses the clip as reference"), Group(id: "frames", label: "From frames"),
++                                       Group(id: "text", label: "From words only")]
++    /// The rows by group, in the list's order; empty groups left out.
++    public var grouped: [(group: Group, rows: [Row])] {
++        (groups ?? Self.defaultGroups).compactMap { g in
++            let rows = models.filter { $0.groupId == g.id }
++            return rows.isEmpty ? nil : (g, rows)
++        }
++    }
++
++    enum CodingKeys: String, CodingKey { case toggles, auto, models, groups }
++    /// A row that doesn't decode is left out alone (owner bug 2026-11-12: one bad row must never hide the whole list).
++    private struct LossyRow: Decodable { let row: Row?; init(from d: Decoder) throws { row = try? Row(from: d) } }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: CodingKeys.self)
++        toggles = (try? c.decode([String].self, forKey: .toggles)) ?? []
++        auto = try? c.decodeIfPresent(Auto.self, forKey: .auto)
++        models = ((try? c.decode([LossyRow].self, forKey: .models)) ?? []).compactMap(\.row)
++        groups = try? c.decodeIfPresent([Group].self, forKey: .groups)
++    }
++    public init(toggles: [String] = [], auto: Auto? = nil, models: [Row] = [], groups: [Group]? = nil) {
++        self.toggles = toggles
++        self.auto = auto
++        self.models = models
++        self.groups = groups
++    }
+ }
+ 
+ /// The model pill's request body.
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift b/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift
+index 4290f4f2..6b70d515 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift
+@@ -156,6 +156,22 @@ final class NewSwapTests: XCTestCase {
+         XCTAssertEqual(cat.engines(for: .matte).map(\.model), ["rvm"])
+     }
+ 
++    func testTheModelListIsGroupedAndOneBadRowNeverHidesTheOthers() throws {
++        // Owner bug 2026-11-12: "MiniMax H3 Higgsfield is not part of the models that come with New Swap".
++        let row = { (id: String, group: String, extra: String) in
++            #"{"model":"\#(id)","label":"\#(id) · X","support":"adapted","route":"reference","unavailable":null,"tested":true,"auto":false,"group":"\#(group)","limits":{"minSeconds":5,"maxSeconds":15,"resolutions":["2K"],"maxImages":9,"keepsAudio":false,"soundNote":"MUSE puts the clip’s sound back"},"price":{"resolution":"2K","perSec":0.065,"seconds":10,"usd":0.65,"inputBilled":"x"}\#(extra)}"#
++        }
++        let bad = #"{"model":"broken","label":"Broken","support":"yes","tested":true,"auto":false,"limits":null,"price":null}"#
++        let json = #"{"toggles":["character"],"groups":[{"id":"auto","label":"Auto picks"},{"id":"edit","label":"Edits the clip"},{"id":"reference","label":"Uses the clip as reference"}],"auto":{"model":"genjutsu-light","why":"w"},"models":["#
++            + [row("genjutsu-light", "auto", ""), row("h3-hf", "auto", #","warning":"Higgsfield refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again""#), bad, row("h3", "reference", "")].joined(separator: ",") + "]}"
++        let m = try JSONDecoder().decode(RemixModels.self, from: Data(json.utf8))
++        XCTAssertEqual(m.models.map(\.model), ["genjutsu-light", "h3-hf", "h3"], "the broken row alone is left out")
++        XCTAssertEqual(m.grouped.map(\.group.label), ["Auto picks", "Uses the clip as reference"])
++        XCTAssertEqual(m.grouped[0].rows.map(\.model), ["genjutsu-light", "h3-hf"])
++        XCTAssertTrue(m.models[1].pickable)
++        XCTAssertEqual(m.models[1].line, "Higgsfield refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again")
++    }
++
+     func testRemixIsADraftToolTheServerAccepts() {
+         XCTAssertTrue(SuiteDraft.tools.contains("remix"))
+     }
