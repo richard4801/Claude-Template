@@ -19,7 +19,7 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
-import { buildRemixPlan, pickRemix, remixIncomplete, remixModels, remixSpan, remixView, togglesOn } from './remix.js';
+import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
 import { z } from 'zod';
 import { billedSeconds, buildPlan, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
@@ -267,7 +267,7 @@ export class SuiteService {
   async plan(u: AuthUser, r: ShotRequest) {
     if (this.mode === 'off') throw new ApiError(400, 'engine_unavailable', "The AI suite isn't switched on yet");
     if (r.engineModel?.startsWith('c_')) { // WS5: a custom model makes plain shots only
-      if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.mode === 'remix' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
+      if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
       await this.byo.checkUse(u, r.engineModel, 'video');
     }
     // New Swap (plans/new-swap.md): its own planner; the old Swap and Recast paths below are untouched.
@@ -297,12 +297,29 @@ export class SuiteService {
     // The apps send Character swap as a one-person Recast (mode "recast", cast[0] = who she becomes). With a swap model
     // picked (H3, H3 Lite, Highspeed, Higgsfield, Edit, Fast) that isn't a Recast model, it IS a swap: run it as one.
     if (r.mode !== 'swap' && r.cast?.length === 1 && !r.extend && r.engineModel && swapEngineById(r.engineModel)
-      && !(await modelChoice(this.ctx).candidates(u, 'recast')).some(e => e.model === r.engineModel)) {
+      && !(await modelChoice(this.ctx).candidates(u, 'recast')).some(e => e.model === r.engineModel && e.fit !== 'adapted')) {
       const c = r.cast[0]!;
       Object.assign(r, { mode: 'swap', modelId: c.characterId, outfitId: c.outfitId ?? r.outfitId, cast: undefined });
     }
     // WS13: the owner's override for this purpose (checked: a candidate, owner only), else the studio's default for it.
     const choice = await modelChoice(this.ctx).choose(u, purposeOfShot(r), r.engineModel);
+    // Owner 2026-11-12, "every model on every mode": Swap or a one-person Recast on a model that is neither a swap nor
+    // a recast model runs as a New Swap on it (her as Character), and the plan says so. Several people need a model
+    // that tells them apart (said plainly).
+    const cm = choice ? modelById(choice.model) : undefined;
+    const recastModel = !!cm && !!cm.modes.recast && !!cm.recast;
+    if (cm && !r.extend && !swapEngineById(cm.id) && (r.mode === 'swap' || !recastModel)) {
+      if (r.mode === 'swap' || r.cast?.length === 1) {
+        const rp = await this.remixPlan(u, this.asRemix(r, cm.id));
+        rp.plan.notes.unshift(`${specName(cm)} isn’t a ${r.mode === 'swap' ? 'Swap' : 'Recast'} model: MUSE runs it as a New Swap with her as Character`);
+        return rp;
+      }
+    }
+    if (cm && !recastModel && (r.cast?.length ?? 0) > 1)
+      throw new ApiError(400, 'nothing_fits', `${specName(cm)} can’t tell several people in a clip apart · recast one person with it, or pick a Recast model for ${r.cast!.length} people`);
+    // A model that only edits an existing video has nothing to work from in a shot: said plainly, with where it works.
+    if (cm && r.mode !== 'swap' && !r.cast?.length && !r.extend && r.mode !== 'recast' && !(cm.modes.text || cm.modes.image || cm.modes.reference))
+      throw new ApiError(400, 'needs_a_video', `${specName(cm)} edits an existing video: it can’t make a shot from words or pictures · use it in Swap → New Swap, or pick another model`);
     if (r.mode === 'swap') {
       const sw = await this.swapEstimate(u, r, choice);
       if (autoNote) { sw.view.warnings = [autoNote, ...sw.view.warnings]; Object.assign(sw.view, { chosen: { model: choice?.model ?? null, reason: autoNote } }); }
@@ -345,6 +362,7 @@ export class SuiteService {
     const talk = await this.resolveSpeaking(u.studioId, got.request);
     const plan = buildPlan(got.request, got.need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
       separationUsd: SEPARATION_ESTIMATE_USD, sent: await sentImagesOf(this.ctx).forRequest(u, r) });
+    await this.livePrice(plan, prefs);
     if (got.notes.length) { plan.notes.unshift(...got.notes); plan.adapted = got.adapted; }
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
@@ -401,7 +419,7 @@ export class SuiteService {
     // 4c: members pick any model the owner hasn't hidden from them; Auto skips the hidden ones too.
     const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
     if (r.engineModel && hidden.has(r.engineModel)) throw new ApiError(403, 'owner_only', 'That model isn’t offered to members');
-    const pick = pickRemix(x, { prefs, providers: this.available(), engineModel: r.engineModel, hidden });
+    const pick = pickRemix(x, { prefs, providers: this.available(), engineModel: r.engineModel, hidden, studioId: u.studioId });
     if ('error' in pick) {
       const words = await this.wordsFor(u);
       const e = new ApiError(400, pick.error, words(pick.message));
@@ -419,8 +437,21 @@ export class SuiteService {
     if (x.outfit?.kind === 'outfit' && !(her?.outfit ?? outfitOnly)?.images.length) throw badRequest('Outfit: this outfit has no pictures yet');
     const texts = await this.ctx.prompts.texts(u.studioId);
     const plan = buildRemixPlan(r, x, pick, { her, outfitOnly }, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    await this.livePrice(plan, prefs);
     return { swap: false as const, plan, pick: { model: pick.model, resolution: pick.model.resolutions.find(z => z.id === plan.resolution)!, seconds: plan.seconds, tried: [] }, prefs,
       tried: pick.tried.map(t => ({ ...t, resolution: '' })), talk: { speaking: false, source: 'default' as const } };
+  }
+
+  /** The old Swap / a one-person Recast as a New Swap request on `model`: her (and her outfit), the background, the words. */
+  private asRemix(r: ShotRequest, model: string): ShotRequest {
+    const who = r.mode === 'swap' ? { modelId: r.modelId, outfitId: r.outfitId } : { modelId: r.cast?.[0]?.characterId, outfitId: r.cast?.[0]?.outfitId ?? r.outfitId };
+    if (!who.modelId) throw badRequest('Swap needs the character (modelId)');
+    const words = [r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' ').slice(0, 400);
+    const background = r.background === 'describe' && words ? { mode: 'describe' as const, words }
+      : r.background === 'photo' && (r.backgroundImage?.asset || r.backgroundImage?.url) ? { mode: 'photo' as const, image: r.backgroundImage as { asset?: string; url?: string } } : undefined;
+    const remix = { character: { kind: 'model' as const, modelId: who.modelId }, ...(who.outfitId ? { outfit: { kind: 'outfit' as const, outfitId: who.outfitId } } : {}),
+      ...(background ? { background } : {}), ...(!background && words ? { direction: words } : {}) };
+    return { ...r, mode: 'remix', cast: undefined, engineModel: model, remix: remix as ShotRequest['remix'] };
   }
 
   /**
@@ -440,26 +471,57 @@ export class SuiteService {
     }
     const prefs = await this.prefs(u.studioId);
     const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
-    const o = { prefs, providers: this.available(), hidden };
+    const o = { prefs, providers: this.available(), hidden, studioId: u.studioId };
     const auto = togglesOn(x).length ? pickRemix(x, o) : null;
     const autoId = auto && !('error' in auto) ? auto.model.id : null;
     const words = await this.wordsFor(u);
+    // Owner 2026-11-12: every video model is listed, defaults first; none is greyed out. `support` says how MUSE uses it
+    // (yes / prompt / adapted, with `notes`); only `unavailable` (can't run at all) keeps one from running.
     const models = remixModels(x, o).filter(c => !(u.role !== 'owner' && hidden.has(c.model.id))).map(({ model: m, support, unavailable }) => {
-      const e = m.edit!, scale = prefs.models?.[m.id]?.priceScale ?? 1;
-      const res = m.resolutions.find(z => z.id === e.defaultResolution) ?? m.resolutions.at(-1)!;
-      const perSec = round4(perSecond(m, res, { videoInput: true, audio: false, kind: 'guide' }) * scale);
+      const scale = prefs.models?.[m.id]?.priceScale ?? 1, route = support.route, e = m.edit;
+      const res = (e ? m.resolutions.find(z => z.id === e.defaultResolution) : undefined) ?? m.resolutions.find(z => z.id === '720p' || z.id === '768P' || z.id === '720') ?? m.resolutions.at(-1)!;
+      const videoIn = route === 'edit' || route === 'reference';
+      const kind = route === 'edit' ? 'guide' : route === 'reference' ? 'ref2v' : route === 'frames' ? 'i2v' : 't2v';
+      const perSec = m.livePrice ? null : round4(perSecond(m, res, { videoInput: videoIn, audio: false, kind }) * scale);
       const span = clipSeconds != null ? remixSpan(m, clipSeconds, range ?? null) : null;
-      const seconds = span ? (span.needed ? span.max : span.seconds) : null;
+      const used = span ? (span.needed ? span.max : span.seconds) : null;
+      const seconds = used != null ? outputSeconds(m, used, route) : null;
+      const [minS, maxS] = sourceLimits(m, route);
+      const keeps = e?.keepsAudio ?? false;
       return {
-        model: m.id, label: words(specName(m)), support: support.support, reason: support.reason, unavailable, tested: e.tested, auto: m.id === autoId,
+        model: m.id, label: words(specName(m)), support: support.support, reason: support.reason ? words(support.reason) : null, notes: support.notes.map(words), route,
+        unavailable, tested: e?.tested ?? true, auto: m.id === autoId,
         ...(m.id === autoId && auto && !('error' in auto) ? { why: words(auto.why ?? '') } : {}),
-        limits: { minSeconds: e.sourceSeconds[0], maxSeconds: e.sourceSeconds[1], resolutions: m.resolutions.map(z => z.id), maxImages: e.maxImages, keepsAudio: e.keepsAudio,
-          soundNote: e.keepsAudio ? 'keeps the clip’s sound' : 'MUSE puts the clip’s sound back' },
-        price: { resolution: res.id, perSec, ...(seconds != null ? { seconds, trimNeeded: span!.needed, usd: round4(perSec * billedSeconds(m, Math.max(seconds, e.sourceSeconds[0]), { videoInput: true, guideSeconds: seconds })) } : {}),
-          inputBilled: m.id === 'genjutsu-light' ? 'the clip’s seconds are billed too (in the rate)' : res.perSecWithVideo != null ? 'the clip is priced into the rate' : 'only the new video is billed' },
+        limits: { minSeconds: minS, maxSeconds: maxS, resolutions: m.resolutions.map(z => z.id), maxImages: pictureRoom(m, route), keepsAudio: keeps,
+          soundNote: keeps ? 'keeps the clip’s sound' : 'MUSE puts the clip’s sound back' },
+        price: { resolution: res.id, perSec, ...(seconds != null ? { seconds, trimNeeded: span!.needed, ...(perSec != null ? { usd: round4(perSec * billedSeconds(m, route === 'edit' ? Math.max(seconds, minS) : seconds, { videoInput: videoIn, guideSeconds: used ?? seconds }) + (m.byo ? m.byo.perRunUsd * scale : 0)) } : {}) } : {}),
+          inputBilled: m.livePrice ? 'priced live by the provider when you pick it' : m.id === 'genjutsu-light' ? 'the clip’s seconds are billed too (in the rate)' : videoIn && res.perSecWithVideo != null ? 'the clip is priced into the rate' : 'only the new video is billed' },
       };
     });
     return { toggles: togglesOn(x), auto: autoId ? { model: autoId, why: models.find(m => m.auto)?.why ?? null } : auto && 'error' in auto ? { model: null, why: words(auto.message) } : null, models };
+  }
+
+  /**
+   * A model priced live (registry `livePrice`, e.g. Wan 3.0 on Higgsfield): the provider's free quote for this exact
+   * request (length, resolution, sound, the inputs' kind) × takes × the owner's priceScale. No quote = no run (the
+   * price would be a guess): said plainly.
+   */
+  private async livePrice(plan: ShotPlan, prefs: SuitePrefs) {
+    const m = modelById(plan.modelId);
+    if (!m?.livePrice) return;
+    const sample = { image: 'https://example.com/muse-estimate.jpg', video: 'https://example.com/muse-estimate.mp4', audio: 'https://example.com/muse-estimate.wav' };
+    const seconds = Math.max(m.duration.min, Math.min(m.duration.max, Math.round(plan.seconds)));
+    const body: Record<string, unknown> = { prompt: 'x', duration: seconds, resolution: plan.resolution, generate_audio: plan.audio,
+      ...(plan.kind === 'i2v' ? { image_url: sample.image, ...(plan.images.end || plan.remix?.frames?.end ? { end_image_url: sample.image } : {}) } : {}),
+      ...(plan.kind === 'ref2v' ? { ...(plan.images.refs.length || plan.remix?.personStill ? { image_urls: Array.from({ length: Math.min(10, Math.max(1, plan.images.refs.length + (plan.remix?.personStill ? 1 : 0))) }, () => sample.image) } : {}),
+        ...(plan.videos.length ? { video_urls: plan.videos.slice(0, 5).map(() => sample.video) } : {}), ...(plan.audioRef ? { audio_urls: [sample.audio] } : {}) } : {}) };
+    const usd = await (this.providers.higgsfield.quote?.(plan.ref, body) ?? Promise.resolve(null)).catch(() => null);
+    if (usd == null) throw new ApiError(400, 'price_unavailable', `${specName(m)} has no price right now (Higgsfield didn't quote it) · try again in a minute, or pick another model`);
+    const scale = prefs.models?.[m.id]?.priceScale ?? 1;
+    plan.billedPerTake = seconds;
+    plan.perSec = Math.round((usd / seconds) * scale * 10000) / 10000;
+    plan.estimate = Math.round(usd * scale * plan.takes * 10000) / 10000;
+    plan.notes.push(`priced live by Higgsfield: ${P.money(usd * scale)} per take`);
   }
 
   /** Extend's source: a take, clip or upload in this studio, with its length (stored, else the client's `seconds`). */
@@ -485,12 +547,15 @@ export class SuiteService {
     const skipped = 'error' in pick && choice?.source === 'studio';
     if (skipped) pick = pickExtend(r.quality, need, { prefs, providers: this.available() });
     if ('error' in pick) {
-      const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't extend this clip ${r.extend.direction === 'before' ? 'backwards' : 'forwards'} · try another quality or length`);
+      const why = choice?.source === 'request' ? pick.tried[0]?.why : undefined;
+      const e = new ApiError(400, 'nothing_fits', why ? `Can't extend with this model · ${why}` : `${TIER_INFO[r.quality].label} can't extend this clip ${r.extend.direction === 'before' ? 'backwards' : 'forwards'} · try another quality or length`);
       (e as any).tried = pick.tried;
       throw e;
     }
     const texts = await this.ctx.prompts.texts(u.studioId);
     const plan = buildExtendPlan(r, pick, source, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    if (pick.adapted) plan.notes.unshift(pick.adapted);
+    await this.livePrice(plan, prefs);
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk: { speaking: false, source: 'default' as const } };
   }
@@ -529,6 +594,7 @@ export class SuiteService {
     }
     const plan = buildRecastPlan(r, members, pick, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale,
       sent: await sentImagesOf(this.ctx).forRequest(u, r) });
+    await this.livePrice(plan, prefs);
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     const talk = { speaking: plan.speaking, source: (r.cast.some(c => typeof c.speaking === 'boolean') ? 'switch' : clipTalk?.source ?? 'default') as 'switch' | 'upload' | 'detected' | 'default' };
     return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk };

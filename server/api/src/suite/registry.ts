@@ -22,7 +22,7 @@ export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @v
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'wan-2.7-edit' | 'mock' | 'byo';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'hf-wan3' | 'wan-2.7-edit' | 'mock' | 'byo';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -73,6 +73,11 @@ export type ModelSpec = {
     /** hidden until the owner acknowledges it in suite settings */ requiresAck?: boolean; notes?: string };
   status: 'active' | 'preview' | 'removed';
   notes?: string;
+  /**
+   * Priced live from the provider's free quote (Higgsfield POST /estimate/{ref}) for each request, not from `perSec`
+   * (owner 2026-11-12: Wan 3.0 has no published rate). `perSec` is 0 there and never shown as a price.
+   */
+  livePrice?: boolean;
   /** Bring your own provider (WS5): an owner-added model, run with the studio's own provider key (byo/service.ts). */
   byo?: ByoSpec;
 };
@@ -170,6 +175,26 @@ export const MODELS: ModelSpec[] = [
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 via Higgsfield (hosted)'), status: 'active',
     notes: '50% max-discount price; each reference image beyond 5 adds $0.08.' },
+  // ---------------------------------------------------------------- Wan 3.0 / Wan 3.0 Prime on Higgsfield (owner 2026-11-12)
+  // docs.higgsfield.ai/docs/models/wan-3 and wan-3-prime (read 2026-11-12; schemas in assets/higgsfield/catalog.json):
+  // text-to-video, image-to-video (image_url, end_image_url) and reference-to-video (image_urls ≤ 10, video_urls ≤ 5,
+  // audio_urls ≤ 5); duration 2–30 s; 480p / 720p / 1080p; generate_audio. No published rate: priced live (livePrice).
+  { id: 'wan-3.0', name: 'Wan 3.0', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'alibaba/wan-3.0/text-to-video', i2v: 'alibaba/wan-3.0/image-to-video', ref2v: 'alibaba/wan-3.0/reference-to-video' }, adapter: 'hf-wan3',
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false },
+    refs: { images: 10, videos: 5, audios: 5 }, duration: { min: 2, max: 30 },
+    resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)], aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
+    audio: 'flag', negativePrompt: false, seed: true, camera: { vocab: 'wan', refStyle: 'angle', referenceVideo: true }, lora: false,
+    licence: hosted('Wan 3.0 via Higgsfield (hosted)'), status: 'active',
+    notes: 'Text, image (start and end frame) or references (≤ 10 pictures, ≤ 5 videos, ≤ 5 audio); 2–30 s. No video-edit endpoint. Priced live from Higgsfield’s free estimate.' },
+  { id: 'wan-3.0-prime', name: 'Wan 3.0 Prime', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'alibaba/wan-3.0-prime/text-to-video', i2v: 'alibaba/wan-3.0-prime/image-to-video', ref2v: 'alibaba/wan-3.0-prime/reference-to-video' }, adapter: 'hf-wan3',
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false },
+    refs: { images: 10, videos: 5, audios: 5 }, duration: { min: 2, max: 30 },
+    resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)], aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
+    audio: 'flag', negativePrompt: false, seed: true, camera: { vocab: 'wan', refStyle: 'angle', referenceVideo: true }, lora: false,
+    licence: hosted('Wan 3.0 Prime via Higgsfield (hosted)'), status: 'active',
+    notes: 'Text, image (start and end frame) or references (≤ 10 pictures, ≤ 5 videos, ≤ 5 audio); 2–30 s. No video-edit endpoint. Priced live from Higgsfield’s free estimate.' },
   // ---------------------------------------------------------------- Higgsfield Genjutsu motion transfer (swap only)
   // docs.higgsfield.ai/docs/models/genjutsu/motion-transfer (read 2026-11-11): video_url (≥ 4 s, cut to 30 s), image_urls
   // 1–8, prompt (optional), resolution 480p | 720p | 1080p. Billed per source second rounded up: $0.154 / $0.3446 /

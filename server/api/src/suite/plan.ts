@@ -50,6 +50,8 @@ export const RemixSchema = z.object({
     z.object({ kind: z.literal('face'), image: ImageRefSchema, name: z.string().max(120).optional() }).strict(),
   ]).optional(),
   look: z.object({ words: z.string().max(400) }).strict().optional(),
+  /** Free words that go with the change (the old Swap's prompt when it runs as a New Swap on another model). */
+  direction: z.string().max(500).optional(),
 }).strict();
 export type RemixToggles = z.infer<typeof RemixSchema>;
 
@@ -390,7 +392,16 @@ export type ShotPlan = {
   recast?: { keepAudio: boolean; restoreAudio: boolean; people: { characterId: string; outfitId?: string; who: string; speaking: 'yes' | 'no' | 'unknown' }[] };
   /** New Swap only: the clip's sound put back by stream copy, the part of the clip used, what was switched on and Auto's reason. */
   remix?: { keepAudio: boolean; restoreAudio: boolean; range: [number, number] | null; clipSeconds: number; toggles: string[]; why: string | null; tested: boolean;
-    /** The clip is longer than the model takes: the person trims first (priced at the maximum until then). */ trimNeeded?: boolean; tooShort?: boolean; minSeconds: number; maxSeconds: number };
+    /** The clip is longer than the model takes: the person trims first (priced at the maximum until then). */ trimNeeded?: boolean; tooShort?: boolean; minSeconds: number; maxSeconds: number;
+    /** How the clip reaches the model (owner 2026-11-12, every model in every mode): edit = the clip itself; reference = as a
+     *  reference video; frames = frames from the clip (start/end images and/or reference stills); text = words only. */
+    route: 'edit' | 'reference' | 'frames' | 'text';
+    /** The clip's storage key (frames/text routes send no video, but the sound and frames still come from it). */
+    sourceKey: string;
+    /** frames route: the start / end image and how many stills go as references (after the pictures). */
+    frames?: { start: boolean; end: boolean; stills: number };
+    /** A still of the clip's person, sent as their picture (models that put a person from pictures into the clip). */
+    personStill?: boolean };
   /** The reference images sent (images/sent.ts), automatic or chosen, for the estimate. */
   sentImages?: SentView;
   /** What MUSE changed so the model could make it (adaptRequest codes: frames_as_refs, length:15, aspect:16:9, …). */

@@ -566,9 +566,10 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     const gen = (await est({ engineModel: 'kling-v4', resolution: undefined })).body;
     expect(gen).toMatchObject({ method: 'generate', request: { engineModel: 'kling-v4' } });
     expect(gen.estimate.engine.model).toBe('kling-v4');
-    const bad = await est({ engineModel: 'kling-v4', method: 'swap' });
-    expect([bad.status, bad.body.code]).toEqual([400, 'engine_not_allowed']);
-    expect(bad.body.valid).toContain('viggle');
+    // A non-swap model asked to swap generates the slot on it instead (owner 2026-11-12: every model on every mode).
+    const other = await est({ engineModel: 'kling-v4', method: 'swap' });
+    expect(other.status, JSON.stringify(other.body)).toBe(200);
+    expect(other.body).toMatchObject({ method: 'generate', request: { engineModel: 'kling-v4' } });
     // Fast can't take a new background: own setting with Fast falls back to generating, saying why.
     expect((await est({ engineModel: 'viggle', keepBackground: false })).body.method).toBe('generate');
     // The background plate on a picked image model (owner only).

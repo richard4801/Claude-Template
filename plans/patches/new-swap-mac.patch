@@ -280,6 +280,20 @@ index 9e9ad8fd..79ffdf5a 100644
      }
  
      // MARK: Generate (only with the owner's press)
+diff --git a/mac/Muse/Views/ModelPicker/OwnerModelPill.swift b/mac/Muse/Views/ModelPicker/OwnerModelPill.swift
+index d36e8502..62c1f83a 100644
+--- a/mac/Muse/Views/ModelPicker/OwnerModelPill.swift
++++ b/mac/Muse/Views/ModelPicker/OwnerModelPill.swift
+@@ -162,6 +162,9 @@ struct EngineList: View {
+                 Text(e.shownName).scaled(t.scale.body, t.roles.ink).lineLimit(1)
+                 if let n = e.notice, !n.isEmpty { Text(n).scaled(t.scale.caption, t.roles.caution).lineLimit(2) }
+                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
++                // Every model on every mode (owner 2026-11-12): one not made for this purpose says what MUSE does with it.
++                if let n = e.adaptedNote(purpose) { Text(n).scaled(t.scale.caption, t.roles.ink2).lineLimit(2) }
++                if e.livePrice { Text("Priced by the provider when you pick it").scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
+                 if o.resolutions.count < 2 {
+                     let price = ComposerModelPicker.price(o, resolution: o.resolution)
+                     chip(price.isEmpty ? "Use" : price, picked: on, label: "Use \(e.shownName)") { onPick(e.model, o.resolution) }
 diff --git a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
 index f1bc0cb9..d875f47b 100644
 --- a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
@@ -452,12 +466,25 @@ index 7d8d897f..ba323903 100644
          case .swap:
              if store.suite.swap.promptOn {
                  promptBox
+diff --git a/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift b/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift
+index 17bd6aaa..da3d15a5 100644
+--- a/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift
++++ b/mac/Muse/Views/Suite/Composer/ModelPickerViews.swift
+@@ -93,6 +93,8 @@ struct ModelPickerList: View {
+             VStack(alignment: .leading, spacing: Space.s1) {
+                 Text(m.shownName).scaled(t.scale.body, t.roles.ink).lineLimit(1)
+                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
++                // Every model on every mode (owner 2026-11-12): one the tool adapts says what MUSE does with it.
++                if let n = ComposerModelPicker.adaptedNote(m, tool: d.tool) { Text(n).scaled(t.scale.caption, t.roles.ink2).lineLimit(2) }
+                 if m.resolutions.isEmpty {
+                     // A photo model, or a per-run model: one choice, one price.
+                     chip(ComposerModelPicker.price(m).isEmpty ? "Use" : ComposerModelPicker.price(m), picked: on,
 diff --git a/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
 new file mode 100644
-index 00000000..a617f31c
+index 00000000..162fb18b
 --- /dev/null
 +++ b/mac/Muse/Views/Suite/Composer/NewSwapPanel.swift
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,323 @@
 +import MuseCore
 +import SwiftUI
 +
@@ -736,8 +763,9 @@ index 00000000..a617f31c
 +    }
 +}
 +
-+/// New Swap's model pill: Auto (with its pick) first, then every model that edits a video, each with its limits and its
-+/// price for this clip; the ones that can't make these changes are greyed with the reason.
++/// New Swap's model pill: Auto (with its pick) first, then every video model (owner 2026-11-12: every model on every
++/// mode), each with its limits and its price for this clip; an adapted one says what MUSE does with it. Only a model
++/// that can't run at all (its provider isn't set up) is greyed, with the reason.
 +struct RemixModelPill: View {
 +    @Environment(AppStore.self) private var store
 +    @Environment(\.theme) private var t
@@ -762,7 +790,7 @@ index 00000000..a617f31c
 +                    store.suite.remix.engineModel = m.model
 +                } label: {
 +                    Text("\(m.label)\(m.price.usd.map { " · \(Pricing.money($0))" } ?? "")")
-+                    Text(m.detail)
++                    Text(m.adaptedLine ?? m.detail) // an adapted model says exactly what MUSE does with it
 +                }
 +                .disabled(!m.pickable)
 +            }
@@ -780,6 +808,141 @@ index 00000000..a617f31c
 +        .accessibilityLabel("Model: \(title)")
 +    }
 +}
+diff --git a/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift b/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift
+index 4e70015c..51853162 100644
+--- a/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift
++++ b/mac/MuseCore/Sources/MuseCore/Engines/EngineChoice.swift
+@@ -40,6 +40,8 @@ public enum EnginePurpose: String, CaseIterable, Sendable, Hashable, Identifiabl
+ 
+     /// Which request field carries the pick: `imageModel` for stills, else `engineModel`.
+     public var isImage: Bool { self == .photo || self == .outfit || self == .character || self == .plate }
++    /// A job-specific tool (upscale, matte, track, captions, noise): only its own models (a matte model can't caption).
++    public var isTool: Bool { self == .upscale || self == .matte || self == .track || self == .captions || self == .denoise }
+ 
+     /// The composer's tool → its purpose.
+     public init?(tool: ComposerTool) {
+@@ -151,8 +153,22 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
+     public var label: String?
+     /// What to show for the model: the server's label; older servers: the name with its provider.
+     public var shownName: String { label ?? providerName.map { "\(name) · \($0)" } ?? name }
++    /// Owner 2026-11-12 ("every model on every mode"): with `?purpose=`, "native" or "adapted" and the server's line for an
++    /// adapted one (what MUSE does with it there).
++    public var fit: String?
++    public var fitNote: String?
++    /// Priced live by the provider when a request is planned (Wan 3.0 on Higgsfield): no price in the list.
++    public var livePrice = false
++
++    /// Whether the model is made for `p` (else MUSE adapts it there).
++    public func isNative(_ p: EnginePurpose) -> Bool { fit.map { $0 == "native" } ?? purposes.contains(p.rawValue) }
++    /// The picker's line for a model used outside what it's made for, or nil.
++    public func adaptedNote(_ p: EnginePurpose) -> String? {
++        if isNative(p) { return nil }
++        return fitNote ?? "Not made for this: MUSE adapts what it can’t take and says what it changed"
++    }
+ 
+-    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName, label }
++    enum CodingKeys: String, CodingKey { case model, name, kind, purposes, custom, `default`, notice, limits, resolution, price, inputs, providerName, label, fit, fitNote, livePrice }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         model = try c.decode(String.self, forKey: .model)
+@@ -168,6 +184,9 @@ public struct EngineEntry: Decodable, Hashable, Sendable {
+         resolution = c.o(.resolution)
+         price = c.o(.price)
+         inputs = c.o(.inputs)
++        fit = c.o(.fit)
++        fitNote = c.o(.fitNote)
++        livePrice = c.v(.livePrice, false)
+     }
+ 
+     /// The picker's entry: the price per second (or per output second) on the engine's own resolution; the others
+@@ -200,14 +219,22 @@ public struct EngineCatalog: Decodable, Sendable {
+ 
+     public func purpose(_ p: EnginePurpose) -> EnginePurposeInfo? { purposes.first { $0.id == p.rawValue } }
+ 
+-    /// The engines for a purpose (all of them when the list was asked for that purpose already), default first.
++    /// The engines for a purpose. Owner 2026-11-12: "Every model in our app should be available on every mode … the
++    /// default models are mostly on top of the list". Every model of the purpose's kind (video or image; a tool's own
++    /// models only): the default first, then the ones made for it, then the ones MUSE adapts; the owner's providers after
++    /// MUSE's within each. Never filtered by what a model is made for.
+     public func engines(for p: EnginePurpose) -> [EngineEntry] {
+-        let list = engines.filter { $0.purposes.isEmpty || $0.purposes.contains(p.rawValue) }
+-        return list.sorted { a, b in
+-            if a.custom != b.custom { return !a.custom }
+-            if a.isDefault != b.isDefault { return a.isDefault }
+-            return false
++        let kind = p.isImage ? "image" : "video"
++        let list = engines.filter { e in p.isTool ? e.purposes.contains(p.rawValue) : (e.kind == kind || (e.kind.isEmpty && e.purposes.contains(p.rawValue))) }
++        let def = purpose(p)?.default
++        func rank(_ e: EngineEntry) -> Int {
++            if e.isDefault || e.model == def { return 0 }
++            return (e.isNative(p) ? 1 : 3) + (e.custom ? 1 : 0)
+         }
++        return list.enumerated().sorted { a, b in
++            let ra = rank(a.element), rb = rank(b.element)
++            return ra != rb ? ra < rb : a.offset < b.offset
++        }.map(\.element)
+     }
+ 
+     /// The pill's words for a pick: "Auto (Kling 4.0)" / "Auto" / the model's name (and resolution).
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift b/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
+index e34cffbf..0ca902d7 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
+@@ -237,17 +237,35 @@ public enum ComposerModelPicker {
+         }
+     }
+ 
+-    /// Video models for a shot tool (Talking needs an audio slot, UGC ad a reference image); image models for Photo.
++    /// Owner 2026-11-12, every model on every mode: a shot tool lists every video model, Photo every image model.
+     public static func supports(_ e: SuiteModelOption, tool: ComposerTool) -> Bool {
+         switch tool {
+         case .photo: return e.kind == "image"
+-        case .shot, .storyboard: return e.isVideo
+-        case .talking: return e.isVideo && e.inputs?.audio == true
+-        case .ugc: return e.isVideo && (e.inputs?.images ?? 0) > 0
++        case .shot, .storyboard, .talking, .ugc: return e.isVideo
+         case .swap, .recast, .extend: return false
+         }
+     }
+ 
++    /// Whether the model takes what the tool sends natively (Talking: an audio slot; UGC ad: a reference image). The
++    /// others are still offered, after these, and MUSE adapts them (it says what it changed).
++    public static func fits(_ e: SuiteModelOption, tool: ComposerTool) -> Bool {
++        switch tool {
++        case .talking: return e.inputs?.audio == true
++        case .ugc: return (e.inputs?.images ?? 0) > 0
++        default: return true
++        }
++    }
++
++    /// The row's line for a model the tool adapts, or nil.
++    public static func adaptedNote(_ e: SuiteModelOption, tool: ComposerTool) -> String? {
++        if fits(e, tool: tool) { return nil }
++        switch tool {
++        case .talking: return "Takes no voice track: MUSE writes the words to say in the prompt"
++        case .ugc: return "Takes no product photo: MUSE describes the product in words"
++        default: return nil
++        }
++    }
++
+     /// The list: this quality's ladder first (its order), then the others in quality order, then by name; the owner's own
+     /// provider models last. A search filters by name or id.
+     public static func options(_ catalog: SuiteCatalog?, _ settings: SuiteSettings?, tool: ComposerTool, quality: String, search: String = "") -> [SuiteModelOption] {
+@@ -255,11 +273,12 @@ public enum ComposerModelPicker {
+         let ladder = (catalog?.tier(quality)?.models ?? []).map(\.model)
+         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+         let found = q.isEmpty ? all : all.filter { "\($0.name) \($0.model)".lowercased().contains(q) }
+-        func rank(_ e: SuiteModelOption) -> (Int, Int, Int) {
++        func rank(_ e: SuiteModelOption) -> (Int, Int, Int, Int) {
+             let onThis = e.tiers.contains(quality) ? 0 : 1
+             let inLadder = ladder.firstIndex(of: e.model) ?? Int.max
+             let firstTier = e.tier.flatMap { SuiteText.tierIds.firstIndex(of: $0) } ?? Int.max
+-            return (e.custom ? 1 : 0, onThis, onThis == 0 ? inLadder : firstTier)
++            // The ones made for the tool first (the defaults among them), then the ones MUSE adapts.
++            return (fits(e, tool: tool) ? 0 : 1, e.custom ? 1 : 0, onThis, onThis == 0 ? inLadder : firstTier)
+         }
+         return found.sorted { a, b in
+             let ra = rank(a), rb = rank(b)
 diff --git a/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Suite.swift b/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Suite.swift
 index bc1fd0ab..70b8381d 100644
 --- a/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Suite.swift
@@ -807,10 +970,10 @@ index bc1fd0ab..70b8381d 100644
          }
 diff --git a/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift b/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift
 new file mode 100644
-index 00000000..19886b7e
+index 00000000..f08bf602
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Suite/NewSwap.swift
-@@ -0,0 +1,350 @@
+@@ -0,0 +1,357 @@
 +import Foundation
 +
 +// New Swap (beta, plans/new-swap.md): remix a clip with toggles. The person adds a video (upload, link or Library), then
@@ -1092,7 +1255,8 @@ index 00000000..19886b7e
 +    }
 +    public struct Price: Codable, Hashable, Sendable {
 +        public var resolution: String
-+        public var perSec: Double
++        /// nil: priced live by the provider when picked (Wan 3.0).
++        public var perSec: Double?
 +        public var seconds: Double?
 +        public var trimNeeded: Bool?
 +        public var usd: Double?
@@ -1101,9 +1265,13 @@ index 00000000..19886b7e
 +    public struct Row: Codable, Hashable, Sendable, Identifiable {
 +        public var model: String
 +        public var label: String
-+        /// "yes", "prompt" (by instruction only) or "no".
++        /// "yes", "prompt" (by instruction only) or "adapted" (MUSE sends the clip another way; `notes` say how).
++        /// Owner 2026-11-12: every model can be picked; only `unavailable` stops one.
 +        public var support: String
 +        public var reason: String?
++        public var notes: [String]?
++        /// How the clip reaches the model: edit, reference, frames or text.
++        public var route: String?
 +        public var unavailable: String?
 +        public var tested: Bool
 +        public var auto: Bool
@@ -1111,17 +1279,19 @@ index 00000000..19886b7e
 +        public var limits: Limits
 +        public var price: Price
 +        public var id: String { model }
-+        /// Can be picked: it can do these changes and it's set up.
-+        public var pickable: Bool { support != "no" && unavailable == nil }
-+        /// The row's second line: limits, sound, "not tested yet", or why not.
++        /// Can be picked: everything that can run (no model is greyed out for what it's made for).
++        public var pickable: Bool { unavailable == nil }
++        /// The row's second line: limits, sound, "not tested yet", or why it can't run.
 +        public var detail: String {
 +            if let u = unavailable { return "Not available: \(u)" }
-+            if support == "no" { return reason.map { "Can't: \($0)" } ?? "Can't make these changes" }
 +            var p = ["up to \(Pricing.trimNum(limits.maxSeconds)) s", limits.resolutions.joined(separator: "/"), limits.soundNote]
 +            if support == "prompt" { p.append("by instruction only") }
++            if price.perSec == nil { p.append("priced when you pick it") }
 +            if !tested { p.append("not tested yet") }
 +            return p.joined(separator: ", ")
 +        }
++        /// What MUSE does with an adapted model here (its first note), or nil.
++        public var adaptedLine: String? { support == "adapted" ? (notes?.first ?? reason) : nil }
 +    }
 +    public var toggles: [String]
 +    public var auto: Auto?
@@ -1215,6 +1385,24 @@ index 1ddff000..e1e0447c 100644
      /// The keys the server reads or checks; everything else is `extra`.
      public static let knownKeys: Set<String> = ["v", "tool", "quality", "aspect", "duration", "takes", "count", "sound", "speaking", "rig", "tokens", "slots"]
      public static let maxBytes = 64 * 1024
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift
+index 0cefb0d5..f6fbab67 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift
+@@ -124,8 +124,12 @@ final class ComposerModelPickerTests: XCTestCase {
+         XCTAssertFalse(ComposerModelPicker.offered(.swap))
+         XCTAssertFalse(ComposerModelPicker.offered(.extend))
+         let c = try await ownerCatalog()
++        // Every video model is offered (owner 2026-11-12): the ones with a voice slot first, then the others, adapted.
+         let talking = ComposerModelPicker.options(c, nil, tool: .talking, quality: "draft")
+-        XCTAssertTrue(talking.allSatisfy { $0.inputs?.audio == true })
++        let firstAdapted = talking.firstIndex { $0.inputs?.audio != true } ?? talking.count
++        XCTAssertTrue(talking[..<firstAdapted].allSatisfy { $0.inputs?.audio == true })
++        XCTAssertTrue(talking[firstAdapted...].allSatisfy { ComposerModelPicker.adaptedNote($0, tool: .talking) != nil })
++        XCTAssertEqual(talking.filter(\.isVideo).count, talking.count)
+     }
+ 
+     // Owner bug 2026-11-11: on Draft, picking MiniMax H3 (Higgsfield), which makes 2K only, left the Quality choice blank.
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/Fixtures/prompt_scripts_fixture.json b/mac/MuseCore/Tests/MuseCoreTests/Fixtures/prompt_scripts_fixture.json
 index 49110089..f16550f3 100644
 --- a/mac/MuseCore/Tests/MuseCoreTests/Fixtures/prompt_scripts_fixture.json
@@ -1226,10 +1414,10 @@ index 49110089..f16550f3 100644
 \ No newline at end of file
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift b/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift
 new file mode 100644
-index 00000000..7fc15864
+index 00000000..4290f4f2
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/NewSwapTests.swift
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,175 @@
 +import XCTest
 +@testable import MuseCore
 +
@@ -1356,15 +1544,36 @@ index 00000000..7fc15864
 +          {"model":"wan-2.7-edit","label":"Wan 2.7 Edit · Replicate","support":"yes","reason":null,"unavailable":null,"tested":false,"auto":true,"why":"Background only",
 +           "limits":{"minSeconds":2,"maxSeconds":10,"resolutions":["720p","1080p"],"maxImages":1,"keepsAudio":true,"soundNote":"keeps the clip’s sound"},
 +           "price":{"resolution":"1080p","perSec":0.1,"seconds":10,"trimNeeded":true,"usd":1,"inputBilled":"only the new video is billed"}},
-+          {"model":"genjutsu-light","label":"Genjutsu Light · Higgsfield","support":"no","reason":"puts a person from pictures into the clip: turn on Character (her)","unavailable":null,"tested":true,"auto":false,
++          {"model":"genjutsu-light","label":"Genjutsu Light · Higgsfield","support":"adapted","route":"edit","reason":"Genjutsu Light puts a person from pictures into the clip: MUSE sends a still of the person from your clip so they stay themselves (their look may drift)","notes":["Genjutsu Light puts a person from pictures into the clip: MUSE sends a still of the person from your clip so they stay themselves (their look may drift)"],"unavailable":null,"tested":true,"auto":false,
 +           "limits":{"minSeconds":4,"maxSeconds":15,"resolutions":["480p","720p","1080p"],"maxImages":8,"keepsAudio":false,"soundNote":"MUSE puts the clip’s sound back"},
 +           "price":{"resolution":"720p","perSec":0.2,"inputBilled":"the clip’s seconds are billed too (in the rate)"}}]}
 +        """.utf8))
 +        XCTAssertEqual(m.auto?.model, "wan-2.7-edit")
 +        XCTAssertEqual(m.models[0].detail, "up to 10 s, 720p/1080p, keeps the clip’s sound, not tested yet")
 +        XCTAssertTrue(m.models[0].pickable)
-+        XCTAssertFalse(m.models[1].pickable)
-+        XCTAssertEqual(m.models[1].detail, "Can't: puts a person from pictures into the clip: turn on Character (her)")
++        // Every model can be picked (owner 2026-11-12); an adapted one says what MUSE does with it.
++        XCTAssertTrue(m.models[1].pickable)
++        XCTAssertEqual(m.models[1].adaptedLine, "Genjutsu Light puts a person from pictures into the clip: MUSE sends a still of the person from your clip so they stay themselves (their look may drift)")
++        XCTAssertNil(m.models[0].adaptedLine)
++    }
++
++    func testEveryModelOfAKindIsOfferedForEveryPurposeDefaultFirstThenNativeThenAdapted() throws {
++        let cat = try JSONDecoder().decode(EngineCatalog.self, from: Data("""
++        {"purposes":[{"id":"talking","label":"Talking","kind":"video","default":"h3-lite"}],"engines":[
++          {"model":"kling-v4","name":"Kling 4.0","kind":"video","purposes":["shot","recast"],"label":"Kling 4.0 · Replicate"},
++          {"model":"wan-2.7-edit","name":"Wan 2.7 Edit","kind":"video","purposes":[]},
++          {"model":"h3","name":"MiniMax H3","kind":"video","purposes":["shot","talking"]},
++          {"model":"h3-lite","name":"MiniMax H3 Lite","kind":"video","purposes":["shot","talking"]},
++          {"model":"wan-3.0","name":"Wan 3.0","kind":"video","purposes":["shot"],"livePrice":true},
++          {"model":"flux","name":"FLUX","kind":"image","purposes":["photo"]},
++          {"model":"rvm","name":"RVM","kind":"tool","purposes":["matte"]}]}
++        """.utf8))
++        XCTAssertEqual(cat.engines(for: .talking).map(\.model), ["h3-lite", "h3", "kling-v4", "wan-2.7-edit", "wan-3.0"])
++        XCTAssertNil(cat.engines(for: .talking)[1].adaptedNote(.talking))
++        XCTAssertEqual(cat.engines(for: .talking)[2].adaptedNote(.talking), "Not made for this: MUSE adapts what it can’t take and says what it changed")
++        XCTAssertTrue(cat.engines(for: .talking)[4].livePrice)
++        XCTAssertEqual(cat.engines(for: .photo).map(\.model), ["flux"])
++        XCTAssertEqual(cat.engines(for: .matte).map(\.model), ["rvm"])
 +    }
 +
 +    func testRemixIsADraftToolTheServerAccepts() {

@@ -11,7 +11,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { PaidLost, paidLostFailure, reportPaidLost, sleep } from '../services/paidLost.js';
 import { ReplicateError } from '../replicate/client.js';
 import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail, type MediaInfo } from '../replicate/media.js';
-import { cutRange, frameOf, joinClips, segment } from './extendMedia.js';
+import { cutRange, frameAt, frameOf, joinClips, segment } from './extendMedia.js';
 import { finishPlan, finishTake, TARGET_LUFS } from './finish.js';
 import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
@@ -261,15 +261,28 @@ export class SuiteRunner {
         urls.videos = [await put('source_part.mp4', f, 'video/mp4')];
       }
     }
-    // New Swap: the part of the clip the person picked with the trimmer (the model gets only that part; its sound goes back on).
-    if (plan.remix?.range) {
+    // New Swap: the part of the clip the person picked with the trimmer (the model gets only that part; its sound goes
+    // back on). Routes without a video (owner 2026-11-12: every model in every mode) get frames from it instead, and a
+    // model that puts a person from pictures into the clip gets a still of the clip's person.
+    const rx = plan.remix;
+    if (rx && (rx.range || rx.frames || rx.personStill)) {
       await report(1, 0.02, 'Preparing the clip');
       const part = await this.remixSource(job.studioId, plan, tmp);
-      urls.videos = [await (async () => {
-        const key = `s/${job.id}/source_part.mp4`;
-        await putFile(ctx, { key, file: part, studioId: job.studioId, kind: 'output', userId: job.userId, contentType: 'video/mp4' });
+      const put = async (name: string, f: string, contentType: string) => {
+        const key = `s/${job.id}/${name}`;
+        await putFile(ctx, { key, file: f, studioId: job.studioId, kind: 'output', userId: job.userId, contentType });
         return ctx.storage.presignGet(key, c.REPLICATE_INPUT_URL_TTL_SEC);
-      })()];
+      };
+      if (rx.range && plan.videos.length) urls.videos = [await put('source_part.mp4', part, 'video/mp4')];
+      if (rx.frames || rx.personStill) {
+        const info = await probe(c.FFPROBE_PATH, part);
+        const D = Math.max(0.1, info.duration);
+        const grab = async (name: string, at: number) => { const f = path.join(tmp, name); await frameAt(c.FFMPEG_PATH, part, f, Math.max(0, Math.min(D - 0.05, at))); return put(name, f, 'image/jpeg'); };
+        if (rx.frames?.start) urls.start = await grab('frame_first.jpg', 0);
+        if (rx.frames?.end) urls.end = await grab('frame_last.jpg', D - 0.1);
+        for (let k = 0; k < (rx.frames?.stills ?? 0); k++) urls.refs.push(await grab(`frame_${k + 1}.jpg`, (D * (k + 0.5)) / (rx.frames!.stills)));
+        if (rx.personStill) urls.refs.push(await grab('person.jpg', D / 2));
+      }
     }
     return { urls, prompt, separationCost, source };
   }
@@ -280,7 +293,7 @@ export class SuiteRunner {
     const src = path.join(tmp, 'remix_source.mp4');
     if (fs.existsSync(src)) return src;
     const full = plan.remix?.range ? path.join(tmp, 'remix_full.mp4') : src;
-    const obj = await ctx.storage.get(plan.videos[0]!.video.key!);
+    const obj = await ctx.storage.get(plan.remix?.sourceKey ?? plan.videos[0]!.video.key!);
     if (!obj) throw new ReplicateError('the source clip is missing', 'failed');
     await pipeline(obj.body, fs.createWriteStream(full));
     if (plan.remix?.range) await cutRange(c.FFMPEG_PATH, full, src, plan.remix.range[0], plan.remix.range[1], await probe(c.FFPROBE_PATH, full));
@@ -493,7 +506,7 @@ export class SuiteRunner {
     };
     // Sound off: the audio track is dropped by stream copy. Then finishing (below) cuts to the planned length and levels the sound.
     let shaped = false;
-    if (plan.remix?.restoreAudio && plan.videos[0]?.video.key) {
+    if (plan.remix?.restoreAudio && (plan.remix.sourceKey || plan.videos[0]?.video.key)) {
       // New Swap keeps the clip's sound: put back by stream copy from the part used (no re-encode of the video).
       shaped = await soft('putting the original sound back', async () => {
         const src = await this.remixSource(job.studioId, plan, tmp);

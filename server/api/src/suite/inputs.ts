@@ -92,6 +92,14 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       i.video = u.videos[0]; i.resolution = p.resolution; i.aspect_ratio = 'auto'; i.audio_setting = 'origin';
       set(i, 'reference_image', u.refs[0]); set(i, 'seed', p.seed);
       break;
+    case 'hf-wan3': // Higgsfield Wan 3.0 / Prime: t2v, i2v (image_url, end_image_url) or ref2v (image_urls, video_urls, audio_urls)
+      i.duration = Math.max(2, Math.min(30, Math.round(p.seconds))); i.resolution = p.resolution; i.generate_audio = p.audio; set(i, 'seed', p.seed);
+      if (p.kind === 'i2v') { i.image_url = u.start; set(i, 'end_image_url', u.end); i.aspect_ratio = 'adaptive'; }
+      else {
+        i.aspect_ratio = p.aspect;
+        if (p.kind === 'ref2v') { set(i, 'image_urls', u.refs.slice(0, 10)); set(i, 'video_urls', u.videos.slice(0, 5)); set(i, 'audio_urls', u.audio ? [u.audio] : undefined); }
+      }
+      break;
     case 'hf-genjutsu': // docs.higgsfield.ai genjutsu motion-transfer: video_url, image_urls 1–8, prompt in plain words ("image 1")
       return { video_url: u.videos[0], image_urls: u.refs.slice(0, 8), resolution: p.resolution,
         ...(p.prompt.trim() ? { prompt: p.prompt.replace(/<Image (\d+)>/g, 'image $1').replace(/<Video 1>/g, 'the source video').slice(0, 10000) } : {}) };

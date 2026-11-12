@@ -18,6 +18,70 @@ suggests one and says why; Claude can read and set everything, but a run needs A
 
 ---
 
+## Phase 3 (2026-11-12): every model on every mode, and Wan 3.0
+
+**The owner's rule** (via the coordinator): "Every model in our app should be available on every mode. Doesn't matter. The only difference is that the default models are mostly on top of the list. We should be able to pick other models freely."
+- No model is greyed out or refused in any picker.
+- When a picked model can't take an input natively, MUSE adapts and says exactly what it did.
+- A model is refused only when nothing at all can be sent, and then the reason is said.
+
+### New Swap
+Every video model is listed. Auto's order comes first, then the other edit models, then the ones MUSE adapts. Each model has a **route** (`suite/remix.ts` `routeOf`):
+
+| Route | Models | What MUSE sends | The line shown (example) |
+|---|---|---|---|
+| edit | Wan 2.7 Edit, Kling O1/4.0, Seedance 2.5, Genjutsu (Light), H3 Max Recast, Wan 2.2 Animate | the clip itself | (none, or "has no Background control: MUSE asks for it in words") |
+| reference | MiniMax H3 family (Replicate and Higgsfield), Wan 3.0 / Prime, Kling 3.0 Omni, Wan 2.7 | the clip as a reference video | "MiniMax H3 can't edit a video: MUSE sends your clip as a reference video, so the motion and framing follow it closely but not exactly" |
+| frames | Veo 3.1 Lite, LTX-2.3, image-only models, BYO models with a start image or references | first/last frame, or 3 stills as references | "Veo 3.1 Lite can't take a video: MUSE sends 2 frames from your clip (the first, the last); the motion follows your words, so it will be approximate" |
+| text | words-only models | words only | "… takes only words: your clip and pictures aren't sent, so the result won't follow the clip's motion" |
+
+- **The v1 rule "Genjutsu/H3 need Character on" is dropped.** With Character off, MUSE sends a still of the clip's person: "Genjutsu Light puts a person from pictures into the clip: MUSE sends a still of the person from your clip so they stay themselves (their look may drift)".
+- **Pictures that don't fit** are described in words.
+- **Toggles a model has no control for** are asked for in words.
+- **The runner extracts the frames and stills** from the trimmed part of the clip (`frameAt`). The clip's sound is put back on every route.
+- **What still refuses:** a model whose provider isn't set up, one that is switched off, or an unknown id. The model pill shows these with the reason, as "unavailable".
+
+### Every other mode (server)
+- **Lists:** `GET /v1/engines?purpose=` gives every video model for every video purpose.
+  - Order: the default first, then the ones made for it (`fit: "native"`), then the rest (`fit: "adapted"` with a one-line `fitNote`).
+  - Image purposes already listed every image model.
+  - Tools (matte, track, captions, noise, upscale) stay per job: a matte model can't caption.
+- **Swap (classic)** on a non-swap model, or a **one-person Recast** on a non-Recast model, runs as a New Swap on that model with her as Character, and the warnings say so.
+  - **A Recast with several people** on a model that can't tell people apart is the one refusal left there ("…can't tell several people in a clip apart · recast one person with it, or pick a Recast model"). Nothing coherent can be sent.
+  - **The classic `/v1/jobs` swap pipeline** has no adapter: a picked non-swap model is told to generate from the AI suite's Swap.
+- **Extend** on a model without its own extend: a frame bridge (its start frame), else the clip as a reference video, with "…has no extend of its own: MUSE continues from your clip's last frame, so the join may show". An edit-only or words-only model is refused with that reason.
+- **Shot, Talking, UGC ad, Storyboard and Guide** on any model use the shot planner's existing "adapt, don't block". A model that only edits an existing video is refused: "edits an existing video: it can't make a shot from words or pictures · use it in Swap → New Swap".
+- **Recreate fills:** a non-swap model asked to swap generates the slot on that model instead of being refused.
+- **Studio defaults:** any video model can be the default for any video purpose.
+
+### Wan 3.0 and Wan 3.0 Prime (built in, Higgsfield)
+- **Registry:** `wan-3.0` and `wan-3.0-prime`, refs `alibaba/wan-3.0[-prime]/{text,image,reference}-to-video`, adapter `hf-wan3`.
+  - Inputs: image_url / end_image_url for i2v; image_urls ≤ 10, video_urls ≤ 5 and audio_urls ≤ 5 for ref2v.
+  - 2–30 s; 480p, 720p and 1080p.
+- **Price: not available from here.** Higgsfield publishes no rate, and this session has no working Higgsfield key (the proxy's credential got "Invalid credentials"; the rules say no keys). So they are **priced live**: `livePrice`.
+  - Each plan calls Higgsfield's free `POST /estimate/{ref}` with the server's own key, for that exact request (length, resolution, sound, the kind of input). The result is cached 10 minutes.
+  - No quote means no run: "Wan 3.0 · Higgsfield has no price right now · try again in a minute, or pick another model".
+  - The pickers show "Priced by the provider when you pick it".
+- **They appear in every video picker,** but only once the server's Higgsfield key is set (as for all Higgsfield models).
+- **In New Swap they take the clip as a reference video** (no video-edit endpoint).
+
+### Apps (patches)
+**Mac** (`plans/patches/new-swap-mac.patch`; MuseCore on Linux: 877 tests, 0 failures):
+- `EngineCatalog.engines(for:)` no longer filters by purpose. It lists every model of the kind: default, then native, then adapted, MUSE's before the owner's providers.
+- The `EngineEntry` model gains `fit`, `fitNote` and `livePrice`.
+- The owner's model list (`EngineList`) shows the adapted line and "Priced by the provider when you pick it".
+- `ComposerModelPicker.supports` no longer narrows Talking or UGC ad to models with a voice or picture slot. Those models come first; the rest follow with "Takes no voice track: MUSE writes the words to say in the prompt" or "Takes no product photo: MUSE describes the product in words".
+- New Swap's model pill no longer greys a model for what it's made for (`pickable` = it can run), and shows each one's adapted line.
+
+**Android** (`plans/patches/new-swap-android.patch`, which replaces the earlier fixtures-only patch and still holds the two regenerated demo files):
+- `ModelPicker.groups` no longer filters by purpose: natives first, then adapted with a line.
+- `SuiteCatalogEngine` gains `fit`, `fitNote` and `livePrice`.
+- The model row shows the adapted line.
+- `ModelChoiceTest` is updated.
+- There is no Android SDK in this container, so the Android unit tests were not run here. Android's New Swap panel is still the next job, after Mac is green.
+
+---
+
 ## Build (phase 2, 2026-11-12) — owner answers and what was built
 
 **Owner answers (via the coordinator):**
@@ -57,8 +121,8 @@ suggests one and says why; Claude can read and set everything, but a run needs A
 - **The Mac prompt-scripts fixture** (`MuseCoreTests/Fixtures/prompt_scripts_fixture.json`) is in the same patch.
 
 ### Android (after Mac is green)
-`plans/patches/new-swap-android-fixtures.patch` holds only the regenerated demo copies, `prompt_library.json` and `prompt_scripts.json`.
-**The server's fixture tests need these two patches applied.** On `claude/new-swap` alone, `prompts.test.ts` and `prompt-scripts-fixture.test.ts` (3 tests) fail. Merge the server branch together with both fixture patches. With them applied, `tsc` is clean and the full vitest is green. The Android panel itself is the next job.
+`plans/patches/new-swap-android.patch` (phase 3: also the picker changes) holds the regenerated demo copies, `prompt_library.json` and `prompt_scripts.json`.
+**The server's fixture tests need these two patches applied** (Mac and Android). On `claude/new-swap` alone, `prompts.test.ts` and `prompt-scripts-fixture.test.ts` (3 tests) fail. Merge the server branch together with both patches. With them applied, `tsc` is clean and the full vitest is green. The Android panel itself is the next job.
 
 ### Wan 2.7 Edit's paid test (prepared, NOT run; needs the owner's OK)
 One run, about **$1.00** (10 s × $0.10, 1080p, provider cost = member price at priceScale 1). The request, sent from the app as the owner on one of the owner's clips of 10 s or less:

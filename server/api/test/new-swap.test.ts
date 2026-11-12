@@ -2,6 +2,7 @@
 // suite.remix script (figure lock in every prompt), pictures and their caps, the trimmer, prices, provider inputs, and
 // the API + Claude's draft on the MOCK provider. No real predictions, no money.
 import { execFileSync } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -65,17 +66,30 @@ describe('New Swap · registry and Auto (unit)', () => {
     expect('model' in hidden && [hidden.model.id, hidden.tried[0]]).toEqual(['kling-o1', { model: 'wan-2.7-edit', why: 'not offered to members' }]);
   });
 
-  it('what each model can do: refusals say why; "prompt" marks instruction-only', () => {
+  it('every model can be picked (owner 2026-11-12): MUSE adapts and says exactly what it did; only a model that can’t run is refused', () => {
     const bgOnly = X({ background: { mode: 'describe', words: 'beach' } });
-    expect(remixSupport(modelById('genjutsu-light')!, bgOnly)).toEqual({ support: 'no', reason: 'puts a person from pictures into the clip: turn on Character (her)' });
-    expect(remixSupport(modelById('wan-2.7-edit')!, X({ character: { kind: 'model', modelId: 'm' } }))).toEqual({ support: 'no', reason: 'can’t do Character' });
-    expect(remixSupport(modelById('wan-2.7-edit')!, X({ outfit: { kind: 'product', image: img('p') }, background: { mode: 'photo', image: img('b') } })))
-      .toEqual({ support: 'no', reason: 'takes 1 picture: these changes need 2' });
-    expect(remixSupport(modelById('wan-2.7-edit')!, X({ outfit: { kind: 'words', words: 'red dress' } }))).toEqual({ support: 'prompt', reason: 'does Outfit by instruction only' });
-    expect(remixSupport(modelById('genjutsu')!, X({ character: { kind: 'face', image: img('f') } })).support).toBe('no'); // face swap isn't a Genjutsu job
-    expect(remixSupport(modelById('wan-2.2-animate')!, X({ character: { kind: 'model', modelId: 'm' }, look: { words: 'warm' } })).support).toBe('no');
-    expect(pickRemix(X({ background: { mode: 'describe', words: 'x' } }), { providers: ALL, engineModel: 'genjutsu' })).toMatchObject({ error: 'remix_unsupported' });
-    expect(pickRemix(X({ background: { mode: 'describe', words: 'x' } }), { providers: ALL, engineModel: 'veo-3.1-lite' })).toMatchObject({ error: 'remix_unsupported' });
+    // An edit model that puts a person from pictures in: a still of the clip's person is sent.
+    expect(remixSupport(modelById('genjutsu-light')!, bgOnly)).toMatchObject({ support: 'adapted', route: 'edit',
+      reason: 'Genjutsu Light puts a person from pictures into the clip: MUSE sends a still of the person from your clip so they stay themselves (their look may drift)' });
+    // A toggle the edit model has no control for is asked in words.
+    expect(remixSupport(modelById('wan-2.7-edit')!, X({ character: { kind: 'model', modelId: 'm' } }))).toMatchObject({ support: 'adapted', reason: 'Wan 2.7 Edit has no Character control: MUSE asks for it in words' });
+    // Too many pictures: the most important go, the rest in words.
+    expect(remixSupport(modelById('wan-2.7-edit')!, X({ outfit: { kind: 'product', image: img('p') }, background: { mode: 'photo', image: img('b') } })).notes)
+      .toContain('Wan 2.7 Edit takes 1 picture: MUSE sends the most important one and describes the rest in words');
+    expect(remixSupport(modelById('wan-2.7-edit')!, X({ outfit: { kind: 'words', words: 'red dress' } }))).toMatchObject({ support: 'prompt', reason: 'does Outfit by instruction only' });
+    // Shot models: the H3 swap models take the clip as a reference video; Veo gets frames; every one says so.
+    expect(remixSupport(modelById('h3')!, bgOnly)).toMatchObject({ support: 'adapted', route: 'reference',
+      reason: 'MiniMax H3 can’t edit a video: MUSE sends your clip as a reference video, so the motion and framing follow it closely but not exactly' });
+    expect(remixSupport(modelById('veo-3.1-lite')!, bgOnly)).toMatchObject({ support: 'adapted', route: 'frames',
+      reason: 'Veo 3.1 Lite can’t take a video: MUSE sends 2 frames from your clip (the first, the last); the motion follows your words, so it will be approximate' });
+    expect(remixSupport(modelById('wan-3.0')!, bgOnly).route).toBe('reference');
+    for (const id of ['genjutsu', 'veo-3.1-lite', 'h3-hf', 'wan-3.0-prime', 'kling-v3-omni', 'ltx-2.3']) {
+      const p = pickRemix(bgOnly, { providers: ALL, engineModel: id });
+      expect('model' in p && p.model.id, id).toBe(id);
+    }
+    // The only refusals: a model that can't run (provider not set up, switched off, unknown).
+    expect(pickRemix(bgOnly, { providers: NO_HF, engineModel: 'wan-3.0' })).toMatchObject({ error: 'engine_unavailable', message: 'Wan 3.0 can’t run right now: higgsfield not set up' });
+    expect(pickRemix(bgOnly, { providers: ALL, engineModel: 'nope' })).toMatchObject({ error: 'unknown_model' });
     expect(togglesOn(X({ character: { kind: 'face', image: img('f') }, look: { words: 'w' } }))).toEqual(['face', 'look']);
     expect(remixIncomplete({})).toMatch(/^Turn on a change/);
     expect(remixIncomplete(X({ background: { mode: 'describe', words: ' ' } }))).toBe('Background · Describe: write the new place');
@@ -96,7 +110,7 @@ describe('New Swap · prompt, pictures, trimmer and prices (unit)', () => {
     const x = X({ character: { kind: 'model', modelId: 'm' }, outfit: { kind: 'outfit', outfitId: 'o' }, background: { mode: 'photo', image: img('bg') } });
     const p = planOn('genjutsu-light', x, { outfit: true });
     expect(p.images.refs.map(r => r.label)).toEqual(['face, front', 'face, profile', 'outfit, front', 'outfit, back', 'outfit, side', 'outfit, ¾', 'outfit, face, front', 'background']);
-    expect(p.notes.join()).toMatch(/takes 8 pictures: left out outfit, face, profile, outfit, face, ¾/);
+    expect(p.notes.join()).toMatch(/takes 8 pictures here: left out outfit, face, profile, outfit, face, ¾/);
     expect(p.prompt).toMatch(/^Edit <Video 1>\. Change only what is listed below/);
     expect(p.prompt).toContain('FIGURE LOCK: her face, hair and skin come only from <Image 1> and <Image 2>, and her body shape and proportions only from <Image 3>, <Image 4>, <Image 5> and <Image 6>, unchanged. From <Video 1> take only the motion, timing and facial gestures');
     expect(p.prompt).toContain('never the face, body, figure or proportions of the person in it');
@@ -248,9 +262,33 @@ describe.skipIf(!hasFfmpeg)('New Swap · API and Claude on the mock provider', (
     expect(m.auto).toEqual({ model: 'wan-2.7-edit', why: 'Background only: Wan 2.7 Edit (keeps the sound, up to 10 s, 1080p)' });
     const wan = m.models.find((x: any) => x.model === 'wan-2.7-edit');
     expect(wan).toMatchObject({ support: 'yes', auto: true, tested: false, limits: { minSeconds: 2, maxSeconds: 10, keepsAudio: true }, price: { resolution: '1080p', perSec: 0.1, seconds: 6, usd: 0.6 } });
+    // Every video model is listed (owner 2026-11-12): Auto's order first, then the other edit models, then adapted ones.
+    expect(m.models.map((x: any) => x.model).slice(0, 4)).toEqual(['wan-2.7-edit', 'kling-o1', 'kling-v4', 'seedance-2.5']);
+    expect(m.models.length).toBeGreaterThan(15);
     const gj = m.models.find((x: any) => x.model === 'genjutsu-light');
-    expect(gj.support).toBe('no');
-    expect(gj.reason).toMatch(/turn on Character/);
+    expect(gj).toMatchObject({ support: 'adapted', route: 'edit' });
+    expect(gj.notes[0]).toMatch(/MUSE sends a still of the person from your clip/);
+    expect(m.models.find((x: any) => x.model === 'h3')).toMatchObject({ support: 'adapted', route: 'reference', unavailable: null });
+    expect(m.models.find((x: any) => x.model === 'wan-3.0')).toMatchObject({ route: 'reference', unavailable: 'higgsfield not set up', price: { perSec: null } });
+    expect(m.models.every((x: any) => x.support !== 'no')).toBe(true);
+  });
+
+  it('adapted runs on the mock: Veo gets the clip’s first and last frames, MiniMax H3 the clip as a reference video; the sound goes back on', async () => {
+    const before = a.ctx.suite.mock.calls.length;
+    const e = (await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'remix', clipId: 'c_six', remix: BG, engineModel: 'veo-3.1-lite' })).body;
+    expect(e.remix).toMatchObject({ route: 'frames', trim: { needed: false } });
+    expect(e.warnings[0]).toBe('Veo 3.1 Lite can’t take a video: MUSE sends 2 frames from your clip (the first, the last); the motion follows your words, so it will be approximate');
+    expect(e.prompt).toMatch(/^Edit the source clip \(its first frame is the start image\)\./);
+    const v = (await owner.req('POST', '/v1/suite/shots', { mode: 'remix', clipId: 'c_six', remix: BG, engineModel: 'veo-3.1-lite', range: [1, 5] })).body;
+    expect((await done(v.id)).state).toBe('done');
+    const vc = a.ctx.suite.mock.calls.slice(before)[0]!;
+    expect([String(vc.input.image), String(vc.input.last_frame)]).toEqual([expect.stringMatching(/frame_first\.jpg/), expect.stringMatching(/frame_last\.jpg/)]);
+    expect(vc.ref).toBe("google/veo-3.1-lite");
+    const h = (await owner.req('POST', '/v1/suite/shots', { mode: 'remix', clipId: 'c_six', remix: BG, engineModel: 'h3' })).body;
+    expect((await done(h.id)).state).toBe('done');
+    const hc = a.ctx.suite.mock.calls.slice(before)[1]!;
+    expect(hc.ref).toBe('minimax/h3');
+    expect(hc.input.reference_video_urls).toEqual([expect.stringMatching(/clips\/remix\.mp4/)]);
   });
 
   it('Claude: switches Swap to New Swap, sets the clip and the toggles, prices it, and asks the owner to Approve', async () => {
@@ -275,5 +313,48 @@ describe.skipIf(!hasFfmpeg)('New Swap · API and Claude on the mock provider', (
     await svc.set(me as any, d.id, { range: [0, 8] });
     expect((await svc.ask(me as any, d.id)).status).toBe('waiting');
     await expect(svc.set(me as any, d.id, { clipId: 'c_nope' })).rejects.toThrow(/no clip/);
+  });
+});
+
+describe.skipIf(!hasFfmpeg)('Wan 3.0 on Higgsfield: built in, priced live from the free estimate (fake Higgsfield)', () => {
+  let a: Awaited<ReturnType<typeof makeApp>>, owner: Client, server: http.Server, studioId: string;
+  const quotes: { url: string; body: any }[] = [];
+  let price: number | null = 0.85;
+  beforeAll(async () => {
+    server = http.createServer((q, res) => {
+      let body = '';
+      q.on('data', c => (body += c));
+      q.on('end', () => {
+        const json = (st: number, o: unknown) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+        if (q.headers.authorization !== 'Key hfid:hfsecret') return json(401, { detail: 'Invalid credentials' });
+        if (q.method === 'POST' && q.url?.startsWith('/hf/estimate/')) { quotes.push({ url: q.url.slice('/hf/estimate/'.length), body: JSON.parse(body) }); return price == null ? json(500, {}) : json(200, { usd: price, currency: 'USD' }); }
+        json(404, {});
+      });
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    a = await makeApp({ SUITE_MODE: 'mock', SUITE_POLL_MS: '10', HIGGSFIELD_API_URL: `${base}/hf`, HF_CREDENTIALS: 'hfid:hfsecret' });
+    ({ owner } = await people(a, 0, { topUp: 100 }) as any);
+    const [u] = await a.ctx.db.select().from(users).where(eq(users.id, owner.id));
+    studioId = u!.studioId;
+    await a.ctx.db.insert(clips).values({ id: 'c_w', studioId, name: 'w', durationSec: 8, width: 180, height: 320, fps: 24, meta: {}, checks: [], storageKey: 'clips/w.mp4', createdAt: Date.now() });
+  });
+  afterAll(async () => { await a?.close(); server?.close(); });
+
+  it('a Shot on Wan 3.0 is quoted for its exact request; New Swap sends the clip as a reference video; no quote, no run', async () => {
+    const e = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'A walk on the beach.', engineModel: 'wan-3.0', resolution: '720p', duration: 8, audio: false });
+    expect(e.status, JSON.stringify(e.body)).toBe(200);
+    expect(e.body.estimate).toBe(0.85);
+    expect(e.body.engine).toMatchObject({ model: 'wan-3.0', label: 'Wan 3.0 · Higgsfield' });
+    expect(quotes.at(-1)).toEqual({ url: 'alibaba/wan-3.0/text-to-video', body: { prompt: 'x', duration: 8, resolution: '720p', generate_audio: false } });
+    const r = (await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'remix', clipId: 'c_w', engineModel: 'wan-3.0-prime', remix: { look: { words: 'night, neon' } } })).body;
+    expect(r.remix.route).toBe('reference');
+    expect(quotes.at(-1)!.url).toBe('alibaba/wan-3.0-prime/reference-to-video');
+    expect(quotes.at(-1)!.body.video_urls).toHaveLength(1);
+    expect(r.estimate).toBe(0.85);
+    price = null;
+    const n = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'Rain.', engineModel: 'wan-3.0', resolution: '1080p', duration: 6 });
+    expect(n.body).toMatchObject({ code: 'price_unavailable' });
+    expect(n.body.error).toMatch(/Wan 3.0 · Higgsfield has no price right now/);
   });
 });
