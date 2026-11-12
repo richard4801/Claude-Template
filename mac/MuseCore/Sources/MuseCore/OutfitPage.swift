@@ -166,8 +166,34 @@ public enum OutfitPictures {
         return angles + faces
     }
 
+    /// Swap the pictures of slots `a` and `b` (a reorder move: nothing is lost).
+    public static func swapped(_ pics: [ImageRef?], _ a: Int, _ b: Int) -> [ImageRef?] {
+        var p = pics
+        guard p.indices.contains(a), p.indices.contains(b) else { return p }
+        p.swapAt(a, b)
+        return p
+    }
+    /// "Move to…" entries for the picture in slot `from`: every other slot, "Swap with Back" when it holds a picture,
+    /// "Move to Face side" when it is empty.
+    public static func moveTargets(_ o: Outfit, from: Int) -> [(index: Int, title: String)] {
+        let pics = refs(o)
+        return pics.indices.filter { $0 != from }.map { k in (k, pics[k] == nil ? "Move to \(captions[k])" : "Swap with \(captions[k])") }
+    }
+
     /// The ones with a picture, in order, with their index (0–6) and viewer label.
     public static func shown(_ o: Outfit) -> [(index: Int, label: String, ref: ImageRef)] {
         refs(o).enumerated().compactMap { i, r in r.map { (i, viewerLabels[i], $0) } }
     }
+}
+
+/// One reorder move (POST /v1/outfits/{id}/reorder): the pictures of `from` and `to` swap.
+public struct OutfitMove: Codable, Hashable, Sendable {
+    public var from: String
+    public var to: String
+    public init(from: String, to: String) { self.from = from; self.to = to }
+}
+public struct OutfitReorder: Codable, Sendable {
+    public var outfit: Outfit
+    public var changed: [String]
+    public init(outfit: Outfit, changed: [String]) { self.outfit = outfit; self.changed = changed }
 }

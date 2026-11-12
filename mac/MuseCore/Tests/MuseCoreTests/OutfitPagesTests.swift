@@ -48,4 +48,16 @@ final class OutfitPagesTests: XCTestCase {
         XCTAssertFalse(o.hasFaces)
         XCTAssertEqual(OutfitPictures.shown(o).count, 3)
     }
+
+    /// Reorder (owner 2026-11-12): moves swap two slots; "Move to…" names the other six.
+    func testReorderSwapsAndMenuTitles() {
+        let o = Outfit(id: "o", modelId: "m", name: "Linen", angles: [.asset("f"), .asset("t"), .asset("b"), .asset("s")], faces: [.asset("ff"), nil, nil])
+        let fixed = OutfitPictures.swapped(OutfitPictures.refs(o), 2, 3)
+        XCTAssertEqual(fixed.prefix(4).map { $0?.asset }, ["f", "t", "s", "b"])
+        XCTAssertEqual(fixed.compactMap { $0 }.count, 5, "nothing is lost")
+        let targets = OutfitPictures.moveTargets(o, from: 2)
+        XCTAssertEqual(targets.map { $0.index }, [0, 1, 3, 4, 5, 6])
+        XCTAssertEqual(targets.first { $0.index == 3 }?.title, "Swap with Back")
+        XCTAssertEqual(targets.first { $0.index == 6 }?.title, "Move to Face side")
+    }
 }
