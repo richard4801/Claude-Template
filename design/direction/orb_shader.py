@@ -5,9 +5,9 @@ disc and no rim line: the shape is the light. The same fragment shader (GLSL her
 mac/Muse/Resources/ClaudeOrb.metal) is driven by ClaudeOrb's phase and state.
 
     python3 design/direction/orb_shader.py
-    → plans/design/claude-panel/orb-states.png      (256 px, the five states on the dark and the light theme)
-      plans/design/claude-panel/orb-small.png       (28–36 pt in the panel, both themes)
-      plans/design/claude-panel/orb-preview.mp4     (8 s cycling the states, dark and light side by side)
+    → plans/design/claude-panel/orb-vortex-states.png (256 px, the five states on the dark and the light theme)
+      plans/design/claude-panel/orb-vortex-small.png  (28–36 pt in the panel, both themes)
+      plans/design/claude-panel/orb-vortex-preview.mp4 (8 s cycling the states, dark and light side by side)
 """
 import json, os, subprocess, tempfile
 from pathlib import Path
@@ -215,15 +215,15 @@ def main():
     p.on('pageerror', e => console.error(e)); p.on('console', m => console.log(m.text()));
     await p.goto({json.dumps(html.as_uri())});
     await p.evaluate('(' + fn + ')()'); await p.waitForTimeout(200); await p.screenshot({{ path: png }}); await p.close(); console.log('wrote', png); }};
-  await shot(1280, 640, {json.dumps(STILLS_JS)}, {json.dumps(str(OUT / 'orb-states.png'))});
-  await shot(1000, 200, {json.dumps(SMALL_JS)}, {json.dumps(str(OUT / 'orb-small.png'))});
+  await shot(1280, 640, {json.dumps(STILLS_JS)}, {json.dumps(str(OUT / 'orb-vortex-states.png'))});
+  await shot(1000, 200, {json.dumps(SMALL_JS)}, {json.dumps(str(OUT / 'orb-vortex-small.png'))});
   const p = await b.newPage({{ viewport: {{ width: 720, height: 400 }}, deviceScaleFactor: 1 }});
   await p.goto({json.dumps(html.as_uri())}); await p.evaluate(() => document.fonts.load('18px muse'));
   const frame = {json.dumps(FRAME_JS)};
   for (let f = 0; f < 240; f++) {{ await p.evaluate(`(${{frame}})(${{f}})`); await p.screenshot({{ path: `{frames}/f${{String(f).padStart(3, '0')}}.png` }}); }}
   await b.close(); }})();""")
         subprocess.run(["node", str(js)], check=True, env={**os.environ, "NODE_PATH": root})
-        mp4 = OUT / "orb-preview.mp4"
+        mp4 = OUT / "orb-vortex-preview.mp4"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", "30", "-i", str(frames / "f%03d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p",
                         "-crf", "18", "-movflags", "+faststart", str(mp4)], check=True)
         print("wrote", mp4)
