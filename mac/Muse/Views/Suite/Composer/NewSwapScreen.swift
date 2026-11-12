@@ -300,6 +300,7 @@ struct NewSwapBar: View {
                 HStack(spacing: Space.s2) {
                     Ph(d.keepAudio ? "speaker-high" : "speaker-slash", 15).frame(width: 18, height: 18)
                     Text("Clip sound").font(t.scale.label.font).lineLimit(1).fixedSize()
+                        .fitProbe("composer pill sound") // CI fit check: a wrapped or cut label is a CUT line
                 }
                 .foregroundStyle(d.keepAudio ? t.roles.ink : t.roles.ink2)
                 .padding(.horizontal, Space.s3).frame(height: 32)
@@ -307,12 +308,14 @@ struct NewSwapBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).fixedSize()
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill sound") } } // CI fit check: the bar's pills
             .help(d.keepAudio ? "The clip's own sound goes back on the take (click to turn off)" : "No sound from the clip (click to keep it)")
             .accessibilityLabel(d.keepAudio ? "Clip sound on" : "Clip sound off")
             RemixModelPill()
                 .padding(.horizontal, Space.s1)
                 .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
                 .fixedSize()
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill model") } }
             Text(why).font(t.scale.caption.font).foregroundStyle(d.missing != nil ? t.roles.caution : t.roles.ink2)
                 .lineLimit(1).truncationMode(.tail)
                 .help(why)

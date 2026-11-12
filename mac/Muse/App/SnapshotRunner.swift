@@ -414,7 +414,10 @@ enum SnapshotRunner {
         }
         let g = state.generateLabel ?? ""
         // The price is the last part: "Generate · $0.14", "Generate · Free", "Generate · —" while there is none yet.
-        if !g.contains(" · ") { out.append("CUT \(label) bar generate shows no price (\"\(g)\")") }
+        // New Swap with no clip yet (newswap_empty): a plain, disabled "Generate" is the approved mockup; its line says
+        // "The model and price show once a video is added". Every other bar must show a price.
+        let noClipYet = label.hasPrefix("newswap_empty") && g == "Generate"
+        if !g.contains(" · ") && !noClipYet { out.append("CUT \(label) bar generate shows no price (\"\(g)\")") }
         if out.isEmpty {
             let names = pills.map { String($0.key.dropFirst(5)) }.joined(separator: ", ")
             out.append("FITS \(label) bar \(pills.count) pills whole (\(names)), \"\(g)\"")
