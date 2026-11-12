@@ -15,6 +15,7 @@ import { scriptDef } from '../src/prompt/scripts/defs.js';
 import { validateRules } from '../src/prompt/scripts/run.js';
 import { putObject } from '../src/storage/objects.js';
 import { assistOf } from '../src/suite/assist.js';
+import { SUITE_TOOLS } from '../src/suite/mcpTools.js';
 import { buildInput } from '../src/suite/inputs.js';
 import { RemixSchema, ShotRequestSchema, type Character, type RemixToggles } from '../src/suite/plan.js';
 import { buildRemixPlan, fillImages, pickRemix, remixIncomplete, remixSpan, remixSupport, togglesOn } from '../src/suite/remix.js';
@@ -60,7 +61,7 @@ describe('New Swap · registry and Auto (unit)', () => {
     expect('model' in char && [char.model.id, char.why]).toEqual(['genjutsu-light', 'Background + Character: Genjutsu Light (same moves, new look, MUSE puts the clip’s sound back, up to 15 s)']);
     // No Higgsfield: Auto moves on and says what it skipped.
     const noHf = pickRemix(X({ character: { kind: 'model', modelId: 'm1' } }), { providers: NO_HF });
-    expect('model' in noHf && [noHf.model.id, noHf.tried.map(t => t.why)]).toEqual(['kling-o1', ['higgsfield not set up', 'higgsfield not set up']]);
+    expect('model' in noHf && [noHf.model.id, noHf.tried.map(t => t.why)]).toEqual(['kling-o1', ['higgsfield not set up', 'higgsfield not set up', 'higgsfield not set up']]);
     // 4c: a model hidden from members is skipped for them.
     const hidden = pickRemix(X({ look: { words: 'warm' } }), { providers: ALL, hidden: new Set(['wan-2.7-edit']) });
     expect('model' in hidden && [hidden.model.id, hidden.tried[0]]).toEqual(['kling-o1', { model: 'wan-2.7-edit', why: 'not offered to members' }]);
@@ -313,6 +314,10 @@ describe.skipIf(!hasFfmpeg)('New Swap · API and Claude on the mock provider', (
     await svc.set(me as any, d.id, { range: [0, 8] });
     expect((await svc.ask(me as any, d.id)).status).toBe('waiting');
     await expect(svc.set(me as any, d.id, { clipId: 'c_nope' })).rejects.toThrow(/no clip/);
+    // Claude outside the app (MCP), no draft id, no page: the person's latest Suite draft (here, this New Swap).
+    const got = await SUITE_TOOLS.find(t => t.name === 'suite_get_draft')!.run({ ctx: a.ctx, user: me as any, source: 'mcp' } as any, {}) as any;
+    expect(got.id ?? got.assistId).toBe(d.id);
+    expect(got.draft?.tool ?? got.request?.mode).toMatch(/remix/);
   });
 });
 
@@ -352,6 +357,24 @@ describe.skipIf(!hasFfmpeg)('Wan 3.0 on Higgsfield: built in, priced live from t
     expect(quotes.at(-1)!.url).toBe('alibaba/wan-3.0-prime/reference-to-video');
     expect(quotes.at(-1)!.body.video_urls).toHaveLength(1);
     expect(r.estimate).toBe(0.85);
+    price = 0.85;
+    // Owner bug 2026-11-12 ("MiniMax H3 Higgsfield is not part of the models that come with New Swap"): with her as
+    // Character it is in Auto's group, near the top; a Higgsfield refusal a moment ago keeps it listed and pickable.
+    const mia = await demoModel(owner);
+    const body = { clipId: 'c_w', remix: { character: { kind: 'model', modelId: mia.id }, outfit: { kind: 'words', words: 'a red dress' }, background: { mode: 'describe', words: 'a beach' } } };
+    const m = (await owner.req('POST', '/v1/suite/remix/models', body)).body;
+    expect(m.groups.map((g: any) => g.label)).toEqual(['Auto picks', 'Edits the clip', 'Uses the clip as reference', 'From frames', 'From words only']);
+    expect(m.models.slice(0, 3).map((x: any) => [x.model, x.group])).toEqual([['genjutsu-light', 'auto'], ['genjutsu', 'auto'], ['h3-hf', 'auto']]);
+    expect(m.models.find((x: any) => x.model === 'h3-hf')).toMatchObject({ label: 'MiniMax H3 · Higgsfield', unavailable: null, route: 'reference' });
+    a.ctx.suite.markDown('higgsfield');
+    const d = (await owner.req('POST', '/v1/suite/remix/models', body)).body;
+    const hf = d.models.find((x: any) => x.model === 'h3-hf');
+    expect(hf).toMatchObject({ unavailable: null, warning: expect.stringMatching(/^Higgsfield refused a run in the last 30 minutes/) });
+    expect(d.auto.model).toBe('kling-o1'); // Auto skips a provider that refused recently; the person can still pick it
+    const est = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'remix', ...body, engineModel: 'h3-hf' });
+    expect(est.status, JSON.stringify(est.body)).toBe(200);
+    expect((await owner.req('GET', '/v1/engines?purpose=shot')).body.engines.some((e: any) => e.model === 'h3-hf')).toBe(true);
+    (a.ctx.suite as any).down.clear();
     price = null;
     const n = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'Rain.', engineModel: 'wan-3.0', resolution: '1080p', duration: 6 });
     expect(n.body).toMatchObject({ code: 'price_unavailable' });

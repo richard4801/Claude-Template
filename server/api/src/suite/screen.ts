@@ -200,6 +200,17 @@ async function assistOfCamera(ctx: Ctx, u: AuthUser, s: typeof cameraSessions.$i
 }
 
 /** A page's ids → the draft on screen (the Suite's shared draft, else a camera session's Shot draft). */
+/**
+ * The person's most recently changed Suite draft (the composer on screen pushes into it as it changes), when nothing
+ * names one: Claude outside the app, or a page that carries no draft id (New Swap on a Mac whose Claude panel was never
+ * opened there). Only a draft changed in the last 12 hours, so an old one is never revived.
+ */
+async function latestDraft(ctx: Ctx, u: AuthUser): Promise<string | undefined> {
+  const [r] = await ctx.db.select({ id: suiteAssists.id, at: suiteAssists.updatedAt }).from(suiteAssists)
+    .where(and(eq(suiteAssists.userId, u.id), eq(suiteAssists.studioId, u.studioId))).orderBy(desc(suiteAssists.updatedAt)).limit(1);
+  return r && Date.now() - Number(r.at) < 12 * 3600_000 ? r.id : undefined;
+}
+
 async function fromIds(ctx: Ctx, u: AuthUser, ids: Record<string, string | undefined> | undefined) {
   if (ids?.assistId) return ids.assistId;
   if (ids?.cameraSessionId) { const s = await ownSession(ctx, u, eq(cameraSessions.id, ids.cameraSessionId)); if (s) return assistOfCamera(ctx, u, s); }
@@ -229,7 +240,7 @@ export async function resolveAssist(env: Env, a: Record<string, unknown>): Promi
   }
   if (typeof a.cameraSessionId === 'string' && a.cameraSessionId) return resolveAssist(env, { assistId: a.cameraSessionId });
   if (env.page) {
-    const now = await fromIds(ctx, u, env.page.ids);
+    const now = await fromIds(ctx, u, env.page.ids) ?? (env.page.name === 'suite' ? await latestDraft(ctx, u) : undefined);
     if (now) return now;
     throw new ApiError(400, 'nothing_open', 'No composer is open on this page: open the AI Suite (open_page {page:"suite"}) or pass the draft id (sa_…, a camera Shot draft sd_… or a camera session cs_…)');
   }
@@ -237,7 +248,7 @@ export async function resolveAssist(env: Env, a: Record<string, unknown>): Promi
     ? await ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.id, a.chatId), eq(claudeThreads.ownerId, u.id), eq(claudeThreads.studioId, u.studioId)))
     : await ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.ownerId, u.id), eq(claudeThreads.studioId, u.studioId))).orderBy(desc(claudeThreads.updatedAt)).limit(1);
   const page: PageRef | undefined = t ? (t.page ?? pageOfContext(t.contextKind, t.contextId, t.contextKey)) : undefined;
-  const got = await fromIds(ctx, u, page?.ids);
+  const got = await fromIds(ctx, u, page?.ids) ?? await latestDraft(ctx, u);
   if (got) return got;
   throw new ApiError(400, 'bad_request', 'assistId: no composer is open on the person\'s page. Open the AI Suite (open_page {page:"suite"}) or pass the draft id (sa_…, a camera Shot draft sd_… or a camera session cs_…)');
 }

@@ -105,7 +105,7 @@ function pictureNotes(m: ModelSpec, x: RemixToggles, route: RemixRoute): string[
 
 /** Auto's order for these toggles (owner 2026-11-12: Wan 2.7 Edit first for Background / Look). */
 export function autoOrder(x: RemixToggles): string[] {
-  if (x.character?.kind === 'model') return ['genjutsu-light', 'genjutsu', 'kling-o1', 'seedance-2.5', 'kling-v4'];
+  if (x.character?.kind === 'model') return ['genjutsu-light', 'genjutsu', 'h3-hf', 'kling-o1', 'seedance-2.5', 'kling-v4'];
   if (x.outfit && !x.background && !x.look) return ['kling-o1', 'seedance-2.5', 'wan-2.7-edit', 'kling-v4'];
   if (x.outfit) return ['kling-o1', 'seedance-2.5', 'kling-v4', 'wan-2.7-edit'];
   return ['wan-2.7-edit', 'kling-o1', 'kling-v4', 'seedance-2.5'];
@@ -123,7 +123,16 @@ export function whyLine(m: ModelSpec, x: RemixToggles): string {
 }
 
 export type RemixCandidate = { model: ModelSpec; support: RemixSupport };
-type PickOpts = { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; /** 4c: models the owner hides from this member. */ hidden?: Set<string>; studioId?: string };
+/** The model pill's groups, in order (owner 2026-11-12: grouped, scrollable, every model). */
+export type RemixGroup = 'auto' | 'edit' | 'reference' | 'frames' | 'text';
+export const REMIX_GROUPS: { id: RemixGroup; label: string }[] = [
+  { id: 'auto', label: 'Auto picks' }, { id: 'edit', label: 'Edits the clip' }, { id: 'reference', label: 'Uses the clip as reference' },
+  { id: 'frames', label: 'From frames' }, { id: 'text', label: 'From words only' },
+];
+/** A model's group for these toggles: Auto's order first, else how the clip reaches it. */
+export const remixGroup = (m: ModelSpec, x: RemixToggles): RemixGroup => (autoOrder(x).includes(m.id) ? 'auto' : routeOf(m));
+type PickOpts = { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; /** 4c: models the owner hides from this member. */ hidden?: Set<string>; studioId?: string;
+  /** Providers that refused a run recently: still listed and pickable; Auto skips them. */ down?: Set<ProviderId> };
 /** Why a model can't run at all right now (not set up, switched off), or null. The only refusals left. */
 const usable = (m: ModelSpec, o: PickOpts) => {
   const pref = o.prefs?.models?.[m.id];
@@ -165,10 +174,11 @@ export function pickRemix(x: RemixToggles, o: PickOpts): RemixPick | { error: st
     if (!m) { tried.push({ model: id, why: 'unknown model' }); continue; }
     const off = usable(m, o);
     if (off) { tried.push({ model: id, why: off }); continue; }
+    if (o.down?.has(m.provider)) { tried.push({ model: id, why: `${m.provider} refused a run recently` }); continue; }
     return { model: m, support: remixSupport(m, x), why: whyLine(m, x), tried };
   }
   // Nothing in Auto's order runs: the first video model that does (adapted, said in the plan).
-  for (const c of remixModels(x, o)) if (!c.unavailable) return { model: c.model, support: c.support, why: `${whyLine(c.model, x)} · the usual models aren’t available`, tried };
+  for (const c of remixModels(x, o)) if (!c.unavailable && !o.down?.has(c.model.provider)) return { model: c.model, support: c.support, why: `${whyLine(c.model, x)} · the usual models aren’t available`, tried };
   return { error: 'nothing_fits', message: `No video model can run right now · ${tried.map(t => `${modelById(t.model)?.name ?? t.model}: ${t.why}`).join('; ')}`, tried };
 }
 
