@@ -140,12 +140,25 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
   app.get('/v1/claude/permissions', async req => ({ asks: permissionsOf(ctx).pending(req.user) }));
   app.post<P>('/v1/claude/permissions/:id', async (req, reply) => {
     const b = parse(z.object({ allow: z.boolean(), message: z.string().max(500).optional(),
-      result: z.object({ uploadId: z.string().min(1).max(120), kind: z.enum(['image', 'clip']), url: z.string().max(2000).optional(), name: z.string().max(200).optional() }).strict().optional() }).strict(), req.body);
+      result: z.object({ uploadId: z.string().min(1).max(120), kind: z.enum(['image', 'clip', 'audio']), url: z.string().max(2000).optional(), name: z.string().max(200).optional(),
+        durationSec: z.number().positive().max(36_000).optional() }).strict().optional() }).strict(), req.body);
     if (b.result) {
       // An upload the Mac made for upload_local_file: this person's, in this studio, confirmed.
-      const [up] = await ctx.db.select({ id: uploads.id, state: uploads.state, createdBy: uploads.createdBy }).from(uploads)
-        .where(and(eq(uploads.id, b.result.uploadId), eq(uploads.studioId, req.user.studioId)));
-      if (!up || up.state !== 'ready' || (up.createdBy && up.createdBy !== req.user.id)) throw new ApiError(400, 'bad_request', 'result.uploadId: not a ready upload of yours');
+      const [up] = await ctx.db.select({ id: uploads.id, state: uploads.state, createdBy: uploads.createdBy, kind: uploads.kind, contentType: uploads.contentType, storageKey: uploads.storageKey })
+        .from(uploads).where(and(eq(uploads.id, b.result.uploadId), eq(uploads.studioId, req.user.studioId)));
+      if (!up || (up.createdBy && up.createdBy !== req.user.id)) throw new ApiError(400, 'bad_request', 'result.uploadId: not a ready upload of yours');
+      if (b.result.kind === 'audio') {
+        // A sound (ci_de89873ab1de): an editor audio upload (presign + PUT, no confirm step), so its file is checked here.
+        if (up.kind !== 'asset' || !up.contentType.startsWith('audio/')) throw new ApiError(400, 'bad_request', 'result.uploadId: not a sound upload of yours');
+        if (up.state !== 'ready') {
+          const head = await ctx.storage.head(up.storageKey);
+          if (!head) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
+          await ctx.db.update(uploads).set({ state: 'ready', bytes: head.size }).where(eq(uploads.id, up.id));
+        }
+        b.result.url ??= `${ctx.config.PUBLIC_URL ?? ''}/uploads/${up.storageKey}`;
+      } else if (up.state !== 'ready') {
+        throw new ApiError(400, 'bad_request', 'result.uploadId: not a ready upload of yours');
+      }
     }
     permissionsOf(ctx).answer(req.user, req.params.id, b);
     return reply.status(204).send();

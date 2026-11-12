@@ -266,4 +266,27 @@ describe('upload_local_file (a Mac file into MUSE, after the person says yes)', 
     await owner.req('POST', `/v1/claude/permissions/${a2.id}`, { allow: false });
     expect(JSON.parse((await p2).body.result.content[0].text).error).toMatch(/said no/);
   });
+
+  it('takes a sound as an editor audio upload (ci_de89873ab1de): checks the file arrived, marks it ready, fills its link', async () => {
+    const up = (path: string) => rpc('tools/call', { name: 'upload_local_file', arguments: { path, purpose: 'audio' } });
+    const next = async () => { let x: any; for (let i = 0; i < 50 && !x; i++) { x = (await owner.req('GET', '/v1/claude/permissions')).body.asks[0]; if (!x) await new Promise(r => setTimeout(r, 20)); } return x; };
+    const studioId = ((await a.ctx.db.execute(sql`select studio_id from users where id = ${owner.id}`)) as any).rows[0].studio_id;
+    // A presigned editor upload whose PUT hasn't landed: refused until the file is there.
+    await a.ctx.db.insert(uploads).values({ id: 'up_song', studioId, kind: 'asset', storageKey: 'c/up_song.aac', contentType: 'audio/aac', bytes: null, state: 'pending', createdBy: owner.id, createdAt: Date.now() });
+    await a.ctx.db.insert(uploads).values({ id: 'up_pic', studioId, kind: 'image', storageKey: 'u/pic.png', contentType: 'image/png', bytes: 10, state: 'ready', createdBy: owner.id, createdAt: Date.now() });
+    const p1 = up('/Users/me/Music/song.mp4');
+    const a1 = await next();
+    expect(a1).toMatchObject({ toolName: 'Upload', input: { file_path: '/Users/me/Music/song.mp4', purpose: 'audio' } });
+    expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true, result: { uploadId: 'up_pic', kind: 'audio' } })).status).toBe(400); // not a sound
+    expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true, result: { uploadId: 'up_song', kind: 'audio', durationSec: 184.2 } })).status).toBe(409);
+    await a.ctx.storage.put('c/up_song.aac', Buffer.from([0xff, 0xf1, 0x50, 0x80, 0, 0, 0, 0]), 'audio/aac');
+    expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true, result: { uploadId: 'up_song', kind: 'audio', name: 'song.mp4', durationSec: 184.2 } })).status).toBe(204);
+    const out = JSON.parse((await p1).body.result.content[0].text);
+    expect(out).toMatchObject({ uploadId: 'up_song', kind: 'audio', name: 'song.mp4', durationSec: 184.2 });
+    expect(out.url).toMatch(/\/uploads\/c\/up_song\.aac$/);
+    const [row] = ((await a.ctx.db.execute(sql`select state, bytes from uploads where id = 'up_song'`)) as any).rows;
+    expect(row).toMatchObject({ state: 'ready', bytes: 8 });
+    const tools = (await rpc('tools/list', {})).body.result.tools;
+    expect(tools.find((t: any) => t.name === 'upload_local_file').description).toMatch(/sound \(MP3, M4A, AAC, WAV, or an MP4 with sound only, up to 200 MB/);
+  });
 });
