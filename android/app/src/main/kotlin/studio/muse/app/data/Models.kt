@@ -1243,7 +1243,13 @@ data class EditorJob(
     val result: JsonObject? = null,
     val error: String? = null,
     val createdAt: Long = 0,
+    /** Failed after the provider made the result: provider_paid_unsaved / provider_unconfirmed (owner's free Recover when
+     *  [recoverable]) or provider_paid_lost (not recoverable; the member wasn't charged). */
+    val errorCode: String? = null,
+    val recoverable: Boolean = false,
 ) {
+    /** The owner can bring this result back for free (POST /v1/jobs/:id/recover; never a new run). */
+    val canRecover: Boolean get() = state == "failed" && recoverable && errorCode in Job.RECOVER_CODES
     val finished: Boolean get() = state == "done" || state == "failed" || state == "cancelled"
 }
 
