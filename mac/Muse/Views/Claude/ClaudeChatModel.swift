@@ -410,7 +410,9 @@ final class ClaudeChatModel {
         var full = false
         for f in list where NSImage(data: f.data) != nil {
             guard room > 0 else { full = true; break }
-            localImages.append(ChatPendingImage(name: f.name, data: f.data, mime: f.mime))
+            let img = ChatPendingImage(name: f.name, data: f.data, mime: f.mime)
+            localImages.append(img)
+            uploadImage(img)
             room -= 1
         }
         for v in videos {
@@ -462,6 +464,17 @@ final class ClaudeChatModel {
         }
     }
 
+    /// An image is uploaded as soon as it is attached (owner, 2026-11-11: Claude got only a local path and couldn't put the
+    /// picture in a shot). Quietly: if it fails or isn't done when the message goes, Claude still sees the image itself.
+    private func uploadImage(_ img: ChatPendingImage) {
+        guard !SnapshotRunner.probing, let uploader = service?.api as? any ClaudeImageUploading else { return }
+        let id = img.id
+        Task { [weak self] in
+            guard let a = try? await uploader.uploadClaudeImage(name: img.name, data: img.data, mime: img.mime), !a.uploadId.isEmpty else { return }
+            self?.setVideo(id) { $0.uploadId = a.uploadId }
+        }
+    }
+
     /// Changes a pending row, if it is still there.
     private func setVideo(_ id: UUID, _ change: (inout ChatPendingImage) -> Void) {
         guard let i = localImages.firstIndex(where: { $0.id == id }) else { return }
@@ -497,10 +510,11 @@ final class ClaudeChatModel {
 
     private func save(_ img: ChatPendingImage, threadId: String) -> ClaudeAttachmentFile? {
         let ext = ClaudeAttachmentCache.ext(mime: img.mime, url: nil)
-        let a = ClaudeAttachment(id: "local-\(img.id.uuidString.prefix(8).lowercased())", uploadId: "", mimeType: img.mime)
+        let a = ClaudeAttachment(id: "local-\(img.id.uuidString.prefix(8).lowercased())", uploadId: img.uploadId ?? "", mimeType: img.mime)
         guard var f = ClaudeAttachmentCache.save(img.data, attachment: a, threadId: threadId) else { return nil }
         if !f.path.hasSuffix(".\(ext)") { f.path += ".\(ext)" }
-        f.uploadId = ""
+        // Its upload id goes in Claude's line ("(uploadId up_…)"), so Claude can use the picture in a shot.
+        f.uploadId = img.uploadId ?? ""
         return f
     }
 

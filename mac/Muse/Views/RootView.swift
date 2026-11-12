@@ -118,7 +118,7 @@ struct Shell: View {
                 TitleBar()
                 HStack(spacing: 0) {
                     // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
-                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
+                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor || (store.screen == .suite && store.oneClaude.open))
                     ScreenHost()
                     // One Claude (plans/one-claude.md): the same Claude on every page, its chat following the person.
                     if store.oneClaude.open && store.user != nil {
@@ -202,6 +202,7 @@ struct TitleBar: View {
             }
             .buttonStyle(.plain)
             .help("Search or jump to a screen (⌘K)")
+            .accessibilityIdentifier("titlebar.search")
             .layoutPriority(1)
             Spacer(minLength: 12)
             HStack(spacing: 10) {
@@ -396,6 +397,7 @@ struct NavRow: View {
         .buttonStyle(.plain)
         .help(compact ? title : "")
         .accessibilityLabel(title)
+        .accessibilityIdentifier("nav.\(UiTree.slug(title))") // Claude finds the sidebar by these (ui_snapshot)
         .accessibilityAddTraits(on ? .isSelected : [])
         .onHover { hover = $0 }
     }

@@ -255,7 +255,9 @@ extension AppStore {
         case "cast": go(.models)
         case "character": if let id = ui.id { openProfile(id) } else { go(.models) }
         case "suite":
-            if let t = ui.tool, let tool = ComposerTool(rawValue: t) { openTool(tool) } else { openSuite() }
+            if let t = ui.tool, let tool = ComposerTool(rawValue: t) { openTool(tool) } else if ui.id?.hasPrefix("sa_") == true { openTool(.shot) } else { openSuite() }
+            // A shared draft (a camera session's Shot draft opens as one): the composer takes it, Directed camera and guides included.
+            if let id = ui.id, id.hasPrefix("sa_") { Task { await openSuiteAssist(id) } }
         case "edit":
             // An edit session (es_…, a blank project included) opens the editor on it; a take id opens that take.
             if let id = ui.id, id.hasPrefix("es_") { Task { await openEditSession(id) } } else { openEdit(takeId: ui.id) }

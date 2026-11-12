@@ -230,7 +230,9 @@ public enum PromptLibraryDefaults {
     private static func ph(_ n: String, _ d: String, _ r: Bool = false) -> PromptPlaceholder { PromptPlaceholder(name: n, description: d, required: r) }
 
     public static let entries: [PromptEntry] = [
-        PromptEntry(key: "style.house", group: "photoshoot", title: "House style", description: "Added to every photo prompt.", defaultText: PromptEngine.houseStyle),
+        PromptEntry(key: "style.realism", group: "photoshoot", title: "Realism", description: "Always on. How real every photo looks: skin, colour, no filters.", defaultText: PromptEngine.realism),
+        PromptEntry(key: "style.camera", group: "photoshoot", title: "Camera feel", description: "The camera the photo looks taken with, when the shot names none. Left out when a rig or preset sets its own camera, lens, grade or look.",
+                    defaultText: PromptEngine.cameraFeel, allowEmpty: true),
         PromptEntry(key: "never.base", group: "photoshoot", title: "Never add · every model", description: "Appended to every model's never-add list.",
                     kind: "list", defaultText: PromptEngine.globalNever.joined(separator: ", "), allowEmpty: true),
         PromptEntry(key: "shoot.identity", group: "photoshoot", title: "Identity line", description: "Who she is, in every photo prompt.",

@@ -11,6 +11,9 @@ struct ChatPendingImage: Identifiable, Equatable {
     var data: Data
     var mime: String
     var video: ChatPendingVideo? = nil
+    /// An image's upload on the MUSE server (started when it is attached), so Claude can use it in a shot by its id
+    /// (suite_add_reference, set_sent_images). nil until it lands; the image still goes to Claude as a file without it.
+    var uploadId: String? = nil
 }
 
 /// A video waiting to go: uploaded to the MUSE server as soon as it is picked (Claude watches it there, by its upload id).
@@ -305,7 +308,12 @@ struct ChatComposerBar: View {
     @State private var focus = 0
     @State private var focused = false
 
+    /// Claude's own chat box: Claude never types or sends here through the window (MuseCore UiRefusal "claude.chat").
     var body: some View {
+        content.accessibilityElement(children: .contain).accessibilityIdentifier("claude.chat.composer")
+    }
+
+    private var content: some View {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let canSend = !empty && !held && !busy
         let font = Fonts.nsFont(t.scale.textFamily, t.scale.body.size, .regular) ?? NSFont.systemFont(ofSize: t.scale.body.size)
@@ -314,7 +322,7 @@ struct ChatComposerBar: View {
         // squares of it, so on one line all three share a centre, and as the field grows they stay on its bottom line.
         let lineH = ceil(font.boundingRectForFont.height) + 12
         let rowH = lineH + 2 * Space.s1
-        VStack(alignment: .leading, spacing: Space.s2) {
+        return VStack(alignment: .leading, spacing: Space.s2) {
             if !suggestions.isEmpty {
                 FlowLayout(spacing: Space.s1) {
                     ForEach(suggestions) { s in

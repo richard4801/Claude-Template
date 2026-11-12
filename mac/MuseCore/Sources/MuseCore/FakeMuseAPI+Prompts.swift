@@ -38,7 +38,12 @@ extension FakeMuseAPI {
         var id = m.promptIdentity(lora: loras[m.id])
         id.neverAdd += promptText("never.base").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         return PromptEngine.shootPreview(identity: id, outfitName: outfit, settings: s, presets: req.presets ?? true, refs: refs, prompt: req.prompt,
-                                         houseStyle: promptText("style.house"), pricing: photoPricing, count: count)
+                                         houseStyle: houseStyleText(), pricing: photoPricing, count: count)
+    }
+
+    /// The demo's house style: Camera feel then Realism (the demo has no rigs, so Camera feel is always on).
+    func houseStyleText(_ edited: [String: String] = [:]) -> String {
+        PromptEngine.houseStyle(camera: edited["style.camera"] ?? promptText("style.camera"), realism: edited["style.realism"] ?? promptText("style.realism"))
     }
 
     func promptText(_ key: String) -> String {
@@ -96,9 +101,9 @@ extension FakeMuseAPI {
         let id = PromptIdentity(name: "Demo model", look: sample["look"] ?? "")
         var s = ShootSettings()
         s.direction = sample["direction"] ?? ""
-        let isStyle = e.key == "style.house"
+        let isStyle = e.key == "style.camera" || e.key == "style.realism"
         var lines = PromptEngine.shoot(identity: id, outfitName: sample["outfit"] ?? "outfit", settings: s,
-                                       houseStyle: isStyle ? rendered : promptText("style.house")).map(\.text)
+                                       houseStyle: houseStyleText(isStyle ? [e.key: rendered] : [:])).map(\.text)
         if !isStyle {
             if let i = lines.firstIndex(of: PromptPlaceholders.fill(e.current, sample)) ?? lines.firstIndex(of: PromptPlaceholders.fill(e.defaultText, sample)) {
                 lines[i] = rendered

@@ -79,6 +79,10 @@ public protocol ClaudeAPI: Sendable {
     func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws
     /// Results arrive in the chat: this Mac answers it (false: another Mac of the person already does).
     func claimResult(_ id: String) async throws -> Bool
+    /// Claude operating the MUSE window: calls waiting for this person; claim one (false: another Mac does it); answer it.
+    func pendingUiCalls() async throws -> [UiCall]
+    func claimUiCall(_ id: String, device: String) async throws -> Bool
+    func answerUiCall(_ id: String, _ answer: UiAnswer) async throws
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -105,6 +109,9 @@ public extension ClaudeAPI {
     func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
     func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws { throw ApiError("not_found", "This server can't take uploads from Claude yet") }
     func claimResult(_ id: String) async throws -> Bool { true }
+    func pendingUiCalls() async throws -> [UiCall] { [] }
+    func claimUiCall(_ id: String, device: String) async throws -> Bool { false }
+    func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {}
 }
 
 enum ClaudeIds {
@@ -159,7 +166,7 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         }
         return r
     }
-    public static let capabilities = "files,results"
+    public static let capabilities = "files,results,ui"
 
     private func send(_ r: URLRequest) async throws -> Data {
         let (data, resp): (Data, URLResponse?)
@@ -270,6 +277,22 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         } catch let e as ApiError where e.code == "not_found" {
             return true // an older server without claims
         }
+    }
+    private struct UiClaim: Encodable { var device: String }
+    public func pendingUiCalls() async throws -> [UiCall] {
+        let list: UiCallList = try await call("GET", "v1/claude/ui")
+        return list.calls
+    }
+    public func claimUiCall(_ id: String, device: String) async throws -> Bool {
+        do {
+            _ = try await send(request("POST", "v1/claude/ui/\(try ClaudeIds.check(id))/claim", body: try encoder.encode(UiClaim(device: String(device.prefix(120))))))
+            return true
+        } catch let e as ApiError where e.code == "ui_claimed" || e.code == "ui_expired" {
+            return false
+        }
+    }
+    public func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {
+        _ = try await send(request("POST", "v1/claude/ui/\(try ClaudeIds.check(id))", body: try encoder.encode(answer), timeout: 60))
     }
     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))

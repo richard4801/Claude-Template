@@ -11,14 +11,31 @@ const sec = (id: string, label: string, extra: Partial<Section> = {}): Section =
 const R = (id: string, label: string, target: string, block: string, when: Cond[] = [], extra: Partial<Rule> = {}): Rule => ({ id, label, target, when, block, ...extra });
 const is = (input: string, value: boolean | string | number): Cond => ({ input, op: 'is', value });
 
+/**
+ * One sample set for every preview (Settings → Prompts): three images of her (face, face ¾, body = images/panels 1–3),
+ * the outfit (4) and one reference image (5) guiding the pose, look and scene. The prompt library's previews use it too.
+ */
+export const SAMPLE = {
+  name: 'Demo model', look: 'young woman, shoulder-length dark brown hair, brown eyes, light olive skin', refCount: 3, outfitPanel: 4, refIndex: 5,
+  style: 'realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss',
+  never: 'tattoos, rings, logos, extra fingers, warped jewellery',
+  /** The cinematic variant: what a rig with a cinema body, lens and look puts in the prompt. */
+  cinematic: {
+    style: 'natural skin texture, true-to-life colour, no beauty filter, no AI gloss',
+    grade: 'tungsten-balanced cinema film stock, cool shadows, glowing practicals',
+    direction: 'Shot on 35mm motion-picture film, fine grain, gentle halation, organic colour; anamorphic lens, oval bokeh, horizontal blue lens flares.',
+    camera: 'anamorphic cinema lens, 35mm motion-picture film',
+  },
+} as const;
+
 const PRESETS = bool('presets', 'Presets on', 'The Presets switch. Off removes the optional style blocks (scene, camera, light, style, never-add).');
 const REFS: InputDef = {
   name: 'refs', label: 'Reference images', description: 'The reference images sent (after her own), each with what it guides.', type: 'list',
   fields: [
-    { name: 'refIndex', label: 'Image number', description: 'Its 1-based number among the images sent.', type: 'number', sample: 8 },
+    { name: 'refIndex', label: 'Image number', description: 'Its 1-based number among the images sent.', type: 'number', sample: 5 },
     { name: 'guides', label: 'Guides', description: 'What it guides.', type: 'list', options: [{ id: 'pose', label: 'Pose & framing' }, { id: 'look', label: 'Look & colour' }, { id: 'scene', label: 'Scene' }], sample: ['pose', 'look', 'scene'] },
   ],
-  sample: [{ refIndex: 8, guides: ['pose', 'look', 'scene'] }],
+  sample: [{ refIndex: 5, guides: ['pose', 'look', 'scene'] }],
 };
 const OUTFIT_SOURCE = en('outfitSource', 'Outfit', 'Where the outfit comes from.', [['set', 'Reference set (photos)'], ['described', 'Described in words'], ['product', 'Product photo']]);
 const identity = (target = 'identity') => R('identity', 'Who she is', target, 'shoot.identity', [], { locked: true });
@@ -35,17 +52,33 @@ const refRules = (): Rule[] => [
   R('refs.guard', 'Never her face, body or clothes from a reference', 'reference', 'refs.guard', [], { locked: true }),
 ];
 const SHOOT_VARS = [
-  { name: 'name', description: 'her name', sample: 'Demo model' }, { name: 'look', description: 'her written look', sample: 'young woman, shoulder-length dark brown hair' },
-  { name: 'refCount', description: 'how many sheet images she has', sample: '7' }, { name: 'lora', description: '" + LoRA demo_v2 (photo)" or empty', sample: '' },
-  { name: 'outfit', description: 'the outfit', sample: 'green set' }, { name: 'style', description: 'the house style', sample: 'realistic smartphone photo' },
-  { name: 'never', description: 'her never-add list plus the base list', sample: 'tattoos, rings, logos' },
+  { name: 'name', description: 'her name', sample: SAMPLE.name }, { name: 'look', description: 'her written look', sample: SAMPLE.look },
+  { name: 'refCount', description: 'how many images of her are sent', sample: String(SAMPLE.refCount) }, { name: 'lora', description: '" + LoRA demo_v2 (photo)" or empty', sample: '' },
+  { name: 'outfit', description: 'the outfit', sample: 'green set' },
+  { name: 'style', description: 'the house style: camera feel (unless the shot has its own camera) and realism (script "House style")', sample: SAMPLE.style },
+  { name: 'never', description: 'her never-add list plus the base list', sample: SAMPLE.never },
 ];
+const OWN_CAMERA = bool('ownCamera', 'Has its own camera', 'A rig or preset sets a camera body, lens, grade or look. Then the camera feel and the default grade are left out and its own words stand.', false);
+
+// ---------------------------------------------------------------- house style (owner 2026-11-11)
+/** The house style of every photo: Camera feel only when the shot has no camera of its own, then Realism (always). */
+const houseStyle: Script = {
+  id: 'style.house', group: 'photoshoot', title: 'House style',
+  description: 'The {style} of shoots, template shoots, sheet fills and outfit sets: Camera feel, unless a rig or preset sets its own camera body, lens, grade or look, then Realism. Video Suite shots don’t use it.',
+  format: 'lines', inputs: [OWN_CAMERA],
+  sections: [sec('camera', 'Camera feel'), sec('realism', 'Realism')],
+  rules: [
+    R('camera.feel', 'Camera feel (the shot has no camera of its own)', 'camera', 'style.camera', [is('ownCamera', false)]),
+    R('realism', 'Realism (always)', 'realism', 'style.realism', [], { locked: true }),
+  ],
+};
 
 // ---------------------------------------------------------------- photo scripts
 const photoshoot: Script = {
   id: 'photoshoot', group: 'photoshoot', title: 'Photo', description: 'Every still of the Photo tool (no template).', format: 'lines',
   inputs: [PRESETS, bool('lockSeed', 'Lock look', 'Lock look is on (a fixed seed for her).', false), OUTFIT_SOURCE,
-    num('lens', 'Lens (mm)', 'The lens in mm.', 35), REFS],
+    num('lens', 'Lens (mm)', 'The lens in mm.', 35), REFS, OWN_CAMERA,
+    bool('noGrade', 'No grade', 'No grade was picked and the shot has its own camera, lens or look: the default grade is left out.', false)],
   sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'),
     { id: 'direction', label: 'Direction from the user', kind: 'user', pick: 'first' }, refSection(), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
   values: [{ name: 'lensNote', label: 'Lens note' }],
@@ -55,6 +88,7 @@ const photoshoot: Script = {
     R('camera', 'Shot size, lens and aperture', 'camera', 'shoot.camera', [], { optional: true }),
     R('lens.wide', 'Wide lens note (24 mm and wider)', '@lensNote', 'shoot.camera.wide', [{ input: 'lens', op: 'atMost', value: 24 }]),
     R('lens.tele', 'Long lens note (85 mm and longer)', '@lensNote', 'shoot.camera.tele', [{ input: 'lens', op: 'atLeast', value: 85 }]),
+    R('light.only', 'Light without a grade (its own camera sets the colour)', 'light', 'shoot.light.only', [is('noGrade', true)], { optional: true }),
     R('light', 'Light and grade', 'light', 'shoot.light', [], { optional: true }),
     R('direction', 'The user’s direction', 'direction', 'shoot.direction', [], { locked: true }),
     ...refRules(),
@@ -64,7 +98,7 @@ const photoshoot: Script = {
     R('seed.new', 'New look each shot', 'seed', 'shoot.seed.new'),
   ],
   vars: [...SHOOT_VARS, { name: 'scene', description: 'the scene, lower case', sample: 'rooftop · golden hour' }, { name: 'shot', description: 'close, medium, full or wide', sample: 'medium' },
-    { name: 'aperture', description: 'f/2.8 …', sample: 'f/2.8' }, { name: 'light', description: 'the light, lower case', sample: 'golden hour' }, { name: 'grade', description: 'the grade, lower case', sample: 'phone-natural' }],
+    { name: 'aperture', description: 'f/2.8 …', sample: 'f/2.8' }, { name: 'light', description: 'the light, lower case', sample: 'golden hour' }, { name: 'grade', description: 'the grade, lower case (the default grade unless the shot has its own camera)', sample: 'phone-natural' }],
 };
 
 const template: Script = {
@@ -75,7 +109,8 @@ const template: Script = {
     bool('hasScene', 'Has a scene', 'The template or the draw gives a scene, background or time of day.'), bool('hasCamera', 'Has a camera', 'The template or the draw gives camera words.'),
     bool('hasLight', 'Has light', 'The template gives light words.'), bool('hasPose', 'Has a pose', 'The draw gives a pose, body angle, expression or hands.'),
     en('product', 'Product', 'The template’s product layer.', [['none', 'No product'], ['photo', 'With a product photo'], ['noPhoto', 'No product photo']]),
-    en('seed', 'Seed', 'How the seed is chosen.', [['locked', 'Lock look'], ['known', 'A new seed, known'], ['none', 'No seed yet']]), REFS],
+    en('seed', 'Seed', 'How the seed is chosen.', [['locked', 'Lock look'], ['known', 'A new seed, known'], ['none', 'No seed yet']]), REFS,
+    { ...OWN_CAMERA, description: 'The template’s camera words name a camera that is not a phone, or its style is cinematic: the camera feel is left out of the house style.' }],
   sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'), sec('pose', 'Pose'),
     sec('template', 'Locked template line'), { id: 'direction', label: 'Direction from the user', kind: 'user', pick: 'first' }, refSection(),
     sec('product', 'Product'), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
@@ -137,16 +172,21 @@ const userRule = () => R('user', 'The user’s direction', 'user', 'video.user.d
 const videoReplicate: Script = {
   id: 'video.replicate', group: 'video', title: 'Character swap · Draft/Standard/HD', description: 'The short prompt for the hosted video model: her face, body and outfit replace the performer of the clip.',
   format: 'sections',
-  inputs: [SPEAKING, bool('audioSent', 'Clip audio sent', 'The clip is sent with its audio (only when the performer speaks).')],
+  inputs: [SPEAKING, bool('audioSent', 'Clip audio sent', 'The clip is sent with its audio (only when the performer speaks).'),
+    bool('newBackground', 'Background: Describe it', 'The user’s direction describes a new place; the clip’s moves and timing are kept, not its background.', false)],
   sections: [sec('subjects', 'Subjects', { heading: 'subject_definitions:' }), sec('summary', 'Summary', { heading: 'summary:' }),
     sec('retention', 'Retention', { heading: 'retention_analysis:' }), sec('detailed', 'Details', { heading: 'detailed_description:', pick: 'all', join: ' ' }), userSection()],
   rules: [
     R('subjects', 'Who is who', 'subjects', 'video.replicate.subjects', [], { locked: true }),
+    R('summary.describe.silent', 'New background, not speaking', 'summary', 'video.replicate.summary.describe.silent', [is('newBackground', true), is('speaking', false)]),
+    R('summary.describe', 'New background from the direction', 'summary', 'video.replicate.summary.describe', [is('newBackground', true)]),
     R('summary.silent', 'Not speaking: no lip-sync', 'summary', 'video.replicate.summary.silent', [is('speaking', false)]),
     R('summary', 'Copy the facial performance', 'summary', 'video.replicate.summary'),
+    R('retention.describe', 'What is kept (new background)', 'retention', 'video.replicate.retention.describe', [is('newBackground', true)], { locked: true }),
     R('retention', 'What is kept', 'retention', 'video.replicate.retention', [], { locked: true }),
-    R('detailed.silent', 'Not speaking: no mouthed words', 'detailed', 'video.replicate.detailed.silent', [is('speaking', false)]),
-    R('detailed', 'Details', 'detailed', 'video.replicate.detailed', [is('speaking', true)]),
+    R('detailed.describe', 'Details (new background)', 'detailed', 'video.replicate.detailed.describe', [is('newBackground', true)]),
+    R('detailed.silent', 'Not speaking: no mouthed words', 'detailed', 'video.replicate.detailed.silent', [is('speaking', false), is('newBackground', false)]),
+    R('detailed', 'Details', 'detailed', 'video.replicate.detailed', [is('speaking', true), is('newBackground', false)]),
     R('mouth.speaking', 'Speaking: mouth in sync with the speech', 'detailed', 'video.mouth.speaking', [is('speaking', true)]),
     R('mouth.silent', 'Not speaking: mouth follows the clip, no words', 'detailed', 'video.mouth.silent', [is('speaking', false)]),
     userRule(),
@@ -159,7 +199,8 @@ const videoReplicate: Script = {
 const videoEdit: Script = {
   id: 'video.edit', group: 'video', title: 'Character swap · Edit', description: 'The structured prompt for Edit: her face, body and outfit replace the performer of the clip.',
   format: 'sections',
-  inputs: [SPEAKING, bool('keepAudio', 'Keep audio', 'The clip’s audio is kept (and sent with the clip).'), bool('keepBackground', 'Keep background', 'The background of the clip is kept (else a background photo replaces it).')],
+  inputs: [SPEAKING, bool('keepAudio', 'Keep audio', 'The clip’s audio is kept (and sent with the clip).'), bool('keepBackground', 'Keep background', 'The background of the clip is kept (else a background photo replaces it).'),
+    bool('describeBackground', 'Background: Describe it', 'The user’s direction describes the new place (no photo).', false)],
   sections: [sec('subjects', 'Subjects', { heading: 'subject_definitions:', alias: { audio: 'audioSubjects' } }),
     sec('summary', 'Summary', { heading: 'summary:', alias: { audio: 'audioSummary' } }),
     sec('retention', 'Retention', { heading: 'retention_analysis:', alias: { audio: 'audioRetention' } }),
@@ -174,8 +215,10 @@ const videoEdit: Script = {
     R('audio.kept', 'Audio kept', '@audioRetention', 'video.edit.audio.kept', [is('keepAudio', true)]),
     R('audio.replaced', 'Audio replaced', '@audioRetention', 'video.edit.audio.replaced'),
     R('background.keep', 'Background kept', '@background', 'video.edit.background.keep', [is('keepBackground', true)]),
+    R('background.describe', 'Background described', '@background', 'video.edit.background.describe', [is('describeBackground', true)]),
     R('background.photo', 'Background photo', '@background', 'video.edit.background.photo'),
     R('video.keep', 'Source kept', '@video', 'video.edit.video.keep', [is('keepBackground', true)]),
+    R('video.describe', 'Source, background described', '@video', 'video.edit.video.describe', [is('describeBackground', true)]),
     R('video.photo', 'Source, new background', '@video', 'video.edit.video.photo'),
     R('subjects', 'Who is who', 'subjects', 'video.edit.subjects', [], { locked: true }),
     R('summary', 'Copy every movement', 'summary', 'video.edit.summary'),
@@ -213,7 +256,7 @@ const collage: Script = {
     fields: [{ name: 'panel', label: 'Panel number', description: '1-based.', type: 'number', sample: 4 },
       { name: 'role', label: 'Shows', description: 'What the panel shows.', type: 'enum', options: [{ id: 'person', label: 'Her' }, { id: 'outfit', label: 'The outfit' }, { id: 'product', label: 'The product' }, { id: 'ref', label: 'A reference image' }], sample: 'outfit' },
       { name: 'guides', label: 'Guides', description: 'A reference image’s guides, in words.', type: 'text', sample: 'pose & framing' }],
-    sample: [{ panel: 1, role: 'person', guides: '' }, { panel: 2, role: 'person', guides: '' }, { panel: 3, role: 'person', guides: '' }, { panel: 4, role: 'outfit', guides: '' }, { panel: 5, role: 'ref', guides: 'pose & framing' }] }],
+    sample: [{ panel: 1, role: 'person', guides: '' }, { panel: 2, role: 'person', guides: '' }, { panel: 3, role: 'person', guides: '' }, { panel: 4, role: 'outfit', guides: '' }, { panel: 5, role: 'ref', guides: 'pose & framing and the look & colour and the scene' }] }],
   sections: [sec('sheet', 'Reference sheet', { layer: 'sheet' })],
   values: [{ name: 'panels', label: 'Other panels', each: 'panels', itemPrefix: '; ' }],
   rules: [
@@ -225,7 +268,7 @@ const collage: Script = {
   vars: [{ name: 'person', description: '"panel 1 shows" / "panels 1–3 show"', sample: 'panels 1–3 show' }],
 };
 
-export const SCRIPTS: Script[] = [collage, photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, loraCandidate, videoReplicate, videoEdit, audioLine];
+export const SCRIPTS: Script[] = [collage, houseStyle, photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, loraCandidate, videoReplicate, videoEdit, audioLine];
 const BY_ID = new Map(SCRIPTS.map(s => [s.id, s]));
 export const scriptDef = (id: string) => BY_ID.get(id);
 /**

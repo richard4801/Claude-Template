@@ -3,7 +3,7 @@
 // one draw from each variation-pool slot (or the user's direction) + a seed. Two views of the same prompt are built:
 // `full` (what the image engine gets, and what the template's owner may see) and `visible` (everyone else: one locked
 // "Template: <name>" line in place of the hidden layers).
-import { identityLine, neverLine, neverList, referenceLine, sanitizeDirection, seedFor, type Identity, type OutfitSpec, type SentRef } from './engine.js';
+import { houseText, identityLine, neverLine, neverList, referenceLine, sanitizeDirection, seedFor, type Identity, type OutfitSpec, type SentRef } from './engine.js';
 import { DEFAULT_TEXTS, fill, type PromptTexts } from '../../src/prompt/library.js';
 import { POOL_SLOTS, type PoolSlot, type TemplateLayers, type VariationDraw, type VariationPool } from '../../src/db/schema.js';
 
@@ -77,7 +77,7 @@ export function buildTemplatePrompt(o: {
     { layer: 'light', text: L.light ? fill(t['template.light']!, { light: join(L.light) }) : '' },
     { layer: 'pose', text: v.pose || v.bodyAngle || v.expression || v.hands ? fill(t['template.pose']!, { pose: join(v.pose, v.bodyAngle, v.expression, v.hands) }) : '' },
     { layer: 'product', text: L.product && o.hasProduct ? fill(t['template.product']!, { product: join(L.product) }) : L.product ? fill(t['template.product.none']!, { product: join(L.product) }) : '' },
-    { layer: 'style', text: fill(t['template.style']!, { style: join(L.style, t['style.house']) }) },
+    { layer: 'style', text: fill(t['template.style']!, { style: join(L.style, houseText(t)) }) },
   ].filter(s => s.text.trim());
   const nHead = hidden.filter(s => ['scene', 'camera', 'light', 'pose'].includes(s.layer)).length;
 

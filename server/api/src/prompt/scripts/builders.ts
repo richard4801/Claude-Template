@@ -31,9 +31,16 @@ export function run(id: string, t: PromptTexts, o: { inputs: Inputs; vars?: Reco
 
 const trimEndChars = (s: string, chars: string) => { let e = s.length; while (e > 0 && chars.includes(s[e - 1]!)) e--; return s.slice(0, e); };
 const refCount = (id: Identity) => id.referenceCount ?? 6;
-const idVars = (id: Identity, t: PromptTexts) => ({
+/**
+ * The house style (script `style.house`): Camera feel unless the shot has a camera of its own, then Realism, as one
+ * comma-separated phrase. Sheet fills and outfit sets never have their own camera, so they always get both.
+ */
+export function houseStyle(t: PromptTexts = DEFAULT_TEXTS, ownCamera = false) {
+  return run('style.house', t, { inputs: { ownCamera } }).parts.map(p => p.text.trim().replace(/[.,;\s]+$/, '')).filter(Boolean).join(', ');
+}
+const idVars = (id: Identity, t: PromptTexts, ownCamera = false) => ({
   name: id.name, look: id.look, refCount: refCount(id), lora: id.lora ? ` + LoRA ${id.lora} (photo)` : '',
-  style: t['style.house'], never: neverList(id, t).join(', '),
+  style: houseStyle(t, ownCamera), never: neverList(id, t).join(', '),
 });
 const outfitSource = (o: OutfitSpec | null | undefined) => (o?.source === 'described' ? 'described' : o?.source === 'product-photo' ? 'product' : 'set');
 const outfitVar = (o: OutfitSpec) => (o.source === 'described' ? trimEndChars((o.description ?? o.name).trim(), '.') : o.name.toLowerCase());
@@ -47,8 +54,9 @@ export function photoshoot(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS): BuiltP
   const c = shootChoices(s, t);
   const cam = cameraValues(c.camera, t);
   const r = run('photoshoot', t, {
-    inputs: { presets: s.presets !== false, lockSeed: !!s.lockSeed, outfitSource: outfitSource(s.outfit), lens: c.camera.lensMm, refs: refItems(s.refs) },
-    vars: { ...idVars(s.identity, t), outfit: outfitVar(s.outfit), scene: c.scene.toLowerCase(), shot: cam.shot, lens: cam.lens, aperture: cam.aperture,
+    inputs: { presets: s.presets !== false, lockSeed: !!s.lockSeed, outfitSource: outfitSource(s.outfit), lens: c.camera.lensMm, refs: refItems(s.refs),
+      ownCamera: c.ownCamera, noGrade: !c.grade },
+    vars: { ...idVars(s.identity, t, c.ownCamera), outfit: outfitVar(s.outfit), scene: c.scene.toLowerCase(), shot: cam.shot, lens: cam.lens, aperture: cam.aperture,
       light: c.light.toLowerCase(), grade: c.grade.toLowerCase() },
     direction: dir,
   });
@@ -81,13 +89,16 @@ export type TemplateParts = {
   identity: Identity; outfit: OutfitSpec | null; templateName: string; refs?: SentRef[]; direction: string;
   scene: string; camera: string; light: string; pose: string; product: { words: string; photo: boolean } | null; style: string;
   neverFull: string[]; neverVisible: string[]; seed: { mode: 'locked' | 'known' | 'none'; value: number | null };
+  /** The template's camera or style names a camera of its own (templates/prompt.ts templateOwnCamera). Informational:
+   *  `style` already holds the house style built for it. */
+  ownCamera?: boolean;
 };
 /** Both views of a template shoot. Slots carry `locked: true` on the line members see in place of the hidden layers. */
 export function templateViews(p: TemplateParts, t: PromptTexts = DEFAULT_TEXTS) {
   const common = {
     outfitSource: !p.outfit ? 'none' : p.outfit.source === 'described' ? 'described' : 'set',
     hasScene: !!p.scene, hasCamera: !!p.camera, hasLight: !!p.light, hasPose: !!p.pose,
-    product: !p.product ? 'none' : p.product.photo ? 'photo' : 'noPhoto', seed: p.seed.mode, refs: refItems(p.refs),
+    product: !p.product ? 'none' : p.product.photo ? 'photo' : 'noPhoto', seed: p.seed.mode, refs: refItems(p.refs), ownCamera: !!p.ownCamera,
   };
   const vars = { ...idVars(p.identity, t), outfit: p.outfit ? (p.outfit.source === 'described' ? trimEndChars((p.outfit.description ?? p.outfit.name).trim(), '.') : p.outfit.name.toLowerCase()) : '',
     scene: p.scene, camera: p.camera, light: p.light, pose: p.pose, product: p.product?.words ?? '', style: p.style, seed: p.seed.value, name: p.identity.name };
@@ -117,7 +128,7 @@ export function videoSwap(v: VideoSwapSpec & { speaking?: boolean }, t: PromptTe
   const clean = [perf.tattoos && "None of <Subject 1>'s tattoos remain.", perf.rings && "None of <Subject 1>'s rings remain."].filter(Boolean).join(' ');
   const { clean: dir, removed } = sanitizeDirection(v.direction, id, t);
   const r = run('video.edit', t, {
-    inputs: { speaking, keepAudio, keepBackground },
+    inputs: { speaking, keepAudio, keepBackground, describeBackground: !keepBackground && !!v.describeBackground },
     vars: { performer: perf.description + (extras.length ? ` with ${extras.join(' and ')}` : ''), setting: perf.setting, name: id.name, look: id.look, refs: refList,
       lora: id.lora ? `, with LoRA ${id.lora} video` : '', motion: v.backgroundMotion ? ` (${v.backgroundMotion})` : '',
       tattoos: perf.tattoos ? 'tattoos, ' : '', clean: clean ? ` ${clean}` : '', n, outfit: v.outfit.name.toLowerCase(), never: neverList(id, t).join(', no ') },
@@ -153,7 +164,7 @@ export function replicateSwap(v: ReplicateSwapSpec & { speaking?: boolean }, t: 
     outfit, `no ${never.join(', no ')}`];
   const speaking = v.speaking ?? true;
   const r = run('video.replicate', t, {
-    inputs: { speaking, audioSent: speaking },
+    inputs: { speaking, audioSent: speaking, newBackground: !!v.newBackground },
     vars: { subject: all.length ? `the person in ${imageRange(all)}: ${look}` : look, reference: parts.join('; '), faceRef: faces.length ? `<Image ${faces[0]}>` : 'the description' },
     direction: dir,
   });

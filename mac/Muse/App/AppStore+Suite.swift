@@ -91,6 +91,25 @@ extension ComposerTool {
 
 enum SwapKind: String { case swap, recast }
 
+/// Swap's Background pill: Keep (the clip's place), New photo (a studio location or an upload), Describe it (the prompt's words).
+enum SwapBackground: String, CaseIterable, Equatable {
+    case keep, photo, describe
+    var label: String {
+        switch self {
+        case .keep: return "Keep"
+        case .photo: return "New photo"
+        case .describe: return "Describe it"
+        }
+    }
+    /// What the request sends (nil = the server's default, Keep).
+    var value: String? { self == .keep ? nil : rawValue }
+}
+
+/// One choice of the Background pill's list.
+enum SwapBackgroundPick: Hashable {
+    case keep, describe, location(String), upload
+}
+
 /// Character swap and Recast (tools of the composer).
 struct SwapDraft: Equatable {
     var kind: SwapKind = .swap
@@ -99,6 +118,11 @@ struct SwapDraft: Equatable {
     var quality = "standard"
     var keepAudio = true
     var speaking: ComposerSpeaking = .auto
+    /// Background: keep (the clip's place) or describe (the prompt's words set the new place; Auto then runs Genjutsu Light).
+    var background: SwapBackground = .keep
+    /// New photo: the picture and its name (a location's, or the uploaded file's).
+    var backgroundImage: ImageRef?
+    var backgroundName: String?
     /// The prompt sits behind a toggle (off by default).
     var promptOn = false
     /// Swap's add-ons (they stay add-ons: Edit, Fast · beta), off = the ladder.
@@ -610,7 +634,8 @@ extension AppStore {
         case .swap:
             guard let m = d.modelId else { return nil }
             var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
-                                prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
+                                prompt: d.promptOn || d.background == .describe ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
+            applySwapBackground(&r, d)
             applyLook(&r)
             applyEnginePick(&r, .swap) // the owner's model (WS6)
             if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
@@ -622,10 +647,47 @@ extension AppStore {
         case .recast:
             guard !d.cast.isEmpty else { return nil }
             let cast = RecastFaces.resolveClashes(d.cast, faces: d.people.map(\.face))
-            var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
+            var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)",
+                                       prompt: d.background == .describe ? suite.composer.tokens.promptText() : "")
+            if cast.count == 1 { applySwapBackground(&r, d) } // a new background is a one-person swap
             applyLook(&r)
             applyEnginePick(&r, .recast) // the owner's model (WS6)
             return r
+        }
+    }
+
+    /// Background: Keep sends nothing; New photo sends its picture (none picked yet = Keep); Describe it sends the words.
+    private func applySwapBackground(_ r: inout ShotRequest, _ d: SwapDraft) {
+        switch d.background {
+        case .keep: r.background = nil
+        case .describe: r.background = "describe"
+        case .photo:
+            guard let img = d.backgroundImage else { r.background = nil; return }
+            r.background = "photo"
+            r.backgroundImage = img
+        }
+    }
+
+    /// The Background pill's choice: a studio location or an uploaded picture makes it New photo.
+    func pickSwapBackground(_ p: SwapBackgroundPick) {
+        switch p {
+        case .keep: suite.swap.background = .keep
+        case .describe:
+            suite.swap.background = .describe
+            suite.swap.promptOn = true // the words set the new place
+        case .location(let id):
+            guard let loc = suite.locations.first(where: { $0.id == id }) else { return }
+            suite.swap.background = .photo
+            suite.swap.backgroundImage = loc.image
+            suite.swap.backgroundName = loc.name
+        case .upload:
+            guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use as the new background").first(where: MediaImport.isImage) else { return }
+            perform { [self] in
+                let ref = try await uploadImage(url)
+                suite.swap.background = .photo
+                suite.swap.backgroundImage = ref
+                suite.swap.backgroundName = url.deletingPathExtension().lastPathComponent
+            }
         }
     }
 

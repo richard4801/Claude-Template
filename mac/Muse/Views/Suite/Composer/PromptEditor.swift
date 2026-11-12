@@ -23,31 +23,67 @@ final class PromptController {
 
 enum PromptKey { case up, down, enter, escape }
 
+/// Where the @ / # list opens: above the box (the prompt bar at the bottom of the window), below it, or inside it at the
+/// bottom right (the full-height editor, where there is no room outside).
+enum SuggestionPlacement { case above, below, inside }
+
 struct ComposerPromptBox: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var placeholder: String
+    /// The box never gets shorter than this (two lines in the prompt bar), even with one short line of text.
     var minHeight: CGFloat = 104
-    /// The tallest the box grows before it scrolls (the composer's prompt bar keeps it short so the picture keeps the height).
+    /// The box grows with its text up to this, then scrolls (the prompt bar passes ~40% of the window's height).
     var maxHeight: CGFloat = 180
-    /// The @ / # list opens above the box (the prompt bar sits at the bottom of the window).
-    var suggestionsAbove = false
+    var suggestions: SuggestionPlacement = .below
+    /// Shows the expand button that opens the prompt in a full-height editor.
+    var expandable = false
     @State private var typed: TypedTrigger?
     @State private var highlight = 0
     @State private var controller = PromptController()
+    /// The text's laid-out height (lines and chips), reported by the text view after each layout.
+    @State private var contentHeight: CGFloat = 0
+    @State private var expanded = false
+
+    private var boxHeight: CGFloat {
+        let top = max(minHeight, maxHeight)
+        return min(max(contentHeight, minHeight), top)
+    }
 
     private var tokens: Binding<PromptTokens> {
         Binding(get: { store.suite.composer.tokens }, set: { store.suite.composer.tokens = $0 })
     }
 
     var body: some View {
+        HStack(alignment: .top, spacing: Space.s2) {
+            editor
+            if expandable {
+                Button { expanded = true } label: {
+                    Ph("arrow.up.left.and.arrow.down.right", 14).foregroundStyle(t.roles.ink2)
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open the prompt in a larger editor")
+                .accessibilityLabel("Expand prompt")
+                .sheet(isPresented: $expanded) {
+                    PromptExpandedSheet(placeholder: placeholder) { expanded = false }
+                        .environment(store)
+                        .environment(\.theme, t)
+                }
+            }
+        }
+    }
+
+    private var editor: some View {
         ZStack(alignment: .topLeading) {
             TokenTextEditor(tokens: tokens, controller: controller, theme: t, onTrigger: { tr in
                 if tr != typed { highlight = 0 }
                 typed = tr
-                controller.suggesting = tr != nil && !suggestions.isEmpty
+                controller.suggesting = tr != nil && !matches.isEmpty
             }, onTokenClick: { key, rect, view in showTokenMenu(key, rect, view) },
-               onBackspaceEmpty: { store.unselectPresetOnEmptyPrompt() })
+               onBackspaceEmpty: { store.unselectPresetOnEmptyPrompt() },
+               onHeight: { h in if abs(h - contentHeight) > 0.5 { contentHeight = h } })
             if store.suite.composer.tokens.isEmpty {
                 HStack(spacing: 0) {
                     Rectangle().fill(t.accent).frame(width: 2, height: 21)
@@ -58,13 +94,17 @@ struct ComposerPromptBox: View {
                 .accessibilityHidden(true)
             }
         }
-        .frame(minHeight: minHeight, maxHeight: max(minHeight, maxHeight))
-        .overlay(alignment: suggestionsAbove ? .topLeading : .bottomLeading) {
-            if let typed, !suggestions.isEmpty {
-                if suggestionsAbove {
-                    suggestionList(typed).alignmentGuide(.top) { $0[.bottom] + 4 }
-                } else {
-                    suggestionList(typed).alignmentGuide(.bottom) { $0[.top] - 4 }
+        // Grows with the text (a line at a time, smoothly), from two lines up to `maxHeight`, then scrolls. In the prompt
+        // bar it grows upwards: the bar is pinned to the bottom and the picture above gives up the height.
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: boxHeight)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: boxHeight)
+        .overlay(alignment: suggestionAlignment) {
+            if let typed, !matches.isEmpty {
+                switch suggestions {
+                case .above: suggestionList(typed).alignmentGuide(.top) { $0[.bottom] + 4 }
+                case .below: suggestionList(typed).alignmentGuide(.bottom) { $0[.top] - 4 }
+                case .inside: suggestionList(typed).padding(Space.s2)
                 }
             }
         }
@@ -85,7 +125,15 @@ struct ComposerPromptBox: View {
         var move: SuiteMoveOption?
     }
 
-    private var suggestions: [Suggestion] {
+    private var suggestionAlignment: Alignment {
+        switch suggestions {
+        case .above: return .topLeading
+        case .below: return .bottomLeading
+        case .inside: return .bottomTrailing
+        }
+    }
+
+    private var matches: [Suggestion] {
         guard let typed else { return [] }
         let q = typed.trigger.query.lowercased()
         if typed.trigger.char == "#" {
@@ -111,7 +159,7 @@ struct ComposerPromptBox: View {
     }
 
     private func suggestionList(_ typed: TypedTrigger) -> some View {
-        let list = suggestions
+        let list = matches
         return VStack(alignment: .leading, spacing: 0) {
             Text(typed.trigger.char == "#" ? "CAMERA MOVES · UP TO \(PromptTokens.maxMoves)" : "YOUR CAST · OUTFITS · LOCATIONS")
                 .font(t.mono(10, .medium)).tracking(1.2).foregroundStyle(t.muted)
@@ -152,11 +200,11 @@ struct ComposerPromptBox: View {
     }
 
     private func handleKey(_ k: PromptKey) -> Bool {
-        guard let typed, !suggestions.isEmpty else { return false }
+        guard let typed, !matches.isEmpty else { return false }
         switch k {
         case .up: highlight = max(0, highlight - 1)
-        case .down: highlight = min(suggestions.count - 1, highlight + 1)
-        case .enter: pick(suggestions[min(highlight, suggestions.count - 1)], typed)
+        case .down: highlight = min(matches.count - 1, highlight + 1)
+        case .enter: pick(matches[min(highlight, matches.count - 1)], typed)
         case .escape:
             self.typed = nil
             controller.suggesting = false
@@ -229,6 +277,30 @@ struct ComposerPromptBox: View {
         })
         pop.contentViewController = NSHostingController(rootView: content)
         pop.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+    }
+}
+
+/// The full-height prompt editor (the prompt box's expand button): the same prompt, chips and @ / # list, with room to
+/// read and write a long prompt. ⌘Return or Done closes it; the prompt bar shows the same text.
+struct PromptExpandedSheet: View {
+    @Environment(\.theme) private var t
+    var placeholder: String
+    var onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack {
+                Text("Prompt").font(t.scale.title.font).foregroundStyle(t.roles.ink)
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .help("Done (⌘Return)")
+            }
+            ComposerPromptBox(placeholder: placeholder, minHeight: 420, maxHeight: 420, suggestions: .inside)
+        }
+        .padding(Space.s5)
+        .frame(width: 760)
+        .background(t.roles.raised)
     }
 }
 
@@ -370,6 +442,8 @@ struct TokenTextEditor: NSViewRepresentable {
     var onTrigger: (TypedTrigger?) -> Void
     var onTokenClick: (Int, NSRect, NSView) -> Void
     var onBackspaceEmpty: (() -> Void)? = nil
+    /// The text's laid-out height (insets included), after every layout: the box sizes itself to it.
+    var onHeight: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -396,6 +470,7 @@ struct TokenTextEditor: NSViewRepresentable {
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         tv.insertionPointColor = NSColor(theme.accent)
         tv.delegate = context.coordinator
+        tv.layoutManager?.delegate = context.coordinator
         tv.controller = controller
         tv.setAccessibilityLabel("Prompt")
         let coord = context.coordinator
@@ -426,7 +501,7 @@ struct TokenTextEditor: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSLayoutManagerDelegate {
         var parent: TokenTextEditor
         /// The tokens the view shows now.
         var shown = PromptTokens()
@@ -435,6 +510,19 @@ struct TokenTextEditor: NSViewRepresentable {
         private var applying = false
 
         init(_ parent: TokenTextEditor) { self.parent = parent }
+
+        /// The last height sent, so a layout that changes nothing doesn't re-render the box.
+        private var reportedHeight: CGFloat = -1
+
+        /// Every finished layout (typing, a chip added, the box getting narrower or wider) re-measures the text.
+        func layoutManager(_ lm: NSLayoutManager, didCompleteLayoutFor tc: NSTextContainer?, atEnd: Bool) {
+            guard atEnd, let tc, let tv = tc.textView else { return }
+            let h = ceil(lm.usedRect(for: tc).height + tv.textContainerInset.height * 2)
+            guard abs(h - reportedHeight) > 0.5 else { return }
+            reportedHeight = h
+            // Not during the layout pass itself: SwiftUI state changes there are dropped or warned about.
+            DispatchQueue.main.async { [weak self] in self?.parent.onHeight?(h) }
+        }
 
         private var font: NSFont { Fonts.nsFont(parent.theme.bodyFamily, 16, .regular) ?? .systemFont(ofSize: 16) }
         private var plain: [NSAttributedString.Key: Any] {

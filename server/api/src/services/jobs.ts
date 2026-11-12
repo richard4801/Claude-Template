@@ -41,7 +41,8 @@ export const JobRequestSchema = z.object({
   takes: z.number().int().optional().default(1),
   keepAudio: z.boolean().optional().default(true),
   lipSync: z.boolean().optional().default(false),
-  background: z.enum(['keep', 'photo']).optional().default('keep'),
+  /** keep: the clip's place; photo: a new background picture; describe: the direction's words set the new place (owner 2026-11-11). */
+  background: z.enum(['keep', 'photo', 'describe']).optional().default('keep'),
   backgroundMotion: z.enum(['still', 'subtle', 'busy']).optional().default('subtle'),
   clipSeconds: z.number().positive().max(600).nullable().optional(),
   queue: z.boolean().optional(),
@@ -147,7 +148,8 @@ export class JobService {
     if (replicate) {
       if (!this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Draft, Standard and HD aren't available right now · try Edit");
       if (r.lipSync) throw badRequest('Lip sync is only on Edit');
-      if (r.background === 'photo') throw badRequest('A new background photo is only on Edit for now');
+      const gjEngine = !!swapEngineById(String((r as Record<string, unknown>).swapEngine ?? ''))?.genjutsu;
+      if (r.background === 'photo' && !gjEngine) throw badRequest('A new background photo is only on Edit or Genjutsu for now');
       if (!(await this.ctx.replicateVideo.toolsReady())) throw new ApiError(400, 'engine_unavailable', "Draft, Standard and HD aren't available right now · try Edit");
       r.use = 'full';
       r.quality = r.quality ?? this.ctx.config.VIDEO_QUALITY_DEFAULT;
@@ -161,6 +163,8 @@ export class JobService {
     const [clip] = r.clipId ? await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, user.studioId))) : [];
     // Clip checks are advice only (owner decision): a clip that fails them can still be rendered; the apps show a
     // disclaimer. Over 15 s, only the first 15 s are used (the engines' limit).
+    if (r.background === 'describe' && !r.direction?.trim()) throw badRequest('Background “Describe it”: describe the new place in the direction');
+    if (r.background === 'photo' && replicate && !(r.backgroundImage?.asset || r.backgroundImage?.url)) throw badRequest('Background “New photo”: add the background picture');
     if (r.engine === 'h3' && (r.steps < P.STEPS_MIN || r.steps > P.STEPS_MAX)) throw badRequest('Steps must be 4–30');
     if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first');
     if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first');
@@ -181,6 +185,12 @@ export class JobService {
     // Genjutsu takes up to 8 images (face front and profile first, then the outfit set): the rest are left out.
     const gj = swapEngineById(String((r as Record<string, unknown>).swapEngine ?? ''))?.genjutsu;
     if (gj && references.length > gj.maxImages) references.splice(gj.maxImages);
+    // Genjutsu with a new background photo: the photo goes last (within its 8) and the direction points to it.
+    let direction = r.direction;
+    if (gj && r.background === 'photo' && r.backgroundImage) {
+      references.splice(gj.maxImages - 1, references.length, { label: 'background', image: r.backgroundImage });
+      direction = [direction?.trim(), `Use the place and background from <Image ${references.length}>.`].filter(Boolean).join(' ');
+    }
     if (!replicate && r.background === 'photo' && r.backgroundImage && (r.backgroundImage.asset || r.backgroundImage.url))
       references.splice(5, references.length, { label: 'background', image: r.backgroundImage });
     const texts = await this.ctx.prompts.texts(user.studioId);
@@ -191,11 +201,11 @@ export class JobService {
     const prompt = replicate ? replicateSwap({ speaking: sp.speaking,
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd },
       outfit: o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' : 'reference-set' } : null,
-      referenceLabels: references.map(x => x.label), direction: r.direction,
+      referenceLabels: references.map(x => x.label), direction, newBackground: r.background === 'describe' || (!!gj && r.background === 'photo'),
     }, texts).text : videoSwap({ speaking: sp.speaking,
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, referenceCount: Math.max(1, references.length), neverAdd: m.neverAdd, lora },
       referenceLabels: references.length ? references.map(x => x.label) : undefined,
-      outfit: { name: o?.name ?? 'outfit' }, keepAudio: r.keepAudio, keepBackground: r.background === 'keep',
+      outfit: { name: o?.name ?? 'outfit' }, keepAudio: r.keepAudio, keepBackground: r.background === 'keep', describeBackground: r.background === 'describe',
       backgroundMotion: MOTION_WORDS[r.backgroundMotion], steps: r.steps, seed, direction: r.direction,
     }, texts).text;
     const { queue, draft: _draft, ...request } = r as typeof r & { draft?: unknown }; // the draft is stored on its own (jobs.draft)

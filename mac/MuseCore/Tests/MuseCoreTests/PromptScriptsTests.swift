@@ -62,7 +62,7 @@ final class PromptScriptsTests: XCTestCase {
         XCTAssertEqual(refs.fields?.map(\.name), ["refIndex", "guides"])
         XCTAssertEqual(refs.fields?.last?.options?.map(\.id), ["pose", "look", "scene"])
         guard case .array(let items) = refs.sample, case .object(let first)? = items.first else { return XCTFail("refs sample is a list of items") }
-        XCTAssertEqual(first["refIndex"], .number(8))
+        XCTAssertEqual(first["refIndex"], .number(5)) // the shared sample set: her images 1–3, the outfit 4, the reference 5
         XCTAssertEqual(shoot.section("reference")?.each, "refs")
         XCTAssertEqual(shoot.values.map(\.name), ["lensNote"])
         XCTAssertEqual(shoot.targets.last?.id, "@lensNote")

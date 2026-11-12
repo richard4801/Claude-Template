@@ -3,12 +3,13 @@ import { and, eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { promptOverrides, users } from '../db/schema.js';
 import { ApiError, notFound } from '../errors.js';
-import { allowEmpty, DEFAULT_TEXTS, fill, listOf, PROMPT_DEFS, PROMPT_GROUPS, promptDef, resolveTexts, validatePrompt, type PromptDef, type PromptTexts } from './library.js';
+import { allowEmpty, DEFAULT_TEXTS, fill, LEGACY_HOUSE_STYLE, listOf, migrateOverrides, PROMPT_DEFS, PROMPT_GROUPS, promptDef, resolveTexts, validatePrompt, type PromptDef, type PromptTexts } from './library.js';
 import * as E from './engine.js';
 import { buildTemplatePrompt } from '../templates/prompt.js';
 import { suiteExample } from '../suite/example.js';
 import { withRules } from './scripts/builders.js';
 import { loadRules } from './scripts/service.js';
+import { SAMPLE as S } from './scripts/defs.js';
 
 export type PromptEntry = {
   key: string; group: string; title: string; description: string; kind: PromptDef['kind']; default: string; current: string; overridden: boolean;
@@ -16,12 +17,18 @@ export type PromptEntry = {
 };
 type Row = typeof promptOverrides.$inferSelect;
 
-/** Sample values for the editor's preview (the sample model is "Demo model"). */
-const SAMPLE_ID: E.Identity = { name: 'Demo model', look: 'young woman, shoulder-length dark brown hair, brown eyes, light olive skin', neverAdd: ['tattoos', 'rings'], referenceCount: 7 };
+/**
+ * Sample values for the editor's preview (the sample model is "Demo model"). One set for every preview, the scripts' too
+ * (scripts/defs.ts SAMPLE): three images of her (1–3), the outfit (4), one reference image (5) guiding pose, look and scene.
+ */
+const SAMPLE_ID: E.Identity = { name: S.name, look: S.look, neverAdd: ['tattoos', 'rings'], referenceCount: S.refCount };
+const SAMPLE_REF: E.SentRef = { index: S.refIndex, guides: ['pose', 'look', 'scene'] };
+const SAMPLE_PANELS: E.SheetPanel[] = [{ label: 'face', role: 'person' }, { label: 'face ¾', role: 'person' }, { label: 'body', role: 'person' },
+  { label: 'outfit', role: 'outfit' }, { label: E.refPanelLabel(SAMPLE_REF.guides), role: 'ref', guides: SAMPLE_REF.guides }];
 const SAMPLE: Record<string, string> = {
-  name: 'Demo model', look: SAMPLE_ID.look, refCount: '7', lora: '', outfit: 'green set', scene: 'rooftop · golden hour', shot: 'medium', lens: '35', aperture: 'f/2.8',
-  lensNote: '', light: 'golden hour', grade: 'phone-natural', direction: 'laughing mid-step, hair blowing', style: '', never: '', refIndex: '8',
-  person: 'panels 1–3 show', panels: '; panel 4 shows the outfit to wear; panel 5 guides the pose & framing only',
+  name: S.name, look: S.look, refCount: String(S.refCount), lora: '', outfit: 'green set', scene: 'rooftop · golden hour', shot: 'medium', lens: '35', aperture: 'f/2.8',
+  lensNote: '', light: 'golden hour', grade: 'phone-natural', direction: 'laughing mid-step, hair blowing', style: '', never: '', refIndex: String(S.refIndex),
+  person: 'panels 1–3 show', panels: `; panel ${S.outfitPanel} shows the outfit to wear; panel ${S.refIndex} guides the pose & framing and the look & colour and the scene only`,
   angle: 'body · front', framing: 'full body, facing the camera', seed: '421337', anchor: '', camera: 'handheld, slightly tilted', pose: 'mid-step, glancing back',
   product: 'held up next to the cheek', subject: 'the person in <Image 1> to <Image 5>: ' + SAMPLE_ID.look, reference: 'face and identity from <Image 1> and <Image 2>',
   faceRef: '<Image 1>', performer: 'the person', setting: 'the room', refs: '<Image 1> (face, front) and <Image 2> (face, profile)', audio: '', audioTag: '',
@@ -37,6 +44,21 @@ export class PromptLibrary {
   forget(studioId: string) { this.cache.delete(studioId); }
 
   private async rows(studioId: string): Promise<Row[]> {
+    const rows = await this.ctx.db.select().from(promptOverrides).where(eq(promptOverrides.studioId, studioId));
+    return rows.some(r => r.key === LEGACY_HOUSE_STYLE) ? this.splitHouseStyle(studioId, rows) : rows;
+  }
+  /**
+   * An owner's saved house style from before the split (owner 2026-11-11) becomes Camera feel (her phone phrases) and
+   * Realism (the rest), saved as her own edits with the old date and author, so nothing she wrote is lost.
+   */
+  private async splitHouseStyle(studioId: string, rows: Row[]): Promise<Row[]> {
+    const old = rows.find(r => r.key === LEGACY_HOUSE_STYLE)!;
+    const have = Object.fromEntries(rows.map(r => [r.key, r.text]));
+    const next = migrateOverrides(have);
+    const added = (['style.camera', 'style.realism'] as const).filter(k => have[k] == null && next[k] != null && validatePrompt(k, next[k]!) == null)
+      .map(key => ({ studioId, key, text: next[key]!, updatedBy: old.updatedBy, updatedAt: old.updatedAt }));
+    if (added.length) await this.ctx.db.insert(promptOverrides).values(added).onConflictDoNothing();
+    await this.ctx.db.delete(promptOverrides).where(and(eq(promptOverrides.studioId, studioId), eq(promptOverrides.key, LEGACY_HOUSE_STYLE)));
     return this.ctx.db.select().from(promptOverrides).where(eq(promptOverrides.studioId, studioId));
   }
   /** The studio's resolved texts (defaults ⊕ overrides). Cached; every write drops the cache. */
@@ -109,11 +131,13 @@ export class PromptLibrary {
     const saved = await this.texts(u.studioId);
     const text = b.text === undefined ? saved[def.key]! : this.check(def.key, b.text);
     const t: PromptTexts = { ...saved, [def.key]: text };
-    const sample: Record<string, string> = { ...SAMPLE, style: t['style.house']!, never: E.neverList(SAMPLE_ID, t).join(', ') };
+    const sample: Record<string, string> = { ...SAMPLE, style: E.houseStyle(t), never: E.neverList(SAMPLE_ID, t).join(', ') };
     if (def.key === 'shoot.camera') sample.lensNote = '';
     const rendered = def.kind === 'text' ? fill(text, sample) : listOf(text, def.kind).join(def.kind === 'lines' ? '\n' : ', ');
     const used = Object.fromEntries(def.placeholders.map(([n]) => [n, sample[n] ?? '']));
-    return { key: def.key, text: rendered, example: exampleFor(def, t), sample: used };
+    const cine = cinematicExampleFor(def, t);
+    return { key: def.key, text: rendered, example: exampleFor(def, t), sample: used,
+      variants: cine == null ? [] : [{ id: 'cinematic', label: 'With a cinematic rig', note: 'A rig with a cinema camera, lens and look: Camera feel and the default grade are left out.', example: cine }] };
   }
 }
 
@@ -122,8 +146,7 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
   const outfit: E.OutfitSpec = { name: 'Green set' };
   switch (def.group) {
     case 'photoshoot': case 'references':
-      return (def.key === 'refs.collage' ? `${E.collageLine([{ label: 'face', role: 'person' }, { label: 'face ¾', role: 'person' }, { label: 'body', role: 'person' },
-        { label: 'outfit', role: 'outfit' }, { label: E.refPanelLabel(['pose']), role: 'ref', guides: ['pose'] }], t)}\n` : '') + E.photoshoot({ identity: SAMPLE_ID, outfit, direction: 'laughing mid-step, hair blowing', refs: [{ index: 8, guides: ['pose', 'look', 'scene'] }],
+      return (def.key.startsWith('refs.collage') ? `${E.collageLine(SAMPLE_PANELS, t)}\n` : '') + E.photoshoot({ identity: SAMPLE_ID, outfit, direction: 'laughing mid-step, hair blowing', refs: [SAMPLE_REF],
         camera: def.key === 'shoot.camera.wide' ? { shot: 'Wide', lensMm: 24, aperture: 'f/5.6' } : def.key === 'shoot.camera.tele' ? { shot: 'Close', lensMm: 85, aperture: 'f/1.4' } : undefined,
         lockSeed: def.key === 'shoot.seed.locked', ...(def.key === 'shoot.outfit.described' ? { outfit: { name: 'Knit', description: 'a cream cable-knit sweater', source: 'described' } } : {}),
         ...(def.key === 'shoot.outfit.product' ? { outfit: { name: 'Green set', source: 'product-photo' } } : {}) }, t).text;
@@ -146,6 +169,23 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
   return '';
 }
 
+/**
+ * The same example with a cinematic rig (a cinema camera, an anamorphic lens and a film-stock look, as the AI suite's
+ * Photo sends them): Camera feel and the default grade are left out. Null where the entry never meets a rig.
+ */
+export function cinematicExampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): string | null {
+  const outfit: E.OutfitSpec = { name: 'Green set' };
+  const c = S.cinematic;
+  switch (def.group) {
+    case 'photoshoot': case 'references':
+      return (def.key.startsWith('refs.collage') ? `${E.collageLine(SAMPLE_PANELS, t)}\n` : '') + E.photoshoot({ identity: SAMPLE_ID, outfit, direction: c.direction, refs: [SAMPLE_REF],
+        grade: c.grade, ownCamera: true, lockSeed: def.key === 'shoot.seed.locked' }, t).text;
+    case 'templates':
+      return buildTemplatePrompt({ templateId: 't', templateName: 'Night street', layers: { scene: 'rainy street at night', camera: c.camera, light: 'neon signs, wet reflections', style: 'cinematic still' },
+        pool: { pose: ['walking towards the camera'], framing: ['medium shot'] }, identity: SAMPLE_ID, outfit, shuffleSeed: 1, seed: 421337, hasProduct: false }, t).fullText;
+  }
+  return null;
+}
 /** The LoRA candidate variations and the line for candidate `n`. */
 export const loraVariations = (t: PromptTexts = DEFAULT_TEXTS) => { const l = listOf(t['lora.variations']!, 'lines'); return l.length ? l : listOf(DEFAULT_TEXTS['lora.variations']!, 'lines'); };
 /** The variation line of LoRA candidate n (the candidate's whole prompt: scripts' loraCandidate). */

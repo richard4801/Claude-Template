@@ -115,6 +115,15 @@ public enum SuiteAssistDraft {
         // Images sent: Claude's choice (or none) as the draft has it.
         let sent = draft.raw["sent"]
         if !(sent == nil && current.sent == .null) { out.sent = sent } // a reset the server already applied stays a reset
+        // Movement → Directed (Claude's suite_set_draft directed: a camera session's camera and Blender guides) and the
+        // pinned model. The app sends both whenever it has them, so a newer draft without them means Claude took them out.
+        if tool != .photo, tool != .swap, tool != .recast {
+            let dir: CameraSpec? = { if case .object(let o)? = draft.extra["directed"] { return o["camera"]?.decoded(CameraSpec.self) }; return nil }()
+            if dir != current.directed { out.directed = dir.map { var c = $0; c.mode = "directed"; return c } }
+            let e: String? = { if case .string(let v)? = draft.extra["engineModel"] { return v }; return nil }()
+            let res: String? = { if case .string(let v)? = draft.extra["resolution"] { return v }; return nil }()
+            if e != current.engineModel || (e != nil && res != current.resolution) { out.engineModel = e; out.resolution = e == nil ? nil : res }
+        }
         // A preset's collapsed composer opens up once Claude changes its rig or prompt.
         if out.settings != current.settings || out.tokens != current.tokens { out.collapsed = nil }
         return SuiteDraftApplied(composer: out, changed: changedRows(current, out), rejected: rejected)
@@ -265,6 +274,8 @@ public enum SuiteAssistDraft {
         if a.sound != b.sound { out.append("Sound") }
         if a.speaking != b.speaking { out.append("Speaking") }
         if (a.sent == .null ? nil : a.sent) != (b.sent == .null ? nil : b.sent) { out.append("Images sent") }
+        if a.directed != b.directed { out.append("Movement") }
+        if a.engineModel != b.engineModel || a.resolution != b.resolution { out.append("Model") }
         return out
     }
 

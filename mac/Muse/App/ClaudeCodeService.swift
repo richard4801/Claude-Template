@@ -231,6 +231,7 @@ final class ClaudeCodeService: ObservableObject {
             case .connected:
                 if let turns = try? await api.pendingTurns() { await relay.offer(turns) }
                 if let asks = try? await api.pendingPermissions() { for a in asks { await handlePermission(a) } }
+                if let calls = try? await api.pendingUiCalls() { for c in calls { Task { await handleUiCall(c) } } }
                 await refreshStatus()
             case .permission(let a):
                 await handlePermission(a)
@@ -238,6 +239,8 @@ final class ClaudeCodeService: ObservableObject {
                 fileAsks.removeAll { $0.id == id }
             case .result(let r):
                 resultArrived(r)
+            case .uiCall(let c):
+                Task { await handleUiCall(c) }
             case .turn(let t):
                 await relay.offer([t])
             case .stop(let id):
@@ -325,6 +328,7 @@ final class ClaudeCodeService: ObservableObject {
     /// A turn typed on this Mac (queued behind the thread's running turn).
     func send(threadId: String, text: String, files: [ClaudeAttachmentFile] = []) {
         guard let relay else { return }
+        ClaudeUiOverlay.shared.reset() // the person wrote again: Claude may use MUSE's screen again after an Esc
         Task { await relay.submit(threadId: threadId, text: text, files: files) }
     }
 
@@ -492,6 +496,59 @@ final class ClaudeCodeService: ObservableObject {
         fileAsks.removeAll { $0.threadId == threadId }
         guard let api else { return }
         for a in mine { Task { try? await api.answerPermission(a.id, allow: false, message: message) } }
+    }
+
+    // MARK: Claude operates the MUSE window (ui_snapshot / ui_act / ui_wait)
+
+    private var uiCallsSeen: Set<String> = []
+    /// This Mac, for claiming a call (one of the person's Macs does it).
+    private static let deviceId: String = {
+        let k = "muse.deviceId"
+        if let id = UserDefaults.standard.string(forKey: k) { return id }
+        let id = UUID().uuidString
+        UserDefaults.standard.set(id, forKey: k)
+        return id
+    }()
+
+    var uiControlOn: Bool { fileSettings.uiOn }
+
+    /// Settings → Claude: "Let Claude operate MUSE's screen" (per person, on by default).
+    func setUiControl(_ on: Bool) {
+        fileSettings.uiControl = on
+        saveFileSettings()
+        if !on { ClaudeUiOverlay.shared.hide() }
+    }
+
+    private func handleUiCall(_ c: UiCall) async {
+        guard let api, uiCallsSeen.insert(c.id).inserted else { return }
+        // The Mac in front claims at once; another of the person's Macs waits a moment so the one they're using wins.
+        if !NSApp.isActive { try? await Task.sleep(nanoseconds: 1_500_000_000) }
+        guard (try? await api.claimUiCall(c.id, device: Self.deviceId)) == true else { return }
+        let answer: UiAnswer
+        do {
+            guard fileSettings.uiOn else { throw UiError.off }
+            try ClaudeUiOverlay.shared.checkNotStopped()
+            answer = try await runUi(c)
+        } catch let e as UiError {
+            answer = UiAnswer(error: e)
+        } catch {
+            answer = UiAnswer(error: UiError(.failed, "MUSE couldn't do that: \(error.localizedDescription)"))
+        }
+        try? await api.answerUiCall(c.id, answer)
+    }
+
+    private func runUi(_ c: UiCall) async throws -> UiAnswer {
+        let bridge = MuseUiBridge.shared
+        if let w = bridge.window() { ClaudeUiOverlay.shared.active(on: w) }
+        switch try UiRequest.parse(c) {
+        case .snapshot(let shot, let within):
+            let (json, image) = try bridge.snapshot(screenshot: shot, within: within, page: nil)
+            return UiAnswer(result: json, image: image)
+        case .act(let action, let target, let value):
+            return UiAnswer(result: try await bridge.act(action: action, target: target, value: value))
+        case .wait(let f, let target, let timeout):
+            return UiAnswer(result: try await bridge.wait(for: f, target: target, timeout: timeout))
+        }
     }
 
     // MARK: Results arrive in the chat

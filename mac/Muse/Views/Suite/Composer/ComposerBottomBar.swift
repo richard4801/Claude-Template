@@ -98,6 +98,24 @@ struct ComposerBottomBar: View {
             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pricing") } }
     }
 
+    /// Background pill: Keep, the studio's locations and an upload (New photo), Describe it.
+    private var backgroundOptions: [(String, SwapBackgroundPick)] {
+        [("Keep", .keep)] + store.suite.locations.map { ("New photo · \($0.name)", .location($0.id)) } + [("New photo · Upload a picture…", .upload), ("Describe it", .describe)]
+    }
+    private var backgroundSelected: SwapBackgroundPick {
+        let d = store.suite.swap
+        switch d.background {
+        case .keep: return .keep
+        case .describe: return .describe
+        case .photo: return store.suite.locations.first(where: { $0.image == d.backgroundImage }).map { .location($0.id) } ?? .upload
+        }
+    }
+    private var backgroundValue: String {
+        let d = store.suite.swap
+        if d.background == .photo { return d.backgroundImage == nil ? "Keep" : (d.backgroundName ?? "New photo") }
+        return d.background.label
+    }
+
     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
     @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
         HStack(spacing: spacing) {
@@ -105,6 +123,8 @@ struct ComposerBottomBar: View {
             if isSwap {
                 listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
                          help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
+                listPill("background", icon: "photo", value: backgroundValue, help: "Background: keep the clip’s place, a new photo, or describe it in the prompt",
+                         options: backgroundOptions, selected: backgroundSelected) { store.pickSwapBackground($0) }
                 if tool == .swap {
                     listPill("speaking", icon: "text.bubble", value: store.suite.swap.speaking.label, help: "Speaking",
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }

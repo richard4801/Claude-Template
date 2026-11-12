@@ -21,12 +21,18 @@ export type ShootSpec = {
   presets?: boolean;
   /** Reference images that were sent (plans/api.md "Shoot references"). */
   refs?: SentRef[];
+  /** The shot has a camera of its own: the AI suite Photo rig (or its camera preset) sets a camera body, lens character,
+   *  look or grade. Then the house style's Camera feel and the default grade are left out. The old Photo tool's grade
+   *  picker doesn't count (it isn't a rig). */
+  ownCamera?: boolean;
 };
 export type PromptSlot = { layer: LayerKey; text: string };
 export type BuiltPrompt = { slots: PromptSlot[]; seed: number | null; removed: string[]; text: string };
 export type SourcePerformer = { description?: string; tattoos?: boolean; rings?: boolean; setting?: string };
 export type VideoSwapSpec = {
   identity: Identity; outfit: OutfitSpec; performer?: SourcePerformer; keepAudio?: boolean; keepBackground?: boolean;
+  /** Background "Describe it": the direction sets the new place (keepBackground false, no photo). */
+  describeBackground?: boolean;
   backgroundMotion?: string | null; steps?: number; seed?: number; direction?: string | null;
   /** Labels of the reference images actually sent, in <Image n> order ("face, front", "outfit, back"). Default: the sheet order. */
   referenceLabels?: string[];
@@ -55,7 +61,8 @@ export const OUTFIT_ANGLES = [
   { label: 'Back', words: 'full body back view' },
 ] as const;
 
-export const HOUSE_STYLE = DEFAULT_TEXTS['style.house']!;
+/** The house style at its defaults with no camera of the shot's own: Camera feel, then Realism. */
+export const HOUSE_STYLE = `${DEFAULT_TEXTS['style.camera']}, ${DEFAULT_TEXTS['style.realism']}`;
 export const GLOBAL_NEVER = listOf(DEFAULT_TEXTS['never.base']!);
 export const DEFAULT_SCENE = DEFAULT_TEXTS['shoot.default.scene']!;
 export const DEFAULT_GRADE = DEFAULT_TEXTS['shoot.default.grade']!;
@@ -159,12 +166,17 @@ function javaHash(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h =
 /** Deterministic seed from a name, used when Lock look is on. */
 export const seedFor = (key: string) => (javaHash(key) & 0x7fffffff) % 1_000_000;
 
-/** The scene, light and grade a shoot really used (defaults from the library). */
+/**
+ * The scene, light and grade a shoot really used (defaults from the library). The default grade yields to the shot's own
+ * camera, lens or look: then `grade` is empty and the light line goes without one.
+ */
 export function shootChoices(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS) {
-  const scene = s.scene && s.scene.trim() ? s.scene.trim() : t['shoot.default.scene']!;
+  // The scene line adds its own full stop: a scene typed as a sentence ("… at dusk.") loses its own, so it can't end "dusk..".
+  const typed = trimEndChars((s.scene ?? '').trim(), '.,;: ').trim();
+  const scene = typed ? typed : t['shoot.default.scene']!;
   const light = s.light && s.light.trim() ? s.light.trim() : t['shoot.default.light']!;
-  const grade = s.grade && s.grade.trim() ? s.grade.trim() : t['shoot.default.grade']!;
-  return { scene, light, grade, camera: s.camera ?? DEFAULT_CAMERA };
+  const grade = s.grade && s.grade.trim() ? s.grade.trim() : s.ownCamera ? '' : t['shoot.default.grade']!;
+  return { scene, light, grade, camera: s.camera ?? DEFAULT_CAMERA, ownCamera: !!s.ownCamera };
 }
 
 
@@ -207,6 +219,8 @@ export type ReplicateSwapSpec = {
   /** Roles of the images actually sent, in <Image n> order. */
   referenceLabels: string[];
   direction?: string | null;
+  /** Background "Describe it": the direction sets the new place; the clip's moves and timing are kept, not its background. */
+  newBackground?: boolean;
 };
 
 /** "<Image 3>", "<Image 3> and <Image 4>", "<Image 3> to <Image 5>", "<Image 1>, <Image 3> and <Image 6>". */
@@ -222,5 +236,5 @@ export function imageRange(ns: number[]): string {
 
 // ---- Prompt scripts (plans/prompt-scripts.md): every builder runs its script. Same signatures and, at default
 // settings, the same prompts as before (test/prompt-scripts.test.ts checks them against test/legacy/).
-import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine } from './scripts/builders.js';
-export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine };
+import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine, houseStyle } from './scripts/builders.js';
+export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine, houseStyle };

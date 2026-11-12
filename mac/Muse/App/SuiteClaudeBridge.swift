@@ -30,6 +30,8 @@ final class SuiteClaudeBridge {
     var revision = 0
     /// The composer as the shared draft last had it (nil: not synced yet). The owner's edits are what differs from it.
     var synced: ComposerDraft?
+    /// The screen (SuiteScreen: the request Generate would send and every input) as last sent, without its time.
+    var syncedScreen: JSONValue?
     /// What the composer couldn't take from Claude's last draft, with the reasons.
     var rejected: [SuiteDraftRejection] = []
     /// Claude's paid ask, shown as the Generate confirmation. Nothing runs without the owner's press.
@@ -87,6 +89,7 @@ final class SuiteClaudeBridge {
         error = nil
         revision = 0
         synced = nil
+        syncedScreen = nil
         rejected = []
         ask = nil
         confirmOpen = false
@@ -178,6 +181,25 @@ extension AppStore {
         takeSuiteAssist(a, force: true)
         ClaudeChatModel.remember(key, threadId: t.id)
         return true
+    }
+
+    /// Claude opened a shared draft (open_page suite with an sa_ id, e.g. a camera session's Shot draft): it becomes the
+    /// composer's, laid over it with Undo, and the composer's edits go back to it.
+    func openSuiteAssist(_ id: String) async {
+        guard let api = suiteAssistAPI, let a = try? await api.suiteAssist(id: id) else {
+            showToast("That shot couldn't be opened")
+            return
+        }
+        let c = suite.claude
+        let lines = c.demoLines
+        c.reset(keepOpen: true)
+        c.demoLines = lines
+        c.key = suiteClaudeKey
+        c.assist = a
+        c.revision = 0
+        c.synced = nil
+        c.syncedScreen = nil
+        takeSuiteAssist(a, force: true)
     }
 
     /// A new chat in this mode: a new shared draft from the composer as it is now (the composer stays).
@@ -276,6 +298,9 @@ extension AppStore {
         if r.composer != before {
             // A character Claude picked keeps Claude's rig: no default rig is laid on top (as Reuse settings).
             if r.composer.tokens.characterId != before.tokens.characterId { suite.restoredCharacterId = r.composer.tokens.characterId }
+            // Swap / Recast keep their character in their own panel: Claude's pick goes there too.
+            if before.tool == .swap, r.composer.tokens.characterId != before.tokens.characterId, let m = r.composer.tokens.characterId { suite.swap.modelId = m }
+            if before.tool == .swap, r.composer.outfitId != before.outfitId, let o = r.composer.outfitId { suite.swap.outfitId = o }
             suite.composer = r.composer
         }
         if let text = SuiteAssistDraft.toast(changed) {
@@ -434,7 +459,9 @@ extension AppStore {
     /// The composer changed (by hand, Undo, a picker): send it after a short pause.
     func suiteComposerChanged(now: Bool = false) {
         let c = suite.claude
-        guard c.assist != nil, c.open || c.linked || c.refsDirty, suite.composer != c.synced || c.refsDirty else { return }
+        // One source of truth (owner, 2026-11-11): the shared draft follows the screen whether or not a chat is open, so
+        // Claude never reads a composer that isn't the one on screen.
+        guard c.assist != nil, suite.composer != c.synced || c.refsDirty || suiteScreen(at: nil) != c.syncedScreen else { return }
         c.pushTask?.cancel()
         c.pushTask = Task { [weak self] in
             if !now { try? await Task.sleep(nanoseconds: 700_000_000) }
@@ -448,14 +475,18 @@ extension AppStore {
         let c = suite.claude
         guard let api = suiteAssistAPI, let a = c.assist else { return }
         let mine = suite.composer
-        guard mine != c.synced || c.refsDirty else { return }
+        let screenKey = suiteScreen(at: nil)
+        guard mine != c.synced || c.refsDirty || screenKey != c.syncedScreen else { return }
         // The draft's references ride along (the composer doesn't hold them); a removed one is left out.
-        let draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
+        var draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
+        // Everything on screen: the clip, guides and slot pictures, the request Generate would send (server suite/screen.ts).
+        draft.raw["screen"] = suiteScreen(at: Date())
         do {
             let n = try await api.patchSuiteAssist(id: a.id, SuiteAssistPatch(draft: draft, baseRevision: c.revision))
             c.assist = n
             c.revision = max(c.revision, n.revision)
             c.synced = mine
+            c.syncedScreen = screenKey
             c.refsDirty = false
             updateSuiteAsk(n)
         } catch let e as ApiError where e.code == "stale" && attempt < 2 {
@@ -480,6 +511,30 @@ extension AppStore {
         let d = suite.composer
         return SuiteAssistClaude.context(assistId: c.assist?.id, revision: c.assist?.revision, composer: d, camera: suite.camera,
                                          characterName: d.tokens.characterId.flatMap { character($0)?.shortName }, rejected: c.rejected)
+    }
+
+    /// The draft's `screen` (SuiteScreen): the request Generate would send now and every input on screen. `at` nil leaves
+    /// the time out (to compare with what was sent).
+    func suiteScreen(at: Date?) -> JSONValue {
+        let tool = suite.composer.tool
+        var inputs: [SuiteScreen.Input] = []
+        let request: ShotRequest?
+        switch tool {
+        case .swap, .recast:
+            if let c = clip { inputs.append(SuiteScreen.clip(c, slot: "\(tool.rawValue).clip")) }
+            request = swapRequest
+        case .photo:
+            inputs = SuiteScreen.inputs(suite.composerSlots.slots)
+            request = nil
+        default:
+            if let g = SuiteScreen.guide(suite.composer.directed) { inputs.append(g) }
+            if tool == .extend, let src = suite.composer.extend.source {
+                inputs.append(SuiteScreen.Input(slot: "extend.video", kind: "video", label: src.name, takeId: src.takeId, key: src.key, seconds: src.seconds))
+            }
+            inputs += SuiteScreen.inputs(suite.composerSlots.slots)
+            request = shotRequest
+        }
+        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, at: at)
     }
 
     // MARK: Generate (only with the owner's press)

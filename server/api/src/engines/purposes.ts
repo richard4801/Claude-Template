@@ -110,6 +110,11 @@ export function recastIntent(text: string | null | undefined): { kind: 'look' | 
     : { kind: 'person', reason: 'same scene, new person' };
 }
 
+/** Words that describe a place (a new background) in a swap's prompt or direction. */
+const PLACE_RE = /\b(background|backdrop|scene|setting|location|set in|on a beach|at the beach|beach|street|rooftop|kitchen|bedroom|living room|bathroom|office|park|forest|garden|city|cafe|café|restaurant|club|gym|pool|desert|mountains?|snow|in the rain|at night|sunset|studio)\b/i;
+/** The place words a text uses ("rooftop"), or null when it doesn't describe a place. */
+export const placeWords = (text: string | null | undefined) => PLACE_RE.exec(text ?? '')?.[0] ?? null;
+
 /** Said when the server's Higgsfield key has no access to Genjutsu (a 403/404 that isn't about credit). */
 export const GENJUTSU_NO_ACCESS = "Your Higgsfield plan doesn't include Genjutsu · you weren't charged. Pick another model, or add Genjutsu to the Higgsfield plan.";
 /** Genjutsu's resolution per MUSE quality (Draft 480p, Standard 720p, HD 1080p). */

@@ -12,6 +12,9 @@ import { GENJUTSU_KEEPS, GENJUTSU_NO_ACCESS, recastIntent, SWAP_ENGINES } from '
 import { genjutsuSeconds, genjutsuUsd, parseGenjutsuOptions } from '../src/editor/genjutsu.js';
 import * as P from '../src/pricing.js';
 import { genjutsuInput } from '../src/services/replicateVideo.js';
+import { replicateSwap, videoSwap } from '../src/prompt/scripts/builders.js';
+import { requestOf } from '../src/suite/assist.js';
+import { placeWords } from '../src/engines/purposes.js';
 import { modelById } from '../src/suite/registry.js';
 import { editorAi } from '../src/editor/service.js';
 import { demoModel, makeApp, people, until } from './helpers.js';
@@ -63,6 +66,36 @@ describe('Genjutsu · registry, pricing and inputs', () => {
     expect(genjutsuSeconds(45)).toBe(30);
     expect(genjutsuUsd('objectswap', '720p', 6.2, 2)).toBeCloseTo(0.3446 * 7 * 2, 4);
     expect(genjutsuUsd('restyle', '1080p', 60, 2)).toBeCloseTo(1.632 * 30 * 2, 4);
+  });
+});
+
+describe('Swap background · Describe it (prompts)', () => {
+  const id = { name: 'Mia', look: 'young woman' };
+  it('hosted prompt: the place comes from the direction, the moves and timing stay, the background is not kept', () => {
+    const keep = replicateSwap({ identity: id, referenceLabels: ['face, front'], direction: 'on a rooftop at night', speaking: true }).text;
+    const desc = replicateSwap({ identity: id, referenceLabels: ['face, front'], direction: 'on a rooftop at night', speaking: true, newBackground: true }).text;
+    expect(keep).toMatch(/background and the lighting of <Video 1> stay unchanged/);
+    expect(desc).toMatch(/replaced by the place described in the direction from the user/);
+    expect(desc).toMatch(/motion_preserved/);
+    expect(desc).not.toMatch(/in the same place/);
+    expect(desc).not.toMatch(/fully_preserved - camera motion, framing and crop, background/);
+    expect(desc).toMatch(/Direction from the user: on a rooftop at night/);
+    const silent = replicateSwap({ identity: id, referenceLabels: ['face, front'], direction: 'on a beach', speaking: false, newBackground: true }).text;
+    expect(silent).toMatch(/new background/);
+    expect(silent).not.toMatch(/mouth and lip movement and head turn/);
+  });
+  it('Edit prompt: its own background sentence and retention line', () => {
+    const t = videoSwap({ identity: { ...id, age: 25 } as any, outfit: { name: 'red dress' }, keepBackground: false, describeBackground: true, direction: 'in a neon club' }).text;
+    expect(t).toMatch(/the background is replaced by the place described in the direction from the user/);
+    expect(t).toMatch(/the background is not kept, it is replaced by the place the user describes/);
+    const photo = videoSwap({ identity: { ...id, age: 25 } as any, outfit: { name: 'red dress' }, keepBackground: false }).text;
+    expect(photo).toMatch(/background reference photo/);
+  });
+  it('the draft carries it; place words are found', () => {
+    expect(requestOf({ v: 1, tool: 'swap', background: 'describe' } as any)).toMatchObject({ background: 'describe' });
+    expect((requestOf({ v: 1, tool: 'swap' } as any) as any).background).toBeUndefined();
+    expect(placeWords('same dance on a rooftop at night')).toBe('rooftop');
+    expect(placeWords('she smiles more')).toBeNull();
   });
 });
 
@@ -209,6 +242,51 @@ describe.skipIf(!hasFfmpeg)('Genjutsu against a FAKE Higgsfield (no money)', () 
       const plain = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId, cast: [{ characterId: m.id }], prompt: 'Replace the dancer', quality: 'standard' });
       expect(plain.body.engine?.model).not.toBe('genjutsu-light');
       expect(plain.body.mode).not.toBe('swap');
+    } finally { await a.close(); }
+  });
+
+  it('Swap background: Describe it / New photo → Auto runs Genjutsu Light and says why; Keep with a place in the prompt → a warning', async () => {
+    hf.length = 0; mode = 'ok';
+    const a = await makeApp(env());
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const m = await demoModel(owner), clipId = await clipOf(a, owner);
+      const base = { mode: 'swap', modelId: m.id, clipId, prompt: '', quality: 'standard' };
+      const desc = await owner.req('POST', '/v1/suite/shots/estimate', { ...base, background: 'describe', direction: 'dancing on a rooftop at night' });
+      expect(desc.status, JSON.stringify(desc.body)).toBe(200);
+      expect(desc.body.engine).toMatchObject({ model: 'genjutsu-light' });
+      expect(desc.body.warnings[0]).toMatch(/^Auto chose Genjutsu Light: the background is set to Describe it/);
+      const photo = await owner.req('POST', '/v1/suite/shots/estimate', { ...base, background: 'photo', backgroundImage: { url: 'https://example.com/room.jpg' } });
+      expect(photo.body.engine).toMatchObject({ model: 'genjutsu-light' });
+      const keep = await owner.req('POST', '/v1/suite/shots/estimate', { ...base, direction: 'on a beach at sunset' });
+      expect(keep.body.engine?.model).not.toBe('genjutsu-light');
+      expect(keep.body.warnings).toContain('Background is set to Keep · your prompt describes a new place · switch to Describe it?');
+      expect(keep.body.fixes).toEqual([{ fix: 'background:describe', label: 'Describe it' }]);
+      // Keep: the composer's prompt still reaches the swap model as the direction.
+      const kept = await owner.req('POST', '/v1/suite/shots', { ...base, prompt: 'she smiles more at the end', engineModel: 'genjutsu-light' });
+      expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+      await until(async () => { const x = (await owner.req('GET', '/v1/jobs')).body.find((y: any) => y.id === (kept.body.job?.id ?? kept.body.id)); return x && ['done', 'failed'].includes(x.state) ? x : null; }, 30_000);
+      expect(hf.at(-1)!.input.prompt).toMatch(/Direction from the user: she smiles more at the end/);
+      expect(hf.at(-1)!.input.prompt).not.toMatch(/replaced by the place described/);
+      const plain = await owner.req('POST', '/v1/suite/shots/estimate', { ...base, direction: 'she smiles more' });
+      expect(plain.body.warnings ?? []).not.toContain('Background is set to Keep · your prompt describes a new place · switch to Describe it?');
+      // Describe it needs words; the job's prompt then says the place is new.
+      expect((await owner.req('POST', '/v1/jobs', { modelId: m.id, clipId, engineModel: 'genjutsu-light', quality: 'standard', background: 'describe' })).body.error).toMatch(/describe the new place/);
+      const r = await owner.req('POST', '/v1/jobs', { modelId: m.id, clipId, engineModel: 'genjutsu-light', quality: 'standard', background: 'describe', direction: 'dancing on a rooftop at night' });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const j = await until(async () => { const x = (await owner.req('GET', '/v1/jobs')).body.find((y: any) => y.id === r.body.id); return x && ['done', 'failed'].includes(x.state) ? x : null; }, 30_000);
+      expect(j.state, j.error).toBe('done');
+      expect(hf.at(-1)!.input.prompt).toMatch(/replaced by the place described in the direction from the user/);
+      expect(hf.at(-1)!.input.prompt).toMatch(/rooftop at night/);
+      // Genjutsu with a new photo: the photo is the last picture and the direction points to it.
+      const r2 = await owner.req('POST', '/v1/jobs', { modelId: m.id, clipId, engineModel: 'genjutsu-light', quality: 'standard', background: 'photo', backgroundImage: { url: 'https://example.com/room.jpg' } });
+      expect(r2.status, JSON.stringify(r2.body)).toBe(200);
+      await until(async () => { const x = (await owner.req('GET', '/v1/jobs')).body.find((y: any) => y.id === r2.body.id); return x && ['done', 'failed'].includes(x.state) ? x : null; }, 30_000);
+      const last = hf.at(-1)!.input;
+      expect(last.image_urls.at(-1)).toBe('https://example.com/room.jpg');
+      expect(last.prompt).toMatch(new RegExp(`place and background from image ${last.image_urls.length}`));
+      // Other hosted swaps still refuse a background photo.
+      expect((await owner.req('POST', '/v1/jobs', { modelId: m.id, clipId, engineModel: 'h3', quality: 'standard', background: 'photo', backgroundImage: { url: 'https://example.com/room.jpg' } })).body.error).toMatch(/only on Edit or Genjutsu/);
     } finally { await a.close(); }
   });
 

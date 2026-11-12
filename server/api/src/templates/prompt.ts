@@ -3,7 +3,7 @@
 // `full` (what the image engine gets, and what the template's owner may see) and `visible` (everyone else: one locked
 // "Template: <name>" line in place of the hidden layers).
 import { neverList, sanitizeDirection, seedFor, type Identity, type OutfitSpec, type SentRef } from '../prompt/engine.js';
-import { templateViews } from '../prompt/scripts/builders.js';
+import { houseStyle, templateViews } from '../prompt/scripts/builders.js';
 import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { POOL_SLOTS, type PoolSlot, type TemplateLayers, type VariationDraw, type VariationPool } from '../db/schema.js';
 
@@ -45,6 +45,19 @@ const dot = (s: string) => { const t = s.trim(); return !t ? '' : /[.!?]$/.test(
 const join = (...parts: (string | undefined)[]) => parts.map(p => (p ?? '').trim().replace(/[.;,]+$/, '')).filter(Boolean).join('; ');
 
 
+const PHONE_WORDS = /\b(smart ?phones?|phones?|iphones?|selfies?|mobile|webcam|camera roll)\b/i;
+const CINE_WORDS = /\b(cinema|cinematic|film|motion[- ]picture|anamorphic|35 ?mm|16 ?mm|super ?8|65 ?mm|large[- ]format|medium[- ]format|dslr|mirrorless|rangefinder|leica|hasselblad|arri|alexa|kodak|portra|fujifilm|cine|lens|prime)\b/i;
+/**
+ * A preset (photo template) with a camera of its own: its camera words name a camera that isn't a phone, or its style or
+ * camera words are cinematic / film. Then the house style's Camera feel ("realistic smartphone photo") is left out.
+ * Every starter template is a phone shot, so they keep it.
+ */
+export function templateOwnCamera(L: Pick<TemplateLayers, 'camera' | 'style'>) {
+  const camera = (L.camera ?? '').trim(), style = (L.style ?? '').trim();
+  if (camera && PHONE_WORDS.test(camera)) return false;
+  return CINE_WORDS.test(camera) || CINE_WORDS.test(style);
+}
+
 export function buildTemplatePrompt(o: {
   templateId: string; templateName: string; layers: TemplateLayers; pool: VariationPool;
   identity: Identity; outfit: OutfitSpec | null; direction?: string | null; shuffleSeed: number; index?: number;
@@ -59,11 +72,12 @@ export function buildTemplatePrompt(o: {
   const id = o.identity;
   const seed = o.lockSeed ? seedFor(`${o.templateId}:${id.name}`) : (o.seed ?? null);
   const never = neverList(id, t);
+  const own = templateOwnCamera(L);
   const views = templateViews({
     identity: id, outfit: o.outfit, templateName: o.templateName, refs: o.refs, direction: dir ? dot(dir) : '',
     scene: join(L.scene, v.background, v.timeOfDay), camera: join(L.camera, v.framing), light: L.light ? join(L.light) : '',
     pose: join(v.pose, v.bodyAngle, v.expression, v.hands), product: L.product ? { words: join(L.product), photo: !!o.hasProduct } : null,
-    style: join(L.style, t['style.house']), neverFull: [...never, ...(L.negative ? [L.negative.trim().replace(/\.$/, '')] : [])], neverVisible: never,
+    style: join(L.style, houseStyle(t, own)), ownCamera: own, neverFull: [...never, ...(L.negative ? [L.negative.trim().replace(/\.$/, '')] : [])], neverVisible: never,
     seed: { mode: o.lockSeed ? 'locked' : seed != null ? 'known' : 'none', value: seed },
   }, t);
   return { ...views, seed, variation: v, removed };

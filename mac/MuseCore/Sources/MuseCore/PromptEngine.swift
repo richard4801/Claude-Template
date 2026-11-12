@@ -110,7 +110,15 @@ public struct VideoPromptInput: Equatable, Sendable {
 /// The layered prompt engine from plans/prompt-system.md, worded exactly like prototype/desktop/desktop.js
 /// (`shootPrompt`, `videoPrompt`). Users never write prompts from scratch; their choices fill slots and empty slots are dropped.
 public enum PromptEngine {
-    public static let houseStyle = "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+    /// The house style, split in two (server prompt/library.ts, 2026-11-11): Camera feel (left out by the server when a rig or
+    /// preset sets its own camera, lens, grade or look) and Realism (always). Together they read as the old single house style.
+    public static let cameraFeel = "realistic smartphone photo"
+    public static let realism = "natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+    public static let houseStyle = "\(cameraFeel), \(realism)"
+    /// The house style from its two parts (an empty part is left out; trailing full stops dropped).
+    public static func houseStyle(camera: String, realism: String) -> String {
+        [camera, realism].map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " .,;\n")) }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
     public static let globalNever = ["logos", "extra fingers", "warped jewellery"]
 
     static func identityLine(_ id: PromptIdentity) -> String {
