@@ -1,14 +1,15 @@
 diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
-index 1a50d7e6..2b615138 100644
+index 1a50d7e6..20e91e05 100644
 --- a/.github/workflows/mac.yml
 +++ b/.github/workflows/mac.yml
-@@ -150,6 +150,18 @@ jobs:
+@@ -150,6 +150,19 @@ jobs:
            if grep -q '^FAIL' "$f"; then exit 1; fi
            if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
  
-+      # Continue a draft (owner 2026-11-12): clicking Edit reopens the last edit exactly where it was left (playhead, zoom,
-+      # tab, Uploads bin, platform view); an edit whose take was deleted opens with its clips marked missing; Recent edits and
-+      # New edit on the Edit home (SnapshotRunner+EditResume.swift). Fails on any FAIL line or a missing ALL DONE.
++      # Continue a draft (owner 2026-11-12): Edit opens on a choice, New or Continue draft (nothing opens by itself); Continue
++      # draft reopens the last edit exactly where it was left (playhead, zoom, tab, Uploads bin, platform view); an edit whose
++      # take was deleted opens with its clips marked missing; New starts a blank project (SnapshotRunner+EditResume.swift).
++      # Fails on any FAIL line or a missing ALL DONE.
 +      - name: Edit continue-a-draft check
 +        working-directory: mac
 +        run: |
@@ -22,16 +23,15 @@ index 1a50d7e6..2b615138 100644
        # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
        # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
 diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
-index 78ea15e6..9571fb1e 100644
+index 78ea15e6..cbaa43ad 100644
 --- a/mac/Muse/App/AppStore+Suite.swift
 +++ b/mac/Muse/App/AppStore+Suite.swift
-@@ -255,6 +255,17 @@ final class SuiteState {
+@@ -255,6 +255,16 @@ final class SuiteState {
      /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
      var editAttach: EditAttach?
      struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
-+    /// Continue a draft (owner, 2026-11-12): opening Edit reopens the last edit where it was left. Off in review mode
-+    /// (the page shots and scroll checks expect the Edit home) except in its own check.
-+    var editResumeOnOpen = true
++    /// Edit home's "New" asked for from outside the view (a check): starts a blank project.
++    var editNewRequest: UUID?
 +    /// Recent edits on the Edit home (the last worked on first), loaded when it shows.
 +    var recentEdits: [EditRecentItem] = []
 +    /// A recent edit to open (the home's list, or a check).
@@ -43,7 +43,7 @@ index 78ea15e6..9571fb1e 100644
      /// Swap with an add-on renders on the classic pipeline: the result pane follows the studio stage's job.
      var swapUsesStage = false
  
-@@ -284,6 +295,8 @@ final class SuiteState {
+@@ -284,6 +294,8 @@ final class SuiteState {
          picker = nil
          browserOpen = false
          mode = .hub
@@ -334,18 +334,19 @@ index 563ee523..88b71228 100644
      func step(_ dir: Int) {
 diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
 new file mode 100644
-index 00000000..7df83d94
+index 00000000..3c7c779f
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,151 @@
 +import AppKit
 +import MuseCore
 +
 +/// Continue a draft check (Mac CI, owner 2026-11-12: "When you click on Edit, you should see the last draft you were
-+/// editing"). In review mode only, through the real Edit page: a take is opened, the editor is moved (playhead, zoom,
-+/// inspector tab, Uploads bin, platform view off) and left; clicking Edit again must reopen that edit exactly there. Then an
-+/// edit whose take was deleted must open anyway with its clips marked missing, the Edit home must list Recent edits, and
-+/// "New edit" must start a blank project. Writes `edit-resume-check.txt`; CI fails on any FAIL line or a missing ALL DONE.
++/// editing"; owner decision the same day: Edit opens on a choice, "New" or "Continue draft"). In review mode only, through
++/// the real Edit page: a take is opened, the editor is moved (playhead, zoom, inspector tab, Uploads bin, platform view off)
++/// and left; clicking Edit again must show the choice (no editor opens by itself) with that edit as the draft, and Continue
++/// draft must reopen it exactly there. Then an edit whose take was deleted must open anyway with its clips marked missing,
++/// and New must start a blank project. Writes `edit-resume-check.txt`; CI fails on any FAIL line or a missing ALL DONE.
 +extension SnapshotRunner {
 +    static func editResumeCheck(_ store: AppStore, dir: URL) async {
 +        let log = dir.appendingPathComponent("edit-resume-check.txt")
@@ -393,8 +394,6 @@ index 00000000..7df83d94
 +        store.takes.removeAll { $0.id.hasPrefix("rz_") }
 +        store.takes.insert(contentsOf: made, at: 0)
 +        await fake.adoptTakes(made)
-+        store.suite.editResumeOnOpen = true
-+        defer { store.suite.editResumeOnOpen = false }
 +
 +        // 1. Open a take, move the editor, leave Edit.
 +        note("START open_and_move")
@@ -415,9 +414,17 @@ index 00000000..7df83d94
 +                  "server view \(String(describing: s.view))")
 +        } else { note("FAIL view_on_server: session not readable") }
 +
-+        // 2. Click Edit: the last edit opens where it was left.
-+        note("START reopen_last")
++        // 2. Click Edit: the choice shows (nothing opens by itself), Continue draft names that edit, and reopens it there.
++        note("START choice")
 +        store.openEdit(takeId: nil)
++        try? await Task.sleep(for: .seconds(3))
++        check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
++        let draft = store.suite.recentEdits.first
++        check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
++              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing")")
++        capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
++        note("START reopen_last")
++        if let draft { store.suite.editResume = draft }
 +        if let s = await editorReady("rz_resume"), s.isReady {
 +            check("reopen_last", true)
 +            check("reopen_playhead", abs(s.state.playhead - 2.5) < 0.05, "playhead \(s.state.playhead)")
@@ -427,7 +434,7 @@ index 00000000..7df83d94
 +            check("reopen_platform_view_off", s.state.safeArea == nil, "safe area \(String(describing: s.state.safeArea))")
 +            capture(dir.appendingPathComponent("mac_a_edit_resumed.png"))
 +        } else {
-+            note("FAIL reopen_last: Edit showed \(store.suite.editCurrent?.take.id ?? "the home"), not the last edit")
++            note("FAIL reopen_last: Continue draft opened \(store.suite.editCurrent?.take.id ?? "nothing"), not the last edit")
 +        }
 +
 +        // 3. The Edit home lists Recent edits (the editor's Back).
@@ -436,8 +443,7 @@ index 00000000..7df83d94
 +        try? await Task.sleep(for: .seconds(2))
 +        check("back_to_home", store.suite.editCurrent == nil, "the editor is still open")
 +        let recent = await store.loadRecentEdits()
-+        check("recent_list", recent.first?.takeId == "rz_resume" && recent.first?.title == "Beach walk",
-+              "first is \(recent.first.map { "\($0.title) (\($0.takeId))" } ?? "none")")
++        check("draft_still_first", recent.first?.takeId == "rz_resume", "first is \(recent.first.map { "\($0.title) (\($0.takeId))" } ?? "none")")
 +        try? await Task.sleep(for: .seconds(1))
 +        capture(dir.appendingPathComponent("mac_a_edit_recent.png"))
 +
@@ -466,18 +472,16 @@ index 00000000..7df83d94
 +            note("FAIL missing_media: \(error.localizedDescription)")
 +        }
 +
-+        // 5. "New edit" starts a blank project (the home's primary action).
++        // 5. New starts a blank project (the choice's other way in).
 +        note("START new_edit")
 +        store.suite.editHomeRequest = UUID()
 +        try? await Task.sleep(for: .seconds(1))
-+        store.openEdit(takeId: EditV2.blankSourceId)
++        store.suite.editNewRequest = UUID()
 +        if let b = await editorReady(EditV2.blankSourceId) {
 +            check("new_edit_blank", b.isReady && b.project.mainClips.isEmpty, "phase \(b.phase)")
 +        } else { note("FAIL new_edit_blank: no blank project") }
 +        store.suite.editHomeRequest = UUID()
 +        try? await Task.sleep(for: .seconds(1))
-+        // Later checks expect the Edit home on Edit.
-+        store.suite.editResumeOnOpen = false
 +        store.suite.editTakeId = nil
 +        store.go(.home)
 +        try? await Task.sleep(for: .seconds(1))
@@ -486,19 +490,10 @@ index 00000000..7df83d94
 +    }
 +}
 diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
-index f02e37a6..607a1d8e 100644
+index f02e37a6..c89ac232 100644
 --- a/mac/Muse/App/SnapshotRunner.swift
 +++ b/mac/Muse/App/SnapshotRunner.swift
-@@ -88,6 +88,8 @@ enum SnapshotRunner {
-             }
-             store.dataSource = .fake
-             store.applyDataSource()
-+            // Continue a draft: the page shots and checks expect the Edit home on Edit; editResumeCheck turns it on for itself.
-+            store.suite.editResumeOnOpen = false
-             try? await Task.sleep(for: .seconds(1))
-             store.authEmail = "you@studio.com"
-             store.signIn()
-@@ -179,6 +181,7 @@ enum SnapshotRunner {
+@@ -179,6 +179,7 @@ enum SnapshotRunner {
              await fitCheck(store, dir: dir)
              await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
              await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
@@ -554,30 +549,20 @@ index ae68d0a6..249a36c7 100644
      /// timeline (the owner's "oval", 2026-11-11). Click: select the clip and open "Mask & green screen".
      private func maskBadge(_ badge: MaskBadge, itemId: String, locked: Bool) -> some View {
 diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
-index cd05450a..63be6db8 100644
+index cd05450a..b461df85 100644
 --- a/mac/Muse/Views/Edit/EditSuiteView.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteView.swift
-@@ -10,20 +10,25 @@ struct EditSuiteView: View {
+@@ -10,6 +10,8 @@ struct EditSuiteView: View {
      private let takeId: String?
      @State private var openId: String?
      @State private var session: EditSuiteSession?
 +    /// Continue a draft: the recent edit `openId` names ("local:…" or a session id), opened as it was left.
 +    @State private var resuming: EditRecentItem?
-+    /// Looking for the last edit before showing anything (so the home doesn't flash first).
-+    @State private var findingLast: Bool
  
      init(takeId: String? = nil) {
          self.takeId = takeId
-         _openId = State(initialValue: takeId)
-+        _findingLast = State(initialValue: takeId == nil)
-     }
- 
-     var body: some View {
-         Group {
-             if let s = session {
-                 EditSuiteEditor(session: s, onClose: close)
--            } else if openId != nil {
-+            } else if openId != nil || findingLast {
+@@ -23,7 +25,7 @@ struct EditSuiteView: View {
+             } else if openId != nil {
                  VStack(spacing: 12) {
                      ProgressView()
 -                    Text(openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…").font(t.body(13)).foregroundStyle(t.muted)
@@ -585,7 +570,7 @@ index cd05450a..63be6db8 100644
                  }
                  .frame(maxWidth: .infinity, maxHeight: .infinity)
              } else if store.recreate.open {
-@@ -35,32 +40,77 @@ struct EditSuiteView: View {
+@@ -35,32 +37,68 @@ struct EditSuiteView: View {
                  case .recipes: LearnRecipesView()
                  }
              } else {
@@ -593,9 +578,9 @@ index cd05450a..63be6db8 100644
 +                EditSuiteHome(open: openTake, resume: resume)
              }
          }
-+        .task { await openLast() }
          .task(id: openId) { await open(openId) }
-+        // A recent edit picked elsewhere (a check): opened as it was left.
++        // A recent edit picked elsewhere (a check, One Claude): opened as it was left.
++        .onChange(of: store.suite.editNewRequest) { _, r in if r != nil { store.suite.editNewRequest = nil; openTake(EditV2.blankSourceId) } }
 +        .task(id: store.suite.editResume?.id) {
 +            guard let r = store.suite.editResume else { return }
 +            store.suite.editResume = nil
@@ -618,17 +603,8 @@ index cd05450a..63be6db8 100644
 +    }
 +
 +    private var openingText: String {
-+        if resuming != nil || (openId == nil && findingLast) { return "Opening your last edit…" }
++        if resuming != nil { return "Opening your draft…" }
 +        return openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…"
-+    }
-+
-+    /// Clicking Edit (no take named): the last edit opens where it was left; with none, the Edit home.
-+    private func openLast() async {
-+        defer { findingLast = false }
-+        guard takeId == nil, openId == nil, session == nil, store.suite.editResumeOnOpen, store.suite.editAttach == nil,
-+              !store.recreate.open, store.learn.page == nil else { return }
-+        guard let last = await store.loadRecentEdits().first, openId == nil, session == nil else { return }
-+        resume(last)
 +    }
 +
 +    private func resume(_ item: EditRecentItem) {
@@ -671,7 +647,7 @@ index cd05450a..63be6db8 100644
          store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
          await s.load()
          // The viewer's Split: the playhead where the take was when Split was pressed.
-@@ -73,18 +123,23 @@ struct EditSuiteView: View {
+@@ -73,18 +111,23 @@ struct EditSuiteView: View {
      private func close() {
          session?.close()
          session = nil
@@ -696,33 +672,60 @@ index cd05450a..63be6db8 100644
  
      var body: some View {
          let takes = store.editSuiteTakes
-@@ -100,12 +155,18 @@ struct EditSuiteHome: View {
+@@ -99,13 +142,19 @@ struct EditSuiteHome: View {
+                     SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
                  }
                  SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
-                 // A fresh project with no source video (owner request 2026-11-11); saved to the Library as a new video.
+-                // A fresh project with no source video (owner request 2026-11-11); saved to the Library as a new video.
 -                SuiteToolButton(title: "New blank project", icon: "plus") { open(EditV2.blankSourceId) }
-+                SuiteToolButton(title: "New edit", icon: "plus", accent: true) { open(EditV2.blankSourceId) }
-+                    .help("A blank project with no source video")
              }
 -            if takes.isEmpty {
 -                Note("Start a blank project, or make a video in the Video suite; its takes show up here to edit.")
-+            let recent = Array(store.suite.recentEdits.prefix(EditRecent.shown))
++            // Owner decision 2026-11-12: Edit opens on a choice, New or Continue draft (only New when there is no draft).
++            let recent = store.suite.recentEdits
++            startChoice(last: recent.first)
 +            if takes.isEmpty && recent.isEmpty {
-+                Note("Start a new edit, or make a video in the Video suite; its takes show up here to edit.")
++                Note("Make a video in the Video suite and its takes show up here to edit.")
                      .padding(.top, 12)
              }
-+            if !recent.isEmpty {
++            let older = Array(recent.dropFirst().prefix(EditRecent.shown))
++            if !older.isEmpty {
 +                SectionHeader("Recent edits")
-+                recentRow(recent)
++                recentRow(older)
 +            }
              if !edits.isEmpty {
                  SectionHeader("Edited versions")
                  grid(edits)
-@@ -115,6 +176,30 @@ struct EditSuiteHome: View {
+@@ -115,6 +164,55 @@ struct EditSuiteHome: View {
                  grid(renders)
              }
          }
 +        .task { await store.loadRecentEdits() }
++    }
++
++    /// The two ways in: New (a blank project, saved to the Library as a new video) and Continue draft (the last edit, where
++    /// it was left: its picture, name and when). Continue draft is the primary when there is one.
++    private func startChoice(last: EditRecentItem?) -> some View {
++        HStack(alignment: .top, spacing: Space.s3) {
++            EditStartTile(title: "New", detail: "Blank project", accent: last == nil) {
++                Ph("plus", 20).foregroundStyle(t.roles.ink)
++                    .frame(width: 54, height: 96)
++                    .background(RoundedRectangle(cornerRadius: t.imageRadius, style: .continuous).fill(t.roles.raised))
++            } action: { open(EditV2.blankSourceId) }
++            .accessibilityLabel("New edit")
++            if let last {
++                let thumb = last.thumbTakeId.flatMap { id in store.takes.first { $0.id == id } }
++                let when = EditRecent.lastEditedText(last.lastEditedAt)
++                EditStartTile(title: "Continue draft", detail: last.title, meta: when, accent: true) {
++                    MuseImage(ref: thumb?.thumb, symbol: "film")
++                        .frame(width: 54, height: 96)
++                        .clipShape(RoundedRectangle(cornerRadius: t.imageRadius, style: .continuous))
++                } action: { resume(last) }
++                .accessibilityLabel("Continue draft: \(last.title), edited \(when)")
++            }
++        }
++        .frame(maxWidth: 720, alignment: .leading)
++        .padding(.top, Space.s2)
 +    }
 +
 +    /// Recent edits: picture, name, when it was last worked on. Opens where it was left.
@@ -749,6 +752,46 @@ index cd05450a..63be6db8 100644
      }
  
      private func grid(_ list: [Take]) -> some View {
+@@ -428,3 +526,39 @@ struct EditSuiteEditor: View {
+         }
+     }
+ }
++
++/// One of the Edit home's two ways in: a picture, a title over its detail (and when), the whole tile a button. Tone, not
++/// shadow, lifts it; the primary one carries the accent edge.
++struct EditStartTile<Picture: View>: View {
++    @Environment(\.theme) private var t
++    var title: String
++    var detail: String
++    var meta: String? = nil
++    var accent = false
++    @ViewBuilder var picture: () -> Picture
++    var action: () -> Void
++    @State private var hover = false
++
++    var body: some View {
++        Button(action: action) {
++            HStack(spacing: Space.s3) {
++                picture()
++                VStack(alignment: .leading, spacing: 2) {
++                    Text(title).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
++                    Text(detail).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++                    if let meta { Text(meta).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1) }
++                }
++                Spacer(minLength: 0)
++            }
++            .padding(Space.s3)
++            .frame(maxWidth: .infinity, alignment: .leading)
++            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(hover ? t.roles.raised : t.roles.field))
++            .overlay(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
++                .strokeBorder(accent ? t.roles.accent : t.roles.hairline, lineWidth: accent ? 1.5 : 1))
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .onHover { hover = $0 }
++        .frame(minWidth: 220, maxWidth: 340)
++    }
++}
 diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
 new file mode 100644
 index 00000000..65540531
