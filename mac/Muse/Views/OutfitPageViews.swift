@@ -126,6 +126,8 @@ struct OutfitOpenView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             title(o)
                             Text(subtitle(o, model)).scaled(t.scale.caption, t.roles.ink2)
+                            // A set that came out partly: what was made, and that each missing picture has its own Redo.
+                            if let p = o.partial { Text(p.label).scaled(t.scale.caption, t.roles.caution) }
                         }
                         Spacer(minLength: Space.s3)
                         RIconButton(systemName: "xmark", help: "Close (Esc)") { store.closeOutfit() }
@@ -137,6 +139,7 @@ struct OutfitOpenView: View {
                             ForEach(row, id: \.self) { k in
                                 VStack(alignment: .leading, spacing: Space.s2) {
                                     picture(o, k, items: items, filling: filling)
+                                        .dropDestination(for: String.self) { got, _ in dropped(o, on: k, got) }
                                     Text(OutfitPictures.captions[k]).scaled(t.scale.caption, t.roles.ink2)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -223,15 +226,36 @@ struct OutfitOpenView: View {
         if busy {
             SkeletonBlock(ratio: 0.75, radius: t.radii.container)
         } else if let ref, let at = items.firstIndex(where: { $0.ref == ref && $0.label == label }) {
+            let free = store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil
             OutfitPictureTile(ref: ref, label: label,
-                              redo: store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
+                              redo: free ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
+                              moves: free ? OutfitPictures.moveTargets(o, from: k).map { OutfitMoveTarget(index: $0.index, title: $0.title) } : [],
+                              dragPayload: free ? Self.payload(o.id, k) : nil,
+                              onMove: { store.moveOutfitPicture(o, from: k, to: $0) },
                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
                               onRedo: { store.redoOutfitPicture(o, k) })
+        } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
+            // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged).
+            Color.clear.aspectRatio(0.75, contentMode: .fit)
+                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
+                .overlay {
+                    RButton("Redo · \(Pricing.money(store.outfitRedoEstimate(k)))", small: true) { store.redoOutfitPicture(o, k) }
+                }
+                .accessibilityLabel("\(label) missing")
         } else {
             Color.clear.aspectRatio(0.75, contentMode: .fit)
                 .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
                 .accessibilityLabel("\(label) missing")
         }
+    }
+
+    /// Drag and drop between slots: the dragged picture is "<outfit id>#<slot index>"; dropping it on another slot swaps them.
+    static func payload(_ outfitId: String, _ k: Int) -> String { "\(outfitId)#\(k)" }
+    private func dropped(_ o: Outfit, on k: Int, _ got: [String]) -> Bool {
+        guard let s = got.first, let hash = s.lastIndex(of: "#"), String(s[..<hash]) == o.id,
+              let from = Int(s[s.index(after: hash)...]), from != k, store.canChange(o) else { return false }
+        store.moveOutfitPicture(o, from: from, to: k)
+        return true
     }
 
     /// The pictures that exist, in order, for the full-size viewer ("Face side  7 of 7").
@@ -241,17 +265,29 @@ struct OutfitOpenView: View {
 }
 
 /// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), the same in its menu.
+/// A "Move to…" entry: the slot (0–6) and its title ("Swap with Back", "Move to Face side").
+struct OutfitMoveTarget: Hashable {
+    var index: Int
+    var title: String
+}
+
+/// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), and in its menu Redo
+/// and "Move to…" (the other 6 slots). Drag it onto another slot to swap them.
 struct OutfitPictureTile: View {
     var ref: ImageRef
     var label: String
     /// "Redo · $0.03", or nil when this person can't change the outfit.
     var redo: String?
+    var moves: [OutfitMoveTarget] = []
+    /// Set when it may be dragged to another slot.
+    var dragPayload: String?
+    var onMove: (Int) -> Void = { _ in }
     var open: () -> Void
     var onRedo: () -> Void
     @State private var hover = false
 
     var body: some View {
-        Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
+        withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
             .buttonStyle(.plain)
             .help("View \(label.lowercased()) full size")
             .accessibilityLabel("View \(label.lowercased()) full size")
@@ -263,6 +299,15 @@ struct OutfitPictureTile: View {
             .onHover { hover = $0 }
             .contextMenu {
                 if let redo { Button(redo, action: onRedo) }
-            }
+                if !moves.isEmpty {
+                    Menu("Move to…") {
+                        ForEach(moves, id: \.self) { m in Button(m.title) { onMove(m.index) } }
+                    }
+                }
+            })
+    }
+
+    @ViewBuilder private func withDrag<V: View>(_ v: V) -> some View {
+        if let dragPayload { v.draggable(dragPayload) { MediaFrame(ref: ref, ratio: 0.75).frame(width: 90) } } else { v }
     }
 }

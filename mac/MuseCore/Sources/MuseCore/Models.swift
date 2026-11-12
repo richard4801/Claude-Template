@@ -230,6 +230,16 @@ public struct SetSlotRequest: Codable, Sendable {
 }
 
 /// Outfit set: front, ¾, side, back. mode: describe | photo | own. state: ready | generating | preview.
+/// A set that came out partly (server outfitView `partial`).
+public struct OutfitPartial: Codable, Hashable, Sendable {
+    public var made: Int
+    public var of: Int
+    public var missing: [String]
+    /// "5 of 7 made · Redo the missing ones"
+    public var label: String
+    public init(made: Int, of: Int, missing: [String], label: String) { self.made = made; self.of = of; self.missing = missing; self.label = label }
+}
+
 public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var modelId: String
@@ -245,6 +255,9 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     /// When it was made (ms; the folder's date on the outfit page) and who made it (they or the owner may rename/delete it).
     public var createdAt: Int64?
     public var createdBy: String?
+    /// A set that came out partly (some pictures failed while making it; owner 2026-11-12): "5 of 7 made · Redo the missing
+    /// ones", and which of the seven are missing (OutfitPictures.keys names). Nil when it's complete or still being made.
+    public var partial: OutfitPartial?
 
     public init(id: String, modelId: String, name: String, mode: String = "describe", description: String = "", angles: [ImageRef?] = [nil, nil, nil, nil],
                 state: String = "ready", prompt: String = "", faces: [ImageRef?]? = nil, createdAt: Int64? = nil, createdBy: String? = nil) {
@@ -261,7 +274,7 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         self.prompt = prompt
     }
 
-    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy }
+    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy, partial }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -275,9 +288,12 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         faces = c.o(.faces)
         createdAt = c.o(.createdAt)
         createdBy = c.o(.createdBy)
+        partial = c.o(.partial)
     }
 
     public var front: ImageRef? { angles.first ?? nil }
+    /// One of its 7 pictures (0–3 angles, 4–6 faces) is missing from a partial set: it gets its own Redo with its price.
+    public func isMissing(_ k: Int) -> Bool { OutfitPictures.keys.indices.contains(k) && partial?.missing.contains(OutfitPictures.keys[k]) == true }
     /// How many of the four angles have a picture (a set can come back with some empty).
     public var madeAngles: Int { (0..<4).filter { angles.indices.contains($0) && angles[$0] != nil }.count }
     /// Made with Dress up (removed 2026-11-11; its outfits keep working).

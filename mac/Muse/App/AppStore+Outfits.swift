@@ -124,6 +124,21 @@ extension AppStore {
             try await api.redoOutfit(id: o.id, picture: OutfitPictures.keys[k], imageModel: enginePick(.outfit)?.model)
         }
     }
+    /// Move a picture to another of its 7 slots (owner 2026-11-12: "the picture in Side is actually the back"): the two
+    /// swap, so nothing is lost. Free; the owner or the outfit's maker (the server checks too).
+    func moveOutfitPicture(_ o: Outfit, from: Int, to: Int) {
+        let keys = OutfitPictures.keys
+        guard from != to, keys.indices.contains(from), keys.indices.contains(to), canChange(o) else { return }
+        guard remakingOutfit[o.id] == nil, !fillingOutfits.contains(o.id), o.state != "generating" else {
+            showToast("This outfit is still being made")
+            return
+        }
+        perform { [self] in
+            let r = try await api.reorderOutfit(id: o.id, moves: [OutfitMove(from: keys[from], to: keys[to])])
+            LiveEvents.applyOutfit(&outfits, &models, r.outfit)
+        }
+    }
+
     /// One edit; the front is a new shot (its price as one new outfit picture).
     func outfitRedoEstimate(_ k: Int) -> Double { k == 0 ? photoPricing.outfitSet() - 3 * photoPricing.perEdit : photoPricing.perEdit }
 

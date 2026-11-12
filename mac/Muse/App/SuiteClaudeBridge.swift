@@ -295,6 +295,13 @@ extension AppStore {
             if refs.count > refsBefore.count || !refs.isEmpty { changed.append("References") }
         }
         c.rejected = r.rejected
+        // Swap / Recast's Background, set by Claude (suite_set_draft background): the panel takes it like the model.
+        let swapBefore = suite.swap
+        if before.tool == .swap || before.tool == .recast, case .string(let b)? = d.raw["background"], let bg = SwapBackground(rawValue: b), bg != suite.swap.background {
+            suite.swap.background = bg
+            if bg == .describe { suite.swap.promptOn = true } // the words set the new place
+            changed.append(bg == .photo && suite.swap.backgroundImage == nil ? "Background: New photo (pick the picture)" : "Background: \(bg.label)")
+        }
         if r.composer != before {
             // A character Claude picked keeps Claude's rig: no default rig is laid on top (as Reuse settings).
             if r.composer.tokens.characterId != before.tokens.characterId { suite.restoredCharacterId = r.composer.tokens.characterId }
@@ -307,6 +314,7 @@ extension AppStore {
             showToast(text, action: "Undo") { [weak self] in
                 guard let self else { return }
                 self.suite.composer = before
+                self.suite.swap = swapBefore
                 if self.suite.claude.references != refsBefore {
                     self.suite.claude.references = refsBefore
                     self.suite.claude.refsDirty = true
@@ -518,14 +526,22 @@ extension AppStore {
     func suiteScreen(at: Date?) -> JSONValue {
         let tool = suite.composer.tool
         var inputs: [SuiteScreen.Input] = []
+        var settings: [String: JSONValue] = [:]
         let request: ShotRequest?
         switch tool {
         case .swap, .recast:
             if let c = clip { inputs.append(SuiteScreen.clip(c, slot: "\(tool.rawValue).clip")) }
             request = swapRequest
+            // The panel's controls, also before a request can be built (no clip or character yet).
+            let d = suite.swap
+            settings = ["background": .string(d.background.rawValue), "promptOn": .bool(d.promptOn), "quality": .string(d.quality),
+                        "clipSound": .bool(d.keepAudio), "speaking": .string(d.speaking.rawValue), "addOn": d.addOn.map { .string($0.rawValue) } ?? .null]
+            if let n = d.backgroundName, d.background == .photo { settings["backgroundName"] = .string(String(n.prefix(120))) }
         case .photo:
-            inputs = SuiteScreen.inputs(suite.composerSlots.slots)
+            inputs = SuiteScreen.inputs(suite.composerSlots.slots) + SuiteScreen.photoReferences(suite.photo.references)
             request = nil
+            let p = suite.photo
+            settings = ["count": .number(Double(p.count)), "preset": p.presetId.map { .string($0) } ?? .null, "photoModel": p.imageModel.map { .string($0) } ?? .null]
         default:
             if let g = SuiteScreen.guide(suite.composer.directed) { inputs.append(g) }
             if tool == .extend, let src = suite.composer.extend.source {
@@ -534,7 +550,7 @@ extension AppStore {
             inputs += SuiteScreen.inputs(suite.composerSlots.slots)
             request = shotRequest
         }
-        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, at: at)
+        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, settings: settings, at: at)
     }
 
     // MARK: Generate (only with the owner's press)

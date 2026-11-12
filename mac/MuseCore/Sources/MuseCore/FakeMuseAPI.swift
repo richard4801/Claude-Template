@@ -708,6 +708,22 @@ public actor FakeMuseAPI: MuseAPI {
         return OutfitFill(outfit: outfits[i], cost: cost)
     }
 
+    public func reorderOutfit(id: String, moves: [OutfitMove]) throws -> OutfitReorder {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        var pics = OutfitPictures.refs(outfits[i])
+        for m in moves {
+            guard let f = OutfitPictures.keys.firstIndex(of: m.from), let t = OutfitPictures.keys.firstIndex(of: m.to), f != t else {
+                throw ApiError("bad_request", "moves: two different slots (front, tq, side, back, face, faceTq, profile)")
+            }
+            pics = OutfitPictures.swapped(pics, f, t)
+        }
+        let changed = OutfitPictures.keys.indices.filter { pics[$0] != OutfitPictures.refs(outfits[i])[$0] }.map { OutfitPictures.keys[$0] }
+        outfits[i].angles = Array(pics.prefix(4))
+        outfits[i].faces = Array(pics.suffix(3))
+        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
+        return OutfitReorder(outfit: outfits[i], changed: changed)
+    }
+
     public func redoOutfit(id: String, picture: String, imageModel: String?) throws -> OutfitFill {
         guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
         guard let k = OutfitPictures.keys.firstIndex(of: picture) else { throw ApiError("bad_request", "angle: front, tq, side, back, face, faceTq or profile") }

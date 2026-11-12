@@ -83,10 +83,19 @@ public enum SuiteScreen {
         return Input(slot: "guide", kind: "video", label: "Blender guide", role: use ?? "blocking", cameraSessionId: session, key: key, url: url, seconds: seconds)
     }
 
-    /// The draft's `screen`: the tool, the request Generate would send now (nil when it can't be built yet) and the inputs.
-    /// `at` nil leaves the time out (to compare a screen with the one last sent).
-    public static func json(tool: String, request: ShotRequest?, inputs: [Input], at: Date? = Date()) -> JSONValue {
+    /// Photo's reference pictures (the Photo tool keeps them outside the slots): "reference 1" … with their guides.
+    public static func photoReferences(_ refs: [ShootRef]) -> [Input] {
+        refs.enumerated().map { i, r in
+            Input(slot: "reference \(i + 1)", kind: "image", label: r.guides.map(\.label).joined(separator: ", "), role: r.guides.first?.rawValue, url: r.image.url)
+        }
+    }
+
+    /// The draft's `screen`: the tool, the request Generate would send now (nil when it can't be built yet), the inputs and
+    /// `settings`: the panel's own controls the request can't carry (Swap's Background pill even before a picture is picked,
+    /// its picture's name, the prompt toggle, the add-on; Photo's count, preset and photo model). `at` nil leaves the time out.
+    public static func json(tool: String, request: ShotRequest?, inputs: [Input], settings: [String: JSONValue] = [:], at: Date? = Date()) -> JSONValue {
         var o: [String: JSONValue] = ["tool": .string(tool), "inputs": .array(inputs.prefix(24).map(\.json))]
+        if !settings.isEmpty { o["settings"] = .object(settings) }
         if let at { o["at"] = .number((at.timeIntervalSince1970 * 1000).rounded()) }
         if var r = request {
             r.draft = nil // the draft itself is not repeated inside it
