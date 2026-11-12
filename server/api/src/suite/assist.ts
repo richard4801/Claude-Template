@@ -22,7 +22,7 @@ import { onScreen, screenOf, withScreen } from './screen.js';
 import { ImageInSchema, sentImagesOf } from '../images/sent.js';
 
 type Row = typeof suiteAssists.$inferSelect;
-export type AssistPending = { id: string; kind: 'suite_request_shot'; label: string; estimateUsd: number; maxUsd: number; status: 'waiting' | 'declined' | 'done' | 'failed'; jobId?: string; error?: string; createdAt: number };
+export type AssistPending = { id: string; kind: 'suite_request_shot'; label: string; estimateUsd: number; maxUsd: number; breakdown?: { lines: { label: string; usd: number }[]; totalUsd: number }; status: 'waiting' | 'declined' | 'done' | 'failed'; jobId?: string; error?: string; createdAt: number };
 type Token = { t: 'text'; text: string } | { t: 'move'; id: string; label: string; category: string; intensity: number; key: number } | { t: 'mention'; kind: string; id: string; label: string; key: number };
 
 const QUALITIES = ['draft', 'standard', 'hd', 'cinema'] as const;
@@ -233,6 +233,11 @@ export class SuiteAssist {
     return this.view(await this.save(r, { draft: parseDraft(incoming), revision: r.revision + 1 }));
   }
 
+  /** Undo of one "What I changed" row (claude/cards.ts): fn turns the draft as it is now into the draft to keep. */
+  async rewrite(u: AuthUser, id: string, fn: (d: Record<string, unknown>) => Record<string, unknown>) {
+    const r = await this.row(u, id);
+    return this.view(await this.save(r, { draft: parseDraft(fn({ ...(r.draft as Record<string, unknown>) })), revision: r.revision + 1 }));
+  }
   /** suite_set_draft: Claude's changes, checked against the composer's visible options. */
   async set(u: AuthUser, id: string, input: unknown) {
     const p = SetBody.safeParse(input ?? {});
@@ -378,12 +383,12 @@ export class SuiteAssist {
   async ask(u: AuthUser, id: string) {
     const tool = ((await this.row(u, id)).draft as { tool?: string }).tool ?? 'shot';
     if (tool !== 'shot' && tool !== 'remix') throw new ApiError(409, 'not_a_shot', 'Claude can ask to generate a Shot or a New Swap only · in this composer the owner presses Generate');
-    const e = await this.estimate(u, id) as { estimate: { estimate?: number; ok?: boolean; message?: string; buttonLabel?: string; remix?: { trim?: { needed?: boolean; maxSeconds?: number } } } };
+    const e = await this.estimate(u, id) as { estimate: { estimate?: number; ok?: boolean; message?: string; buttonLabel?: string; breakdown?: AssistPending['breakdown']; remix?: { trim?: { needed?: boolean; maxSeconds?: number } } } };
     if (e.estimate.remix?.trim?.needed) throw new ApiError(400, 'remix_trim_needed', `Trim the clip first: this model takes up to ${e.estimate.remix.trim.maxSeconds} s (suite_set_draft range, or the person uses the trimmer)`);
     if (e.estimate.ok === false) throw new ApiError(402, 'caps', e.estimate.message ?? 'A spending cap stops this shot');
     const usd = Number(e.estimate.estimate) || 0;
     const r = await this.row(u, id);
-    const item: AssistPending = { id: uid('sp'), kind: 'suite_request_shot', label: e.estimate.buttonLabel ?? `Generate · $${usd.toFixed(2)}`, estimateUsd: usd, maxUsd: usd, status: 'waiting', createdAt: Date.now() };
+    const item: AssistPending = { id: uid('sp'), kind: 'suite_request_shot', label: e.estimate.buttonLabel ?? `Generate · $${usd.toFixed(2)}`, estimateUsd: usd, maxUsd: usd, ...(e.estimate.breakdown ? { breakdown: e.estimate.breakdown } : {}), status: 'waiting', createdAt: Date.now() };
     const list = [...(r.pending as AssistPending[]).filter(p => p.status !== 'waiting').slice(-5), ...(r.pending as AssistPending[]).filter(p => p.status === 'waiting'), item];
     await this.save(r, { pending: list });
     return item;

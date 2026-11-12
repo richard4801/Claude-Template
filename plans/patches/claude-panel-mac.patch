@@ -1,0 +1,1976 @@
+diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
+index cd32580..9bf7c43 100644
+--- a/mac/Muse/App/AppStore+OneClaude.swift
++++ b/mac/Muse/App/AppStore+OneClaude.swift
+@@ -31,6 +31,18 @@ final class OneClaudeState {
+     var suggestion: ClaudeUI?
+     /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
+     var approvals: [ClaudeUI] = []
++    /// Cards (ChatCards.swift): Approve cards answered here ("Approved, rendering"), answers and Undos in flight.
++    var answeredCards: [String: String] = [:]
++    var answering: Set<String> = []
++    var undoing: Set<String> = []
++    /// The quick-action chips over the composer, for the page Claude sees.
++    var chips: [ClaudeChip] = ClaudeChip.fallback(page: nil, tool: nil)
++    /// A job started from a card (its progress fills the activity strip until it ends).
++    var watchJob: String?
++    /// The server puts cards in the chat (it answered GET v1/claude/chips): its Approve cards replace the strip's.
++    var serverCards = false
++    /// Approve cards in the chat still waiting for the person (by message id or action id): the orb shows "waiting".
++    var waitingCards: Set<String> = []
+     var memory: ClaudeMemory?
+     var memoryError: String?
+     /// Step 6b: the models and this person's default.
+@@ -188,6 +200,7 @@ extension AppStore {
+             guard let self, !Task.isCancelled else { return }
+             await self.oneClaudeLinkSuite()
+             let p = self.claudePage
++            if p.name != self.oneClaude.lastSentPage?.name || p.tool != self.oneClaude.lastSentPage?.tool { await self.loadClaudeChips() }
+             guard p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat else { return }
+             try? await api.setChatPage(id, page: p)
+             self.oneClaude.lastSentPage = p
+@@ -236,10 +249,15 @@ extension AppStore {
+             oneClaude.suggestion = nil
+         case "memory_suggest":
+             oneClaude.suggestion = ui
++        case "card":
++            if case .approve(_, _, _, _, let target, _, _)? = ui.card?.card { oneClaude.waitingCards.insert(Self.cardKey(target)) }
+         case "approve":
+-            if let id = ui.approve, !oneClaude.approvals.contains(where: { $0.approve == id }) { oneClaude.approvals.append(ui) }
++            if let box = ui.card, case .approve(_, _, _, _, let target, _, _) = box.card { oneClaude.waitingCards.insert(Self.cardKey(target)) }
++            // A newer server sends the Approve card in the chat itself (ui.card): no second card here.
++            if ui.card == nil, let id = ui.approve, !oneClaude.approvals.contains(where: { $0.approve == id }) { oneClaude.approvals.append(ui) }
+         case "approve_result":
+             oneClaude.approvals.removeAll { $0.approve == ui.action }
++            if let a = ui.action { oneClaude.waitingCards.remove(Self.cardKey(.action(a))) }
+         default:
+             break
+         }
+@@ -302,11 +320,90 @@ extension AppStore {
+     func loadClaudeApprovals(_ chatId: String) async {
+         guard let api = oneClaudeAPI, let list = try? await api.waitingActions() else { return }
+         guard oneClaude.chatId == chatId else { return }
+-        oneClaude.approvals = list.filter { $0.chatId == chatId }.map {
++        // Actions of this chat show as Approve cards in the chat itself (claude/cards.ts); only those without a chat stay here.
++        oneClaude.approvals = list.filter { $0.chatId == chatId && !oneClaude.serverCards }.map {
+             ClaudeUI(label: $0.label, approve: $0.id, gate: $0.gate, summary: $0.summary, priceUsd: $0.priceUsd)
+         }
+     }
+ 
++    // MARK: Cards in the chat (plan, clip, what changed, approve)
++
++    /// Undo one row of "What I changed": the server puts back only that part, as it is now, and the card shows "Undone".
++    func undoClaudeCardRow(messageId: String, row: Int, label: String) async {
++        guard let api = oneClaudeAPI else { return }
++        let key = "\(messageId)#\(row)"
++        oneClaude.undoing.insert(key)
++        defer { oneClaude.undoing.remove(key) }
++        do {
++            _ = try await api.undoCardRow(messageId: messageId, row: row)
++            showToast("\(label) put back")
++        } catch {
++            showToast("Couldn't undo \(label.lowercased()). \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
++        }
++    }
++
++    /// Approve or Decline on an Approve card in the chat: a gated action, or the Suite's waiting shot.
++    func answerClaudeCard(messageId: String, target: ClaudeApproveTarget, approve: Bool) async {
++        guard !oneClaude.answering.contains(messageId) else { return }
++        oneClaude.answering.insert(messageId)
++        defer { oneClaude.answering.remove(messageId); oneClaude.waitingCards.remove(Self.cardKey(target)) }
++        do {
++            switch target {
++            case .action(let id):
++                guard let api = oneClaudeAPI else { return }
++                oneClaude.approvals.removeAll { $0.approve == id }
++                let r = try await api.answerAction(id, approve: approve)
++                oneClaude.answeredCards[messageId] = r.status == "failed" ? "Didn't work: \(r.error ?? "try again from its screen")" : approve ? "Approved" : "Declined"
++            case .suite(let assistId, let pendingId):
++                guard let api = suiteAssistAPI else { return }
++                let r = try await api.answerSuitePending(assistId: assistId, pendingId: pendingId, approve: approve)
++                if approve, let jid = r.jobId {
++                    if let s = try? await self.api.suiteShot(id: jid) { upsert(s.job) }
++                    suite.shotJobIds.append(jid)
++                    oneClaude.watchJob = jid
++                    if let b = try? await self.api.balance() { balance = b }
++                    oneClaude.answeredCards[messageId] = "Approved, rendering"
++                } else {
++                    oneClaude.answeredCards[messageId] = approve ? "Approved" : "Declined"
++                }
++                if suite.claude.ask?.id == pendingId { suite.claude.ask = nil }
++            }
++        } catch let e as ApiError where e.code == "price_changed" || e.code == "not_found" || e.code == "already_answered" || e.code == "expired" {
++            oneClaude.answeredCards[messageId] = e.code == "price_changed" ? e.message : "Already answered"
++        } catch {
++            showToast("Couldn't answer that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
++        }
++    }
++
++    static func cardKey(_ t: ClaudeApproveTarget) -> String {
++        switch t { case .action(let id): id; case .suite(_, let p): p }
++    }
++
++    /// What waits for the person now (Approve cards, Open?, Remember?, file questions): the orb's "waiting".
++    var claudeWaitingCount: Int {
++        oneClaude.approvals.count + oneClaude.waitingCards.count + (oneClaude.askOpen != nil ? 1 : 0) + (oneClaude.suggestion != nil ? 1 : 0)
++            + ClaudeCodeService.shared.fileAsks.count
++    }
++
++    /// The watched job's progress for the activity strip (0…1), nil when none runs.
++    var claudeJobProgress: Double? {
++        guard let id = oneClaude.watchJob, let j = jobs.first(where: { $0.id == id }) else { return nil }
++        if j.isDone || j.isFailed { return nil }
++        return min(1, max(0, j.progress > 1 ? j.progress / 100 : j.progress))
++    }
++
++    /// The chips for the page Claude sees (the server's list; this app's copy when it is older or offline).
++    func loadClaudeChips() async {
++        let p = claudePage
++        var list = ClaudeChip.fallback(page: p.name, tool: p.tool)
++        if let api = oneClaudeAPI {
++            do { list = try await api.claudeChips(page: p.name, tool: p.tool); oneClaude.serverCards = true }
++            catch let e as ApiError where e.code == "not_found" { oneClaude.serverCards = false }
++            catch {}
++        }
++        if oneClaude.chips != list { oneClaude.chips = list }
++    }
++
+     /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.
+     func answerClaudeAction(_ ui: ClaudeUI, approve: Bool) async {
+         guard let id = ui.approve, let api = oneClaudeAPI else { return }
+diff --git a/mac/Muse/App/ClaudeCodeService.swift b/mac/Muse/App/ClaudeCodeService.swift
+index 617a04b..da8afdc 100644
+--- a/mac/Muse/App/ClaudeCodeService.swift
++++ b/mac/Muse/App/ClaudeCodeService.swift
+@@ -240,7 +240,12 @@ final class ClaudeCodeService: ObservableObject {
+             case .result(let r):
+                 resultArrived(r)
+             case .uiCall(let c):
++                activity.began(c) // the Claude panel's activity strip
++                orb.uiCallBegan(c.id, at: Self.now)
+                 Task { await handleUiCall(c) }
++            case .uiCallEnd(let id):
++                activity.ended(id)
++                orb.uiCallEnded(id, at: Self.now)
+             case .turn(let t):
+                 await relay.offer([t])
+             case .stop(let id):
+@@ -512,6 +517,51 @@ final class ClaudeCodeService: ObservableObject {
+ 
+     var uiControlOn: Bool { fileSettings.uiOn }
+ 
++    /// What Claude is doing in the window now (the Claude panel's strip: "Opening Swap… setting outfit…").
++    @Published private(set) var activity = ClaudeActivity()
++
++    /// "Esc to stop" pressed on the strip: the same as Esc on the window.
++    func stopUiFromPanel() {
++        ClaudeUiOverlay.shared.stopFromPanel()
++        activity.stop()
++        orb.stopped()
++    }
++
++    // MARK: Claude's orb (one state machine, MuseCore ClaudeOrb): fed by real events only
++
++    @Published private(set) var orb = ClaudeOrb()
++    static var now: Double { Date().timeIntervalSinceReferenceDate }
++
++    /// The open chat's stream (this Mac's own turns and other devices' turns).
++    func orbEvent(_ e: ClaudeEvent) {
++        let now = Self.now
++        switch e {
++        case .user: orb.turnStarted()
++        case .text, .assistant, .tool, .image: orb.chunk(at: now)
++        case .done(let ok, _, _):
++            orb.turnEnded(ok: ok, at: now)
++            if !ok { orbErrorEnds() }
++        }
++    }
++    func orbTurnStarted() { orb.turnStarted() }
++    /// A change landed in the chat (What I changed, an applied edit): a flash.
++    func orbChange() { orb.changeApplied(at: Self.now) }
++    /// Approve cards, file questions and Claude's questions still waiting for the person.
++    func orbWaiting(_ n: Int) { if orb.waitingCount != n { orb.waiting(n) } }
++    func orbJob(running: Bool, failed: Bool) {
++        guard orb.jobRunning != running || failed else { return }
++        orb.job(running: running, failed: failed, at: Self.now)
++        if failed { orbErrorEnds() }
++    }
++    func orbTyping(_ on: Bool) { if orb.typing != on { orb.typing = on } }
++    /// The error tint ends on its own after its hold: redraw then (the orb's timeline is paused while it is still).
++    private func orbErrorEnds() {
++        Task { [weak self] in
++            try? await Task.sleep(nanoseconds: UInt64((ClaudeOrb.errorHold + 0.1) * 1_000_000_000))
++            self?.objectWillChange.send()
++        }
++    }
++
+     /// Settings → Claude: "Let Claude operate MUSE's screen" (per person, on by default).
+     func setUiControl(_ on: Bool) {
+         fileSettings.uiControl = on
+@@ -535,6 +585,9 @@ final class ClaudeCodeService: ObservableObject {
+             answer = UiAnswer(error: UiError(.failed, "MUSE couldn't do that: \(error.localizedDescription)"))
+         }
+         try? await api.answerUiCall(c.id, answer)
++        activity.ended(c.id)
++        orb.uiCallEnded(c.id, ok: answer.error == nil, at: Self.now)
++        if answer.error != nil { orbErrorEnds() }
+     }
+ 
+     private func runUi(_ c: UiCall) async throws -> UiAnswer {
+diff --git a/mac/Muse/App/ClaudeUiOverlay.swift b/mac/Muse/App/ClaudeUiOverlay.swift
+index 907e976..b2ee260 100644
+--- a/mac/Muse/App/ClaudeUiOverlay.swift
++++ b/mac/Muse/App/ClaudeUiOverlay.swift
+@@ -27,6 +27,16 @@ final class ClaudeUiOverlay {
+ 
+     func checkNotStopped() throws { if stopped { throw UiError.stopped } }
+ 
++    /// The theme's accent and danger for the orb in the pill (a child window has no theme environment; Shell sets them).
++    var accent: Color = .accentColor
++    var danger: Color = .red
++
++    /// "Esc to stop" on the Claude panel's activity strip: the same as Esc.
++    func stopFromPanel() {
++        stopped = true
++        hide()
++    }
++
+     /// Shows the pill (and listens for Esc) while Claude works; hides a few seconds after the last call.
+     func active(on w: NSWindow) {
+         busy = true
+@@ -120,7 +130,8 @@ final class ClaudeUiOverlay {
+ private struct ClaudeUiPill: View {
+     var body: some View {
+         HStack(spacing: 6) {
+-            Circle().fill(Color.accentColor).frame(width: 6, height: 6)
++            // Claude's orb (it floats here while Claude operates MUSE, the panel open or closed), in the theme's colours.
++            ClaudeOrbView(size: 22, accent: ClaudeUiOverlay.shared.accent, danger: ClaudeUiOverlay.shared.danger)
+             Text("Claude is using MUSE")
+                 .font(.system(size: 12, weight: .medium))
+             Text("·").foregroundStyle(.secondary)
+diff --git a/mac/Muse/Views/Claude/ChatCards.swift b/mac/Muse/Views/Claude/ChatCards.swift
+new file mode 100644
+index 0000000..fcecb9c
+--- /dev/null
++++ b/mac/Muse/Views/Claude/ChatCards.swift
+@@ -0,0 +1,271 @@
++import AVKit
++import MuseCore
++import SwiftUI
++
++// The Claude panel's cards (owner's chosen chat reference, 2026-11-12; plans/design/claude-panel/panel-*.png): a plan
++// checklist that ticks, a clip with its key moments (click to jump), "What I changed" with Undo per row, and an Approve
++// card with price lines and a Total. Design rules (plans/design-direction.md): tone, not shadow; no box inside a card
++// (the price table is rows); Approve is the panel's one filled button; ticked steps use `positive` (state); Phosphor only.
++
++struct ChatCardView: View {
++    @Environment(\.theme) private var t
++    let card: ClaudeCard
++    let messageId: String
++    var resolve: (String) -> String
++
++    var body: some View {
++        Group {
++            switch card {
++            case .plan(_, let title, let steps): ChatPlanCard(title: title, steps: steps)
++            case .media(let title, let summary, let video, let duration, let moments):
++                ChatClipCard(title: title, summary: summary, url: resolve(video.url), duration: duration, moments: moments)
++            case .changes(let title, let rows): ChatChangesCard(title: title, rows: rows, messageId: messageId)
++            case .approve(let title, let subtitle, let lines, let total, let target, let yes, let no):
++                ChatApproveCard(title: title, subtitle: subtitle, lines: lines, total: total, target: target, approveLabel: yes, declineLabel: no, messageId: messageId)
++            case .unknown: EmptyView()
++            }
++        }
++        .padding(Space.s3)
++        .frame(maxWidth: .infinity, alignment: .leading)
++        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field.opacity(t.isDark ? 0.55 : 0.6)))
++    }
++}
++
++// MARK: Plan
++
++struct ChatPlanCard: View {
++    @Environment(\.theme) private var t
++    let title: String
++    let steps: [ClaudePlanStep]
++
++    var body: some View {
++        let r = t.roles
++        let done = steps.filter(\.done).count
++        VStack(alignment: .leading, spacing: Space.s1) {
++            Text(title).scaled(t.scale.label, r.ink).padding(.bottom, Space.s1).accessibilityAddTraits(.isHeader)
++            ForEach(Array(steps.enumerated()), id: \.offset) { _, s in
++                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
++                    ZStack {
++                        RoundedRectangle(cornerRadius: 4, style: .continuous)
++                            .strokeBorder(s.done ? r.positive : r.ink2, lineWidth: 1.5)
++                            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(s.done ? r.positive : .clear))
++                        if s.done { Ph("check", 10).foregroundStyle(r.canvas) }
++                    }
++                    .frame(width: 16, height: 16)
++                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
++                    Text(s.text).scaled(t.scale.caption, s.done ? r.ink2 : r.ink).fixedSize(horizontal: false, vertical: true)
++                }
++                .animation(.easeOut(duration: 0.12), value: s.done)
++                .accessibilityElement(children: .combine)
++                .accessibilityLabel("\(s.text), \(s.done ? "done" : "to do")")
++            }
++        }
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel("\(title), \(done) of \(steps.count) done")
++    }
++}
++
++// MARK: Clip analysis
++
++struct ChatClipCard: View {
++    @Environment(\.theme) private var t
++    let title: String
++    let summary: String?
++    let url: String
++    let duration: Double?
++    let moments: [ClaudeMoment]
++    @State private var player: AVPlayer?
++    @State private var hover: Int?
++
++    var body: some View {
++        let r = t.roles
++        HStack(alignment: .top, spacing: Space.s3) {
++            ZStack(alignment: .bottomTrailing) {
++                if let player { VideoPlayer(player: player) } else { r.field }
++                if let duration {
++                    Text(ClaudeCardText.clock(duration)).scaled(t.scale.micro, .white)
++                        .padding(.horizontal, 6).padding(.vertical, 1)
++                        .background(Capsule().fill(Color.black.opacity(0.55)))
++                        .padding(6)
++                        .allowsHitTesting(false)
++                }
++            }
++            .frame(width: 104, height: 132)
++            .clipShape(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous))
++            .accessibilityLabel("The clip\(duration.map { ", \(ClaudeCardText.clock($0)) long" } ?? "")")
++            VStack(alignment: .leading, spacing: 2) {
++                Text(title).scaled(t.scale.label, r.ink).accessibilityAddTraits(.isHeader)
++                if let summary { Text(summary).scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true).padding(.bottom, Space.s1) }
++                ForEach(Array(moments.enumerated()), id: \.offset) { i, m in
++                    Button { seek(m.from) } label: {
++                        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
++                            Text(m.timecode).monospacedDigit().scaled(t.scale.micro, r.ink).frame(width: 66, alignment: .leading)
++                            Text(m.label).scaled(t.scale.caption, r.ink).fixedSize(horizontal: false, vertical: true)
++                            Spacer(minLength: 0)
++                        }
++                        .padding(.horizontal, 6).padding(.vertical, 3)
++                        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(hover == i ? r.field : .clear))
++                        .contentShape(Rectangle())
++                    }
++                    .buttonStyle(.plain)
++                    .padding(.horizontal, -6)
++                    .onHover { hover = $0 ? i : (hover == i ? nil : hover) }
++                    .help("Play from \(ClaudeCardText.clock(m.from))")
++                    .accessibilityLabel("\(m.label), at \(m.timecode). Play from here")
++                }
++            }
++        }
++        .onAppear { if player == nil, let u = URL(string: url) { player = AVPlayer(url: u) } }
++        .onDisappear { player?.pause() }
++    }
++
++    private func seek(_ s: Double) {
++        guard let player else { return }
++        player.seek(to: CMTime(seconds: s, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
++        player.play()
++    }
++}
++
++// MARK: What I changed
++
++struct ChatChangesCard: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    let title: String
++    let rows: [ClaudeChangeRow]
++    let messageId: String
++
++    var body: some View {
++        let r = t.roles
++        VStack(alignment: .leading, spacing: 0) {
++            Text(title).scaled(t.scale.label, r.ink).padding(.bottom, Space.s1).accessibilityAddTraits(.isHeader)
++            ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
++                HStack(spacing: Space.s2) {
++                    Text(row.what).scaled(t.scale.caption, r.ink2).lineLimit(1).fixedSize()
++                    Ph("caret-right", 10).foregroundStyle(r.ink2)
++                    Text(row.to).font(t.scale.caption.font.weight(.semibold)).foregroundStyle(row.undone ? r.ink2 : r.ink)
++                        .strikethrough(row.undone).lineLimit(1).truncationMode(.tail)
++                    Spacer(minLength: Space.s2)
++                    if row.undone {
++                        Text("Undone").scaled(t.scale.micro, r.ink2)
++                    } else if row.undoable {
++                        Button { Task { await store.undoClaudeCardRow(messageId: messageId, row: i, label: row.what) } } label: {
++                            HStack(spacing: 4) { Ph("arrow-counter-clockwise", 12); Text("Undo") }
++                                .font(t.scale.micro.font).foregroundStyle(r.ink2).frame(minHeight: 28).contentShape(Rectangle())
++                        }
++                        .buttonStyle(.plain)
++                        .disabled(store.oneClaude.undoing.contains("\(messageId)#\(i)"))
++                        .help("Put \(row.what.lowercased()) back as it was")
++                        .accessibilityLabel("Undo \(row.what)")
++                    }
++                }
++                .frame(minHeight: 30)
++                .accessibilityElement(children: .combine)
++                .accessibilityLabel(ClaudeCardText.change(row))
++            }
++        }
++    }
++}
++
++// MARK: Approve
++
++struct ChatApproveCard: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    let title: String
++    let subtitle: String?
++    let lines: [ClaudePriceLine]
++    let total: Double?
++    let target: ClaudeApproveTarget
++    let approveLabel: String
++    let declineLabel: String
++    let messageId: String
++
++    var body: some View {
++        let r = t.roles
++        let state = store.oneClaude.answeredCards[messageId]
++        VStack(alignment: .leading, spacing: 2) {
++            Text(title).scaled(t.scale.label, r.ink).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
++            if let subtitle { Text(subtitle).scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true) }
++            if !lines.isEmpty {
++                VStack(spacing: 2) {
++                    ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
++                        HStack(alignment: .firstTextBaseline) {
++                            Text(l.label).scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
++                            Spacer(minLength: Space.s2)
++                            Text(ClaudeCardText.money(l.usd)).monospacedDigit().scaled(t.scale.caption, r.ink).fixedSize()
++                        }
++                    }
++                    Rectangle().fill(r.hairline).frame(height: 1).padding(.vertical, Space.s1)
++                    HStack {
++                        Text("Total").font(t.scale.caption.font.weight(.semibold)).foregroundStyle(r.ink)
++                        Spacer()
++                        Text(ClaudeCardText.money(ClaudeCardText.total(lines, total))).monospacedDigit().font(t.scale.caption.font.weight(.semibold)).foregroundStyle(r.ink)
++                    }
++                    .accessibilityElement(children: .combine)
++                }
++                .padding(.top, Space.s2)
++            }
++            if let state {
++                Text(state).scaled(t.scale.caption, r.ink2).padding(.top, Space.s2)
++            } else {
++                HStack(spacing: Space.s2) {
++                    SuiteToolButton(title: approveLabel, filled: true, disabled: store.oneClaude.answering.contains(messageId)) {
++                        Task { await store.answerClaudeCard(messageId: messageId, target: target, approve: true) }
++                    }
++                    .frame(maxWidth: .infinity)
++                    SuiteToolButton(title: declineLabel, disabled: store.oneClaude.answering.contains(messageId)) {
++                        Task { await store.answerClaudeCard(messageId: messageId, target: target, approve: false) }
++                    }
++                    .frame(maxWidth: .infinity)
++                }
++                .padding(.top, Space.s3)
++            }
++        }
++        .accessibilityElement(children: .contain)
++    }
++}
++
++// MARK: Live activity strip
++
++/// "Opening Swap… setting outfit…", a percentage and a bar while Claude operates the window or a job it started runs,
++/// and "Esc to stop" (Esc stops the window calls; the job itself runs on).
++struct ClaudeActivityStrip: View {
++    @Environment(\.theme) private var t
++    let activity: ClaudeActivity
++    var onStop: () -> Void
++
++    var body: some View {
++        let r = t.roles
++        VStack(alignment: .leading, spacing: 6) {
++            HStack(spacing: Space.s2) {
++                ClaudeOrbView(size: 18) // in place of a spinner
++                Text(activity.line.isEmpty ? "Working…" : activity.line).scaled(t.scale.caption, r.ink).lineLimit(1).truncationMode(.middle)
++                Spacer(minLength: Space.s2)
++                if let p = activity.percent { Text(p).monospacedDigit().scaled(t.scale.micro, r.ink2) }
++                if !activity.open.isEmpty {
++                    Button(action: onStop) {
++                        Text("Esc to stop").scaled(t.scale.micro, r.ink2)
++                            .padding(.horizontal, 5).padding(.vertical, 1)
++                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(r.hairline))
++                    }
++                    .buttonStyle(.plain)
++                    .help("Stop Claude using the window (Esc)")
++                    .accessibilityLabel("Stop Claude")
++                }
++            }
++            GeometryReader { g in
++                ZStack(alignment: .leading) {
++                    Capsule().fill(r.field)
++                    Capsule().fill(r.accent).frame(width: g.size.width * CGFloat(activity.progress ?? 0))
++                        .animation(.easeOut(duration: 0.2), value: activity.progress)
++                }
++            }
++            .frame(height: 3)
++            .opacity(activity.progress == nil ? 0 : 1)
++        }
++        .padding(.horizontal, Space.s4).padding(.top, Space.s2)
++        .accessibilityElement(children: .combine)
++        .accessibilityLabel("\(activity.line)\(activity.percent.map { ", \($0)" } ?? "")")
++    }
++}
+diff --git a/mac/Muse/Views/Claude/ChatComposer.swift b/mac/Muse/Views/Claude/ChatComposer.swift
+index 826085a..a123493 100644
+--- a/mac/Muse/Views/Claude/ChatComposer.swift
++++ b/mac/Muse/Views/Claude/ChatComposer.swift
+@@ -283,6 +283,14 @@ final class ComposerTextView: NSTextView {
+ 
+ /// The composer bar every Claude chat shares: suggestions, the images waiting to go, the growing field with attach, and
+ /// Send (or Stop while Claude answers); a line under it for the mode or the surface's own note.
++/// What the composer's attach buttons add (one-Claude panel).
++enum ChatAttachKind: String, CaseIterable, Identifiable {
++    case file, image, video, document
++    var id: String { rawValue }
++    var icon: String { switch self { case .file: "paperclip"; case .image: "image"; case .video: "video-camera"; case .document: "file-text" } }
++    var label: String { switch self { case .file: "Attach a file"; case .image: "Attach a photo"; case .video: "Attach a video"; case .document: "Attach a document" } }
++}
++
+ struct ChatComposerBar: View {
+     @Environment(\.theme) private var t
+     @Binding var text: String
+@@ -304,6 +312,9 @@ struct ChatComposerBar: View {
+     var onSuggestion: (String) -> Void
+     var onAttach: (() -> Void)?
+     var onImages: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)?
++    /// One-Claude panel: the page's quick-action chips over the field, and four attach buttons under it.
++    var chips: [ClaudeChip] = []
++    var onPick: ((ChatAttachKind) -> Void)?
+     @State private var height: CGFloat = 0
+     @State private var focus = 0
+     @State private var focused = false
+@@ -334,11 +345,30 @@ struct ChatComposerBar: View {
+                     }
+                 }
+             }
++            if !chips.isEmpty {
++                ScrollView(.horizontal, showsIndicators: false) {
++                    HStack(spacing: 6) {
++                        ForEach(chips) { c in
++                            Button { onSuggestion(c.prompt); focus += 1 } label: {
++                                HStack(spacing: 4) { Ph(c.icon, 13); Text(c.label).fixedSize() }
++                                    .font(t.scale.micro.font).foregroundStyle(t.roles.ink)
++                                    .padding(.horizontal, Space.s2).frame(minHeight: 28)
++                                    .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
++                                    .contentShape(Rectangle())
++                            }
++                            .buttonStyle(.plain)
++                            .disabled(busy || held)
++                            .help(c.prompt)
++                            .accessibilityLabel("Ask Claude: \(c.label)")
++                        }
++                    }
++                }
++            }
+             if let top { top }
+             if !localImages.isEmpty { localRow }
+             if let attachNote { Text(attachNote).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
+             HStack(alignment: .bottom, spacing: Space.s2) {
+-                if let onAttach {
++                if let onAttach, onPick == nil {
+                     Button(action: onAttach) { Ph("plus", 16).frame(width: rowH, height: rowH).contentShape(Rectangle()) }
+                         .buttonStyle(.plain)
+                         .foregroundStyle(t.roles.ink2)
+@@ -366,7 +396,20 @@ struct ChatComposerBar: View {
+                 .background(shape.fill(t.roles.field))
+                 .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
+                 .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat field") } }
+-                sendOrStop(canSend: canSend, side: rowH, shape: shape)
++                if onPick == nil { sendOrStop(canSend: canSend, side: rowH, shape: shape) }
++            }
++            if let onPick {
++                // The panel's attach row (reference, 2026-11-12): file, photo, video, document, then Send on the right.
++                HStack(spacing: Space.s1) {
++                    ForEach(ChatAttachKind.allCases) { k in
++                        Button { onPick(k) } label: { Ph(k.icon, 16).frame(width: 28, height: 28).contentShape(Rectangle()) }
++                            .buttonStyle(.plain).foregroundStyle(t.roles.ink2)
++                            .disabled(held)
++                            .help(k.label).accessibilityLabel(k.label)
++                    }
++                    Spacer(minLength: 0)
++                    sendOrStop(canSend: canSend, side: 32, shape: shape)
++                }
+             }
+             if !footer.isEmpty {
+                 VStack(alignment: .leading, spacing: Space.s1) {
+@@ -376,7 +419,7 @@ struct ChatComposerBar: View {
+                 }
+                 .help(footerHelp ?? "")
+                 // Lines up with the field's text, not with the + button.
+-                .padding(.leading, (onAttach != nil ? rowH + Space.s2 : 0) + Space.s3)
++                .padding(.leading, (onAttach != nil && onPick == nil ? rowH + Space.s2 : 0) + Space.s3)
+             }
+             // ⌘K puts the caret in the field.
+             Button("") { focus += 1 }
+diff --git a/mac/Muse/Views/Claude/ChatTranscriptView.swift b/mac/Muse/Views/Claude/ChatTranscriptView.swift
+index 838e35c..d403aea 100644
+--- a/mac/Muse/Views/Claude/ChatTranscriptView.swift
++++ b/mac/Muse/Views/Claude/ChatTranscriptView.swift
+@@ -26,6 +26,8 @@ enum ChatRowKind: Hashable {
+     case assistant(text: String, streaming: Bool)
+     case tools([ChatToolLine])
+     case frame(url: String)
++    /// A card Claude put up (ChatCards.swift); `messageId` is its stored line.
++    case card(messageId: String, ClaudeCard)
+ }
+ 
+ struct ChatRow: Identifiable, Hashable {
+@@ -56,6 +58,8 @@ struct ChatRow: Identifiable, Hashable {
+                 }
+             case .image(let id, let url):
+                 out.append(ChatRow(id: id, kind: .frame(url: url)))
++            case .card(let id, let messageId, let card):
++                out.append(ChatRow(id: "card_" + id, kind: .card(messageId: messageId, card)))
+             }
+         }
+         return out
+@@ -275,6 +279,7 @@ struct ChatRowView: View, Equatable {
+         case .assistant(let text, let streaming): ChatAssistantText(text: text, streaming: streaming)
+         case .tools(let lines): ChatToolRows(lines: lines)
+         case .frame(let url): ChatFrame(url: resolve(url))
++        case .card(let messageId, let card): ChatCardView(card: card, messageId: messageId, resolve: resolve)
+         }
+     }
+ }
+@@ -347,6 +352,14 @@ struct ChatAssistantText: View {
+     var body: some View {
+         let blocks = ChatMarkdown.parse(text, streaming: streaming)
+         VStack(alignment: .leading, spacing: Space.s1) {
++            // Claude's orb beside the reply while it is being written (it settles when the reply is done).
++            if streaming {
++                HStack(spacing: Space.s1) {
++                    ClaudeOrbView(size: 16)
++                    Text("Claude").scaled(t.scale.micro, t.roles.ink2)
++                }
++                .accessibilityHidden(true)
++            }
+             ChatMarkdownView(blocks: blocks)
+             if !streaming {
+                 HStack(spacing: Space.s2) {
+diff --git a/mac/Muse/Views/Claude/ClaudeChatModel.swift b/mac/Muse/Views/Claude/ClaudeChatModel.swift
+index da37112..005f138 100644
+--- a/mac/Muse/Views/Claude/ClaudeChatModel.swift
++++ b/mac/Muse/Views/Claude/ClaudeChatModel.swift
+@@ -2,6 +2,7 @@ import AppKit
+ import Foundation
+ import MuseCore
+ import Observation
++import UniformTypeIdentifiers
+ 
+ /// State of one ClaudeChatView: the thread of a camera, edit, recreate or suite context, its transcript (stored messages +
+ /// the live turn), the composer, images waiting to go, Stop and Try again. Turns run on this Mac through ClaudeCodeService;
+@@ -259,12 +260,16 @@ final class ClaudeChatModel {
+         guard let tid = thread?.id else { return }
+         switch f {
+         case .local(let t, _, let e) where t == tid:
++            if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
+             transcript.apply(e)
+             toolDone(e)
+             if case .done = e { scheduleReload(); Task { await refreshThreads() } }
+         case .live(.message(let t, let m)) where t == tid:
++            // A "What I changed" card (or its Undo) landed: the orb flashes.
++            if lastContext?.kind == "chat", m.tool?.ui?.card?.card.kind == "changes" { ClaudeCodeService.shared.orbChange() }
+             transcript.upsert(m)
+         case .live(.event(let t, let turnId, let e)) where t == tid:
++            if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
+             transcript.apply(e)
+             toolDone(e)
+             if case .done = e {
+@@ -493,6 +498,35 @@ final class ClaudeChatModel {
+         attachNote = nil
+     }
+ 
++    /// The composer's four attach buttons (one-Claude panel): photos and videos go up as today; a file or document stays
++    /// on this Mac and its path goes in the message, so Claude Code asks the person before reading it (the file cards).
++    func pick(_ kind: ChatAttachKind) {
++        if SnapshotRunner.probing { if kind == .image || kind == .video { pickImages() }; return }
++        let panel = NSOpenPanel()
++        panel.allowsMultipleSelection = true
++        panel.canChooseDirectories = false
++        switch kind {
++        case .image:
++            panel.allowedContentTypes = ChatImageInput.types
++            panel.message = "Choose up to \(Self.maxLocalImages) photos for Claude to look at."
++        case .video:
++            panel.allowedContentTypes = ChatImageInput.videoTypes
++            panel.message = "Choose a video for Claude to watch: MP4 or MOV, 500 MB at most."
++        case .document:
++            panel.allowedContentTypes = [.pdf, .plainText, .rtf, .json, .commaSeparatedText] + ["md", "docx", "srt", "vtt"].compactMap { UTType(filenameExtension: $0) }
++            panel.message = "Choose a document. Claude asks before reading it."
++        case .file:
++            panel.message = "Choose a file. Claude asks before reading it."
++        }
++        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
++        switch kind {
++        case .image, .video: addImages(urls: panel.urls, data: [])
++        case .file, .document:
++            let lines = panel.urls.map { "Attached file: \($0.path)" }.joined(separator: "\n")
++            composer = composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? lines + "\n" : composer + "\n" + lines
++        }
++    }
++
+     func pickImages() {
+         // Review mode never opens a modal panel (it would stop the run): a stand-in image is attached instead.
+         if SnapshotRunner.probing {
+diff --git a/mac/Muse/Views/Claude/ClaudeChatView.swift b/mac/Muse/Views/Claude/ClaudeChatView.swift
+index 0d11e73..499a49b 100644
+--- a/mac/Muse/Views/Claude/ClaudeChatView.swift
++++ b/mac/Muse/Views/Claude/ClaudeChatView.swift
+@@ -47,6 +47,10 @@ struct ClaudeChatView: View {
+     var onToolDone: ((String) -> Void)?
+     /// The Suite: the model, so the bridge can follow the open chat.
+     var onModel: ((ClaudeChatModel) -> Void)?
++    /// One-Claude panel (reference, 2026-11-12): chips over the composer, the four attach buttons, and the activity strip.
++    var chips: [ClaudeChip] = []
++    var attachKinds = false
++    var activity: AnyView?
+ 
+     func sessions(_ hooks: ClaudeChatModel.SessionHooks?, onToolDone: ((String) -> Void)? = nil, onModel: ((ClaudeChatModel) -> Void)? = nil) -> ClaudeChatView {
+         var c = self
+@@ -56,6 +60,14 @@ struct ClaudeChatView: View {
+         return c
+     }
+ 
++    func panel(chips: [ClaudeChip], activity: AnyView?) -> ClaudeChatView {
++        var c = self
++        c.chips = chips
++        c.attachKinds = true
++        c.activity = activity
++        return c
++    }
++
+     func attachments(top: AnyView?, sendBlocked: Bool, userImages: ((String) -> [String])?,
+                      takeFiles: ((String) -> [ClaudeAttachmentFile])? = nil,
+                      attach: (() -> Void)? = nil,
+@@ -118,6 +130,8 @@ struct ClaudeChatView: View {
+             await model.attach(service, contextKind: contextKind, contextId: contextId, fallback: fallback)
+         }
+         .onDisappear { model.detach() }
++        // While the person types, the panel's living edge stays calm (ClaudeOrb.typing).
++        .onChange(of: model.composer.isEmpty) { _, empty in if contextKind == "chat" { service.orbTyping(!empty) } }
+         // Images dropped anywhere on the chat go with the next message.
+         .dropDestination(for: URL.self) { urls, _ in
+             let images = urls.filter(ChatImageInput.isImage)
+@@ -175,6 +189,7 @@ struct ClaudeChatView: View {
+             if model.answeringPhone { phoneStrip }
+             // Files on this Mac: Claude's questions before a file or command call wait here.
+             if let tid = model.thread?.id { ClaudeFileApprovals(threadId: tid, chatTitle: model.thread?.title) }
++            if let activity { activity }
+             composer
+         }
+     }
+@@ -286,6 +301,8 @@ struct ClaudeChatView: View {
+             onStop: { model.stop() },
+             onSuggestion: { model.send($0) },
+             onAttach: suiteAttach ?? { model.pickImages() },
+-            onImages: suiteImages ?? { urls, data in model.addImages(urls: urls, data: data) })
++            onImages: suiteImages ?? { urls, data in model.addImages(urls: urls, data: data) },
++            chips: chips,
++            onPick: attachKinds && suiteAttach == nil ? { model.pick($0) } : nil)
+     }
+ }
+diff --git a/mac/Muse/Views/Claude/ClaudeOrbView.swift b/mac/Muse/Views/Claude/ClaudeOrbView.swift
+new file mode 100644
+index 0000000..510d79b
+--- /dev/null
++++ b/mac/Muse/Views/Claude/ClaudeOrbView.swift
+@@ -0,0 +1,147 @@
++import AppKit
++import MuseCore
++import SwiftUI
++
++// Claude's orb (owner, 2026-11-12; plans/design/claude-panel/orb-states-*.png): our own design, a small dark glass sphere
++// with one elliptical light band in the theme's accent and a soft halo. State and rhythm come from MuseCore's ClaudeOrb
++// (real events only). Drawn with Canvas inside a TimelineView that runs at the orb's own rate (12 fps idle, 30 at most),
++// stops when nothing moves (Reduce Motion, a still state) and when the window is hidden or covered.
++
++struct ClaudeOrbView: View {
++    @Environment(\.theme) private var t
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    @ObservedObject private var service: ClaudeCodeService = .shared
++    @ObservedObject private var visibility: OrbVisibility = .shared
++    var size: CGFloat
++    /// Colours for windows without the theme environment (the "Claude is using MUSE" pill).
++    var accent: Color?
++    var danger: Color?
++
++    var body: some View {
++        let orb = service.orb
++        let now = Date().timeIntervalSinceReferenceDate
++        let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
++        TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
++            let time = ctx.date.timeIntervalSinceReferenceDate
++            Canvas(rendersAsynchronously: true) { g, sz in
++                draw(&g, sz, orb: orb, time: time)
++            }
++        }
++        .frame(width: size, height: size)
++        .accessibilityElement()
++        .accessibilityLabel(Self.words(orb.state(at: now)))
++    }
++
++    static func words(_ s: ClaudeOrbState) -> String {
++        switch s {
++        case .idle: "Claude"
++        case .thinking: "Claude is thinking"
++        case .operating: "Claude is using MUSE"
++        case .waiting: "Claude is waiting for you"
++        case .error: "Claude ran into a problem"
++        }
++    }
++
++    private func draw(_ g: inout GraphicsContext, _ sz: CGSize, orb: ClaudeOrb, time: Double) {
++        let look = orb.look(at: time, reduceMotion: reduceMotion)
++        let glow = orb.glow(at: time, reduceMotion: reduceMotion)
++        let flash = look.flashes ? orb.pulse(at: time, reduceMotion: reduceMotion) : 0
++        let accent = self.accent ?? t.roles.accent
++        let danger = self.danger ?? t.roles.danger
++        let halo = look.danger ? danger : accent
++        let d = min(sz.width, sz.height)
++        let inset = d * 0.14 // room for the halo
++        let r = CGRect(x: inset, y: inset, width: d - 2 * inset, height: d - 2 * inset)
++        let sphere = Path(ellipseIn: r)
++
++        // Halo: the glow, breathing and flashing with the state.
++        var h = g
++        h.addFilter(.blur(radius: d * 0.10))
++        h.fill(Path(ellipseIn: r.insetBy(dx: -d * 0.04, dy: -d * 0.04)), with: .color(halo.opacity(0.15 + 0.6 * glow)))
++
++        // The dark glass (danger-tinted on error, so it reads even where the accent is red).
++        let center = CGPoint(x: r.midX, y: r.minY + r.height * 0.62)
++        g.fill(sphere, with: .radialGradient(Gradient(colors: look.danger ? [danger.opacity(0.85), Color(white: 0.08)] : [Color(white: 0.15), Color(white: 0.04)]),
++                                              center: center, startRadius: 0, endRadius: r.width * 0.62))
++
++        // The band: an ellipse stroked in the accent (grey and still on error), turning with the swirl.
++        var b = g
++        b.clip(to: sphere)
++        b.addFilter(.blur(radius: max(0.4, d * 0.035)))
++        let angle = Angle.radians(2 * .pi * look.swirl * time) + .degrees(-20)
++        let bandColor = look.danger ? Color(white: 0.72) : accent
++        let band = Path(ellipseIn: CGRect(x: r.minX + r.width * 0.06, y: r.midY - r.height * 0.18, width: r.width * 0.88, height: r.height * 0.36))
++        let turn = CGAffineTransform(translationX: r.midX, y: r.midY).rotated(by: angle.radians).translatedBy(x: -r.midX, y: -r.midY)
++        b.stroke(band.applying(turn), with: .color(bandColor.opacity(min(1, look.band + 0.3 * flash))), lineWidth: max(1, d * 0.07))
++        if !look.danger {
++            let second = CGAffineTransform(translationX: r.midX, y: r.midY).rotated(by: angle.radians + .pi / 3).translatedBy(x: -r.midX, y: -r.midY)
++            b.stroke(band.applying(second), with: .color(accent.opacity(look.band * 0.4)), lineWidth: max(0.6, d * 0.04))
++        }
++        // Operating: a sweep crossing the glass, left to right.
++        if look.sweep {
++            let x = r.minX + r.width * CGFloat((time * 0.8).truncatingRemainder(dividingBy: 1)) * 1.6 - r.width * 0.3
++            b.fill(Path(CGRect(x: x, y: r.minY, width: r.width * 0.28, height: r.height)),
++                   with: .linearGradient(Gradient(colors: [.clear, accent.opacity(0.45 + 0.4 * flash), .clear]),
++                                         startPoint: CGPoint(x: x, y: r.midY), endPoint: CGPoint(x: x + r.width * 0.28, y: r.midY)))
++        }
++
++        // Glass: the highlight and the rim.
++        g.fill(Path(ellipseIn: CGRect(x: r.minX + r.width * 0.22, y: r.minY + r.height * 0.08, width: r.width * 0.40, height: r.height * 0.24)),
++               with: .radialGradient(Gradient(colors: [Color.white.opacity(0.45), .clear]), center: CGPoint(x: r.minX + r.width * 0.42, y: r.minY + r.height * 0.2),
++                                     startRadius: 0, endRadius: r.width * 0.22))
++        g.stroke(sphere, with: .color(Color.white.opacity(0.14)), lineWidth: 0.5)
++    }
++}
++
++/// Whether the MUSE window can be seen (not hidden, minimised or fully covered): the orb and the panel's edge stop
++/// drawing when it can't.
++@MainActor
++final class OrbVisibility: ObservableObject {
++    static let shared = OrbVisibility()
++    @Published private(set) var visible = true
++    private var observers: [NSObjectProtocol] = []
++
++    private init() {
++        let nc = NotificationCenter.default
++        for name in [NSApplication.didChangeOcclusionStateNotification, NSApplication.didHideNotification, NSApplication.didUnhideNotification,
++                     NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification] {
++            observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.update() } })
++        }
++        update()
++    }
++
++    private func update() {
++        let shown = !NSApp.isHidden && NSApp.occlusionState.contains(.visible)
++            && (NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible && !$0.isMiniaturized }).map { $0.occlusionState.contains(.visible) && !$0.isMiniaturized } ?? true
++        if shown != visible { visible = shown }
++    }
++}
++
++/// The floating panel's living edge: a hairline that takes the accent and glows in step with the orb (same state, same
++/// rhythm); calm in idle and while the person types.
++struct ClaudeLivingEdge: View {
++    @Environment(\.theme) private var t
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    @ObservedObject private var service: ClaudeCodeService = .shared
++    @ObservedObject private var visibility: OrbVisibility = .shared
++    var cornerRadius: CGFloat
++
++    var body: some View {
++        let orb = service.orb
++        let now = Date().timeIntervalSinceReferenceDate
++        let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
++        TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
++            let time = ctx.date.timeIntervalSinceReferenceDate
++            let e = orb.edge(at: time, reduceMotion: reduceMotion)
++            let c = orb.look(at: time, reduceMotion: reduceMotion).danger ? t.roles.danger : t.roles.accent
++            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
++            ZStack {
++                shape.strokeBorder(t.roles.hairline, lineWidth: 1)
++                shape.strokeBorder(c.opacity(0.25 + 0.75 * e), lineWidth: 1)
++                shape.stroke(c.opacity(0.6 * e), lineWidth: 6).blur(radius: 10)
++            }
++        }
++        .allowsHitTesting(false)
++        .accessibilityHidden(true)
++    }
++}
+diff --git a/mac/Muse/Views/Claude/FloatingClaudePanel.swift b/mac/Muse/Views/Claude/FloatingClaudePanel.swift
+new file mode 100644
+index 0000000..2e43088
+--- /dev/null
++++ b/mac/Muse/Views/Claude/FloatingClaudePanel.swift
+@@ -0,0 +1,84 @@
++import MuseCore
++import SwiftUI
++
++/// The Claude panel as a floating panel over the page (owner, 2026-11-12; plans/design/claude-panel/float-*.png): rounded,
++/// a soft shadow, and the living edge that glows with Claude's orb. It never reflows the page. Moved by its header,
++/// resized from the lower-left corner (it hangs from the top-right), and its place and size are remembered.
++struct FloatingClaudePanel: View {
++    @Environment(\.theme) private var t
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    /// Distance from the window's right and top edges, the width, and the height (0: the window's height less margins).
++    @AppStorage("claudePanel.right") private var right: Double = Double(Space.s4)
++    @AppStorage("claudePanel.top") private var top: Double = Double(Space.s4)
++    @AppStorage("claudePanel.width") private var width: Double = 400
++    @AppStorage("claudePanel.height") private var height: Double = 0
++    @State private var moving: CGSize = .zero
++    @State private var sizing: CGSize = .zero
++
++    static let minSize = CGSize(width: 340, height: 420)
++    static let margin: CGFloat = Space.s4
++
++    var body: some View {
++        GeometryReader { g in
++            let f = frame(in: g.size)
++            let radius = t.radii.container + 4
++            let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
++            OneClaudePanel(onDrag: { d, ended in
++                if ended { commitMove(d, in: g.size) } else { moving = d }
++            })
++            .frame(width: f.width, height: f.height)
++            .background(t.roles.canvas)
++            .clipShape(shape)
++            .overlay(ClaudeLivingEdge(cornerRadius: radius))
++            .overlay(alignment: .bottomLeading) { resizeHandle(in: g.size) }
++            // A soft shadow lifts it off the page (the one `float` shadow; dark themes get a deeper, neutral one).
++            .shadow(color: .black.opacity(t.isDark ? 0.55 : 0.18), radius: 32, y: 16)
++            .position(x: g.size.width - f.right - f.width / 2, y: f.top + f.height / 2)
++            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: g.size)
++        }
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel("Claude")
++    }
++
++    /// The panel's frame now (stored values, the drag in progress, kept inside the window).
++    private func frame(in s: CGSize) -> (right: CGFloat, top: CGFloat, width: CGFloat, height: CGFloat) {
++        let m = Self.margin
++        var w = CGFloat(width) - sizing.width
++        var h = (height > 0 ? CGFloat(height) : s.height - 2 * m) + sizing.height
++        w = min(max(w, Self.minSize.width), max(Self.minSize.width, s.width - 2 * m))
++        h = min(max(h, Self.minSize.height), max(Self.minSize.height, s.height - 2 * m))
++        var r = CGFloat(right) - moving.width
++        var y = CGFloat(top) + moving.height
++        r = min(max(r, m), max(m, s.width - w - m))
++        y = min(max(y, m), max(m, s.height - h - m))
++        return (r, y, w, h)
++    }
++
++    private func commitMove(_ d: CGSize, in s: CGSize) {
++        moving = d
++        let f = frame(in: s)
++        right = Double(f.right); top = Double(f.top)
++        moving = .zero
++    }
++
++    /// The lower-left corner: drag to resize (left widens, down makes it taller). Double-click returns to full height.
++    private func resizeHandle(in s: CGSize) -> some View {
++        Image(systemName: "arrow.up.left.and.arrow.down.right")
++            .font(.system(size: 9, weight: .semibold))
++            .foregroundStyle(t.roles.ink2.opacity(0.7))
++            .rotationEffect(.degrees(90))
++            .frame(width: 22, height: 22)
++            .contentShape(Rectangle())
++            .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
++                .onChanged { sizing = CGSize(width: $0.translation.width, height: $0.translation.height) }
++                .onEnded { v in
++                    sizing = CGSize(width: v.translation.width, height: v.translation.height)
++                    let f = frame(in: s)
++                    width = Double(f.width); height = Double(f.height)
++                    sizing = .zero
++                })
++            .onTapGesture(count: 2) { height = 0 }
++            .help("Drag to resize. Double-click for full height.")
++            .accessibilityLabel("Resize the Claude panel")
++    }
++}
+diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
+index 040e72a..67fc7d6 100644
+--- a/mac/Muse/Views/Claude/OneClaudePanel.swift
++++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
+@@ -15,6 +15,10 @@ struct OneClaudePanel: View {
+     @State private var deleteAsk: OneClaudeDeleteAsk?
+ 
+     static let width: CGFloat = 380
++    /// The floating panel's move (translation, ended).
++    var onDrag: ((CGSize, Bool) -> Void)?
++
++    init(onDrag: ((CGSize, Bool) -> Void)? = nil) { self.onDrag = onDrag }
+ 
+     var body: some View {
+         let o = store.oneClaude
+@@ -25,9 +29,10 @@ struct OneClaudePanel: View {
+             lines
+             if let id = o.chatId {
+                 ClaudeChatView(contextKind: "chat", contextId: id, title: o.current?.shownTitle ?? "Claude", showsHeader: false,
+-                               placeholder: "Ask Claude", emptyHint: "Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.",
++                               placeholder: "Tell me what to do next…", emptyHint: "Ask for anything in MUSE. Claude sees this page and can open others. It asks before spending.",
+                                wrapOutgoing: { [store] text in store.oneClaudeOutgoing(text) }, unwrapShown: ClaudePage.stripContext)
+                     .sessions(nil, onToolDone: { [store] name in store.suiteClaudeToolDone(name) })
++                    .panel(chips: o.chips, activity: activityStrip)
+                     .id(id)
+             } else if let e = o.listError {
+                 VStack(spacing: Space.s3) {
+@@ -40,8 +45,7 @@ struct OneClaudePanel: View {
+                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+             }
+         }
+-        .frame(width: Self.width)
+-        .frame(maxHeight: .infinity)
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
+         .background(r.raised)
+         .sheet(isPresented: $showMemory) { OneClaudeMemorySheet() }
+         .sheet(isPresented: $showManage) { OneClaudeManageChats() }
+@@ -53,6 +57,13 @@ struct OneClaudePanel: View {
+             Button("Cancel", role: .cancel) {}
+         } message: { Text(OneClaudeDeleteAsk.keeps) }
+         .onChange(of: store.claudePage) { _, _ in store.oneClaudePageChanged() }
++        // Claude's orb (MuseCore ClaudeOrb) hears what waits for the person and the job Claude started.
++        .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
++        .onChange(of: store.claudeJobProgress, initial: true) { _, p in
++            let failed = store.oneClaude.watchJob.flatMap { id in store.jobs.first { $0.id == id } }?.isFailed ?? false
++            service.orbJob(running: p != nil, failed: failed)
++            if p == nil, store.oneClaude.watchJob != nil { store.oneClaude.watchJob = nil }
++        }
+     }
+ 
+     // MARK: Header: the chat, New chat, what Claude sees
+@@ -60,8 +71,17 @@ struct OneClaudePanel: View {
+     private var header: some View {
+         let o = store.oneClaude
+         let r = t.roles
+-        return VStack(alignment: .leading, spacing: Space.s1) {
+-            HStack(spacing: Space.s2) {
++        return VStack(alignment: .leading, spacing: Space.s2) {
++            HStack(spacing: Space.s1) {
++                ClaudeOrbView(size: 24)
++                Text("Claude").scaled(t.scale.heading, r.ink).accessibilityAddTraits(.isHeader)
++                    .help(o.current?.shownTitle ?? "New chat")
++                Spacer(minLength: Space.s2)
++                modelMenu
++                Button { Task { await store.newOneClaudeChat() } } label: {
++                    Ph("plus", 16).foregroundStyle(r.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
++                }
++                .buttonStyle(.plain).help("New chat").accessibilityLabel("New chat")
+                 Menu {
+                     Section("Chats") {
+                         ForEach(o.chats) { c in
+@@ -79,40 +99,48 @@ struct OneClaudePanel: View {
+                     }
+                     Button("Manage chats…") { showManage = true }
+                 } label: {
+-                    HStack(spacing: Space.s1) {
+-                        Text(o.current?.shownTitle ?? "Claude").scaled(t.scale.label, r.ink).lineLimit(1).truncationMode(.tail)
+-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(r.ink2)
+-                    }
+-                    .contentShape(Rectangle())
++                    // A Menu label drops custom image sizing (build 530): the system clock glyph, sized by the font.
++                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 14)).foregroundStyle(r.ink2)
++                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                 }
+                 .menuStyle(.borderlessButton)
+                 .menuIndicator(.hidden)
+-                .fixedSize(horizontal: false, vertical: true)
+-                .help("Your chats: switch, or open Claude's memory")
+-                .accessibilityLabel("Chat: \(o.current?.shownTitle ?? "Claude"). Open the list of chats")
+-                Spacer(minLength: Space.s2)
+-                Button { Task { await store.newOneClaudeChat() } } label: {
+-                    HStack(spacing: Space.s1) { Ph("plus", 14); Text("New chat").fixedSize() }
+-                        .font(t.scale.label.font).foregroundStyle(r.ink2).frame(minHeight: 28).contentShape(Rectangle())
+-                }
+-                .buttonStyle(.plain).help("Start a chat for a new piece of work").accessibilityLabel("New chat")
++                .fixedSize()
++                .help("History: your chats and Claude's memory")
++                .accessibilityLabel("History. Chat: \(o.current?.shownTitle ?? "new chat"). Open the list of chats")
+                 SuiteIconButton(systemName: "xmark", label: "Hide Claude", size: 26) { store.toggleOneClaude() }
+             }
+-            HStack(spacing: Space.s1) {
+-                Ph("map-pin", 13)
++            HStack(spacing: 6) {
++                Ph("eye", 13)
+                 Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
+             }
+-            .font(t.scale.caption.font).foregroundStyle(r.ink2)
++            .font(t.scale.micro.font).foregroundStyle(r.ink2)
++            .padding(.horizontal, Space.s2).frame(height: 24)
++            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(r.field))
++            .accessibilityElement(children: .combine)
+             .accessibilityLabel("Claude sees \(store.claudePage.line)")
+-            modelMenu
+         }
+         .padding(.horizontal, Space.s4)
+         .padding(.vertical, Space.s3)
+-        .frame(width: Self.width, alignment: .leading)
++        .frame(maxWidth: .infinity, alignment: .leading)
+         .clipped()
++        .contentShape(Rectangle())
++        // The floating panel moves by its header (the buttons in it still click: a drag starts after 4 pt).
++        .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
++            .onChanged { onDrag?($0.translation, false) }
++            .onEnded { onDrag?($0.translation, true) })
+         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude header") } }
+     }
+ 
++    // MARK: Live activity: Claude operating the window, or a job it started
++
++    private var activityStrip: AnyView? {
++        var a = service.activity
++        a.job(store.claudeJobProgress)
++        guard a.isActive else { return nil }
++        return AnyView(ClaudeActivityStrip(activity: a) { service.stopUiFromPanel() })
++    }
++
+     // MARK: The chat's Claude model (step 6b): speed and cost in plain words, per chat, with your own default
+ 
+     @ViewBuilder private var modelMenu: some View {
+@@ -138,8 +166,7 @@ struct OneClaudePanel: View {
+                 // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
+                 // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
+                 HStack(spacing: Space.s1) {
+-                    Text("\(cur.info?.name ?? "Claude")\(cur.isDefault ? " (your default)" : "") · \(cur.info?.speed ?? "")")
+-                        .lineLimit(1).truncationMode(.tail)
++                    Text(cur.info?.name ?? "Claude").lineLimit(1).fixedSize()
+                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                 }
+                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
+@@ -147,8 +174,7 @@ struct OneClaudePanel: View {
+             }
+             .menuStyle(.borderlessButton)
+             .menuIndicator(.hidden)
+-            .fixedSize(horizontal: false, vertical: true)
+-            .frame(maxWidth: .infinity, alignment: .leading)
++            .fixedSize()
+             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude model line") } }
+             .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
+             .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
+@@ -156,7 +182,7 @@ struct OneClaudePanel: View {
+             // The list isn't here yet (or the server is older): the line still shows, and tapping it tries again.
+             Button { Task { await store.loadClaudeModels() } } label: {
+                 HStack(spacing: Space.s1) {
+-                    Text("Claude Code's default model").lineLimit(1).truncationMode(.tail)
++                    Text("Default model").lineLimit(1).fixedSize()
+                 }
+                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
+                 .contentShape(Rectangle())
+diff --git a/mac/Muse/Views/RootView.swift b/mac/Muse/Views/RootView.swift
+index 529b7ed..ebbd535 100644
+--- a/mac/Muse/Views/RootView.swift
++++ b/mac/Muse/Views/RootView.swift
+@@ -118,14 +118,17 @@ struct Shell: View {
+                 TitleBar()
+                 HStack(spacing: 0) {
+                     // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
+-                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor || (store.screen == .suite && store.oneClaude.open))
++                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
+                     ScreenHost()
+-                    // One Claude (plans/one-claude.md): the same Claude on every page, its chat following the person.
+-                    if store.oneClaude.open && store.user != nil {
+-                        Rectangle().fill(t.roles.hairline).frame(width: 1)
+-                        OneClaudePanel()
+-                    }
+                 }
++                // One Claude (owner, 2026-11-12): a floating panel over the page, never reflowing it; moved by its header,
++                // resized from its lower-left corner, remembering both. ⌘⇧C shows and hides it.
++                .overlay(alignment: .topTrailing) {
++                    if store.oneClaude.open && store.user != nil { FloatingClaudePanel() }
++                }
++            }
++                .onAppear { ClaudeUiOverlay.shared.accent = t.roles.accent; ClaudeUiOverlay.shared.danger = t.roles.danger }
++                .onChange(of: t.roles.accent) { _, c in ClaudeUiOverlay.shared.accent = c; ClaudeUiOverlay.shared.danger = t.roles.danger }
+             }
+         }
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+index 4ae90a1..bab45f0 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+@@ -83,6 +83,9 @@ public protocol ClaudeAPI: Sendable {
+     func pendingUiCalls() async throws -> [UiCall]
+     func claimUiCall(_ id: String, device: String) async throws -> Bool
+     func answerUiCall(_ id: String, _ answer: UiAnswer) async throws
++    /// Cards: Undo one row of a "What I changed" card; the page's quick-action chips.
++    func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo
++    func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip]
+ }
+ 
+ /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
+@@ -112,6 +115,8 @@ public extension ClaudeAPI {
+     func pendingUiCalls() async throws -> [UiCall] { [] }
+     func claimUiCall(_ id: String, device: String) async throws -> Bool { false }
+     func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {}
++    func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo { throw ApiError("not_found", "This server can't undo from the chat yet") }
++    func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip] { ClaudeChip.fallback(page: page, tool: tool) }
+ }
+ 
+ enum ClaudeIds {
+@@ -294,6 +299,21 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+     public func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {
+         _ = try await send(request("POST", "v1/claude/ui/\(try ClaudeIds.check(id))", body: try encoder.encode(answer), timeout: 60))
+     }
++    private struct UndoRow: Encodable { var row: Int }
++    public func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo {
++        try await call("POST", "v1/claude/cards/\(try ClaudeIds.check(messageId))/undo", UndoRow(row: row))
++    }
++    public func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip] {
++        var q: [String] = []
++        if let p = page, p.allSatisfy({ $0.isASCII && $0.isLetter }) { q.append("page=\(p)") }
++        if let t = tool, t.allSatisfy({ $0.isASCII && $0.isLowercase }) { q.append("tool=\(t)") }
++        do {
++            let l: ClaudeChipList = try await call("GET", "v1/claude/chips" + (q.isEmpty ? "" : "?" + q.joined(separator: "&")))
++            return l.chips.isEmpty ? ClaudeChip.fallback(page: page, tool: tool) : l.chips
++        } catch let e as ApiError where e.code == "offline" {
++            return ClaudeChip.fallback(page: page, tool: tool) // no server now: this app's own copy (not_found: an older server, the caller decides)
++        }
++    }
+     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {
+         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(PermissionAnswer(allow: allow, message: message))))
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCards.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCards.swift
+new file mode 100644
+index 0000000..47fbaf8
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCards.swift
+@@ -0,0 +1,214 @@
++import Foundation
++
++// Claude panel cards (owner's chosen chat reference, 2026-11-12; server/api/src/claude/cards.ts). Claude's replies can
++// carry structured parts the panel draws as cards instead of plain bubbles: a plan that ticks, a clip with its key
++// moments, "What I changed" with Undo per row, and an Approve card with price lines and a Total. Each arrives as a tool
++// line (tool.name "card" or "approve", tool.ui.card) in the chat, and live as op "message" / "card" / "ui". Plain text
++// stays plain. This file is the pure part: decoding (lenient: an unknown card is skipped, never an error), and the
++// words and numbers the views show.
++
++public struct ClaudePlanStep: Codable, Hashable, Sendable {
++    public var text: String
++    public var done: Bool
++    public init(text: String, done: Bool = false) { self.text = text; self.done = done }
++    private enum K: String, CodingKey { case text, done }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: K.self)
++        text = try c.decode(String.self, forKey: .text)
++        done = (try? c.decodeIfPresent(Bool.self, forKey: .done)) ?? false
++    }
++}
++
++public struct ClaudeMoment: Codable, Hashable, Sendable {
++    /// Seconds from the video's start.
++    public var from: Double
++    public var to: Double?
++    public var label: String
++    public init(from: Double, to: Double? = nil, label: String) { self.from = from; self.to = to; self.label = label }
++    /// "0:04–0:10", or "0:04" for one moment.
++    public var timecode: String { to.map { "\(ClaudeCardText.clock(from))–\(ClaudeCardText.clock($0))" } ?? ClaudeCardText.clock(from) }
++}
++
++public struct ClaudeCardVideo: Codable, Hashable, Sendable {
++    public var id: String
++    public var kind: String
++    /// "/uploads/<key>": resolve against the server like other studio media.
++    public var url: String
++    public var title: String?
++}
++
++public struct ClaudeChangeRow: Codable, Hashable, Sendable {
++    public var what: String
++    public var to: String
++    public var undoable: Bool
++    public var undone: Bool
++    public init(what: String, to: String, undoable: Bool = true, undone: Bool = false) { self.what = what; self.to = to; self.undoable = undoable; self.undone = undone }
++    private enum K: String, CodingKey { case what, to, undoable, undone }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: K.self)
++        what = try c.decode(String.self, forKey: .what)
++        to = try c.decode(String.self, forKey: .to)
++        undoable = (try? c.decodeIfPresent(Bool.self, forKey: .undoable)) ?? false
++        undone = (try? c.decodeIfPresent(Bool.self, forKey: .undone)) ?? false
++    }
++}
++
++public struct ClaudePriceLine: Codable, Hashable, Sendable {
++    public var label: String
++    public var usd: Double
++    public init(label: String, usd: Double) { self.label = label; self.usd = usd }
++}
++
++/// Who answers an Approve card: a gated action (POST v1/claude/actions/:id) or the Suite composer's waiting shot
++/// (POST v1/suite/assist/:id/pending/:pid).
++public enum ClaudeApproveTarget: Hashable, Sendable {
++    case action(String)
++    case suite(assistId: String, pendingId: String)
++}
++
++public enum ClaudeCard: Hashable, Sendable, Decodable {
++    case plan(planId: String, title: String, steps: [ClaudePlanStep])
++    case media(title: String, summary: String?, video: ClaudeCardVideo, durationSec: Double?, moments: [ClaudeMoment])
++    case changes(title: String, rows: [ClaudeChangeRow])
++    case approve(title: String, subtitle: String?, lines: [ClaudePriceLine], totalUsd: Double?, target: ClaudeApproveTarget, approveLabel: String, declineLabel: String)
++    /// A card this app doesn't know yet (a newer server): shown as its tool line's summary.
++    case unknown(kind: String)
++
++    private enum K: String, CodingKey { case kind, planId, title, steps, summary, video, durationSec, moments, rows, subtitle, lines, totalUsd, answer, approveLabel, declineLabel }
++    private struct Answer: Decodable { var actionId: String?; var assistId: String?; var pendingId: String? }
++
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: K.self)
++        let kind = (try? c.decode(String.self, forKey: .kind)) ?? ""
++        let title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
++        switch kind {
++        case "plan":
++            guard let steps = try? c.decode([ClaudePlanStep].self, forKey: .steps) else { self = .unknown(kind: kind); return }
++            self = .plan(planId: (try? c.decodeIfPresent(String.self, forKey: .planId)) ?? "plan", title: title.isEmpty ? "Plan" : title, steps: steps)
++        case "media":
++            guard let v = try? c.decode(ClaudeCardVideo.self, forKey: .video) else { self = .unknown(kind: kind); return }
++            self = .media(title: title.isEmpty ? "Clip analysis" : title, summary: try? c.decodeIfPresent(String.self, forKey: .summary), video: v,
++                          durationSec: try? c.decodeIfPresent(Double.self, forKey: .durationSec), moments: (try? c.decode([ClaudeMoment].self, forKey: .moments)) ?? [])
++        case "changes":
++            self = .changes(title: title.isEmpty ? "What I changed" : title, rows: (try? c.decode([ClaudeChangeRow].self, forKey: .rows)) ?? [])
++        case "approve":
++            guard let a = try? c.decode(Answer.self, forKey: .answer) else { self = .unknown(kind: kind); return }
++            let target: ClaudeApproveTarget
++            if let id = a.actionId { target = .action(id) } else if let s = a.assistId, let p = a.pendingId { target = .suite(assistId: s, pendingId: p) } else { self = .unknown(kind: kind); return }
++            self = .approve(title: title, subtitle: try? c.decodeIfPresent(String.self, forKey: .subtitle), lines: (try? c.decode([ClaudePriceLine].self, forKey: .lines)) ?? [],
++                            totalUsd: try? c.decodeIfPresent(Double.self, forKey: .totalUsd), target: target,
++                            approveLabel: (try? c.decodeIfPresent(String.self, forKey: .approveLabel)) ?? "Approve",
++                            declineLabel: (try? c.decodeIfPresent(String.self, forKey: .declineLabel)) ?? "Decline")
++        default: self = .unknown(kind: kind)
++        }
++    }
++
++    public var kind: String {
++        switch self { case .plan: "plan"; case .media: "media"; case .changes: "changes"; case .approve: "approve"; case .unknown(let k): k }
++    }
++    /// The plan's steps done and in all ("2 of 3").
++    public var progress: (done: Int, of: Int)? {
++        guard case .plan(_, _, let steps) = self else { return nil }
++        return (steps.filter(\.done).count, steps.count)
++    }
++}
++
++/// The card stored on a tool line (encoded back as the raw JSON the server sent, so ClaudeUI stays Codable).
++public struct ClaudeCardBox: Codable, Hashable, Sendable {
++    public var card: ClaudeCard
++    public var raw: JSONValue
++    public init(from d: Decoder) throws {
++        raw = try JSONValue(from: d)
++        card = (try? JSONDecoder().decode(ClaudeCard.self, from: JSONEncoder().encode(raw))) ?? .unknown(kind: "")
++    }
++    public func encode(to e: Encoder) throws { try raw.encode(to: e) }
++    public static func == (a: Self, b: Self) -> Bool { a.raw == b.raw }
++    public func hash(into h: inout Hasher) { h.combine(raw) }
++}
++
++public enum ClaudeCardText {
++    /// "0:04", "1:02:05".
++    public static func clock(_ s: Double) -> String {
++        let t = max(0, Int(s.rounded(.down)))
++        return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
++    }
++    /// "$1.17".
++    public static func money(_ v: Double) -> String { String(format: "$%.2f", v) }
++    /// The Total under the lines: the card's own, else the lines added up.
++    public static func total(_ lines: [ClaudePriceLine], _ total: Double?) -> Double {
++        total ?? (lines.reduce(0) { $0 + $1.usd } * 100).rounded() / 100
++    }
++    /// The accessibility line for a change row ("Outfit changed to Hoodie").
++    public static func change(_ r: ClaudeChangeRow) -> String { "\(r.what) changed to \(r.to)\(r.undone ? ", undone" : "")" }
++}
++
++/// The quick-action chips over the composer (GET v1/claude/chips; this copy when the server is older or offline).
++public struct ClaudeChip: Codable, Hashable, Sendable, Identifiable {
++    public var label: String
++    public var prompt: String
++    /// Phosphor name ("play-circle", "pencil-simple", "coins").
++    public var icon: String
++    public var id: String { label }
++    public init(label: String, prompt: String, icon: String) { self.label = label; self.prompt = prompt; self.icon = icon }
++
++    public static func fallback(page: String?, tool: String?) -> [ClaudeChip] {
++        let price = ClaudeChip(label: "Check the price", prompt: "What will this cost, line by line?", icon: "coins")
++        let write = ClaudeChip(label: "Write the prompt", prompt: "Write the prompt for this shot.", icon: "pencil-simple")
++        switch page {
++        case "suite":
++            if let t = tool, ["swap", "remix", "recast", "extend"].contains(t) { return [ClaudeChip(label: "Watch my clip", prompt: "Watch my clip and tell me the key moments.", icon: "play-circle"), write, price] }
++            return [write, ClaudeChip(label: "Set the rig", prompt: "Set up the rig for this shot.", icon: "aperture"), price]
++        case "edit": return [ClaudeChip(label: "Watch my edit", prompt: "Watch my edit and tell me what to fix.", icon: "play-circle"),
++                             ClaudeChip(label: "Cut to the beat", prompt: "Cut this to the beat.", icon: "scissors"), ClaudeChip(label: "Add captions", prompt: "Add captions to this edit.", icon: "text-aa")]
++        case "take": return [ClaudeChip(label: "Watch this take", prompt: "Watch this take and tell me what works.", icon: "play-circle"),
++                             ClaudeChip(label: "Make a variation", prompt: "Set up a variation of this take.", icon: "pencil-simple"), ClaudeChip(label: "Edit it", prompt: "Open this take in Edit.", icon: "film-strip")]
++        default: return [ClaudeChip(label: "What can you do", prompt: "What can you do on this page?", icon: "chat-circle"),
++                         ClaudeChip(label: "Start a shot", prompt: "Help me start a new shot.", icon: "video-camera"), ClaudeChip(label: "Watch my clip", prompt: "Watch my latest clip.", icon: "play-circle")]
++        }
++    }
++}
++
++public struct ClaudeChipList: Codable, Hashable, Sendable { public var chips: [ClaudeChip] }
++
++/// Undo on a "What I changed" row (POST v1/claude/cards/:id/undo {row}): the card as it is now.
++public struct ClaudeCardUndo: Decodable, Hashable, Sendable { public var ok: Bool; public var card: ClaudeCardBox? }
++
++/// The live activity strip while Claude operates the window or a job runs: "Opening Swap… setting outfit…", a
++/// percentage and bar, and "Esc to stop". Steps come from uiCall events (`step`), progress from the job's own events.
++public struct ClaudeActivity: Hashable, Sendable {
++    public private(set) var steps: [String] = []
++    /// 0…1 when a job reports it; nil while only the window is being operated.
++    public var progress: Double?
++    /// Calls in flight (uiCall without its uiCallEnd yet).
++    public private(set) var open: Set<String> = []
++    public init() {}
++
++    public var isActive: Bool { !open.isEmpty || progress != nil }
++    /// The last two steps, the second in lower case: "Opening Swap… setting outfit…".
++    public var line: String {
++        let last = steps.suffix(2)
++        guard let first = last.first else { return progress != nil ? "Working…" : "" }
++        if last.count == 1 { return first }
++        let second = last.last!
++        return "\(first) \(second.prefix(1).lowercased())\(second.dropFirst())"
++    }
++    /// "42%".
++    public var percent: String? { progress.map { "\(Int((min(1, max(0, $0)) * 100).rounded()))%" } }
++
++    public mutating func began(_ call: UiCall) {
++        open.insert(call.id)
++        let s = (call.step?.isEmpty == false ? call.step! : "Working in the window…")
++        if steps.last != s { steps.append(s) }
++        if steps.count > 6 { steps.removeFirst(steps.count - 6) }
++    }
++    public mutating func ended(_ id: String) {
++        open.remove(id)
++        if open.isEmpty && progress == nil { steps.removeAll() }
++    }
++    /// A job's progress (0…1), or nil when it finished.
++    public mutating func job(_ p: Double?) {
++        progress = p
++        if p == nil && open.isEmpty { steps.removeAll() }
++    }
++    public mutating func stop() { open.removeAll(); steps.removeAll(); progress = nil }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
+index 52a35ca..11b5d06 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
+@@ -24,6 +24,8 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
+     /// Claude operates the MUSE window (ui_snapshot / ui_act / ui_wait), and the call ended (another Mac did it, or timed out).
+     case uiCall(UiCall)
+     case uiCallEnd(id: String)
++    /// A card changed in place (a plan ticked, an Undo pressed): replace the message's card.
++    case card(threadId: String, messageId: String, ClaudeCardBox)
+ }
+ 
+ /// SSE lines → `claude` live events; everything else on the stream is ignored.
+@@ -53,8 +55,10 @@ public struct ClaudeLiveEventFilter: Sendable {
+         var id: String?
+         var result: ClaudeJobResult?
+         var call: UiCall?
++        var messageId: String?
++        var card: ClaudeCardBox?
+ 
+-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call }
++        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call, messageId, card }
+         init(from d: Decoder) throws {
+             let c = try d.container(keyedBy: K.self)
+             type = try c.decode(String.self, forKey: .type)
+@@ -72,6 +76,8 @@ public struct ClaudeLiveEventFilter: Sendable {
+             id = try? c.decodeIfPresent(String.self, forKey: .id)
+             result = try? c.decodeIfPresent(ClaudeJobResult.self, forKey: .result)
+             call = try? c.decodeIfPresent(UiCall.self, forKey: .call)
++            messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
++            card = try? c.decodeIfPresent(ClaudeCardBox.self, forKey: .card)
+         }
+     }
+ 
+@@ -98,6 +104,9 @@ public struct ClaudeLiveEventFilter: Sendable {
+         case "result": return e.result.map { .result($0) }
+         case "uiCall": return e.call.map { .uiCall($0) }
+         case "uiCallEnd": return e.id.map { .uiCallEnd(id: $0) }
++        case "card":
++            guard let tid = e.threadId, let mid = e.messageId, let card = e.card else { return nil }
++            return .card(threadId: tid, messageId: mid, card)
+         default: return nil
+         }
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift
+new file mode 100644
+index 0000000..11279c3
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift
+@@ -0,0 +1,159 @@
++import Foundation
++
++// Claude's orb (owner, 2026-11-12; plans/design/claude-panel/orb-states-*.png): MUSE's own design, a small dark glass
++// sphere with one swirling light band in the theme's accent. It sits in the panel header, beside the reply being written,
++// in the activity strip, and floats over the app while Claude operates MUSE with the panel closed. The panel's edge
++// glows in step with it. ONE state machine, fed only by real events (the chat stream, ui-control calls, cards, jobs),
++// never by a timer of its own; the views read `look` and `pulse(at:)` and draw. Pure, so Android can port it as is.
++
++public enum ClaudeOrbState: String, Sendable, CaseIterable {
++    /// Nothing happening: slow breathing.
++    case idle
++    /// A turn runs (thinking, writing, a tool): the swirl speeds up and pulses with each streamed chunk.
++    case thinking
++    /// Claude operates the MUSE window: a directional sweep, a flash per action and per change applied.
++    case operating
++    /// An Approve card or a question waits for the person: a steady glow with a slow pulse.
++    case waiting
++    /// The last turn or action failed: the glass takes the danger tint (the band goes grey and still).
++    case error
++}
++
++/// How the orb (and the panel's edge) looks in a state. Numbers, not colours: the view takes the theme's accent, and
++/// the danger colour when `danger` is set.
++public struct ClaudeOrbLook: Hashable, Sendable {
++    /// Band turns per second (0: still).
++    public var swirl: Double
++    /// Band brightness and the halo around the sphere, 0…1.
++    public var band: Double
++    public var glow: Double
++    /// Seconds per breath (0: no breathing).
++    public var breath: Double
++    /// How much a breath moves the glow, 0…1.
++    public var breathDepth: Double
++    /// The operating sweep across the glass.
++    public var sweep: Bool
++    /// Pulses (chunks, ui actions, changes) show as a flash.
++    public var flashes: Bool
++    public var danger: Bool
++    /// The panel's living edge: its glow, 0…1 (the view multiplies the accent's alpha by it).
++    public var edge: Double
++}
++
++public struct ClaudeOrb: Hashable, Sendable {
++    public private(set) var turnRunning = false
++    public private(set) var openUiCalls: Set<String> = []
++    public private(set) var waitingCount = 0
++    public private(set) var jobRunning = false
++    public private(set) var errorUntil: Double?
++    /// Pulses so far (a chunk, a ui action, a change applied) and when the last one came.
++    public private(set) var pulses = 0
++    public private(set) var lastPulseAt: Double = -.infinity
++    /// The person is typing in the composer: the edge stays quiet.
++    public var typing = false
++
++    /// An error tints the orb this long, or until the person writes again.
++    public static let errorHold: Double = 8
++    /// A flash fades out over this long.
++    public static let flashDecay: Double = 0.6
++
++    public init() {}
++
++    // MARK: Events in
++
++    /// The person sent a message (or a phone turn started): a new turn; a past error is cleared.
++    public mutating func turnStarted() { turnRunning = true; errorUntil = nil }
++    /// A streamed chunk of Claude's text (or a tool step): a pulse while thinking.
++    public mutating func chunk(at now: Double) { turnRunning = true; pulse(now) }
++    /// The turn ended; a failed one tints the orb for `errorHold` seconds.
++    public mutating func turnEnded(ok: Bool, at now: Double) {
++        turnRunning = false
++        if !ok { errorUntil = now + Self.errorHold }
++    }
++    /// Claude operates the window (a uiCall): operating, with a flash.
++    public mutating func uiCallBegan(_ id: String, at now: Double) { openUiCalls.insert(id); pulse(now) }
++    public mutating func uiCallEnded(_ id: String, ok: Bool = true, at now: Double) {
++        openUiCalls.remove(id)
++        if !ok { errorUntil = now + Self.errorHold }
++    }
++    /// The person pressed Esc / "Esc to stop": the window calls end at once.
++    public mutating func stopped() { openUiCalls.removeAll() }
++    /// A change landed (What I changed, an edit op): a flash.
++    public mutating func changeApplied(at now: Double) { pulse(now) }
++    /// How many Approve cards or questions wait for the person.
++    public mutating func waiting(_ count: Int) { waitingCount = max(0, count) }
++    /// A job Claude started runs (or ended).
++    public mutating func job(running: Bool, failed: Bool = false, at now: Double) {
++        jobRunning = running
++        if failed { errorUntil = now + Self.errorHold }
++    }
++
++    private mutating func pulse(_ now: Double) { pulses += 1; lastPulseAt = now }
++
++    // MARK: What it shows
++
++    /// The state at `now`. Error first (it must be seen), then operating, thinking, waiting, idle.
++    public func state(at now: Double) -> ClaudeOrbState {
++        if let e = errorUntil, now < e { return .error }
++        if !openUiCalls.isEmpty { return .operating }
++        if turnRunning || jobRunning { return .thinking }
++        if waitingCount > 0 { return .waiting }
++        return .idle
++    }
++
++    /// The flash of the last pulse at `now`, 1 → 0 over `flashDecay` (0 under Reduce Motion: no flashes).
++    public func pulse(at now: Double, reduceMotion: Bool = false) -> Double {
++        guard !reduceMotion, now >= lastPulseAt else { return 0 }
++        let t = (now - lastPulseAt) / Self.flashDecay
++        return t >= 0.999 ? 0 : (1 - t) * (1 - t)
++    }
++
++    /// The look of a state. Reduce Motion keeps only static tint and glow changes: no swirl, breath, sweep or flash.
++    public static func look(_ s: ClaudeOrbState, reduceMotion: Bool = false, typing: Bool = false) -> ClaudeOrbLook {
++        var l: ClaudeOrbLook
++        switch s {
++        case .idle: l = ClaudeOrbLook(swirl: 0.05, band: 0.55, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
++        case .thinking: l = ClaudeOrbLook(swirl: 0.35, band: 0.95, glow: 0.28, breath: 2.4, breathDepth: 0.25, sweep: false, flashes: true, danger: false, edge: 0.30)
++        case .operating: l = ClaudeOrbLook(swirl: 0.25, band: 0.85, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
++        case .waiting: l = ClaudeOrbLook(swirl: 0.03, band: 0.70, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
++        case .error: l = ClaudeOrbLook(swirl: 0, band: 0.35, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
++        }
++        if reduceMotion { l.swirl = 0; l.breath = 0; l.breathDepth = 0; l.sweep = false; l.flashes = false }
++        // While the person types, the edge stays calm: at most the idle glow, never pulsing.
++        if typing { l.edge = min(l.edge, 0.15) }
++        return l
++    }
++
++    public func look(at now: Double, reduceMotion: Bool = false) -> ClaudeOrbLook {
++        Self.look(state(at: now), reduceMotion: reduceMotion, typing: typing)
++    }
++
++    /// The glow 0…1 at `now`: the state's glow, the breath, and the flash of the last pulse. One number drives both the
++    /// orb's halo and the panel's edge, so they move together.
++    public func glow(at now: Double, reduceMotion: Bool = false) -> Double {
++        let l = look(at: now, reduceMotion: reduceMotion)
++        var g = l.glow
++        if l.breath > 0 { g *= 1 - l.breathDepth * 0.5 * (1 - cos(2 * .pi * now / l.breath)) }
++        if l.flashes && !typing { g += (1 - g) * 0.6 * pulse(at: now, reduceMotion: reduceMotion) }
++        return min(1, max(0, g))
++    }
++
++    /// The edge's glow at `now` (the same rhythm as the orb, scaled to the state's edge strength).
++    public func edge(at now: Double, reduceMotion: Bool = false) -> Double {
++        let l = look(at: now, reduceMotion: reduceMotion)
++        let base = l.glow > 0 ? glow(at: now, reduceMotion: reduceMotion) / l.glow : 1
++        return min(1, max(0, l.edge * base))
++    }
++
++    /// Whether anything moves at `now` (the view stops its timeline when nothing does, to save CPU and GPU).
++    public func animates(at now: Double, reduceMotion: Bool = false) -> Bool {
++        let l = look(at: now, reduceMotion: reduceMotion)
++        return l.swirl > 0 || l.breath > 0 || l.sweep || pulse(at: now, reduceMotion: reduceMotion) > 0
++    }
++
++    /// Frames per second the view should draw at: low in idle, capped at 30.
++    public func frameRate(at now: Double, reduceMotion: Bool = false) -> Double {
++        guard animates(at: now, reduceMotion: reduceMotion) else { return 0 }
++        return state(at: now) == .idle ? 12 : 30
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift
+index dbfcf1a..85941fc 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift
+@@ -7,10 +7,12 @@ public enum ClaudeChatItem: Hashable, Sendable, Identifiable {
+     case tool(id: String, name: String, summary: String, status: ClaudeToolStatus)
+     /// `url` is the server's link, or a `data:` URL while the turn is live.
+     case image(id: String, url: String)
++    /// A card Claude put up (claude/cards.ts): plan, clip, what changed, approve. `messageId` is the stored line (Undo).
++    case card(id: String, messageId: String, ClaudeCard)
+ 
+     public var id: String {
+         switch self {
+-        case .user(let id, _, _), .assistant(let id, _, _), .tool(let id, _, _, _), .image(let id, _): return id
++        case .user(let id, _, _), .assistant(let id, _, _), .tool(let id, _, _, _), .image(let id, _), .card(let id, _, _): return id
+         }
+     }
+ }
+@@ -153,6 +155,15 @@ public struct ClaudeTranscript: Hashable, Sendable {
+         var out: [ClaudeChatItem] = []
+         var toolAt: [String: Int] = [:]
+         for m in messages {
++            // A card line (a newer server): drawn as its card; an unknown card falls back to the tool chip.
++            if let t = m.tool, let box = t.ui?.card, box.card.kind != "", !{ if case .unknown = box.card { return true }; return false }() {
++                let item = ClaudeChatItem.card(id: t.id, messageId: m.id, box.card)
++                if let i = toolAt[t.id] { out[i] = item } else {
++                    toolAt[t.id] = out.count
++                    out.append(item)
++                }
++                continue
++            }
+             if let t = m.tool {
+                 let status: ClaudeToolStatus = t.ok == false ? .error : t.ok == true ? .done : .running
+                 let item = ClaudeChatItem.tool(id: t.id, name: t.name, summary: t.summary ?? ClaudeChipText.words(t.name), status: status)
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift
+index 166df3c..42b4db9 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeUiControl.swift
+@@ -13,11 +13,14 @@ public struct UiCall: Codable, Hashable, Sendable, Identifiable {
+     public var kind: String
+     public var args: JSONValue
+     public var expiresAt: Double?
+-    public init(id: String, kind: String, args: JSONValue = .object([:]), expiresAt: Double? = nil) {
++    /// The activity strip's words for this call ("Choosing Swap…"); older servers send none.
++    public var step: String?
++    public init(id: String, kind: String, args: JSONValue = .object([:]), expiresAt: Double? = nil, step: String? = nil) {
+         self.id = id
+         self.kind = kind
+         self.args = args
+         self.expiresAt = expiresAt
++        self.step = step
+     }
+ }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift b/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
+index 0b88474..568e97b 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
+@@ -93,13 +93,16 @@ public struct ClaudeUI: Codable, Hashable, Sendable {
+     /// approve_result: the action it answers and how it ended (done, failed, declined).
+     public var action: String?
+     public var status: String?
++    /// A card (claude/cards.ts): plan, clip, what changed, approve with price lines. Drawn instead of the plain line.
++    public var card: ClaudeCardBox?
+ 
+     public init(page: String? = nil, id: String? = nil, tool: String? = nil, label: String? = nil, ask: Bool? = nil, from: ClaudePage? = nil,
+                 remembered: String? = nil, text: String? = nil, suggest: String? = nil, area: String? = nil, characterId: String? = nil,
+-                approve: String? = nil, gate: String? = nil, summary: String? = nil, priceUsd: Double? = nil, action: String? = nil, status: String? = nil) {
++                approve: String? = nil, gate: String? = nil, summary: String? = nil, priceUsd: Double? = nil, action: String? = nil, status: String? = nil, card: ClaudeCardBox? = nil) {
+         self.page = page; self.id = id; self.tool = tool; self.label = label; self.ask = ask; self.from = from
+         self.remembered = remembered; self.text = text; self.suggest = suggest; self.area = area; self.characterId = characterId
+         self.approve = approve; self.gate = gate; self.summary = summary; self.priceUsd = priceUsd; self.action = action; self.status = status
++        self.card = card
+     }
+ 
+     /// Where it goes, as the person reads it ("AI Suite, Shot", "Take, Sunset walk 3").
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ChatLeakFilterTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ChatLeakFilterTests.swift
+index e457bb6..05f1617 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ChatLeakFilterTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ChatLeakFilterTests.swift
+@@ -132,6 +132,7 @@ final class ChatLeakFilterTests: XCTestCase {
+                     shown.append(ChatMarkdown.plainText(ChatMarkdown.parse(ChatLeakFilter.reply(text), streaming: streaming)))
+                 case .tool(_, let name, let summary, _): shown.append(ChatLeakFilter.toolSummary(summary, name: name))
+                 case .image: break
++                case .card: break
+                 }
+             }
+             let all = shown.joined(separator: "\n")
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
+new file mode 100644
+index 0000000..c6eaa83
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
+@@ -0,0 +1,171 @@
++import XCTest
++@testable import MuseCore
++
++// Claude panel cards (server/api/src/claude/cards.ts): the JSON the server sends decodes into the cards the panel draws,
++// unknown cards are skipped (never an error), and the activity strip reads as the owner's reference.
++final class ClaudeCardsTests: XCTestCase {
++    private func card(_ json: String) throws -> ClaudeCard {
++        try JSONDecoder().decode(ClaudeCardBox.self, from: Data(json.utf8)).card
++    }
++
++    func testPlanMediaChangesApproveDecode() throws {
++        let plan = try card(#"{"kind":"plan","planId":"swap","title":"Plan: outfit swap","steps":[{"text":"Watch the clip","done":true},{"text":"Swap the outfit","done":false},{"text":"Render"}]}"#)
++        XCTAssertEqual(plan.progress?.done, 1)
++        XCTAssertEqual(plan.progress?.of, 3)
++
++        let media = try card(#"{"kind":"media","title":"Clip analysis","summary":"Three moments","durationSec":15,"video":{"id":"tk_1","kind":"take","url":"/uploads/s/a.mp4"},"moments":[{"from":4,"to":10,"label":"Face toward camera"},{"from":11,"label":"Closing shot"}]}"#)
++        guard case .media(_, let summary, let video, let dur, let moments) = media else { return XCTFail("media") }
++        XCTAssertEqual(summary, "Three moments")
++        XCTAssertEqual(video.url, "/uploads/s/a.mp4")
++        XCTAssertEqual(dur, 15)
++        XCTAssertEqual(moments.map(\.timecode), ["0:04–0:10", "0:11"])
++
++        let changes = try card(#"{"kind":"changes","title":"What I changed","rows":[{"what":"Outfit","to":"Hoodie","undoable":true},{"what":"Background","to":"Describe it","undone":true}]}"#)
++        guard case .changes(_, let rows) = changes else { return XCTFail("changes") }
++        XCTAssertEqual(rows.map(\.undoable), [true, false])
++        XCTAssertEqual(ClaudeCardText.change(rows[0]), "Outfit changed to Hoodie")
++
++        let approve = try card(#"{"kind":"approve","title":"Generate · 15 s · $1.17","subtitle":"A new version","lines":[{"label":"Video, 15 s at $0.066/s","usd":0.99},{"label":"2 reference images past the 5 included","usd":0.18}],"totalUsd":1.17,"answer":{"assistId":"sa_1","pendingId":"sp_2"},"approveLabel":"Approve","declineLabel":"Decline"}"#)
++        guard case .approve(let title, _, let lines, let total, let target, _, _) = approve else { return XCTFail("approve") }
++        XCTAssertEqual(title, "Generate · 15 s · $1.17")
++        XCTAssertEqual(ClaudeCardText.money(ClaudeCardText.total(lines, total)), "$1.17")
++        XCTAssertEqual(ClaudeCardText.total(lines, nil), 1.17)
++        XCTAssertEqual(target, .suite(assistId: "sa_1", pendingId: "sp_2"))
++        let action = try card(#"{"kind":"approve","title":"Delete the take","answer":{"actionId":"ca_9"}}"#)
++        guard case .approve(_, _, let none, _, .action("ca_9"), "Approve", "Decline") = action else { return XCTFail("action") }
++        XCTAssertTrue(none.isEmpty)
++    }
++
++    func testUnknownOrBrokenCardsAreSkippedNotErrors() throws {
++        XCTAssertEqual(try card(#"{"kind":"poll","options":[1,2]}"#), .unknown(kind: "poll"))
++        XCTAssertEqual(try card(#"{"kind":"approve","title":"No answer"}"#), .unknown(kind: "approve"))
++        // A tool line with a card still decodes as a whole, and keeps the raw JSON when encoded again.
++        let ui = try JSONDecoder().decode(ClaudeUI.self, from: Data(#"{"card":{"kind":"plan","steps":[{"text":"A"}]},"approve":"ca_1"}"#.utf8))
++        XCTAssertEqual(ui.card?.card.kind, "plan")
++        XCTAssertEqual(ui.approve, "ca_1")
++        let again = try JSONDecoder().decode(ClaudeUI.self, from: JSONEncoder().encode(ui))
++        XCTAssertEqual(again, ui)
++    }
++
++    func testLiveCardEventAndUiCallStep() {
++        let e = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"card","threadId":"ct_1","messageId":"cm_2","card":{"kind":"plan","steps":[{"text":"A","done":true}]}}"#.utf8))
++        guard case .card("ct_1", "cm_2", let box)? = e else { return XCTFail("card event") }
++        XCTAssertEqual(box.card.progress?.done, 1)
++        let c = ClaudeLiveEventFilter.parse(Data(#"{"type":"claude","op":"uiCall","call":{"id":"ui_1","kind":"act","args":{},"step":"Choosing Swap…"}}"#.utf8))
++        guard case .uiCall(let call)? = c else { return XCTFail("uiCall") }
++        XCTAssertEqual(call.step, "Choosing Swap…")
++    }
++
++    func testActivityStripReadsLikeTheReference() {
++        var a = ClaudeActivity()
++        XCTAssertFalse(a.isActive)
++        a.began(UiCall(id: "1", kind: "act", step: "Opening Swap…"))
++        a.began(UiCall(id: "2", kind: "act", step: "Setting outfit…"))
++        XCTAssertEqual(a.line, "Opening Swap… setting outfit…")
++        a.job(0.42)
++        XCTAssertEqual(a.percent, "42%")
++        a.ended("1"); a.ended("2")
++        XCTAssertTrue(a.isActive) // the job still runs
++        a.job(nil)
++        XCTAssertFalse(a.isActive)
++        XCTAssertEqual(a.line, "")
++        a.began(UiCall(id: "3", kind: "snapshot"))
++        XCTAssertEqual(a.line, "Working in the window…") // an older server: no step
++        a.stop()
++        XCTAssertFalse(a.isActive)
++    }
++
++    func testChipsFallbackFitsThePage() async throws {
++        XCTAssertEqual(ClaudeChip.fallback(page: "suite", tool: "remix").map(\.label), ["Watch my clip", "Write the prompt", "Check the price"])
++        XCTAssertEqual(ClaudeChip.fallback(page: "suite", tool: "shot").first?.label, "Write the prompt")
++        XCTAssertEqual(ClaudeChip.fallback(page: nil, tool: nil).count, 3)
++        XCTAssertEqual(ClaudeCardText.clock(3725), "1:02:05")
++    }
++}
++
++final class ClaudeCardsTranscriptTests: XCTestCase {
++    func testStoredCardLinesBecomeCardItemsInPlace() throws {
++        func msg(_ id: String, _ json: String, at: Double) throws -> ClaudeMessage {
++            try JSONDecoder().decode(ClaudeMessage.self, from: Data("""
++            {"id":"\(id)","threadId":"ct","role":"tool","source":"api","text":"","tool":{"id":"ui_1","name":"card","ok":true,"summary":"Plan","ui":{"card":\(json)}},"createdAt":\(at)}
++            """.utf8))
++        }
++        var tr = ClaudeTranscript(messages: [try msg("cm_1", #"{"kind":"plan","steps":[{"text":"A"},{"text":"B"}]}"#, at: 1)])
++        guard case .card(_, "cm_1", let c)? = tr.items.first else { return XCTFail("card item") }
++        XCTAssertEqual(c.progress?.done, 0)
++        // The same line again (show_plan ticked a step): replaced in place, not added.
++        tr.upsert(try msg("cm_1", #"{"kind":"plan","steps":[{"text":"A","done":true},{"text":"B"}]}"#, at: 1))
++        XCTAssertEqual(tr.items.count, 1)
++        guard case .card(_, _, let c2)? = tr.items.first else { return XCTFail("card item") }
++        XCTAssertEqual(c2.progress?.done, 1)
++        // An unknown card stays a plain tool chip.
++        tr.upsert(try msg("cm_2", #"{"kind":"poll"}"#, at: 2).withToolId("ui_2"))
++        guard case .tool? = tr.items.last else { return XCTFail("tool chip") }
++    }
++}
++
++private extension ClaudeMessage {
++    func withToolId(_ id: String) -> ClaudeMessage { var m = self; m.tool?.id = id; return m }
++}
++
++final class ClaudeOrbTests: XCTestCase {
++    func testStatesFollowRealEventsWithErrorFirst() {
++        var o = ClaudeOrb()
++        XCTAssertEqual(o.state(at: 0), .idle)
++        o.waiting(1)
++        XCTAssertEqual(o.state(at: 0), .waiting)
++        o.turnStarted()
++        XCTAssertEqual(o.state(at: 1), .thinking)
++        o.uiCallBegan("ui_1", at: 2)
++        XCTAssertEqual(o.state(at: 2), .operating)
++        o.uiCallEnded("ui_1", at: 3)
++        XCTAssertEqual(o.state(at: 3), .thinking)
++        o.turnEnded(ok: false, at: 4)
++        XCTAssertEqual(o.state(at: 5), .error)
++        XCTAssertEqual(o.state(at: 4 + ClaudeOrb.errorHold + 0.1), .waiting) // the error fades; the card still waits
++        o.waiting(0)
++        XCTAssertEqual(o.state(at: 20), .idle)
++        o.turnEnded(ok: false, at: 21)
++        o.turnStarted() // the person writes again: the error clears at once
++        XCTAssertEqual(o.state(at: 22), .thinking)
++        o.turnEnded(ok: true, at: 23)
++        o.job(running: true, at: 23)
++        XCTAssertEqual(o.state(at: 24), .thinking)
++        o.job(running: false, failed: true, at: 25)
++        XCTAssertEqual(o.state(at: 26), .error)
++        o.uiCallBegan("ui_2", at: 27); o.stopped()
++        XCTAssertEqual(o.state(at: 40), .idle)
++    }
++
++    func testPulsesFlashAndFadeEdgeFollowsOrb() {
++        var o = ClaudeOrb()
++        o.turnStarted()
++        o.chunk(at: 10)
++        XCTAssertEqual(o.pulses, 1)
++        XCTAssertEqual(o.pulse(at: 10), 1)
++        XCTAssertGreaterThan(o.pulse(at: 10.2), 0)
++        XCTAssertEqual(o.pulse(at: 10 + ClaudeOrb.flashDecay), 0)
++        XCTAssertGreaterThan(o.glow(at: 10), o.glow(at: 11))
++        XCTAssertGreaterThan(o.edge(at: 10), o.edge(at: 11)) // the edge moves with the orb
++        o.changeApplied(at: 12)
++        XCTAssertEqual(o.pulses, 2)
++    }
++
++    func testReduceMotionTypingAndFrameRate() {
++        var o = ClaudeOrb()
++        o.turnStarted(); o.chunk(at: 1)
++        let still = o.look(at: 1, reduceMotion: true)
++        XCTAssertEqual(still.swirl, 0); XCTAssertEqual(still.breath, 0); XCTAssertFalse(still.flashes)
++        XCTAssertEqual(o.pulse(at: 1, reduceMotion: true), 0)
++        XCTAssertFalse(o.animates(at: 1, reduceMotion: true))
++        XCTAssertEqual(o.frameRate(at: 1, reduceMotion: true), 0)
++        XCTAssertEqual(o.frameRate(at: 1), 30)
++        o.turnEnded(ok: true, at: 2)
++        XCTAssertEqual(o.frameRate(at: 50), 12) // idle breathes slowly, at a low rate
++        o.typing = true
++        XCTAssertLessThanOrEqual(o.look(at: 50).edge, 0.15)
++        XCTAssertTrue(ClaudeOrb.look(.error).danger)
++        XCTAssertFalse(ClaudeOrb.look(.waiting).flashes)
++        for s in ClaudeOrbState.allCases { XCTAssertLessThanOrEqual(ClaudeOrb.look(s).edge, 0.5) } // subtle, always
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift
+index 139e387..9a8bcc7 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift
+@@ -192,6 +192,7 @@ final class ClaudeTests: XCTestCase {
+             case .assistant(_, let text, let s): return "assistant:\(text)\(s ? "…" : "")"
+             case .tool(_, let name, let summary, let st): return "tool:\(name):\(summary):\(st.rawValue)"
+             case .image(_, let url): return "image:\(url.prefix(21))"
++            case .card(_, _, let c): return "card:\(c.kind)"
+             }
+         }
+         XCTAssertEqual(kinds, [

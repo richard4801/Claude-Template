@@ -4,6 +4,12 @@
 import { badRequest } from '../errors.js';
 import type { EditTool } from '../editor/mcpTools.js';
 import { assistOf, suiteOptions } from './assist.js';
+import { and, eq, inArray } from 'drizzle-orm';
+import { clips, outfits } from '../db/schema.js';
+import { balance, draftChanges, postCard } from '../claude/cards.js';
+import { ownChat } from '../claude/chatTools.js';
+import { modelById } from './registry.js';
+import { modelName } from './plan.js';
 import { modelChoice } from '../engines/service.js';
 import { feed } from './feed.js';
 import { castOf, lookOf, seeBlocks, withLook } from './vision.js';
@@ -30,6 +36,22 @@ const AID = str(DRAFT_ID_HELP, 80);
 /** Bound by the app (never shown to Claude): the chat, and on the Camera page its session; they find the draft on screen. */
 const BOUND = { chatId: str('This chat (filled in for you)'), cameraSessionId: str('The camera session open on the Camera page (filled in for you)', 80) };
 const aid = (env: Parameters<EditTool['run']>[0], a: Record<string, unknown>) => resolveAssist(env, a);
+
+/** The "What I changed" card for one suite_set_draft, with the names the person knows (outfit, clip, model). */
+async function changesCard(env: Parameters<EditTool['run']>[0], a: Record<string, unknown>, assistId: string, before: Record<string, unknown>, after: Record<string, unknown>) {
+  const chatId = typeof a.chatId === 'string' && a.chatId ? a.chatId : env.user.chatId;
+  if (!chatId) return;
+  const ids = (k: string) => [before, after].flatMap(d => { const v = d[k]; const r = (d.remix ?? {}) as { outfit?: { outfitId?: unknown } };
+    return [v, k === 'outfitId' ? r.outfit?.outfitId : undefined].filter((x): x is string => typeof x === 'string'); });
+  const outfitIds = ids('outfitId'), clipIds = ids('clipId');
+  const of = outfitIds.length ? await env.ctx.db.select({ id: outfits.id, name: outfits.name }).from(outfits).where(and(eq(outfits.studioId, env.user.studioId), inArray(outfits.id, outfitIds))) : [];
+  const cl = clipIds.length ? await env.ctx.db.select({ id: clips.id, name: clips.name }).from(clips).where(and(eq(clips.studioId, env.user.studioId), inArray(clips.id, clipIds))) : [];
+  const rows = draftChanges(assistId, before, after, { outfit: x => of.find(o => o.id === x)?.name, clip: x => cl.find(c => c.id === x)?.name,
+    engine: x => { const m = modelById(x); return m ? modelName(m) : undefined; } });
+  if (!rows.length) return;
+  const chat = await ownChat(env.ctx, env.user, chatId);
+  await postCard(env.ctx, env.user, chat.id, { kind: 'changes', title: 'What I changed', rows });
+}
 
 export const SUITE_PROMPT = `You are MUSE's shot designer in the AI Suite, setting up one video shot with the studio owner inside the MUSE app.
 The owner describes the shot in words. You:
@@ -92,7 +114,11 @@ export const SUITE_TOOLS: EditTool[] = [
       engineModel: { type: ['string', 'null'], maxLength: 40, description: 'Pin the model (null = Auto). Swap / one-person Recast: genjutsu-light (or genjutsu) when the person wants the same moves with a new look or scene (outfit, background, added characters or products); Auto or a Recast model for the same scene with a new person. Say which you chose and why' }, resolution: { type: ['string', 'null'], maxLength: 20 } }),
     run: async (env, a) => {
       const { assistId: _a, chatId: _c, cameraSessionId: _s, ...rest } = a;
-      const v = await assistOf(env.ctx).set(env.user, await aid(env, a), rest);
+      const id = await aid(env, a);
+      const before = (await assistOf(env.ctx).get(env.user, id)).draft as Record<string, unknown>;
+      const v = await assistOf(env.ctx).set(env.user, id, rest);
+      // "What I changed" with Undo per row, in the chat (claude/cards.ts). Never stops the change itself.
+      await changesCard(env, a, id, before, v.draft as Record<string, unknown>).catch(() => undefined);
       // A model or outfit just put in: Claude sees them (her face and body front, every outfit angle).
       const modelId = typeof a.modelId === 'string' && a.modelId ? a.modelId : null, outfitId = typeof a.outfitId === 'string' && a.outfitId ? a.outfitId : null;
       if (!modelId && !outfitId) return v;
@@ -181,6 +207,14 @@ export const SUITE_TOOLS: EditTool[] = [
         return { needsConfirmation: true, estimateUsd: usd, label: e.estimate.buttonLabel, message: `This shot costs about $${usd.toFixed(2)}. Call again with confirm: true to ask the owner; it runs only after they approve it in the MUSE app.` };
       }
       const p = await svc.ask(env.user, id);
+      const chatId = typeof a.chatId === 'string' && a.chatId ? a.chatId : env.user.chatId;
+      if (chatId) {
+        const chat = await ownChat(env.ctx, env.user, chatId).catch(() => null);
+        const lines = p.breakdown?.lines.length ? balance(p.breakdown.lines, p.estimateUsd) : [{ label: 'Video', usd: p.estimateUsd }];
+        const draft = (await svc.get(env.user, id)).draft as { tool?: string };
+        if (chat) await postCard(env.ctx, env.user, chat.id, { kind: 'approve', title: p.label, subtitle: draft.tool === 'remix' ? 'A new version of your clip with these changes' : 'A new shot as set up in the composer',
+          lines, totalUsd: Math.round(p.estimateUsd * 100) / 100, answer: { assistId: id, pendingId: p.id }, approveLabel: 'Approve', declineLabel: 'Decline' }).catch(() => undefined);
+      }
       return { waitingForOwner: true, pendingId: p.id, estimateUsd: p.estimateUsd, message: 'The owner has been asked in the MUSE app. It runs only when they approve.' };
     },
   },
