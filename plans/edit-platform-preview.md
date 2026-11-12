@@ -128,5 +128,7 @@ Tests: `PlatformPreviewTest` (6), on the shared fixtures.
 - **Both layouts:** a warning pill at the bottom of the stage with "Move into the safe area" (48 dp target).
 - `EditAuditTest`: the view checks replace the old safe-area line.
 
+**Checks (Linux, Android SDK 36):** `:core:test` gave 193 tests with 0 failures; `:app:testDebugUnitTest` gave 2406 tests with 0 failures and 4 skipped. The app module compiles. `:app:assembleRelease` was not run here; Android CI runs it.
+
 **TakeViewer on Android:** nothing to remove. Android never got the viewer's skins, frames or safe zones (the swap-viewer work stopped at the Mac), so its viewer is already a clean player. When the Android TakeViewer is built, it must not get platform previews.
 

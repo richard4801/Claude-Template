@@ -1,0 +1,955 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+index b71dedf2..c845b95d 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+@@ -168,6 +168,7 @@ interface MuseService {
+     @POST("v1/edit-sessions/{id}/patch") suspend fun pushEditPatch(@Path("id") id: String, @Body r: EditPatchRequest): EditChangeResult
+     @POST("v1/edit-sessions/{id}/undo") suspend fun undoEditEntry(@Path("id") id: String, @Body r: EditUndoRequest): EditChangeResult
+     @POST("v1/edit-sessions/{id}/presence") suspend fun editPresence(@Path("id") id: String, @Body r: EditPresence): JsonObject
++    @GET("v1/preview/layouts") suspend fun previewLayouts(): JsonObject
+     @DELETE("v1/edit-sessions/{id}/presence/{device}") suspend fun leaveEditSession(@Path("id") id: String, @Path("device") device: String): retrofit2.Response<Unit>
+     @POST("v1/edit-sessions/{id}/frames/{rid}") suspend fun answerEditFrame(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditFrameAnswer): JsonObject
+     @POST("v1/edit-sessions/{id}/requests/{rid}") suspend fun answerEditRequest(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditRequestAnswer): JsonObject
+@@ -673,6 +674,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
+     override suspend fun pushEditPatch(id: String, req: EditPatchRequest) = call { pushEditPatch(id, req) }
+     override suspend fun undoEditEntry(id: String, req: EditUndoRequest) = call { undoEditEntry(id, req) }
+     override suspend fun editPresence(id: String, presence: EditPresence) { call { editPresence(id, presence) } }
++    override suspend fun previewLayouts(): JsonObject? = runCatching { call { previewLayouts() } }.getOrNull()
+     override suspend fun leaveEditSession(id: String, device: String) { call { leaveEditSession(id, device) } }
+     /** Always the image presign + PUT (the server checks the upload is an image of the studio; no confirm step). */
+     override suspend fun uploadEditFrame(png: ByteArray): String = putPresigned("image", "image/png", png) {}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index 26e309f4..fc143c24 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -1348,7 +1348,13 @@ data class EditAppRequest(
+ )
+ 
+ @Serializable
+-data class EditPresence(val device: String, val label: String = "", val platform: String = "other", val canRender: Boolean = true)
++data class EditPresence(val device: String, val label: String = "", val platform: String = "other", val canRender: Boolean = true,
++    /** Edit's preview on this device (plans/edit-platform-preview.md), so Claude knows what the person sees. */
++    val preview: EditPresencePreview? = null)
++
++/** The view ("clean", "tiktok" …) and the Safe area switch. */
++@Serializable
++data class EditPresencePreview(val view: String, val safeArea: Boolean = true)
+ 
+ @Serializable
+ data class EditSessionDto(
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+index 0d0244f8..86cb83e2 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+@@ -221,6 +221,8 @@ interface MuseApi {
+     /** Undoes one history entry (anyone's) as a new change. */
+     suspend fun undoEditEntry(id: String, req: EditUndoRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+     suspend fun editPresence(id: String, presence: EditPresence) {}
++    /** GET /v1/preview/layouts: Edit's platform views' safe zones (null: the defaults, e.g. offline or a demo). */
++    suspend fun previewLayouts(): kotlinx.serialization.json.JsonObject? = null
+     suspend fun leaveEditSession(id: String, device: String) {}
+     /** A PNG of a frame Claude asked for, uploaded with the image presign (`POST /v1/uploads/presign {kind:"image"}` + PUT): the upload id. */
+     suspend fun uploadEditFrame(png: ByteArray): String = throw ApiException("unsupported", "Uploading frames needs the studio server")
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditPlatformChrome.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditPlatformChrome.kt
+new file mode 100644
+index 00000000..d4458a4c
+--- /dev/null
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditPlatformChrome.kt
+@@ -0,0 +1,186 @@
++package studio.muse.app.ui.screens.edit
++
++import androidx.compose.foundation.Canvas
++import androidx.compose.foundation.background
++import androidx.compose.foundation.border
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.BoxWithConstraints
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.geometry.Size
++import androidx.compose.ui.graphics.Brush
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.PathEffect
++import androidx.compose.ui.graphics.drawscope.Stroke
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.unit.Dp
++import androidx.compose.ui.unit.dp
++import studio.muse.app.ui.theme.Ic
++import studio.muse.core.edit.PreviewView
++import studio.muse.core.edit.SafeZone
++
++// Edit's platform preview (owner decision 2026-11-12, plans/edit-platform-preview.md): each app's generic chrome drawn
++// over the edit (our own drawing: grey bars for text, Phosphor glyphs for buttons; no logos, no brand colours, no
++// platform type) and the red safe-area box. The same drawing as the Mac (Views/Edit/EditPlatformChrome.swift). The chrome
++// fills the canvas exactly: the canvas is what gets posted, so nothing is cropped.
++
++/** The safe box's red (the Edit guide's colour on both apps). */
++val SafeRed = Color(0xFFFF5A5F)
++
++/** The chrome for a view over a [w]×[h] canvas: the phone layouts on portrait, the landscape players on 16:9; Clean draws nothing. */
++@Composable
++fun EditPlatformChrome(view: PreviewView, landscape: Boolean, w: Dp, h: Dp) {
++    if (view == PreviewView.CLEAN) return
++    if (landscape) LandscapeChrome(view, w, h) else PhoneChrome(view, w, h)
++}
++
++/** The red dashed box: where the app leaves the picture clear (approximate). */
++@Composable
++fun SafeBoxGuide(zone: SafeZone, name: String) {
++    Canvas(Modifier.fillMaxSize().semantics { contentDescription = "Red box: $name. Keep faces and words inside it." }) {
++        drawRect(SafeRed.copy(alpha = .95f), Offset(size.width * zone.x.toFloat(), size.height * zone.y.toFloat()),
++            Size(size.width * zone.w.toFloat(), size.height * zone.h.toFloat()),
++            style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))))
++    }
++}
++
++@Composable
++private fun ChromeBar(w: Dp, h: Dp, dim: Boolean = false) =
++    Box(Modifier.size(w, h).clip(RoundedCornerShape(h / 2)).background(Color.White.copy(alpha = if (dim) .55f else .85f)))
++
++@Composable
++private fun Glyph(name: String, size: Dp, count: Boolean = true) {
++    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(size * .12f)) {
++        Ic(name, size * .8f, Color.White)
++        if (count) ChromeBar(size * .7f, maxOf(3.dp, size * .2f))
++    }
++}
++
++@Composable
++private fun Avatar(d: Dp) = Box(Modifier.size(d).clip(CircleShape).background(Color.White.copy(alpha = .75f)).border(1.5.dp, Color.White, CircleShape))
++
++/** A phone app's layout: status bar, top bar, the right-hand rail, the caption block and the bottom navigation. */
++@Composable
++private fun PhoneChrome(view: PreviewView, w: Dp, h: Dp) {
++    val k = w.value / 300f
++    val nav = (56 * k).dp
++    val icon = (26 * k).dp
++    fun d(v: Number) = (v.toFloat() * k).dp
++    Box(Modifier.size(w, h).semantics { contentDescription = "${view.label} layout" }) {
++        Row(Modifier.fillMaxWidth().padding(start = d(18), end = d(18), top = d(8)), horizontalArrangement = Arrangement.SpaceBetween) {
++            ChromeBar(d(28), d(7)); ChromeBar(d(40), d(7))
++        }
++        // Top bar.
++        when (view) {
++            PreviewView.TIKTOK -> Box(Modifier.fillMaxWidth().padding(start = d(14), end = d(14), top = d(32))) {
++                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(d(14))) { ChromeBar(d(50), d(8), dim = true); ChromeBar(d(44), d(8)) }
++                Box(Modifier.align(Alignment.CenterEnd)) { Ic("magnifying-glass", d(18), Color.White) }
++            }
++            PreviewView.REELS -> Row(Modifier.fillMaxWidth().padding(start = d(14), end = d(14), top = d(32)), verticalAlignment = Alignment.CenterVertically) {
++                ChromeBar(d(54), d(10)); Spacer(Modifier.weight(1f)); Ic("camera", d(18), Color.White)
++            }
++            PreviewView.SHORTS -> Row(Modifier.fillMaxWidth().padding(start = d(14), end = d(14), top = d(30)), horizontalArrangement = Arrangement.spacedBy(d(16), Alignment.End)) {
++                Ic("magnifying-glass", d(18), Color.White); Ic("dots-three-vertical", d(18), Color.White)
++            }
++            else -> Row(Modifier.fillMaxWidth().padding(start = d(14), end = d(14), top = d(30)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(14))) {
++                Ic("caret-left", d(18), Color.White); ChromeBar(d(48), d(10)); Spacer(Modifier.weight(1f)); Ic("magnifying-glass", d(18), Color.White); Ic("user-circle", d(18), Color.White)
++            }
++        }
++        // Right-hand rail.
++        Column(Modifier.align(Alignment.BottomEnd).padding(end = d(10), bottom = nav + d(16)), horizontalAlignment = Alignment.CenterHorizontally,
++            verticalArrangement = Arrangement.spacedBy(d(16))) {
++            when (view) {
++                PreviewView.TIKTOK -> {
++                    Avatar(d(40)); Glyph("heart", icon); Glyph("chat-circle-dots", icon); Glyph("bookmark-simple", icon); Glyph("share-fat", icon)
++                    Box(Modifier.size(d(32)).clip(CircleShape).background(Color(0xFF333333)).border(d(5), Color(0xFF121212), CircleShape))
++                }
++                PreviewView.REELS -> {
++                    Glyph("heart", icon); Glyph("chat-circle", icon); Glyph("paper-plane-tilt", icon); Glyph("dots-three-vertical", icon, count = false)
++                    Box(Modifier.size(d(26)).clip(RoundedCornerShape(d(5))).background(Color.White.copy(alpha = .6f)))
++                }
++                PreviewView.SHORTS -> {
++                    Glyph("thumbs-up", icon); Glyph("thumbs-down", icon, count = false); Glyph("chat-circle-dots", icon); Glyph("share-fat", icon); Glyph("arrows-clockwise", icon)
++                    Box(Modifier.size(d(28)).clip(RoundedCornerShape(d(6))).background(Color.White.copy(alpha = .6f)))
++                }
++                else -> { Glyph("thumbs-up", icon); Glyph("chat-circle", icon); Glyph("share-fat", icon); Glyph("dots-three", icon, count = false) }
++            }
++        }
++        // Caption block.
++        val cw = w * .62f
++        Column(Modifier.align(Alignment.BottomStart).padding(start = d(12), bottom = nav + d(14)).width(cw), verticalArrangement = Arrangement.spacedBy(d(6))) {
++            when (view) {
++                PreviewView.TIKTOK -> ChromeBar(cw * .4f, d(9))
++                PreviewView.REELS -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(8))) {
++                    Avatar(d(26)); ChromeBar(cw * .34f, d(9))
++                    Box(Modifier.size(d(46), d(20)).border(d(1.2), Color.White.copy(alpha = .8f), RoundedCornerShape(d(6))))
++                }
++                PreviewView.SHORTS -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(8))) {
++                    Avatar(d(26)); ChromeBar(cw * .3f, d(9)); Box(Modifier.size(d(60), d(22)).clip(RoundedCornerShape(d(11))).background(Color.White.copy(alpha = .9f)))
++                }
++                else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(8))) {
++                    Avatar(d(26)); ChromeBar(cw * .3f, d(9)); Box(Modifier.size(d(44), d(20)).clip(RoundedCornerShape(d(6))).background(Color.White.copy(alpha = .25f)))
++                }
++            }
++            ChromeBar(cw * .92f, d(7), dim = true)
++            ChromeBar(cw * .64f, d(7), dim = true)
++            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(6))) { Ic("music-note", d(11), Color.White); ChromeBar(cw * .52f, d(6), dim = true) }
++        }
++        // Bottom navigation.
++        val navIcons = when (view) {
++            PreviewView.TIKTOK -> listOf("house", "users-three", "plus-square", "chat-circle", "user")
++            PreviewView.REELS -> listOf("house", "magnifying-glass", "plus-square", "film-strip", "user-circle")
++            PreviewView.SHORTS -> listOf("house", "lightning", "plus-circle", "play-circle", "user-circle")
++            else -> listOf("house", "video", "users-three", "bag", "bell")
++        }
++        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(nav).background(Color.Black.copy(alpha = .92f)).padding(bottom = d(6)),
++            verticalAlignment = Alignment.CenterVertically) {
++            navIcons.forEach { n -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Ic(n, d(18), Color.White) } }
++        }
++    }
++}
++
++/** A landscape player's chrome: the title row on top and the controls along the bottom. */
++@Composable
++private fun LandscapeChrome(view: PreviewView, w: Dp, h: Dp) {
++    val k = w.value / 640f
++    fun d(v: Number) = (v.toFloat() * k).dp
++    BoxWithConstraints(Modifier.size(w, h).semantics { contentDescription = "${view.label} layout" }) {
++        Box(Modifier.fillMaxWidth().height(h * .16f).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .55f), Color.Transparent))))
++        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(h * .18f).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .6f)))))
++        Row(Modifier.fillMaxWidth().padding(start = d(16), end = d(16), top = d(14)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(10))) {
++            Box(Modifier.size(d(26)).clip(CircleShape).background(Color.White.copy(alpha = .75f)))
++            ChromeBar(d(if (view == PreviewView.YOUTUBE) 180 else 120), d(10))
++            Spacer(Modifier.weight(1f))
++            if (view == PreviewView.YOUTUBE) { Ic("clock", d(15), Color.White); Ic("share-fat", d(15), Color.White) }
++        }
++        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = d(14), end = d(14), bottom = d(10)), verticalArrangement = Arrangement.spacedBy(d(8))) {
++            Box(Modifier.fillMaxWidth().height(d(3)).clip(RoundedCornerShape(d(2))).background(Color.White.copy(alpha = .35f))) {
++                Box(Modifier.fillMaxWidth(.28f).height(d(3)).background(Color.White))
++            }
++            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(14))) {
++                Ic("play", d(15), Color.White)
++                if (view == PreviewView.YOUTUBE) Ic("skip-forward", d(15), Color.White)
++                Ic("speaker-high", d(15), Color.White)
++                ChromeBar(d(70), d(7), dim = true)
++                Spacer(Modifier.weight(1f))
++                Ic("closed-captioning", d(15), Color.White); Ic("dots-three-vertical", d(15), Color.White); Ic("arrows-out-simple", d(15), Color.White)
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSessionSync.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSessionSync.kt
+index 6c8b23e1..ed88c6f0 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSessionSync.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSessionSync.kt
+@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.debounce
+ import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.drop
+ import kotlinx.coroutines.flow.map
+ import kotlinx.coroutines.isActive
+ import kotlinx.coroutines.launch
+@@ -21,6 +22,7 @@ import studio.muse.app.data.EditHistoryEntry
+ import studio.muse.app.data.EditPatchRequest
+ import studio.muse.app.data.EditPending
+ import studio.muse.app.data.EditPresence
++import studio.muse.app.data.EditPresencePreview
+ import studio.muse.app.data.EditRequestAnswer
+ import studio.muse.app.data.EditSessionDto
+ import studio.muse.app.data.EditUndoRequest
+@@ -119,6 +121,8 @@ class EditSessionSync(
+         jobs += scope.launch { events.collect { ev -> if (ev.type == "edit" && ev.sessionId == s.id) onEvent(ev) } }
+         jobs += scope.launch { controller.ui.map { it.project }.distinctUntilChanged().debounce(debounceMs).collect { flush() } }
+         jobs += scope.launch { while (isActive) { presence(); delay(presenceMs) } }
++        // Edit's view changed: Claude hears it at once, not at the next 30 s ping.
++        jobs += scope.launch { controller.ui.map { it.preview }.distinctUntilChanged().drop(1).collect { presence() } }
+         return true
+     }
+ 
+@@ -162,7 +166,9 @@ class EditSessionSync(
+ 
+     private suspend fun presence() {
+         val id = sessionId ?: return
+-        runCatching { api().editPresence(id, EditPresence(device, deviceLabel, "android", canRender = true)) }
++        val pv = controller.ui.value.preview
++        runCatching { api().editPresence(id, EditPresence(device, deviceLabel, "android", canRender = true,
++            preview = EditPresencePreview(pv.view.id, pv.safeArea))) }
+     }
+ 
+     private fun parse(el: JsonElement): EditProject? = runCatching { EditJson.parse(el) }.getOrNull()?.takeIf { problemOf(it, paletteIds = paletteIds) == null }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt
+index 1f59c3ba..8691f403 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteController.kt
+@@ -126,7 +126,11 @@ sealed interface EditAction {
+     data class Zoom(val pxPerSec: Float) : EditAction
+     data class Select(val id: String?) : EditAction
+     data class Open(val panel: Panel?) : EditAction
+-    data class SafeAreaOf(val area: SafeArea?) : EditAction
++    /** Edit's preview: the view (Clean, TikTok …) and the Safe area switch; remembered per project by the screen. */
++    data class PreviewOf(val preview: studio.muse.core.edit.EditPreview) : EditAction
++    data class PreviewLayoutsOf(val layouts: studio.muse.core.edit.PreviewLayouts) : EditAction
++    /** "Move into the safe area": captions and text just inside the red box, one undo step. */
++    data object MoveIntoSafeArea : EditAction
+     data object Fullscreen : EditAction
+     /** Tablet: "Hide inspector" / "Show inspector" (plans/edit-layout.md). */
+     data class InspectorHidden(val hidden: Boolean) : EditAction
+@@ -366,6 +370,8 @@ class EditSuiteController(
+ ) {
+ 
+     private val _ui = MutableStateFlow(initial)
++    /** Edit's preview changed by the person (the screen remembers it for the project; the session tells Claude). */
++    var onPreviewChanged: ((studio.muse.core.edit.EditPreview) -> Unit)? = null
+     val ui: StateFlow<EditSuiteUi> = _ui.asStateFlow()
+     private var history: ProjectHistory? = initial.project?.let { ProjectHistory(it) }
+     /** The project before the current drag (null when not dragging). */
+@@ -573,7 +579,17 @@ class EditSuiteController(
+             is EditAction.Zoom -> _ui.update { it.copy(pxPerSec = a.pxPerSec.coerceIn(8f, 240f)) }
+             is EditAction.Select -> _ui.update { it.copy(selectedId = a.id) }
+             is EditAction.Open -> open(a.panel)
+-            is EditAction.SafeAreaOf -> _ui.update { it.copy(safeArea = a.area) }
++            is EditAction.PreviewOf -> {
++                val c = u.project?.canvas
++                val next = if (c != null) a.preview.resolved(c.width, c.height) else a.preview
++                if (next != u.preview) { _ui.update { it.copy(preview = next) }; onPreviewChanged?.invoke(next) }
++            }
++            is EditAction.PreviewLayoutsOf -> _ui.update { it.copy(previewLayouts = a.layouts) }
++            EditAction.MoveIntoSafeArea -> {
++                val c = u.project?.canvas ?: return
++                val z = studio.muse.core.edit.EditSafeBox.zone(u.preview, c.width, c.height, u.previewLayouts) ?: return
++                if (change(refused = "Couldn't move them inside the safe area") { p -> studio.muse.core.edit.EditSafeCheck.fixed(p, z) }) say("Moved into the safe area")
++            }
+             EditAction.Fullscreen -> _ui.update { it.copy(fullscreen = !it.fullscreen) }
+             is EditAction.InspectorHidden -> _ui.update { it.copy(inspectorHidden = a.hidden) }
+             EditAction.ClearMessage -> _ui.update { it.copy(message = null) }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+index bc65b476..0b41630d 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+@@ -416,7 +416,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+     /** Edit sessions (workstream 3): the owner's live session with Claude (null for members / local only). */
+     private var sync: EditSessionSync? = null
+ 
++    /** Edit's preview choice per project (plans/edit-platform-preview.md), on this device. */
++    private val previewStore = app.getSharedPreferences("edit-preview", Context.MODE_PRIVATE)
++    private var previewKey: String? = null
++    private fun previewPrefs() = studio.muse.core.edit.EditPreviewPrefs.decode(previewStore.getString("prefs", null))
++
+     init {
++        controller.onPreviewChanged = { p ->
++            previewKey?.let { k -> previewStore.edit().putString("prefs", previewPrefs().set(p, k).encode()).apply() }
++        }
+         load()
+         loadKits()
+         viewModelScope.launch {
+@@ -485,6 +493,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+                 val project = projectFor(source, target?.initial)
+                 for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
+                 controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
++                // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
++                previewKey = source.id
++                controller.act(EditAction.PreviewOf(previewPrefs().choice(source.id)))
++                viewModelScope.launch { runCatching { c.repo.api.previewLayouts() }.getOrNull()?.let { controller.act(EditAction.PreviewLayoutsOf(studio.muse.core.edit.PreviewLayouts.parse(it))) } }
+                 startSession(source.id, project, fromVersion = if (target?.initial != null && take.kind == "edit") take.id else null)
+                 loadFrames(project)
+                 fetchTakeAssets(controller.project ?: project)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
+index 08c12ebe..966becd4 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
+@@ -39,10 +39,6 @@ enum class Panel(val title: String) {
+         }
+ }
+ 
+-/** Platform safe areas drawn over the preview (UI chrome of each app). */
+-enum class SafeArea(val label: String, val top: Float, val bottom: Float, val right: Float) {
+-    TIKTOK("TikTok", .11f, .20f, .16f), REELS("Reels", .10f, .22f, .14f), SHORTS("Shorts", .09f, .18f, .15f),
+-}
+ 
+ /** An AI helper's row: what it costs (shown before running), whether it runs, how far, and what went wrong. */
+ data class AiTask(
+@@ -159,7 +155,10 @@ data class EditSuiteUi(
+     /** The item the edit tools act on (a main clip by default: the one under the playhead). */
+     val selectedId: String? = null,
+     val panel: Panel? = null,
+-    val safeArea: SafeArea? = SafeArea.TIKTOK,
++    /** The preview's view (Clean or an app's chrome) and the red safe-area box (plans/edit-platform-preview.md). */
++    val preview: studio.muse.core.edit.EditPreview = studio.muse.core.edit.EditPreview(),
++    /** The views' safe zones: GET /v1/preview/layouts over the defaults. */
++    val previewLayouts: studio.muse.core.edit.PreviewLayouts = studio.muse.core.edit.PreviewLayouts.DEFAULTS,
+     /** Timeline zoom: dp per second (pinch). */
+     val pxPerSec: Float = 34f,
+     val phase: SuitePhase = SuitePhase.Loading(),
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditTablet.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditTablet.kt
+index 39c14502..031174b8 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditTablet.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditTablet.kt
+@@ -173,10 +173,18 @@ private fun Segmented(labels: List<String>, picked: Int, what: String, onPick: (
+ @Composable
+ private fun SafeAreaRow(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+     val m = muse
+-    val options = listOf<SafeArea?>(null) + SafeArea.entries
++    val c = ui.project?.canvas
++    val options = if (c != null) studio.muse.core.edit.PreviewView.options(c.width, c.height) else studio.muse.core.edit.PreviewView.options(1080, 1920)
++    val shown = if (c != null) ui.preview.resolved(c.width, c.height) else ui.preview
++    // "View" (Clean or an app's chrome over the edit) and the Safe area switch (plans/edit-platform-preview.md).
+     Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Pad), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+-        T("Safe area", m.scale.caption, m.t.muted, maxLines = 1)
+-        Segmented(options.map { it?.label ?: "Off" }, options.indexOf(ui.safeArea), "Safe area") { i -> act(EditAction.SafeAreaOf(options[i])) }
++        T("View", m.scale.caption, m.t.muted, maxLines = 1)
++        Segmented(options.map { it.label }, options.indexOf(shown.view), "View") { i -> act(EditAction.PreviewOf(ui.preview.copy(view = options[i]))) }
++        Row(Modifier.padding(start = 4.dp).semantics(mergeDescendants = true) { contentDescription = if (shown.safeArea) "Safe area on" else "Safe area off" },
++            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++            studio.muse.app.ui.components.Toggle(shown.safeArea, { act(EditAction.PreviewOf(ui.preview.copy(safeArea = !ui.preview.safeArea))) })
++            T("Safe area", m.scale.caption, m.t.ink, maxLines = 1)
++        }
+     }
+ }
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuitePreview.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuitePreview.kt
+index b1c0272e..5b88b5b1 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuitePreview.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/SuitePreview.kt
+@@ -1,6 +1,16 @@
+ package studio.muse.app.ui.screens.edit
+ 
+ import androidx.compose.ui.geometry.Size
++import androidx.compose.material3.DropdownMenu
++import androidx.compose.material3.DropdownMenuItem
++import androidx.compose.material3.HorizontalDivider
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import studio.muse.core.edit.EditSafeBox
++import studio.muse.core.edit.EditSafeCheck
++import studio.muse.core.edit.PreviewView
+ import androidx.compose.ui.graphics.drawscope.clipPath
+ import androidx.compose.ui.graphics.Path
+ import androidx.compose.foundation.gestures.awaitFirstDown
+@@ -78,7 +88,8 @@ val StageColor = Color(0xFF1B1916)
+ /**
+  * The preview (EM1): the canvas at its aspect on the dark stage, the picture from [picture] (the player on a phone, a
+  * still in screenshots), and — when [drawText] — the text, hooks and captions at the playhead in Compose (the player
+- * draws its own), plus the platform safe area and its switch.
++ * draws its own), plus Edit's platform view (an app's generic chrome) and the red safe box, the phone's view chip and the
++ * warning line when captions or text sit outside the box (plans/edit-platform-preview.md).
+  */
+ @Composable
+ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier, drawText: Boolean = true, picture: @Composable (Modifier) -> Unit,
+@@ -93,13 +104,20 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier
+         Box(Modifier.size(w, h).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
+             picture(Modifier.fillMaxSize())
+             if (p != null && drawText) Overlays(p, ui.playheadSec, w, h)
+-            ui.safeArea?.let { SafeAreaGuides(it) }
++            if (p != null) {
++                val pv = ui.preview.resolved(p.canvas.width, p.canvas.height)
++                EditPlatformChrome(pv.view, PreviewView.isLandscape(p.canvas.width, p.canvas.height), w, h)
++                EditSafeBox.zone(ui.preview, p.canvas.width, p.canvas.height, ui.previewLayouts)?.let { z ->
++                    SafeBoxGuide(z, EditSafeBox.name(ui.preview, p.canvas.width, p.canvas.height))
++                }
++            }
+             // Remove background → tap what to keep: taps on the paused picture, and where they are.
+             ui.keep?.let { k -> KeepTaps(k, act) }
+             // The chroma eyedropper: touch the colour to remove; a loupe shows the source pixels under the finger.
+             ui.pick?.let { pk -> PickOverlay(pk, act) }
+         }
+-        // Safe-area switch: TikTok → Reels → Shorts → off.
++        // Captions or text outside the red box: one line and the fix (both layouts).
++        if (p != null) SafeWarning(ui, act, Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
+         if (!safeChip) return@BoxWithConstraints
+         // Fullscreen (the phone): hides the timeline and tools; tap again to bring them back.
+         Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(48.dp).press { act(EditAction.Fullscreen) }.semantics { contentDescription = if (ui.fullscreen) "Exit fullscreen" else "Fullscreen" },
+@@ -108,29 +126,57 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier
+                 EIc("expand", 16.dp, Color.White)
+             }
+         }
+-        val next = when (ui.safeArea) { SafeArea.TIKTOK -> SafeArea.REELS; SafeArea.REELS -> SafeArea.SHORTS; SafeArea.SHORTS -> null; null -> SafeArea.TIKTOK }
+-        Row(
+-            Modifier.align(Alignment.TopStart).padding(10.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f))
+-                .border(1.dp, if (ui.safeArea != null) muse.t.accent else Color.White.copy(alpha = .3f), RoundedCornerShape(2.dp))
+-                .press { act(EditAction.SafeAreaOf(next)) }.padding(horizontal = 8.dp, vertical = 5.dp),
+-            verticalAlignment = Alignment.CenterVertically,
+-        ) { T(ui.safeArea?.label?.let { "$it safe area" } ?: "Safe area off", muse.scale.micro, Color.White, maxLines = 1) }
++        // The phone's view chip: the view and the switch in one small menu.
++        ViewChip(ui, act, Modifier.align(Alignment.TopStart).padding(4.dp))
+     }
+ }
+ 
+-/** The platform's UI zones as dashed lines and its side buttons. */
++/** The phone's view picker: a chip ("TikTok", "Clean") that opens the views and the Safe area switch. */
+ @Composable
+-private fun SafeAreaGuides(area: SafeArea) {
+-    Canvas(Modifier.fillMaxSize()) {
+-        val dash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
+-        val c = Color.White.copy(alpha = .55f)
+-        val top = size.height * area.top; val bottom = size.height * (1 - area.bottom); val right = size.width * (1 - area.right)
+-        drawLine(c, Offset(0f, top), Offset(size.width, top), 1.dp.toPx(), pathEffect = dash)
+-        drawLine(c, Offset(0f, bottom), Offset(size.width, bottom), 1.dp.toPx(), pathEffect = dash)
+-        drawLine(c, Offset(right, top), Offset(right, bottom), 1.dp.toPx(), pathEffect = dash)
++private fun ViewChip(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier) {
++    val p = ui.project ?: return
++    var open by remember { mutableStateOf(false) }
++    val shown = ui.preview.resolved(p.canvas.width, p.canvas.height)
++    Box(modifier) {
++        Box(Modifier.size(width = 112.dp, height = 48.dp).press { open = true }
++            .semantics { contentDescription = "View: ${shown.view.label}${if (shown.safeArea) ", safe area on" else ""}. Change the view" },
++            contentAlignment = Alignment.CenterStart) {
++            Row(Modifier.padding(start = 6.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f))
++                .border(1.dp, if (shown.view != PreviewView.CLEAN || shown.safeArea) muse.t.accent else Color.White.copy(alpha = .3f), RoundedCornerShape(2.dp))
++                .padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
++                T(shown.view.label, muse.scale.micro, Color.White, maxLines = 1)
++            }
++        }
++        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
++            PreviewView.options(p.canvas.width, p.canvas.height).forEach { v ->
++                DropdownMenuItem(text = { T(v.label, muse.scale.label, muse.t.ink, maxLines = 1) },
++                    trailingIcon = { if (v == shown.view) EIc("check", 18.dp, muse.t.accent) },
++                    onClick = { act(EditAction.PreviewOf(ui.preview.copy(view = v))); open = false })
++            }
++            HorizontalDivider()
++            DropdownMenuItem(text = { T("Safe area", muse.scale.label, muse.t.ink, maxLines = 1) },
++                trailingIcon = { studio.muse.app.ui.components.Toggle(shown.safeArea, { act(EditAction.PreviewOf(ui.preview.copy(safeArea = !ui.preview.safeArea))) }) },
++                onClick = { act(EditAction.PreviewOf(ui.preview.copy(safeArea = !ui.preview.safeArea))) })
++        }
+     }
+-    Column(Modifier.fillMaxSize().padding(end = 6.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.Center) {
+-        listOf("heart", "msg", "send").forEach { EIc(it, 15.dp, Color.White.copy(alpha = .85f), Modifier.padding(vertical = 5.dp)) }
++}
++
++/** "Captions sit under TikTok's caption and buttons (0:01–0:09)." and "Move into the safe area". */
++@Composable
++fun SafeWarning(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
++    val p = ui.project ?: return
++    val line = remember(p, ui.preview, ui.previewLayouts) {
++        val z = EditSafeBox.zone(ui.preview, p.canvas.width, p.canvas.height, ui.previewLayouts) ?: return@remember null
++        EditSafeCheck.line(EditSafeCheck.issues(p, z), EditSafeBox.covers(ui.preview, p.canvas.width, p.canvas.height))
++    } ?: return
++    Row(modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = .72f)).padding(start = 10.dp),
++        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++        EIc("warning", 14.dp, SafeRed)
++        T(line, muse.scale.micro, Color.White, Modifier.weight(1f, fill = false), maxLines = 2)
++        Box(Modifier.height(48.dp).press { act(EditAction.MoveIntoSafeArea) }.padding(horizontal = 10.dp)
++            .semantics { contentDescription = "Move into the safe area" }, contentAlignment = Alignment.Center) {
++            T("Move into the safe area", muse.scale.micro, muse.t.accent, maxLines = 1)
++        }
+     }
+ }
+ 
+diff --git a/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditAuditTest.kt b/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditAuditTest.kt
+index 3bc37429..e167228b 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditAuditTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/ui/screens/edit/EditAuditTest.kt
+@@ -109,7 +109,17 @@ class EditAuditTest {
+         c.act(EditAction.PlayPause); assertTrue(c.ui.value.playing)
+         c.act(EditAction.PlayPause); assertFalse(c.ui.value.playing)
+         c.act(EditAction.Fullscreen); assertTrue(c.ui.value.fullscreen)
+-        c.act(EditAction.SafeAreaOf(null)); assertNull(c.ui.value.safeArea)
++        // Edit's view (plans/edit-platform-preview.md): Clean with the box by default; a view the person picks is told
++        // to the screen (remembered per project) once; a view the canvas lacks shows as Clean.
++        val told = ArrayList<studio.muse.core.edit.EditPreview>()
++        c.onPreviewChanged = { told += it }
++        assertEquals(studio.muse.core.edit.EditPreview(), c.ui.value.preview)
++        val portrait = c.p().canvas.height > c.p().canvas.width
++        c.act(EditAction.PreviewOf(studio.muse.core.edit.EditPreview(studio.muse.core.edit.PreviewView.TIKTOK)))
++        assertEquals(if (portrait) studio.muse.core.edit.PreviewView.TIKTOK else studio.muse.core.edit.PreviewView.CLEAN, c.ui.value.preview.view)
++        c.act(EditAction.PreviewOf(c.ui.value.preview.copy(safeArea = false))); assertFalse(c.ui.value.preview.safeArea)
++        c.act(EditAction.PreviewOf(c.ui.value.preview)) // no change: not told again
++        assertEquals(if (portrait) 2 else 1, told.size)
+         c.act(EditAction.Seek(7.0)); assertEquals(7.0, c.ui.value.playheadSec, 1e-9)
+         c.act(EditAction.Zoom(80f)); assertEquals(80f, c.ui.value.pxPerSec)
+     }
+diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/PlatformPreview.kt b/android/core/src/main/kotlin/studio/muse/core/edit/PlatformPreview.kt
+new file mode 100644
+index 00000000..aa67c7db
+--- /dev/null
++++ b/android/core/src/main/kotlin/studio/muse/core/edit/PlatformPreview.kt
+@@ -0,0 +1,295 @@
++package studio.muse.core.edit
++
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import kotlinx.serialization.json.booleanOrNull
++import kotlinx.serialization.json.buildJsonArray
++import kotlinx.serialization.json.buildJsonObject
++import kotlinx.serialization.json.contentOrNull
++import kotlinx.serialization.json.doubleOrNull
++import kotlinx.serialization.json.jsonArray
++import kotlinx.serialization.json.jsonObject
++import kotlinx.serialization.json.jsonPrimitive
++import kotlinx.serialization.json.put
++import kotlin.math.ceil
++import kotlin.math.max
++import kotlin.math.min
++import kotlin.math.roundToInt
++
++// Edit's platform preview (owner decision 2026-11-12, plans/edit-platform-preview.md). The platform views live in Edit,
++// merged with its safe-area guide:
++// - View: Clean · TikTok · Reels · Shorts · Facebook (portrait, square, 4:5) or Clean · YouTube · Facebook (16:9). A
++//   platform view draws that app's generic chrome over the edit; Clean draws nothing.
++// - Safe area: a switch that works in every view. A platform view shows that app's red box; Clean shows the box safe on
++//   every app; landscape views use their own boxes (title-safe in Clean).
++// - Remembered per project, falling back to this device's last choice.
++// - The check that warns when captions or text sit outside the box.
++// The same rules as the Mac (MuseCore Edit/EditPlatformPreview.swift) and the server (src/editor/safeArea.ts).
++
++/** What Edit's preview shows over the edit. [id] is the wire name (presence, server table). */
++enum class PreviewView(val id: String, val label: String) {
++    CLEAN("clean", "Clean"), TIKTOK("tiktok", "TikTok"), REELS("reels", "Reels"), SHORTS("shorts", "Shorts"),
++    FACEBOOK("facebook", "Facebook"), YOUTUBE("youtube", "YouTube");
++
++    companion object {
++        fun of(id: String?): PreviewView? = entries.firstOrNull { it.id == id }
++        fun isLandscape(width: Int, height: Int): Boolean = width.toDouble() / max(1, height) > 1.05
++        /** The views for a canvas of this shape. */
++        fun options(width: Int, height: Int): List<PreviewView> =
++            if (isLandscape(width, height)) listOf(CLEAN, YOUTUBE, FACEBOOK) else listOf(CLEAN, TIKTOK, REELS, SHORTS, FACEBOOK)
++    }
++}
++
++/** The parts of the frame an app's own buttons and captions cover, as fractions of the frame. */
++data class SafeZone(val top: Double, val bottom: Double, val left: Double, val right: Double) {
++    private fun c(v: Double) = if (v.isFinite()) v.coerceIn(0.0, 0.5) else 0.0
++    val x get() = c(left)
++    val y get() = c(top)
++    val w get() = max(0.0, 1 - c(left) - c(right))
++    val h get() = max(0.0, 1 - c(top) - c(bottom))
++}
++
++/** The safe zones per view (GET /v1/preview/layouts merged over these defaults; approximate). */
++data class PreviewLayouts(val zones: Map<String, SafeZone>, val landscape: Map<String, SafeZone> = emptyMap(), val note: String? = null) {
++    fun zone(v: PreviewView): SafeZone? = if (v == PreviewView.CLEAN || v == PreviewView.YOUTUBE) null else zones[v.id] ?: DEFAULTS.zones[v.id]
++    fun landscapeZone(v: PreviewView): SafeZone? =
++        if (v != PreviewView.YOUTUBE && v != PreviewView.FACEBOOK) null else landscape[v.id] ?: DEFAULTS.landscape[v.id]
++
++    /** This table (the server's) over the defaults: a view it leaves out keeps its default. */
++    fun merged(): PreviewLayouts = PreviewLayouts(DEFAULTS.zones + zones, DEFAULTS.landscape + landscape, note ?: DEFAULTS.note)
++
++    companion object {
++        val DEFAULTS = PreviewLayouts(
++            zones = mapOf(
++                "tiktok" to SafeZone(.11, .29, .03, .17), "reels" to SafeZone(.10, .30, .03, .16),
++                "shorts" to SafeZone(.09, .30, .03, .17), "facebook" to SafeZone(.10, .28, .03, .16),
++            ),
++            landscape = mapOf("youtube" to SafeZone(.12, .16, .03, .03), "facebook" to SafeZone(.08, .16, .03, .03)),
++            note = "Approximate. Each app moves its buttons now and then.",
++        )
++
++        /** The server's reply (`{zones, landscape?, note?}`); a bad entry is left out. */
++        fun parse(o: JsonObject): PreviewLayouts {
++            fun zones(k: String) = (o[k] as? JsonObject)?.mapNotNull { (name, z) ->
++                val m = z as? JsonObject ?: return@mapNotNull null
++                fun d(f: String) = (m[f] as? JsonPrimitive)?.doubleOrNull
++                val t = d("top"); val b = d("bottom"); val r = d("right")
++                if (t == null || b == null || r == null) null else name to SafeZone(t, b, d("left") ?: 0.0, r)
++            }?.toMap() ?: emptyMap()
++            return PreviewLayouts(zones("zones"), zones("landscape"), (o["note"] as? JsonPrimitive)?.contentOrNull).merged()
++        }
++    }
++}
++
++/** The view and the Safe area switch. */
++data class EditPreview(val view: PreviewView = PreviewView.CLEAN, val safeArea: Boolean = true) {
++    /** The view this canvas can show (a TikTok choice on a 16:9 project shows Clean). */
++    fun resolved(width: Int, height: Int): EditPreview =
++        if (view in PreviewView.options(width, height)) this else copy(view = PreviewView.CLEAN)
++}
++
++object EditSafeBox {
++    val TITLE_SAFE = SafeZone(.05, .05, .05, .05)
++
++    /** The box safe on every phone app: the largest inset of each side. */
++    fun everyApp(l: PreviewLayouts = PreviewLayouts.DEFAULTS): SafeZone {
++        val zs = listOf(PreviewView.TIKTOK, PreviewView.REELS, PreviewView.SHORTS, PreviewView.FACEBOOK).mapNotNull { l.zone(it) }
++        return SafeZone(zs.maxOf { it.top }, zs.maxOf { it.bottom }, zs.maxOf { it.left }, zs.maxOf { it.right })
++    }
++
++    /** The red box for this choice on a canvas of this shape (null: the switch is off). */
++    fun zone(p: EditPreview, width: Int, height: Int, layouts: PreviewLayouts = PreviewLayouts.DEFAULTS): SafeZone? {
++        if (!p.safeArea) return null
++        val v = p.resolved(width, height).view
++        return if (PreviewView.isLandscape(width, height)) { if (v == PreviewView.CLEAN) TITLE_SAFE else layouts.landscapeZone(v) }
++        else { if (v == PreviewView.CLEAN) everyApp(layouts) else layouts.zone(v) }
++    }
++
++    /** What the app's chrome covers, for the warning line ("TikTok's caption and buttons"). */
++    fun covers(p: EditPreview, width: Int, height: Int): String {
++        val v = p.resolved(width, height).view
++        val wide = PreviewView.isLandscape(width, height)
++        return when (v) {
++            PreviewView.CLEAN -> if (wide) "the edge of some screens" else "some apps' captions and buttons"
++            PreviewView.YOUTUBE -> "YouTube's title and controls"
++            else -> if (wide) "${v.label}'s controls" else "${v.label}'s caption and buttons"
++        }
++    }
++
++    /** What the box is, for its description. */
++    fun name(p: EditPreview, width: Int, height: Int): String {
++        val v = p.resolved(width, height).view
++        return if (v == PreviewView.CLEAN) { if (PreviewView.isLandscape(width, height)) "the title-safe area" else "the area safe on every app" }
++        else "${v.label}'s safe area"
++    }
++}
++
++/** Captions ([itemId] null) or a text item outside the red box, the times it shows and which edges cross the box. */
++data class SafeIssue(val captions: Boolean, val itemId: String?, val startSec: Double, val endSec: Double, val edges: List<String>)
++
++/** An approximate box for a block of text (fractions of the canvas). */
++data class TextBox(val x: Double, val y: Double, val w: Double, val h: Double) {
++    fun edges(z: SafeZone): List<String> {
++        val tol = .005
++        return buildList {
++            if (y - h / 2 < z.y - tol) add("top")
++            if (y + h / 2 > z.y + z.h + tol) add("bottom")
++            if (x - w / 2 < z.x - tol) add("left")
++            if (x + w / 2 > z.x + z.w + tol) add("right")
++        }
++    }
++
++    companion object {
++        /** Glyphs ≈ 0.55 em (0.62 uppercase): good enough for a warning, not for layout. */
++        fun estimate(text: String, x: Double, y: Double, sizePct: Double, maxWidthPct: Double?, lineHeight: Double?, uppercase: Boolean,
++                     maxLines: Int?, aspect: Double): TextBox {
++            val em = sizePct / max(.1, aspect)
++            val glyph = em * if (uppercase) .62 else .55
++            val wrap = maxWidthPct ?: .85
++            var lines = 0
++            var widest = 0.0
++            for (raw in text.split("\n")) {
++                val w = raw.codePointCount(0, raw.length) * glyph
++                lines += max(1, ceil(w / max(.01, wrap)).toInt())
++                widest = max(widest, min(w, wrap))
++            }
++            if (maxLines != null) lines = min(lines, max(1, maxLines))
++            return TextBox(x, y, widest, max(1, lines) * sizePct * (lineHeight ?: 1.15))
++        }
++    }
++}
++
++object EditSafeCheck {
++    private fun aspect(p: EditProject) = p.canvas.width.toDouble() / max(1, p.canvas.height)
++
++    fun box(it: TextItem, aspect: Double): TextBox {
++        val sc = it.transform?.scale ?: 1.0
++        return TextBox.estimate(it.text, it.transform?.x ?: .5, it.transform?.y ?: .5, it.style.sizePct * sc, it.style.maxWidthPct?.let { w -> w * sc },
++            it.style.lineHeight, it.style.uppercase == true, null, aspect)
++    }
++
++    private fun pageBox(p: EditProject, page: CaptionPage, s: CaptionStyle, language: String?, y: Double, maxWidthPct: Double?) =
++        TextBox.estimate(captionText(page.words.map { it.text }, language), .5, y, s.text.sizePct, maxWidthPct, s.text.lineHeight,
++            s.text.uppercase == true, s.maxLines ?: 2, aspect(p))
++
++    /** Captions (each page) and text items (at rest) outside [z]; captions as one issue over every page that crosses it. */
++    fun issues(p: EditProject, z: SafeZone): List<SafeIssue> {
++        val out = ArrayList<SafeIssue>()
++        val capTrack = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION && it.caption != null }
++        val ct = capTrack?.caption
++        if (ct != null && capTrack.hidden != true) {
++            var from: Double? = null
++            var to = 0.0
++            val es = LinkedHashSet<String>()
++            for (page in captionPages(p)) {
++                val e = pageBox(p, page, ct.style, ct.language, ct.style.y ?: .72, ct.style.text.maxWidthPct).edges(z)
++                if (e.isEmpty()) continue
++                if (from == null) from = page.startSec
++                to = max(to, page.endSec)
++                es += e
++            }
++            if (from != null) out += SafeIssue(true, null, from, to, listOf("top", "bottom", "left", "right").filter { it in es })
++        }
++        for (t in p.tracks) {
++            if (t.kind != TrackKind.TEXT || t.hidden == true) continue
++            for (it in t.items) {
++                val item = it as? TextItem ?: continue
++                val e = box(item, aspect(p)).edges(z)
++                if (e.isNotEmpty()) out += SafeIssue(false, item.id, item.startSec, item.startSec + item.durationSec, e)
++            }
++        }
++        return out
++    }
++
++    private fun clock(s: Double): String { val n = max(0, s.roundToInt()); return "${n / 60}:${(n % 60).toString().padStart(2, '0')}" }
++
++    /** "Captions sit under TikTok's caption and buttons (0:01–0:09)." null when everything is inside. */
++    fun line(issues: List<SafeIssue>, covers: String): String? {
++        val first = issues.firstOrNull() ?: return null
++        val caps = issues.firstOrNull { it.captions }
++        val texts = issues.filter { !it.captions }
++        fun range(i: SafeIssue) = "${clock(i.startSec)}–${clock(i.endSec)}"
++        return when {
++            caps != null && texts.isEmpty() -> "Captions sit under $covers (${range(caps)})."
++            caps == null && texts.size == 1 -> "A text sits under $covers (${range(first)})."
++            caps == null -> "${texts.size} texts sit under $covers."
++            else -> "Captions and ${if (texts.size == 1) "a text" else "${texts.size} texts"} sit under $covers."
++        }
++    }
++
++    /** "Move into the safe area": the captions' height and wrap width and each text item's position, just inside [z]. */
++    fun fixed(p: EditProject, z: SafeZone): EditProject? {
++        val found = issues(p, z)
++        if (found.isEmpty()) return null
++        val margin = .01
++        val a = aspect(p)
++        val tracks = p.tracks.map { t ->
++            val ct = t.caption
++            when {
++                t.kind == TrackKind.CAPTION && ct != null && found.any { it.captions } -> {
++                    val half = min(.5 - z.x, z.x + z.w - .5) - margin
++                    val wrap = ct.style.text.maxWidthPct ?: .85
++                    val newWrap = if (half > .1 && wrap > 2 * half) kotlin.math.floor(2 * half * 100) / 100 else ct.style.text.maxWidthPct
++                    val tallest = captionPages(p).maxOfOrNull { pageBox(p, it, ct.style, ct.language, .5, newWrap).h } ?: 0.0
++                    val y = clampCentre(ct.style.y ?: .72, tallest / 2, z.y + margin, z.y + z.h - margin)
++                    t.copy(caption = ct.copy(style = ct.style.copy(y = y, text = ct.style.text.copy(maxWidthPct = newWrap))))
++                }
++                t.kind == TrackKind.TEXT -> t.copy(items = t.items.map { it ->
++                    val item = it as? TextItem
++                    if (item == null || found.none { f -> f.itemId == item.id }) it else {
++                        // Wrap no wider than the box, then the block's centre inside it.
++                        val sc = item.transform?.scale ?: 1.0
++                        val room = z.w - 2 * margin
++                        val narrowed = if (box(item, a).w > room && room > .1)
++                            item.copy(style = item.style.copy(maxWidthPct = kotlin.math.floor(room / sc * 100) / 100)) else item
++                        val b = box(narrowed, a)
++                        val tr = narrowed.transform ?: Transform()
++                        narrowed.copy(transform = tr.copy(x = clampCentre(b.x, b.w / 2, z.x + margin, z.x + z.w - margin),
++                            y = clampCentre(b.y, b.h / 2, z.y + margin, z.y + z.h - margin)))
++                    }
++                })
++                else -> t
++            }
++        }
++        return p.copy(tracks = tracks)
++    }
++
++    /** A centre kept so [c − half, c + half] sits in [lo, hi] (centred when it can't fit), to 3 decimals. */
++    fun clampCentre(c: Double, half: Double, lo: Double, hi: Double): Double {
++        val v = if (hi - lo < 2 * half) (lo + hi) / 2 else c.coerceIn(lo + half, hi - half)
++        return (v * 1000).roundToInt() / 1000.0
++    }
++}
++
++/** The choice per project (keyed by the project's source take) and this device's last choice; at most [KEPT] projects. */
++data class EditPreviewPrefs(val last: EditPreview? = null, val byProject: Map<String, EditPreview> = emptyMap(), val order: List<String> = emptyList()) {
++    fun choice(project: String): EditPreview = byProject[project] ?: last ?: EditPreview()
++
++    fun set(p: EditPreview, project: String): EditPreviewPrefs {
++        val o = (order - project) + project
++        val keep = o.takeLast(KEPT)
++        return EditPreviewPrefs(p, (byProject + (project to p)).filterKeys { it in keep }, keep)
++    }
++
++    fun encode(): String = buildJsonObject {
++        last?.let { put("last", enc(it)) }
++        put("byProject", JsonObject(byProject.mapValues { enc(it.value) }))
++        put("order", buildJsonArray { order.forEach { add(JsonPrimitive(it)) } })
++    }.toString()
++
++    companion object {
++        const val KEPT = 200
++        private fun enc(p: EditPreview) = buildJsonObject { put("view", p.view.id); put("safeArea", p.safeArea) }
++        private fun dec(o: JsonObject?): EditPreview? {
++            val v = PreviewView.of(o?.get("view")?.jsonPrimitive?.contentOrNull) ?: return null
++            return EditPreview(v, o?.get("safeArea")?.jsonPrimitive?.booleanOrNull ?: true)
++        }
++
++        fun decode(s: String?): EditPreviewPrefs = runCatching {
++            val o = kotlinx.serialization.json.Json.parseToJsonElement(s ?: return EditPreviewPrefs()).jsonObject
++            EditPreviewPrefs(dec(o["last"] as? JsonObject),
++                (o["byProject"] as? JsonObject)?.mapNotNull { (k, v) -> dec(v as? JsonObject)?.let { k to it } }?.toMap() ?: emptyMap(),
++                o["order"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList())
++        }.getOrDefault(EditPreviewPrefs())
++    }
++}
+diff --git a/android/core/src/test/kotlin/studio/muse/core/edit/PlatformPreviewTest.kt b/android/core/src/test/kotlin/studio/muse/core/edit/PlatformPreviewTest.kt
+new file mode 100644
+index 00000000..ab4c5460
+--- /dev/null
++++ b/android/core/src/test/kotlin/studio/muse/core/edit/PlatformPreviewTest.kt
+@@ -0,0 +1,82 @@
++package studio.muse.core.edit
++
++import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.jsonObject
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++/** Edit's platform preview (plans/edit-platform-preview.md): the same answers as the Mac and the server. */
++class PlatformPreviewTest {
++    private fun project(name: String): EditProject =
++        EditJson.parse(Fixtures.load("projects.json").arr.first { it.obj["name"]!!.str == name }.obj["project"]!!)
++
++    private fun withCaptionsAt(p: EditProject, y: Double, wrap: Double = .6) = p.copy(tracks = p.tracks.map { t ->
++        val ct = t.caption ?: return@map t
++        t.copy(caption = ct.copy(style = ct.style.copy(y = y, text = ct.style.text.copy(maxWidthPct = wrap))))
++    })
++
++    @Test fun viewsFollowTheCanvasShape() {
++        assertEquals(listOf(PreviewView.CLEAN, PreviewView.TIKTOK, PreviewView.REELS, PreviewView.SHORTS, PreviewView.FACEBOOK), PreviewView.options(1080, 1920))
++        assertEquals(listOf(PreviewView.CLEAN, PreviewView.YOUTUBE, PreviewView.FACEBOOK), PreviewView.options(1920, 1080))
++        assertEquals(EditPreview(PreviewView.CLEAN, false), EditPreview(PreviewView.TIKTOK, false).resolved(1920, 1080))
++    }
++
++    @Test fun theRedBoxWorksInEveryView() {
++        assertEquals(PreviewLayouts.DEFAULTS.zone(PreviewView.TIKTOK), EditSafeBox.zone(EditPreview(PreviewView.TIKTOK), 1080, 1920))
++        val all = EditSafeBox.zone(EditPreview(), 1080, 1920)!!
++        assertEquals(.11, all.top, 1e-9); assertEquals(.30, all.bottom, 1e-9); assertEquals(.17, all.right, 1e-9)
++        assertEquals(PreviewLayouts.DEFAULTS.landscapeZone(PreviewView.YOUTUBE), EditSafeBox.zone(EditPreview(PreviewView.YOUTUBE), 1920, 1080))
++        assertEquals(EditSafeBox.TITLE_SAFE, EditSafeBox.zone(EditPreview(), 1920, 1080))
++        assertNull(EditSafeBox.zone(EditPreview(PreviewView.TIKTOK, false), 1080, 1920))
++        assertEquals("TikTok's caption and buttons", EditSafeBox.covers(EditPreview(PreviewView.TIKTOK), 1080, 1920))
++    }
++
++    @Test fun theServersTableGoesOverTheDefaults() {
++        val o = Json.parseToJsonElement("""{"zones":{"tiktok":{"top":0.12,"bottom":0.3,"left":0.02,"right":0.18},"bad":{"top":1}},"landscape":{"youtube":{"top":0.2,"bottom":0.2,"left":0,"right":0}}}""").jsonObject
++        val l = PreviewLayouts.parse(o)
++        assertEquals(.12, l.zone(PreviewView.TIKTOK)!!.top, 1e-9)
++        assertEquals(PreviewLayouts.DEFAULTS.zone(PreviewView.REELS), l.zone(PreviewView.REELS))
++        assertEquals(.2, l.landscapeZone(PreviewView.YOUTUBE)!!.top, 1e-9)
++        assertEquals(PreviewLayouts.DEFAULTS.note, l.note)
++    }
++
++    @Test fun captionsLowOnTheFrameAreFlaggedAndMovedIn() {
++        val z = PreviewLayouts.DEFAULTS.zone(PreviewView.TIKTOK)!!
++        val low = withCaptionsAt(project("captions pop 2"), .85)
++        val found = EditSafeCheck.issues(low, z)
++        assertEquals(listOf("bottom"), found.single().edges)
++        assertTrue(found.single().captions && found.single().endSec > found.single().startSec)
++        assertTrue(EditSafeCheck.line(found, "TikTok's caption and buttons")!!.startsWith("Captions sit under TikTok's caption and buttons ("))
++        assertTrue(EditSafeCheck.issues(withCaptionsAt(project("captions pop 2"), .5, .95), z).single().edges.contains("right"))
++        val fixed = EditSafeCheck.fixed(low, z)!!
++        assertTrue(EditSafeCheck.issues(fixed, z).isEmpty())
++        assertNull(problemOf(fixed))
++        assertNull(EditSafeCheck.fixed(fixed, z))
++    }
++
++    @Test fun textUnderTheRailIsFlaggedAndNudgedIn() {
++        val z = PreviewLayouts.DEFAULTS.zone(PreviewView.TIKTOK)!!
++        val p = project("pip text image look")
++        val moved = p.copy(tracks = p.tracks.map { t -> if (t.kind != TrackKind.TEXT) t else t.copy(items = t.items.map { (it as TextItem).copy(transform = Transform(x = .92, y = .5)) }) })
++        val issue = EditSafeCheck.issues(moved, z).first { !it.captions }
++        assertTrue("right" in issue.edges)
++        val fixed = EditSafeCheck.fixed(moved, z)
++        assertNotNull(fixed)
++        assertTrue(EditSafeCheck.issues(fixed!!, z).none { !it.captions })
++    }
++
++    @Test fun theChoiceIsRememberedPerProject() {
++        var prefs = EditPreviewPrefs()
++        assertEquals(EditPreview(), prefs.choice("a"))
++        prefs = prefs.set(EditPreview(PreviewView.TIKTOK), "a").set(EditPreview(PreviewView.REELS, false), "b")
++        assertEquals(PreviewView.TIKTOK, prefs.choice("a").view)
++        assertEquals(EditPreview(PreviewView.REELS, false), prefs.choice("new"))
++        repeat(EditPreviewPrefs.KEPT + 5) { prefs = prefs.set(EditPreview(PreviewView.SHORTS), "t$it") }
++        assertTrue(prefs.byProject.size <= EditPreviewPrefs.KEPT)
++        assertEquals(prefs, EditPreviewPrefs.decode(prefs.encode()))
++        assertEquals(EditPreviewPrefs(), EditPreviewPrefs.decode("not json"))
++    }
++}
