@@ -5,8 +5,8 @@
 ## Owner decision (2026-11-12, after the first build)
 Edit does NOT jump into the last draft. The Edit home opens on a choice with two tiles: "New" and "Continue draft" (the last
 edit's picture, name and "5 min ago"; the primary, with the accent edge). With no draft, only New shows. Older Recent edits
-are listed below. Continue draft does everything below; New starts a blank project (Mac). Android has no blank project yet,
-so its New scrolls to the videos to start from.
+are listed below. Continue draft does everything below; New starts a blank project (both apps; Android's from
+edit-blank-android.patch).
 
 ## What it does
 - Continue draft opens the last edit, back where it was left: timeline, playhead, zoom, selected clip, inspector tab, media
@@ -45,9 +45,24 @@ Patch `plans/patches/edit-continue-draft-android.patch`. It applies on prod 852d
   `EditResumeTest` (4 tests).
 - The place saved: playhead, zoom (dp/s), the open panel as `tab` (Mac "captions"/"text"/"audio" match), selection, and
   the platform view as `safeArea`. Fields Android doesn't show (Mac `binTab`, `mode`) are kept from the last place.
-- Android has no blank project yet: its New tile scrolls to the videos (picking one starts the edit).
+- New on Android: see "Android blank projects" below. (edit-continue-draft-android alone has New scroll to the videos.)
 - The owner opening an edit whose take was deleted: the place goes to the session; the project changes are kept on
   the phone (a session opens by take id), and reopening there uses the phone copy.
+
+## Android blank projects (coordinator go 2026-11-12)
+Patch `plans/patches/edit-blank-android.patch`. It applies after edit-continue-draft-android. It ports the Mac's "New blank project"
+(server and Mac since 44cf00f2):
+- Core: `BLANK_SOURCE` ("blank"), `blankProject()` (9:16 1080 × 1920, 30 fps), `EditProject.isBlank`. `validate`/`problemOf`
+  take `draft`, so a blank project may have an empty main track while it's being edited. Saving still needs a clip.
+  Tested in `BlankProjectTest`.
+- App: New opens a blank editor (a fresh session for the owner; Continue draft joins the blank session by id through
+  `EditSessionSync.start(attach)`). Edits on an empty blank are allowed (`draft` in the controller and the sync). The
+  viewer says "Add a video from Overlay · Add to end". The preview, frame saves, look and effect tiles and export work once
+  a clip is on. Export on an empty blank says "Add a video first". The first save goes to POST /v1/edits (a new Library
+  video, "Saved to the Library as a new video"); later saves are versions of that video. A saved blank reopens its own
+  project. Each New is its own editor (view-model key). Empty blank sessions aren't listed in Recent edits. Fake API
+  mirrors the server. Tested in `EditBlankTest`.
+- A member's blank project is kept on the phone as one entry (key "blank"): only one member blank draft per phone.
 
 ## Known limits
 - Member drafts are per Mac, not per signed-in member (a shared Mac shows the last member's edits).
