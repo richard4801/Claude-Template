@@ -76,9 +76,6 @@ extension EditV2Engine {
                                         AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height)]
             if hdr {
                 compression[AVVideoProfileLevelKey] = kVTProfileLevel_HEVC_Main10_AutoLevel as String
-                // Pure HLG, no Dolby Vision 8.4 RPU (owner's 582 export carried one): the RPU is worked out from the
-                // pictures, so a wrong first frame could stretch the flash on Dolby Vision players; HLG plays everywhere.
-                compression[kVTCompressionPropertyKey_HDRMetadataInsertionMode as String] = kVTHDRMetadataInsertionMode_None as String
                 video[AVVideoColorPropertiesKey] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
                                                     AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
                                                     AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020]
