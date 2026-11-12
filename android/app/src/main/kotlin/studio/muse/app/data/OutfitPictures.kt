@@ -23,6 +23,44 @@ object OutfitPictures {
     /** Where picture [index] sits in [shown] (0 when it isn't shown). */
     fun pageOf(pictures: List<ImageRef?>, index: Int): Int = shown(pictures).indexOfFirst { it.first == index }.coerceAtLeast(0)
 
+    /**
+     * "Move to…" for picture [from] (owner, 2026-11-12: "the picture in Side is actually the back"): the other 6 slots in
+     * order, each "Swap with Back" when that slot has a picture, "Move to Back" when it's empty.
+     */
+    fun moveTargets(pictures: List<ImageRef?>, from: Int): List<Pair<Int, String>> =
+        KEYS.indices.filter { it != from }.map { i -> i to (if (pictures.getOrNull(i) != null) "Swap with ${LABELS[i]}" else "Move to ${LABELS[i]}") }
+
+    /** The 7 pictures with [from] and [to] swapped (what POST /reorder does with one move; nothing is lost). */
+    fun swapped(pictures: List<ImageRef?>, from: Int, to: Int): List<ImageRef?> {
+        val all = (0 until KEYS.size).map { pictures.getOrNull(it) }.toMutableList()
+        if (from !in all.indices || to !in all.indices || from == to) return all
+        val a = all[from]
+        all[from] = all[to]
+        all[to] = a
+        return all
+    }
+
+    /** One move from slot [from] to slot [to], as /reorder takes it (null for a slot that isn't one of the 7, or the same slot). */
+    fun move(from: Int, to: Int): OutfitMove? {
+        val f = KEYS.getOrNull(from) ?: return null
+        val t = KEYS.getOrNull(to) ?: return null
+        return if (from == to) null else OutfitMove(f, t)
+    }
+
+    /** [o] with [moves] applied in order (the demo's /reorder); an unknown slot is refused with [IllegalArgumentException]. */
+    fun reordered(o: Outfit, moves: List<OutfitMove>): Outfit {
+        var all = all(o)
+        moves.forEach { m ->
+            val f = KEYS.indexOf(m.from)
+            val t = KEYS.indexOf(m.to)
+            require(f >= 0 && t >= 0) { "Unknown picture" }
+            all = swapped(all, f, t)
+        }
+        val faces = all.drop(BODY)
+        // An older outfit with no faces stays without them unless a picture moved into a face slot.
+        return o.copy(angles = all.take(BODY), faces = if (o.faces == null && faces.all { it == null }) null else faces)
+    }
+
     /** How many face close-ups it has. */
     fun madeFaces(o: Outfit): Int = (0 until FACES).count { o.faces?.getOrNull(it) != null }
 

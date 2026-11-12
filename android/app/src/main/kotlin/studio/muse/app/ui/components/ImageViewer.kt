@@ -27,8 +27,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,16 +75,21 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
  * pictures at 1×. Back or the close button leaves it. Shown in a full-screen [Dialog] so it covers the bars.
  */
 @Composable
-fun ImageViewer(images: List<ViewerImage>, start: Int, action: ((Int) -> ViewerAction?)? = null, onClose: () -> Unit) {
+fun ImageViewer(images: List<ViewerImage>, start: Int, action: ((Int) -> ViewerAction?)? = null, more: ((Int) -> List<MenuItem>)? = null, onClose: () -> Unit) {
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        ImageViewerContent(images, start, onClose, action = action)
+        ImageViewerContent(images, start, onClose, action = action, more = more)
     }
 }
 
 /** [ImageViewer]'s content, without the window (screenshot tests render this directly). */
 @Composable
-fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier, action: ((Int) -> ViewerAction?)? = null) {
+fun ImageViewerContent(
+    images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier, action: ((Int) -> ViewerAction?)? = null,
+    /** "Move to…" for the picture shown (the outfit's other slots), behind a ⋯ button; empty or null hides it. */
+    more: ((Int) -> List<MenuItem>)? = null,
+) {
     val pager = rememberPagerState(initialPage = start.coerceIn(0, (images.size - 1).coerceAtLeast(0))) { images.size }
+    var moreOpen by remember { mutableStateOf(false) }
     // Each page's zoom; swiping between pictures only works at 1× (a zoomed picture pans instead).
     val zoomed = remember { mutableStateMapOf<Int, Boolean>() }
     val current = images.getOrNull(pager.currentPage)
@@ -110,6 +117,15 @@ fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Uni
                         .semantics { contentDescription = a.label; role = Role.Button },
                     contentAlignment = Alignment.Center,
                 ) { T(a.label, muse.scale.label, Color.White.copy(alpha = if (a.enabled) 1f else .5f), maxLines = 1) }
+            }
+            more?.invoke(pager.currentPage)?.takeIf { it.isNotEmpty() }?.let { items ->
+                Box {
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape).press { moreOpen = true }.semantics { contentDescription = "Move to…"; role = Role.Button },
+                        contentAlignment = Alignment.Center,
+                    ) { Ic("more", 24.dp, Color.White) }
+                    MuseMenu(moreOpen, { moreOpen = false }, items)
+                }
             }
         }
         // Where you are in the set, as dots along the bottom (only with more than one picture).

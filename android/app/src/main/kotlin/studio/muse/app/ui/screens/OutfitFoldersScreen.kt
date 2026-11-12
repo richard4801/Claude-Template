@@ -2,6 +2,10 @@ package studio.muse.app.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,13 +33,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -72,6 +87,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /** "11 Nov" (the suggested name's date). */
 fun outfitDay(ms: Long): String = SimpleDateFormat("d MMM", Locale.UK).format(Date(ms))
@@ -140,7 +156,21 @@ class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
         c.repo.redoOutfit(o.id, index)
     }
     fun redoEstimate(index: Int): Double = OutfitPictures.redoEstimate(photoPrices(c), index)
+
+    /** Move picture [from] to slot [to], swapping with whatever is there (free; the outfit event updates the grid). */
+    fun move(o: Outfit, from: Int, to: Int) {
+        if (o.id in state.value.filling || !state.value.making[o.id].isNullOrEmpty()) return
+        val mv = OutfitPictures.move(from, to) ?: return
+        viewModelScope.launch { c.repo.reorderOutfit(o.id, listOf(mv)) }
+    }
 }
+
+/** "Move to…" for picture [from]: the other 6 slots, "Swap with Back" or "Move to Back" when it's empty. */
+fun outfitMoveMenu(pictures: List<ImageRef?>, from: Int, onMove: (to: Int) -> Unit): List<MenuItem> =
+    OutfitPictures.moveTargets(pictures, from).map { (to, text) -> MenuItem(if (pictures.getOrNull(to) != null) "swap" else "move", text) { onMove(to) } }
+
+/** The grid's own place in [OutfitPictureGrid]'s bounds map (the tiles use 0–6). */
+private const val GRID = -1
 
 private fun photoPrices(c: AppContainer): studio.muse.core.PhotoPrices = c.repo.state.value.photo
 
@@ -277,6 +307,11 @@ fun OutfitOpenScreen(id: String) {
             ViewerAction("Redo · ${Pricing.money(vm.redoEstimate(i))}", { vm.redo(o, i); viewing = null }, enabled = i !in making && !filling)
         }
     }) else null
+    // Full size: "Move to…" for the picture shown (the owner or whoever made it; not while any of it is being made).
+    val moveMenu: ((Int) -> List<MenuItem>)? = if (canChange && !filling && making.isEmpty()) ({ page: Int ->
+        shownAt.getOrNull(page)?.let { (i, _) -> outfitMoveMenu(pictures, i) { to -> viewing = null; vm.move(o, i, to) } }.orEmpty()
+    }) else null
+    val onMove: ((Int, Int) -> Unit)? = if (canChange) ({ from: Int, to: Int -> vm.move(o, from, to) }) else null
     val facesMissing = OutfitPictures.FACES - OutfitPictures.madeFaces(o)
     val makingFaces = (OutfitPictures.BODY until OutfitPictures.KEYS.size).any { it in making }
     // "Make missing angles": the empty ¾ / side / back show as skeletons until they come back.
@@ -295,7 +330,7 @@ fun OutfitOpenScreen(id: String) {
                     DisplayTitle(o.name)
                     Caption(listOfNotNull(s.model?.name?.substringBefore(' ')?.let { "For $it" }, outfitDate(o.createdAt)?.let { "made $it" }).joinToString(", "))
                 }
-                OutfitPictureGrid(pictures, making + fillingAt, busy = false) { i ->
+                OutfitPictureGrid(pictures, making + fillingAt, busy = false, onMove = onMove) { i ->
                     viewing = OutfitPictures.pageOf(pictures, i)
                 }
                 if (filling) Notice("Making the missing angles from the front.")
@@ -317,7 +352,7 @@ fun OutfitOpenScreen(id: String) {
                 }
             }
         }
-        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction) { viewing = null } }
+        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction, more = moveMenu) { viewing = null } }
         ActionDock {
             PrimaryButton("Use in Photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, o.modelId, o.id) }, Modifier.weight(1f))
         }
@@ -330,11 +365,30 @@ fun OutfitOpenScreen(id: String) {
  * An outfit's 7 pictures (plans/outfit-faces.md): the 4 body angles, then the 3 face close-ups in the same columns, grouped
  * by space with their captions ("Face front"). 2 columns on a phone, 4 when wide. A picture in [making] (or, while [busy],
  * any not made yet) shows a skeleton; a tap opens [onOpen] with its index into [OutfitPictures.KEYS].
+ *
+ * With [onMove] (owner, 2026-11-12: "the picture in Side is actually the back"), and while nothing is being made: long-press
+ * a picture for "Move to…" (the other 6 slots), or long-press and drag it onto another slot to swap the two.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onOpen: (Int) -> Unit) {
+fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onMove: ((from: Int, to: Int) -> Unit)? = null, onOpen: (Int) -> Unit) {
     val m = muse
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val density = LocalDensity.current
+    val canMove = onMove != null && !busy && making.isEmpty()
+    val move by rememberUpdatedState(onMove)
+    // Where each tile (and, at [GRID], the grid) sits in the window, for drag and drop. Not state: dragAt drives redraws.
+    val bounds = remember { mutableMapOf<Int, Rect>() }
+    var menuFor by remember { mutableStateOf<Int?>(null) }
+    var dragFrom by remember { mutableStateOf<Int?>(null) }
+    var dragStart by remember { mutableStateOf(Offset.Zero) }
+    var dragAt by remember { mutableStateOf(Offset.Zero) }
+    fun dropTarget(): Int? {
+        val f = dragFrom ?: return null
+        return bounds.entries.firstOrNull { (i, r) -> i != GRID && i != f && r.contains(dragAt) }?.key
+    }
+    LaunchedEffect(canMove) { if (!canMove) { menuFor = null; dragFrom = null } }
+    val drop = dropTarget()
+    BoxWithConstraints(Modifier.fillMaxWidth().onGloballyPositioned { bounds[GRID] = Rect(it.positionInRoot(), it.size.toSize()) }) {
         val cols = if (maxWidth >= 600.dp) 4 else 2
         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s6)) {
             listOf((0 until OutfitPictures.BODY).toList(), (OutfitPictures.BODY until OutfitPictures.KEYS.size).toList()).forEach { group ->
@@ -347,10 +401,47 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: 
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                                     val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
                                     if (i in making || (busy && ref == null)) Skeleton(tile.semantics { contentDescription = "$label, being made" }, containerShape())
-                                    else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
-                                        if (ref == null) t.semantics { contentDescription = "$label missing" }
-                                        else t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
-                                    }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
+                                    else Box(tile.onGloballyPositioned { bounds[i] = Rect(it.positionInRoot(), it.size.toSize()) }
+                                        .alpha(if (dragFrom == i) .4f else 1f)
+                                        .clip(containerShape()).background(m.roles.field)
+                                        .let { t -> if (drop == i) t.border(2.dp, m.roles.selection, containerShape()) else t }
+                                        .let { t ->
+                                            when {
+                                                ref == null -> t.semantics { contentDescription = "$label missing" }
+                                                canMove -> t.combinedClickable(
+                                                    onClickLabel = "View full size", onLongClickLabel = "Move to…",
+                                                    onLongClick = { menuFor = i }, onClick = { onOpen(i) },
+                                                ).pointerInput(i) {
+                                                    // Long-press and drag onto another slot; letting go without moving leaves the menu open.
+                                                    var dist = 0f
+                                                    detectDragGesturesAfterLongPress(
+                                                        onDragStart = { at ->
+                                                            dist = 0f
+                                                            dragFrom = i
+                                                            dragStart = at
+                                                            dragAt = (bounds[i]?.topLeft ?: Offset.Zero) + at
+                                                        },
+                                                        onDragEnd = { ->
+                                                            val to = if (dist > viewConfiguration.touchSlop) dropTarget() else null
+                                                            dragFrom = null
+                                                            if (to != null) { menuFor = null; move?.invoke(i, to) }
+                                                        },
+                                                        onDragCancel = { -> dragFrom = null },
+                                                        onDrag = { change, amount ->
+                                                            change.consume()
+                                                            dist += amount.getDistance()
+                                                            if (dist > viewConfiguration.touchSlop) menuFor = null
+                                                            dragAt += amount
+                                                        },
+                                                    )
+                                                }.semantics { contentDescription = "$label, view full size" }
+                                                else -> t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
+                                            }
+                                        }
+                                    ) {
+                                        if (ref != null) RefImage(ref, Modifier.fillMaxSize())
+                                        if (canMove && ref != null) MuseMenu(menuFor == i, { menuFor = null }, outfitMoveMenu(pictures, i) { to -> move?.invoke(i, to) })
+                                    }
                                     Caption(label, maxLines = 1)
                                 }
                             }
@@ -359,6 +450,19 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: 
                     }
                 }
             }
+        }
+        // The picture being dragged follows the finger, drawn above the grid.
+        val from = dragFrom
+        val src = from?.let { bounds[it] }
+        val grid = bounds[GRID]
+        val dragged = from?.let { pictures.getOrNull(it) }
+        if (src != null && grid != null && dragged != null) {
+            val topLeft = dragAt - dragStart - grid.topLeft
+            Box(
+                Modifier.offset { IntOffset(topLeft.x.roundToInt(), topLeft.y.roundToInt()) }
+                    .size(with(density) { src.width.toDp() }, with(density) { src.height.toDp() })
+                    .clip(containerShape()).background(m.roles.field),
+            ) { RefImage(dragged, Modifier.fillMaxSize()) }
         }
     }
 }

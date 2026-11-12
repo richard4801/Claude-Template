@@ -48,6 +48,8 @@ interface MuseApi {
     suspend fun addOutfitFaces(outfitId: String): OutfitFill
     /** Redoes one of the 7 pictures ([OutfitPictures.KEYS]: front | tq | side | back | face | faceTq | profile); an outfit event follows. */
     suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill
+    /** Reorders the 7 pictures (free): each move swaps the pictures of two slots ([OutfitPictures.KEYS]); an outfit event follows. */
+    suspend fun reorderOutfit(outfitId: String, moves: List<OutfitMove>): OutfitReorder
 
     // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
     suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef

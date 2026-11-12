@@ -122,6 +122,18 @@ data class OutfitFill(val outfit: Outfit, val cost: Double = 0.0)
 @Serializable
 data class OutfitRedoRequest(val angle: String)
 
+/** One move in POST /v1/outfits/{id}/reorder: swaps the pictures of slots [from] and [to] ([OutfitPictures.KEYS]); nothing is lost. */
+@Serializable
+data class OutfitMove(val from: String, val to: String)
+
+/** POST /v1/outfits/{id}/reorder (owner or the outfit's maker, free): the moves in order; [dryRun] checks them without saving. */
+@Serializable
+data class OutfitReorderRequest(val moves: List<OutfitMove>, val dryRun: Boolean? = null)
+
+/** POST /v1/outfits/{id}/reorder: the outfit now and which slots changed. */
+@Serializable
+data class OutfitReorder(val outfit: Outfit, val changed: List<String> = emptyList())
+
 @Serializable
 data class CreateOutfitRequest(
     val modelId: String,
