@@ -1,8 +1,10 @@
 // Claude watches videos (plans/claude-video-vision.md, Stage 1, free): a "flip book" of any take, Suite job, Library
 // item, clip or uploaded video in the person's studio. Frames are picked by motion (every hard cut, the motion peaks,
 // and more frames where the picture moves fast than where it is still), packed into small timestamped JPEG contact
-// sheets, with the video's length, frame rate, size and whether it has sound in the voice range. watch_closer gives
-// every frame (or an even run) of a short window at a larger size. ffmpeg on the server only: nothing is paid or stored.
+// sheets, with the video's length, frame rate, size and whether it has sound in the voice range. Beside that overview,
+// watch returns a full sweep: frames at an even rate (up to 8 fps) over the whole video up to 60 s, so every second is
+// seen; longer videos get a list of consecutive watch_closer windows to sweep. watch_closer gives every frame (or an
+// even run, up to 96 for a sweep window) of a short window at a larger size. ffmpeg on the server only: nothing is paid or stored.
 // Railway has ~512 MB: one watch runs at a time, frames are decoded streamed (the motion pass keeps two tiny frames),
 // stills are written to a temp dir and packed small, and results are cached in memory.
 import { execFile } from 'node:child_process';
@@ -21,6 +23,13 @@ import { editorAi } from '../editor/service.js';
 import { mediaToolsAvailable, probe, type MediaInfo } from '../replicate/media.js';
 
 export const SHEET_COLS = 4, SHEET_TILES = 16, MAX_SHEETS = 3, TILE_EDGE = 256, CLOSER_EDGE = 400, CLOSER_MAX = 16, SINGLE_EDGE = 1024;
+// The full sweep: every part of the video at an even rate, beside the motion-picked overview. 24 frames a sheet, 4
+// across (a row is a fixed slice of time, so the eye reads motion down the sheet), tiles ≤ 224 px so a sheet stays
+// under ~1.4 MP in portrait and landscape. At most 8 sweep sheets + 3 overview sheets = 11 images a call.
+export const SWEEP_EDGE = 224, SWEEP_TILES = 24, SWEEP_SHEETS = 8, SWEEP_MAX = SWEEP_TILES * SWEEP_SHEETS, SWEEP_FPS = 8, SWEEP_MAX_SEC = 60;
+export const IMAGE_CAP = MAX_SHEETS + SWEEP_SHEETS;
+/** watch_closer's largest even run (a sweep window): 4 sheets of sweep-size tiles. */
+export const CLOSER_SWEEP_MAX = SWEEP_TILES * 4, SWEEP_WINDOW_SEC = 30;
 const MAX_WATCH_SEC = 30 * 60, CACHE_MAX = 16, LABEL_H = 18;
 
 type Video = { id: string; kind: 'take' | 'upload' | 'clip'; key: string; title?: string };
@@ -141,6 +150,32 @@ export function pickFrames(m: MotionFrames, budget: number): Picked[] {
 /** How many frames the overview shows for a video this long. */
 export const budgetFor = (sec: number) => (sec <= 6 ? 24 : sec <= 15 ? 32 : SHEET_TILES * MAX_SHEETS);
 
+/**
+ * The sweep's frame rate for a video this long: 8 fps while that fits the 192-frame budget (up to 24 s), then as dense
+ * as fits (6.4 fps at 30 s, 3.2 fps at 60 s), never above the video's own rate. 0 above SWEEP_MAX_SEC: no sweep.
+ */
+export function sweepFps(sec: number, srcFps = 30): number {
+  if (!(sec > 0) || sec > SWEEP_MAX_SEC) return 0;
+  return Math.min(SWEEP_FPS, SWEEP_MAX / sec, srcFps > 0 ? srcFps : SWEEP_FPS);
+}
+
+/** The sweep's source frames: evenly spaced from the first frame to the last, the same for the same video. */
+export function sweepFrames(sec: number, srcFps: number): number[] {
+  const f = sweepFps(sec, srcFps);
+  if (!f) return [];
+  const last = Math.max(0, Math.floor(sec * srcFps) - 1);
+  const n = Math.min(SWEEP_MAX, last + 1, Math.max(2, Math.round(sec * f)));
+  return [...new Set(Array.from({ length: n }, (_, k) => (n === 1 ? 0 : Math.round((k * last) / (n - 1)))))];
+}
+
+/** Consecutive watch_closer windows that cover every second of a video too long for the sweep. */
+export function sweepWindows(sec: number): { fromSec: number; toSec: number; frames: number }[] {
+  const out: { fromSec: number; toSec: number; frames: number }[] = [];
+  const end = Math.min(sec, MAX_WATCH_SEC);
+  for (let a = 0; a < end; a += SWEEP_WINDOW_SEC) out.push({ fromSec: a, toSec: Math.round(Math.min(end, a + SWEEP_WINDOW_SEC) * 1000) / 1000, frames: CLOSER_SWEEP_MAX });
+  return out;
+}
+
 // ---- ffmpeg -------------------------------------------------------------------------------------------------------
 
 function run(bin: string, args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
@@ -192,7 +227,7 @@ async function soundOf(ffmpeg: string, input: string, info: MediaInfo) {
 const mmss = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
 
 /** Timestamped contact sheets, `SHEET_COLS` across, tiles fitted inside `edge` px, read left→right, top→bottom. */
-async function sheets(tiles: { t: number; tag?: string; jpg: Buffer }[], edge: number, perSheet = SHEET_TILES): Promise<{ from: number; to: number; jpg: Buffer }[]> {
+async function sheets(tiles: { t: number; tag?: string; jpg: Buffer }[], edge: number, perSheet = SHEET_TILES, quality = 72): Promise<{ from: number; to: number; jpg: Buffer }[]> {
   const out: { from: number; to: number; jpg: Buffer }[] = [];
   for (let s = 0; s < tiles.length; s += perSheet) {
     const part = tiles.slice(s, s + perSheet);
@@ -205,7 +240,7 @@ async function sheets(tiles: { t: number; tag?: string; jpg: Buffer }[], edge: n
       const svg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="${LABEL_H}"><rect width="100%" height="100%" fill="#111"/><text x="4" y="13" font-size="12" fill="#fff" font-family="DejaVu Sans Mono, monospace">${label}</text></svg>`);
       return [{ input: p.jpg, left, top }, { input: svg, left, top: top + th }];
     });
-    const jpg = await sharp({ create: { width: cols * tw, height: rows * (th + LABEL_H), channels: 3, background: '#111111' } }).composite(comps).jpeg({ quality: 72 }).toBuffer();
+    const jpg = await sharp({ create: { width: cols * tw, height: rows * (th + LABEL_H), channels: 3, background: '#111111' } }).composite(comps).jpeg({ quality }).toBuffer();
     out.push({ from: part[0]!.t, to: part.at(-1)!.t, jpg });
   }
   return out;
@@ -238,19 +273,35 @@ export async function watchVideo(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: un
     const picks = pickFrames(m, budgetFor(dur));
     const fps = info.fps || m.fps, last = Math.max(0, Math.floor(dur * fps) - 1);
     const frameOf = (t: number) => Math.min(last, Math.max(0, Math.round(t * fps)));
-    const got = await grab(c.FFMPEG_PATH, input, picks.map(p => frameOf(p.t)), TILE_EDGE);
+    // One decoding pass for both: the motion-picked overview and the even sweep (shrunk to sweep size after).
+    const sweep = sweepFrames(dur, fps);
+    const got = await grab(c.FFMPEG_PATH, input, [...picks.map(p => frameOf(p.t)), ...sweep], TILE_EDGE);
     const tiles = picks.flatMap(p => { const jpg = got.get(frameOf(p.t)); return jpg ? [{ t: frameOf(p.t) / fps, tag: p.why === 'cut' ? 'CUT' : p.why === 'motion peak' ? '★' : undefined, jpg }] : []; });
     const sh = await sheets(tiles, TILE_EDGE);
     const cuts = findCuts(m).map(x => x.t);
+    const cutAt = new Set(cuts.map(t => Math.round(t * fps)));
+    const sweepTiles = (await Promise.all(sweep.map(async f => {
+      const jpg = got.get(f);
+      if (!jpg) return [];
+      const small = await sharp(jpg).resize(SWEEP_EDGE, SWEEP_EDGE, { fit: 'inside' }).jpeg({ quality: 80 }).toBuffer();
+      return [{ t: f / fps, tag: cutAt.has(f) ? 'CUT' : undefined, jpg: small }];
+    }))).flat();
+    const ssh = await sheets(sweepTiles, SWEEP_EDGE, SWEEP_TILES, 68);
+    const sweepRate = sweepTiles.length > 1 ? Math.round(((sweepTiles.length - 1) / (sweepTiles.at(-1)!.t - sweepTiles[0]!.t || 1)) * 10) / 10 : 0;
+    const windows = sweep.length ? [] : sweepWindows(dur);
     const sound = await soundOf(c.FFMPEG_PATH, input, info);
     const meta = {
       id: v.id, kind: v.kind, ...(v.title ? { title: v.title } : {}), durationSec: Math.round(dur * 1000) / 1000, fps, width: info.width, height: info.height,
       sound, cuts, frames: tiles.map(x => Math.round(x.t * 1000) / 1000), sheets: sh.length,
+      sweep: ssh.length
+        ? { frames: sweepTiles.length, fps: sweepRate, everySec: Math.round((1 / (sweepRate || 1)) * 1000) / 1000, sheets: ssh.length, fromSec: Math.round(sweepTiles[0]!.t * 1000) / 1000, toSec: Math.round(sweepTiles.at(-1)!.t * 1000) / 1000 }
+        : { frames: 0, sheets: 0, windows, note: `This video is longer than ${SWEEP_MAX_SEC} s, so it has no full sweep here: only the overview. Before you describe, judge or edit it, sweep ALL of it with watch_closer, one call per window, in order: ${windows.length} consecutive windows of ${SWEEP_WINDOW_SEC} s (fromSec/toSec as listed, frames: ${CLOSER_SWEEP_MAX}), so every second is seen. Then watch_closer again on any fast moment.` },
       ...(dur > MAX_WATCH_SEC ? { analysedSec: MAX_WATCH_SEC } : {}),
-      howToRead: `${sh.length} contact sheet(s), ${SHEET_COLS} frames across, read left→right then top→bottom like a flip book; each frame is labelled m:ss.ss. Frames are picked by motion: CUT marks a hard cut (the frames either side), ★ a motion peak; fast stretches get more frames than still ones. For any moment you need to see better (a fast move, a hand, a face, text), call watch_closer with that time range.`,
+      howToRead: `Two parts. (1) The overview: ${sh.length} sheet(s) of frames picked by motion: CUT marks a hard cut (the frames either side), ★ a motion peak; fast stretches get more frames than still ones. ${ssh.length ? `(2) The full sweep: ${ssh.length} sheet(s), ${sweepTiles.length} frames evenly every ${(1 / (sweepRate || 1)).toFixed(2)} s from the first frame to the last, so every second of the video is on them.` : '(2) No full sweep: the video is too long; see sweep.windows.'} All sheets are ${SHEET_COLS} frames across, read left→right then top→bottom like a flip book, each frame labelled m:ss.ss. Go through EVERY sheet, in order, before you describe or judge anything; never summarise from a few frames. For any fast moment (hands, a face, text, a quick move, a glitch), call watch_closer on that time range to see every frame larger.`,
     };
     const blocks: Block[] = [{ type: 'text', text: JSON.stringify(meta) }];
     sh.forEach((s, i) => blocks.push({ type: 'text', text: `Sheet ${i + 1}/${sh.length}: ${mmss(s.from)}–${mmss(s.to)}` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' }));
+    ssh.forEach((s, i) => blocks.push({ type: 'text', text: `Sweep ${i + 1}/${ssh.length}: ${mmss(s.from)}–${mmss(s.to)}` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' }));
     return remember(ck, { meta, blocks });
   }));
 }
@@ -261,7 +312,7 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
   const from = Number(fromSec), to = toSec === undefined ? from : Number(toSec);
   if (!Number.isFinite(from) || from < 0 || !Number.isFinite(to) || to < from) throw badRequest('fromSec/toSec: seconds from the start, toSec ≥ fromSec');
   if (to - from > 30) throw badRequest('watch_closer is for windows up to 30 s: use watch for the whole video, then look closer at parts');
-  const max = Math.min(CLOSER_MAX, Math.max(1, Math.round(Number(count) || CLOSER_MAX)));
+  const max = Math.min(CLOSER_SWEEP_MAX, Math.max(1, Math.round(Number(count) || CLOSER_MAX)));
   const ck = `${u.studioId}|${v.key}|${from}|${to}|${max}`;
   const hit = cache.get(ck);
   if (hit) return hit;
@@ -273,7 +324,8 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
     const fps = info.fps || 30, end = Math.min(to, info.duration);
     const all = Math.max(1, Math.floor((end - from) * fps) + 1), n = Math.min(all, max);
     const rel = [...new Set(Array.from({ length: n }, (_, i) => (n === 1 ? 0 : Math.round((i * (all - 1)) / (n - 1)))))];
-    const single = rel.length === 1, edge = single ? SINGLE_EDGE : CLOSER_EDGE;
+    // Up to 16 frames large (12 a sheet); a longer run (a sweep window) at sweep size, 24 a sheet.
+    const single = rel.length === 1, wide = rel.length > CLOSER_MAX, edge = single ? SINGLE_EDGE : wide ? SWEEP_EDGE : CLOSER_EDGE;
     const got = await grab(c.FFMPEG_PATH, input, rel, edge, from, end - from + 2 / fps);
     const tiles = rel.flatMap(f => { const jpg = got.get(f); return jpg ? [{ t: from + f / fps, jpg }] : []; });
     const step = rel.length > 1 ? (rel[1]! - rel[0]!) : 1;
@@ -281,7 +333,7 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
       everyFrame: step === 1, ...(step > 1 ? { everyNthFrame: step, note: `More frames than ${max} in this window: every ${step}th frame. Narrow the window to see every frame.` } : {}) };
     const blocks: Block[] = [{ type: 'text', text: JSON.stringify(meta) }];
     if (single && tiles[0]) blocks.push({ type: 'text', text: `Frame at ${mmss(tiles[0].t)}` }, { type: 'image', data: tiles[0].jpg.toString('base64'), mimeType: 'image/jpeg' });
-    else for (const s of await sheets(tiles, edge, 12)) blocks.push({ type: 'text', text: `${mmss(s.from)}–${mmss(s.to)}, left→right then down` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' });
+    else for (const s of await sheets(tiles, edge, wide ? SWEEP_TILES : 12, wide ? 68 : 72)) blocks.push({ type: 'text', text: `${mmss(s.from)}–${mmss(s.to)}, left→right then down` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' });
     return remember(ck, { meta, blocks });
   }));
 }
@@ -298,15 +350,15 @@ const PHOTOS_MAX = 6;
 export const WATCH_TOOLS: EditTool[] = [
   {
     name: 'watch', title: 'Watch a video (free)', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: 'Watch a video yourself: a take, a Library item, a clip or a video attached to the chat. Returns its length, frame rate, size and sound (present, level, how much is in the voice range; not the words), the hard cuts, and a flip book: contact sheets of frames picked by motion (every cut, the motion peaks, more frames where it moves fast), each labelled with its time. ALWAYS watch a video before you judge, compare, describe or edit it: never work from the person\'s description, the title or the prompt alone. Then use watch_closer on any moment you need to see better. Free; can take a few seconds.',
+    description: `Watch a video yourself: a take, a Library item, a clip or a video attached to the chat. Returns its length, frame rate, size and sound (present, level, how much is in the voice range; not the words), the hard cuts, and two flip books, each frame labelled with its time: an overview of frames picked by motion (every cut, the motion peaks, more frames where it moves fast) and a FULL SWEEP of the whole video at an even rate (about ${SWEEP_FPS} frames a second up to ${SWEEP_MAX / SWEEP_FPS} s, ${SWEEP_MAX} frames up to ${SWEEP_MAX_SEC} s). ALWAYS watch a video before you judge, compare, describe or edit it: never work from the person\'s description, the title or the prompt alone. Cover every second: go through every sheet of the sweep, then watch_closer on every fast moment (hands, a face, text, a quick move); never summarise from a few frames. Over ${SWEEP_MAX_SEC} s there is no sweep: sweep it yourself with watch_closer in the consecutive windows the result lists. Free; can take a few seconds.`,
     inputSchema: obj({ id: ID, takeId: str('The take open on the page (filled in for you)', 80) }),
     run: async (env, a) => result(await watchVideo(env.ctx, env.user, a.id ?? a.takeId)),
   },
   {
     name: 'watch_closer', title: 'Look closer at part of a video (free)', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: `Every frame of a short window of a video (up to ${CLOSER_MAX} frames, larger than watch's; an even run when the window has more), each labelled with its time: for a fast move, a hand, a face, text, a glitch. One frame at full detail when toSec is left out. Seconds from the video's start, as watch labels them. Free.`,
+    description: `Every frame of a short window of a video (${CLOSER_MAX} frames by default, larger than watch's; an even run when the window has more), each labelled with its time: for a fast move, a hand, a face, text, a glitch. Use it on every fast moment of a video you are studying. frames up to ${CLOSER_SWEEP_MAX} (smaller tiles) sweeps a window of up to ${SWEEP_WINDOW_SEC} s: for a video too long for watch's sweep, call it on consecutive windows that cover every second. One frame at full detail when toSec is left out. Seconds from the video's start, as watch labels them. Free.`,
     inputSchema: obj({ id: ID, takeId: str('The take open on the page (filled in for you)', 80), fromSec: num('Start of the window (s)', 0), toSec: num('End of the window (s); leave out for one frame', 0),
-      frames: num(`At most this many frames (default ${CLOSER_MAX})`, 1, CLOSER_MAX) }, ['fromSec']),
+      frames: num(`At most this many frames (default ${CLOSER_MAX}; up to ${CLOSER_SWEEP_MAX} to sweep a window)`, 1, CLOSER_SWEEP_MAX) }, ['fromSec']),
     run: async (env, a) => result(await watchCloser(env.ctx, env.user, a.id ?? a.takeId, a.fromSec, a.toSec, a.frames)),
   },
   {
