@@ -140,7 +140,7 @@ struct NewSwapStage: View {
             .frame(height: 32)
             .padding(.top, Space.s2)
             TakeViewer(media: ViewerMedia(id: c.id, videoURL: store.clipVideo, poster: store.clipPoster, width: c.width, height: c.height, label: c.name),
-                       context: .source, autoplay: false, startMuted: true, previewControls: false)
+                       context: .source, autoplay: false, startMuted: true)
                 .id(c.id)
                 .frame(maxHeight: .infinity)
             NewSwapTrimmer(clip: c)

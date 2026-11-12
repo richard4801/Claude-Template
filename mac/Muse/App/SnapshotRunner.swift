@@ -27,6 +27,8 @@ enum SnapshotRunner {
         var rigPanelOnScreen = false
         /// The Edit suite hides its media panel and inspector (the `_collapsed` layout shots).
         var editCollapsed = false
+        /// Edit's preview shows this view (the platform-preview shots; nil leaves it as it is).
+        var editPreview: EditPreview?
         /// Recreate's cost line and its primary (window space), for the fit check (SnapshotFrame).
         var recreateFrames: [String: CGRect] = [:]
         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
@@ -194,10 +196,6 @@ enum SnapshotRunner {
 
     /// The render's draft (design/direction/render.py `composer_mac`): @Demo in a café, 16:9, 8 s, 35 mm film with an
     /// anamorphic lens, window light, Golden warmth, UGC · Calm, and a #Dolly in. Options the catalog doesn't have stay Auto.
-    /// The take viewer's per-device choices for a review shot (nil: the defaults, Clean with no frame).
-    static func viewerPrefs(_ json: String?) {
-        if let json { UserDefaults.standard.set(json, forKey: "viewer.prefs") } else { UserDefaults.standard.removeObject(forKey: "viewer.prefs") }
-    }
 
     static func fillDemoDraft(_ store: AppStore) {
         let cam = store.suite.camera
@@ -349,16 +347,13 @@ enum SnapshotRunner {
             // …and after "go": Claude's ask waits in the panel for the owner's confirmation (never approved here).
             ("composer_claude_ask", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(ask: true) }),
             // The swap viewer fix (plans/swap-viewer-build.md; owner, build 582): the real views for the side-by-side with
-            // the approved mockups. A finished take on the Shot stage; the take viewer Clean, then with the TikTok layout
-            // (YouTube for a landscape take) in the device frame; New Swap empty and with a clip.
-            ("stage_take", { viewerPrefs(nil); store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
+            // the approved mockups. A finished take on the Shot stage; the take viewer (a clean player: the platform layouts
+            // are Edit's since 2026-11-12, see the mac_editpreview_* shots); New Swap empty and with a clip.
+            ("stage_take", { store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
                 if let j = store.suiteTakes(photo: false).compactMap(\.jobId).first { store.rememberStage(j, tool: .shot) } }),
-            ("viewer_clean", { viewerPrefs(nil); store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+            ("viewer_clean", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
-            ("viewer_tiktok", { viewerPrefs("{\"portraitSkin\":\"tiktok\",\"landscapeSkin\":\"youtube\",\"deviceFrame\":true,\"safeZones\":true}")
-                store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
-                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
-            ("newswap_empty", { viewerPrefs(nil); store.suite.feedOpen = false; store.suite.viewerTakeId = nil
+            ("newswap_empty", { store.suite.feedOpen = false; store.suite.viewerTakeId = nil
                 store.openTool(.swap); store.setSwapVariant(.remix); store.clip = nil; store.clipVideo = nil }),
             ("newswap_filled", { store.suite.feedOpen = false; store.openTool(.swap); store.setSwapVariant(.remix)
                 store.suite.remix.backgroundOn = true; store.suite.remix.backgroundMode = .describe
@@ -370,9 +365,8 @@ enum SnapshotRunner {
                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
         ]
         await run([.c, .a, .b, .d], [(1280, 800), (1000, 700)], feedScreens)
-        // Back to the defaults after the swap viewer shots: the classic Swap, Clean, no device frame.
+        // Back to the defaults after the swap viewer shots: the classic Swap.
         store.setSwapVariant(.classic)
-        viewerPrefs(nil)
         // The last screen was the comparison: two takes were on screen (the demo has video takes).
         let compared = store.suiteComparing.count
         lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
@@ -489,6 +483,19 @@ enum SnapshotRunner {
                 shot("\(theme.rawValue)_\(width)x\(height)_collapsed", "\(width)x\(height) \(theme.rawValue) collapsed")
                 state.editCollapsed = false
                 try? await Task.sleep(for: .seconds(0.5))
+                // Edit's platform preview (plans/edit-platform-preview.md): TikTok's chrome with its red box, and Clean,
+                // in the dark and light themes (`mac_editpreview_<theme>_<view>.png`).
+                if width == 1440 && (theme == .b || theme == .a) {
+                    for (view, tag) in [(PreviewSkin.tiktok, "tiktok"), (.clean, "clean")] {
+                        state.editPreview = EditPreview(view: view, safeArea: true)
+                        try? await Task.sleep(for: .seconds(1))
+                        capture(dir.appendingPathComponent("mac_editpreview_\(theme.rawValue)_\(tag).png"))
+                        let cut = truncatedLabels()
+                        lines.append(contentsOf: cut.isEmpty ? ["FITS edit preview \(tag) \(theme.rawValue) (\(fitProbes.count) labels)"]
+                                                             : cut.map { "CUT edit preview \(tag) \(theme.rawValue) \($0)" })
+                    }
+                    state.editPreview = nil
+                }
             }
             // The app now opens down to 960 pt (coordination item 8): Edit at 1000 × 700 for the record. INFO lines, not
             // CUT: the Edit layout plan's sizes are the three above.

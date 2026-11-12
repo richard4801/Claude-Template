@@ -143,6 +143,8 @@ final class EditSuiteSession {
     @ObservationIgnored let drafts = EditSessionDrafts.standard
     /// A kept draft differs from the session's latest: "Keep this device's changes / Use the latest".
     var draftAsk: EditSessionDraft?
+    /// The platform views' safe zones (GET /v1/preview/layouts over the defaults), for the red box and its warning.
+    var previewLayouts = PreviewLayouts.defaults
     /// The app's gallery hook for versions saved on Claude's request.
     @ObservationIgnored var onVersionSaved: ((Take) -> Void)?
 
@@ -205,6 +207,7 @@ final class EditSuiteSession {
             project.sourceTakeId = sourceTakeId
             state = EditSuiteState(project)
             state.paletteIds = EditV2LookLibrary.shared.paletteIds
+            state.preview = Self.rememberedPreview(for: previewKey)
             state.markSaved()
             for a in project.assets {
                 if a.take == sourceTakeId, let local { files[a.id] = local }
@@ -213,6 +216,7 @@ final class EditSuiteSession {
             phase = .ready
             Task { [weak self] in await self?.refreshFeatures() }
             Task { [weak self] in await self?.loadContent() }
+            Task { [weak self] in await self?.loadPreviewLayouts() }
             observeTime()
             await ensureFiles()
             rebuild(immediately: true)

@@ -3,9 +3,11 @@ import MuseCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The viewer (E1, plans/edit-layout.md): "Safe area" as one segmented control (Off · TikTok · Reels · Shorts) and Fit ·
-/// 100 %; the live edit on the viewer tone at the canvas shape with the platform's safe-area guide; the transport below
-/// (timecode in tabular figures, back, a 40 pt play, forward, sound, full screen).
+/// The viewer (E1, plans/edit-layout.md; platform views plans/edit-platform-preview.md): "View" (Clean · TikTok · Reels ·
+/// Shorts · Facebook, or Clean · YouTube · Facebook on 16:9) with the "Safe area" switch, and Fit · 100 %; the live edit
+/// on the viewer tone at the canvas shape with the app's generic chrome and its red safe box over it; a warning line when
+/// captions or text sit outside the box; the transport below (timecode in tabular figures, back, a 40 pt play, forward,
+/// sound, full screen).
 struct EditSuitePreview: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
@@ -23,14 +25,27 @@ struct EditSuitePreview: View {
                 if mediaHidden {
                     SuiteIconButton(systemName: "caret-double-right", label: "Show media", tint: t.roles.ink2, action: showMedia)
                 }
-                Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("safe area")
-                EditSeg(options: safeAreas,
-                        selection: session.state.safeArea, height: 28, small: true) { a in
-                    session.view { $0.safeArea = a }
+                Text("View").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("preview view")
+                EditSeg(options: views, selection: session.shownPreview.view, height: 28, small: true) { v in
+                    var p = session.state.preview
+                    p.view = v
+                    session.setPreview(p)
                 }
                 .fixedSize()
+                .help("Preview the edit under each app's buttons and captions (our own drawing of its layout)")
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("Safe area")
+                .accessibilityLabel("Preview view")
+                Toggle(isOn: Binding(get: { session.state.preview.safeArea }, set: { on in
+                    var p = session.state.preview
+                    p.safeArea = on
+                    session.setPreview(p)
+                })) {
+                    Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("safe area")
+                }
+                .toggleStyle(.switch).controlSize(.small)
+                .padding(.leading, Space.s2)
+                .help(session.previewLayouts.note.map { "The red box: where the app leaves your picture clear. \($0)" }
+                      ?? "The red box: where the app leaves your picture clear")
                 Spacer(minLength: Space.s2)
                 Button { actualSize.toggle() } label: {
                     Text(actualSize ? "Actual size · 100%" : "Fit · \(fitPercent)%").font(t.scale.caption.font).monospacedDigit()
@@ -60,7 +75,10 @@ struct EditSuitePreview: View {
                             .font(t.scale.caption.font).foregroundStyle(.white.opacity(0.75))
                             .multilineTextAlignment(.center).padding(Space.s3)
                     }
-                    if let a = session.state.safeArea { SafeAreaGuide(area: a) }
+                    EditPlatformChrome(view: session.shownPreview.view, landscape: session.previewIsLandscape, width: w, height: h)
+                    if let z = session.safeZone {
+                        EditSafeBoxGuide(zone: z, name: EditSafeBox.name(session.state.preview, width: c.width, height: c.height))
+                    }
                     if session.pickingKeyColour { KeyColourPicker(session: session, scale: Double(c.width) / Double(max(1, w))) }
                 }
                 .frame(width: w, height: h)
@@ -72,10 +90,31 @@ struct EditSuitePreview: View {
             .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.editViewer))
             .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
 
+            if let warning = session.safeWarning { safeWarning(warning) }
+
             transport
         }
         .padding(Space.s4)
         .background(t.roles.canvas)
+        // Review mode: the platform-preview shots set the view (never remembered).
+        .onChange(of: SnapshotRunner.state.editPreview) { _, p in if let p { session.setPreview(p, remember: false) } }
+    }
+
+    /// "Captions sit under TikTok's caption and buttons (0:01–0:09)." and the one fix.
+    private func safeWarning(_ text: String) -> some View {
+        HStack(spacing: Space.s2) {
+            Ph("warning", 14).foregroundStyle(Color(hex: 0xFF5A5F))
+            Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
+            Button("Move into the safe area") { session.moveIntoSafeArea() }
+                .buttonStyle(.plain)
+                .font(t.scale.caption.font.weight(.medium))
+                .foregroundStyle(t.roles.accent)
+                .fixedSize()
+                .help("Moves the captions and text just inside the red box (one change; Undo puts them back)")
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 28)
+        .accessibilityElement(children: .combine)
     }
 
     /// Parity wave 1 "extract frame": the edit's frame at the playhead (with every look, text and caption) as a PNG.
@@ -91,9 +130,9 @@ struct EditSuitePreview: View {
         }
     }
 
-    /// Off, then each platform's guide (the same state as the guides before: nil is off).
-    private var safeAreas: [(EditSuite.SafeArea?, String)] {
-        [(nil, "Off")] + EditSuite.SafeArea.allCases.map { a -> (EditSuite.SafeArea?, String) in (a, a.label) }
+    /// The views this canvas offers: the phone apps on portrait, square and 4:5; the landscape players on 16:9.
+    private var views: [(PreviewSkin, String)] {
+        EditPreview.options(width: session.project.canvas.width, height: session.project.canvas.height).map { ($0, $0.label) }
     }
 
     private var transport: some View {
@@ -193,23 +232,6 @@ struct SuitePlayerSurface: NSViewRepresentable {
 
     func updateNSView(_ v: AVPlayerView, context: Context) {
         if v.player !== player { v.player = player }
-    }
-}
-
-/// Dashed safe-area box: the part of the frame the platform's buttons and captions leave clear.
-struct SafeAreaGuide: View {
-    var area: EditSuite.SafeArea
-
-    var body: some View {
-        GeometryReader { g in
-            let i = area.insets
-            let rect = CGRect(x: g.size.width * i.left, y: g.size.height * i.top,
-                              width: g.size.width * (1 - i.left - i.right), height: g.size.height * (1 - i.top - i.bottom))
-            Path { p in p.addRect(rect) }
-                .stroke(Color(hex: 0xFF5A5F).opacity(0.9), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 

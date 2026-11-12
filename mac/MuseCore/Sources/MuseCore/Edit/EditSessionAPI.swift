@@ -123,8 +123,10 @@ public struct EditPresence: Codable, Hashable, Sendable {
     /// android | mac | other
     public var platform: String
     public var canRender: Bool
-    public init(device: String, label: String, platform: String = "mac", canRender: Bool = true) {
-        self.device = device; self.label = label; self.platform = platform; self.canRender = canRender
+    /// Edit's preview on this app (the view and the red safe-area box), so Claude knows what the person sees.
+    public var preview: EditPreview?
+    public init(device: String, label: String, platform: String = "mac", canRender: Bool = true, preview: EditPreview? = nil) {
+        self.device = device; self.label = label; self.platform = platform; self.canRender = canRender; self.preview = preview
     }
 }
 

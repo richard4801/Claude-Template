@@ -134,27 +134,6 @@ public enum EditSuite {
         }
     }
 
-    /// Platform safe-area guides over the preview.
-    public enum SafeArea: String, CaseIterable, Hashable, Sendable, Identifiable {
-        case tiktok, reels, shorts
-        public var id: String { rawValue }
-        public var label: String {
-            switch self {
-            case .tiktok: return "TikTok"
-            case .reels: return "Reels"
-            case .shorts: return "Shorts"
-            }
-        }
-        /// The area kept clear of the platform's buttons and captions, as canvas fractions (left, top, right, bottom insets).
-        public var insets: (left: Double, top: Double, right: Double, bottom: Double) {
-            switch self {
-            case .tiktok: return (0.06, 0.12, 0.17, 0.2)
-            case .reels: return (0.05, 0.14, 0.15, 0.22)
-            case .shorts: return (0.05, 0.1, 0.16, 0.18)
-            }
-        }
-    }
-
     public enum BeatMarks: String, CaseIterable, Hashable, Sendable { case every, strong }
 
     /// Caption position presets (style.y).
@@ -380,7 +359,9 @@ public struct EditSuiteState: Sendable {
     /// Locked rows can't be selected or changed from the timeline (view state).
     public var locked: Set<String> = []
     public var tab: EditSuite.InspectorTab = .captions
-    public var safeArea: EditSuite.SafeArea? = .tiktok
+    /// The preview's view (Clean or a platform's chrome) and the red safe-area box (plans/edit-platform-preview.md). The app
+    /// sets it from the remembered choice for this project.
+    public var preview = EditPreview()
     public var export = EditSuite.ExportSettings()
     /// The last saved project (for "saved just now" / unsaved changes).
     public private(set) var savedProject: E.Project?

@@ -165,7 +165,9 @@ struct EditSuiteCaptionsMode: View {
                 let h = min(g.size.width / aspect, g.size.height)
                 ZStack {
                     SuitePlayerSurface(player: session.player)
-                    if let a = session.state.safeArea { SafeAreaGuide(area: a) }
+                    if let z = session.safeZone {
+                        EditSafeBoxGuide(zone: z, name: EditSafeBox.name(session.state.preview, width: c.width, height: c.height))
+                    }
                 }
                 .frame(width: h * aspect, height: h)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
