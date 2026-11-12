@@ -32,23 +32,27 @@ import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 import { GENJUTSU_HELPERS, GENJUTSU_LIMITS, genjutsuHelperInput, genjutsuSeconds, genjutsuUsd, isGenjutsuHelper, parseGenjutsuOptions, runGenjutsu, type GenjutsuImage, type GenjutsuOptions } from './genjutsu.js';
 import { GENJUTSU_NO_ACCESS } from '../engines/purposes.js';
 
+import { LAYERS_LIMITS, matteBoxes, objectsKey, parseObjects, type LayerObject } from './layers.js';
+
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate', 'cutout', 'objectswap', 'restyle'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats', 'reverse', 'stabilize', 'translate', 'slowmo', 'separate', 'cutout', 'objectswap', 'restyle', 'layers'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 export const GPU_SEC = {
   transcribe: (d: number) => 8 + 0.15 * d,
   matte: (d: number) => 10 + 4 * d,
   track: (d: number) => 15 + 3 * d,
+  /** Layers: one tracking run per object (plans/layers-edit.md; re-measure on first real runs). */
+  layers: (d: number, n: number) => n * (15 + 3 * d),
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', separate: 'Splitting voice and music', cutout: 'Cutting out', briefs: 'Writing the briefs', objectswap: 'Swapping the object', restyle: 'Restyling' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat', reverse: 'Reversing', stabilize: 'Steadying', translate: 'Translating', slowmo: 'Slowing down', separate: 'Splitting voice and music', cutout: 'Cutting out', layers: 'Finding layers', briefs: 'Writing the briefs', objectswap: 'Swapping the object', restyle: 'Restyling' };
 const LANG_RE = /^[a-z]{2}$/;
 
 /** Tap to keep (workstream 1): a point on the clip, 0–1 of the frame, at `t` seconds of the source; keep false = leave out. */
 export type KeepPoint = { x: number; y: number; t: number; keep: boolean };
 export const MAX_KEEP_POINTS = 10;
-export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[] } & CutOptions & GenjutsuOptions;
+export type JobOptions = { language?: string | null; fromJobId?: string; targetLanguage?: string; sourceLanguage?: string; lines?: AppLine[]; quality?: Quality; strength?: number; zoom?: 'auto' | 'none'; factor?: SlowmoFactor; startSec?: number; endSec?: number; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number; points?: KeepPoint[]; objects?: LayerObject[] } & CutOptions & GenjutsuOptions;
 
 /** The languages translate offers: those the export draws today. */
 const translateTargets = () => { const ok = exportLanguages(); return Object.keys(TRANSLATE_LANGUAGES).filter(l => ok.has(l)); };
@@ -83,6 +87,7 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
     });
     if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
   }
+  if (kind === 'layers') out.objects = parseObjects(o.objects, LAYERS_LIMITS.maxSec);
   if (kind === 'translate') {
     // Only languages the export can draw (scripts.ts): the others would show in the app but vanish from exports.
     if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage] || !exportLanguages().has(o.targetLanguage)) throw badRequest(`options.targetLanguage: one of ${translateTargets().join(', ')}`);
@@ -227,7 +232,7 @@ export class EditorAiService {
     // WS13 · owner only: the model for this helper, checked against its candidates (engines/service.ts); today each has one.
     if (body?.engineModel !== undefined) {
       if (typeof body.engineModel !== 'string') throw badRequest('engineModel: a model id');
-      const purpose = kind === 'captions' || kind === 'cuts' ? 'captions' : kind === 'matte' ? (opts.points ? 'track' : 'matte') : kind === 'denoise' ? 'denoise' : null;
+      const purpose = kind === 'captions' || kind === 'cuts' ? 'captions' : kind === 'layers' ? 'track' : kind === 'matte' ? (opts.points ? 'track' : 'matte') : kind === 'denoise' ? 'denoise' : null;
       if (!purpose) throw badRequest(`engineModel: ${kind} runs no model`);
       await (await import('../engines/service.js')).modelChoice(this.ctx).check(u, purpose, body.engineModel);
     }
@@ -252,6 +257,15 @@ export class EditorAiService {
     // 2026-11-08: background removal is "coming soon" while production runs the mock (nothing real to give yet).
     if (kind === 'matte' && !this.matteAvailable) throw badRequest('Background removal is coming soon');
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
+    if (kind === 'layers') {
+      // Find layers (plans/layers-edit.md): the tracker once per object; the same objects on the same video again are free.
+      if (!this.matteAvailable) throw badRequest('Layers are coming soon');
+      if (d > LAYERS_LIMITS.maxSec + 0.05) throw badRequest(`source: layers work on clips up to ${LAYERS_LIMITS.maxSec} s · trim it first`);
+      if (opts.objects!.some(ob => ob.points.some(q => q.t > d + 0.05))) throw badRequest(`options.objects: t must be within the clip (0–${d} s)`);
+      if (await this.layersBefore(u.studioId, src.key, opts.objects!)) return { kind, opts, src, reuse: null, usd: 0 };
+      const usd = GPU_SEC.layers(d, opts.objects!.length) * this.provider.rates.track;
+      return { kind, opts, src, reuse: null, usd: usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0 };
+    }
     if (kind === 'reverse' && d > REVERSE_LIMITS.maxSec) throw badRequest(`source: reverse works on videos up to ${REVERSE_LIMITS.maxSec} s`);
     if (kind === 'stabilize' && d > STABILIZE_LIMITS.maxSec) throw badRequest(`source: stabilise works on videos up to ${STABILIZE_LIMITS.maxSec / 60} minutes`);
     if (kind === 'stabilize' && !(await this.stabilizeAvailable())) throw badRequest('kind: stabilise is not available on this server');
@@ -306,9 +320,12 @@ export class EditorAiService {
   // ------------------------------------------------------------------ jobs
   async start(u: AuthUser, body: any) {
     const e = await this.estimate(u, body);
+    // Layers (owner, 2026-11-11): a run above $1 per clip asks first; the app (or the owner's approval) sends acceptUsd.
+    if (e.kind === 'layers' && e.usd > LAYERS_LIMITS.askAboveUsd && !(typeof body?.acceptUsd === 'number' && body.acceptUsd >= e.usd - 1e-9))
+      throw Object.assign(new ApiError(409, 'price_confirm', `Finding these layers costs $${e.usd.toFixed(2)} · confirm to go ahead`), { extra: { usd: e.usd } });
     if (e.usd > 0) await this.allowPaid(u.studioId, e.usd);
     const id = uid('edj');
-    const models = isGenjutsuHelper(e.kind) ? [GENJUTSU_HELPERS[e.kind].ref] : e.kind === 'cutout' ? (e.usd > 0 ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : []) : e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
+    const models = e.kind === 'layers' ? (e.usd > 0 ? [this.provider.models.track] : []) : isGenjutsuHelper(e.kind) ? [GENJUTSU_HELPERS[e.kind].ref] : e.kind === 'cutout' ? (e.usd > 0 ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : []) : e.kind === 'separate' ? (e.usd > 0 ? [this.provider.models.separate] : []) : e.kind === 'slowmo' ? (e.usd > 0 ? [SLOWMO_MODEL.ref] : []) : e.kind === 'translate' ? [TRANSLATE_MODELS[e.opts.quality ?? 'standard'].model] : e.usd === 0 ? [] : e.kind === 'matte' ? [e.opts.points ? this.provider.models.track : this.provider.models.matte] : e.kind === 'denoise' ? [this.provider.models.separate] : [('transcriber' in e && e.transcriber) || this.provider.models.transcribe];
     const holdTokens = e.usd > 0 ? await this.ctx.money.hold(whoOf(u), id, e.usd, { perJob: false, note: `Editor ${e.kind} · hold` }) : 0;
     let row: Row;
     resultsOf(this.ctx).link(u, `editor-${id}`);
@@ -353,6 +370,12 @@ export class EditorAiService {
   private slowTools: Promise<boolean> | null = null;
   /** Whether slow motion can run: fal is set up and ffmpeg is here. */
   async slowmoAvailable() { return !!this.ctx.config.FAL_KEY && await (this.slowTools ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH)); }
+  /** The same objects (names and taps) found on the same video before, by anyone in the studio, within the reuse window. */
+  private async layersBefore(studioId: string, key: string, objects: LayerObject[]) {
+    const since = Date.now() - EDITOR_LIMITS.reuseDays * 86_400_000, want = objectsKey(objects);
+    const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'layers'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'), sql`${editorJobs.createdAt} > ${since}`)).orderBy(desc(editorJobs.createdAt)).limit(20);
+    return prev.find(r => objectsKey((r.options as JobOptions).objects ?? []) === want && !!r.result && !(r.result as { reused?: boolean }).reused) ?? null;
+  }
   private async slowmoBefore(studioId: string, key: string, o: JobOptions) {
     const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'slowmo'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20);
     return prev.find(r => { const p = r.options as JobOptions; return p.factor === o.factor && p.startSec === o.startSec && p.endSec === o.endSec && !!r.result; }) ?? null;
@@ -538,6 +561,26 @@ export class EditorAiService {
         const t = await transcript();
         const s = suggestCuts(t.words, d, o);
         result = { ...s, words: t.words, language: t.language, options: { ...CUT_DEFAULTS, ...o }, durationSec: d };
+      } else if (row.kind === 'layers') {
+        const prev = await this.layersBefore(u.studioId, src.key, o.objects!);
+        if (prev) result = { ...(prev.result as Record<string, unknown>), reused: true };
+        else {
+          const out: Record<string, unknown>[] = [], objs = o.objects!;
+          let billed = 0, known = true;
+          for (let k = 0; k < objs.length; k++) {
+            const ob = objs[k]!;
+            const part: Hooks = { ...hooks, onProgress: async (f, ph) => { await hooks.onProgress?.((k + f) / objs.length, ph ? `${ph} · ${ob.name}` : `Finding ${ob.name}`); } };
+            const made = await p.track(url, d, await this.pixelPoints(src.key, ob.points, src.size, p.name === 'mock'), part);
+            if (made.file) temps.push(made.file);
+            if (made.gpuSec == null) known = false; else billed += made.gpuSec;
+            // Where the object is over time, for pinned text (best effort: a layer without it just can't take a pin).
+            const boxes = made.file ? await matteBoxes(this.ctx.config.FFMPEG_PATH, made.file).catch(e => { this.ctx.log.warn({ err: (e as Error).message, job: id }, 'layer boxes failed'); return null; }) : null;
+            const asset = await this.store(u, src, made.file, made.contentType, 'video', d);
+            out.push({ name: ob.name, asset, ...(boxes ? { track: { fps: LAYERS_LIMITS.trackFps, boxes } } : {}) });
+          }
+          gpuSec = known ? billed : null; rate = p.rates.track;
+          result = { layers: out, durationSec: d, reused: false };
+        }
       } else if (row.kind === 'matte' || (row.kind === 'denoise' && !o.analyzeOnly)) {
         const tracked = row.kind === 'matte' && !!o.points?.length;
         const out = row.kind !== 'matte' ? await p.separate(url, d, hooks)
@@ -779,6 +822,7 @@ export class EditorAiService {
       stabilize: { available: await this.stabilizeAvailable(), free: true, maxSec: STABILIZE_LIMITS.maxSec },
       separate: { available: paid && this.matteAvailable },
       cutout: { available: paid && this.matteAvailable, maxPoints: MAX_KEEP_POINTS },
+      layers: { available: paid && this.matteAvailable, maxSec: LAYERS_LIMITS.maxSec, maxObjects: LAYERS_LIMITS.maxObjects, askAboveUsd: LAYERS_LIMITS.askAboveUsd },
       slowmo: { available: paid && await this.slowmoAvailable(), factors: [2, 4], maxRangeSec: SLOWMO_LIMITS.maxRangeSec },
       translate: { available: paid && !!this.translator(), languages: translateTargets(), qualities: ['standard', 'best'], maxWords: TRANSLATE_LIMITS.maxWords, maxLines: TRANSLATE_LIMITS.maxLines, maxLineChars: TRANSLATE_LIMITS.maxLineChars },
       objectswap: { available: paid && this.ctx.suite.providers.higgsfield.configured(), minSec: GENJUTSU_LIMITS.minSec, maxSec: GENJUTSU_LIMITS.maxSec, maxImages: GENJUTSU_HELPERS.objectswap.maxImages,

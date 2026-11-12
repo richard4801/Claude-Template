@@ -78,7 +78,38 @@ export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: num
   /** In / out animation (as images: fade, pop, slideUp, slideDown, zoom), main or overlay; [animState] over clipLength. */
   animIn?: Anim; animOut?: Anim;
   /** A repeating animation while it's on screen (overlay clips only; text and images have it too). */
-  animLoop?: AnimLoop };
+  animLoop?: AnimLoop;
+  /** Layers (plans/layers-edit.md Phase 1, main-track clips only): tracked objects of this clip, each drawn again over it; see ClipLayer. */
+  layers?: ClipLayer[];
+  /** The "Background" row of a clip with layers: the clip's own picture under them; see LayerBase. */
+  layerBase?: LayerBase;
+  /** Where the layers came from (the Find layers job), for reuse and "Find layers again". Not drawn. */
+  layerSource?: { job: string } };
+/**
+ * A layer (plans/layers-edit.md, Phase 1): one tracked object of its clip. It is the clip's own picture drawn again over the
+ * clip, cut out by `matte` (a grey video asset aligned with the clip's source like alphaMatte, white = this object), with
+ * its own colour. It follows the clip's trim, speed, crop, fit, transform, keyframes and mask (layerClip); it has no sound.
+ * - look / filter replace the clip's for this layer, adjust is merged over the clip's (per field); absent = the clip's.
+ * - recolor: a colour wash that keeps the light and shade (recolorPixel), after the colour.
+ * - blur: the layer's picture blurred (layerBlurPx); feather: the matte's edge softened (layerFeatherPx).
+ * - aboveText: drawn after the text and captions ("text behind her"), while its clip is on screen outside its
+ *   transitions (clipSteadyRange); during a transition it is drawn in the normal place instead.
+ * - track: where the object is in the source (made by the job; pins read it, layerBoxAt).
+ * Drawing order inside a clip: the clip (Background, see LayerBase), then its layers in array order.
+ */
+export type ClipLayer = { id: string; name: string; matte: string; hidden?: boolean; look?: Look; adjust?: Adjust; filter?: FilterRef;
+  recolor?: Recolor; opacity?: number; blur?: number; feather?: number; aboveText?: boolean; track?: LayerTrack };
+export type Recolor = { color: string; amount: number };
+/** Boxes [x, y, w, h] (0–1 of the source frame) sampled every 1/fps s of the clip's source from 0; null = not seen. */
+export type LayerTrack = { fps: number; boxes: (number[] | null)[] };
+/**
+ * The clip's own picture under its layers. hidden: not drawn (the canvas shows); blur: blurred (layerBlurPx); look /
+ * filter / adjust as for a layer (for the background only); asset: another picture (image, or video played from its start
+ * at 1×, held on its last frame) drawn instead, cover-fitted to the clip's source frame, then cropped and placed like it.
+ */
+export type LayerBase = { hidden?: boolean; blur?: number; look?: Look; adjust?: Adjust; filter?: FilterRef; asset?: string };
+/** A text pinned to a layer: its centre follows the layer's box (center / top / bottom middle) plus offset (canvas 0–1). */
+export type TextPin = { clip: string; layer: string; anchor: 'center' | 'top' | 'bottom'; offset?: { x: number; y: number } };
 /** Background removal's result: a video asset the same length as the clip's source; its luma is the clip's alpha (invert: the reverse). */
 export type AlphaMatte = { asset: string; invert?: boolean };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim; blend?: BlendMode; animLoop?: AnimLoop;
@@ -94,7 +125,9 @@ export type TextStyle = { font: FontFamily; weight: 400 | 700 | 900; sizePct: nu
   /** Text items only: a `font` asset to draw with (its own face; `weight` is not synthesised). `font` stays the fallback. */
   fontAsset?: string };
 export type TextItem = { id: string; startSec: number; durationSec: number; text: string; style: TextStyle; transform?: Transform; opacity?: number;
-  keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string; animLoop?: AnimLoop };
+  keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string; animLoop?: AnimLoop;
+  /** Layers: the text moves with a tracked layer (pinPoint replaces its x and y while the layer is seen). */
+  pin?: TextPin };
 export type AudioClip = Voice & { id: string; asset: string; strongBeats?: number[]; startSec: number; inSec: number; outSec: number; speed?: number; volume?: number; muted?: boolean;
   fadeInSec?: number; fadeOutSec?: number; keyframes?: Keyframes; beats?: number[] };
 export type CaptionPreset = 'plain' | 'highlight' | 'box' | 'karaoke' | 'pop' | 'single' | 'highlighter' | 'neon';
@@ -329,7 +362,7 @@ export function reverseClip(c: VideoClip, reversed: string, durationSec: number)
   if (c.holdSec !== undefined) return null;
   const out: VideoClip = { ...c, asset: reversed, inSec: r6(Math.max(0, durationSec - c.outSec)), outSec: r6(Math.min(durationSec, durationSec - c.inSec)) };
   // Lined up frame for frame with the original, so they'd play the wrong way: dropped (the apps say so).
-  delete out.alphaMatte; delete out.audioAsset;
+  delete out.alphaMatte; delete out.audioAsset; dropLayers(out);
   if (c.speedCurve) {
     const points = c.speedCurve.points.map(([x, v]) => [r6(1 - x), v] as [number, number]).sort((a, b) => a[0] - b[0]);
     const same = points.length === c.speedCurve.points.length && points.every((q, i) => q[0] === c.speedCurve!.points[i]![0] && q[1] === c.speedCurve!.points[i]![1]);
@@ -345,7 +378,7 @@ export function reverseClip(c: VideoClip, reversed: string, durationSec: number)
  */
 export function deriveClip(c: VideoClip, copy: string, op: 'stabilize' | null): VideoClip {
   const out: VideoClip = { ...c, asset: copy };
-  if (op === 'stabilize') delete out.alphaMatte;
+  if (op === 'stabilize') { delete out.alphaMatte; dropLayers(out); }
   return out;
 }
 
@@ -391,7 +424,7 @@ export function applySlowmo(p: EditProject, clipId: string, slowId: string): { p
   const last = (v: VideoClip) => ({ ...v, ...(fadeOutSec !== undefined ? { fadeOutSec } : {}), ...(animOut ? { animOut } : {}) });
   const withKeys = (v: VideoClip, a: number, b: number, scale: number): VideoClip => { const k = sliceKeys(keyframes, a, b, scale); return k ? { ...v, keyframes: k } : v; };
   if (hasBefore) pieces.push(withKeys({ ...base, outSec: r6(d.startSec) }, 0, la, 1));
-  const { alphaMatte: _m, audioAsset: _a, ...plain } = base;
+  const { alphaMatte: _m, audioAsset: _a, layers: _l, layerBase: _lb, layerSource: _ls, ...plain } = base;
   const midId = hasBefore ? nextId() : c.id;
   pieces.push(withKeys({ ...plain, id: midId, asset: slowId, inSec: 0, outSec: midLen, speed: 1, muted: true }, la, lb, lb > la ? midLen / (lb - la) : 1));
   if (hasAfter) pieces.push(withKeys({ ...base, id: nextId(), inSec: r6(d.endSec) }, lb, len, 1));
@@ -1143,6 +1176,120 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 
 /** All the rules of plans/video-editor.md "Rules". Throws EditProblem (field path + message) on the first one broken. */
 /** opts.draft: a blank project still being built may have an empty main track (0 s); everything else is checked. */
+// ------------------------------------------------------------------ layers (plans/layers-edit.md, Phase 1)
+/** Rounds to 6 places (the fixtures' layer boxes). */
+export const LAYERS_ROUND = r6;
+export const LAYER_LIMITS = { maxLayers: 5, maxName: 40, maxTrackFps: 10, maxTrackSamples: 10 * 125 } as const;
+/** A clip loses its layers when its frames no longer line up with the source (reverse, stabilise, slow motion). */
+export function dropLayers(c: VideoClip) { delete c.layers; delete c.layerBase; delete c.layerSource; }
+
+/** The clip as drawn for one of its layers: its picture with the layer's matte as alpha and the layer's colour and opacity. */
+export function layerClip(c: VideoClip, l: ClipLayer): VideoClip {
+  const { layers: _l, layerBase: _b, layerSource: _s, chroma: _c, alphaMatte: _a, audioAsset: _au, look, adjust, filter, opacity, keyframes, ...rest } = c;
+  const k = l.opacity ?? 1;
+  const keys = keyframes?.opacity && k !== 1 ? { ...keyframes, opacity: keyframes.opacity.map(kf => ({ ...kf, v: r6(kf.v * k) })) } : keyframes;
+  const lk = l.look ?? look, ad = l.adjust ? { ...(adjust ?? {}), ...l.adjust } : adjust, fl = l.filter ?? filter;
+  const op = (opacity ?? 1) * k;
+  return { ...rest, alphaMatte: { asset: l.matte }, muted: true, ...(lk ? { look: lk } : {}), ...(ad ? { adjust: ad } : {}), ...(fl ? { filter: fl } : {}),
+    ...(op !== 1 ? { opacity: r6(op) } : {}), ...(keys ? { keyframes: keys } : {}) };
+}
+/** The clip as drawn under its layers (the Background row's colour over the clip's; its other parts are the engines'). */
+export function baseClip(c: VideoClip): VideoClip {
+  const b = c.layerBase;
+  if (!b) return c;
+  const out: VideoClip = { ...c };
+  if (b.look) out.look = b.look;
+  if (b.adjust) out.adjust = { ...(c.adjust ?? {}), ...b.adjust };
+  if (b.filter) out.filter = b.filter;
+  return out;
+}
+/** Blur (layer or background) and feather (a layer's matte edge), 0–1, as a Gaussian sigma in canvas pixels. */
+export const layerBlurPx = (canvas: { width: number; height: number }, v: number | undefined) => (v ? r6(v * 0.02 * Math.min(canvas.width, canvas.height)) : 0);
+export const layerFeatherPx = (canvas: { width: number; height: number }, v: number | undefined) => (v ? r6(v * 0.006 * Math.min(canvas.width, canvas.height)) : 0);
+
+const rgbHsl = (r: number, g: number, b: number): [number, number, number] => {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (d < 1e-9) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  const h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+};
+const hslRgb = (h: number, s: number, l: number): [number, number, number] => {
+  if (s < 1e-9) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t: number) => { t = t < 0 ? t + 1 : t > 1 ? t - 1 : t; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [f(h + 1 / 3), f(h), f(h - 1 / 3)];
+};
+/**
+ * A layer's recolour of one pixel (0–1 RGB): the colour's hue and saturation, the pixel's light and shade moved to the
+ * colour's lightness (L' = Lc + (L − 0.5) × (1 − |2Lc − 1| / 2), clamped), mixed in by amount.
+ */
+export function recolorPixel(rgb: [number, number, number], rc: Recolor): [number, number, number] {
+  const [hc, sc, lc] = rgbHsl(...hexRgb(rc.color));
+  const l = rgbHsl(...rgb)[2];
+  const out = hslRgb(hc, sc, clamp(lc + (l - 0.5) * (1 - Math.abs(2 * lc - 1) / 2), 0, 1));
+  const a = clamp(rc.amount, 0, 1);
+  return [0, 1, 2].map(i => r6(rgb[i]! + (out[i]! - rgb[i]!) * a)) as [number, number, number];
+}
+/** The layer's box at a source time: linear between the two samples around it; a gap is bridged up to 0.5 s; else null. */
+export function layerBoxAt(l: Pick<ClipLayer, 'track'>, sourceSec: number): [number, number, number, number] | null {
+  const tr = l.track;
+  if (!tr || !tr.boxes.length || !(tr.fps > 0)) return null;
+  const f = Math.max(0, sourceSec * tr.fps), reach = Math.max(1, Math.round(tr.fps / 2));
+  const i0 = Math.min(tr.boxes.length - 1, Math.floor(f));
+  let a = -1, b = -1;
+  for (let i = i0; i >= Math.max(0, i0 - reach); i--) if (tr.boxes[i]) { a = i; break; }
+  for (let i = Math.min(tr.boxes.length - 1, i0 + (f > i0 ? 1 : 0)); i <= Math.min(tr.boxes.length - 1, i0 + reach); i++) if (tr.boxes[i]) { b = i; break; }
+  if (a < 0 && b < 0) return null;
+  if (a < 0 || b < 0 || a === b) return tr.boxes[a < 0 ? b : a]!.map(r6) as [number, number, number, number];
+  const u = clamp((f - a) / (b - a), 0, 1), A = tr.boxes[a]!, B = tr.boxes[b]!;
+  return [0, 1, 2, 3].map(i => r6(A[i]! + (B[i]! - A[i]!) * u)) as [number, number, number, number];
+}
+/** The timeline stretch where main clip [index] is on screen outside its transitions (aboveText layers go above the text there). */
+export function clipSteadyRange(p: EditProject, index: number): Range | null {
+  const tl = timeline(p), s = tl[index];
+  if (!s) return null;
+  const next = tl[index + 1];
+  return { startSec: r6(s.startSec + s.transitionSec), endSec: r6(next ? next.startSec : s.endSec) };
+}
+/** The layers drawn above the text at timeline t: those with aboveText (not hidden) of the main clip steadily on screen. */
+export function aboveTextLayersAt(p: EditProject, t: number): { clipId: string; layerId: string; local: number }[] {
+  const main = mainTrack(p);
+  if (main.hidden) return [];
+  const tl = timeline(p);
+  for (let i = 0; i < tl.length; i++) {
+    const r = clipSteadyRange(p, i)!;
+    if (t < r.startSec - 1e-9 || t >= r.endSec - 1e-9) continue;
+    const c = main.items[i] as VideoClip;
+    return (c.layers ?? []).filter(l => l.aboveText && !l.hidden).map(l => ({ clipId: c.id, layerId: l.id, local: r6(t - tl[i]!.startSec) }));
+  }
+  return [];
+}
+/**
+ * Where a pinned text's centre goes at timeline t (canvas 0–1), or null (its clip isn't on screen, or the layer isn't
+ * seen near then: the text stays at its own x and y). The anchor on the layer's box at the clip's source time, through the
+ * clip's crop, then fitted and placed like the clip (itemCorners with the clip's x, y, scale and rotation at that time).
+ */
+export function pinPoint(p: EditProject, pin: TextPin, t: number, size?: (assetId: string) => { width: number; height: number } | undefined): { x: number; y: number } | null {
+  const main = mainTrack(p), tl = timeline(p);
+  const i = main.items.findIndex(c => c.id === pin.clip);
+  const c = main.items[i] as VideoClip | undefined, span = tl[i];
+  if (!c || !span || t < span.startSec - 1e-9 || t >= span.endSec - 1e-9) return null;
+  const l = c.layers?.find(x => x.id === pin.layer), a = size?.(c.asset) ?? p.assets.find(x => x.id === c.asset);
+  if (!l || !a?.width || !a.height) return null;
+  const local = t - span.startSec, box = layerBoxAt(l, clipSourceAt(c, local));
+  if (!box) return null;
+  const u = box[0] + box[2] / 2, v = pin.anchor === 'top' ? box[1] : pin.anchor === 'bottom' ? box[1] + box[3] : box[1] + box[3] / 2;
+  const cr = c.crop ?? {}, cl = cr.left ?? 0, ct = cr.top ?? 0, cw = 1 - cl - (cr.right ?? 0), ch = 1 - ct - (cr.bottom ?? 0);
+  const uu = (u - cl) / cw, vv = (v - ct) / ch;
+  const tr = c.transform ?? {};
+  const k = itemCorners(p.canvas, a.width * cw, a.height * ch, c.fit ?? 'cover', { x: propAt(c, 'x', tr.x ?? 0.5, local), y: propAt(c, 'y', tr.y ?? 0.5, local),
+    scale: propAt(c, 'scale', tr.scale ?? 1, local), rotation: propAt(c, 'rotation', tr.rotation ?? 0, local), flipX: tr.flipX, flipY: tr.flipY });
+  const [TL, TR, , BL] = k as [[number, number], [number, number], [number, number], [number, number]];
+  const px = TL[0] + uu * (TR[0] - TL[0]) + vv * (BL[0] - TL[0]), py = TL[1] + uu * (TR[1] - TL[1]) + vv * (BL[1] - TL[1]);
+  return { x: r6(px / p.canvas.width + (pin.offset?.x ?? 0)), y: r6(py / p.canvas.height + (pin.offset?.y ?? 0)) };
+}
+
 export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: Set<string> = new Set(), paletteIds: Set<string> = new Set(), opts: { draft?: boolean } = {}): { durationSec: number } {
   const bad = (f: string, m: string): never => { throw new EditProblem(f, m); };
   const num = (f: string, v: unknown, lo: number, hi: number, optional = true) => {
@@ -1391,6 +1538,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
             if (m.invert !== undefined && typeof m.invert !== 'boolean') bad(`${g}.alphaMatte.invert`, 'true or false');
           }
         }
+        layers(g, c, t.kind === 'main');
         anim(`${g}.animIn`, c.animIn, false); anim(`${g}.animOut`, c.animOut, false);
         if (c.animLoop !== undefined && t.kind === 'main') bad(`${g}.animLoop`, 'loop animations are for overlays, images and text');
         loop(`${g}.animLoop`, c.animLoop);
@@ -1430,6 +1578,15 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.opacity`, tx.opacity, 0, 1);
         kfs(`${g}.keyframes`, tx.keyframes, tx.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
         anim(`${g}.animIn`, tx.animIn, true); anim(`${g}.animOut`, tx.animOut, true); loop(`${g}.animLoop`, tx.animLoop);
+        if (tx.pin !== undefined) {
+          const pn = tx.pin;
+          if (!pn || typeof pn !== 'object') bad(`${g}.pin`, 'must be {clip, layer, anchor, offset?}');
+          if (!['center', 'top', 'bottom'].includes(pn.anchor)) bad(`${g}.pin.anchor`, 'must be center, top or bottom');
+          if (pn.offset !== undefined) { if (!pn.offset || typeof pn.offset !== 'object') bad(`${g}.pin.offset`, 'must be {x, y}'); num(`${g}.pin.offset.x`, pn.offset.x, -1, 1, false); num(`${g}.pin.offset.y`, pn.offset.y, -1, 1, false); }
+          const mc = p.tracks[0]!.items.find(x => x.id === pn.clip) as VideoClip | undefined;
+          if (!mc) bad(`${g}.pin.clip`, 'must be a main clip');
+          if (!mc!.layers?.some(l => l.id === pn.layer)) bad(`${g}.pin.layer`, 'must be a layer of that clip');
+        }
       } else if (t.kind === 'adjust') {
         const ad = it as AdjustItem & Record<string, unknown>;
         for (const k of ['look', 'mask', 'transform', 'crop', 'fit', 'asset'] as const) if (ad[k] !== undefined) bad(`${g}.${k}`, 'is not part of an adjustment layer');
@@ -1464,6 +1621,45 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
       }
     });
   });
+  function layers(g: string, c: VideoClip, main: boolean) {
+    if (c.layers === undefined && c.layerBase === undefined && c.layerSource === undefined) return;
+    if (!main) bad(`${g}.layers`, 'layers are on main-track clips');
+    if (c.layerSource !== undefined && (!c.layerSource || typeof c.layerSource !== 'object' || typeof c.layerSource.job !== 'string' || !c.layerSource.job || c.layerSource.job.length > 64)) bad(`${g}.layerSource.job`, 'must be a job id');
+    const ls = c.layers ?? [];
+    if (!Array.isArray(ls) || ls.length > LAYER_LIMITS.maxLayers) bad(`${g}.layers`, `at most ${LAYER_LIMITS.maxLayers} layers`);
+    const seen = new Set<string>();
+    ls.forEach((l, j) => {
+      const f = `${g}.layers.${j}`;
+      if (!l || typeof l !== 'object') bad(f, 'must be a layer');
+      id(`${f}.id`, l.id);
+      if (seen.has(l.id)) bad(`${f}.id`, 'is used twice');
+      seen.add(l.id);
+      if (typeof l.name !== 'string' || !l.name.trim() || l.name.length > LAYER_LIMITS.maxName) bad(`${f}.name`, `must be 1–${LAYER_LIMITS.maxName} characters`);
+      if (typeof l.matte !== 'string' || assets.get(l.matte)?.kind !== 'video') bad(`${f}.matte`, 'must be a video asset');
+      for (const k of ['hidden', 'aboveText'] as const) if (l[k] !== undefined && typeof l[k] !== 'boolean') bad(`${f}.${k}`, 'must be true or false');
+      num(`${f}.blur`, l.blur, 0, 1); num(`${f}.feather`, l.feather, 0, 1);
+      visual(f, { look: l.look, adjust: l.adjust, filter: l.filter, opacity: l.opacity } as Visual, clipLength(c));
+      if (l.recolor !== undefined) {
+        if (!l.recolor || typeof l.recolor !== 'object') bad(`${f}.recolor`, 'must be {color, amount}');
+        color(`${f}.recolor.color`, l.recolor.color, false); num(`${f}.recolor.amount`, l.recolor.amount, 0, 1, false);
+      }
+      if (l.track !== undefined) {
+        const tr = l.track;
+        if (!tr || typeof tr !== 'object') bad(`${f}.track`, 'must be {fps, boxes}');
+        num(`${f}.track.fps`, tr.fps, 1, LAYER_LIMITS.maxTrackFps, false);
+        if (!Array.isArray(tr.boxes) || tr.boxes.length > LAYER_LIMITS.maxTrackSamples) bad(`${f}.track.boxes`, `at most ${LAYER_LIMITS.maxTrackSamples} boxes`);
+        tr.boxes.forEach((b, k) => { if (b !== null && (!Array.isArray(b) || b.length !== 4 || b.some(v => !isNum(v) || v < 0 || v > 1))) bad(`${f}.track.boxes.${k}`, 'must be [x, y, w, h] from 0 to 1, or null'); });
+      }
+    });
+    if (c.layerBase !== undefined) {
+      const b = c.layerBase, f = `${g}.layerBase`;
+      if (!b || typeof b !== 'object') bad(f, 'must be an object');
+      if (b.hidden !== undefined && typeof b.hidden !== 'boolean') bad(`${f}.hidden`, 'must be true or false');
+      num(`${f}.blur`, b.blur, 0, 1);
+      visual(f, { look: b.look, adjust: b.adjust, filter: b.filter } as Visual, clipLength(c));
+      if (b.asset !== undefined) { const k = assets.get(b.asset)?.kind; if (k !== 'image' && k !== 'video') bad(`${f}.asset`, 'must be an image or video asset'); }
+    }
+  }
   function textStyle(f: string, s: TextStyle, ownFont: boolean) {
     if (!s || typeof s !== 'object') bad(f, 'is required');
     if (s.fontAsset !== undefined) {

@@ -120,13 +120,26 @@ const clipKeys: Table<M.VideoClip> = {
   chroma: nested, transitionIn: nested, alphaMatte: nested, holdSec: { mut: o => { o.holdSec = 1; o.speed = 1; } }, blend: set('blend', 'screen'),
   animIn: nested, animOut: nested, animLoop: nested, voiceEffect: set('voiceEffect', 'radio'), enhance: set('enhance', true),
   fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
+  layers: nested, layerBase: nested, layerSource: meta('where the layers came from (the job); not drawn'),
 };
+// Layers (plans/layers-edit.md): main clips only.
+const BOXES = [[0.2, 0.2, 0.3, 0.4], [0.3, 0.2, 0.3, 0.4], [0.4, 0.25, 0.3, 0.4], [0.5, 0.3, 0.3, 0.4], [0.5, 0.3, 0.3, 0.4], [0.5, 0.3, 0.3, 0.4], [0.5, 0.3, 0.3, 0.4], [0.5, 0.3, 0.3, 0.4]];
+const withLayer = (o: Obj, extra: Obj = {}) => { o.layers = [{ id: 'l1', name: 'Her', matte: 'mt', track: { fps: 5, boxes: BOXES }, ...extra }]; };
+const lay = (field: string, v: unknown): Probe => ({ prep: o => withLayer(o), mut: o => { (o.layers as Obj[])[0]![field] = v; } });
+const layerFields: Table<M.ClipLayer> = { id: meta('an id'), name: meta('a label'), matte: { prep: o => withLayer(o), mut: o => { (o.layers as Obj[])[0]!.matte = 'b'; } },
+  hidden: lay('hidden', true), look: lay('look', { lut: 'pack:bw-classic' }), adjust: lay('adjust', { saturation: -0.8 }), filter: lay('filter', { id: 'mono', amount: 1 }),
+  recolor: lay('recolor', { color: '#1B2A6B', amount: 0.8 }), opacity: lay('opacity', 0.5), blur: lay('blur', 0.5), feather: lay('feather', 0.5), aboveText: lay('aboveText', true),
+  track: meta('where the object is: read by pinned text (probed there)') };
+const baseFields: Table<M.LayerBase> = { hidden: { prep: o => withLayer(o), mut: o => { o.layerBase = { hidden: true }; } }, blur: { prep: o => withLayer(o), mut: o => { o.layerBase = { blur: 0.5 }; } },
+  look: { prep: o => withLayer(o), mut: o => { o.layerBase = { look: { lut: 'pack:bw-classic' } }; } }, adjust: { prep: o => withLayer(o), mut: o => { o.layerBase = { adjust: { exposure: -0.5 } }; } },
+  filter: { prep: o => withLayer(o), mut: o => { o.layerBase = { filter: { id: 'mono', amount: 1 } }; } }, asset: { prep: o => withLayer(o), mut: o => { o.layerBase = { asset: 'im' }; } } };
 const clipFields = (main: boolean) => ({
   ...Object.fromEntries(Object.entries(clipKeys).filter(([, v]) => !('meta' in v && v === nested))),
   ...visualFields(CLIP_KFS, main ? 'contain' : 'cover'), ...nest('chroma', chromaFields), ...nest('alphaMatte', matteFields), ...nest('speedCurve', curveFields),
   ...nest('animIn', animFields('animIn')), ...nest('animOut', animFields('animOut')),
   ...(main ? { 'startSec': meta('main clips play back to back (validation refuses startSec)'), 'blend': meta('overlay tracks only (validation refuses it on main)') }
     : { ...nest('animLoop', loopFields) }),
+  ...(main ? { ...nest('layers', layerFields), ...nest('layerBase', baseFields) } : {}),
 });
 const imageKeys: Table<M.ImageItem> = { id: meta('an id'), asset: set('asset', 'im'), startSec: set('startSec', 0.4), durationSec: set('durationSec', 0.5), blend: set('blend', 'multiply'),
   animIn: nested, animOut: nested, animLoop: nested, fit: nested, transform: nested, crop: nested, opacity: nested, keyframes: nested, filter: nested, adjust: nested, look: nested, mask: nested,
@@ -156,8 +169,12 @@ const styleParts = (k: string) => {
   } satisfies Record<`stroke.${keyof NonNullable<M.TextStyle['stroke']>}` | `shadow.${keyof NonNullable<M.TextStyle['shadow']>}` | `background.${keyof NonNullable<M.TextStyle['background']>}`, Entry>;
 };
 const textKeys: Table<M.TextItem> = { id: meta('an id'), startSec: set('startSec', 0.4), durationSec: set('durationSec', 0.5), text: set('text', 'Another line of words'), style: nested,
-  transform: nested, opacity: set('opacity', 0.5), keyframes: nested, animIn: nested, animOut: nested, animLoop: nested, template: meta('the template it came from (a label)') };
-const textFields = { startSec: textKeys.startSec, durationSec: textKeys.durationSec, text: textKeys.text, opacity: textKeys.opacity,
+  transform: nested, opacity: set('opacity', 0.5), keyframes: nested, animIn: nested, animOut: nested, animLoop: nested, template: meta('the template it came from (a label)'),
+  pin: { prep: (_o, p) => withLayer(p.tracks[0]!.items[0] as unknown as Obj), mut: o => { o.pin = { clip: 'c1', layer: 'l1', anchor: 'center' }; } } };
+const pinFields: Table<M.TextPin> = { clip: meta('which clip (one probe: the pin itself)'), layer: meta('which layer (one probe: the pin itself)'),
+  anchor: { prep: (o, p) => { withLayer(p.tracks[0]!.items[0] as unknown as Obj); o.pin = { clip: 'c1', layer: 'l1', anchor: 'center' }; }, mut: o => { (o.pin as Obj).anchor = 'top'; } },
+  offset: { prep: (o, p) => { withLayer(p.tracks[0]!.items[0] as unknown as Obj); o.pin = { clip: 'c1', layer: 'l1', anchor: 'center' }; }, mut: o => { (o.pin as Obj).offset = { x: 0.1, y: -0.1 }; } } };
+const textFields = { startSec: textKeys.startSec, durationSec: textKeys.durationSec, text: textKeys.text, opacity: textKeys.opacity, pin: textKeys.pin, ...nest('pin', pinFields),
   ...nest('style', { ...styleKeys('style'), ...styleParts('style') }), ...nest('transform', transformFields), ...nest('keyframe', keyframeFields),
   ...Object.fromEntries((['x', 'y', 'scale', 'rotation', 'opacity'] as M.KfProp[]).map(k => [`keyframes.${k}`, kfProbe(k)])),
   ...nest('animIn', { ...animFields('animIn'), typewriter: set('animIn', { kind: 'typewriter', durationSec: 0.5 }) }), ...nest('animOut', animFields('animOut')), ...nest('animLoop', loopFields),
