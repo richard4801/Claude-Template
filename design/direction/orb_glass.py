@@ -1,8 +1,8 @@
 """Claude's orb, Option B (owner's close-up, 2026-11-12): a transparent glass sphere that REFRACTS what is behind it (the
-panel's text, bent and magnified like a water drop), smoky in its upper half, with one thin very bright light band
-across the middle (white-hot centre, iridescent edges: gold on one side, cyan, blue and violet on the other). The
-band lights the lower half, a crisp Fresnel rim with a chromatic fringe runs round the edge, and there's a soft specular
-highlight on top. The band is what moves: it tilts, twists, spins and ripples by state, and wisps peel off it when busy.
+panel's text, bent and magnified like a water drop), smoky in its upper half, with one short thick crescent of light
+(a caustic glint just below the centre, white-hot, its ends split into spectrum: gold on the left, cyan and violet on the
+right) that lights the glass around it. A real ball lens: the page behind comes through upside down and squeezed to the
+bottom; dark smoky top; a thin soft rim; a broad dim reflection on top; no halo. The glint is what moves, by state.
 Option A (the vortex) is design/direction/orb_shader.py.
 
     python3 design/direction/orb_glass.py
@@ -22,90 +22,94 @@ precision highp float;
 uniform sampler2D uBack; uniform vec2 uTex, uCenter; uniform float uRadius;
 uniform float uPhase, uTime, uBright, uWidth, uWisps, uRipple, uSpin, uDanger, uPulse, uBreath, uLight;
 
-vec3 rotX(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }
-vec3 rotZ(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z); }
-
-// The band's colour round its ring: gold → white → cyan → violet → gold (error: red → orange).
-vec3 iris(float h) {
-  h = fract(h);
-  vec3 g = vec3(1.0, 0.68, 0.28), w = vec3(1.0, 0.96, 0.92), c = vec3(0.3, 0.84, 1.0), v = vec3(0.62, 0.45, 1.0);
-  vec3 col = h < 0.25 ? mix(g, w, h * 4.0) : h < 0.5 ? mix(w, c, h * 4.0 - 1.0) : h < 0.75 ? mix(c, v, h * 4.0 - 2.0) : mix(v, g, h * 4.0 - 3.0);
-  return mix(col, mix(vec3(1.0, 0.32, 0.2), vec3(1.0, 0.65, 0.22), 0.5 + 0.5 * sin(h * 6.283)), uDanger);
-}
 vec3 back(vec2 px) { return texture2D(uBack, clamp(px / uTex, 0.0, 1.0)).rgb; }
 
-// One band: a great circle of light on the sphere, tilted by `n`. Returns light and (in .a) its strength for the tint.
-vec4 band(vec3 P, vec3 n, float width, float spin, float ripple) {
-  vec3 e1 = normalize(cross(n, vec3(0.0, 0.0, 1.0) + vec3(0.001, 0.0, 0.0)));
-  vec3 e2 = cross(n, e1);
-  float ang = atan(dot(P, e2), dot(P, e1));
-  float d = dot(P, n) + ripple * 0.045 * sin(5.0 * ang - uTime * 5.0) + ripple * 0.02 * sin(9.0 * ang + uTime * 3.0);
-  float w = width;
-  float core = exp(-pow(d / (0.22 * w), 2.0));
-  float glow = exp(-pow(d / w, 2.0));
-  float wide = exp(-pow(d / (3.5 * w), 2.0));
-  vec3 col = iris(ang / 6.2832 + spin);
-  vec3 light = vec3(1.0, 0.97, 0.94) * core * 1.2 + col * glow * 0.9 + col * wide * 0.25;
-  return vec4(light, glow);
+// A ray through a solid glass ball (index n): in at the front, out at the back, on to the page behind. The image comes
+// out upside down and squeezed toward the bottom, as through a real glass ball. Returns where it lands, in radii.
+vec2 throughBall(vec2 uv, float nz, float n) {
+  vec3 p1 = vec3(uv, nz);
+  vec3 t1 = refract(vec3(0.0, 0.0, -1.0), p1, 1.0 / n);
+  vec3 p2 = p1 - 2.0 * dot(p1, t1) * t1;
+  vec3 t2 = refract(t1, -p2, n);
+  if (dot(t2, t2) < 1e-4) t2 = reflect(t1, -p2);               // total internal reflection at the very edge
+  float s = (-3.2 - p2.z) / min(t2.z, -0.05);                   // the page sits behind the ball, past its focus
+  return (p2.xy + s * t2.xy) * 0.55;
+}
+
+// The glint's spectrum: warm orange and gold at its left end, cyan, blue and violet at its right (error: red, orange).
+vec3 spectrum(float x) {
+  vec3 l = mix(vec3(1.0, 0.78, 0.45), vec3(1.0, 0.45, 0.15), clamp(-x, 0.0, 1.0));
+  vec3 r = mix(vec3(0.45, 0.85, 1.0), mix(vec3(0.3, 0.5, 1.0), vec3(0.62, 0.42, 1.0), clamp(x * 2.0 - 1.0, 0.0, 1.0)), clamp(x * 1.6, 0.0, 1.0));
+  vec3 c = mix(mix(l, vec3(1.0, 0.95, 0.9), smoothstep(-0.6, 0.0, x)), r, smoothstep(0.0, 0.6, x));
+  return mix(c, mix(vec3(1.0, 0.35, 0.2), vec3(1.0, 0.65, 0.25), clamp(0.5 - x, 0.0, 1.0)), uDanger);
 }
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - uCenter) / uRadius;
   float r = length(uv);
+  if (r >= 1.0) { gl_FragColor = vec4(0.0); return; }           // no halo: the glass ends at its edge
+  float nz = sqrt(1.0 - r * r);
   float bright = uBright * (1.0 + 0.7 * uPulse) * (1.0 - 0.3 * uBreath);
-  // The band's plane: tilted so the ring is seen in perspective, slowly tilting and twisting with the phase.
-  vec3 n = normalize(rotZ(rotX(vec3(0.0, 1.0, 0.0), 0.32 + 0.22 * sin(uPhase * 0.7)), 0.18 * sin(uPhase * 0.53) - 0.08));
-  float spin = uPhase * uSpin * 0.25;
-  float width = (0.045 + 0.04 * uWidth) * (1.0 + 0.5 * uPulse);
-  vec3 outC = vec3(0.0); float outA = 0.0;
-  if (r < 1.0) {
-    float nz = sqrt(1.0 - r * r);
-    vec3 Pf = vec3(uv, nz), Pb = vec3(uv, -nz);
-    // The content behind, refracted: magnified in the middle, bent at the edge, with a slight chromatic split.
-    float k = 0.55 + 0.32 * r * r;
-    vec2 base = uCenter;
-    vec3 refr = vec3(back(base + uv * uRadius * k).r, back(base + uv * uRadius * k * (1.0 + 0.02 * r * r)).g, back(base + uv * uRadius * k * (1.0 + 0.04 * r * r)).b);
-    // Front and back of the band (the back seen through the glass: dimmer, softer), and wisps peeling off it.
-    vec4 bf = band(Pf, n, width, spin, uRipple);
-    vec4 bb = band(Pb, n, width * 1.6, spin + 0.5, uRipple);
-    vec3 light = bf.rgb + bb.rgb * 0.35;
-    float tw = bf.a + 0.35 * bb.a;
-    if (uWisps > 0.0) {
-      vec3 n2 = normalize(rotZ(rotX(n, 0.28 * sin(uPhase * 0.9)), 0.35 + 0.2 * sin(uPhase * 0.6)));
-      vec3 n3 = normalize(rotZ(rotX(n, -0.3 * sin(uPhase * 0.8 + 1.0)), -0.4 + 0.2 * cos(uPhase * 0.5)));
-      light += band(Pf, n2, width * 0.35, spin + 0.3, 0.0).rgb * 0.45 * uWisps;
-      light += band(Pf, n3, width * 0.3, spin + 0.6, 0.0).rgb * 0.35 * uWisps;
-    }
-    vec3 avg = iris(spin + 0.15);
-    // Smoky upper half, the lower half lit by the band (warm grey, spilling down and fading).
-    float side = dot(Pf, n);
-    float lower = smoothstep(0.15, -0.55, side);
-    vec3 glass = refr * mix(0.24, 0.62, lower) + vec3(0.02, 0.02, 0.035);
-    glass += mix(vec3(0.75, 0.66, 0.56), avg, 0.35) * exp(-max(-side, 0.0) / 0.55) * step(side, 0.0) * 0.3 * bright;
-    // A crisp Fresnel rim, strongest at the sides and bottom, with a chromatic fringe; one soft highlight on top.
-    float f = pow(1.0 - nz, 2.6);
-    vec3 rim = vec3(f, pow(f, 1.12), pow(f, 1.25)) * (0.55 + 0.45 * clamp(0.4 - uv.y * 0.8, 0.0, 1.0));
-    float spec = exp(-(pow(uv.x + 0.28, 2.0) / 0.045 + pow(uv.y - 0.6, 2.0) / 0.012)) * 0.55;
-    vec3 col = glass + light * bright + rim * (0.6 + 0.25 * mix(vec3(1.0), avg, 0.5)) + spec;
-    col = 1.0 - exp(-col * 1.25) * 1.0;
-    col = mix(col, glass + light * bright + rim * 0.7 + spec, 0.35);
-    float aa = smoothstep(1.0, 0.985, r);
-    outC = col * aa; outA = aa;
-  }
-  // Light spill: a faint halo outside, tinted by the band.
-  vec3 haloC = iris(spin + 0.15) * exp(-pow(max(r - 1.0, 0.0) / 0.12, 2.0)) * 0.22 * bright * step(1.0, r + 0.015);
-  float haloA = clamp(max(haloC.r, max(haloC.g, haloC.b)), 0.0, 1.0) * (uLight > 0.5 ? 0.6 : 1.0);
-  outC += haloC * (1.0 - outA); outA += haloA * (1.0 - outA);
-  gl_FragColor = vec4(clamp(outC, 0.0, 1.0), clamp(outA, 0.0, 1.0));
+
+  // The page behind, through the ball (a slight chromatic split from three indices).
+  // Soft, like thick glass: four taps a little apart.
+  vec2 q = throughBall(uv, nz, 1.5), qr = throughBall(uv, nz, 1.49), qb = throughBall(uv, nz, 1.51);
+  float bl = 0.014 * uRadius;
+  vec2 c0 = uCenter + q * uRadius;
+  vec3 refr = vec3(back(uCenter + qr * uRadius).r, back(c0).g, back(uCenter + qb * uRadius).b) * 0.36
+            + (back(c0 + vec2(bl, 0.0)) + back(c0 - vec2(bl, 0.0)) + back(c0 + vec2(0.0, bl)) + back(c0 - vec2(0.0, bl))) * 0.16;
+  // Right at the edge the ball shows mostly a blur of the page around it.
+  refr = mix(refr, back(uCenter + uv * uRadius * 1.1), smoothstep(0.85, 1.0, r) * 0.3);
+  // Smoky glass: dark on top, clearer through the middle, lightest at the bottom where the inverted page shows.
+  float top = uLight > 0.5 ? 0.45 : 0.1, bottom = uLight > 0.5 ? 0.95 : 0.85;
+  float shade = mix(top, bottom, smoothstep(0.1, -0.85, uv.y)) * (0.7 + 0.3 * smoothstep(1.0, 0.6, r));
+  vec3 col = refr * shade + (uLight > 0.5 ? vec3(0.0) : vec3(0.03, 0.03, 0.035) * (0.5 + 0.5 * smoothstep(0.9, -0.9, uv.y)));
+
+  // The glint: one short thick crescent just below the centre, bulging up, white-hot and widest in the middle, tapering
+  // and fading well before the rim; its ends split into spectrum. It drifts, slides and tilts with the state.
+  float slide = 0.06 * sin(uPhase * 0.9) + uSpin * 0.32 * sin(uPhase * 1.3);
+  float tilt = 0.08 * sin(uPhase * 0.7) + uSpin * 0.18 * sin(uPhase * 1.3 + 0.6);
+  vec2 g = uv - vec2(slide, -0.16);
+  g = vec2(cos(tilt) * g.x + sin(tilt) * g.y, -sin(tilt) * g.x + cos(tilt) * g.y);
+  float halfLen = (0.6 + 0.2 * uWidth) * (1.0 + 0.25 * uPulse);
+  float x = g.x / halfLen;
+  float taper = clamp(1.0 - x * x, 0.0, 1.0);
+  float curve = 0.07 * (1.0 - x * x) - 0.03;                 // bulges upward in the middle
+  float ripple = uRipple * 0.012 * sin(x * 9.0 - uTime * 6.0);
+  float d = g.y - curve - ripple;
+  float w = (0.055 + 0.05 * uWidth) * pow(taper, 0.7) + 0.004;
+  float core = exp(-pow(d / (0.45 * w), 2.0)) * pow(taper, 1.6);
+  float body = exp(-pow(d / w, 2.0)) * pow(taper, 1.1);
+  float ends = smoothstep(0.25, 0.9, abs(x)) * taper;          // the spectrum lives toward the ends
+  vec3 glint = vec3(1.0, 0.98, 0.95) * core * 2.0 * (1.0 - 0.5 * ends) + spectrum(x) * body * (0.45 + 1.6 * ends)
+             + spectrum(x * 1.2 + 0.08 * sin(uTime * 3.0) * uWisps) * exp(-pow(d / (2.2 * w), 2.0)) * taper * ends * 0.8 * (1.0 + uWisps);
+  // It lights the glass: a soft glow just above and below it, fading smoothly.
+  vec3 spill = mix(vec3(0.95, 0.88, 0.78), spectrum(x), 0.4) * exp(-pow(d / 0.24, 2.0)) * pow(taper, 0.7) * 0.45;
+  spill += vec3(0.8, 0.76, 0.72) * exp(-pow(max(-d, 0.0) / 0.45, 1.5)) * step(d, 0.0) * taper * 0.08;
+  col += (glint + spill) * bright;
+
+  // A thin soft rim, brightest bottom-left and right, with a rainbow fringe where the glint's ends meet it.
+  float f = pow(1.0 - nz, 3.0);
+  float ang = atan(uv.y, uv.x);
+  float where = 0.35 + 0.65 * max(smoothstep(0.4, -0.9, uv.y) * smoothstep(0.2, -0.8, uv.x), smoothstep(0.3, 0.95, uv.x));
+  vec3 fringe = vec3(f, pow(f, 1.15), pow(f, 1.3));
+  float nearGlintL = exp(-pow((ang - 3.4) / 0.35, 2.0)), nearGlintR = exp(-pow((ang + 0.3) / 0.35, 2.0));
+  col += fringe * 0.5 * where + (spectrum(-0.9) * nearGlintL + spectrum(0.9) * nearGlintR) * f * 0.55 * bright;
+
+  // A broad, soft, dim reflection on top.
+  col += vec3(1.0) * exp(-(pow(uv.x + 0.12, 2.0) / 0.22 + pow(uv.y - 0.62, 2.0) / 0.035)) * 0.16;
+
+  float aa = smoothstep(1.0, 0.985, r);
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0) * aa, aa);
 }
 """
 
 STATES = {
-    "idle":      dict(label="Idle", speed=0.22, bright=0.7, width=0.35, wisps=0, ripple=0, spin=0.3, danger=0, breath=0),
-    "thinking":  dict(label="Thinking, writing", speed=0.8, bright=1.0, width=1.0, wisps=0.8, ripple=1, spin=0.6, danger=0, breath=0, pulse=0.35),
-    "operating": dict(label="Operating MUSE", speed=0.7, bright=0.95, width=0.8, wisps=0.5, ripple=0.3, spin=3.0, danger=0, breath=0, pulse=0.6),
-    "waiting":   dict(label="Waiting for you", speed=0.12, bright=1.1, width=0.7, wisps=0, ripple=0, spin=0.1, danger=0, breath=3.2),
-    "error":     dict(label="Error", speed=0.1, bright=0.85, width=0.6, wisps=0, ripple=0, spin=0.1, danger=1, breath=0),
+    "idle":      dict(label="Idle", speed=0.22, bright=0.75, width=0.35, wisps=0, ripple=0, spin=0, danger=0, breath=0),
+    "thinking":  dict(label="Thinking, writing", speed=0.8, bright=1.0, width=1.0, wisps=1, ripple=1, spin=0, danger=0, breath=0, pulse=0.35),
+    "operating": dict(label="Operating MUSE", speed=0.9, bright=0.95, width=0.7, wisps=0.4, ripple=0.2, spin=1, danger=0, breath=0, pulse=0.6),
+    "waiting":   dict(label="Waiting for you", speed=0.12, bright=1.05, width=0.7, wisps=0, ripple=0, spin=0, danger=0, breath=3.2),
+    "error":     dict(label="Error", speed=0.1, bright=0.85, width=0.55, wisps=0, ripple=0, spin=0, danger=1, breath=0),
 }
 
 TEXT = ["Swap the outfit to a hoodie, keep the same scene", "and mood, and give me a quick plan.", "",
