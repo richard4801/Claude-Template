@@ -15,6 +15,7 @@ struct EditSuitePreview: View {
     var showMedia: () -> Void
     @State private var actualSize = false
     @State private var muted = false
+    @State private var viewMenuOpen = false
     /// The fitted picture's size against actual size (the "Fit · 43%" label).
     @State private var fitScale: CGFloat = 1
     private var fitPercent: Int { max(1, Int((fitScale * 100).rounded())) }
@@ -25,37 +26,32 @@ struct EditSuitePreview: View {
                 if mediaHidden {
                     SuiteIconButton(systemName: "caret-double-right", label: "Show media", tint: t.roles.ink2, action: showMedia)
                 }
-                Text("View").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("preview view")
-                EditSeg(options: views, selection: session.shownPreview.view, height: 28, small: true) { v in
-                    var p = session.state.preview
-                    p.view = v
-                    session.setPreview(p)
+                // The bar adapts so nothing is ever cut (owner review, run 587: with the Claude panel open "Safe area"
+                // showed as "S"): every view as chips, then "View: TikTok ▾" with the switch's label, then the switch as
+                // an icon with its tooltip and the fit as a bare percentage.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s2) {
+                        Text("View").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize().fitProbe("preview view")
+                        viewChips
+                        safeSwitch.padding(.leading, Space.s2)
+                        Spacer(minLength: Space.s2)
+                        fitButton(short: false)
+                    }
+                    HStack(spacing: Space.s2) {
+                        viewMenu
+                        safeSwitch.padding(.leading, Space.s1)
+                        Spacer(minLength: Space.s2)
+                        fitButton(short: false)
+                    }
+                    HStack(spacing: Space.s1) {
+                        viewMenu
+                        SuiteIconButton(systemName: "selection", label: safeHelp + (session.state.preview.safeArea ? " (on)" : " (off)"),
+                                        on: session.state.preview.safeArea, size: 28) { setSafeArea(!session.state.preview.safeArea) }
+                        Spacer(minLength: Space.s1)
+                        fitButton(short: true)
+                    }
                 }
-                .fixedSize()
-                .help("Preview the edit under each app's buttons and captions (our own drawing of its layout)")
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Preview view")
-                Toggle(isOn: Binding(get: { session.state.preview.safeArea }, set: { on in
-                    var p = session.state.preview
-                    p.safeArea = on
-                    session.setPreview(p)
-                })) {
-                    Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("safe area")
-                }
-                .toggleStyle(.switch).controlSize(.small)
-                .padding(.leading, Space.s2)
-                .help(session.previewLayouts.note.map { "The red box: where the app leaves your picture clear. \($0)" }
-                      ?? "The red box: where the app leaves your picture clear")
-                Spacer(minLength: Space.s2)
-                Button { actualSize.toggle() } label: {
-                    Text(actualSize ? "Actual size · 100%" : "Fit · \(fitPercent)%").font(t.scale.caption.font).monospacedDigit()
-                        .foregroundStyle(t.roles.ink2).lineLimit(1)
-                        .frame(minHeight: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Fit the preview or show it at its actual size")
-                .accessibilityLabel(actualSize ? "Actual size" : "Fit")
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             GeometryReader { g in
@@ -115,6 +111,101 @@ struct EditSuitePreview: View {
         }
         .frame(minHeight: 28)
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: View bar parts
+
+    private var safeHelp: String {
+        session.previewLayouts.note.map { "Safe area: the red box shows where the app leaves your picture clear. \($0)" }
+            ?? "Safe area: the red box shows where the app leaves your picture clear"
+    }
+
+    private func setView(_ v: PreviewSkin) {
+        var p = session.state.preview
+        p.view = v
+        session.setPreview(p)
+    }
+
+    private func setSafeArea(_ on: Bool) {
+        var p = session.state.preview
+        p.safeArea = on
+        session.setPreview(p)
+    }
+
+    /// Every view as chips (the widest form).
+    private var viewChips: some View {
+        EditSeg(options: views, selection: session.shownPreview.view, height: 28, small: true) { setView($0) }
+            .fixedSize()
+            .help("Preview the edit under each app's buttons and captions (our own drawing of its layout)")
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Preview view")
+    }
+
+    /// "View: TikTok ▾": the views in a popover (a button, not a Menu, so no icon is drawn at menu size).
+    private var viewMenu: some View {
+        Button { viewMenuOpen.toggle() } label: {
+            HStack(spacing: 4) {
+                Text("View: \(session.shownPreview.view.label)").font(t.scale.caption.font).foregroundStyle(t.roles.ink)
+                    .lineLimit(1).fixedSize().fitProbe("preview view menu")
+                Ph("caret-down", 11).foregroundStyle(t.roles.ink2)
+            }
+            .padding(.horizontal, Space.s2)
+            .frame(minHeight: 28)
+            .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Preview the edit under each app's buttons and captions (our own drawing of its layout)")
+        .accessibilityLabel("Preview view: \(session.shownPreview.view.label)")
+        .popover(isPresented: $viewMenuOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(views, id: \.0) { item in viewRow(item.0, item.1) }
+            }
+            .padding(.vertical, Space.s2)
+            .frame(width: 180)
+        }
+    }
+
+    private func viewRow(_ v: PreviewSkin, _ label: String) -> some View {
+        Button {
+            setView(v)
+            viewMenuOpen = false
+        } label: {
+            HStack(spacing: Space.s2) {
+                Text(label).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                Spacer(minLength: Space.s3)
+                if v == session.shownPreview.view { Ph("check", 14).foregroundStyle(t.roles.accent) }
+            }
+            .padding(.horizontal, Space.s3)
+            .frame(minHeight: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(v == session.shownPreview.view ? .isSelected : [])
+    }
+
+    /// The Safe area switch with its label.
+    private var safeSwitch: some View {
+        Toggle(isOn: Binding(get: { session.state.preview.safeArea }, set: { setSafeArea($0) })) {
+            Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize().fitProbe("safe area")
+        }
+        .toggleStyle(.switch).controlSize(.small)
+        .fixedSize()
+        .help(safeHelp)
+    }
+
+    /// "Fit · 43%" (or "43%" when short), or "Actual size · 100%".
+    private func fitButton(short: Bool) -> some View {
+        Button { actualSize.toggle() } label: {
+            Text(actualSize ? (short ? "100%" : "Actual size · 100%") : (short ? "\(fitPercent)%" : "Fit · \(fitPercent)%"))
+                .font(t.scale.caption.font).monospacedDigit()
+                .foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize().fitProbe("preview fit")
+                .frame(minHeight: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Fit the preview or show it at its actual size")
+        .accessibilityLabel(actualSize ? "Actual size" : "Fit")
     }
 
     /// Parity wave 1 "extract frame": the edit's frame at the playhead (with every look, text and caption) as a PNG.

@@ -513,6 +513,42 @@ enum SnapshotRunner {
             store.openEdit(takeId: nil)
             try? await Task.sleep(for: .seconds(1))
         }
+        // Edit's View bar with the Claude panel open (owner review, run 587: "Safe area" showed as "S" and the fit was
+        // cut). TikTok view at 1280 × 800 and 1000 × 700, light and dark (`mac_editpreview_claude_<theme>_<w>x<h>.png`).
+        // The bar's own labels must be whole: a CUT line here fails the fit check.
+        // The bar's probes ("preview view", "preview view menu", "preview fit", "safe area"); the chips are fixed-size, so
+        // a bar too narrow for them shows the menu instead.
+        let barLabels = ["preview", "safe area"]
+        for theme in [ThemeID.a, .b] {
+            store.themeID = theme
+            state.editCollapsed = false
+            state.editPreview = nil
+            state.claudeTab = 0
+            if !store.takes.contains(where: { $0.id == take.id }) { store.takes.insert(take, at: 0) }
+            store.openEdit(takeId: take.id)
+            try? await Task.sleep(for: .seconds(8))
+            state.editPreview = EditPreview(view: .tiktok, safeArea: true)
+            for (width, height) in [(1280, 800), (1000, 700)] {
+                NSLog("[snapshot] editpreview claude %dx%d %@", width, height, theme.rawValue)
+                w.setFrame(NSRect(x: original.minX, y: original.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                try? await Task.sleep(for: .seconds(1.5))
+                capture(dir.appendingPathComponent("mac_editpreview_claude_\(theme.rawValue)_\(width)x\(height).png"))
+                let bar = fitProbes.values.filter { p in barLabels.contains { p.name.hasPrefix($0) } }
+                let cut = truncatedLabels().filter { l in barLabels.contains { l.hasPrefix($0) } }
+                if bar.isEmpty {
+                    lines.append("CUT edit preview bar \(width)x\(height) \(theme.rawValue) with Claude: the View bar wasn't drawn")
+                } else if cut.isEmpty {
+                    lines.append("FITS edit preview bar \(width)x\(height) \(theme.rawValue) with Claude (\(bar.count) labels)")
+                } else {
+                    lines.append(contentsOf: cut.map { "CUT edit preview bar \(width)x\(height) \(theme.rawValue) with Claude \($0)" })
+                }
+            }
+            state.editPreview = nil
+            state.claudeTab = nil
+            w.setFrame(original, display: true)
+            store.openEdit(takeId: nil)
+            try? await Task.sleep(for: .seconds(1))
+        }
         store.themeID = .a
     }
 
