@@ -72,7 +72,9 @@ data class EditPlace(
 
 /** One open server session as the recent list needs it (the app maps its DTO). */
 data class RecentSession(val id: String, val takeId: String, val status: String = "open", val updatedAt: Long = 0, val lastTouchedAt: Long? = null,
-                         val place: EditPlace? = null)
+                         val place: EditPlace? = null,
+                         /** A blank project nothing was added to ("New" pressed and left): not an edit yet, not listed. */
+                         val emptyBlank: Boolean = false)
 
 /** A member's edit kept on this phone (the project and where it was left), or the owner's own record of a session's place. */
 data class EditRecentEntry(
@@ -99,7 +101,7 @@ object EditRecent {
     fun items(sessions: List<RecentSession>, local: List<EditRecentEntry>, takeTitle: (String) -> String?): List<EditRecentItem> {
         val out = LinkedHashMap<String, EditRecentItem>()
         for (s in sessions) {
-            if (s.status != "open") continue
+            if (s.status != "open" || s.emptyBlank) continue
             val at = maxOf(s.lastTouchedAt ?: 0, s.updatedAt, s.place?.at ?: 0)
             out[s.id] = EditRecentItem(s.id, s.takeId, s.id, title(s.place, s.takeId, takeTitle), at, s.place)
         }

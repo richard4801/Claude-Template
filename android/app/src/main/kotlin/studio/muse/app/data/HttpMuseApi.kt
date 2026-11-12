@@ -159,6 +159,8 @@ interface MuseService {
     @GET("v1/editor/jobs/{id}") suspend fun editorJob(@Path("id") id: String): EditorJob
     @DELETE("v1/editor/jobs/{id}") suspend fun cancelEditorJob(@Path("id") id: String): retrofit2.Response<Unit>
     @POST("v1/takes/{id}/versions") suspend fun createVersionV2(@Path("id") id: String, @Body r: TakeVersionV2Request): Take
+    /** A blank project's first save: a new Library video with no source take. */
+    @POST("v1/edits") suspend fun createEdit(@Body r: TakeVersionV2Request): Take
     @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
     @GET("v1/editor/uploads/{id}") suspend fun editorUpload(@Path("id") id: String): EditorUploadDto
     @GET("v1/editor/content") suspend fun editorContent(): okhttp3.ResponseBody
@@ -515,6 +517,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         putToStorage(p, FileProgressBody(video.file, "video/mp4".toMediaType()) { onProgress(it * .97f) })
         val thumbId = video.thumbJpeg?.let { putPresigned("image", "image/jpeg", it) {} }
         val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps, name = versionName(name), aiLabel = true.takeIf { aiLabel })
+        // A blank project's first save (no source take): POST /v1/edits makes it a new Library video.
+        if (takeId == studio.muse.core.edit.BLANK_SOURCE) return call { createEdit(req) }.abs().also { onProgress(1f) }
         return call { createVersionV2(takeId, req) }.abs().also { onProgress(1f) }
     }
     // WS7: import from link: the phone's file as a clip upload (the import confirms it).

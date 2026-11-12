@@ -29,7 +29,8 @@ class EditRecentFile(private val file: File) {
 suspend fun recentEdits(c: AppContainer, dir: File): List<EditRecentItem> {
     val owner = c.repo.demo || c.prefs.value.owner
     val sessions = if (!owner) emptyList() else runCatching { c.repo.api.recentEditSessions(20) }.getOrDefault(emptyList()).map {
-        RecentSession(it.id, it.takeId, it.status, it.updatedAt, it.lastTouchedAt, EditPlace.of(it.view))
+        RecentSession(it.id, it.takeId, it.status, it.updatedAt, it.lastTouchedAt, EditPlace.of(it.view),
+            emptyBlank = it.takeId == studio.muse.core.edit.BLANK_SOURCE && (it.project["assets"] as? kotlinx.serialization.json.JsonArray).isNullOrEmpty())
     }
     val takes = c.repo.state.value.takes
     return EditRecent.items(sessions, EditRecentFile.of(dir).load()) { id -> takes.firstOrNull { it.id == id }?.title?.takeIf { it.isNotBlank() } }

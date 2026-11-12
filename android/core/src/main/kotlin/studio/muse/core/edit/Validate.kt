@@ -8,16 +8,20 @@ package studio.muse.core.edit
  * bundled looks a `pack:` LUT may name (empty skips that check, like the reference); [paletteIds] = the suite looks a
  * `palette:` LUT may name (empty = none, so every `palette:` look is refused, like the reference).
  */
-fun validate(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS, paletteIds: Set<String> = emptySet()): Double =
-    Validator(p, presets, lookIds, paletteIds).run()
+fun validate(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS, paletteIds: Set<String> = emptySet(),
+             /** A blank project still being built may have an empty main track (0 s), like the server's `draft`; saving checks without it. */
+             draft: Boolean = false): Double =
+    Validator(p, presets, lookIds, paletteIds, draft && p.isBlank && p.tracks.firstOrNull()?.items?.isEmpty() == true).run()
 
-/** The first problem, or null when [p] is valid. */
-fun problemOf(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS, paletteIds: Set<String> = emptySet()): EditProblem? =
-    try { validate(p, presets, lookIds, paletteIds); null } catch (e: EditProblem) { e }
+/** The first problem, or null when [p] is valid. [draft]: see [validate]. */
+fun problemOf(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS, paletteIds: Set<String> = emptySet(),
+              draft: Boolean = false): EditProblem? =
+    try { validate(p, presets, lookIds, paletteIds, draft); null } catch (e: EditProblem) { e }
 
 private val HEX = Regex("^#[0-9A-Fa-f]{6}$")
 
-private class Validator(val p: EditProject, presets: List<FilterPreset>, private val lookIds: Set<String>, private val paletteIds: Set<String>) {
+private class Validator(val p: EditProject, presets: List<FilterPreset>, private val lookIds: Set<String>, private val paletteIds: Set<String>,
+                        private val emptyDraft: Boolean = false) {
     private val assets = HashMap<String, Asset>()
     private val ids = HashSet<String>()
     private val filterIds = presets.map { it.id }.toSet()
@@ -103,7 +107,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         var total = 0
         p.tracks.forEachIndexed { ti, t -> total = track("edits.tracks.$ti", t, total) }
         val d = durationSec(p)
-        if (d < EditLimits.MIN_OUTPUT_SEC - 1e-9) bad("edits", "the edited video must be at least ${fmt(EditLimits.MIN_OUTPUT_SEC)} s")
+        if (d < EditLimits.MIN_OUTPUT_SEC - 1e-9 && !emptyDraft) bad("edits", "the edited video must be at least ${fmt(EditLimits.MIN_OUTPUT_SEC)} s")
         if (d > EditLimits.MAX_OUTPUT_SEC + 1e-9) bad("edits", "the edited video must be at most ${fmt(EditLimits.MAX_OUTPUT_SEC)} s")
         return d
     }
@@ -116,7 +120,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         if (t.items.size > EditLimits.MAX_ITEMS_PER_TRACK) bad("$f.items", "at most ${EditLimits.MAX_ITEMS_PER_TRACK} items")
         val total = before + t.items.size
         if (total > EditLimits.MAX_ITEMS) bad("$f.items", "at most ${EditLimits.MAX_ITEMS} items in all")
-        if (t.kind == TrackKind.MAIN && t.items.isEmpty()) bad("$f.items", "the main track needs at least one clip")
+        if (t.kind == TrackKind.MAIN && t.items.isEmpty() && !emptyDraft) bad("$f.items", "the main track needs at least one clip")
         if (t.kind == TrackKind.CAPTION) {
             if (t.items.isNotEmpty()) bad("$f.items", "a caption track has no items")
             val c = t.caption ?: bad("$f.caption", "is required")

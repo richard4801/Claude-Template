@@ -42,6 +42,8 @@ import studio.muse.core.edit.Asset as EdAsset // Edit sessions (workstream 3)
 import studio.muse.core.edit.AssetKind as EdAssetKind // Edit sessions (workstream 3)
 import studio.muse.core.edit.Canvas as EdCanvas // Edit sessions (workstream 3)
 import studio.muse.core.edit.EditJson as EdEditJson // Edit sessions (workstream 3)
+import studio.muse.core.edit.BLANK_SOURCE as EdBlankSource
+import studio.muse.core.edit.blankProject as edBlankProject
 import studio.muse.core.edit.EditProject as EdEditProject // Edit sessions (workstream 3)
 import studio.muse.core.edit.JsonPatch as EdJsonPatch // Edit sessions (workstream 3)
 import studio.muse.core.edit.Look as EdLook // Edit sessions (workstream 3)
@@ -892,11 +894,18 @@ class FakeMuseApi(
     override suspend fun cancelEditorJob(id: String) { lock.withLock { editorJobs[id]?.let { editorJobs[id] = it.copy(state = "cancelled", result = null) } } }
 
     override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, name: String?, onProgress: (Float) -> Unit, aiLabel: Boolean): Take = lock.withLock {
-        val src = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
+        // A blank project's first save (POST /v1/edits): a new Library video with no source take.
+        val blank = takeId == EdBlankSource
+        val src = if (blank) takes.firstOrNull()?.copy(title = versionName(name) ?: "New project", look = null)
+            ?: throw ApiException("not_found", "Take not found") else takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
+        if (blank) { // like POST /v1/edits: the marker as the source, and a clip on the main track (no draft when saving)
+            if ((project["sourceTakeId"] as? kotlinx.serialization.json.JsonPrimitive)?.content != takeId) throw ApiException("bad_request", "edits.sourceTakeId: must be the take in the URL")
+            if (EdEditJson.parse(project).main.items.isEmpty()) throw ApiException("bad_request", "edits.tracks.0.items: the main track needs at least one clip")
+        }
         onProgress(1f)
         val dto = EditListDto(2, takeId, 0.0, emptyList(), false).also { it.project = project }
         val t = src.copy(
-            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0, aiLabel = aiLabel,
+            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId.takeIf { !blank }, label = "Edited", edits = dto, createdAt = now(), cost = 0.0, aiLabel = aiLabel,
             videoUrl = "file://" + video.file.absolutePath, durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
             name = versionName(name), // Edit sessions (workstream 3)
         )
@@ -941,7 +950,7 @@ class FakeMuseApi(
 
     private fun editCheck(p: kotlinx.serialization.json.JsonElement, takeId: String): kotlinx.serialization.json.JsonObject {
         val project = try { EdEditJson.parse(p) } catch (e: Exception) { throw ApiException("bad_request", "project: ${e.message}") }
-        edProblemOf(project)?.let { throw ApiException("bad_request", "project.${it.field}: ${it.reason}") }
+        edProblemOf(project, draft = true)?.let { throw ApiException("bad_request", "project.${it.field}: ${it.reason}") }
         if (project.sourceTakeId != takeId) throw ApiException("bad_request", "project.sourceTakeId: must be the session's take")
         return p as kotlinx.serialization.json.JsonObject
     }
@@ -963,6 +972,13 @@ class FakeMuseApi(
     private fun editStale(s: FakeEditSession, base: Int) = ApiException("stale_revision", "The edit moved on (revision ${s.revision}, you sent $base) · get it again and re-apply")
 
     override suspend fun openEditSession(req: OpenEditSessionRequest): EditSessionDto = lock.withLock {
+        // A blank project ("New"): always a new session, stored under the marker take id (like the server).
+        if (req.takeId == EdBlankSource) {
+            val project = req.project?.let { editCheck(it, req.takeId) } ?: EdEditJson.encode(edBlankProject())
+            val s = FakeEditSession("es_${++editSessionSeq}", req.takeId, project, updatedAt = now())
+            editSessions[s.id] = s
+            return@withLock editView(s)
+        }
         val t = takes.firstOrNull { it.id == req.takeId } ?: throw ApiException("not_found", "Take not found")
         if (req.fresh != true) editSessions.values.lastOrNull { it.takeId == t.id }?.let { return@withLock editView(it) }
         val project = req.project?.let { editCheck(it, t.id) } ?: (t.edits?.project?.takeIf { (it["sourceTakeId"] as? kotlinx.serialization.json.JsonPrimitive)?.content == t.id })

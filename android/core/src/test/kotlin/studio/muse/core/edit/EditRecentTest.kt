@@ -36,6 +36,7 @@ class EditRecentTest {
             RecentSession("es_1", "take_a", updatedAt = 1_000),
             RecentSession("es_2", "take_gone", updatedAt = 500, place = EditPlace(at = 3_000)), // left later than es_1 changed
             RecentSession("es_3", "take_a", status = "closed", updatedAt = 9_000),
+            RecentSession("es_4", BLANK_SOURCE, updatedAt = 9_500, emptyBlank = true), // "New" pressed and left
         )
         val items = EditRecent.items(sessions, emptyList()) { titles[it] }
         assertEquals(listOf("es_2", "es_1"), items.map { it.id })

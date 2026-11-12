@@ -103,6 +103,10 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
         val (w, h) = if (availW / availH > aspect) (availH * aspect) to availH else availW to (availW / aspect)
         Box(Modifier.size(w, h).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
             picture(Modifier.fillMaxSize())
+            // A blank project before its first clip ("New"): where the video comes from.
+            if (p != null && p.isBlank && p.main.items.isEmpty()) Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                T("Add a video from Overlay · Add to end", muse.type.tiny.copy(fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center), Color.White.copy(alpha = .75f))
+            }
             if (p != null && drawText) Overlays(p, ui.playheadSec, w, h)
             if (p != null) {
                 val pv = ui.preview.resolved(p.canvas.width, p.canvas.height)

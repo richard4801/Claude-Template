@@ -129,6 +129,8 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     val filesDir = LocalContext.current.filesDir
     var resume by remember { mutableStateOf<studio.muse.core.edit.EditRecentItem?>(null) }
     var recent by remember { mutableStateOf<List<studio.muse.core.edit.EditRecentItem>>(emptyList()) }
+    /** Each "New" is its own blank project (the editor is kept per key, so a second New mustn't reopen the first). */
+    var newCount by rememberSaveable { mutableStateOf(0) }
     var recreating by rememberSaveable { mutableStateOf(false) } // "Recreate an edit" (plans/recreate-edit.md)
     var reference by rememberSaveable { mutableStateOf<String?>(null) } // a library reference opened in the Recipe view
     var learn by rememberSaveable { mutableStateOf<String?>(null) } // "playbook" | "recipes" (plans/learning-editor-ui.md), owner only
@@ -149,10 +151,11 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
         onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
     else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }, recent = recent,
-        onResume = { r -> resume = r; open = r.takeId }, onOpen = openTake)
+        onResume = { r -> resume = r; open = r.takeId }, onNew = { resume = null; newCount++; open = studio.muse.core.edit.BLANK_SOURCE }, onOpen = openTake)
     // "Open playbook" in the editor's Claude sheet leaves the editor for the Playbook.
     else androidx.compose.runtime.CompositionLocalProvider(LocalOpenPlaybook provides { open = null; learn = "playbook" }) {
-        EditSuiteEditor(id, resume?.takeIf { it.takeId == id }, onBack = { if (takeId == null) { open = null; resume = null } else onBack() })
+        val r = resume?.takeIf { it.takeId == id }
+        EditSuiteEditor(id, r, key = if (id == studio.muse.core.edit.BLANK_SOURCE) "edit-suite-blank-${r?.id ?: "new$newCount"}" else "edit-suite-$id", onBack = { if (takeId == null) { open = null; resume = null } else onBack() })
     }
 }
 
@@ -164,7 +167,7 @@ fun editableTakes(takes: List<Take>): List<TakeChoice> = takes.filter { it.kind 
 
 @Composable
 fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onLearn: (String) -> Unit = {}, recent: List<studio.muse.core.edit.EditRecentItem> = emptyList(),
-             onResume: (studio.muse.core.edit.EditRecentItem) -> Unit = {}, onOpen: (String) -> Unit) {
+             onResume: (studio.muse.core.edit.EditRecentItem) -> Unit = {}, onNew: () -> Unit = {}, onOpen: (String) -> Unit) {
     val c = LocalContainer.current
     val state by c.repo.state.collectAsState()
     val prefs by c.prefs.collectAsState()
@@ -173,24 +176,19 @@ fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onLearn: (String) -> Un
     val rows = recent.take(studio.muse.core.edit.EditRecent.SHOWN).map { r ->
         RecentRow(r, state.takes.firstOrNull { it.id == r.takeId }?.thumb, studio.muse.core.edit.EditRecent.lastEditedText(r.lastEditedAt, System.currentTimeMillis()))
     }
-    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate, onLearn = onLearn.takeIf { owner }, recent = rows, onResume = onResume)
+    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate, onLearn = onLearn.takeIf { owner }, recent = rows, onResume = onResume, onNew = onNew)
 }
 
 @Composable
 fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null, onLearn: ((String) -> Unit)? = null,
-                    recent: List<RecentRow> = emptyList(), onResume: (studio.muse.core.edit.EditRecentItem) -> Unit = {}) {
+                    recent: List<RecentRow> = emptyList(), onResume: (studio.muse.core.edit.EditRecentItem) -> Unit = {}, onNew: () -> Unit = {}) {
     val m = muse
-    val list = androidx.compose.foundation.lazy.rememberLazyListState()
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    // "New" on the phone: Android has no blank project yet, so it goes to the videos to start from.
-    val videosAt = 1 + (if (onRecreate != null) 1 else 0) + (if (onLearn != null) 1 else 0) + 1 +
-        (if (recent.size > 1) 1 + (recent.size - 1) else 0)
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
             TopBar("Edit", onBack = onBack)
-            LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // Owner decision 2026-11-12: two ways in, New and Continue draft (only New when there is no draft).
-                item("start") { StartChoice(recent.firstOrNull(), onNew = { scope.launch { list.animateScrollToItem(videosAt.coerceAtMost(list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) } }, onResume = onResume) }
+                item("start") { StartChoice(recent.firstOrNull(), onNew = onNew, onResume = onResume) }
                 item { T("Open a video to cut, caption, grade and export it. Edits are saved as new versions; the original stays.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted) }
                 // "Recreate an edit" (plans/recreate-edit.md): an edit you love, broken into its recipe.
                 if (onRecreate != null) item {
@@ -230,7 +228,7 @@ fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String
 private fun StartChoice(last: RecentRow?, onNew: () -> Unit, onResume: (studio.muse.core.edit.EditRecentItem) -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        StartTile("New", "Pick a video", accent = last == null, label = "New edit", modifier = Modifier.weight(1f), onClick = onNew) {
+        StartTile("New", "Blank project", accent = last == null, label = "New edit", modifier = Modifier.weight(1f), onClick = onNew) {
             Box(Modifier.size(44.dp, 62.dp).clip(RoundedCornerShape(2.dp)).background(m.t.surface2), contentAlignment = Alignment.Center) { EIc("plus", 18.dp, m.t.ink) }
         }
         if (last != null) StartTile("Continue draft", last.item.title, meta = last.whenText, accent = true,
@@ -303,10 +301,10 @@ private fun HomeRow(t: TakeChoice, onOpen: (String) -> Unit) {
 // ======================================================================= editor
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRecentItem?, onBack: () -> Unit) {
+private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRecentItem?, key: String, onBack: () -> Unit) {
     val c = LocalContainer.current
     val context = LocalContext.current
-    val vm: EditSuiteViewModel = viewModel(key = "edit-suite-$takeId") { EditSuiteViewModel(c, takeId, context, resume) }
+    val vm: EditSuiteViewModel = viewModel(key = key) { EditSuiteViewModel(c, takeId, context, resume) }
     val ui by vm.controller.ui.collectAsState()
     val soundPlaying by vm.soundPlaying.collectAsState()
     val frames by vm.frames.collectAsState()
@@ -531,7 +529,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 if (p == null) return@collect
                 // A take added while editing (an overlay, or a clip at the end): its file first, so the preview and the
                 // export include it (before, only takes in the project when it opened were fetched).
-                if (sourceFile != null && p.assets.any { (it.take != null || (it.upload != null && it.kind != AssetKind.LUT && it.kind != AssetKind.FONT && it.id !in fetchTried)) && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
+                if ((sourceFile != null || p.isBlank) && p.assets.any { (it.take != null || (it.upload != null && it.kind != AssetKind.LUT && it.kind != AssetKind.FONT && it.id !in fetchTried)) && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
                 if (p.assets.any { it.kind == AssetKind.FONT && it.upload?.let(OwnFonts::has) == false }) fetchFonts(p)
                 if (contentMissing(p).isNotEmpty()) ensureContent(p)
                 rebuildPreview(p)
@@ -573,6 +571,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         work = viewModelScope.launch {
             controller.setPhase(SuitePhase.Loading())
             val takes = c.repo.state.value.takes
+            // "New" (owner 2026-11-12): a blank project, no source video; or a blank edit continued from Recent edits.
+            if (takeId == studio.muse.core.edit.BLANK_SOURCE) return@launch loadBlank()
             val take = takes.firstOrNull { it.id == takeId } ?: run {
                 // Continue a draft: an edit whose take was deleted still opens (its clips read "Missing").
                 if (resume != null && loadWithoutTake(resume)) return@launch
@@ -593,7 +593,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                     val f = engine.fetchSource(url) { p -> controller.setPhase(SuitePhase.Loading(p)) }
                     sourceFile = f; sourceInfo = engine.probe(f)
                 }
-                val project = localResume?.takeIf { it.sourceTakeId == source.id } ?: projectFor(source, target?.initial)
+                val project = localResume?.takeIf { it.sourceTakeId == source.id } ?: savedBlank(take) ?: projectFor(source, target?.initial)
                 for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
                 controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
                 // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
@@ -613,6 +613,48 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             }
         }
     }
+
+    /** A saved blank project (a Library video with no source): its own project again, this video now its source. */
+    private fun savedBlank(take: Take): EditProject? {
+        if (take.kind != "edit" || take.parentTakeId != null) return null
+        val p = take.edits?.project?.let { runCatching { EditJson.parse(it) }.getOrNull() } ?: return null
+        return if (p.isBlank) p.copy(sourceTakeId = take.id) else null
+    }
+
+    /** A blank project's first save made this Library video; later saves are its versions. */
+    private var blankSavedId: String? = null
+
+    /** "New": nothing on the timeline yet (or the blank edit continued as it was left); videos come from the Overlay panel. */
+    private suspend fun loadBlank() {
+        val takes = c.repo.state.value.takes
+        controller.update { u ->
+            u.copy(
+                looks = runCatching { looks.pack.looks.map { LookChoice(it.id, it.name, it.category) } }.getOrDefault(emptyList()),
+                suiteLooks = runCatching { looks.palettes.looks.associate { it.id to it.name } }.getOrDefault(emptyMap()),
+                takes = editableTakes(takes),
+            )
+        }
+        val r = resume
+        val project = r?.sessionId?.let { sid -> runCatching { EditJson.parse(c.repo.api.editSession(sid).project) }.getOrNull() }
+            ?: localResume ?: studio.muse.core.edit.blankProject()
+        val title = r?.title?.takeIf { it != studio.muse.core.edit.EditRecent.UNTITLED } ?: "New project"
+        controller.load(project, title, studio.muse.core.edit.BLANK_SOURCE, null, reopened = false)
+        viewModelScope.launch { runCatching { c.repo.api.previewLayouts() }.getOrNull()?.let { controller.act(EditAction.PreviewLayoutsOf(studio.muse.core.edit.PreviewLayouts.parse(it))) } }
+        startSession(studio.muse.core.edit.BLANK_SOURCE, project, fromVersion = null, attach = r?.sessionId)
+        fetchTakeAssets(project)
+        fetchFonts(project)
+        startPlace()
+        loadContent()
+        loadWaves(project)
+        rebuildPreview(controller.project ?: project)
+    }
+
+    /** A blank project with nothing on its main track yet: nothing to play or render. */
+    private val emptyBlank: Boolean get() = controller.project?.let { it.isBlank && it.main.items.isEmpty() } == true
+    /** There is something to play or render: the source video, or a blank project's first clip. */
+    private val canRender: Boolean get() = sourceFile != null || (controller.project?.isBlank == true && !emptyBlank)
+    /** A file to take a still from for the look and effect tiles: the source, else a blank project's first clip. */
+    private fun stillSource(): File? = sourceFile ?: controller.project?.mainClips?.firstNotNullOfOrNull { files[it.asset] }
 
     /** The project to start from: a saved v2 project, a v1 edit list, or the whole source as one clip. */
     private fun projectFor(source: Take, initial: studio.muse.app.data.EditListDto?): EditProject {
@@ -720,7 +762,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
 
     private fun rebuildPreview(p: EditProject) {
-        if (sourceFile == null) return
+        if (p.isBlank && p.main.items.isEmpty()) { _player.value?.release(); _player.value = null; return } // the viewer shows "Add a video"
+        if (sourceFile == null && !p.isBlank) return
         val pos = _player.value?.currentPosition ?: (controller.ui.value.playheadSec * 1000).toLong()
         runCatching {
             val plan = composer.plan(playable(p), files)
@@ -1020,7 +1063,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     /** The frame under the playhead, rendered like the export (looks, text, captions), into Pictures/MUSE. */
     fun saveFrame() {
         val p = controller.project ?: return
-        if (sourceFile == null) return c.repo.toast("This video has no file to take a frame from")
+        if (!canRender) return c.repo.toast(if (emptyBlank) "Add a video first" else "This video has no file to take a frame from")
         val t = controller.ui.value.playheadSec
         viewModelScope.launch {
             val png = runCatching {
@@ -1122,7 +1165,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     /** Effect tiles: each effect (at 80 %) on a small frame under the playhead, on the CPU reference (once per editor). */
     fun renderEffectThumbs() {
         if (_fxThumbs.value.isNotEmpty()) return
-        val f = sourceFile ?: return
+        val f = stillSource() ?: return
         viewModelScope.launch {
             val frame = runCatching { engine.frames(f, listOf(controller.ui.value.playheadSec.coerceAtLeast(0.1)), 120).firstOrNull() }.getOrNull() ?: return@launch
             val map = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -1135,7 +1178,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     /** Filter thumbnails: every look on the frame under the playhead. */
     fun renderLookThumbs() {
         if (_thumbs.value.isNotEmpty()) return
-        val f = sourceFile ?: return
+        val f = stillSource() ?: return
         viewModelScope.launch {
             val frame = runCatching { engine.frames(f, listOf(controller.ui.value.playheadSec.coerceAtLeast(0.1)), 240).firstOrNull() }.getOrNull() ?: return@launch
             val map = runCatching { LookThumbnails.renderPack(frame, looks) }.getOrNull() ?: return@launch
@@ -1145,7 +1188,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     // ------------------------------------------------------------ Edit sessions (workstream 3): owner only
     /** The owner's editor joins the take's edit session (Claude edits it too); members and offline stay local. */
-    private fun startSession(sourceTakeId: String, project: EditProject, fromVersion: String?) {
+    private fun startSession(sourceTakeId: String, project: EditProject, fromVersion: String?, attach: String? = null) {
         if (!(c.repo.demo || c.prefs.value.owner)) return
         controller.update { it.copy(claudeOwner = true) } // the Claude button shows, dimmed until the session is there
         val s = EditSessionSync(viewModelScope, { c.repo.api }, c.repo.live, controller, sessionHost, deviceId(), Build.MODEL ?: "Android phone", looks.paletteIds,
@@ -1153,7 +1196,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         sync = s
         // The app's own project goes up only when it was built from a saved version (else the server starts from the take).
         // Offline: the editor works locally and joins when the connection is back (asking first if this device has edits).
-        viewModelScope.launch { s.connect(sourceTakeId, if (fromVersion != null) EditJson.encode(project) else null, fromVersion) }
+        viewModelScope.launch { s.connect(sourceTakeId, if (fromVersion != null) EditJson.encode(project) else null, fromVersion, attach = attach) }
     }
 
     private fun deviceId(): String {
@@ -1163,7 +1206,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     private val sessionHost by lazy { object : SessionHost {
         override suspend fun renderFrame(project: EditProject, t: Double, width: Int): Pair<ByteArray?, String?> {
-            if (sourceFile == null) return null to "No video file"
+            if (!canRender) return null to "No video file"
             return runCatching { studio.muse.app.platform.edit.FrameStill(app, looks).png(composer.plan(playable(project), files), files, t, width) }
                 .fold({ it to null }, { null to "Couldn't render the frame" })
         }
@@ -1192,7 +1235,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     private suspend fun exportToPhone(format: ExportFormat) {
         val p = controller.project ?: return
         val u = controller.ui.value
-        if (sourceFile == null) return c.repo.toast("This video has no file to render · open a finished render")
+        if (!canRender) return c.repo.toast(if (emptyBlank) "Add a video first · the main track is empty" else "This video has no file to render · open a finished render")
         u.export.refusal(u.duration, SuiteOps.editHasSound(playable(p)))?.let { return controller.setPhase(SuitePhase.Failed(it)) }
         withContext(Dispatchers.Main) { pause() }
         // Sound only: a small, quick picture (it's thrown away); a GIF: its own size and frame rate.
@@ -1242,7 +1285,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         lastExportError = null
         val p = controller.project ?: return null
         val u = controller.ui.value
-        if (sourceFile == null) { c.repo.toast("This video has no file to render · open a finished render"); lastExportError = "No video file"; return null }
+        if (!canRender) {
+            lastExportError = if (emptyBlank) "Add a video first · the main track is empty" else "No video file"
+            c.repo.toast(if (emptyBlank) lastExportError!! else "This video has no file to render · open a finished render"); return null
+        }
         withContext(Dispatchers.Main) { pause() }
         val s = u.export.copy(format = ExportFormat.VIDEO) // versions are videos (Claude's export asks for one too)
         controller.setPhase(SuitePhase.Exporting(0f))
@@ -1262,12 +1308,20 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         controller.setPhase(SuitePhase.Saving(0f))
         try {
             // The saved project is the edit as made (canvas = the exported size and fps; captions kept for reopening).
-            val saved = p.copy(canvas = p.canvas.copy(width = made.width, height = made.height, fps = s.fps.toDouble()))
-            val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved), name, { pr -> controller.setPhase(SuitePhase.Saving(pr)) }, aiLabel = s.aiLabel) }
+            // A blank project: its first save is a new Library video (POST /v1/edits), later ones versions of that video.
+            val sourceId = blankSavedId ?: u.sourceTakeId
+            val saved = p.copy(sourceTakeId = sourceId, canvas = p.canvas.copy(width = made.width, height = made.height, fps = s.fps.toDouble()))
+            val (take, err) = c.repo.attemptInline { saveProjectVersion(sourceId, made, EditJson.encode(saved), name, { pr -> controller.setPhase(SuitePhase.Saving(pr)) }, aiLabel = s.aiLabel) }
             if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
             if (take == null) { lastExportError = err ?: "Couldn't save the video"; controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null }
             exportGate.exported(take.id) // answers an export Claude asked for, before the sheet closes
-            controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = if (toPhone) "Saved to Library and to this phone" else "Saved as a new version · Edited") }
+            if (sourceId == studio.muse.core.edit.BLANK_SOURCE) blankSavedId = take.id
+            val newVideo = take.parentTakeId == null
+            controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = when {
+                toPhone -> "Saved to Library and to this phone"
+                newVideo -> "Saved to the Library as a new video"
+                else -> "Saved as a new version · Edited"
+            }) }
             return take
         } finally { made.file.delete() }
     }
