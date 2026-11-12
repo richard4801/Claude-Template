@@ -64,6 +64,10 @@ data class PickerEngine(
     val ladderRes: Map<String, String> = emptyMap(),
     /** WS13: the purposes it serves (empty = any). */
     val purposes: List<String> = emptyList(),
+    /** Owner 2026-11-12: for a model not made for this purpose, what MUSE does with it (it is still offered). */
+    val note: String? = null,
+    /** Priced live by the provider when picked (Wan 3.0). */
+    val livePrice: Boolean = false,
 ) {
     val tier: String? get() = tiers.firstOrNull()
 
@@ -128,7 +132,8 @@ object ModelPicker {
         cat.engines?.let { list ->
             return list.filter { it.kind == kind }.map { e ->
                 PickerEngine(e.model, e.shownName.ifBlank { e.model }, e.tiers.ifEmpty { listOfNotNull(e.tier) }, e.resolution?.ifBlank { null }, e.resolutions,
-                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes)
+                    e.minSeconds, e.maxSeconds, e.allowedSeconds, e.aspectRatios, e.perSec, e.inputs, e.custom, e.perRun, e.kind, ladderRes(e.model), e.purposes,
+                    note = e.fitNote?.takeIf { e.fit == "adapted" }, livePrice = e.livePrice)
             }
         }
         if (kind != "video") return cat.custom.orEmpty().filter { it.kind == kind }.map { c -> customEngine(c) }
@@ -147,18 +152,28 @@ object ModelPicker {
 
     /** The picker's groups for a shot on [quality]: the engines on that quality's ladder first, then the rest, then "Your providers". */
     fun groups(cat: SuiteCatalog?, quality: String, kind: String = "video", purpose: String? = null): PickerGroups {
-        // WS13: engines list their purposes; Talking and UGC take narrower lists than Shot. An entry without purposes fits any.
-        val fit = engines(cat, kind).filter { e -> purpose == null || e.purposes.isEmpty() || purpose in e.purposes }
-        val (custom, core) = fit.partition { it.custom }
+        // Owner 2026-11-12: "Every model in our app should be available on every mode … the default models are mostly on
+        // top of the list". Nothing is filtered by purpose: the models made for it come first, then the others, which MUSE
+        // adapts (each says how). An entry without purposes fits any.
+        fun native(e: PickerEngine) = e.note == null && (purpose == null || e.purposes.isEmpty() || purpose in e.purposes)
+        val all = engines(cat, kind).map { e -> if (native(e) || e.note != null) e else e.copy(note = adaptedLine(purpose)) }
+        val (custom, core) = all.partition { it.custom }
         val (ladder, others) = core.partition { quality in it.tiers }
-        // This quality's ladder in its own order; the others in quality order (Draft → Cinema).
+        // This quality's ladder in its own order; the others in quality order (Draft → Cinema); adapted ones after.
         val ladderOrder = cat?.tier(quality)?.models.orEmpty().map { it.model }
         val order = cat?.tiers?.map { it.id } ?: SuiteRules.TIERS
         return PickerGroups(
-            ladder.sortedBy { e -> ladderOrder.indexOf(e.id).let { if (it < 0) Int.MAX_VALUE else it } },
-            others.sortedBy { e -> order.indexOf(e.tier).let { if (it < 0) Int.MAX_VALUE else it } },
-            custom,
+            ladder.sortedWith(compareBy<PickerEngine>({ if (native(it)) 0 else 1 }, { e -> ladderOrder.indexOf(e.id).let { if (it < 0) Int.MAX_VALUE else it } })),
+            others.sortedWith(compareBy<PickerEngine>({ if (native(it)) 0 else 1 }, { e -> order.indexOf(e.tier).let { if (it < 0) Int.MAX_VALUE else it } })),
+            custom.sortedBy { if (native(it)) 0 else 1 },
         )
+    }
+
+    /** The line for a model a composer tool adapts (Talking: no voice slot; UGC ad: no product photo). */
+    fun adaptedLine(purpose: String?): String = when (purpose) {
+        "talking" -> "Takes no voice track: MUSE writes the words to say in the prompt"
+        "ugc" -> "Takes no product photo: MUSE describes the product in words"
+        else -> "Not made for this: MUSE adapts what it can’t take and says what it changed"
     }
 
     /** The engine a draft has pinned, or null (Auto, or a pin the catalog no longer has). */
@@ -216,7 +231,7 @@ fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngin
 fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups: PickerGroups, autoLine: String, onPick: (PickerEngine?, String?) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxWidth().testTag("model_picker"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        ModelRow("Auto", autoLine, emptyList(), null, selected == null, {}) { onPick(null, null) }
+        ModelRow("Auto", autoLine, emptyList(), null, selected == null, onChip = {}) { onPick(null, null) }
         listOf(
             (quality?.let { "On ${SuiteRules.tierLabel(it)}" } ?: "") to groups.ladder,
             (if (quality == null) "Models" else "Other models") to groups.others,
@@ -228,7 +243,8 @@ fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups:
                 val detail = listOfNotNull(e.tier?.takeIf { quality != null && quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
                 // The chip lit is the resolution it would run at: the pinned one, else this quality's.
                 val res = if (on) selectedRes ?: quality?.let(e::resolutionOn) ?: e.resolution else quality?.let(e::resolutionOn) ?: e.resolution
-                ModelRow(e.name, detail, e.chips, res, on, { r -> onPick(e, r) }) { onPick(e, null) }
+                val note = listOfNotNull(e.note, "Priced by the provider when you pick it".takeIf { e.livePrice }).joinToString(" · ").ifBlank { null }
+                ModelRow(e.name, detail, e.chips, res, on, note = note, onChip = { r -> onPick(e, r) }) { onPick(e, null) }
             }
         }
     }
@@ -239,7 +255,7 @@ fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups:
  * Tapping the row pins it at this quality's resolution.
  */
 @Composable
-private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, String>>, lit: String?, on: Boolean, onChip: (String?) -> Unit, onClick: () -> Unit) {
+private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, String>>, lit: String?, on: Boolean, note: String? = null, onChip: (String?) -> Unit, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(12.dp)
     Column(
@@ -252,6 +268,8 @@ private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, Str
             Column(Modifier.weight(1f)) {
                 T(name, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
                 if (detail.isNotBlank()) T(detail, m.scale.caption, m.t.muted, maxLines = 1)
+                // Every model on every mode: one not made for this says what MUSE does with it.
+                if (!note.isNullOrBlank()) T(note, m.scale.caption, m.t.muted, maxLines = 2)
             }
             Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { if (on) SIc("check", 18.dp, m.t.accent) }
         }

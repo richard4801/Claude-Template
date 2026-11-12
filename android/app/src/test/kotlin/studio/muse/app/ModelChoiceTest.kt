@@ -92,8 +92,15 @@ class ModelChoiceLogicTest {
             studio.muse.app.data.SuiteCatalogEngine("a", "A", purposes = listOf("shot", "guide")),
             studio.muse.app.data.SuiteCatalogEngine("b", "B", purposes = listOf("shot")),
         ))
-        assertEquals(listOf("a"), studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "guide").all.map { it.id })
+        // Owner 2026-11-12: every model on every mode. The ones made for the purpose first; the others after, saying how
+        // MUSE adapts them.
+        val guide = studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "guide").all
+        assertEquals(listOf("a", "b"), guide.map { it.id })
+        assertNull(guide[0].note)
+        assertEquals("Not made for this: MUSE adapts what it can’t take and says what it changed", guide[1].note)
         assertEquals(listOf("a", "b"), studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "shot").all.map { it.id })
+        val talking = studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "talking").all
+        assertEquals("Takes no voice track: MUSE writes the words to say in the prompt", talking[0].note)
     }
 
     @Test fun aPickDoesNotCarryToAnotherKindOfWork() {

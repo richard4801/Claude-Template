@@ -92,7 +92,7 @@ class PromptScriptsTest {
 
     @Test fun httpParsesTheScriptsListGetSaveResetAndPreview() = runBlocking {
         val list = api.listPromptScripts()
-        assertEquals(15, list.scripts.size) // 11 (dressup removed) + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1) + House style (2026-11-11)
+        assertEquals(16, list.scripts.size) // 11 (dressup removed) + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1) + House style (2026-11-11) + New Swap's suite.remix (2026-11-12)
         assertTrue(list.ops.first { it.id == "in" }.types == listOf("enum"))
         assertEquals("Video", list.groups.first { it.id == "video" }.label)
         val v = list.scripts.first { it.id == "video.replicate" }

@@ -237,7 +237,11 @@ public struct LayerResult: Codable, Hashable, Sendable {
     public var name: String
     public var asset: EditorResultAsset
     public var track: EditV2.LayerTrack?
-    public init(name: String, asset: EditorResultAsset, track: EditV2.LayerTrack? = nil) { self.name = name; self.asset = asset; self.track = track }
+    /// When the layer doesn't cover what was marked ("Her: the layer doesn't cover 2 of the 3 points you marked · …").
+    public var warning: String?
+    public init(name: String, asset: EditorResultAsset, track: EditV2.LayerTrack? = nil, warning: String? = nil) {
+        self.name = name; self.asset = asset; self.track = track; self.warning = warning
+    }
 }
 
 public struct EditorResultAsset: Codable, Hashable, Sendable {

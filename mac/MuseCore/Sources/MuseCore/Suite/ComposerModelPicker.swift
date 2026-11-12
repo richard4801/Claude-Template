@@ -237,14 +237,32 @@ public enum ComposerModelPicker {
         }
     }
 
-    /// Video models for a shot tool (Talking needs an audio slot, UGC ad a reference image); image models for Photo.
+    /// Owner 2026-11-12, every model on every mode: a shot tool lists every video model, Photo every image model.
     public static func supports(_ e: SuiteModelOption, tool: ComposerTool) -> Bool {
         switch tool {
         case .photo: return e.kind == "image"
-        case .shot, .storyboard: return e.isVideo
-        case .talking: return e.isVideo && e.inputs?.audio == true
-        case .ugc: return e.isVideo && (e.inputs?.images ?? 0) > 0
+        case .shot, .storyboard, .talking, .ugc: return e.isVideo
         case .swap, .recast, .extend: return false
+        }
+    }
+
+    /// Whether the model takes what the tool sends natively (Talking: an audio slot; UGC ad: a reference image). The
+    /// others are still offered, after these, and MUSE adapts them (it says what it changed).
+    public static func fits(_ e: SuiteModelOption, tool: ComposerTool) -> Bool {
+        switch tool {
+        case .talking: return e.inputs?.audio == true
+        case .ugc: return (e.inputs?.images ?? 0) > 0
+        default: return true
+        }
+    }
+
+    /// The row's line for a model the tool adapts, or nil.
+    public static func adaptedNote(_ e: SuiteModelOption, tool: ComposerTool) -> String? {
+        if fits(e, tool: tool) { return nil }
+        switch tool {
+        case .talking: return "Takes no voice track: MUSE writes the words to say in the prompt"
+        case .ugc: return "Takes no product photo: MUSE describes the product in words"
+        default: return nil
         }
     }
 
@@ -255,11 +273,12 @@ public enum ComposerModelPicker {
         let ladder = (catalog?.tier(quality)?.models ?? []).map(\.model)
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         let found = q.isEmpty ? all : all.filter { "\($0.name) \($0.model)".lowercased().contains(q) }
-        func rank(_ e: SuiteModelOption) -> (Int, Int, Int) {
+        func rank(_ e: SuiteModelOption) -> (Int, Int, Int, Int) {
             let onThis = e.tiers.contains(quality) ? 0 : 1
             let inLadder = ladder.firstIndex(of: e.model) ?? Int.max
             let firstTier = e.tier.flatMap { SuiteText.tierIds.firstIndex(of: $0) } ?? Int.max
-            return (e.custom ? 1 : 0, onThis, onThis == 0 ? inLadder : firstTier)
+            // The ones made for the tool first (the defaults among them), then the ones MUSE adapts.
+            return (fits(e, tool: tool) ? 0 : 1, e.custom ? 1 : 0, onThis, onThis == 0 ? inLadder : firstTier)
         }
         return found.sorted { a, b in
             let ra = rank(a), rb = rank(b)

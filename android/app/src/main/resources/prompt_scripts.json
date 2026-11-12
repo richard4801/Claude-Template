@@ -5714,6 +5714,616 @@
    "stale": false,
    "updatedAt": null,
    "updatedBy": null
+  },
+  {
+   "id": "suite.remix",
+   "group": "suite",
+   "title": "Swap · New Swap (beta)",
+   "description": "New Swap: change only what is switched on (background, outfit, character, look & light) and keep everything else of the clip. The person writes only the change.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "character",
+     "label": "Character",
+     "description": "Who the person becomes.",
+     "type": "enum",
+     "options": [
+      {
+       "id": "none",
+       "label": "Kept from the clip"
+      },
+      {
+       "id": "model",
+       "label": "Her (her images)"
+      },
+      {
+       "id": "face",
+       "label": "Face swap (a photo)"
+      }
+     ],
+     "sample": "model"
+    },
+    {
+     "name": "outfit",
+     "label": "Outfit",
+     "description": "What they wear.",
+     "type": "enum",
+     "options": [
+      {
+       "id": "none",
+       "label": "Kept from the clip"
+      },
+      {
+       "id": "outfit",
+       "label": "One of her outfits"
+      },
+      {
+       "id": "product",
+       "label": "A product photo"
+      },
+      {
+       "id": "words",
+       "label": "In words"
+      }
+     ],
+     "sample": "outfit"
+    },
+    {
+     "name": "background",
+     "label": "Background",
+     "description": "The place.",
+     "type": "enum",
+     "options": [
+      {
+       "id": "none",
+       "label": "Kept from the clip"
+      },
+      {
+       "id": "describe",
+       "label": "Described in words"
+      },
+      {
+       "id": "photo",
+       "label": "A new photo"
+      }
+     ],
+     "sample": "photo"
+    },
+    {
+     "name": "look",
+     "label": "Look & light",
+     "description": "Time of day, light and colour grade change.",
+     "type": "bool",
+     "sample": false
+    }
+   ],
+   "sections": [
+    {
+     "id": "head",
+     "label": "Task",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "lock",
+     "label": "Figure lock",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "character",
+     "label": "Character",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "outfit",
+     "label": "Outfit",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "background",
+     "label": "Background",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "look",
+     "label": "Look & light",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "keep",
+     "label": "Keep",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "change",
+     "label": "The change in the person’s words",
+     "kind": "user",
+     "pick": "first"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "kind": "system",
+     "pick": "first"
+    }
+   ],
+   "values": [],
+   "targets": [
+    {
+     "id": "head",
+     "label": "Task"
+    },
+    {
+     "id": "lock",
+     "label": "Figure lock"
+    },
+    {
+     "id": "character",
+     "label": "Character"
+    },
+    {
+     "id": "outfit",
+     "label": "Outfit"
+    },
+    {
+     "id": "background",
+     "label": "Background"
+    },
+    {
+     "id": "look",
+     "label": "Look & light"
+    },
+    {
+     "id": "keep",
+     "label": "Keep"
+    },
+    {
+     "id": "change",
+     "label": "The change in the person’s words"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line"
+    }
+   ],
+   "vars": [
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "sample": "<Video 1>"
+    },
+    {
+     "name": "subject",
+     "description": "\"she\" (her) or \"the person\"",
+     "sample": "she"
+    },
+    {
+     "name": "name",
+     "description": "her name",
+     "sample": "Mia"
+    },
+    {
+     "name": "refs",
+     "description": "her image tokens",
+     "sample": "<Image 1> and <Image 2>"
+    },
+    {
+     "name": "figureRefs",
+     "description": "the images her figure comes from (her outfit’s angles, else her body shots)",
+     "sample": "<Image 3>, <Image 4>, <Image 5> and <Image 6>"
+    },
+    {
+     "name": "outfitRefs",
+     "description": "the outfit’s image tokens",
+     "sample": "<Image 3>, <Image 4>, <Image 5> and <Image 6>"
+    },
+    {
+     "name": "productRef",
+     "description": "the product photo token",
+     "sample": "<Image 3>"
+    },
+    {
+     "name": "faceRef",
+     "description": "the face-swap photo token",
+     "sample": "<Image 1>"
+    },
+    {
+     "name": "bgRef",
+     "description": "the background photo token",
+     "sample": "<Image 7>"
+    },
+    {
+     "name": "kept",
+     "description": "what is kept from the clip (toggles that are off)",
+     "sample": "the light and colour; "
+    }
+   ],
+   "blocks": [
+    "suite.remix.head",
+    "suite.remix.lock.model",
+    "suite.remix.lock.face",
+    "suite.remix.lock.keep",
+    "suite.remix.character.model",
+    "suite.remix.character.face",
+    "suite.remix.outfit.set",
+    "suite.remix.outfit.product",
+    "suite.remix.outfit.words",
+    "suite.remix.background.describe",
+    "suite.remix.background.photo",
+    "suite.remix.look",
+    "suite.remix.keep",
+    "suite.remix.change",
+    "suite.shot.footer"
+   ],
+   "variants": [],
+   "rules": [
+    {
+     "id": "head",
+     "label": "Change only what is listed",
+     "target": "head",
+     "when": [],
+     "block": "suite.remix.head",
+     "locked": true
+    },
+    {
+     "id": "lock.model",
+     "label": "Figure lock · her",
+     "target": "lock",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "model"
+      }
+     ],
+     "block": "suite.remix.lock.model",
+     "locked": true
+    },
+    {
+     "id": "lock.face",
+     "label": "Figure lock · face swap",
+     "target": "lock",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "face"
+      }
+     ],
+     "block": "suite.remix.lock.face",
+     "locked": true
+    },
+    {
+     "id": "lock.keep",
+     "label": "Figure lock · same person",
+     "target": "lock",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "none"
+      }
+     ],
+     "block": "suite.remix.lock.keep",
+     "locked": true
+    },
+    {
+     "id": "character.model",
+     "label": "Character · her",
+     "target": "character",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "model"
+      }
+     ],
+     "block": "suite.remix.character.model"
+    },
+    {
+     "id": "character.face",
+     "label": "Character · face swap",
+     "target": "character",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "face"
+      }
+     ],
+     "block": "suite.remix.character.face"
+    },
+    {
+     "id": "outfit.set",
+     "label": "Outfit · one of her outfits",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfit",
+       "op": "is",
+       "value": "outfit"
+      }
+     ],
+     "block": "suite.remix.outfit.set"
+    },
+    {
+     "id": "outfit.product",
+     "label": "Outfit · product photo",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfit",
+       "op": "is",
+       "value": "product"
+      }
+     ],
+     "block": "suite.remix.outfit.product"
+    },
+    {
+     "id": "outfit.words",
+     "label": "Outfit · in words",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfit",
+       "op": "is",
+       "value": "words"
+      }
+     ],
+     "block": "suite.remix.outfit.words"
+    },
+    {
+     "id": "background.describe",
+     "label": "Background · described",
+     "target": "background",
+     "when": [
+      {
+       "input": "background",
+       "op": "is",
+       "value": "describe"
+      }
+     ],
+     "block": "suite.remix.background.describe"
+    },
+    {
+     "id": "background.photo",
+     "label": "Background · new photo",
+     "target": "background",
+     "when": [
+      {
+       "input": "background",
+       "op": "is",
+       "value": "photo"
+      }
+     ],
+     "block": "suite.remix.background.photo"
+    },
+    {
+     "id": "look",
+     "label": "Look & light",
+     "target": "look",
+     "when": [
+      {
+       "input": "look",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.remix.look"
+    },
+    {
+     "id": "keep",
+     "label": "Keep everything else",
+     "target": "keep",
+     "when": [],
+     "block": "suite.remix.keep",
+     "locked": true
+    },
+    {
+     "id": "change",
+     "label": "The person’s words",
+     "target": "change",
+     "when": [],
+     "block": "suite.remix.change",
+     "locked": true
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "target": "footer",
+     "when": [],
+     "block": "suite.shot.footer"
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "head",
+     "label": "Change only what is listed",
+     "target": "head",
+     "when": [],
+     "block": "suite.remix.head",
+     "locked": true
+    },
+    {
+     "id": "lock.model",
+     "label": "Figure lock · her",
+     "target": "lock",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "model"
+      }
+     ],
+     "block": "suite.remix.lock.model",
+     "locked": true
+    },
+    {
+     "id": "lock.face",
+     "label": "Figure lock · face swap",
+     "target": "lock",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "face"
+      }
+     ],
+     "block": "suite.remix.lock.face",
+     "locked": true
+    },
+    {
+     "id": "lock.keep",
+     "label": "Figure lock · same person",
+     "target": "lock",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "none"
+      }
+     ],
+     "block": "suite.remix.lock.keep",
+     "locked": true
+    },
+    {
+     "id": "character.model",
+     "label": "Character · her",
+     "target": "character",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "model"
+      }
+     ],
+     "block": "suite.remix.character.model"
+    },
+    {
+     "id": "character.face",
+     "label": "Character · face swap",
+     "target": "character",
+     "when": [
+      {
+       "input": "character",
+       "op": "is",
+       "value": "face"
+      }
+     ],
+     "block": "suite.remix.character.face"
+    },
+    {
+     "id": "outfit.set",
+     "label": "Outfit · one of her outfits",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfit",
+       "op": "is",
+       "value": "outfit"
+      }
+     ],
+     "block": "suite.remix.outfit.set"
+    },
+    {
+     "id": "outfit.product",
+     "label": "Outfit · product photo",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfit",
+       "op": "is",
+       "value": "product"
+      }
+     ],
+     "block": "suite.remix.outfit.product"
+    },
+    {
+     "id": "outfit.words",
+     "label": "Outfit · in words",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfit",
+       "op": "is",
+       "value": "words"
+      }
+     ],
+     "block": "suite.remix.outfit.words"
+    },
+    {
+     "id": "background.describe",
+     "label": "Background · described",
+     "target": "background",
+     "when": [
+      {
+       "input": "background",
+       "op": "is",
+       "value": "describe"
+      }
+     ],
+     "block": "suite.remix.background.describe"
+    },
+    {
+     "id": "background.photo",
+     "label": "Background · new photo",
+     "target": "background",
+     "when": [
+      {
+       "input": "background",
+       "op": "is",
+       "value": "photo"
+      }
+     ],
+     "block": "suite.remix.background.photo"
+    },
+    {
+     "id": "look",
+     "label": "Look & light",
+     "target": "look",
+     "when": [
+      {
+       "input": "look",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.remix.look"
+    },
+    {
+     "id": "keep",
+     "label": "Keep everything else",
+     "target": "keep",
+     "when": [],
+     "block": "suite.remix.keep",
+     "locked": true
+    },
+    {
+     "id": "change",
+     "label": "The person’s words",
+     "target": "change",
+     "when": [],
+     "block": "suite.remix.change",
+     "locked": true
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "target": "footer",
+     "when": [],
+     "block": "suite.shot.footer"
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
   }
  ]
 }

@@ -8,7 +8,8 @@ import { type DraftDirected, directedOf } from './directed.js';
 import { z } from 'zod';
 import { sentOfBody, type SentInput } from '../images/sent.js';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { jobs, models } from '../db/schema.js';
+import { clips, jobs, models } from '../db/schema.js';
+import { RemixSchema } from './plan.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { APERTURES, BODIES, ERAS, FOCAL_STEPS, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, TEMPOS, UGC_FORMATS, type CameraSpecInput, type Option } from './camera.js';
@@ -89,7 +90,11 @@ export function cameraOf(rig: Rig, moves: { id: string; intensity: number }[]): 
   return Object.keys(spec).length > 1 ? spec as CameraSpecInput : undefined;
 }
 /** What Generate sends for this draft (POST /v1/suite/shots), the draft included for Reuse settings. */
-export function requestOf(d: Draft) {
+export function requestOf(d: Draft): ShotRequestOf & { mode?: string; clipId?: string; keepAudio?: boolean } {
+  return d.tool === 'remix' ? remixRequestOf(d) as unknown as ShotRequestOf : shotRequestOf(d);
+}
+type ShotRequestOf = ReturnType<typeof shotRequestOf>;
+function shotRequestOf(d: Draft) {
   const toks = tokensOf(d), rig = (d.rig ?? {}) as Rig;
   const mention = (k: string) => toks.find((x): x is Extract<Token, { t: 'mention' }> => x.t === 'mention' && x.kind === k)?.id;
   const moves = toks.filter((x): x is Extract<Token, { t: 'move' }> => x.t === 'move').map(m => ({ id: m.id, intensity: Math.round(m.intensity) / 100 }));
@@ -112,6 +117,25 @@ export function requestOf(d: Draft) {
     ...sentOfDraft(d),
     draft: d,
   }, d);
+}
+
+/**
+ * New Swap (remix, plans/new-swap.md): the source clip, the toggles, the trimmed part and the model. Claude's own values
+ * (set with suite_set_draft) win; otherwise what the app shows (its screen request).
+ */
+export function remixRequestOf(d: Draft) {
+  const x = d as Record<string, unknown>;
+  const req = withScreen({
+    mode: 'remix' as const, prompt: '',
+    ...(x.remix && typeof x.remix === 'object' ? { remix: x.remix } : {}),
+    ...(Array.isArray(x.range) ? { range: x.range } : {}),
+    ...(typeof x.engineModel === 'string' ? { engineModel: x.engineModel, ...(typeof x.resolution === 'string' ? { resolution: x.resolution } : {}) } : {}),
+    quality: d.quality ?? 'standard', takes: d.takes ?? 1, aspectRatio: d.aspect ?? '9:16',
+    draft: d,
+  } as Record<string, unknown>, d);
+  if (typeof x.clipId === 'string') req.clipId = x.clipId;
+  if (typeof d.sound === 'boolean') req.keepAudio = d.sound;
+  return req;
 }
 
 /** The draft's images-sent choice as request fields (images/sent.ts), or nothing. */
@@ -140,6 +164,17 @@ export const SetBody = z.object({
   engineModel: z.string().max(40).nullable().optional(), resolution: z.string().max(20).nullable().optional(),
   /** Swap / Recast background: keep the clip's place, a new photo, or describe it in the prompt; null = Keep. */
   background: z.enum(['keep', 'photo', 'describe']).nullable().optional(),
+  /** Swap's header switch: the current Swap ("classic") or New Swap (beta, "new"); only while Swap is open. */
+  swapVariant: z.enum(['classic', 'new']).optional(),
+  /** New Swap: the source clip (a clip of this studio). */
+  clipId: z.string().max(80).nullable().optional(),
+  /** New Swap: each toggle's setting; a toggle set to null is switched off (kept from the clip); remix: null clears all. */
+  remix: z.object({
+    background: RemixSchema.shape.background.unwrap().nullable().optional(), outfit: RemixSchema.shape.outfit.unwrap().nullable().optional(),
+    character: RemixSchema.shape.character.unwrap().nullable().optional(), look: RemixSchema.shape.look.unwrap().nullable().optional(),
+  }).strict().nullable().optional(),
+  /** New Swap: the part of the clip to use [from, to] seconds (the trimmer); null = the whole clip. */
+  range: z.tuple([z.number().min(0), z.number().positive()]).nullable().optional(),
 }).strict();
 export type SetInput = z.infer<typeof SetBody>;
 
@@ -243,6 +278,29 @@ export class SuiteAssist {
     // WS18: the draft keeps the composer's tool (Photo, Talking, UGC ad, …). Forcing 'shot' here made the app refuse every
     // change Claude made outside Shot, because it only lays a draft over the composer of the same tool.
     if (!d.tool) d.tool = 'shot';
+    // New Swap: the header switch, the clip, the toggles (each replaced or switched off) and the trimmer's range.
+    if (b.swapVariant !== undefined) {
+      if (d.tool !== 'swap' && d.tool !== 'remix') throw new ApiError(409, 'not_swap', 'swapVariant: open Swap first (it switches between Swap and New Swap)');
+      d.tool = b.swapVariant === 'new' ? 'remix' : 'swap';
+    }
+    if (b.clipId !== undefined || b.remix !== undefined || b.range !== undefined) {
+      if (d.tool !== 'remix') throw new ApiError(409, 'not_new_swap', 'clipId, remix and range are New Swap’s: switch to it first (swapVariant: "new")');
+      if (b.clipId !== undefined) {
+        if (b.clipId === null) delete d.clipId;
+        else {
+          const [c] = await this.ctx.db.select({ id: clips.id }).from(clips).where(and(eq(clips.id, b.clipId), eq(clips.studioId, u.studioId)));
+          if (!c) throw badRequest(`clipId: no clip ${b.clipId} in the studio`);
+          d.clipId = b.clipId;
+        }
+      }
+      if (b.remix === null) delete d.remix;
+      else if (b.remix) {
+        const cur = { ...((d.remix ?? {}) as Record<string, unknown>) };
+        for (const [k, v] of Object.entries(b.remix)) { if (v === null) delete cur[k]; else if (v !== undefined) cur[k] = v; }
+        if (Object.keys(cur).length) d.remix = RemixSchema.parse(cur); else delete d.remix;
+      }
+      if (b.range !== undefined) { if (b.range === null) delete d.range; else d.range = b.range; }
+    }
     (d as Record<string, unknown>).tokens = toks;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
@@ -312,14 +370,16 @@ export class SuiteAssist {
   /** suite_estimate: the price, caps and warnings of what Generate would send (nothing held). */
   async estimate(u: AuthUser, id: string) {
     const v = this.view(await this.row(u, id));
-    if (!v.request.modelId) throw badRequest('Pick the model first (suite_set_draft modelId)');
+    if (v.request.mode === 'remix') { if (!v.request.clipId) throw badRequest('New Swap: add the video first (suite_set_draft clipId, or the person adds it)'); }
+    else if (!v.request.modelId) throw badRequest('Pick the model first (suite_set_draft modelId)');
     return { assistId: id, estimate: await this.ctx.suite.estimate(u, v.request), warnings: v.warnings };
   }
   /** suite_request_shot with confirm: the owner is asked in the app; their yes runs the shot at this price at most. */
   async ask(u: AuthUser, id: string) {
     const tool = ((await this.row(u, id)).draft as { tool?: string }).tool ?? 'shot';
-    if (tool !== 'shot') throw new ApiError(409, 'not_a_shot', 'Claude can ask to generate a Shot only · in this composer the owner presses Generate');
-    const e = await this.estimate(u, id) as { estimate: { estimate?: number; ok?: boolean; message?: string; buttonLabel?: string } };
+    if (tool !== 'shot' && tool !== 'remix') throw new ApiError(409, 'not_a_shot', 'Claude can ask to generate a Shot or a New Swap only · in this composer the owner presses Generate');
+    const e = await this.estimate(u, id) as { estimate: { estimate?: number; ok?: boolean; message?: string; buttonLabel?: string; remix?: { trim?: { needed?: boolean; maxSeconds?: number } } } };
+    if (e.estimate.remix?.trim?.needed) throw new ApiError(400, 'remix_trim_needed', `Trim the clip first: this model takes up to ${e.estimate.remix.trim.maxSeconds} s (suite_set_draft range, or the person uses the trimmer)`);
     if (e.estimate.ok === false) throw new ApiError(402, 'caps', e.estimate.message ?? 'A spending cap stops this shot');
     const usd = Number(e.estimate.estimate) || 0;
     const r = await this.row(u, id);

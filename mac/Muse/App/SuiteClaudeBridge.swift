@@ -212,7 +212,9 @@ extension AppStore {
         }
         let mine = suite.composer
         do {
-            let a = try await api.createSuiteAssist(SuiteAssistCreate(draft: ComposerDrafts.draft(mine)))
+            var first = ComposerDrafts.draft(mine)
+            if isNewSwap { for (k, v) in RemixDraftSync.fields(suite.remix, clipId: clip?.id) { first.raw[k] = v } } // New Swap (beta)
+            let a = try await api.createSuiteAssist(SuiteAssistCreate(draft: first))
             c.error = nil
             c.key = key
             c.assist = a
@@ -286,8 +288,21 @@ extension AppStore {
         guard let d = a.draft else { return }
         let before = suite.composer
         let refsBefore = c.references
-        let r = SuiteAssistDraft.apply(d, to: before, options: suiteDraftOptions)
-        var changed = r.changed
+        // New Swap (beta): Claude's draft says "remix" (or "swap" for the classic panel) while the composer is Swap. The
+        // panel takes the toggles, the trim and the model; the rest is laid over the composer as Swap.
+        var draft = d
+        let remixBefore = suite.remix, variantBefore = suite.swapVariant
+        var remixChanged: [String] = []
+        if before.tool == .swap, draft.tool == "remix" {
+            if suite.swapVariant != .remix { suite.swapVariant = .remix; remixChanged.append("New Swap") }
+            let rx = RemixDraftSync.apply(draft.raw, to: suite.remix)
+            if rx.draft != suite.remix { suite.remix = rx.draft }
+            remixChanged += rx.changed
+            if case .string(let cid)? = draft.raw["clipId"], cid != clip?.id { loadRemixClip(cid); remixChanged.append("Video") }
+            draft.tool = "swap"
+        }
+        let r = SuiteAssistDraft.apply(draft, to: before, options: suiteDraftOptions)
+        var changed = remixChanged + r.changed
         // Reference images Claude added (a pose, style, location or outfit): chips in the composer.
         let refs = SuiteAssistDraft.references(d)
         if refs != refsBefore {
@@ -315,6 +330,8 @@ extension AppStore {
                 guard let self else { return }
                 self.suite.composer = before
                 self.suite.swap = swapBefore
+                self.suite.remix = remixBefore
+                self.suite.swapVariant = variantBefore
                 if self.suite.claude.references != refsBefore {
                     self.suite.claude.references = refsBefore
                     self.suite.claude.refsDirty = true
@@ -325,6 +342,17 @@ extension AppStore {
         c.synced = suite.composer
         // Values the composer refused: the shared draft goes back to what the composer shows, so Claude sees it.
         if !r.rejected.isEmpty { c.synced = nil; suiteComposerChanged() }
+    }
+
+    /// New Swap: the clip Claude set as the video (GET /v1/clips/{id}).
+    func loadRemixClip(_ id: String) {
+        perform { [self] in
+            let c = try await api.suiteClip(id: id)
+            clip = c
+            clipFile = nil
+            clipThumb = c.thumb
+            suite.remix.range = nil
+        }
     }
 
     /// A reference chip's remove button: the draft goes back without it.
@@ -487,6 +515,8 @@ extension AppStore {
         guard mine != c.synced || c.refsDirty || screenKey != c.syncedScreen else { return }
         // The draft's references ride along (the composer doesn't hold them); a removed one is left out.
         var draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
+        // New Swap (beta): the draft is the remix (tool "remix", the clip, the toggles, the trim and the model).
+        if isNewSwap { for (k, v) in RemixDraftSync.fields(suite.remix, clipId: clip?.id) { draft.raw[k] = v } }
         // Everything on screen: the clip, guides and slot pictures, the request Generate would send (server suite/screen.ts).
         draft.raw["screen"] = suiteScreen(at: Date())
         do {
@@ -528,7 +558,26 @@ extension AppStore {
         var inputs: [SuiteScreen.Input] = []
         var settings: [String: JSONValue] = [:]
         let request: ShotRequest?
+        var toolName = tool.rawValue
         switch tool {
+        case .swap where suite.swapVariant == .remix:
+            // New Swap (beta): the clip, each toggle's picture, and the request with the toggles (also before it can run).
+            toolName = "remix"
+            let d = suite.remix
+            if let c = clip { inputs.append(SuiteScreen.clip(c, slot: "remix.clip")) }
+            if d.backgroundOn, d.backgroundMode == .photo, let img = d.backgroundImage {
+                inputs.append(SuiteScreen.Input(slot: "remix.background", kind: "image", label: d.backgroundName ?? "New background", url: img.url))
+            }
+            if d.outfitOn, d.outfitKind == .product, let img = d.productImage {
+                inputs.append(SuiteScreen.Input(slot: "remix.outfit", kind: "image", label: d.productName ?? "Product photo", url: img.url))
+            }
+            if d.characterOn, d.characterKind == .face, let img = d.faceImage {
+                inputs.append(SuiteScreen.Input(slot: "remix.face", kind: "image", label: d.faceName ?? "Face swap photo", url: img.url))
+            }
+            var r = ShotRequest.remix(clipId: clip?.id ?? "", draft: d)
+            if clip == nil { r.clipId = nil }
+            request = r
+            settings = ["swap": .string("New Swap (beta)"), "clipSound": .bool(d.keepAudio), "missing": d.missing.map { .string($0) } ?? .null]
         case .swap, .recast:
             if let c = clip { inputs.append(SuiteScreen.clip(c, slot: "\(tool.rawValue).clip")) }
             request = swapRequest
@@ -550,7 +599,7 @@ extension AppStore {
             inputs += SuiteScreen.inputs(suite.composerSlots.slots)
             request = shotRequest
         }
-        return SuiteScreen.json(tool: tool.rawValue, request: request, inputs: inputs, settings: settings, at: at)
+        return SuiteScreen.json(tool: toolName, request: request, inputs: inputs, settings: settings, at: at)
     }
 
     // MARK: Generate (only with the owner's press)

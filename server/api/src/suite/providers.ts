@@ -23,6 +23,8 @@ export interface VideoProvider {
   get(id: string): Promise<ProviderStatus>;
   cancel(id: string): Promise<void>;
   download(url: string, file: string): Promise<void>;
+  /** The provider's free price quote for one request (Higgsfield's /estimate), USD; absent where there is none. */
+  quote?(ref: string, body: Record<string, unknown>): Promise<number | null>;
 }
 
 export class ReplicateProvider implements VideoProvider {
@@ -127,6 +129,7 @@ export function hfValidation(text: string): HfFieldIssue[] {
   } catch { return []; }
 }
 
+const HF_QUOTES = new Map<string, { usd: number | null; at: number }>();
 export class HiggsfieldProvider implements VideoProvider {
   id = 'higgsfield' as const;
   constructor(private ctx: Ctx, private fetchFn: typeof fetch = fetch) {}
@@ -153,6 +156,22 @@ export class HiggsfieldProvider implements VideoProvider {
     const j = JSON.parse(text) as { request_id: string; status_url?: string; cancel_url?: string };
     const r = `${this.base()}/requests/${j.request_id}`;
     return JSON.stringify({ id: j.request_id, s: j.status_url ?? `${r}/status`, c: j.cancel_url ?? `${r}/cancel` });
+  }
+  /**
+   * The free price quote for one request (POST /estimate/{ref}, priced for this account), in USD, or null when Higgsfield
+   * gives none. Cached 10 minutes per (ref, body); a missing price is retried after 30 s.
+   */
+  async quote(ref: string, body: Record<string, unknown>): Promise<number | null> {
+    if (!this.configured()) return null;
+    const k = `${ref}|${JSON.stringify(body)}`, hit = HF_QUOTES.get(k);
+    if (hit && Date.now() - hit.at < (hit.usd == null ? 30_000 : 600_000)) return hit.usd;
+    const res = await this.fetchFn(`${this.base()}/estimate/${ref}`, { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }).catch(() => null);
+    const b = res?.ok ? (await res.json().catch(() => ({}))) as { usd?: unknown; currency?: string } : {};
+    const usd = Number(b.usd);
+    const v = res?.ok && (!b.currency || b.currency.toUpperCase() === 'USD') && Number.isFinite(usd) && usd >= 0 ? usd : null;
+    HF_QUOTES.set(k, { usd: v, at: Date.now() });
+    if (HF_QUOTES.size > 500) HF_QUOTES.delete(HF_QUOTES.keys().next().value!);
+    return v;
   }
   async get(id: string): Promise<ProviderStatus> {
     const h = JSON.parse(id) as { s: string };

@@ -81,7 +81,7 @@ export function screenOf(d: Draft | Record<string, unknown> | null | undefined):
 /** Request fields that are media on screen: the app's are the truth (Claude can't set them except references/sent). */
 const MEDIA = ['mode', 'clipId', 'keepAudio', 'cast', 'extend', 'frames', 'direction'] as const;
 /** Fields Claude sets in the draft; the screen's are used only when the draft has none (Swap's character lives there). */
-const FALLBACK = ['modelId', 'outfitId', 'engineModel', 'resolution', 'background', 'backgroundImage'] as const;
+const FALLBACK = ['modelId', 'outfitId', 'engineModel', 'resolution', 'background', 'backgroundImage', 'remix', 'range' /* New Swap */] as const;
 
 type Req = Record<string, unknown> & { references?: { images?: unknown[]; videos?: unknown[]; audio?: unknown } };
 
@@ -154,6 +154,7 @@ export function screenSettings(s: Screen, tool?: string) {
     out.background = bg === 'photo' ? { mode: 'photo', ...(n >= 0 ? { picture: s.inputs![n]!.label ?? 'New background', see: `suite_see {input: ${n}}` } : { picture: null, note: 'No picture picked yet' }) }
       : bg === 'describe' ? { mode: 'describe', words: typeof r.prompt === 'string' && r.prompt.trim() ? r.prompt : (r.direction ?? null) } : { mode: 'keep' };
   }
+  if (tool === 'remix') Object.assign(out, remixSettings(r, s.inputs ?? []));
   for (const [k, v] of Object.entries(app)) if (k !== 'background' && k !== 'backgroundName' && out[k] === undefined) out[k] = v;
   return out;
 }
@@ -242,3 +243,25 @@ export async function resolveAssist(env: Env, a: Record<string, unknown>): Promi
 }
 
 export const DRAFT_ID_HELP = 'The draft on screen (filled in for you). Also takes a camera session\'s Shot draft (sd_…) or a camera session (cs_…): its own shared draft, with its Directed camera, guides, prompt and model';
+
+/**
+ * New Swap (remix) as the person set it: which toggles are on, each one's choice and words, the picture's name and input
+ * number where there is one (suite_see {input: n}), the part of the clip used, and the model (Auto or picked).
+ */
+export function remixSettings(r: Record<string, unknown>, inputs: ScreenInput[]) {
+  const x = (r.remix ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const pic = (slot: string) => { const n = inputs.findIndex(i => i.slot === slot); return n >= 0 ? { picture: inputs[n]!.label ?? slot, see: `suite_see {input: ${n}}` } : {}; };
+  const off = 'off (kept from the clip)';
+  const bg = x.background, of = x.outfit, ch = x.character, lk = x.look;
+  return {
+    swap: 'New Swap (beta)',
+    toggles: {
+      background: bg ? (bg.mode === 'photo' ? { mode: 'new photo', ...(typeof bg.name === 'string' ? { name: bg.name } : {}), ...pic('remix.background') } : { mode: 'describe', words: bg.words ?? '' }) : off,
+      outfit: of ? (of.kind === 'outfit' ? { kind: 'her outfit', outfitId: of.outfitId } : of.kind === 'product' ? { kind: 'product photo', ...pic('remix.outfit') } : { kind: 'words', words: of.words ?? '' }) : off,
+      character: ch ? (ch.kind === 'face' ? { kind: 'face swap (face only, from a photo)', ...pic('remix.face') } : { kind: 'her', modelId: ch.modelId }) : off,
+      look: lk ? { words: lk.words ?? '' } : off,
+    },
+    ...(Array.isArray(r.range) ? { range: r.range } : {}),
+    model: typeof r.engineModel === 'string' ? r.engineModel : 'Auto',
+  };
+}

@@ -93,6 +93,8 @@ struct ModelPickerList: View {
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(m.shownName).scaled(t.scale.body, t.roles.ink).lineLimit(1)
                 if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
+                // Every model on every mode (owner 2026-11-12): one the tool adapts says what MUSE does with it.
+                if let n = ComposerModelPicker.adaptedNote(m, tool: d.tool) { Text(n).scaled(t.scale.caption, t.roles.ink2).lineLimit(2) }
                 if m.resolutions.isEmpty {
                     // A photo model, or a per-run model: one choice, one price.
                     chip(ComposerModelPicker.price(m).isEmpty ? "Use" : ComposerModelPicker.price(m), picked: on,

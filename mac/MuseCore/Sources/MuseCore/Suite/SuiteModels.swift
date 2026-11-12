@@ -783,6 +783,10 @@ public struct ShotRequest: Codable, Hashable, Sendable {
     public var extend: SuiteExtend?
     /// The composer's full draft, stored with the job and its takes for "Reuse settings" (left out when nil; estimates ignore it).
     public var draft: SuiteDraft?
+    /// New Swap (`mode: "remix"`, plans/new-swap.md): the toggles (a toggle left out is kept from the clip) and the
+    /// trimmer's part of the clip, [from, to] seconds.
+    public var remix: RemixToggles?
+    public var range: [Double]?
 
     public init(mode: String? = nil, cast: [CastMember]? = nil, title: String? = nil, modelId: String? = nil, outfitId: String? = nil, prompt: String = "",
                 direction: String? = nil, frames: SuiteFrames? = nil, references: SuiteReferences? = nil, duration: Int = 5, aspectRatio: String = "9:16",
@@ -981,6 +985,8 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
     public var rig: [RigWarning]
     /// The images the model gets (server images/sent.ts); nil from an older server.
     public var sentImages: SentImages? = nil
+    /// New Swap: the part of the clip used, the trimmer's limits and Auto's reason; nil for other tools.
+    public var remix: RemixEstimate? = nil
 
     public init(quality: String, label: String, resolution: String, seconds: Double, takes: Int, mode: String, estimate: Double, priceLine: String, buttonLabel: String,
                 ok: Bool = true, code: String? = nil, message: String? = nil, caps: SuiteCaps? = nil, warnings: [String] = [], camera: SuiteEstimateCamera = SuiteEstimateCamera(),
@@ -1012,7 +1018,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case quality, label, resolution, seconds, takes, mode, estimate, priceLine, buttonLabel, ok, code, message, caps, warnings, camera, prompt, test, speaking
-        case cast, keepAudio, engine, tried, look, rig, sentImages
+        case cast, keepAudio, engine, tried, look, rig, sentImages, remix
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -1041,6 +1047,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
         look = c.o(.look)
         rig = c.v(.rig, RigWarnings()).list
         sentImages = c.o(.sentImages)
+        remix = c.o(.remix)
     }
 
     /// The line to show when it can't be made as is (a cap), or nil.

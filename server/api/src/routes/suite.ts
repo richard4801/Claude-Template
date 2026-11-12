@@ -27,6 +27,8 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
     try { return await ctx.suite.create(req.user, req.body); }
     catch (e) { return nothingFits(e, req.user.role === 'owner', reply); }
   });
+  // New Swap (beta): the models that edit a video, with support for these toggles, limits and the price for this clip.
+  app.post('/v1/suite/remix/models', async req => ctx.suite.remixModels(req.user, req.body));
   app.get('/v1/suite/shots/:id', async req => ctx.suite.shot(req.user, (req.params as { id: string }).id));
   // The studio's locations (composer @location).
   app.get('/v1/suite/locations', async req => listLocations(ctx, req.user));

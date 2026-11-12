@@ -28,8 +28,39 @@ export const CastSchema = z.object({
   speaking: z.boolean().optional(),
 }).strict();
 
+/**
+ * New Swap (remix, plans/new-swap.md): what changes in the source clip. A toggle left out is kept from the clip. Only the
+ * change is written by the person; MUSE adds the keep and figure-lock lines (script suite.remix).
+ */
+export const RemixSchema = z.object({
+  background: z.discriminatedUnion('mode', [
+    z.object({ mode: z.literal('describe'), words: z.string().max(400) }).strict(),
+    z.object({ mode: z.literal('photo'), image: ImageRefSchema, name: z.string().max(120).optional() }).strict(),
+  ]).optional(),
+  outfit: z.discriminatedUnion('kind', [
+    /** One of her outfits: its pictures (body angles and close-ups) are sent. `modelId` only when Character is off. */
+    z.object({ kind: z.literal('outfit'), outfitId: z.string().max(80) }).strict(),
+    z.object({ kind: z.literal('product'), image: ImageRefSchema, name: z.string().max(120).optional() }).strict(),
+    z.object({ kind: z.literal('words'), words: z.string().max(400) }).strict(),
+  ]).optional(),
+  character: z.discriminatedUnion('kind', [
+    /** Her (default): her sheet, or her outfit's pictures, under the strict figure lock. */
+    z.object({ kind: z.literal('model'), modelId: z.string().max(80) }).strict(),
+    /** Optional face swap (owner 2026-11-12): only the face comes from this photo; off by default, labelled in the apps. */
+    z.object({ kind: z.literal('face'), image: ImageRefSchema, name: z.string().max(120).optional() }).strict(),
+  ]).optional(),
+  look: z.object({ words: z.string().max(400) }).strict().optional(),
+  /** Free words that go with the change (the old Swap's prompt when it runs as a New Swap on another model). */
+  direction: z.string().max(500).optional(),
+}).strict();
+export type RemixToggles = z.infer<typeof RemixSchema>;
+
 export const ShotRequestSchema = z.object({
-  mode: z.enum(['text', 'image', 'reference', 'swap', 'recast', 'extend']).optional(),
+  mode: z.enum(['text', 'image', 'reference', 'swap', 'recast', 'extend', 'remix']).optional(),
+  /** New Swap: the changes (see RemixSchema), with `clipId` as the source. */
+  remix: RemixSchema.optional(),
+  /** New Swap: the part of the clip to use, in seconds [from, to] (the trimmer). Needed when the clip is longer than the model takes. */
+  range: z.tuple([z.number().min(0), z.number().positive()]).optional(),
   /** Extend: the finished clip to continue (a take, clip or upload in this studio) and which way. suite/extend.ts. */
   extend: z.object({ video: VideoRefSchema, direction: z.enum(['after', 'before']).default('after'),
     /** Deliver source + extension as one clip (default) or the new part alone. */
@@ -348,7 +379,7 @@ export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef; why?: string }[] };
 export type ShotPlan = {
-  tier: Tier; mode: Need['mode'] | 'recast' | 'extend'; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
+  tier: Tier; mode: Need['mode'] | 'recast' | 'extend' | 'remix'; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
   seconds: number; aspect: string; audio: boolean; takes: number; seed?: number; prompt: string; negative?: string; params: Record<string, unknown>;
   images: ImagePlan; videos: { video: VideoRef; use: string }[];
   /** The audio reference and whether only its instrumental is sent (performer not speaking). */
@@ -359,6 +390,18 @@ export type ShotPlan = {
   extend?: { direction: 'after' | 'before'; method: 'clip' | 'reference' | 'frame'; source: { key: string; seconds: number }; join: boolean;
     /** Send only this many seconds from the source's end (after) or start (before). */ useSeconds: number };
   recast?: { keepAudio: boolean; restoreAudio: boolean; people: { characterId: string; outfitId?: string; who: string; speaking: 'yes' | 'no' | 'unknown' }[] };
+  /** New Swap only: the clip's sound put back by stream copy, the part of the clip used, what was switched on and Auto's reason. */
+  remix?: { keepAudio: boolean; restoreAudio: boolean; range: [number, number] | null; clipSeconds: number; toggles: string[]; why: string | null; tested: boolean;
+    /** The clip is longer than the model takes: the person trims first (priced at the maximum until then). */ trimNeeded?: boolean; tooShort?: boolean; minSeconds: number; maxSeconds: number;
+    /** How the clip reaches the model (owner 2026-11-12, every model in every mode): edit = the clip itself; reference = as a
+     *  reference video; frames = frames from the clip (start/end images and/or reference stills); text = words only. */
+    route: 'edit' | 'reference' | 'frames' | 'text';
+    /** The clip's storage key (frames/text routes send no video, but the sound and frames still come from it). */
+    sourceKey: string;
+    /** frames route: the start / end image and how many stills go as references (after the pictures). */
+    frames?: { start: boolean; end: boolean; stills: number };
+    /** A still of the clip's person, sent as their picture (models that put a person from pictures into the clip). */
+    personStill?: boolean };
   /** The reference images sent (images/sent.ts), automatic or chosen, for the estimate. */
   sentImages?: SentView;
   /** What MUSE changed so the model could make it (adaptRequest codes: frames_as_refs, length:15, aspect:16:9, …). */
@@ -537,8 +580,8 @@ export function sentPlanRef(x: SentImage, own: { label: string; image: ImageRef 
 }
 
 /** "Video · Shot · HD 1080p · 5 s" (ledger) / "Shot · HD · 1080p" (job label). Never names a model. */
-export const shotLabel = (tier: Tier, resolution: string, kind: 'Shot' | 'Recast' | 'Extend' = 'Shot') => `${kind} · ${TIER_INFO[tier].label} · ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')}`;
-export const shotNote = (tier: Tier, resolution: string, seconds: number[], kind: 'Shot' | 'Recast' | 'Extend' = 'Shot') => {
+export const shotLabel = (tier: Tier, resolution: string, kind: 'Shot' | 'Recast' | 'Extend' | 'Swap' = 'Shot') => `${kind} · ${TIER_INFO[tier].label} · ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')}`;
+export const shotNote = (tier: Tier, resolution: string, seconds: number[], kind: 'Shot' | 'Recast' | 'Extend' | 'Swap' = 'Shot') => {
   const fmt = (v: number) => String(Math.round(v * 10) / 10);
   const s = seconds.length > 1 ? (seconds.every(v => v === seconds[0]) ? `${seconds.length} × ${fmt(seconds[0]!)} s` : `${fmt(seconds.reduce((a, b) => a + b, 0))} s`) : `${fmt(seconds[0] ?? 0)} s`;
   return `Video · ${kind} ${TIER_INFO[tier].label} ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')} · ${s}`;

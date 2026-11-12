@@ -124,8 +124,12 @@ final class ComposerModelPickerTests: XCTestCase {
         XCTAssertFalse(ComposerModelPicker.offered(.swap))
         XCTAssertFalse(ComposerModelPicker.offered(.extend))
         let c = try await ownerCatalog()
+        // Every video model is offered (owner 2026-11-12): the ones with a voice slot first, then the others, adapted.
         let talking = ComposerModelPicker.options(c, nil, tool: .talking, quality: "draft")
-        XCTAssertTrue(talking.allSatisfy { $0.inputs?.audio == true })
+        let firstAdapted = talking.firstIndex { $0.inputs?.audio != true } ?? talking.count
+        XCTAssertTrue(talking[..<firstAdapted].allSatisfy { $0.inputs?.audio == true })
+        XCTAssertTrue(talking[firstAdapted...].allSatisfy { ComposerModelPicker.adaptedNote($0, tool: .talking) != nil })
+        XCTAssertEqual(talking.filter(\.isVideo).count, talking.count)
     }
 
     // Owner bug 2026-11-11: on Draft, picking MiniMax H3 (Higgsfield), which makes 2K only, left the Quality choice blank.

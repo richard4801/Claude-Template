@@ -600,12 +600,14 @@ export class RecreateReferences {
    * purpose "swap"; any other model is for generating (checked by the Suite); none: the studio's Swap default.
    */
   private async fillChoice(u: AuthUser, b: FillBody): Promise<{ swap: Choice | null; generate: string | undefined }> {
-    const forSwap = !b.engineModel || (b.method !== 'generate' && !!swapEngineById(b.engineModel)) || b.method === 'swap';
+    // Owner 2026-11-12, every model on every mode: a model that isn't a swap engine generates the slot, even when a swap
+    // was asked for (Recreate has no swap for it), instead of being refused.
+    const forSwap = !b.engineModel || (b.method !== 'generate' && !!swapEngineById(b.engineModel));
     if (!forSwap) return { swap: null, generate: b.engineModel };
     return { swap: b.method === 'generate' ? null : await modelChoice(this.ctx).choose(u, 'swap', b.engineModel), generate: undefined };
   }
   private methodFor(r: Row, b: FillBody, choice: Choice | null = null): { method: 'swap' | 'generate'; blocked: string | null } {
-    if (b.engineModel && !choice && b.method !== 'swap') return { method: 'generate', blocked: null }; // a model picked for generating
+    if (b.engineModel && !choice && (b.method !== 'swap' || !swapEngineById(b.engineModel))) return { method: 'generate', blocked: null }; // a model picked for generating
     const blocked = this.swapBlocked(r, b.keepBackground, choice);
     if (b.method === 'generate') return { method: 'generate', blocked };
     if (blocked && b.method === 'swap') throw new ApiError(409, 'swap_unavailable', blocked);
