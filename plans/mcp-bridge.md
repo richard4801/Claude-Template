@@ -139,6 +139,11 @@ The Mac app runs the owner's own **Claude Code** in the background (`plans/claud
 - **Phone messages:** they become turns the Mac claims (the Blender relay's pattern). When the Mac is offline, the phone offers **Open in Claude** (MUSE as a connector) or the studio API key (off by default, billed per use).
 - **To verify on a real build** (the docs leave these open): the exact `tool_result` block shape, whether `--mcp-config` needs the `mcpServers` wrapper (we send it), and the `auth status` JSON fields.
 
+## Troubleshooting: "Incomplete JSON response received" (2026-11-11)
+That text comes from the `uvx mcp-for-blender` server (its `receive_full_response`), not from MUSE. It means something answered on 9876 with bytes that never parse as one JSON object. The usual cause is **Blender's official MCP add-on (Blender Lab)** holding the port: it reads NUL-terminated requests, ignores ours, evicts the client after 10 s with `{"status":"error","message":"Client timed out"}` **plus a NUL byte**, and closes; the trailing NUL makes `json.loads` fail. While it holds the port, MCP for Blender's "Start MCP Server" can't bind ("already in use" in Blender's console). The MCP for Blender add-on itself serves several clients at once (one thread each, commands queued on Blender's main thread), so the Mac relay and the uvx server don't collide.
+- Fix: Blender → Preferences → Add-ons (and Get Extensions) → turn off Blender's official MCP add-on; restart Blender; press Start MCP Server in MCP for Blender. Check: `lsof -nP -iTCP:9876 -sTCP:LISTEN` shows one Blender process, and the relay screen says "Connected, add-on 1.8".
+- The Mac relay (`ReplyReader` in `BlenderSocket.swift`) recognises that reply and says so ("Another program is using Blender's port 9876 …") in the relay's Last error and in `blender_status` (`problem`). Its heartbeat ping waits 15 s so that 10 s eviction reply can arrive.
+
 ## Known limits
 - Hosted video models treat guides as strong suggestions, not frame-accurate paths (research §3.3). Keep ≤ 3 characters and one camera move per shot.
 - The relay and the pending calls live in the API's memory (one instance, like live events). A restart ends waiting calls with an error the chat shows.
