@@ -35,6 +35,9 @@ export function priceOf(e: unknown): number | null {
   for (const k of ['estimate', 'quote', 'price']) if (o[k] && typeof o[k] === 'object') { const p = priceOf(o[k]); if (p !== null) return p; }
   return null;
 }
+/** An outfit's 7 picture slots (POST /v1/outfits/:id/reorder) and how a person reads them. */
+const OUTFIT_SLOTS = ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'] as const;
+const SLOT_WORDS: Record<string, string> = { front: 'Front', tq: '¾', side: 'Side', back: 'Back', face: 'Face front', faceTq: 'Face ¾', profile: 'Face side' };
 const money = (p: number | null | undefined) => (typeof p === 'number' ? ` · $${p.toFixed(2)}` : '');
 
 /** One gated tool: plan() works out the exact call (and the price) without changing anything. */
@@ -241,6 +244,21 @@ export const ACTION_TOOLS: GatedTool[] = [
       const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/redo`, { angle, dryRun: true });
       if (!e?.dryRun) throw new ApiError(409, 'nothing_to_make', 'That picture can\'t be made (her base face photo is missing)');
       return { summary: `Redo the outfit's ${angle} picture`, method: 'POST', url: `/v1/outfits/${o}/redo`, body: { angle }, priceUsd: priceOf(e) };
+    } }),
+  gated({ name: 'outfit_reorder', title: 'Reorder an outfit\'s pictures', scope: 'edit:write', gate: 'settings',
+    description: 'Fixes pictures sitting in the wrong slot of an outfit (e.g. the picture in side is really the back): each move puts the picture of `from` in `to` and the one in `to` takes `from`\'s place (a swap; nothing is lost), applied in order. Slots: front, tq (¾), side, back (body), face, faceTq, profile (face close-ups); suite_see with the outfit shows each picture with its slot. Free, but it changes the stored outfit: without confirm it shows the before and after; with confirm the person approves it.',
+    props: { outfitId: str('The outfit', 80), moves: { type: 'array', minItems: 1, maxItems: 7, description: 'Moves (swaps) in order',
+      items: { type: 'object', additionalProperties: false, required: ['from', 'to'], properties: { from: { type: 'string', enum: [...OUTFIT_SLOTS] }, to: { type: 'string', enum: [...OUTFIT_SLOTS] } } } } },
+    required: ['outfitId', 'moves'],
+    plan: async (env, a) => {
+      const o = enc(id(a.outfitId, 'outfitId'));
+      const moves = (Array.isArray(a.moves) ? a.moves : []) as { from?: unknown; to?: unknown }[];
+      const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/reorder`, { moves, dryRun: true }) as { before: Record<string, unknown>; after: Record<string, unknown>; changed: string[] };
+      if (!e.changed?.length) throw badRequest('Those moves change nothing');
+      // Before → after per changed slot, naming where each picture came from ("side ← back").
+      const from = (k: string) => OUTFIT_SLOTS.find(x => JSON.stringify(e.before[x]) === JSON.stringify(e.after[k]) && x !== k) ?? 'empty';
+      const lines = e.changed.map(k => (e.after[k] ? `${SLOT_WORDS[k] ?? k} ← the picture now in ${SLOT_WORDS[from(k)] ?? from(k)}` : `${SLOT_WORDS[k] ?? k} becomes empty`));
+      return { summary: `Reorder the outfit's pictures: ${lines.join('; ')}`, method: 'POST', url: `/v1/outfits/${o}/reorder`, body: { moves } };
     } }),
   gated({ name: 'outfit_make', title: 'Make a new outfit', scope: 'edit:write', gate: 'spend',
     description: 'Makes a new outfit for a character (7 pictures: front, ¾, side, back, and 3 face close-ups with its own hair, make-up and face accessories), as the Outfits sheet does: mode describe (from the description), photo (from product photos in images) or own. Name it. Paid: without confirm it gives the price.',

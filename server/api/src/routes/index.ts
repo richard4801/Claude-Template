@@ -568,6 +568,31 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const k = REDO.indexOf(angle);
     return remakeOutfit(req, req.params.id, () => (k < 4 ? { angles: [k], faces: [] } : { angles: [], faces: [k - 4] }), `Outfit · redo ${angle}`);
   });
+  /**
+   * Reorder an outfit's pictures (owner 2026-11-12: "the picture in Side is actually the back"): each move puts the picture
+   * of `from` in `to`, and the one that was in `to` takes `from`'s place (a swap, so nothing is lost). Moves apply in
+   * order, across the 7 slots (front, tq, side, back, face, faceTq, profile). Free. `dryRun`: the before and after only.
+   */
+  app.post<{ Params: { id: string } }>('/v1/outfits/:id/reorder', async req => {
+    const Slot = z.enum(REDO);
+    const b = parse(z.object({ moves: z.array(z.object({ from: Slot, to: Slot })).min(1, 'moves: at least one').max(7), dryRun: z.boolean().optional() }).passthrough(), req.body ?? {});
+    const o = await outfitToChange(req.user, req.params.id, true);
+    if (stillMaking(o) || o.state === 'generating') throw new ApiError(409, 'outfit_busy', 'This outfit is still being made · reorder it when it finishes');
+    const before = [...[0, 1, 2, 3].map(i => o.angles[i] ?? null), ...[0, 1, 2].map(i => o.faces?.[i] ?? null)];
+    const after = [...before];
+    for (const m of b.moves) {
+      const f = REDO.indexOf(m.from), t = REDO.indexOf(m.to);
+      if (f === t) throw badRequest(`${m.from}: moving a picture onto itself`);
+      [after[f], after[t]] = [after[t]!, after[f]!];
+    }
+    const view = (list: (ImageRef | null)[]) => Object.fromEntries(REDO.map((k, i) => [k, list[i] ?? null]));
+    const changed = REDO.filter((_, i) => after[i] !== before[i]);
+    if (b.dryRun) return { dryRun: true, before: view(before), after: view(after), changed };
+    const faces = after.slice(4);
+    const [u] = await db.update(outfits).set({ angles: after.slice(0, 4), faces: faces.some(Boolean) || o.faces ? faces : null }).where(eq(outfits.id, o.id)).returning();
+    emitOutfit(u!);
+    return { outfit: outfitView(u!), changed };
+  });
   app.post<{ Params: { id: string } }>('/v1/outfits/:id/save', async req => {
     // §5: the name chosen in the preview (optional; the set keeps its name without one).
     const b = parse(z.object({ name: OutfitName.optional() }).passthrough(), req.body ?? {});

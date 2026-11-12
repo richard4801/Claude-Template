@@ -1,0 +1,512 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+index 4adf4ffd..a14058b3 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+@@ -267,6 +267,23 @@ class FakeMuseApi(
+         return remakeOutfit(outfitId) { listOf(i) }
+     }
+ 
++    override suspend fun reorderOutfit(outfitId: String, moves: List<OutfitMove>): OutfitReorder {
++        val (o, changed) = lock.withLock {
++            val o0 = outfit(outfitId)
++            if (o0.state == "generating") throw ApiException("outfit_busy", "This outfit is still being made · try again when it finishes")
++            if (moves.isEmpty()) throw ApiException("bad_request", "Nothing to move")
++            if (moves.any { it.from !in OutfitPictures.KEYS || it.to !in OutfitPictures.KEYS }) throw ApiException("bad_request", "Unknown picture")
++            val o = OutfitPictures.reordered(o0, moves)
++            val before = OutfitPictures.all(o0)
++            val after = OutfitPictures.all(o)
++            val changed = OutfitPictures.KEYS.filterIndexed { i, _ -> before[i] != after[i] }
++            if (changed.isNotEmpty()) replaceOutfit(o)
++            o to changed
++        }
++        if (changed.isNotEmpty()) events.tryEmit(ApiEvent("outfit", outfit = o))
++        return OutfitReorder(o, changed)
++    }
++
+     override suspend fun saveOutfit(outfitId: String, name: String?): Outfit {
+         val (o, m) = lock.withLock {
+             val o = outfit(outfitId).let { if (name != null) it.copy(name = outfitName(name)) else it }.copy(state = "ready")
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+index 5aa8849a..b71dedf2 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+@@ -62,6 +62,7 @@ interface MuseService {
+     @POST("v1/outfits/{id}/fill") suspend fun fillOutfit(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
+     @POST("v1/outfits/{id}/faces") suspend fun addOutfitFaces(@Path("id") id: String, @Body r: FillAnglesRequest): OutfitFill
+     @POST("v1/outfits/{id}/redo") suspend fun redoOutfit(@Path("id") id: String, @Body r: OutfitRedoRequest): OutfitFill
++    @POST("v1/outfits/{id}/reorder") suspend fun reorderOutfit(@Path("id") id: String, @Body r: OutfitReorderRequest): OutfitReorder
+     @Multipart @POST("v1/uploads/images") suspend fun uploadImage(@Part file: MultipartBody.Part): ImageRef
+     @Multipart @POST("v1/uploads/clips") suspend fun uploadClip(@Part("meta") meta: RequestBody, @Part file: MultipartBody.Part?): Clip
+     @POST("v1/uploads/presign") suspend fun presign(@Body r: PresignRequest): PresignResponse
+@@ -383,6 +384,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
+     override suspend fun fillOutfit(outfitId: String, imageModel: String?) = call { fillOutfit(outfitId, FillAnglesRequest(imageModel)) }.let { it.copy(outfit = it.outfit.abs()) }
+     override suspend fun addOutfitFaces(outfitId: String) = call { addOutfitFaces(outfitId, FillAnglesRequest()) }.let { it.copy(outfit = it.outfit.abs()) }
+     override suspend fun redoOutfit(outfitId: String, angle: String) = call { redoOutfit(outfitId, OutfitRedoRequest(angle)) }.let { it.copy(outfit = it.outfit.abs()) }
++    override suspend fun reorderOutfit(outfitId: String, moves: List<OutfitMove>) = call { reorderOutfit(outfitId, OutfitReorderRequest(moves)) }.let { it.copy(outfit = it.outfit.abs()) }
+ 
+     private suspend fun usePresigned(): Boolean = when (uploadMode) {
+         UploadMode.PRESIGNED -> true
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index 9b8c72f4..d712f6f4 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -122,6 +122,18 @@ data class OutfitFill(val outfit: Outfit, val cost: Double = 0.0)
+ @Serializable
+ data class OutfitRedoRequest(val angle: String)
+ 
++/** One move in POST /v1/outfits/{id}/reorder: swaps the pictures of slots [from] and [to] ([OutfitPictures.KEYS]); nothing is lost. */
++@Serializable
++data class OutfitMove(val from: String, val to: String)
++
++/** POST /v1/outfits/{id}/reorder (owner or the outfit's maker, free): the moves in order; [dryRun] checks them without saving. */
++@Serializable
++data class OutfitReorderRequest(val moves: List<OutfitMove>, val dryRun: Boolean? = null)
++
++/** POST /v1/outfits/{id}/reorder: the outfit now and which slots changed. */
++@Serializable
++data class OutfitReorder(val outfit: Outfit, val changed: List<String> = emptyList())
++
+ @Serializable
+ data class CreateOutfitRequest(
+     val modelId: String,
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+index b9c4b195..0d0244f8 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+@@ -48,6 +48,8 @@ interface MuseApi {
+     suspend fun addOutfitFaces(outfitId: String): OutfitFill
+     /** Redoes one of the 7 pictures ([OutfitPictures.KEYS]: front | tq | side | back | face | faceTq | profile); an outfit event follows. */
+     suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill
++    /** Reorders the 7 pictures (free): each move swaps the pictures of two slots ([OutfitPictures.KEYS]); an outfit event follows. */
++    suspend fun reorderOutfit(outfitId: String, moves: List<OutfitMove>): OutfitReorder
+ 
+     // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
+     suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
+index 3df8a539..bd183987 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
+@@ -432,6 +432,11 @@ class MuseRepository(
+         return attempt { redoOutfit(id, key) }.also { r -> if (r == null) making(id, null) else refreshBalance() }
+     }
+ 
++    /** Swap pictures between slots (free; "the picture in Side is actually the back"). The outfit event follows too. */
++    suspend fun reorderOutfit(id: String, moves: List<OutfitMove>) = attempt { reorderOutfit(id, moves) }?.also { r ->
++        _state.update { s -> s.copy(outfits = s.outfits.upsert(r.outfit) { it.id == r.outfit.id }) }
++    }
++
+     suspend fun saveOutfit(id: String, name: String? = null) = attempt { saveOutfit(id, name) }?.also { o ->
+         _state.update { s ->
+             s.copy(
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt b/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt
+index 7e2f34eb..46e8efde 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/OutfitPictures.kt
+@@ -23,6 +23,44 @@ object OutfitPictures {
+     /** Where picture [index] sits in [shown] (0 when it isn't shown). */
+     fun pageOf(pictures: List<ImageRef?>, index: Int): Int = shown(pictures).indexOfFirst { it.first == index }.coerceAtLeast(0)
+ 
++    /**
++     * "Move to…" for picture [from] (owner, 2026-11-12: "the picture in Side is actually the back"): the other 6 slots in
++     * order, each "Swap with Back" when that slot has a picture, "Move to Back" when it's empty.
++     */
++    fun moveTargets(pictures: List<ImageRef?>, from: Int): List<Pair<Int, String>> =
++        KEYS.indices.filter { it != from }.map { i -> i to (if (pictures.getOrNull(i) != null) "Swap with ${LABELS[i]}" else "Move to ${LABELS[i]}") }
++
++    /** The 7 pictures with [from] and [to] swapped (what POST /reorder does with one move; nothing is lost). */
++    fun swapped(pictures: List<ImageRef?>, from: Int, to: Int): List<ImageRef?> {
++        val all = (0 until KEYS.size).map { pictures.getOrNull(it) }.toMutableList()
++        if (from !in all.indices || to !in all.indices || from == to) return all
++        val a = all[from]
++        all[from] = all[to]
++        all[to] = a
++        return all
++    }
++
++    /** One move from slot [from] to slot [to], as /reorder takes it (null for a slot that isn't one of the 7, or the same slot). */
++    fun move(from: Int, to: Int): OutfitMove? {
++        val f = KEYS.getOrNull(from) ?: return null
++        val t = KEYS.getOrNull(to) ?: return null
++        return if (from == to) null else OutfitMove(f, t)
++    }
++
++    /** [o] with [moves] applied in order (the demo's /reorder); an unknown slot is refused with [IllegalArgumentException]. */
++    fun reordered(o: Outfit, moves: List<OutfitMove>): Outfit {
++        var all = all(o)
++        moves.forEach { m ->
++            val f = KEYS.indexOf(m.from)
++            val t = KEYS.indexOf(m.to)
++            require(f >= 0 && t >= 0) { "Unknown picture" }
++            all = swapped(all, f, t)
++        }
++        val faces = all.drop(BODY)
++        // An older outfit with no faces stays without them unless a picture moved into a face slot.
++        return o.copy(angles = all.take(BODY), faces = if (o.faces == null && faces.all { it == null }) null else faces)
++    }
++
+     /** How many face close-ups it has. */
+     fun madeFaces(o: Outfit): Int = (0 until FACES).count { o.faces?.getOrNull(it) != null }
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt b/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt
+index 708c20f8..c82d68e0 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/components/ImageViewer.kt
+@@ -27,8 +27,10 @@ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateMapOf
++import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.runtime.setValue
+ import androidx.compose.runtime.snapshotFlow
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+@@ -73,16 +75,21 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
+  * pictures at 1×. Back or the close button leaves it. Shown in a full-screen [Dialog] so it covers the bars.
+  */
+ @Composable
+-fun ImageViewer(images: List<ViewerImage>, start: Int, action: ((Int) -> ViewerAction?)? = null, onClose: () -> Unit) {
++fun ImageViewer(images: List<ViewerImage>, start: Int, action: ((Int) -> ViewerAction?)? = null, more: ((Int) -> List<MenuItem>)? = null, onClose: () -> Unit) {
+     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+-        ImageViewerContent(images, start, onClose, action = action)
++        ImageViewerContent(images, start, onClose, action = action, more = more)
+     }
+ }
+ 
+ /** [ImageViewer]'s content, without the window (screenshot tests render this directly). */
+ @Composable
+-fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier, action: ((Int) -> ViewerAction?)? = null) {
++fun ImageViewerContent(
++    images: List<ViewerImage>, start: Int, onClose: () -> Unit, modifier: Modifier = Modifier, action: ((Int) -> ViewerAction?)? = null,
++    /** "Move to…" for the picture shown (the outfit's other slots), behind a ⋯ button; empty or null hides it. */
++    more: ((Int) -> List<MenuItem>)? = null,
++) {
+     val pager = rememberPagerState(initialPage = start.coerceIn(0, (images.size - 1).coerceAtLeast(0))) { images.size }
++    var moreOpen by remember { mutableStateOf(false) }
+     // Each page's zoom; swiping between pictures only works at 1× (a zoomed picture pans instead).
+     val zoomed = remember { mutableStateMapOf<Int, Boolean>() }
+     val current = images.getOrNull(pager.currentPage)
+@@ -111,6 +118,15 @@ fun ImageViewerContent(images: List<ViewerImage>, start: Int, onClose: () -> Uni
+                     contentAlignment = Alignment.Center,
+                 ) { T(a.label, muse.scale.label, Color.White.copy(alpha = if (a.enabled) 1f else .5f), maxLines = 1) }
+             }
++            more?.invoke(pager.currentPage)?.takeIf { it.isNotEmpty() }?.let { items ->
++                Box {
++                    Box(
++                        Modifier.size(48.dp).clip(CircleShape).press { moreOpen = true }.semantics { contentDescription = "Move to…"; role = Role.Button },
++                        contentAlignment = Alignment.Center,
++                    ) { Ic("more", 24.dp, Color.White) }
++                    MuseMenu(moreOpen, { moreOpen = false }, items)
++                }
++            }
+         }
+         // Where you are in the set, as dots along the bottom (only with more than one picture).
+         if (images.size > 1) Row(
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
+index d12e27c8..e2c97ec0 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/OutfitFoldersScreen.kt
+@@ -2,6 +2,10 @@ package studio.muse.app.ui.screens
+ 
+ import androidx.compose.foundation.ExperimentalFoundationApi
+ import androidx.compose.foundation.background
++import androidx.compose.foundation.border
++import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
++import androidx.compose.foundation.layout.offset
++import androidx.compose.foundation.layout.size
+ import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+@@ -20,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.verticalScroll
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.rememberUpdatedState
+ import androidx.compose.runtime.collectAsState
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+@@ -27,13 +33,22 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.alpha
+ import androidx.compose.ui.draw.clip
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.geometry.Rect
++import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.layout.onGloballyPositioned
++import androidx.compose.ui.layout.positionInRoot
++import androidx.compose.ui.platform.LocalDensity
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.semantics.Role
+ import androidx.compose.ui.semantics.contentDescription
+ import androidx.compose.ui.semantics.role
+ import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.unit.IntOffset
+ import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.toSize
+ import androidx.lifecycle.ViewModel
+ import androidx.lifecycle.viewModelScope
+ import androidx.lifecycle.viewmodel.compose.viewModel
+@@ -72,6 +87,7 @@ import java.text.SimpleDateFormat
+ import java.util.Calendar
+ import java.util.Date
+ import java.util.Locale
++import kotlin.math.roundToInt
+ 
+ /** "11 Nov" (the suggested name's date). */
+ fun outfitDay(ms: Long): String = SimpleDateFormat("d MMM", Locale.UK).format(Date(ms))
+@@ -140,8 +156,22 @@ class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
+         c.repo.redoOutfit(o.id, index)
+     }
+     fun redoEstimate(index: Int): Double = OutfitPictures.redoEstimate(photoPrices(c), index)
++
++    /** Move picture [from] to slot [to], swapping with whatever is there (free; the outfit event updates the grid). */
++    fun move(o: Outfit, from: Int, to: Int) {
++        if (o.id in state.value.filling || !state.value.making[o.id].isNullOrEmpty()) return
++        val mv = OutfitPictures.move(from, to) ?: return
++        viewModelScope.launch { c.repo.reorderOutfit(o.id, listOf(mv)) }
++    }
+ }
+ 
++/** "Move to…" for picture [from]: the other 6 slots, "Swap with Back" or "Move to Back" when it's empty. */
++fun outfitMoveMenu(pictures: List<ImageRef?>, from: Int, onMove: (to: Int) -> Unit): List<MenuItem> =
++    OutfitPictures.moveTargets(pictures, from).map { (to, text) -> MenuItem(if (pictures.getOrNull(to) != null) "swap" else "move", text) { onMove(to) } }
++
++/** The grid's own place in [OutfitPictureGrid]'s bounds map (the tiles use 0–6). */
++private const val GRID = -1
++
+ private fun photoPrices(c: AppContainer): studio.muse.core.PhotoPrices = c.repo.state.value.photo
+ 
+ /** Her outfits as folders: the front, name and date; two per row, 8 per page, newest first, "‹ 1 of 3 ›". */
+@@ -277,6 +307,11 @@ fun OutfitOpenScreen(id: String) {
+             ViewerAction("Redo · ${Pricing.money(vm.redoEstimate(i))}", { vm.redo(o, i); viewing = null }, enabled = i !in making && !filling)
+         }
+     }) else null
++    // Full size: "Move to…" for the picture shown (the owner or whoever made it; not while any of it is being made).
++    val moveMenu: ((Int) -> List<MenuItem>)? = if (canChange && !filling && making.isEmpty()) ({ page: Int ->
++        shownAt.getOrNull(page)?.let { (i, _) -> outfitMoveMenu(pictures, i) { to -> viewing = null; vm.move(o, i, to) } }.orEmpty()
++    }) else null
++    val onMove: ((Int, Int) -> Unit)? = if (canChange) ({ from: Int, to: Int -> vm.move(o, from, to) }) else null
+     val facesMissing = OutfitPictures.FACES - OutfitPictures.madeFaces(o)
+     val makingFaces = (OutfitPictures.BODY until OutfitPictures.KEYS.size).any { it in making }
+     // "Make missing angles": the empty ¾ / side / back show as skeletons until they come back.
+@@ -295,7 +330,7 @@ fun OutfitOpenScreen(id: String) {
+                     DisplayTitle(o.name)
+                     Caption(listOfNotNull(s.model?.name?.substringBefore(' ')?.let { "For $it" }, outfitDate(o.createdAt)?.let { "made $it" }).joinToString(", "))
+                 }
+-                OutfitPictureGrid(pictures, making + fillingAt, busy = false) { i ->
++                OutfitPictureGrid(pictures, making + fillingAt, busy = false, onMove = onMove) { i ->
+                     viewing = OutfitPictures.pageOf(pictures, i)
+                 }
+                 if (filling) Notice("Making the missing angles from the front.")
+@@ -317,7 +352,7 @@ fun OutfitOpenScreen(id: String) {
+                 }
+             }
+         }
+-        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction) { viewing = null } }
++        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction, more = moveMenu) { viewing = null } }
+         ActionDock {
+             PrimaryButton("Use in Photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, o.modelId, o.id) }, Modifier.weight(1f))
+         }
+@@ -330,11 +365,30 @@ fun OutfitOpenScreen(id: String) {
+  * An outfit's 7 pictures (plans/outfit-faces.md): the 4 body angles, then the 3 face close-ups in the same columns, grouped
+  * by space with their captions ("Face front"). 2 columns on a phone, 4 when wide. A picture in [making] (or, while [busy],
+  * any not made yet) shows a skeleton; a tap opens [onOpen] with its index into [OutfitPictures.KEYS].
++ *
++ * With [onMove] (owner, 2026-11-12: "the picture in Side is actually the back"), and while nothing is being made: long-press
++ * a picture for "Move to…" (the other 6 slots), or long-press and drag it onto another slot to swap the two.
+  */
++@OptIn(ExperimentalFoundationApi::class)
+ @Composable
+-fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onOpen: (Int) -> Unit) {
++fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onMove: ((from: Int, to: Int) -> Unit)? = null, onOpen: (Int) -> Unit) {
+     val m = muse
+-    BoxWithConstraints(Modifier.fillMaxWidth()) {
++    val density = LocalDensity.current
++    val canMove = onMove != null && !busy && making.isEmpty()
++    val move by rememberUpdatedState(onMove)
++    // Where each tile (and, at [GRID], the grid) sits in the window, for drag and drop. Not state: dragAt drives redraws.
++    val bounds = remember { mutableMapOf<Int, Rect>() }
++    var menuFor by remember { mutableStateOf<Int?>(null) }
++    var dragFrom by remember { mutableStateOf<Int?>(null) }
++    var dragStart by remember { mutableStateOf(Offset.Zero) }
++    var dragAt by remember { mutableStateOf(Offset.Zero) }
++    fun dropTarget(): Int? {
++        val f = dragFrom ?: return null
++        return bounds.entries.firstOrNull { (i, r) -> i != GRID && i != f && r.contains(dragAt) }?.key
++    }
++    LaunchedEffect(canMove) { if (!canMove) { menuFor = null; dragFrom = null } }
++    val drop = dropTarget()
++    BoxWithConstraints(Modifier.fillMaxWidth().onGloballyPositioned { bounds[GRID] = Rect(it.positionInRoot(), it.size.toSize()) }) {
+         val cols = if (maxWidth >= 600.dp) 4 else 2
+         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s6)) {
+             listOf((0 until OutfitPictures.BODY).toList(), (OutfitPictures.BODY until OutfitPictures.KEYS.size).toList()).forEach { group ->
+@@ -347,10 +401,47 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy:
+                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                     val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+                                     if (i in making || (busy && ref == null)) Skeleton(tile.semantics { contentDescription = "$label, being made" }, containerShape())
+-                                    else Box(tile.clip(containerShape()).background(m.roles.field).let { t ->
+-                                        if (ref == null) t.semantics { contentDescription = "$label missing" }
+-                                        else t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
+-                                    }) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
++                                    else Box(tile.onGloballyPositioned { bounds[i] = Rect(it.positionInRoot(), it.size.toSize()) }
++                                        .alpha(if (dragFrom == i) .4f else 1f)
++                                        .clip(containerShape()).background(m.roles.field)
++                                        .let { t -> if (drop == i) t.border(2.dp, m.roles.selection, containerShape()) else t }
++                                        .let { t ->
++                                            when {
++                                                ref == null -> t.semantics { contentDescription = "$label missing" }
++                                                canMove -> t.combinedClickable(
++                                                    onClickLabel = "View full size", onLongClickLabel = "Move to…",
++                                                    onLongClick = { menuFor = i }, onClick = { onOpen(i) },
++                                                ).pointerInput(i) {
++                                                    // Long-press and drag onto another slot; letting go without moving leaves the menu open.
++                                                    var dist = 0f
++                                                    detectDragGesturesAfterLongPress(
++                                                        onDragStart = { at ->
++                                                            dist = 0f
++                                                            dragFrom = i
++                                                            dragStart = at
++                                                            dragAt = (bounds[i]?.topLeft ?: Offset.Zero) + at
++                                                        },
++                                                        onDragEnd = { ->
++                                                            val to = if (dist > viewConfiguration.touchSlop) dropTarget() else null
++                                                            dragFrom = null
++                                                            if (to != null) { menuFor = null; move?.invoke(i, to) }
++                                                        },
++                                                        onDragCancel = { -> dragFrom = null },
++                                                        onDrag = { change, amount ->
++                                                            change.consume()
++                                                            dist += amount.getDistance()
++                                                            if (dist > viewConfiguration.touchSlop) menuFor = null
++                                                            dragAt += amount
++                                                        },
++                                                    )
++                                                }.semantics { contentDescription = "$label, view full size" }
++                                                else -> t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
++                                            }
++                                        }
++                                    ) {
++                                        if (ref != null) RefImage(ref, Modifier.fillMaxSize())
++                                        if (canMove && ref != null) MuseMenu(menuFor == i, { menuFor = null }, outfitMoveMenu(pictures, i) { to -> move?.invoke(i, to) })
++                                    }
+                                     Caption(label, maxLines = 1)
+                                 }
+                             }
+@@ -360,5 +451,18 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy:
+                 }
+             }
+         }
++        // The picture being dragged follows the finger, drawn above the grid.
++        val from = dragFrom
++        val src = from?.let { bounds[it] }
++        val grid = bounds[GRID]
++        val dragged = from?.let { pictures.getOrNull(it) }
++        if (src != null && grid != null && dragged != null) {
++            val topLeft = dragAt - dragStart - grid.topLeft
++            Box(
++                Modifier.offset { IntOffset(topLeft.x.roundToInt(), topLeft.y.roundToInt()) }
++                    .size(with(density) { src.width.toDp() }, with(density) { src.height.toDp() })
++                    .clip(containerShape()).background(m.roles.field),
++            ) { RefImage(dragged, Modifier.fillMaxSize()) }
++        }
+     }
+ }
+diff --git a/android/app/src/test/kotlin/studio/muse/app/OutfitReorderTest.kt b/android/app/src/test/kotlin/studio/muse/app/OutfitReorderTest.kt
+new file mode 100644
+index 00000000..a5f3db07
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/OutfitReorderTest.kt
+@@ -0,0 +1,89 @@
++package studio.muse.app
++
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.test.runTest
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Assert.fail
++import org.junit.Test
++import studio.muse.app.data.ApiEvent
++import studio.muse.app.data.ApiException
++import studio.muse.app.data.FakeMuseApi
++import studio.muse.app.data.ImageRef
++import studio.muse.app.data.Outfit
++import studio.muse.app.data.OutfitMove
++import studio.muse.app.data.OutfitPictures
++import studio.muse.app.data.SampleData
++
++/** Reordering an outfit's 7 pictures (owner, 2026-11-12: "the picture in Side is actually the back"). */
++class OutfitReorderTest {
++    private fun ref(n: String) = ImageRef.asset(n)
++
++    @Test fun moveMenuListsTheOtherSixSlots() {
++        // A set whose face ¾ came back empty.
++        val pictures = listOf(ref("f"), ref("t"), ref("s"), ref("b"), ref("ff"), null, ref("fs"))
++        val targets = OutfitPictures.moveTargets(pictures, 2)
++        assertEquals(listOf(0, 1, 3, 4, 5, 6), targets.map { it.first })
++        assertEquals(
++            listOf("Swap with Front", "Swap with ¾", "Swap with Back", "Swap with Face front", "Move to Face ¾", "Swap with Face side"),
++            targets.map { it.second },
++        )
++        // An older outfit (no faces): every face slot is a "Move to".
++        val old = OutfitPictures.all(Outfit("o", "m", "Green set", angles = listOf(ref("f"), ref("t"), ref("s"), ref("b"))))
++        assertEquals(listOf("Move to Face front", "Move to Face ¾", "Move to Face side"), OutfitPictures.moveTargets(old, 0).drop(3).map { it.second })
++    }
++
++    @Test fun swapKeepsEveryPicture() {
++        val pictures = listOf(ref("f"), ref("t"), ref("s"), ref("b"), null, null, null)
++        assertEquals(listOf("f", "t", "b", "s", null, null, null), OutfitPictures.swapped(pictures, 2, 3).map { it?.asset })
++        // Into an empty slot: the picture moves and its old slot is empty.
++        assertEquals(listOf("f", "t", null, "b", "s", null, null), OutfitPictures.swapped(pictures, 2, 4).map { it?.asset })
++        // The same slot or a slot that isn't one of the 7 changes nothing.
++        assertEquals(pictures, OutfitPictures.swapped(pictures, 1, 1))
++        assertEquals(pictures, OutfitPictures.swapped(pictures, 1, 9))
++        assertEquals(OutfitMove("side", "back"), OutfitPictures.move(2, 3))
++        assertNull(OutfitPictures.move(2, 2))
++        assertNull(OutfitPictures.move(2, 7))
++    }
++
++    @Test fun reorderedAppliesMovesInOrder() {
++        val o = Outfit("o", "m", "Linen shirt", angles = listOf(ref("f"), ref("t"), ref("s"), ref("b")), faces = listOf(ref("ff"), ref("ft"), ref("fs")))
++        val r = OutfitPictures.reordered(o, listOf(OutfitMove("side", "back"), OutfitMove("face", "profile")))
++        assertEquals(listOf("f", "t", "b", "s", "fs", "ft", "ff"), OutfitPictures.all(r).map { it?.asset })
++        // An older outfit stays without faces until a picture moves into one.
++        val old = Outfit("o", "m", "Green set", angles = listOf(ref("f"), ref("t"), ref("s"), ref("b")))
++        assertNull(OutfitPictures.reordered(old, listOf(OutfitMove("side", "back"))).faces)
++        val moved = OutfitPictures.reordered(old, listOf(OutfitMove("side", "faceTq")))
++        assertEquals(listOf(null, "s", null), moved.faces!!.map { it?.asset })
++        assertNull(moved.angles[2])
++    }
++
++    @Test fun demoReorderSwapsAndSendsTheOutfitEvent() = runTest {
++        val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime }, genDelayMs = 0)
++        val events = mutableListOf<ApiEvent>()
++        backgroundScope.launch { api.events().collect { events += it } }
++        testScheduler.runCurrent()
++        // Crystal dress: front, ¾, side = c_face, back = c_front, no faces.
++        val before = OutfitPictures.all(api.listOutfits().first { it.id == SampleData.CRYSTAL })
++        val r = api.reorderOutfit(SampleData.CRYSTAL, listOf(OutfitMove("side", "back")))
++        assertEquals(listOf("side", "back"), r.changed)
++        assertEquals(before[3], OutfitPictures.all(r.outfit)[2])
++        assertEquals(before[2], OutfitPictures.all(r.outfit)[3])
++        assertEquals(r.outfit, api.listOutfits().first { it.id == SampleData.CRYSTAL })
++        testScheduler.runCurrent()
++        assertTrue(events.any { it.type == "outfit" && it.outfit == r.outfit })
++        // Moving into an empty face slot: nothing is lost.
++        val r2 = api.reorderOutfit(SampleData.CRYSTAL, listOf(OutfitMove("side", "face")))
++        assertEquals(listOf("side", "face"), r2.changed)
++        assertNull(r2.outfit.angles[2])
++        assertEquals(before[3], r2.outfit.faces?.get(0))
++        // An unknown slot is refused.
++        try {
++            api.reorderOutfit(SampleData.CRYSTAL, listOf(OutfitMove("side", "top")))
++            fail("expected bad_request")
++        } catch (e: ApiException) {
++            assertEquals("bad_request", e.code)
++        }
++    }
++}

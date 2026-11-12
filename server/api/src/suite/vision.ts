@@ -63,7 +63,8 @@ export async function seeBlocks(ctx: Ctx, studioId: string, items: { label: stri
 
 export const dateOf = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 const MODEL_SLOTS: [string, string][] = [['face', 'face'], ['faceTq', 'face ¾'], ['profile', 'profile'], ['front', 'body front'], ['tq', 'body ¾'], ['side', 'body side'], ['back', 'body back']];
-const ANGLES = ['front', '¾', 'side', 'back'], FACES = ['face', 'face ¾', 'profile'];
+/** An outfit's 7 slots as outfit_reorder names them, with the words a person reads (owner 2026-11-12: labelled slots). */
+const OUTFIT_SLOTS: [string, string][] = [['front', 'front'], ['tq', '¾'], ['side', 'side'], ['back', 'back'], ['face', 'face front'], ['faceTq', 'face ¾'], ['profile', 'face side']];
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 /**
@@ -86,8 +87,10 @@ export async function lookOf(ctx: Ctx, u: AuthUser, o: { modelId?: string | null
     if (f) {
       meta.outfit = { id: f.id, name: f.name, created: dateOf(f.createdAt), description: clip(f.description, 400) || undefined, modelId: f.modelId, state: f.state };
       const tag = `outfit “${f.name}” (${dateOf(f.createdAt)})`;
-      f.angles.forEach((r, i) => { if (r && (o.outfitFull || i === 0)) items.push({ label: `${tag} · ${ANGLES[i] ?? `angle ${i + 1}`}`, ref: r }); });
-      if (o.outfitFull) (f.faces ?? []).forEach((r, i) => { if (r) items.push({ label: `${tag} · ${FACES[i] ?? 'face'}`, ref: r }); });
+      // Each picture with its slot, so a misplaced one can be fixed with outfit_reorder (slot side holding the back view).
+      const pics = [...[0, 1, 2, 3].map(i => f.angles[i] ?? null), ...[0, 1, 2].map(i => f.faces?.[i] ?? null)];
+      pics.forEach((r, i) => { if (r && (o.outfitFull || i === 0)) items.push({ label: `${tag} · slot ${OUTFIT_SLOTS[i]![0]} (${OUTFIT_SLOTS[i]![1]})`, ref: r }); });
+      if (o.outfitFull) (meta.outfit as Record<string, unknown>).emptySlots = OUTFIT_SLOTS.filter((_, i) => !pics[i]).map(x => x[0]);
     } else meta.outfit = { id: o.outfitId, missing: true };
   }
   return { meta, blocks: await seeBlocks(ctx, u.studioId, items) };
