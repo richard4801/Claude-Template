@@ -1,7 +1,7 @@
 import Foundation
 
 // Claude's orb (owner, 2026-11-12; plans/design/claude-panel/orb-states-*.png): MUSE's own design, a small dark glass
-// sphere with soft multicolour light flowing inside it (ClaudeOrbLiquid). It sits in the panel header, beside the reply being written,
+// glass ball with luminous 3D smoke inside (ClaudeOrbShader, ClaudeOrb.metal). It sits in the panel header, beside the reply being written,
 // in the activity strip, and floats over the app while Claude operates MUSE with the panel closed. The panel's edge
 // glows in step with it. ONE state machine, fed only by real events (the chat stream, ui-control calls, cards, jobs),
 // never by a timer of its own; the views read `look` and `pulse(at:)` and draw. Pure, so Android can port it as is.
@@ -112,12 +112,12 @@ public struct ClaudeOrb: Hashable, Sendable {
     public static func look(_ s: ClaudeOrbState, reduceMotion: Bool = false, typing: Bool = false) -> ClaudeOrbLook {
         var l: ClaudeOrbLook
         switch s {
-        // swirl: the liquid's flow speed (phase per second); band: how bright the blobs are; glow: the halo.
-        case .idle: l = ClaudeOrbLook(swirl: 0.12, band: 0.45, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
-        case .thinking: l = ClaudeOrbLook(swirl: 0.65, band: 0.85, glow: 0.28, breath: 0, breathDepth: 0, sweep: false, flashes: true, danger: false, edge: 0.30)
-        case .operating: l = ClaudeOrbLook(swirl: 0.45, band: 0.80, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
-        case .waiting: l = ClaudeOrbLook(swirl: 0.10, band: 0.95, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
-        case .error: l = ClaudeOrbLook(swirl: 0.06, band: 0.70, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
+        // swirl: how fast the smoke's flow evolves (phase per second); band: its emission; glow: the halo (edge).
+        case .idle: l = ClaudeOrbLook(swirl: 1.05, band: 0.85, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
+        case .thinking: l = ClaudeOrbLook(swirl: 2.7, band: 1.1, glow: 0.28, breath: 0, breathDepth: 0, sweep: false, flashes: true, danger: false, edge: 0.30)
+        case .operating: l = ClaudeOrbLook(swirl: 2.4, band: 1.0, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
+        case .waiting: l = ClaudeOrbLook(swirl: 0.75, band: 1.15, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
+        case .error: l = ClaudeOrbLook(swirl: 0.45, band: 0.9, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
         }
         if reduceMotion { l.swirl = 0; l.breath = 0; l.breathDepth = 0; l.sweep = false; l.flashes = false }
         // While the person types, the edge stays calm: at most the idle glow, never pulsing.

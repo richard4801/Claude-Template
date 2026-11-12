@@ -375,6 +375,16 @@ extension AppStore {
         }
     }
 
+    /// The live context strip (ClaudeContext): what Claude sees on this page now, from the same `screen` the composer
+    /// syncs to the server for Claude. Only the AI Suite reports a screen today; other pages show their name only.
+    var claudeContextItems: [ClaudeContextItem] {
+        guard screen == .suite else { return [] }
+        return ClaudeContext.items(screen: suiteScreen(at: nil), lookups: .init(
+            character: { [self] id in character(id).map { ($0.shortName, $0.cover) } },
+            outfit: { [self] id in outfits.first { $0.id == id }.map { ($0.name, $0.angles.first ?? nil) } },
+            clipPoster: { [self] id in clip?.id == id ? clip?.thumb : nil }))
+    }
+
     static func cardKey(_ t: ClaudeApproveTarget) -> String {
         switch t { case .action(let id): id; case .suite(_, let p): p }
     }
