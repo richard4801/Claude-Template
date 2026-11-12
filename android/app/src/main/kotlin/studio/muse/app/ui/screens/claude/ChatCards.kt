@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -242,7 +243,7 @@ private fun orbWords(s: OrbState) = when (s) {
 private fun OrbShaderCanvas(o: ChatOrb, reduce: Boolean, page: Color, light: Boolean) {
     val shader = remember { RuntimeShader(ORB_AGSL) }
     val brush = remember { ShaderBrush(shader) }
-    Canvas(Modifier.matchParentSize()) {
+    Canvas(Modifier.fillMaxSize()) {
         val n = o.now
         val u = o.orb.uniforms(n, reduce)
         shader.setFloatUniform("size", this.size.width, this.size.height)
@@ -266,7 +267,7 @@ private fun OrbShaderCanvas(o: ChatOrb, reduce: Boolean, page: Color, light: Boo
 @Composable
 private fun OrbStill(s: OrbState, page: Color, light: Boolean) {
     val pal = (if (s == OrbState.ERROR) ClaudeOrb.ERROR_PALETTE else ClaudeOrb.PALETTE).map { Color(it) }
-    Canvas(Modifier.matchParentSize()) {
+    Canvas(Modifier.fillMaxSize()) {
         val r = this.size.minDimension / 2f / ClaudeOrb.SCALE.toFloat()
         val c = center
         drawCircle(page, r, c)
