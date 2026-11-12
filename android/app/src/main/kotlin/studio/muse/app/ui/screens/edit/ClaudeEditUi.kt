@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +33,7 @@ import studio.muse.app.ui.components.Ink
 import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.scale
 import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.radii
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.draw.drawBehind
@@ -193,6 +196,7 @@ private fun ChatAndPlaybook(sessionId: String, title: String, modifier: Modifier
     var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     val store = studio.muse.app.ui.screens.claude.rememberClaudeChatStore("edit", sessionId)
     Column(modifier) {
+        OtherEditApprovals(sessionId)
         studio.muse.app.ui.screens.edit.learn.LearnSegmented(listOf("Chat", "Playbook"), tab, Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) { tab = it }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (tab == 0) studio.muse.app.ui.screens.claude.ClaudeChat(store, title, Modifier.fillMaxSize())
@@ -235,3 +239,89 @@ internal fun Scrim(onClose: () -> Unit) {
     Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0x40141210)).press(onClick = onClose))
 }
 
+
+/**
+ * Paid helpers Claude asked for on the owner's OTHER edits (owner issue ci_e546642a4026, 2026-11-12): listed at the top
+ * of this edit's Claude sheet, each naming its edit, and answered on that edit's own session without switching edits.
+ * This edit's own ask has its own sheet ("Claude asks"). Owner only, like the server's events.
+ */
+@Composable
+internal fun OtherEditApprovals(openSessionId: String) {
+    val m = muse
+    val c = studio.muse.app.ui.LocalContainer.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var list by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(studio.muse.core.edit.EditApprovalList()) }
+    var busy by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(emptySet<String>()) }
+    val studioState by c.repo.state.collectAsState()
+    suspend fun reload() { loadEditApprovals(c.repo.api)?.let { list = it } }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (!c.repo.ownerNow()) return@LaunchedEffect
+        reload()
+        c.repo.live.collect { ev ->
+            if (ev.type != "edit" || ev.op != "pending") return@collect
+            val sid = ev.sessionId ?: return@collect
+            val p = ev.pending ?: return@collect
+            val known = list.items.any { it.sessionId == sid }
+            list = editApprovalEvent(list, ev) ?: return@collect
+            if (p.status == "waiting" && !known) reload()
+        }
+    }
+    val shown = list.except(openSessionId)
+    if (shown.isEmpty()) return
+    fun nameOf(a: studio.muse.core.edit.EditApproval) =
+        studio.muse.core.edit.EditApprovalList.editName(a.takeId, studioState.takes.firstOrNull { it.id == a.takeId }?.title)
+    fun answer(a: studio.muse.core.edit.EditApproval, approve: Boolean) {
+        if (a.id in busy) return
+        busy = busy + a.id
+        scope.launch {
+            val (gone, said) = answerEditApproval(c.repo.api, a, approve, nameOf(a))
+            if (gone) list = list.remove(a.id)
+            c.repo.toast(said)
+            busy = busy - a.id
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        shown.forEach { a ->
+            val name = nameOf(a)
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.container))
+                .padding(12.dp).semantics { contentDescription = "Claude asks to run ${a.label} in $name" },
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                T("Claude needs your go-ahead", m.scale.label, m.roles.ink)
+                T("Run ${a.label} in “$name”", m.scale.caption, m.roles.ink2)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SuiteButton("Not now", { answer(a, false) }, Modifier.weight(1f), enabled = a.id !in busy)
+                    SuiteButton(a.allowLabel, { answer(a, true) }, Modifier.weight(1f), primary = true, enabled = a.id !in busy)
+                }
+            }
+        }
+    }
+}
+
+/** Every open edit's waiting paid helpers (GET /v1/edit-sessions); null when they couldn't load (keep what is shown). */
+internal suspend fun loadEditApprovals(api: studio.muse.app.data.MuseApi): studio.muse.core.edit.EditApprovalList? =
+    runCatching { api.recentEditSessions(50) }
+        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        .getOrNull()
+        ?.let { all -> studio.muse.core.edit.EditApprovalList.of(all.flatMap { d -> d.pending.map { p ->
+            studio.muse.core.edit.SessionPending(d.id, d.takeId, p.id, p.label, p.estimateUsd, p.createdAt, p.status) } }) }
+
+/** A live `edit` `pending` event applied to the list (null: not one). */
+internal fun editApprovalEvent(list: studio.muse.core.edit.EditApprovalList, ev: studio.muse.app.data.ApiEvent): studio.muse.core.edit.EditApprovalList? {
+    if (ev.type != "edit" || ev.op != "pending") return null
+    val sid = ev.sessionId ?: return null
+    val p = ev.pending ?: return null
+    return list.apply(studio.muse.core.edit.SessionPending(sid, "", p.id, p.label, p.estimateUsd, p.createdAt, p.status), takeIdKnown = false)
+}
+
+/** Allow / Not now on another edit's helper, on that edit's own session. → (off the list?, what to say). */
+internal suspend fun answerEditApproval(api: studio.muse.app.data.MuseApi, a: studio.muse.core.edit.EditApproval, approve: Boolean, editName: String): Pair<Boolean, String> =
+    try {
+        api.answerEditPending(a.sessionId, a.pendingId, approve)
+        true to (if (approve) "${a.label} started in “$editName”. Claude's change lands when it's done." else "Told Claude not now")
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: studio.muse.app.data.ApiException) {
+        if (e.code == "not_found") true to "That was already answered" else false to "Couldn't answer Claude · try again"
+    } catch (e: Exception) {
+        false to "Couldn't answer Claude · try again"
+    }

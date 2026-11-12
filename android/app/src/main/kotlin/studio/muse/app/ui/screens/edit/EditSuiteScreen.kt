@@ -111,6 +111,7 @@ import studio.muse.core.edit.locate
 import studio.muse.core.edit.fromV1
 import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.toSrt
+import studio.muse.core.edit.MediaSniff
 import java.io.File
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -315,7 +316,8 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); vm.controller.act(EditAction.ClearMessage) } }
     LaunchedEffect(ui.panel) { if (ui.panel == Panel.FILTERS) vm.renderLookThumbs() }
     androidx.lifecycle.compose.LifecycleResumeEffect(vm) { onPauseOrDispose { vm.pause() } }
-    val audio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { vm.addAudio(it, voiceOver = false) } }
+    // Music: sound files and MP4s (a song can be an audio-only MP4, ci_f99f93616ece); the file's bytes decide, not its type.
+    val audio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.addAudio(it, voiceOver = false) } }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) vm.startVoiceOver() else c.repo.toast("Record VO needs the microphone · allow it in the phone's settings")
     }
@@ -323,7 +325,10 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
     // "Add a video from a link": WS7's import screen; when the link can't be fetched, the saved video is picked and imported there too.
     var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var savedVideo by remember { mutableStateOf<Uri?>(null) }
-    val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { savedVideo = uri; importing = true } }
+    // A saved video: one that is really sound (an audio-only MP4) goes in as music instead (ci_f99f93616ece).
+    val video = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) vm.routePickedVideo(uri) { savedVideo = uri; importing = true }
+    }
     // "Add a photo": the system photo picker (images only; no storage permission).
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.addPhoto(it) } }
     // "Your font": the system file picker (fonts have no reliable MIME type, so any file; the view model checks it).
@@ -333,7 +338,7 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
         importing = false; savedVideo = null; vm.addImported(v)
     }
     val host = SuiteHost(
-        pickAudio = { audio.launch("audio/*") },
+        pickAudio = { audio.launch(arrayOf("audio/*", "video/mp4")) },
         // Record VO: records in the editor from the playhead (the phone's own recorder app isn't there on most phones).
         recordVo = {
             when {
@@ -815,6 +820,43 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
+    /**
+     * What a file really is (ci_f99f93616ece): its first bytes, and for an MP4 its tracks (MediaExtractor); never its name
+     * or the picker's MIME type. Null when MUSE can't use it.
+     */
+    private suspend fun sniff(f: File): MediaSniff.Verdict? = withContext(Dispatchers.IO) {
+        val head = runCatching { f.inputStream().use { s -> val b = ByteArray(MediaSniff.HEADER_BYTES); val n = s.read(b); if (n <= 0) ByteArray(0) else b.copyOf(n) } }
+            .getOrDefault(ByteArray(0))
+        val fmt = MediaSniff.format(head)
+        var hasVideo: Boolean? = null
+        var hasAudio: Boolean? = null
+        if (fmt is MediaSniff.Format.IsoMedia) runCatching {
+            val x = android.media.MediaExtractor()
+            try {
+                x.setDataSource(f.absolutePath)
+                val mimes = (0 until x.trackCount).mapNotNull { x.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME) }
+                hasVideo = mimes.any { it.startsWith("video/") }
+                hasAudio = mimes.any { it.startsWith("audio/") }
+            } finally { x.release() }
+        }
+        MediaSniff.verdict(fmt, "", hasVideo, hasAudio)
+    }
+
+    /** A saved video picked for Edit: a real video goes on to the import ([onVideo]); sound only goes in as music. */
+    fun routePickedVideo(uri: Uri, onVideo: () -> Unit) {
+        viewModelScope.launch {
+            val f = copyIn(uri, "picked_${System.currentTimeMillis()}") ?: return@launch c.repo.toast("Couldn't read that file")
+            val v = sniff(f)
+            withContext(Dispatchers.IO) { f.delete() }
+            when (v?.kind) {
+                MediaSniff.Kind.VIDEO -> onVideo()
+                MediaSniff.Kind.AUDIO -> addAudio(uri, voiceOver = false)
+                MediaSniff.Kind.PICTURE -> c.repo.toast("This file is a picture. Add it with Add a photo.")
+                null -> c.repo.toast(MediaSniff.UNREADABLE)
+            }
+        }
+    }
+
     private suspend fun copyIn(uri: Uri, name: String): File? = withContext(Dispatchers.IO) {
         runCatching {
             val f = File(app.cacheDir, "edit-suite/$name").apply { parentFile?.mkdirs() }
@@ -826,10 +868,17 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     fun addAudio(uri: Uri, voiceOver: Boolean, atSec: Double? = null) {
         viewModelScope.launch {
             val f = copyIn(uri, "audio_${System.currentTimeMillis()}") ?: return@launch c.repo.toast("Couldn't read that file")
+            // What the file is, from its bytes (ci_f99f93616ece): raw AAC named .mp4 is a song and goes up as audio/aac.
+            val v = sniff(f) ?: return@launch c.repo.toast(MediaSniff.UNREADABLE)
+            when (v.kind) {
+                MediaSniff.Kind.VIDEO -> return@launch c.repo.toast("This file is a video. Add it as a video instead.")
+                MediaSniff.Kind.PICTURE -> return@launch c.repo.toast("This file is a picture. Add it with Add a photo.")
+                MediaSniff.Kind.AUDIO -> Unit
+            }
             val dur = withContext(Dispatchers.IO) {
                 runCatching { MediaMetadataRetriever().run { setDataSource(f.absolutePath); val d = extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDouble(); release(); d } }.getOrNull()
-            }?.div(1000) ?: return@launch c.repo.toast("That isn't an audio file this phone can read")
-            val mime = app.contentResolver.getType(uri) ?: "audio/mp4"
+            }?.div(1000)?.takeIf { it > 0 } ?: return@launch c.repo.toast(MediaSniff.UNREADABLE)
+            val mime = v.contentType
             val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, mime) } }.getOrElse { null to "Couldn't upload · try again" }
             if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
             controller.act(EditAction.AddAudio(id, (dur * 1000).roundToInt() / 1000.0, voiceOver, atSec))
