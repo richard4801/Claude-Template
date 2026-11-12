@@ -391,6 +391,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
                             if (r < 0 || l > w) return@forEachIndexed
                             clipTile(c, l, r, top, h, frames[c.asset].orEmpty(), p.asset(c.asset)?.durationSec ?: 1.0, ppsPx, m.t.surface2)
+                            if (c.asset in ui.missing) missingMark(measurer, l, r, top, m.t.body)
                             // Helper steps on the clip's video, in order ("Steadied, reversed"), then its speed.
                             val steps = studio.muse.core.edit.derivedLabel(p, c.asset)
                             if (c.speedCurve != null || c.speed != 1.0 || c.holdSec != null || steps.isNotEmpty()) {
@@ -426,6 +427,7 @@ private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap
                             fadeRamps(c, l, r, top, h, ppsPx, wave)
                             val label = when (t.kind) { TrackKind.MUSIC -> "Music"; TrackKind.SFX -> "Sound effect"; else -> if (t.name == SuiteOps.CLIP_SOUND_TRACK) "Detached sound" else "Voice-over" } + if (muted) " · muted" else ""
                             laneLabel(measurer, label, l, r, top, h, m.t.ink, m.t.body, if (muted) m.t.surface2 else bg)
+                            if (c.asset in ui.missing) missingMark(measurer, l, r, top, m.t.body)
                             if (ui.selectedId == it.id) drawRoundRect(m.t.accent, Offset(l, top), Size(r - l, h), CornerRadius(4 * dp), style = Stroke(2 * dp))
                             if (t.kind == TrackKind.MUSIC) for (b in beats) { val x = xOf(b); if (x in l..r) drawRect(m.t.accent, Offset(x, top), Size(2 * dp, 5 * dp)) }
                         }
@@ -665,6 +667,16 @@ private fun DrawScope.clipTile(c: VideoClip, l: Float, r: Float, top: Float, h: 
             drawImage(f, IntOffset((f.width - sw) / 2, (f.height - sh) / 2), IntSize(sw, sh), IntOffset(x.roundToInt(), top.roundToInt()), IntSize(tw.roundToInt() + 1, h.roundToInt()))
             x += tw
         }
+    }
+}
+
+/** Continue a draft: this clip's file is gone (a deleted take, a lost upload); the edit still opens. */
+private fun DrawScope.missingMark(measurer: TextMeasurer, l: Float, r: Float, top: Float, font: androidx.compose.ui.text.font.FontFamily) {
+    clipRect(max(l, 0f), top, min(r, size.width), size.height) {
+        val tl = measurer.measure("Missing", TextStyle(fontFamily = font, fontSize = 11.sp, color = Color.White), maxLines = 1, softWrap = false)
+        val x = max(l, 0f) + 4 * density; val y = top + 4 * density
+        drawRoundRect(Color.Black.copy(alpha = .6f), Offset(x, y), Size(tl.size.width + 8 * density, tl.size.height.toFloat()), CornerRadius(3 * density))
+        drawText(tl, topLeft = Offset(x + 4 * density, y))
     }
 }
 

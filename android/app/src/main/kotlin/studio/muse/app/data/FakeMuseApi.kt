@@ -915,6 +915,7 @@ class FakeMuseApi(
         val history: MutableList<Triple<EditHistoryEntry, List<EdPatchOp>, List<EdPatchOp>>> = mutableListOf(),
         val pending: MutableList<EditPending> = mutableListOf(), val requests: MutableList<EditAppRequest> = mutableListOf(),
         val online: MutableMap<String, EditPresence> = mutableMapOf(),
+        var view: kotlinx.serialization.json.JsonObject? = null, var updatedAt: Long = 0, var status: String = "open",
     )
     private val editSessions = mutableMapOf<String, FakeEditSession>()
     private var editSessionSeq = 0
@@ -930,7 +931,11 @@ class FakeMuseApi(
         s.id, s.takeId, null, s.revision, s.project, durationSec = runCatching { edDurationSec(EdEditJson.parse(s.project)) }.getOrDefault(0.0),
         pending = s.pending.filter { it.status == "waiting" || it.status == "running" }, online = s.online.values.toList(), requests = s.requests.takeLast(10),
         history = s.history.asReversed().take(60).map { it.first },
+        view = s.view, lastTouchedAt = editTouched(s),
     )
+
+    private fun editTouched(s: FakeEditSession): Long =
+        maxOf(s.updatedAt, ((s.view?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0).toLong())
 
     private fun editRow(id: String) = editSessions[id] ?: throw ApiException("not_found", "Edit session not found")
 
@@ -947,7 +952,7 @@ class FakeMuseApi(
         val inverse = EdJsonPatch.diff(next, s.project)
         if (patch.isEmpty()) return null
         val base = s.revision
-        s.project = next; s.revision++
+        s.project = next; s.revision++; s.updatedAt = now()
         val entry = EditHistoryEntry(++editEntrySeq, s.revision, author, author == "claude", kind, label.take(200), undoes, false, now())
         s.history += Triple(entry, patch, inverse)
         if (undoes != null) s.history.replaceAll { if (it.first.id == undoes) it.copy(first = it.first.copy(undone = true)) else it }
@@ -967,7 +972,7 @@ class FakeMuseApi(
                 listOf(EdTrack("main", EdTrackKind.MAIN, items = listOf(EdVideoClip("c1", "src", 0.0, t.durationSec ?: 8.0, 1.0,
                     look = t.look?.lut?.takeIf { it.isNotBlank() }?.let { EdLook(lut = it, strength = 1.0) })))),
             ))
-        val s = FakeEditSession("es_${++editSessionSeq}", t.id, project)
+        val s = FakeEditSession("es_${++editSessionSeq}", t.id, project, updatedAt = now())
         editSessions[s.id] = s
         editView(s)
     }
@@ -997,6 +1002,18 @@ class FakeMuseApi(
 
     override suspend fun editPresence(id: String, presence: EditPresence) { lock.withLock { editRow(id).online[presence.device] = presence } }
     override suspend fun leaveEditSession(id: String, device: String) { lock.withLock { editSessions[id]?.online?.remove(device) } }
+
+    override suspend fun recentEditSessions(limit: Int): List<EditSessionDto> = lock.withLock {
+        editSessions.values.filter { it.status == "open" }.sortedByDescending { editTouched(it) }.take(limit.coerceIn(1, 50))
+            .map { editView(it).copy(history = emptyList()) }
+    }
+
+    /** Like the server: the place is kept as sent (clamped), stamped strictly after the last change. */
+    override suspend fun saveEditView(id: String, view: kotlinx.serialization.json.JsonObject) = lock.withLock {
+        val s = editRow(id)
+        val at = maxOf(now(), s.updatedAt + 1)
+        s.view = kotlinx.serialization.json.JsonObject(view + ("at" to kotlinx.serialization.json.JsonPrimitive(at)))
+    }
 
     override suspend fun uploadEditFrame(png: ByteArray): String = lock.withLock { "up_frame_${++editorSeq}".also { editUploads[it] = png } }
 

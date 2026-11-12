@@ -161,6 +161,8 @@ data class EditSuiteUi(
     val previewLayouts: studio.muse.core.edit.PreviewLayouts = studio.muse.core.edit.PreviewLayouts.DEFAULTS,
     /** Timeline zoom: dp per second (pinch). */
     val pxPerSec: Float = 34f,
+    /** Continue a draft: assets whose file isn't on the phone and couldn't be fetched (a deleted take, a lost upload); their clips read "Missing". */
+    val missing: Set<String> = emptySet(),
     val phase: SuitePhase = SuitePhase.Loading(),
     val ai: Map<String, AiTask> = emptyMap(),
     /** Sheet tabs. */

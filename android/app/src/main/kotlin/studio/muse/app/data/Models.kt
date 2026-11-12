@@ -1362,7 +1362,15 @@ data class EditSessionDto(
     val durationSec: Double = 0.0, val status: String = "open", val updatedBy: String = "", val updatedAt: Long = 0,
     val pending: List<EditPending> = emptyList(), val online: List<EditPresence> = emptyList(), val requests: List<EditAppRequest> = emptyList(),
     val history: List<EditHistoryEntry> = emptyList(),
+    /** Continue a draft: where an editor was last left on this session (server 0035; Mac and Android share it). Absent on older servers. */
+    val view: JsonObject? = null,
+    /** GET /v1/edit-sessions?recent=1: the later of the last change and `view.at` (ms). */
+    val lastTouchedAt: Long? = null,
 )
+
+/** POST /v1/edit-sessions/{id}/view */
+@Serializable
+data class EditViewRequest(val view: JsonObject)
 
 @Serializable
 data class OpenEditSessionRequest(val takeId: String, val project: JsonObject? = null, val baseVersionId: String? = null, val device: String? = null, val fresh: Boolean? = null)
