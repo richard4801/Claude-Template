@@ -238,23 +238,40 @@ struct SuiteResultPane: View {
                 }
             }
             if let take {
-                HStack(spacing: 6) {
-                    MButton(take.isFinal ? "Kept" : "Keep", icon: "checkmark", size: .small, off: take.isFinal) { store.approve(take) }
-                    if let j = job { MButton("Retake", icon: "arrow.clockwise", size: .small) { store.retakeShot(j) } }
-                    MButton("Edit", icon: "scissors", size: .small) { store.openEdit(takeId: take.id) }
-                    MButton("Share", icon: "square.and.arrow.up", size: .small) { store.openPostSheet(take) }
+                // Full labels when they fit; otherwise icons with tooltips, never "✓ K".
+                ViewThatFits(in: .horizontal) {
+                    takeActions(take, iconOnly: false).fixedSize(horizontal: true, vertical: false)
+                    takeActions(take, iconOnly: true).fixedSize(horizontal: true, vertical: false)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 8)
                 // Finish the take: a longer version (Extend) or a sharper one (Upscale).
                 let canExtend = ExtendSource.take(take) != nil
                 if canExtend || take.canUpscale {
-                    HStack(spacing: 6) {
-                        if canExtend { MButton("Extend", icon: "arrow.right.to.line", size: .small) { store.openExtend(take) } }
-                        if take.canUpscale { UpscaleButton(take: take, size: .small) }
+                    ViewThatFits(in: .horizontal) {
+                        finishActions(take, canExtend: canExtend, iconOnly: false).fixedSize(horizontal: true, vertical: false)
+                        finishActions(take, canExtend: canExtend, iconOnly: true).fixedSize(horizontal: true, vertical: false)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
                 }
             }
+        }
+    }
+
+    private func takeActions(_ take: Take, iconOnly: Bool) -> some View {
+        HStack(spacing: 6) {
+            TakeActionButton(title: take.isFinal ? "Kept" : "Keep", icon: "checkmark", iconOnly: iconOnly, off: take.isFinal) { store.approve(take) }
+            if let j = job { TakeActionButton(title: "Retake", icon: "arrow.clockwise", iconOnly: iconOnly) { store.retakeShot(j) } }
+            TakeActionButton(title: "Edit", icon: "scissors", iconOnly: iconOnly) { store.openEdit(takeId: take.id) }
+            TakeActionButton(title: "Share", icon: "square.and.arrow.up", iconOnly: iconOnly) { store.openPostSheet(take) }
+        }
+    }
+
+    private func finishActions(_ take: Take, canExtend: Bool, iconOnly: Bool) -> some View {
+        HStack(spacing: 6) {
+            if canExtend { TakeActionButton(title: "Extend", icon: "arrow.right.to.line", iconOnly: iconOnly) { store.openExtend(take) } }
+            if take.canUpscale { UpscaleButton(take: take, size: .small, iconOnly: iconOnly) }
         }
     }
 
@@ -382,5 +399,29 @@ struct SuiteConnectionsRow: View {
                 }
                 .frame(minWidth: 720, minHeight: 520)
             }
+    }
+}
+
+/// A small take action: icon + label, or icon only with the label as tooltip when space is short.
+struct TakeActionButton: View {
+    var title: String
+    var icon: String
+    var iconOnly: Bool
+    var off = false
+    var action: () -> Void
+
+    var body: some View {
+        if iconOnly {
+            Button(action: action) {
+                Image(systemName: icon).font(.system(size: 12, weight: .semibold)).frame(minWidth: 14)
+            }
+            .buttonStyle(MuseButtonStyle(kind: .secondary, size: .small, off: off, fill: false))
+            .help(title)
+            .accessibilityLabel(title)
+        } else {
+            MButton(title, icon: icon, size: .small, off: off, action: action)
+                .lineLimit(1)
+                .help(title)
+        }
     }
 }

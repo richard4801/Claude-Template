@@ -27,6 +27,19 @@ extension AppStore {
         suiteComposerChanged(now: true) // Claude sees which Swap is open
     }
 
+    /**
+     * The composer always shares its draft (owner bug 2026-11-12: Claude couldn't reach New Swap, "no composer is open
+     * on the person's page"): the page then carries the draft's id, and the screen is pushed into it as it changes, whether
+     * or not Claude's panel was ever opened on this Mac. One draft per mode, as when the panel opens.
+     */
+    func shareSuiteDraft() async {
+        let c = suite.claude
+        guard screen == .suite, suite.mode != .hub, c.assist == nil || c.key != suiteClaudeKey, !c.creating, let api = suiteAssistAPI else { return }
+        c.creating = true
+        defer { c.creating = false }
+        await newSuiteAssist(api: api, key: suiteClaudeKey)
+    }
+
     /// What Generate sends (nil until a video is in and every turned-on toggle is complete).
     var remixRequest: ShotRequest? {
         guard let c = clip, suite.remix.missing == nil else { return nil }

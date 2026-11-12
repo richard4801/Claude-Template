@@ -156,6 +156,22 @@ final class NewSwapTests: XCTestCase {
         XCTAssertEqual(cat.engines(for: .matte).map(\.model), ["rvm"])
     }
 
+    func testTheModelListIsGroupedAndOneBadRowNeverHidesTheOthers() throws {
+        // Owner bug 2026-11-12: "MiniMax H3 Higgsfield is not part of the models that come with New Swap".
+        let row = { (id: String, group: String, extra: String) in
+            #"{"model":"\#(id)","label":"\#(id) · X","support":"adapted","route":"reference","unavailable":null,"tested":true,"auto":false,"group":"\#(group)","limits":{"minSeconds":5,"maxSeconds":15,"resolutions":["2K"],"maxImages":9,"keepsAudio":false,"soundNote":"MUSE puts the clip’s sound back"},"price":{"resolution":"2K","perSec":0.065,"seconds":10,"usd":0.65,"inputBilled":"x"}\#(extra)}"#
+        }
+        let bad = #"{"model":"broken","label":"Broken","support":"yes","tested":true,"auto":false,"limits":null,"price":null}"#
+        let json = #"{"toggles":["character"],"groups":[{"id":"auto","label":"Auto picks"},{"id":"edit","label":"Edits the clip"},{"id":"reference","label":"Uses the clip as reference"}],"auto":{"model":"genjutsu-light","why":"w"},"models":["#
+            + [row("genjutsu-light", "auto", ""), row("h3-hf", "auto", #","warning":"Higgsfield refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again""#), bad, row("h3", "reference", "")].joined(separator: ",") + "]}"
+        let m = try JSONDecoder().decode(RemixModels.self, from: Data(json.utf8))
+        XCTAssertEqual(m.models.map(\.model), ["genjutsu-light", "h3-hf", "h3"], "the broken row alone is left out")
+        XCTAssertEqual(m.grouped.map(\.group.label), ["Auto picks", "Uses the clip as reference"])
+        XCTAssertEqual(m.grouped[0].rows.map(\.model), ["genjutsu-light", "h3-hf"])
+        XCTAssertTrue(m.models[1].pickable)
+        XCTAssertEqual(m.models[1].line, "Higgsfield refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again")
+    }
+
     func testRemixIsADraftToolTheServerAccepts() {
         XCTAssertTrue(SuiteDraft.tools.contains("remix"))
     }

@@ -245,10 +245,17 @@ struct UpscaleButton: View {
     var take: Take
     var size: ButtonSize = .regular
     var fill = false
+    var iconOnly = false
     @State private var open = false
 
     var body: some View {
-        MButton(store.upscaleLive ? "Upscale" : "Upscale · soon", icon: "arrow.up.left.and.arrow.down.right", size: size, off: store.upscaling, fill: fill) { open = true }
+        Group {
+            if iconOnly {
+                TakeActionButton(title: store.upscaleLive ? "Upscale" : "Upscale · soon", icon: "arrow.up.left.and.arrow.down.right", iconOnly: true, off: store.upscaling) { open = true }
+            } else {
+                MButton(store.upscaleLive ? "Upscale" : "Upscale · soon", icon: "arrow.up.left.and.arrow.down.right", size: size, off: store.upscaling, fill: fill) { open = true }
+            }
+        }
             .help("Sharper 1080p, 2K or 4K from this take")
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 UpscalePicker(take: take) { open = false }

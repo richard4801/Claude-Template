@@ -99,6 +99,7 @@ struct ComposerView: View {
             }
         }
         .onAppear { presetsOpen = draftIsEmpty }
+        .task(id: s.composer.tool) { try? await Task.sleep(nanoseconds: 400_000_000); await store.shareSuiteDraft() } // Claude (in the app or over MCP) can always reach this composer
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; pinnedTake = nil; store.suiteClaudeToolChanged() }
         .onChange(of: s.generating) { _, on in if on { pinnedTake = nil } } // a new take goes on the stage
         // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.

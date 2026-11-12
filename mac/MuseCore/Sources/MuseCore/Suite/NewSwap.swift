@@ -302,7 +302,18 @@ public struct RemixModels: Codable, Hashable, Sendable {
         public var why: String?
         public var limits: Limits
         public var price: Price
+        /// The list's group: "auto", "edit", "reference", "frames" or "text" (older servers: from `route`).
+        public var group: String?
+        /// Its provider refused a run recently: still pickable, it may refuse again.
+        public var warning: String?
         public var id: String { model }
+        /// The group this row shows under.
+        public var groupId: String { group ?? (auto ? "auto" : route ?? "edit") }
+        /// The row's line under the name: why it can't run, else a recent refusal, else what MUSE does, else its limits.
+        public var line: String {
+            if unavailable != nil { return detail }
+            return warning ?? adaptedLine ?? detail
+        }
         /// Can be picked: everything that can run (no model is greyed out for what it's made for).
         public var pickable: Bool { unavailable == nil }
         /// The row's second line: limits, sound, "not tested yet", or why it can't run.
@@ -317,9 +328,40 @@ public struct RemixModels: Codable, Hashable, Sendable {
         /// What MUSE does with an adapted model here (its first note), or nil.
         public var adaptedLine: String? { support == "adapted" ? (notes?.first ?? reason) : nil }
     }
+    public struct Group: Codable, Hashable, Sendable { public var id: String; public var label: String }
     public var toggles: [String]
     public var auto: Auto?
     public var models: [Row]
+    /// The list's groups in order, with their names (older servers: MUSE's own).
+    public var groups: [Group]?
+
+    public static let defaultGroups = [Group(id: "auto", label: "Auto picks"), Group(id: "edit", label: "Edits the clip"),
+                                       Group(id: "reference", label: "Uses the clip as reference"), Group(id: "frames", label: "From frames"),
+                                       Group(id: "text", label: "From words only")]
+    /// The rows by group, in the list's order; empty groups left out.
+    public var grouped: [(group: Group, rows: [Row])] {
+        (groups ?? Self.defaultGroups).compactMap { g in
+            let rows = models.filter { $0.groupId == g.id }
+            return rows.isEmpty ? nil : (g, rows)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey { case toggles, auto, models, groups }
+    /// A row that doesn't decode is left out alone (owner bug 2026-11-12: one bad row must never hide the whole list).
+    private struct LossyRow: Decodable { let row: Row?; init(from d: Decoder) throws { row = try? Row(from: d) } }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        toggles = (try? c.decode([String].self, forKey: .toggles)) ?? []
+        auto = try? c.decodeIfPresent(Auto.self, forKey: .auto)
+        models = ((try? c.decode([LossyRow].self, forKey: .models)) ?? []).compactMap(\.row)
+        groups = try? c.decodeIfPresent([Group].self, forKey: .groups)
+    }
+    public init(toggles: [String] = [], auto: Auto? = nil, models: [Row] = [], groups: [Group]? = nil) {
+        self.toggles = toggles
+        self.auto = auto
+        self.models = models
+        self.groups = groups
+    }
 }
 
 /// The model pill's request body.
