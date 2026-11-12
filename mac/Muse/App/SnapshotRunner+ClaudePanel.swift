@@ -33,6 +33,8 @@ extension SnapshotRunner {
             store.suite.remix.lookWords = "Warmer, soft window light"
             await store.useSampleClip(bad: false, quiet: true)
             store.oneClaude.open = true
+            // The panel's chat (run 596: chatId nil, so the body stayed the loading skeleton): start it as "Try again" does.
+            if store.oneClaude.chatId == nil { await store.startOneClaude() }
             try? await Task.sleep(for: .seconds(2.5))
             // The chat's rows and composer drawn (run 591 caught it still loading), and no toast over the header.
             for _ in 0..<50 where state.composerFrames["chat composer"] == nil { try? await Task.sleep(for: .seconds(0.1)) }
@@ -42,7 +44,7 @@ extension SnapshotRunner {
             let composer = state.composerFrames["chat composer"] != nil
             let items = store.claudeContextItems
             let header = state.composerFrames["claude header"].map { "\(Int($0.width))×\(Int($0.height))" } ?? "not drawn"
-            lines.append("INFO claude_panel_idle 1280x800 \(theme.rawValue) header \(header), context strip \(items.count) items (\(items.map(\.label).joined(separator: ", "))), orb \(service.orb.state(at: ClaudeCodeService.now).rawValue), chat composer \(composer ? "drawn" : "NOT drawn")")
+            lines.append("INFO claude_panel_idle 1280x800 \(theme.rawValue) header \(header), context strip \(items.count) items (\(items.map(\.label).joined(separator: ", "))), orb \(service.orb.state(at: ClaudeCodeService.now).rawValue), chat \(store.oneClaude.chatId == nil ? "none" : "started"), composer \(composer ? "drawn" : "NOT drawn")")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_panel_idle.png"))
             // A turn runs: the orb's thinking state (no message is sent; the turn ends right after the shot).
             service.orbTurnStarted()

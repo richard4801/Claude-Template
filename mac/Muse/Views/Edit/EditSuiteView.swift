@@ -49,10 +49,18 @@ struct EditSuiteView: View {
     }
 
     private func open(_ id: String?) async {
+        let attach = id.flatMap { id in store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil } }
+        // Run 596 (open_page edit session: "New project" instead of Claude's session): when Edit appears with an attach
+        // waiting, both the openId task and the editAttach task call open(). The first used to clear editAttach before
+        // its await, so the second found none and opened a fresh project over Claude's. Already on that session: keep it.
+        if let s = session, let id, s.take.id == id, s.attachSessionId != nil,
+           attach == nil || attach == s.attachSessionId {
+            if attach != nil { store.suite.editAttach = nil }
+            return
+        }
         session?.close()
         session = nil
         guard let id else { return }
-        let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
         if attach != nil { store.suite.editAttach = nil }
         guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
             store.showToast("Only video takes can be edited")

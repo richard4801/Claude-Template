@@ -196,8 +196,10 @@ extension SnapshotRunner {
         // that session, not on the Edit home.
         if let blank = try? await fakeMuse.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId, device: "check")) {
             store.performOneClaudeOpen(ClaudeUI(page: "edit", id: blank.id, label: "Blank edit"))
+            let opened = Date()
             let inEditor = await until(15) { store.screen == .edit && store.oneClaude.viewPage?.ids?["sessionId"] == blank.id }
-            line(inEditor, "open_page edit session", "the editor opened on Claude's session \(blank.id): \(inEditor) (page \(store.claudePage.line))")
+            line(inEditor, "open_page edit session", "the editor opened on Claude's session \(blank.id): \(inEditor) after "
+                 + String(format: "%.1f s", Date().timeIntervalSince(opened)) + " (page \(store.claudePage.line))")
             store.go(.home)
         } else {
             line(false, "open_page edit session", "couldn't make a blank session in demo mode")

@@ -1096,6 +1096,9 @@ enum SnapshotRunner {
     /// Draws the window's content into a PNG. Also asks `screencapture` for the same window (`…_sc.png`), which
     /// includes layer-only content (video, some images) if the runner allows screen capture.
     static func capture(_ url: URL) {
+        // A heartbeat for mac.yml's stall watchdog (120 s without a log line = a stall; run 596 false-alarmed on a walk
+        // that only took pictures).
+        NSLog("[snapshot] shot %@", url.lastPathComponent)
         guard let window = mainWindow, let view = window.contentView else { return }
         view.layoutSubtreeIfNeeded()
         if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
