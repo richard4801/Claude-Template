@@ -41,7 +41,7 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
         val text = req.text ?: view(e).current
         validate(e, text)?.let { throw ApiException("prompt_invalid", it) }
         val lib = { k: String -> if (k == e.key) text else text(k) }
-        val values = SAMPLE + mapOf("style" to lib("style.house"), "never" to neverList(SAMPLE_ID, lib).joinToString(", "))
+        val values = SAMPLE + mapOf("style" to houseStyle(lib), "never" to neverList(SAMPLE_ID, lib).joinToString(", "))
         val rendered = when (e.kind) {
             "list" -> items(text, ",").joinToString(", ")
             "lines" -> items(text, "\n").joinToString("\n")
@@ -81,6 +81,13 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
     }
 
     companion object {
+        /**
+         * The house style (server prompt/library.ts, split 2026-11-11): Camera feel then Realism. The demo has no rigs, so
+         * Camera feel is always on (the server leaves it out when a rig or preset sets its own camera, lens, grade or look).
+         */
+        fun houseStyle(library: (String) -> String): String =
+            listOf(library("style.camera"), library("style.realism")).map { it.trim().trimEnd('.', ',', ';', ' ') }.filter { it.isNotEmpty() }.joinToString(", ")
+
         private val PH = Regex("\\{([A-Za-z][A-Za-z0-9]*)\\}")
         /** The server's default library (the same file the server checks is current). */
         val DEFAULTS: PromptLibrary by lazy {
@@ -176,7 +183,7 @@ class FakePromptLibrary(private val now: () -> Long = System::currentTimeMillis)
             val lines = sent.map { referenceLine(it, library) }.iterator()
             return slots.mapNotNull { s ->
                 when (s.layer) {
-                    Layer.STYLE.key -> s.copy(text = fill(library("shoot.style"), mapOf("style" to library("style.house"))))
+                    Layer.STYLE.key -> s.copy(text = fill(library("shoot.style"), mapOf("style" to houseStyle(library))))
                     Layer.NEGATIVE.key -> s.copy(text = fill(library("shoot.never"), mapOf("never" to neverList(identity, library).joinToString(", "))))
                     Layer.REFERENCE.key -> s.copy(text = if (lines.hasNext()) lines.next() else s.text)
                     else -> s

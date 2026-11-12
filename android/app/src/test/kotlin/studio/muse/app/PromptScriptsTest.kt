@@ -92,7 +92,7 @@ class PromptScriptsTest {
 
     @Test fun httpParsesTheScriptsListGetSaveResetAndPreview() = runBlocking {
         val list = api.listPromptScripts()
-        assertEquals(14, list.scripts.size) // 11 (dressup removed) + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1)
+        assertEquals(15, list.scripts.size) // 11 (dressup removed) + the AI suite's suite.shot, suite.camera and suite.recast (workstream 1) + House style (2026-11-11)
         assertTrue(list.ops.first { it.id == "in" }.types == listOf("enum"))
         assertEquals("Video", list.groups.first { it.id == "video" }.label)
         val v = list.scripts.first { it.id == "video.replicate" }
@@ -188,7 +188,7 @@ class PromptScriptsTest {
         val p = api.previewPromptScript("refs.collage", null)
         assertEquals(listOf("panel.outfit", "panel.ref", "sheet"), p.fired)
         assertEquals("The input image is a reference sheet of numbered panels (\"image N\" below means panel N): panels 1–3 show the person (use her face, hair " +
-            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing only; create one new photo, not a collage.", p.text)
+            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing and the look & colour and the scene only; create one new photo, not a collage.", p.text)
         // Item fields are offered (and validated) for a rule in a per-item value slot.
         val s = api.getPromptScript("refs.collage")
         assertTrue(ScriptText.inputsFor(s, "@panels").any { it.first == "item.role" })

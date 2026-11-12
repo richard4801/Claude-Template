@@ -105,11 +105,11 @@ class ShootReferencesTest {
         val req = ShootDraft(refs = listOf(ref("c_front", "look"))).request(SampleData.DEMO, SampleData.GREEN)
         val before = api.previewShoot(req).text
         assertTrue(before.contains("Style: ${PromptEngine.HOUSE_STYLE}."))
-        api.savePrompt("style.house", "HOUSE X")
+        api.savePrompt("style.realism", "HOUSE X")
         api.savePrompt("refs.look", "Match the colours of image {refIndex}.")
         api.savePrompt("never.base", "logos, stickers")
         val after = api.previewShoot(req)
-        assertTrue(after.text, after.text.contains("Style: HOUSE X."))
+        assertTrue(after.text, after.text.contains("Style: realistic smartphone photo, HOUSE X."))
         assertEquals("Match the colours of image 7. Do not take the face, body, hair or clothes from image 7.", after.slots.single { it.layer == "reference" }.text)
         assertTrue(after.text, after.text.contains("Never add: ") && after.text.contains("logos, stickers.") && !after.text.contains("warped jewellery"))
         // The editor's preview: this entry with sample values, and the whole prompt it's part of.
@@ -118,7 +118,7 @@ class ShootReferencesTest {
         assertTrue(pv.example, pv.example.startsWith("Demo model: ") && pv.example.contains("Pose like image 8. Match the colours of image 8."))
         assertTrue(api.previewPrompt(PromptPreviewRequest("shoot.scene", "Somewhere: {scene}.")).example.contains("\nSomewhere: rooftop · golden hour.\n"))
         // Defaults again: the same text as the app's own engine.
-        listOf("style.house", "refs.look", "never.base").forEach { api.resetPrompt(it) }
+        listOf("style.realism", "refs.look", "never.base").forEach { api.resetPrompt(it) }
         assertEquals(FakePromptLibrary.shootPreview(FakeMuseApi.identity(SampleData.models().first()), "Green set", req, studio.muse.core.PhotoPrices()).text,
             api.previewShoot(req).text)
     }
@@ -139,7 +139,7 @@ class ShootReferencesTest {
         assertTrue(saved.overridden); assertEquals("Location: {scene}!", saved.current)
         assertEquals("Location: rooftop · golden hour!", api.previewPrompt(PromptPreviewRequest("shoot.scene")).text)
         assertFalse(api.resetPrompt("shoot.scene").overridden)
-        assertFalse(api.savePrompt("style.house", lib.prompts.first { it.key == "style.house" }.default).overridden)
+        assertFalse(api.savePrompt("style.realism", lib.prompts.first { it.key == "style.realism" }.default).overridden)
     }
 }
 

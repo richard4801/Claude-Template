@@ -69,7 +69,16 @@ data class RecastDraft(
     val quality: String = "standard",
     val keepAudio: Boolean = true,
     val takes: Int = 1,
+    /** Background (one person only): "keep" (the clip's place), "photo" ([backgroundImage]) or "describe" ([place] sets the new place). */
+    val background: String = "keep",
+    val place: String = "",
+    val backgroundImage: studio.muse.app.data.ImageRef? = null,
+    val backgroundName: String = "",
 ) {
+    /** Describe it applies to a one-person swap. */
+    val describing: Boolean get() = background == "describe" && people.size == 1
+    /** New photo, with its picture chosen, on a one-person swap. */
+    val newPhoto: Boolean get() = background == "photo" && people.size == 1 && backgroundImage != null
     val canAdd: Boolean get() = people.size < SuiteRules.MAX_CAST
     /** Room for one more under the catalog's `recastMaxPeople`. */
     fun canAdd(max: Int): Boolean = people.size < max.coerceIn(1, SuiteRules.MAX_CAST)
@@ -117,6 +126,8 @@ data class RecastDraft(
             clipId == null -> "Choose the source clip"
             people.any { it.characterId == null } -> "Pick who each person becomes"
             people.any { it.cropping } -> "Waiting for the face upload"
+            describing && place.isBlank() -> "Describe the new place"
+            background == "photo" && people.size == 1 && backgroundImage == null -> "Pick the new background"
             loose.map { it.hint }.toSet().size != loose.size -> "Two people point at the same spot"
             else -> null
         }
@@ -124,6 +135,8 @@ data class RecastDraft(
 
     fun request(): SuiteShotRequest = SuiteShotRequest(
         mode = "recast", clipId = clipId, quality = quality, keepAudio = keepAudio, takes = takes,
+        background = when { describing -> "describe"; newPhoto -> "photo"; else -> null }, backgroundImage = if (newPhoto) backgroundImage else null,
+        prompt = if (describing) place.trim().take(500) else "",
         cast = people.mapNotNull { p ->
             p.characterId?.let { SuiteCastMember(it, p.outfitId, personHint = p.hint, speaking = if (people.size == 1 && p.speaking == null) null else p.speaking, faceCrop = p.faceCrop) }
         },

@@ -141,7 +141,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "templates_mine" -> c.drafts.templateFilter.value = studio.muse.app.data.TemplateFilter(tab = "mine")
             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
-            "prompts" -> runBlocking { fake.savePrompt("style.house", "realistic phone photo, visible skin texture, true colour, no filter") }
+            "prompts" -> runBlocking { fake.savePrompt("style.realism", "visible skin texture, true colour, no filter") }
             "prompt_edit" -> runBlocking { fake.savePrompt("refs.pose", "Copy the pose and framing from image {refIndex}, but keep her own hands.") }
             "warm_confirm" -> c.warmUi.confirm()
             "quality_draft" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)) }

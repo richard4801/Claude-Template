@@ -379,6 +379,16 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
                     onUploadVideo = { open(null); pickExtendUpload(ToolSlots.EXTEND_VIDEO) },
+                    locations = locations,
+                    onUploadBackground = { uri ->
+                        scope.launch {
+                            val media = c.media ?: return@launch c.repo.toast("Couldn't read that picture")
+                            val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that picture")
+                            val (ref, err) = c.repo.attemptInline { uploadImage("background.jpg", bytes, media.mime(uri).takeIf { it.startsWith("image/") } ?: "image/jpeg") }
+                            if (ref != null) store.recast.update { it.copy(background = "photo", backgroundImage = ref, backgroundName = "Uploaded picture") }
+                            if (err != null) c.repo.toast(err)
+                        }
+                    },
                     onCreateLocation = { name, uri ->
                         scope.launch {
                             val media = c.media ?: return@launch c.repo.toast("Couldn't read that photo")

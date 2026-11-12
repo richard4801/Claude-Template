@@ -376,6 +376,10 @@ data class SuiteShotRequest(
     val camera: JsonElement? = null,
     val clipId: String? = null,
     val keepAudio: Boolean? = null,
+    /** Swap / Recast background: null = Keep; "describe" = the prompt's words set the new place (Auto then runs Genjutsu Light). */
+    val background: String? = null,
+    /** background "photo": the new background picture (a studio location or an upload). */
+    val backgroundImage: ImageRef? = null,
     /** "Grade the take with this look" (default on at the server). */
     val gradeLook: Boolean? = null,
     /** Input slots (InputSlots.kt): start / middle / end frames and references, only those the tier takes. */

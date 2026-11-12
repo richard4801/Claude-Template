@@ -99,6 +99,9 @@ class SheetContext(
     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
     /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
     val onCreateLocation: (String, android.net.Uri) -> Unit = { _, _ -> },
+    /** Swap's Background → New photo: the studio's locations (the library) and an uploaded picture. */
+    val locations: List<studio.muse.app.data.SuiteLocation> = emptyList(),
+    val onUploadBackground: (android.net.Uri) -> Unit = {},
     /** Extend's VIDEO picker: the studio's takes that can be extended, the key in the slot now, and the two ways to fill it. */
     val takes: List<studio.muse.app.data.Take> = emptyList(),
     val extendKey: String? = null,
@@ -614,6 +617,37 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
         }
         if (r.canAdd(max)) Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).border(1.dp, m.t.line, RoundedCornerShape(25.dp)).press { x.updateRecast { it.add() }; active = r.people.size }, contentAlignment = Alignment.Center) {
             T("Add a person", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
+        }
+        if (r.people.size == 1) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                T("Background", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f))
+                MiniSeg(listOf("keep" to "Keep", "photo" to "New photo", "describe" to "Describe it"), r.background) { k -> x.updateRecast { it.copy(background = k) } }
+            }
+            if (r.background == "photo") {
+                val upload = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { u -> if (u != null) x.onUploadBackground(u) }
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    items(x.locations.size) { i ->
+                        val loc = x.locations[i]
+                        val on = r.backgroundImage == loc.image
+                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).border(if (on) 2.dp else 1.dp, if (on) m.t.accent else m.t.line, RoundedCornerShape(10.dp))
+                            .press { x.updateRecast { it.copy(backgroundImage = loc.image, backgroundName = loc.name) } }.semantics { role = Role.Button; contentDescription = "Background · ${loc.name}" }) {
+                            RefImage(loc.image, Modifier.size(72.dp))
+                        }
+                    }
+                    item {
+                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).background(m.t.surface2).press { upload.launch("image/*") }
+                            .semantics { role = Role.Button; contentDescription = "Upload a picture" }, contentAlignment = Alignment.Center) { SIc("image", 20.dp, m.t.muted) }
+                    }
+                }
+                T(if (r.backgroundImage == null) "Pick a saved location or upload a picture" else "New background: ${r.backgroundName.ifBlank { "your picture" }}", m.type.body.copy(fontSize = 12.sp), m.t.muted)
+            }
+            if (r.background == "describe") {
+                Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface2).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+                    androidx.compose.foundation.text.BasicTextField(r.place, { v -> x.updateRecast { it.copy(place = v.take(500)) } }, Modifier.fillMaxWidth().semantics { contentDescription = "New place" },
+                        textStyle = m.type.body.copy(fontSize = 15.sp, color = m.t.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.t.accent),
+                        decorationBox = { inner -> if (r.place.isEmpty()) T("Same moves, on a rooftop at night…", m.type.body.copy(fontSize = 15.sp), m.t.muted); inner() })
+                }
+            }
         }
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).press { x.updateRecast { it.copy(keepAudio = !it.keepAudio) } }, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

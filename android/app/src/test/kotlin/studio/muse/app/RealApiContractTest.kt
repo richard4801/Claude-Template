@@ -196,16 +196,16 @@ class RealApiContractTest {
         val tplPv = member.previewShoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, templateId = mirror.id, shuffleSeed = 5, refs = refReq.refs))
         assertTrue(tplPv.slots.map { it.layer }.toString(), tplPv.slots.any { it.layer == "reference" } && tplPv.refs.single().index != null)
         expectCode("owner_only") { member.prompts() }
-        expectCode("owner_only") { member.savePrompt("style.house", "x") }
+        expectCode("owner_only") { member.savePrompt("style.realism", "x") }
         val lib = owner.prompts()
         assertTrue("${lib.prompts.size} prompts", lib.prompts.size >= 52)
         assertEquals(lib.prompts.size, lib.prompts.map { it.key }.toSet().size)
         assertEquals("References", lib.groups[1].label)
         expectCode("prompt_invalid") { owner.savePrompt("refs.pose", "no number") }
-        assertTrue(owner.savePrompt("style.house", "HOUSE X").overridden)
-        assertTrue(member.previewShoot(refReq).text.contains("Style: HOUSE X."))
+        assertTrue(owner.savePrompt("style.realism", "HOUSE X").overridden)
+        assertTrue(member.previewShoot(refReq).text.contains("Style: realistic smartphone photo, HOUSE X."))
         assertTrue(owner.previewPrompt(studio.muse.app.data.PromptPreviewRequest("refs.look", "Look like image {refIndex}.")).text.startsWith("Look like image "))
-        assertEquals(false, owner.resetPrompt("style.house").overridden)
+        assertEquals(false, owner.resetPrompt("style.realism").overridden)
         val draft = member.templateDraft(plain.id)
         assertTrue(draft.variationPool.getValue("pose").isNotEmpty())
         val mine = member.createTemplate(CreateTemplateRequest("My mirror", listOf("Selfie"), variationPool = draft.variationPool + ("expression" to listOf("soft smile")), fromShotId = plain.id))
