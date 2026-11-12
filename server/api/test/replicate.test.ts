@@ -504,18 +504,16 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(ev.events.some(e => e.type === 'wallet' && e.notice?.code === 'provider_out_of_credit')).toBe(true);
   });
 
-  it('a shoot that fails after some photos were billed: the member pays nothing, the studio records what was spent', async () => {
+  it('a shoot that fails after some photos were billed: the photos made are kept and charged, the rest refunded (paid-jobs-3)', async () => {
     const n0 = fake.state.creates.length;
     fake.state.plans.push({}, { status: 'failed', error: 'boom' });
-    const sb0 = (await owner.req('GET', '/v1/studio/balance')).body;
     const r = await owner.req('POST', '/v1/shoots', { modelId, count: 2 });
-    expect(r.status).toBe(502);
-    expect(r.body.error).toBe("Something went wrong making the photos · you weren't charged");
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toHaveLength(1); // the paid photo is kept, not thrown away
+    expect(r.body[0].of).toBe(1);
     expect(fake.state.creates.length).toBe(n0 + 2);
-    const over = (await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'overhead'))).at(-1)!;
-    expect(over.note).toMatch(/^Photos that didn't finish · Photo · 2 photos/);
-    expect(over.amountUsd).toBeGreaterThan(0.015);
-    const sb1 = (await owner.req('GET', '/v1/studio/balance')).body;
-    expect(sb0.balanceUsd - sb1.balanceUsd).toBeCloseTo(over.amountUsd, 9);
+    const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'settle'))).at(-1)!;
+    expect(settle.note).toMatch(/^Photo · 2 photos/);
+    expect(settle.amountUsd).toBeGreaterThan(0.015); // the kept photo is charged; the one not made isn't
   });
 });

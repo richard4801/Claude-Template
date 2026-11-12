@@ -18,7 +18,7 @@ import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { linkChat, takeView } from '../services/jobs.js';
 import { resultsOf } from '../claude/results.js';
-import { ASSET_DIR, ASSET_KEYS, PROVIDERS, type ShootRefIn } from '../images/service.js';
+import { ASSET_DIR, ASSET_KEYS, PhotoError, PROVIDERS, type ShootRefIn } from '../images/service.js';
 import { PhotoBill } from '../images/bill.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
 import type { EngineSelection } from '../images/engines.js'; // WS5
@@ -854,7 +854,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   /** Runs a planned shoot: holds, generates, grades and saves the stills (`/v1/shoots` and the suite's Photo tool). */
   /** `started`: called once the price is held (the photo job then runs on its own); `made`: each still done (template shoots). */
-  type ShootHooks = { noun?: string; draft?: Draft | null; started?: () => void; made?: (n: number, of: number) => void };
+  type ShootHooks = { noun?: string; draft?: Draft | null; started?: (bill: PhotoBill['held']) => void; made?: (n: number, of: number) => void };
+  /** A shoot's takes, and when a later still failed, how many were made (kept and charged; the rest refunded). */
+  type ShootResult = ReturnType<typeof takeView>[] & { partial?: { made: number; of: number; error: string } | null; chargedUsd?: number };
+  /** After the bill settled: the member was charged `chargedUsd`, whatever fails next (the photo job says so). */
+  const charged = (e: unknown, usd: number) => Object.assign(e as object, { chargedUsd: usd });
   async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: ShootHooks = {}) {
     const noun = o2.noun ?? 'Photo', billNoun = o2.noun ?? 'Photo'; // Photoshoot is gone: legacy /v1/shoots takes are "Photo" too
     if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun, o2.draft, o2);
@@ -862,19 +866,25 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const free = s.kind === 'free'; // no character (owner 2026-11-11)
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
-    o2.started?.();
+    o2.started?.(bill.held);
     const prompt = free ? s.text : s.custom ?? s.built.text;
     const seed = b.seed ?? (free ? undefined : s.built.seed ?? undefined);
-    let r;
+    let r: Awaited<ReturnType<typeof ctx.images.generate>>, partial: ShootResult['partial'] = null;
     try {
       r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
         bill, models: s.stepModels, req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
-      await bill.fail();
-      throw e;
+      // Some stills were made (paid) before a later one failed: they are kept and charged; the rest is refunded.
+      const pe = e instanceof PhotoError ? e.partial : undefined;
+      if (!pe?.images.length) { await bill.fail(); throw e; }
+      bill.keep(pe.costs.reduce((a, c) => a + c, 0));
+      r = { images: pe.images, seed: pe.seed, costUsd: pe.costs.reduce((a, c) => a + c, 0), costs: pe.costs, selection: pe.selection };
+      partial = { made: pe.images.length, of: count, error: (e as Error).message };
     }
     await bill.finish();
-    if (filter) r.images = await Promise.all(r.images.map(async img => (await ctx.templates.postProcess(img, { afterEffects: { look: filter } }, { studioId: req.user.studioId, userId: req.user.id })).ref));
+    try {
+    // The look is a finishing step on paid stills: one that fails keeps the still as made.
+    if (filter) r.images = await Promise.all(r.images.map(async img => (await ctx.templates.postProcess(img, { afterEffects: { look: filter } }, { studioId: req.user.studioId, userId: req.user.id }).catch(() => ({ ref: img }))).ref));
     let label: string, layers: Record<string, string> = {};
     if (s.kind === 'free') label = (b.scene?.trim() || b.prompt?.trim() || 'From your image').slice(0, 28);
     else {
@@ -891,7 +901,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }));
     const inserted = await db.insert(takes).values(rows).returning();
     emitTakes(req.user.studioId, inserted);
-    return inserted.map(t => takeView(t, pub, req.user.id));
+    return Object.assign(inserted.map(t => takeView(t, pub, req.user.id)), { partial, chargedUsd: bill.spent }) as ShootResult;
+    } catch (e) { throw charged(e, bill.spent); }
   }
 
   /**
@@ -905,9 +916,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(u), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
-    hooks.started?.();
+    hooks.started?.(bill.held);
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
+    let partial: ShootResult['partial'] = null;
     try {
       for (let n = 0; n < count; n++) {
         const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
@@ -915,7 +927,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
         const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
           bill, models: s.stepModels, req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
-        const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
+        // The template's finishing on a paid still: one that fails keeps the still as made.
+        const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id })
+          .catch(() => ({ ref: r.images[0]!, key: ctx.images.keyOf(r.images[0]!) }));
         rows.push({
           id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
           title: `${noun} · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costUsd,
@@ -925,14 +939,18 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         if (n + 1 < count) hooks.made?.(n + 1, count);
       }
     } catch (e) {
-      await bill.fail();
-      throw e;
+      // Stills already made (paid) are kept and charged; the ones not made are refunded.
+      if (!rows.length) { await bill.fail(); throw e; }
+      partial = { made: rows.length, of: count, error: (e as Error).message };
+      for (const x of rows) x.of = rows.length;
     }
     await bill.finish();
-    const inserted = await db.insert(takes).values(rows).returning();
-    emitTakes(u.studioId, inserted);
-    await ctx.templates.bumpUses(t.id);
-    return inserted.map(x => takeView(x, pub, u.id));
+    try {
+      const inserted = await db.insert(takes).values(rows).returning();
+      emitTakes(u.studioId, inserted);
+      await ctx.templates.bumpUses(t.id).catch(() => {});
+      return Object.assign(inserted.map(x => takeView(x, pub, u.id)), { partial, chargedUsd: bill.spent }) as ShootResult;
+    } catch (e) { throw charged(e, bill.spent); }
   }
 
   // ------------------------------------------------------------------ AI suite · Photo tool (workstream 3)
@@ -982,9 +1000,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // their ids. `async: true` (the Mac app) answers with the running job once the price is held; without it the call
   // waits and answers with the takes, as before, plus the job.
   const photoPhase = (count: number, made = 0) => count > 1 ? `Making photo ${made + 1} of ${count}` : 'Making your photo';
-  // A restart drops the run: photo jobs still running from before it end as failed (their bill was never finished).
-  void db.update(jobs).set({ state: 'failed', error: 'Interrupted · try again', phase: 'Failed', finishedAt: Date.now() })
-    .where(and(eq(jobs.state, 'running'), sql`${jobs.request}->>'engine' = 'photo'`)).catch(() => {});
+  // A restart drops the run (its provider calls aren't saved, so it can't be resumed): photo jobs still running from
+  // before it end as failed, their PhotoBill hold goes back to the member, and what the provider may have billed for
+  // stills in flight goes on studio overhead (never silently lost).
+  void (async () => {
+    const left = await db.update(jobs).set({ state: 'failed', error: 'Interrupted by a server restart · you weren’t charged · try again', phase: 'Failed', finishedAt: Date.now() })
+      .where(and(eq(jobs.state, 'running'), sql`${jobs.request}->>'engine' = 'photo'`)).returning();
+    for (const j of left) {
+      const h = (j.stats as { photo?: { bill?: { refId: string; holdTokens: number; estimate: number } } } | null)?.photo?.bill;
+      if (!h || !j.userId) continue;
+      if (h.holdTokens) await ctx.money.release(j.studioId, j.userId, h.refId, h.holdTokens, 'Photos interrupted by a restart').catch(() => {});
+      await db.update(jobs).set({ refunded: j.cost }).where(eq(jobs.id, j.id)).catch(() => {});
+      if (h.estimate > 0) await ctx.money.overhead(j.studioId, h.estimate, 'Photos interrupted by a restart (the provider may have billed stills in flight)').catch(() => {});
+    }
+  })().catch(e => ctx.log.warn({ err: (e as Error).message }, 'photo jobs after a restart'));
   app.post('/v1/suite/photos', async req => {
     const draft = draftOf(req.body); // AI suite (workstream 1): every still keeps the composer draft ("Reuse settings")
     const { async: background, ...body } = (req.body ?? {}) as Record<string, unknown>;
@@ -1002,19 +1031,26 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (j) ctx.jobs.emitJob(j, extra);
       return j ?? (await ctx.jobs.get(row.id!));
     };
-    let held!: () => void;
+    let held!: () => void, billHeld: PhotoBill['held'] | null = null;
     const holding = new Promise<void>(r => { held = r; });
-    const run = runShoot(req, s, graded?.filter, { noun: 'Photo', draft, started: () => held(),
+    const run = runShoot(req, s, graded?.filter, { noun: 'Photo', draft, started: b => { billHeld = b; held(); },
       made: (n, of) => { void set({ progress: Math.round((n / of) * 100), take: n + 1, step: n, phase: photoPhase(of, n) }); } });
     await Promise.race([holding, run]); // the bill refused: nothing was held and no job is made (the error goes back)
-    const [j0] = await db.insert(jobs).values(linkChat(u, row)).returning();
+    // The hold is saved on the job: after a restart it is given back (the run can't be resumed).
+    const [j0] = await db.insert(jobs).values(linkChat(u, { ...row, ...(billHeld ? { stats: { photo: { bill: billHeld } } } : {}) })).returning();
     ctx.jobs.emitJob(j0!);
     const finished = run.then(async out => {
-      const j = await set({ state: 'done', progress: 100, step: count, phase: 'Done', finishedAt: Date.now(), thumb: out[0]?.thumb ?? row.thumb,
-        stats: { photo: { takeIds: out.map(t => t.id) } } }, { takes: out });
+      // A partial shoot: the stills made are kept and charged; the rest is refunded and the job says so.
+      const p = out.partial, paid = out.chargedUsd ?? cost;
+      const j = await set({ state: 'done', progress: 100, step: count, phase: p ? `Done · ${p.made} of ${p.of} photos (the rest didn’t finish · not charged)` : 'Done', finishedAt: Date.now(),
+        thumb: out[0]?.thumb ?? row.thumb, ...(p ? { refunded: Math.max(0, Math.round((cost - paid) * 10000) / 10000) } : {}),
+        stats: { photo: { takeIds: out.map(t => t.id), ...(p ? { partial: p } : {}) } } }, { takes: out });
       return { out, j };
     }, async e => {
-      await set({ state: 'failed', error: String((e as Error)?.message ?? '').slice(0, 200) || 'It didn’t finish', refunded: cost, phase: 'Failed', finishedAt: Date.now() });
+      // Failed after the bill settled (the member was charged): never "refunded".
+      const paid = (e as { chargedUsd?: number }).chargedUsd;
+      await set({ state: 'failed', error: String((e as Error)?.message ?? '').slice(0, 200) || 'It didn’t finish', refunded: paid != null ? Math.max(0, Math.round((cost - paid) * 10000) / 10000) : cost,
+        phase: 'Failed', finishedAt: Date.now() });
       throw e;
     });
     if (!wait) {
