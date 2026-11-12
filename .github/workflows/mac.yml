@@ -108,6 +108,19 @@ jobs:
           ls -la snapshots | head -100
           tail -n 60 snapshots.log || true
 
+      # HDR (HLG) export colour (owner bug 2026-11-12): every frame of an SDR skin-tone take exported in HDR shows the same
+      # colour (first 15 frames, caption vs plain) and matches the SDR export. Review mode runs it first, on its own
+      # (SnapshotRunner+EditOps.swift hdrColourCheck); its TRACE lines show the colour tags each frame really arrived with.
+      - name: HDR colour check
+        if: ${{ !cancelled() }}
+        working-directory: mac
+        run: |
+          f=snapshots/hdr-colour-check.txt
+          if [ ! -f "$f" ]; then echo "no hdr-colour-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped during: $(grep '^STEP' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # Closing a chat mid-reply in the same tick as a screen change must not freeze the app (plans/claude-chat-mac.md).
       # Review mode runs it first (SnapshotRunner+StreamClose.swift); on a freeze it samples the app into the snapshots.
       - name: Stream close check

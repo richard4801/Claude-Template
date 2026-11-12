@@ -47,6 +47,24 @@ public extension EditV2 {
             return Tags(primaries: base.primaries, transfer: base.transfer, matrix: matrix)
         }
 
+        /// The colour space a source track's frames are in: its own complete tags, else BT.709 SDR (matrix filled in).
+        public static func trackSpace(_ track: Tags?) -> Tags {
+            resolve(frame: Tags(), track: track)
+        }
+
+        /// Round 2 (owner 2026-11-12, build 582: still orange at the START). A frame's own tags are trusted only when they
+        /// describe one of the two spaces the frame can really be in: its track's (decoded as is) or the composition's
+        /// (converted by AVFoundation). Anything else (missing, partial, or a mix such as BT.2020 primaries with an SDR
+        /// curve, which reads BT.709 colour as BT.2020: orange skin) is read as the track's space.
+        public static func resolve(frame: Tags, track: Tags?, composition: Tags) -> Tags {
+            let space = trackSpace(track)
+            func same(_ a: Tags, _ b: Tags) -> Bool { a.primaries == b.primaries && a.transfer == b.transfer }
+            guard frame.isComplete else { return space }
+            if same(frame, space) { return Tags(primaries: space.primaries, transfer: space.transfer, matrix: frame.matrix ?? space.matrix) }
+            if same(frame, composition) { return Tags(primaries: frame.primaries, transfer: frame.transfer, matrix: frame.matrix ?? composition.matrix) }
+            return space
+        }
+
         // MARK: Maths (BT.709, BT.2020, BT.2100 HLG, BT.2408 SDR placement)
 
         public typealias RGB = (r: Double, g: Double, b: Double)
