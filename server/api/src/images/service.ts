@@ -363,7 +363,7 @@ export class ImageService {
     } catch (e) {
       this.ctx.log.warn({ provider: sel.provider, model: sel.model, err: (e as Error).message }, 'image engine failed');
       const partial = e instanceof ImageEngineError ? e.partial : [];
-      const spent = partial.reduce((a, img) => a + (costOf(img) ?? 0), 0);
+      const spent = partial.reduce((a, img) => a + (costOf(img) ?? 0), 0) + (e instanceof ImageEngineError ? e.wastedUsd : 0);
       o.bill?.waste(spent);
       const code = e instanceof ImageEngineError ? e.code : undefined;
       if (code === 'provider_refused') throw new PhotoError(422, 'provider_refused', PHOTO_REFUSED, spent);
@@ -380,6 +380,7 @@ export class ImageService {
     const engineTotal = out.costUsd;
     const refs: ImageRef[] = [];
     const costs: number[] = [];
+    let lostUsd = 0; // billed by the provider but not kept (storage failed): studio overhead, never silently dropped
     for (const img of images) {
       const id = uid('img');
       let ref: ImageRef, storageKey: string | null = null, outMp: number | undefined;
@@ -391,7 +392,13 @@ export class ImageService {
         storageKey = `g/${id}.png`;
         const buf = Buffer.from(img.b64, 'base64');
         if (img.bill) await measure(buf);
-        await putObject(this.ctx, { key: storageKey, body: buf, studioId: o.studioId, kind: 'generated', userId: o.userId, contentType: 'image/png' });
+        // The image is paid for: storing it is tried twice; if it still can't be kept its cost is recorded, not lost.
+        const put = () => putObject(this.ctx, { key: storageKey!, body: buf, studioId: o.studioId, kind: 'generated', userId: o.userId, contentType: 'image/png' });
+        try { await put().catch(async () => { await new Promise(r => setTimeout(r, 500)); await put(); }); } catch (e) {
+          this.ctx.log.error({ provider: sel.provider, err: (e as Error).message }, 'a paid image could not be stored');
+          lostUsd += costOf(img, outMp) ?? (engineTotal ?? 0) / Math.max(1, images.length);
+          continue;
+        }
         ref = { url: `${this.ctx.config.PUBLIC_URL ?? ''}/uploads/${storageKey}` };
       } else if (img.url) {
         ref = { url: img.url };
@@ -409,13 +416,15 @@ export class ImageService {
       } else continue;
       const cost = costOf(img, outMp) ?? (engineTotal ?? 0) / Math.max(1, images.length);
       costs.push(cost);
+      // The record of a paid image: a failed write is logged, the image is still kept.
       await this.ctx.db.insert(generatedImages).values({
         id, studioId: o.studioId, userId: o.userId, purpose: o.purpose, refId: o.refId ?? null, provider: sel.provider,
         model: req.editOf || edit ? sel.editModel ?? sel.model : sel.model, prompt: o.req.prompt, negative: o.req.negative ?? null, seed: out.seed ?? o.req.seed ?? null, costUsd: cost, image: ref, storageKey, createdAt: Date.now(),
-      });
+      }).catch(e => this.ctx.log.error({ err: (e as Error).message }, 'generated image not recorded'));
       refs.push(ref);
     }
     const total = costs.reduce((a, b) => a + b, 0);
+    o.bill?.waste(lostUsd);
     if (!refs.length) { o.bill?.waste(total); throw new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, total); }
     o.bill?.add(total);
     return { images: refs, seed: out.seed, costUsd: total, costs, selection: sel };

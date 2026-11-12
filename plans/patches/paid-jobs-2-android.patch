@@ -1,0 +1,198 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+index 12a557e3..4adf4ffd 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
+@@ -612,6 +612,13 @@ class FakeMuseApi(
+         ids
+     }
+ 
++    /** Recover (owner, free): the fake has the video, so the job is simply done again with no new charge. */
++    override suspend fun recoverJob(jobId: String) = lock.withLock {
++        val i = jobs.indexOfFirst { it.id == jobId }
++        if (i < 0 || !jobs[i].canRecover) throw ApiException("bad_request", "Nothing to recover")
++        jobs[i] = jobs[i].copy(state = "done", error = null, errorCode = null)
++    }
++
+     override suspend fun removeJob(jobId: String) {
+         lock.withLock { jobs.removeAll { it.id == jobId }; hiddenJobs += jobId }
+         runners.remove(jobId)?.cancel()
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+index f0cd8a4b..5aa8849a 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/HttpMuseApi.kt
+@@ -71,6 +71,7 @@ interface MuseService {
+     @POST("v1/jobs") suspend fun createJob(@Body r: JobRequest): Job
+     @DELETE("v1/jobs/{id}") suspend fun removeJob(@Path("id") id: String)
+     @POST("v1/jobs/clear-failed") suspend fun clearFailedJobs(@Body r: JsonObject): ClearedJobs
++    @POST("v1/jobs/{id}/recover") suspend fun recoverJob(@Path("id") id: String, @Body r: JsonObject): JsonObject
+     @GET("v1/takes") suspend fun takes(): List<Take>
+     @PATCH("v1/takes/{id}") suspend fun setTake(@Path("id") id: String, @Body r: SetTakeStatusRequest): Take
+     @DELETE("v1/takes/{id}") suspend fun deleteTake(@Path("id") id: String)
+@@ -441,6 +442,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
+     override suspend fun createJob(req: JobRequest) = call { createJob(req) }.abs()
+     override suspend fun removeJob(jobId: String) = call { removeJob(jobId) }
+     override suspend fun clearFailedJobs() = call { clearFailedJobs(buildJsonObject {}) }.ids
++    override suspend fun recoverJob(jobId: String) { call { recoverJob(jobId, buildJsonObject {}) } }
+ 
+     /** Edited version: the MP4 (streamed from disk) and its JPEG go up with presigned PUTs, then the take is created. */
+     override suspend fun saveTakeVersion(takeId: String, video: EditedVideo, edits: EditListDto, onProgress: (Float) -> Unit): Take {
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+index 8aee54e0..1abe7833 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Models.kt
+@@ -277,7 +277,8 @@ data class Job(
+     val warm: Boolean? = null,
+     /** The server's label ("Draft · 768P", "Edit", "Fast · beta"); older servers send none. */
+     @SerialName("engineLabel") val serverEngineLabel: String? = null,
+-    /** Failed replicate jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout. */
++    /** Failed replicate/suite jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout |
++     *  provider_paid_unsaved | provider_unconfirmed (made and charged at the provider: Recover, not Retry). */
+     val errorCode: String? = null,
+     /** Done replicate jobs: output seconds Replicate billed. */
+     val billedSeconds: Double? = null,
+@@ -289,6 +290,15 @@ data class Job(
+     val running get() = state == "running" || state == "queued"
+     val done get() = state == "done"
+     val failed get() = state == "failed"
++    /** The provider made (and charged for) the video but the server couldn't save it, or may still finish it: the owner
++     *  brings it back with Recover (free, POST /v1/jobs/:id/recover). Retry would pay for it again. */
++    val canRecover get() = failed && errorCode in RECOVER_CODES
++    companion object {
++        val RECOVER_CODES = setOf("provider_paid_unsaved", "provider_unconfirmed")
++        const val RECOVER = "Recover"
++        /** What a member sees instead (Recover is owner-only on the server). */
++        const val RECOVER_BY_OWNER = "The studio owner can recover it for free"
++    }
+ }
+ 
+ /** One take of a job, or one photoshoot still. status: test | final. kind: take | shot. */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+index d821242d..b9c4b195 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseApi.kt
+@@ -60,6 +60,9 @@ interface MuseApi {
+     suspend fun removeJob(jobId: String)
+     /** POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own). */
+     suspend fun clearFailedJobs(): List<String>
++    /** POST /v1/jobs/:id/recover (owner only, free): a job the provider made and charged for but the server couldn't save
++     *  (errorCode provider_paid_unsaved / provider_unconfirmed) is fetched again by its saved request id. Never a new run. */
++    suspend fun recoverJob(jobId: String)
+     /** Starts queued jobs, oldest first, charging each. Returns the jobs it started. */
+     suspend fun runQueue(): List<Job>
+     suspend fun listTakes(): List<Take>
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt b/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
+index 78fc0679..3df8a539 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/MuseRepository.kt
+@@ -462,6 +462,14 @@ class MuseRepository(
+ 
+     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
+ 
++    /** Recover (owner only, free): fetched again by the saved provider request id; the take arrives as usual. */
++    suspend fun recoverJob(id: String) = attempt { recoverJob(id) }?.also {
++        _state.update { s -> s.copy(jobs = s.jobs.map { if (it.id == id) it.copy(state = "running", error = null, errorCode = null) else it }) }
++        toast("Recovering · free")
++    }
++    /** The signed-in person is the studio owner (owner-only actions such as Recover). */
++    fun ownerNow() = isOwner()
++
+     suspend fun clearFailedJobs() = attempt { clearFailedJobs() }?.also { ids -> _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id in ids }) } }
+ 
+     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/QueueScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/QueueScreen.kt
+index 9415430d..d82d5f12 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/QueueScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/QueueScreen.kt
+@@ -104,6 +104,8 @@ class QueueViewModel(private val c: AppContainer) : ViewModel() {
+         c.drafts.dismissedFails.update { it + j.id }
+         if (c.repo.removeJob(j.id) == null) c.drafts.dismissedFails.update { it - j.id }
+     }
++    fun owner() = c.repo.ownerNow()
++    fun recover(j: Job) = viewModelScope.launch { c.repo.recoverJob(j.id) }
+     fun clearFailed() = viewModelScope.launch { c.repo.clearFailedJobs()?.let { c.repo.toast("Cleared ${it.size} failed") } }
+ 
+     fun rerun(j: Job, nav: Nav) { c.drafts.loadJob(j); c.repo.toast("Settings loaded · tap Generate"); nav.go(Routes.DIRECT) }
+@@ -167,8 +169,12 @@ private fun FailCard(vm: QueueViewModel, j: Job, count: Int) {
+             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                 T("${j.title} didn't render", m.scale.heading, m.roles.danger)
+                 Caption(j.failLine())
++                if (j.canRecover && !vm.owner()) Caption(Job.RECOVER_BY_OWNER)
+             }
+-            SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
++            if (j.canRecover) {
++                // Already made and charged at the provider: Recover is free (owner only); Try again would pay again.
++                if (vm.owner()) SecondaryButton(Job.RECOVER, { vm.recover(j) }, height = 48.dp)
++            } else SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
+             SecondaryButton("Dismiss", { vm.dismiss(j) }, height = 48.dp)
+         }
+         if (count > 1) Caption("Clear all $count failed", Modifier.press { vm.clearFailed() }.padding(vertical = MuseSpace.s2))
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/StudioStage.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/StudioStage.kt
+index 2451e8c0..f35ad5ca 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/StudioStage.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/StudioStage.kt
+@@ -101,6 +101,8 @@ data class StudioStage(
+                 "provider_rate_limited" -> "Busy right now · you weren't charged. Try again in a minute."
+                 "provider_timeout" -> "This took too long and was stopped · you weren't charged"
+                 "provider_out_of_credit" -> "Something went wrong · you weren't charged. The studio owner has been told."
++                "provider_paid_unsaved" -> "Your video was made (the provider charged the studio) but MUSE couldn't save it · it can be recovered for free"
++                "provider_unconfirmed" -> "The provider didn't finish in time and may still charge the studio · it can be recovered for free if it finishes"
+                 else -> ErrorText.WENT_WRONG
+             }
+         }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
+index 8e5faef5..3d9434c4 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteModel.kt
+@@ -208,6 +208,8 @@ data class SuitePane(
+     val price: String = "",
+     val takes: List<Take> = emptyList(),
+     val failure: String? = null,
++    /** Failed after the provider made (and charged for) it: Recover (owner, free) instead of Retry. */
++    val recoverJobId: String? = null,
+ ) {
+     companion object {
+         val STEPS = listOf("Keyframe from %s’s sheet", "Motion & camera", "Sharpen & finish")
+@@ -222,7 +224,7 @@ data class SuitePane(
+             return when (st.phase) {
+                 StagePhase.IDLE -> SuitePane()
+                 StagePhase.READY -> SuitePane(StagePhase.READY, "Ready", "100%", 1f, "Ready", price = st.price, takes = st.takes)
+-                StagePhase.FAILED -> SuitePane(StagePhase.FAILED, "Failed", st.percent, st.progress, "Failed", price = st.price, failure = st.failure)
++                StagePhase.FAILED -> SuitePane(StagePhase.FAILED, "Failed", st.percent, st.progress, "Failed", price = st.price, failure = st.failure, recoverJobId = j.id.takeIf { j.canRecover })
+                 StagePhase.QUEUED -> {
+                     val pos = j.queuePosition
+                     val badge = if (pos != null && pos > 1) "#$pos in line" else "In line"
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteParts.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteParts.kt
+index e48639e0..abf63830 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteParts.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/SuiteParts.kt
+@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.Dp
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.unit.sp
+ import studio.muse.app.data.ImageRef
++import studio.muse.app.data.Job
++import kotlinx.coroutines.launch
+ import studio.muse.app.ui.components.Bar
+ import studio.muse.app.ui.components.Ink
+ import studio.muse.app.ui.components.RefImage
+@@ -247,9 +249,18 @@ fun BoxScope.SuiteResultPane(
+             Column(Modifier.align(Alignment.Center).padding(20.dp).widthIn(max = 300.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                 T("This take didn't work", m.type.h2.copy(fontSize = 26.sp, lineHeight = 28.sp), Color.White, align = TextAlign.Center)
+                 T(pane.failure ?: "We stopped early. You weren't charged.", m.type.tiny, Color.White.copy(alpha = .92f), align = TextAlign.Center, maxLines = 3)
+-                // Not free: the failed run was refunded and a retry is a new run at the same price (owner bug 2026-11-11).
+-                StageButton(if (pane.price.isBlank() || pane.price == "$0.00") "Retry" else "Retry · ${pane.price}", onRetry, primary = true, icon = "retry")
+-                if (onTry != null && tryLabel != null) StageButton(tryLabel, onTry)
++                val recoverId = pane.recoverJobId
++                if (recoverId != null) {
++                    // Already made and charged at the provider: Recover is free (owner only); Retry would pay again.
++                    val repo = studio.muse.app.ui.LocalContainer.current.repo
++                    val scope = androidx.compose.runtime.rememberCoroutineScope()
++                    if (repo.ownerNow()) StageButton(Job.RECOVER, { scope.launch { repo.recoverJob(recoverId) } }, primary = true, icon = "retry")
++                    else T(Job.RECOVER_BY_OWNER, m.type.tiny, Color.White.copy(alpha = .8f), align = TextAlign.Center)
++                } else {
++                    // Not free: the failed run was refunded and a retry is a new run at the same price (owner bug 2026-11-11).
++                    StageButton(if (pane.price.isBlank() || pane.price == "$0.00") "Retry" else "Retry · ${pane.price}", onRetry, primary = true, icon = "retry")
++                    if (onTry != null && tryLabel != null) StageButton(tryLabel, onTry)
++                }
+             }
+         }
+     }

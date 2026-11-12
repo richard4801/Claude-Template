@@ -168,6 +168,9 @@ export class ReplicateAdapter implements ProviderAdapter {
   }
 }
 
+/** A provider error AFTER it finished (and billed): the job says the studio was charged (services/replicateVideo.ts failureOf). */
+export function paidError(message: string, kind: 'refused' | 'failed') { return Object.assign(new ReplicateError(message, kind), { paid: true as const }); }
+
 // ------------------------------------------------------------------------------------------------------------------ fal
 // https://fal.ai/docs/platform-apis/v1/models · Authorization: Key <key>. The model list takes no key (it only lifts rate
 // limits); pricing needs one, so a pricing read is the key check. Runs go through the queue (queue.fal.run).
@@ -265,9 +268,11 @@ export class FalAdapter implements ProviderAdapter {
     const st = (await res.json().catch(() => ({}))) as { status?: string; error?: unknown };
     if (st.status === 'COMPLETED') {
       const out = await this.f(h.r, { headers: this.h(key), signal: AbortSignal.timeout(30_000) }).catch(() => null);
-      const body = (await out?.json().catch(() => ({}))) as Record<string, unknown> | undefined;
+      // fal has finished (and billed): a result fetch that didn't get through is asked again on the next poll, never a failure.
+      if (!out || out.status === 429 || out.status >= 500) return { status: 'running' };
+      const body = (await out.json().catch(() => ({}))) as Record<string, unknown> | undefined;
       const url = firstUrl(body);
-      if (!out?.ok || !url) { const t = errorText((body as any)?.detail ?? st.error ?? `status ${out?.status}`); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
+      if (!out.ok || !url) { const t = errorText((body as any)?.detail ?? st.error ?? `status ${out.status}`); return { status: 'failed', error: paidError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
       return { status: 'succeeded', url };
     }
     if (st.status === 'FAILED' || st.error) { const t = errorText(st.error ?? 'failed'); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
@@ -474,8 +479,9 @@ export class MuapiAdapter implements ProviderAdapter {
       // Muapi flags outputs it thinks are NSFW: those aren't used; all flagged is a refusal.
       const url = firstUrl(outs.filter((_, i) => flags[i] !== true));
       if (url) return { status: 'succeeded', url };
-      if (flags.some(x => x === true)) return { status: 'failed', error: new ReplicateError('Muapi flagged the result as NSFW', 'refused') };
-      return { status: 'failed', error: new ReplicateError('no output came back', 'failed') };
+      // Made (and billed) but not usable: refused or empty, said honestly (never "you weren't charged").
+      if (flags.some(x => x === true)) return { status: 'failed', error: paidError('Muapi flagged the result as NSFW', 'refused') };
+      return { status: 'failed', error: paidError('no output came back', 'failed') };
     }
     if (st === 'failed' || st === 'error') {
       const t = errorText(p.error ?? 'failed');

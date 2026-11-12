@@ -6,9 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { and, eq, sql } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips, jobs, takes, uploads, users, type ImageRef } from '../db/schema.js';
+import { clips, jobs, takes, uploads, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
-import { recordIssue } from '../claude/issues.js';
+import { PaidLost, paidLostFailure, reportPaidLost, sleep } from '../services/paidLost.js';
 import { ReplicateError } from '../replicate/client.js';
 import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail, type MediaInfo } from '../replicate/media.js';
 import { frameOf, joinClips, segment } from './extendMedia.js';
@@ -27,21 +27,13 @@ import type { ProviderStatus, VideoProvider } from './providers.js';
 
 /** The pod id suite jobs are claimed under (no pod row exists for it). */
 export const SUITE_POD = 'suite';
-/** The provider made (and charged for) the video, but this server could not save it. Never "you weren't charged". */
-export const PAID_UNSAVED = "Your video was made (the provider charged the studio) but MUSE couldn't save it · it can be recovered for free";
-/** We stopped waiting, the provider didn't confirm a cancel: it may still finish and charge. */
-export const PAID_UNCONFIRMED = "The provider didn't finish in time and may still charge the studio · it can be recovered for free if it finishes";
+export { PAID_UNSAVED, PAID_UNCONFIRMED } from '../services/paidLost.js';
 type TakeState = { id?: string; provider?: string; done?: boolean; key?: string; billed?: number; output?: Record<string, unknown>;
   /** When the provider request was made (the timeout counts from here, across restarts). */ startedAt?: number;
   /** Our timeout asked the provider to cancel at this time. */ cancelAsked?: number;
   /** The provider finished: it is paid for from here on, whatever happens on our side. */ paid?: boolean; result?: { url: string; billedSeconds?: number | null; at: number } };
 type Running = { cancelled: boolean; ids: Set<string>; done: Promise<void> };
 type Prepared = { urls: MediaUrls; prompt: string; separationCost: number; source?: { file: string; info: MediaInfo } };
-/** A provider result that is (or may be) paid but did not become a take. */
-class PaidLost extends Error {
-  constructor(readonly kind: 'unsaved' | 'unconfirmed', readonly take: number, readonly why: string) { super(why); }
-}
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export class SuiteRunner {
   private running = new Map<string, Running>();
@@ -135,7 +127,9 @@ export class SuiteRunner {
     if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can do that');
     const [j] = await this.ctx.db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.studioId, u.studioId)));
     if (!j) throw notFound('Job');
-    if (j.request?.engine !== 'suite') throw badRequest('Only AI Suite jobs can be recovered');
+    // Character swap (Replicate / Higgsfield line): its own saved predictions (services/replicateVideo.ts).
+    if (j.request?.engine === 'replicate') return this.ctx.replicateVideo.recover(j);
+    if (j.request?.engine !== 'suite') throw badRequest('Only AI Suite and Character swap jobs can be recovered');
     if (j.state === 'running') return { ok: true, state: 'running', job: jobId };
     if (j.state !== 'failed') throw badRequest('This job is not a failed one');
     const suite = ((j.stats as any)?.suite ?? {}) as { takes?: TakeState[]; plan?: unknown };
@@ -222,13 +216,14 @@ export class SuiteRunner {
         if (!sep) {
           if (!key) throw new ReplicateError('the audio must be an upload to separate its beat', 'failed');
           await report(1, 0.02, 'Preparing the audio');
-          const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled }) as { instrumentalKey: string; costUsd: number; separated?: boolean };
+          const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled }) as { instrumentalKey: string; costUsd: number; separated?: boolean; lost?: boolean };
           const separated = b.separated !== false && b.instrumentalKey !== key;
-          sep = separated ? { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd, separated: true } : { instrumentalKey: null, costUsd: 0, separated: false };
+          // A separation that was paid but couldn't be saved is still billed (the shot runs on its no-audio prompt).
+          sep = separated ? { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd, separated: true } : { instrumentalKey: null, costUsd: b.lost ? b.costUsd ?? 0 : 0, separated: false };
           await this.saveExtra(job.id, { audio: sep });
         }
+        separationCost = sep.costUsd ?? 0;
         if (sep.separated && sep.instrumentalKey) {
-          separationCost = sep.costUsd ?? 0;
           urls.audio = await ctx.storage.presignGet(sep.instrumentalKey, c.REPLICATE_INPUT_URL_TTL_SEC);
         } else if (plan.promptNoAudio) {
           prompt = plan.promptNoAudio;
@@ -401,7 +396,7 @@ export class SuiteRunner {
       }
       // Settle: price × billed seconds (+ fixed extras); the mock charges nothing unless SUITE_MOCK_CHARGE.
       const savedSep = (job.stats as any)?.suite?.audio as { separated?: boolean; costUsd?: number } | undefined;
-      const separationCost = prepared ? (await prepared).separationCost : savedSep?.separated ? savedSep.costUsd ?? 0 : 0;
+      const separationCost = prepared ? (await prepared).separationCost : savedSep?.costUsd ?? 0;
       const exact = plan.perSec * billed.reduce((a, b) => a + b, 0) + plan.extraPerTake * n + separationCost;
       const actual = mock && !c.SUITE_MOCK_CHARGE ? 0 : exact;
       const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;
@@ -416,8 +411,9 @@ export class SuiteRunner {
         // Paid (or maybe paid) at the provider and not a take: say so, keep the request id, tell the owner.
         ctx.log.error({ job: job.id, take: e.take, kind: e.kind, err: e.why }, 'suite job: provider result paid but not saved');
         await this.saveExtra(job.id, { lost: { take: e.take, kind: e.kind, why: e.why.slice(0, 300), at: Date.now() } }).catch(() => {});
-        await ctx.jobs.fail(job.id, e.kind === 'unsaved' ? PAID_UNSAVED : PAID_UNCONFIRMED, false, e.kind === 'unsaved' ? 'provider_paid_unsaved' : 'provider_unconfirmed');
-        await this.reportLost(job, modelName, e).catch(err => ctx.log.warn({ err: (err as Error).message }, 'suite: could not record the issue'));
+        const f = paidLostFailure(e);
+        await ctx.jobs.fail(job.id, f.message, false, f.code);
+        await reportPaidLost(ctx, job, modelName, e, 'suite_runner').catch(err => ctx.log.warn({ err: (err as Error).message }, 'suite: could not record the issue'));
         return;
       }
       const f = failureOf(e);
@@ -427,18 +423,6 @@ export class SuiteRunner {
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
-  }
-
-  /** The owner's issue list gets the lost result (owner tool job_recover brings it back for free). */
-  private async reportLost(job: JobRow, modelName: string, e: PaidLost) {
-    const [u] = job.userId ? await this.ctx.db.select({ role: users.role }).from(users).where(eq(users.id, job.userId)) : [];
-    await recordIssue(this.ctx, { id: job.userId ?? 'system', studioId: job.studioId, role: u?.role ?? 'member' }, {
-      source: 'auto', kind: 'bug', severity: 'high', page: 'queue', tool: 'suite_runner',
-      summary: e.kind === 'unsaved'
-        ? `A paid ${modelName} take was made by the provider but MUSE could not save it (job ${job.id}). Recover it free with job_recover.`
-        : `A ${modelName} take ran past its time and the provider did not confirm a cancel (job ${job.id}); it may still be charged. job_recover fetches it if it finishes.`,
-      error: e.why.slice(0, 300),
-    });
   }
 
   /**

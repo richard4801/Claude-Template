@@ -15,6 +15,8 @@ export type BeatOnly = {
   /** The instrumental in storage (audio only, AAC). The source itself when the provider is the mock (`separated: false`). */
   instrumentalKey: string; separated: boolean;
   costUsd: number; predictionId: string | null; seconds: number | null;
+  /** The provider separated (and charged) but saving the instrumental failed: the shot goes on without audio, the cost is billed. */
+  lost?: boolean;
 };
 
 function ffmpeg(bin: string, args: string[]) {
@@ -43,6 +45,10 @@ export async function beatOnlyAudio(ctx: Ctx, o: {
     const key = `r/${o.jobId}/instrumental.m4a`;
     await putFile(ctx, { key, file: out, studioId: o.studioId, kind: 'output', userId: o.userId ?? null, contentType: 'audio/mp4' });
     return { instrumentalKey: key, separated: true, costUsd, predictionId, seconds: r.gpuSec };
+  } catch (e) {
+    // Paid at the provider already: never fail the shot (and say "not charged") over our own conversion or storage.
+    ctx.log.warn({ job: o.jobId, err: (e as Error).message }, 'beat-only audio: separated but not saved, the shot goes on without audio');
+    return { instrumentalKey: o.audioKey, separated: false, costUsd, predictionId, seconds: r.gpuSec, lost: true };
   } finally {
     rmQuiet(r.file);
     fs.rmSync(tmp, { recursive: true, force: true });
