@@ -1,0 +1,190 @@
+diff --git a/mac/Muse/App/AppStore+Actions.swift b/mac/Muse/App/AppStore+Actions.swift
+index 21d7aa24..8469e54d 100644
+--- a/mac/Muse/App/AppStore+Actions.swift
++++ b/mac/Muse/App/AppStore+Actions.swift
+@@ -174,6 +174,21 @@ extension AppStore {
+         }
+     }
+ 
++    /// Recover (owner only, free): a job the provider made and charged for but the server couldn't save is fetched again
++    /// by its saved request id (POST /v1/jobs/:id/recover). Never a new run; the take arrives as usual.
++    func recover(_ j: Job) {
++        guard isOwner, j.canRecover else { return }
++        perform { [self] in
++            try await api.recoverJob(id: j.id)
++            if let i = jobs.firstIndex(where: { $0.id == j.id }) {
++                jobs[i].state = "running"
++                jobs[i].error = nil
++                jobs[i].errorCode = nil
++            }
++            showToast("Recovering \(TakeText.displayTitle(j.title)) · free")
++        }
++    }
++
+     /// Dismiss is stored on the server (the job's hiddenAt), so it holds after a relaunch or a deploy. It used to hide the
+     /// row in memory only, and every failure came back on the next launch (owner bug 2026-11-11).
+     func dismissFailure(_ j: Job) {
+diff --git a/mac/Muse/Views/QueueGalleryViews.swift b/mac/Muse/Views/QueueGalleryViews.swift
+index fa8998ec..360c736f 100644
+--- a/mac/Muse/Views/QueueGalleryViews.swift
++++ b/mac/Muse/Views/QueueGalleryViews.swift
+@@ -51,7 +51,13 @@ struct QueueView: View {
+                         Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                     }
+                     Spacer(minLength: Space.s3)
+-                    RButton(f.isPhoto ? "Make again" : ScreenCopy.retryLabel(cost: f.cost, estimate: Pricing.totalCost(f.request.spec)), small: true) { store.retry(f) }
++                    if f.canRecover {
++                        // Already made and charged at the provider: Recover is free (owner only); Retry would pay again.
++                        if store.isOwner { RButton(ScreenCopy.recoverLabel, small: true) { store.recover(f) } }
++                        else { Text(ScreenCopy.recoverByOwner).scaled(t.scale.caption, t.roles.ink2) }
++                    } else {
++                        RButton(f.isPhoto ? "Make again" : ScreenCopy.retryLabel(cost: f.cost, estimate: Pricing.totalCost(f.request.spec)), small: true) { store.retry(f) }
++                    }
+                     RButton("Dismiss", kind: .plain, small: true) { store.dismissFailure(f) }
+                 }
+                 .padding(.horizontal, Space.s4)
+diff --git a/mac/Muse/Views/Suite/SuiteComponents.swift b/mac/Muse/Views/Suite/SuiteComponents.swift
+index 6bc0fb40..7adbe837 100644
+--- a/mac/Muse/Views/Suite/SuiteComponents.swift
++++ b/mac/Muse/Views/Suite/SuiteComponents.swift
+@@ -307,7 +307,17 @@ struct SuiteResultPane: View {
+             VStack(spacing: 10) {
+                 Text("That take didn't work").font(t.isA ? Fonts.font("Instrument Serif", 26, .regular) : t.display(20)).foregroundStyle(.white)
+                 Text(message).font(t.body(12)).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+-                if let j = job {
++                if let j = job, j.canRecover {
++                    // Already made and charged at the provider: Recover is free (owner only); Retry would pay again.
++                    if store.isOwner {
++                        Button { store.recover(j) } label: {
++                            Text(ScreenCopy.recoverLabel).font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
++                        }
++                        .buttonStyle(.plain)
++                    } else {
++                        Text(ScreenCopy.recoverByOwner).font(t.body(11)).foregroundStyle(.white.opacity(0.8))
++                    }
++                } else if let j = job {
+                     Button { store.retakeShot(j) } label: {
+                         // Not free: the failed run was refunded and the retry is a new run (owner bug 2026-11-11).
+                         Text(j.isPhoto ? "Make again" : j.cost > 0 ? ScreenCopy.retryLabel(cost: j.cost, estimate: 0) : "Retry").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
+diff --git a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+index 09207a6e..6845d64e 100644
+--- a/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/FakeMuseAPI.swift
+@@ -816,6 +816,15 @@ public actor FakeMuseAPI: MuseAPI {
+         return ids
+     }
+ 
++    /// Recover (owner, free): the fake has the video, so the job is simply done again with no new charge.
++    public func recoverJob(id: String) throws {
++        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can do that") }
++        guard let i = jobs.firstIndex(where: { $0.id == id }), jobs[i].canRecover else { throw ApiError("bad_request", "Nothing to recover") }
++        jobs[i].state = "done"
++        jobs[i].error = nil
++        jobs[i].errorCode = nil
++    }
++
+     public func removeJob(id: String) {
+         if runningId == id {
+             runner?.cancel()
+diff --git a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+index 8703ca35..5e842cd9 100644
+--- a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+@@ -576,6 +576,10 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
+         return try decoder.decode(Cleared.self, from: try await send(request("POST", "v1/jobs/clear-failed", body: try encoder.encode(Empty())))).ids
+     }
+ 
++    public func recoverJob(id: String) async throws {
++        _ = try await send(request("POST", "v1/jobs/\(id)/recover", body: try encoder.encode(Empty())))
++    }
++
+     public func runQueue() async throws {
+         // In plans/api.md since 2026-11-04. Older servers start jobs on their own and answer 404, which is ignored.
+         do { _ = try await send(request("POST", "v1/queue/run", body: try encoder.encode(Empty()))) } catch let e as ApiError where e.code == "http_404" || e.code == "not_found" {}
+diff --git a/mac/MuseCore/Sources/MuseCore/MemberText.swift b/mac/MuseCore/Sources/MuseCore/MemberText.swift
+index 5b84ade5..b96867f1 100644
+--- a/mac/MuseCore/Sources/MuseCore/MemberText.swift
++++ b/mac/MuseCore/Sources/MuseCore/MemberText.swift
+@@ -6,6 +6,9 @@ public enum MemberText {
+     public static let wentWrong = "Something went wrong · you weren't charged"
+     public static let ownerTold = "Something went wrong · you weren't charged. The studio owner has been told."
+     public static let waitingToStart = "Waiting to start"
++    /// The server's words for errorCode provider_paid_unsaved / provider_unconfirmed (server/api/src/services/paidLost.ts).
++    public static let paidUnsaved = "Your video was made (the provider charged the studio) but MUSE couldn't save it · it can be recovered for free"
++    public static let paidUnconfirmed = "The provider didn't finish in time and may still charge the studio · it can be recovered for free if it finishes"
+ 
+     /// Words members never see. Server text that contains one (an older server's "The GPU disconnected at step 3.",
+     /// "Rendering on Replicate") is replaced by the contract's wording.
+diff --git a/mac/MuseCore/Sources/MuseCore/Models.swift b/mac/MuseCore/Sources/MuseCore/Models.swift
+index 1ea85075..d1df8359 100644
+--- a/mac/MuseCore/Sources/MuseCore/Models.swift
++++ b/mac/MuseCore/Sources/MuseCore/Models.swift
+@@ -743,11 +743,17 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
+         case "provider_rate_limited": return "Busy right now · you weren't charged. Try again in a minute."
+         case "provider_timeout": return "This took too long and was stopped · you weren't charged"
+         case "provider_out_of_credit": return MemberText.ownerTold
++        case "provider_paid_unsaved": return MemberText.paidUnsaved
++        case "provider_unconfirmed": return MemberText.paidUnconfirmed
+         default: return MemberText.wentWrong
+         }
+     }
+     /// Refused by the provider's safety filter.
+     public var isRefused: Bool { errorCode == "provider_refused" }
++    /// The provider made (and charged for) the video but the server couldn't save it, or may still finish it: the owner
++    /// brings it back with Recover (free, POST /v1/jobs/:id/recover). Retry would pay for it again.
++    public var canRecover: Bool { isFailed && Job.recoverCodes.contains(errorCode ?? "") }
++    public static let recoverCodes: Set<String> = ["provider_paid_unsaved", "provider_unconfirmed"]
+     public var isActive: Bool { state == "running" || state == "queued" }
+     public var isRunning: Bool { state == "running" }
+     public var isQueued: Bool { state == "queued" }
+diff --git a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+index 73ffde77..99fe2570 100644
+--- a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+@@ -91,6 +91,9 @@ public protocol MuseAPI: AnyObject, Sendable {
+     func removeJob(id: String) async throws
+     /// POST /v1/jobs/clear-failed ("Clear all failed"): hides every failed job for good (owner: the studio's; member: own).
+     func clearFailedJobs() async throws -> [String]
++    /// POST /v1/jobs/:id/recover (owner only, free): a job the provider made and charged for but the server couldn't save
++    /// (errorCode provider_paid_unsaved / provider_unconfirmed) is fetched again by its saved request id. Never a new run.
++    func recoverJob(id: String) async throws
+     /// POST /v1/queue/run: starts the GPU on queued jobs ("Run queue"). Servers that start jobs on their own treat it as a no-op.
+     func runQueue() async throws
+     func listTakes() async throws -> [Take]
+diff --git a/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift b/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift
+index 79b45477..e5a1370e 100644
+--- a/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift
++++ b/mac/MuseCore/Sources/MuseCore/ScreenCopy.swift
+@@ -36,4 +36,9 @@ public enum ScreenCopy {
+     public static func retryLabel(cost: Double, estimate: Double) -> String {
+         "Retry · \(Pricing.money(cost > 0 ? cost : estimate))"
+     }
++
++    /// A failed job the provider already made (and charged for): the owner's free Recover instead of a paid Retry.
++    public static let recoverLabel = "Recover"
++    /// What a member sees instead of Retry on such a job (Recover is owner-only on the server).
++    public static let recoverByOwner = "The studio owner can recover it for free"
+ }
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift
+index 5d6ab98c..f0c6e669 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ScreenCopyTests.swift
+@@ -43,4 +43,18 @@ final class ScreenCopyTests: XCTestCase {
+         XCTAssertEqual(ScreenCopy.retryLabel(cost: 0.91, estimate: 0.67), "Retry · $0.91")
+         XCTAssertEqual(ScreenCopy.retryLabel(cost: 0, estimate: 0.67), "Retry · $0.67")
+     }
++
++    /// A job the provider made and charged for but the server couldn't save: Recover (free, owner), never "not charged".
++    func testPaidUnsavedJobOffersRecover() throws {
++        let json = #"{"id":"j9","state":"failed","request":{"engine":"replicate","quality":"hd"},"errorCode":"provider_paid_unsaved","error":"Your video was made (the provider charged the studio) but MUSE couldn't save it · it can be recovered for free"}"#
++        let j = try JSONDecoder().decode(Job.self, from: Data(json.utf8))
++        XCTAssertTrue(j.canRecover)
++        XCTAssertEqual(ScreenCopy.failure(j.failureLine, charged: false), MemberText.paidUnsaved)
++        XCTAssertFalse(ScreenCopy.failure(j.failureLine, charged: false).contains("weren't charged"))
++        XCTAssertEqual(Job.defaultFailure("provider_unconfirmed"), MemberText.paidUnconfirmed)
++        var other = j
++        other.errorCode = "provider_failed"
++        XCTAssertFalse(other.canRecover)
++        XCTAssertEqual(ScreenCopy.recoverLabel, "Recover")
++    }
+ }

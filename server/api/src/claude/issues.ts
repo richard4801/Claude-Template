@@ -166,7 +166,7 @@ export const ISSUE_ADMIN_TOOLS: EditTool[] = [
     inputSchema: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: str('The report id (ci_…)', 80), status: { type: 'string', enum: [...STATUSES] }, note: str('Note', 1000) } },
     run: (env, a) => { const { id, ...rest } = a; return markIssue(env.ctx, env.user, String(id ?? ''), rest); } },
   { name: 'job_recover', title: 'Recover a paid video (owner)', scope: 'edit:write', idempotent: true,
-    description: 'Owner only, free: brings back an AI Suite job that failed after the provider made (and charged for) its video (error code provider_paid_unsaved or provider_unconfirmed, or a failed job you know finished at the provider). It only asks the provider for the saved request\'s result; it never starts a new generation. The take then arrives as usual.',
+    description: 'Owner only, free: brings back an AI Suite or Character swap job that failed after the provider made (and charged for) its video (error code provider_paid_unsaved or provider_unconfirmed, or a failed job you know finished at the provider). It only asks the provider for the saved request\'s result; it never starts a new generation. The take then arrives as usual.',
     inputSchema: { type: 'object', additionalProperties: false, required: ['jobId'], properties: { jobId: str('The job id (queue_list)', 80) } },
     run: (env, a) => env.ctx.suite.runner.recover(env.user, String(a.jobId ?? '')) },
 ];
@@ -176,6 +176,6 @@ export const ISSUE_ADMIN_TOOLS: EditTool[] = [
 export async function registerIssueRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/claude/issues', async req => listIssues(ctx, req.user, req.query));
   app.post<{ Params: { id: string } }>('/v1/claude/issues/:id', async req => markIssue(ctx, req.user, req.params.id, req.body));
-  // Owner, free: a suite job whose paid provider result wasn't saved is fetched again by its saved request id.
+  // Owner, free: a suite or Character swap job whose paid provider result wasn't saved is fetched again by its saved request id.
   app.post<{ Params: { id: string } }>('/v1/jobs/:id/recover', async req => ctx.suite.runner.recover(req.user, req.params.id));
 }

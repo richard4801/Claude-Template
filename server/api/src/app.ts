@@ -199,10 +199,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     ctx.posts.stop();
     if (recreateSweep) clearInterval(recreateSweep);
     for (const t of timers) clearTimeout(t);
-    await ctx.replicateVideo.idle();
-    // Suite runs step back (jobs stay running, provider request ids saved) and the next instance resumes them: a deploy
-    // must never fail or lose a paid provider job.
-    await ctx.suite.runner.stop();
+    // Suite runs and Character swaps (Replicate / Higgsfield line) step back (jobs stay running, provider request ids
+    // saved) and the next instance resumes them: a deploy must never fail or lose a paid provider job.
+    await Promise.all([ctx.replicateVideo.stop(), ctx.suite.runner.stop()]);
     await recreateOf(ctx).idle(); // Recreate this edit (workstream 1)
     await (await import('./editor/renders.js')).rendersOf(ctx).idle(); // edit renders (workstream 1)
     await ctx.gpu.shutdown();
