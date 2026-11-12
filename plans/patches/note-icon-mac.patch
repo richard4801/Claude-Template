@@ -1,0 +1,42 @@
+diff --git a/mac/Muse/Theme/Components.swift b/mac/Muse/Theme/Components.swift
+index 1ba261e2..3106c284 100644
+--- a/mac/Muse/Theme/Components.swift
++++ b/mac/Muse/Theme/Components.swift
+@@ -586,20 +586,22 @@ struct NumStepper: View {
+     }
+ }
+ 
+-/// `.note` and `.note.warn`
++/// `.note` and `.note.warn`. No icon unless the caller names one (design direction §5: no icon next to every label; the
++/// old default was a sparkle, the ✦ the owner flagged as AI-ish on 2026-11-12). A warning gets Phosphor's warning mark.
++/// Icons draw through `Ph` (Phosphor Regular, SF names mapped by PhosphorMap) at 16 pt.
+ struct Note: View {
+     @Environment(\.theme) private var t
+-    var icon: String = "sparkle"
++    var icon: String?
+     var warn = false
+     var text: Text
+ 
+-    init(icon: String = "sparkle", warn: Bool = false, _ text: String) {
++    init(icon: String? = nil, warn: Bool = false, _ text: String) {
+         self.icon = icon
+         self.warn = warn
+         self.text = Text(text)
+     }
+ 
+-    init(icon: String = "sparkle", warn: Bool = false, text: Text) {
++    init(icon: String? = nil, warn: Bool = false, text: Text) {
+         self.icon = icon
+         self.warn = warn
+         self.text = text
+@@ -607,7 +609,9 @@ struct Note: View {
+ 
+     var body: some View {
+         HStack(alignment: .firstTextBaseline, spacing: 10) {
+-            Image(systemName: icon).font(.system(size: 13, weight: .semibold))
++            if let name = icon ?? (warn ? "warning" : nil) {
++                Ph(name, 16).alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 3 }.accessibilityHidden(true)
++            }
+             text.font(t.body(13)).fixedSize(horizontal: false, vertical: true)
+             Spacer(minLength: 0)
+         }
