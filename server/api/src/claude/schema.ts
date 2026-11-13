@@ -6,6 +6,8 @@ export const claudePrefs = pgTable('claude_prefs', {
   userId: text('user_id').primaryKey(),
   studioId: text('studio_id').notNull(),
   defaultModel: text('default_model'),
+  /** 0036: the effort level this person picked last (used by chats that have none, where the model takes it). */
+  defaultEffort: text('default_effort'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 

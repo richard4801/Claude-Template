@@ -29,7 +29,7 @@ import { memoryFacts } from '../claude/memory.js';
 import { SYSTEM_PROMPT as DIRECTOR_PROMPT } from '../camera/director.js';
 /** The director's working rules (one Claude's Camera section; the director's own opening line is left out). */
 const CAMERA_GUIDE = DIRECTOR_PROMPT.slice(DIRECTOR_PROMPT.indexOf('A camera session is one shot.'));
-import { effectiveModel } from '../claude/models.js';
+import { effectiveModel, modelById, personEffort, resolveEffort } from '../claude/models.js';
 import { claudeThreads } from '../camera/schema.js';
 
 /** workstream 1: at most this many attached images are replayed from earlier messages (newest first). */
@@ -163,8 +163,12 @@ export class EditAssistant {
       if (prev?.role === 'user') (prev.content as BetaContentBlockParam[]).push(...turnBlocks); else history.push({ role: 'user', content: turnBlocks });
       const c = this.ctx.config;
       // Step 6b: a chat runs on its own model, else the person's default, else the studio's.
-      const [thr] = await this.ctx.db.select({ model: claudeThreads.model }).from(claudeThreads).where(eq(claudeThreads.id, threadId));
+      const [thr] = await this.ctx.db.select({ model: claudeThreads.model, effort: claudeThreads.effort }).from(claudeThreads).where(eq(claudeThreads.id, threadId));
       const model = await effectiveModel(this.ctx, u, thr?.model);
+      // Effort: the chat's own, else the person's last choice, else the model's own default (an unknown model: the
+      // studio's DIRECTOR_EFFORT). This turn bills the studio's key (owner only, opt-in): higher levels think longer
+      // and use more output tokens.
+      const effort = resolveEffort(model, thr?.effort, await personEffort(this.ctx, u)) ?? (modelById(model) ? undefined : c.DIRECTOR_EFFORT);
       // Haiku has no server-side refusal fallback.
       const fallbacks = c.DIRECTOR_FALLBACKS && !model.startsWith('claude-haiku');
       let stopReason = 'end_turn';
@@ -173,7 +177,7 @@ export class EditAssistant {
         const stream = client.beta.messages.stream({
           model, max_tokens: c.DIRECTOR_MAX_TOKENS,
           system: [{ type: 'text', text: kind === 'chat' ? onePrompt() : kind === 'recreate' ? RECREATE_PROMPT : kind === 'suite' ? SUITE_PROMPT : EDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
-          tools: this.tools(kind, u), messages: history, output_config: { effort: c.DIRECTOR_EFFORT }, cache_control: { type: 'ephemeral' },
+          tools: this.tools(kind, u), messages: history, ...(effort ? { output_config: { effort } } : {}), cache_control: { type: 'ephemeral' },
           ...(fallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
         });
         stream.on('text', delta => { finalText += delta; emit({ type: 'text', delta }); });

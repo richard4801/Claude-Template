@@ -149,6 +149,8 @@ export const claudeThreads = pgTable('claude_threads', {
   page: jsonb('page').$type<import('../claude/page.js').PageRef>(),
   /** One Claude (0029): the Claude model this chat uses (null = the studio default; the picker is the next step). */
   model: text('model'),
+  /** 0036: the chat's own effort level (low … max; null = the person's last choice, else the model's own default). */
+  effort: text('effort'),
   /** One Claude (0029): hidden from the chat list (kept, not deleted). */
   archivedAt: ms('archived_at'),
   /** 0033: the tools this chat last saw (name → short hash), so a chat hears about tools shipped since (claude/capability.ts). */

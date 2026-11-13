@@ -25,19 +25,23 @@ import { permissionsOf } from './permissions.js';
 import { UI_ERROR_CODES, uiOf } from './uiControl.js';
 import { resultsOf } from './results.js';
 import { claudeActions } from './schema.js';
-import { checkModel, CLAUDE_MODELS, personDefault, setPersonDefault } from './models.js';
+import { checkEffort, checkModel, CLAUDE_MODELS, effectiveModel, personDefault, personEffort, setPersonDefault, setPersonEffort } from './models.js';
 
 type Row = typeof claudeThreads.$inferSelect;
 type P = { Params: { id: string } };
 
-/** Step 6b: the chat's own model rides in the brief (the Mac passes it to Claude Code as --model; none = the person's default). */
-const withModel = <B extends object>(b: B | undefined, model: string | null) => (b && model ? { ...b, model } : b);
+/**
+ * Step 6b: the chat's own model rides in the brief (the Mac passes it to Claude Code as --model; none = the person's
+ * default), and its own effort level (`--effort`; none = the person's last choice, else the model's default).
+ */
+const withModel = <B extends object>(b: B | undefined, model: string | null, effort: string | null) =>
+  (b ? { ...b, ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : b);
 
 export const chatView = (t: Row, messageCount?: number) => {
   const page = pageOf(t);
-  return compact({ id: t.id, title: t.title ?? undefined, kind: t.contextKind, page, lastOn: pageLine(page), model: t.model ?? undefined,
+  return compact({ id: t.id, title: t.title ?? undefined, kind: t.contextKind, page, lastOn: pageLine(page), model: t.model ?? undefined, effort: t.effort ?? undefined,
     archived: t.archivedAt ? true : undefined, claudeSessionId: t.claudeSessionId ?? undefined, createdAt: t.createdAt, updatedAt: t.updatedAt, messageCount,
-    brief: withModel(t.contextKind === 'chat' ? threadBrief('chat', t.id) : threadBrief(t.contextKind, t.contextId), t.model) });
+    brief: withModel(t.contextKind === 'chat' ? threadBrief('chat', t.id) : threadBrief(t.contextKind, t.contextId), t.model, t.effort) });
 };
 
 export async function listChats(ctx: Ctx, u: AuthUser, query: unknown) {
@@ -71,11 +75,17 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     return { ...full, ...chatView(t) };
   });
   app.patch<P>('/v1/claude/chats/:id', async req => {
-    const b = parse(z.object({ title: z.string().trim().max(TITLE_MAX).optional(), archived: z.boolean().optional(), model: z.union([z.string().max(60), z.null()]).optional() }).strict()
-      .refine(x => x.title !== undefined || x.archived !== undefined || x.model !== undefined, 'title, archived or model'), req.body);
+    const b = parse(z.object({ title: z.string().trim().max(TITLE_MAX).optional(), archived: z.boolean().optional(), model: z.union([z.string().max(60), z.null()]).optional(),
+      effort: z.union([z.string().max(10), z.null()]).optional() }).strict()
+      .refine(x => x.title !== undefined || x.archived !== undefined || x.model !== undefined || x.effort !== undefined, 'title, archived, model or effort'), req.body);
     const t = await ownChat(ctx, req.user, req.params.id);
+    const model = b.model !== undefined ? checkModel(b.model) : undefined;
+    // The level must be one the chat's model takes (the model sent with it, else the chat's own, else the person's default).
+    const effort = b.effort !== undefined ? checkEffort(b.effort, await effectiveModel(ctx, req.user, model !== undefined ? model : t.model)) : undefined;
+    // A pick is also the person's last choice: new chats and chats without one start from it.
+    if (effort) await setPersonEffort(ctx, req.user, effort);
     const [n] = await ctx.db.update(claudeThreads).set({ ...(b.title !== undefined ? { title: b.title || t.title } : {}),
-      ...(b.model !== undefined ? { model: checkModel(b.model) } : {}),
+      ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}),
       ...(b.archived !== undefined ? { archivedAt: b.archived ? Date.now() : null } : {}) }).where(eq(claudeThreads.id, t.id)).returning();
     const view = chatView(n!);
     void ctx.hub.emitTo(req.user.id, { type: 'claude', op: 'chat', chat: view });
@@ -112,12 +122,18 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     return { ok: true, deleted: [...ids] };
   });
 
-  /** Step 6b: the Claude models anyone can pick (plain-words speed and cost) and this person's default. */
-  app.get('/v1/claude/models', async req => ({ models: CLAUDE_MODELS, default: await personDefault(ctx, req.user), studioDefault: ctx.config.DIRECTOR_MODEL }));
+  /**
+   * Step 6b: the Claude models anyone can pick (plain-words speed and cost, the effort levels each takes and its own
+   * default level), this person's default model and their last effort choice.
+   */
+  app.get('/v1/claude/models', async req => ({ models: CLAUDE_MODELS, default: await personDefault(ctx, req.user), studioDefault: ctx.config.DIRECTOR_MODEL,
+    defaultEffort: await personEffort(ctx, req.user) }));
   app.put('/v1/claude/prefs', async req => {
-    const b = parse(z.object({ defaultModel: z.union([z.string().max(60), z.null()]) }).strict(), req.body);
-    await setPersonDefault(ctx, req.user, checkModel(b.defaultModel));
-    return { default: await personDefault(ctx, req.user) };
+    const b = parse(z.object({ defaultModel: z.union([z.string().max(60), z.null()]).optional(), defaultEffort: z.union([z.string().max(10), z.null()]).optional() }).strict()
+      .refine(x => x.defaultModel !== undefined || x.defaultEffort !== undefined, 'defaultModel or defaultEffort'), req.body);
+    if (b.defaultModel !== undefined) await setPersonDefault(ctx, req.user, checkModel(b.defaultModel));
+    if (b.defaultEffort !== undefined) await setPersonEffort(ctx, req.user, checkEffort(b.defaultEffort));
+    return { default: await personDefault(ctx, req.user), defaultEffort: await personEffort(ctx, req.user) };
   });
 
   /** The app reports the page as the person moves (debounced); Claude reads it each turn (where_am_i over MCP). */

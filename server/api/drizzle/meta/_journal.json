@@ -253,6 +253,13 @@
       "when": 1794506818644,
       "tag": "0035_edit_session_view",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794575683686,
+      "tag": "0036_claude_effort",
+      "breakpoints": true
     }
   ]
 }
