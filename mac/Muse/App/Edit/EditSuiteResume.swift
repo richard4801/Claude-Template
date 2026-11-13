@@ -53,6 +53,7 @@ extension EditSuiteSession {
             seek(state.playhead)
         }
         lastSentView = nil
+        lastSentProject = nil
         viewTracking = true
         // The edit is the last one worked on from now (even if nothing changes).
         saveViewNow()
@@ -82,8 +83,11 @@ extension EditSuiteSession {
             recentStore.save(EditLocalDraft(takeId: draftTakeId, sessionId: sid, localId: isBlankStart && sid == nil ? localBlankId : nil,
                                             project: keepProject ? project : nil, view: v, title: draftTitle, savedAt: now))
         }
-        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true else { return }
+        // The session's view is also "when the person last worked on it" (Recent edits' order): sent when the place moved or
+        // the edit itself changed, so editing without moving the playhead still counts.
+        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true || lastSentProject != project else { return }
         lastSentView = v
+        lastSentProject = project
         let api = self.api
         Task { try? await api.saveEditSessionView(sessionId: sid, v) }
     }

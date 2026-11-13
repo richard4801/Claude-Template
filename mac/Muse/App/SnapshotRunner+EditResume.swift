@@ -81,7 +81,8 @@ extension SnapshotRunner {
         check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
         let draft = store.suite.recentEdits.first
         check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
-              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing")")
+              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); order: " +
+              store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
         capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
         note("START reopen_last")
         if let draft { store.suite.editResume = draft }

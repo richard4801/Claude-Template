@@ -111,16 +111,18 @@ final class EditRecentTests: XCTestCase {
             try session("es_3", takeId: E.blankSourceId, project: blankUsed, updatedAt: 2_000, view: EditSessionView(title: "Promo")),
             try session("es_4", takeId: E.blankSourceId, project: blankEmpty, updatedAt: 9_000),
             try session("es_5", takeId: "take_a", project: p, updatedAt: 9_500, status: "closed"),
+            // Left at 1 500, then a helper's result landed at 9 000 with no one there: still ranked by when it was left.
+            try session("es_6", takeId: "take_b", project: p, updatedAt: 9_000, view: EditSessionView(at: 1_500)),
         ]
         let items = EditRecent.items(sessions: sessions, local: [], takeTitle: { titles[$0] })
-        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_1"])
+        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_6", "es_1"])
         XCTAssertEqual(items[0].title, EditRecent.untitled)      // its take is gone: still listed, still opens
         XCTAssertEqual(items[1].title, "Promo")
         XCTAssertEqual(items[1].thumbTakeId, "take_b")
         XCTAssertTrue(items[1].isBlank)
-        XCTAssertEqual(items[2].title, "Café review")
-        XCTAssertEqual(items[2].thumbTakeId, "take_a")
-        XCTAssertEqual(items[2].sessionId, "es_1")
+        XCTAssertEqual(items[3].title, "Café review")
+        XCTAssertEqual(items[3].thumbTakeId, "take_a")
+        XCTAssertEqual(items[3].sessionId, "es_1")
     }
 
     func testThisMacsDraftsJoinTheList() throws {

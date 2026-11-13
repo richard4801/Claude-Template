@@ -174,7 +174,9 @@ public enum EditRecent {
             let p = try? JSONPatch.decode(EditV2.Project.self, s.project)
             // A blank project nothing was added to is not an edit yet ("New edit" pressed and left).
             if s.takeId == EditV2.blankSourceId, let p, p.assets.isEmpty { continue }
-            let at = max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0, s.view?.at ?? 0)
+            // When the person last worked on it: the last saved view; an edit no app has opened (Claude's) by its last change.
+            // A change landing later with no one there (a helper's result, Claude's note) doesn't move it up (run 604).
+            let at = s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0)
             out[s.id] = EditRecentItem(id: s.id, takeId: s.takeId, sessionId: s.id, title: title(view: s.view, takeId: s.takeId, takeTitle: takeTitle),
                                        thumbTakeId: thumbTake(takeId: s.takeId, project: p), lastEditedAt: at, view: s.view)
         }

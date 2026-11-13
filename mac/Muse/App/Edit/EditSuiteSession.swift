@@ -60,6 +60,7 @@ final class EditSuiteSession {
     @ObservationIgnored var viewTracking = false
     @ObservationIgnored var viewTask: Task<Void, Never>?
     @ObservationIgnored var lastSentView: EditSessionView?
+    @ObservationIgnored var lastSentProject: E.Project?
     @ObservationIgnored let recentStore = EditRecentStore.standard
     /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
     @ObservationIgnored var localBlankId = UUID().uuidString

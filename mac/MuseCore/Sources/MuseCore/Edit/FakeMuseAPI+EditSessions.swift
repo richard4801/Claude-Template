@@ -219,7 +219,8 @@ extension FakeMuseAPI {
     /// Continue a draft: open sessions, the last worked on (changed or left) first, without history.
     public func recentEditSessions(limit: Int) throws -> [EditSession] {
         try editOwner()
-        func touched(_ s: EditSession) -> Double { max(s.updatedAt ?? 0, s.view?.at ?? 0) }
+        // Like the server: when the person last worked on it (the view), else its last change.
+        func touched(_ s: EditSession) -> Double { s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? (s.updatedAt ?? 0) }
         return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted { touched($0) > touched($1) }
             .prefix(max(1, min(50, limit))).map { s in
                 var v = view(editSessions[s.id]!, history: false)
