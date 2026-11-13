@@ -159,7 +159,7 @@ export const ACTION_TOOLS: GatedTool[] = [
       return { summary: `Delete the collection “${c?.name ?? a.collectionId}” (its takes stay)`, method: 'DELETE', url: `/v1/library/collections/${enc(a.collectionId as string)}` };
     } }),
   gated({ name: 'outfit_delete', title: 'Delete an outfit', scope: 'edit:write', gate: 'delete',
-    description: 'Deletes an outfit and its pictures (as Delete on the outfit page). Needs the person\'s go-ahead.',
+    description: 'Deletes an outfit and its pictures (as Delete on the outfit page), or throws away a new one waiting in preview. Needs the person\'s go-ahead.',
     props: { outfitId: str('The outfit', 80) }, required: ['outfitId'],
     plan: async (env, a) => {
       const o = (await appCall(env.ctx, env.user, 'GET', '/v1/outfits') as { id: string; name?: string }[]).find(x => x.id === a.outfitId);

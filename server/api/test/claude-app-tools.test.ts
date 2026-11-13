@@ -4,7 +4,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/ctx.js';
-import { users } from '../src/db/schema.js';
+import { models, outfits, users } from '../src/db/schema.js';
 import { registryByName, toolsForUser } from '../src/claude/registry.js';
 import { APP_TOOLS } from '../src/claude/appTools.js';
 import { makeApp, people, type Client } from './helpers.js';
@@ -69,5 +69,22 @@ describe('B1 tools', () => {
     const u = await run(memberU, 'character_update', { modelId: m.id, neverAdd: ['hats'] });
     expect(u.neverAdd).toEqual(['hats']);
     await expect(run(memberU, 'tool_run', { action: 'list' })).resolves.toBeTruthy();
+  });
+  it('outfit_keep: a preview outfit joins her outfits (with a new name); a generating one is refused', async () => {
+    const m = await run(ownerU, 'character_create', { name: 'Ivy', niche: 'fashion' });
+    const R = (k: string) => ({ asset: k });
+    const base = { studioId: ownerU.studioId, modelId: m.id, mode: 'describe', description: '', createdBy: ownerU.id, createdAt: Date.now() };
+    await a.ctx.db.insert(outfits).values([
+      { ...base, id: 'o_prev', name: 'Linen', state: 'preview', angles: [R('k_f'), R('k_t'), R('k_s'), R('k_b')] },
+      { ...base, id: 'o_gen', name: 'Wool', state: 'generating', angles: [null, null, null, null] },
+    ] as any);
+    const kept = await run(ownerU, 'outfit_keep', { outfitId: 'o_prev', name: 'Linen set' });
+    expect(kept).toMatchObject({ id: 'o_prev', state: 'ready', name: 'Linen set' });
+    const [mm] = await a.ctx.db.select().from(models).where(eq(models.id, m.id));
+    expect(mm!.outfitIds).toContain('o_prev');
+    await expect(run(ownerU, 'outfit_keep', { outfitId: 'o_gen' })).rejects.toMatchObject({ status: 409 });
+    const [g] = await a.ctx.db.select().from(outfits).where(eq(outfits.id, 'o_gen'));
+    expect(g!.state).toBe('generating');
+    await expect(run(ownerU, 'outfit_keep', { outfitId: 'o_nothere' })).rejects.toMatchObject({ status: 404 });
   });
 });

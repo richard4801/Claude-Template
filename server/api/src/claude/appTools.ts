@@ -2,7 +2,7 @@
 // spend nothing and delete nothing, as tools on every page for everyone. Each calls the app's own route as the person
 // (claude/appCall.ts), so what a member may see or change is exactly what their app allows.
 import type { EditTool } from '../editor/mcpTools.js';
-import { badRequest } from '../errors.js';
+import { ApiError, badRequest, notFound } from '../errors.js';
 import { appCall, slim } from './appCall.js';
 import { assistOf } from '../suite/assist.js';
 
@@ -56,6 +56,20 @@ export const APP_TOOLS: EditTool[] = [
     description: 'Renames an outfit (as on its page). Free; nothing else changes.',
     inputSchema: obj({ outfitId: str('The outfit', 80), name: str('The new name', 60) }, ['outfitId', 'name']),
     run: async (env, a) => slim(await appCall(env.ctx, env.user, 'PATCH', `/v1/outfits/${enc(id(a.outfitId, 'outfitId'))}`, { name: a.name })),
+  },
+  {
+    name: 'outfit_keep', title: 'Keep a new outfit', scope: 'edit:write',
+    description: 'Keeps a newly made outfit that is waiting in preview (state "preview"), as "Add to her outfits" in the app: it joins her outfits, ready for Photo and the Suite. Optional new name. Free; nothing is deleted. Wait until it has finished making (queue_list / outfits_list). To throw a preview away instead, use outfit_delete.',
+    inputSchema: obj({ outfitId: str('The outfit', 80), name: str('A new name (optional; it keeps its name without one)', 60) }, ['outfitId']),
+    run: async (env, a) => {
+      const oid = id(a.outfitId, 'outfitId');
+      const o = ((await appCall(env.ctx, env.user, 'GET', '/v1/outfits')) as { id: string; state?: string }[]).find(x => x.id === oid);
+      if (!o) throw notFound('Outfit');
+      // The finished pictures only land while it is still "generating": keeping it before then would lose them.
+      if (o.state === 'generating') throw new ApiError(409, 'outfit_busy', 'This outfit is still being made · keep it when it finishes');
+      const name = typeof a.name === 'string' && a.name.trim() ? { name: a.name.trim() } : {};
+      return slim(await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${enc(oid)}/save`, name));
+    },
   },
   {
     name: 'library_find', title: 'Library: find takes', ...read,
