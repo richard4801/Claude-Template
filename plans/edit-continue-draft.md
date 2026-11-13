@@ -25,7 +25,7 @@ edit-blank-android.patch).
 - Server: `editor/sessions.ts` (`saveView`, `recent`, `cleanView`, `lastTouched`), `sessionRoutes.ts`, test in
   `editor-sessions.test.ts`.
 - Mac patch `plans/patches/edit-continue-draft-mac.patch`. It applies after edit-panels-clean-mac, link-to-uploads-mac
-  and note-icon-mac on prod 852d6b53. Contents: MuseCore `Edit/EditRecent.swift` (view snapshot/restore, the recent-list
+  and note-icon-mac on prod ab1de4aa (rebased 2026-11-13: the saved `safeArea` maps to EditPreview, the integrator's de3886b9 fix). Contents: MuseCore `Edit/EditRecent.swift` (view snapshot/restore, the recent-list
   merge, the local store, missing assets, "5 min ago"), `EditRecentTests` (10 tests), and API + fake. App:
   `EditSuiteResume.swift`, `AppStore+EditRecent.swift`, `EditSuiteView` (opens the last edit, Recent edits, New edit),
   the timeline's Missing mark, and the CI check `SnapshotRunner+EditResume.swift` → `edit-resume-check.txt` (open Edit →

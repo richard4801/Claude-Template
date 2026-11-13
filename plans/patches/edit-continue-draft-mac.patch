@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
-index 1a50d7e6..20e91e05 100644
+index 37c3efc6..bb0f91dc 100644
 --- a/.github/workflows/mac.yml
 +++ b/.github/workflows/mac.yml
-@@ -150,6 +150,19 @@ jobs:
+@@ -166,6 +166,19 @@ jobs:
            if grep -q '^FAIL' "$f"; then exit 1; fi
            if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
  
@@ -212,7 +212,7 @@ index 00000000..e3fb6feb
 +    }
 +}
 diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
-index 563ee523..88b71228 100644
+index 318b12aa..eeec5a09 100644
 --- a/mac/Muse/App/Edit/EditSuiteSession.swift
 +++ b/mac/Muse/App/Edit/EditSuiteSession.swift
 @@ -35,17 +35,28 @@ final class EditSuiteSession {
@@ -247,7 +247,7 @@ index 563ee523..88b71228 100644
      /// Frame strips per video asset (evenly over the whole file) and waveforms per sounding asset (0…1 peaks over the file).
      private(set) var strips: [String: [CGImage]] = [:]
      private(set) var waves: [String: [Float]] = [:]
-@@ -179,7 +190,10 @@ final class EditSuiteSession {
+@@ -181,7 +192,10 @@ final class EditSuiteSession {
          do {
              var project: E.Project
              var local: URL?
@@ -259,7 +259,7 @@ index 563ee523..88b71228 100644
                  // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
                  project = E.Project.blank()
              } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
-@@ -220,6 +234,7 @@ final class EditSuiteSession {
+@@ -224,6 +238,7 @@ final class EditSuiteSession {
              refreshLookThumbs()
              if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
              if isOwner { await startLive() }
@@ -267,7 +267,7 @@ index 563ee523..88b71228 100644
          } catch {
              phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
          }
-@@ -246,6 +261,7 @@ final class EditSuiteSession {
+@@ -250,6 +265,7 @@ final class EditSuiteSession {
              guard let link, let url = URL(string: link) else { continue }
              if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
          }
@@ -275,7 +275,7 @@ index 563ee523..88b71228 100644
          await ensureContentFonts()
      }
  
-@@ -262,6 +278,9 @@ final class EditSuiteSession {
+@@ -266,6 +282,9 @@ final class EditSuiteSession {
      }
  
      func close() {
@@ -285,7 +285,7 @@ index 563ee523..88b71228 100644
          stopLive()
          player.pause()
          player.replaceCurrentItem(with: nil)
-@@ -289,7 +308,7 @@ final class EditSuiteSession {
+@@ -293,7 +312,7 @@ final class EditSuiteSession {
          playhead = state.playhead
          // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
          if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
@@ -294,7 +294,7 @@ index 563ee523..88b71228 100644
          return ok
      }
  
-@@ -322,12 +341,13 @@ final class EditSuiteSession {
+@@ -326,12 +345,13 @@ final class EditSuiteSession {
      }
  
      /// View-only changes (selection, zoom, tabs, snapping…).
@@ -309,7 +309,7 @@ index 563ee523..88b71228 100644
          Task { await ensureFiles(); rebuild(); refreshMedia() }
          if !applyingRemote { liveLocalChange() }
      }
-@@ -423,6 +443,7 @@ final class EditSuiteSession {
+@@ -427,6 +447,7 @@ final class EditSuiteSession {
          shuttle = 0
          playing = false
          state.playhead = playhead
@@ -317,7 +317,7 @@ index 563ee523..88b71228 100644
      }
  
      /// J / K / L: back faster, stop, forward faster (1×, 2×, 4×).
-@@ -448,12 +469,14 @@ final class EditSuiteSession {
+@@ -452,12 +473,14 @@ final class EditSuiteSession {
          playhead = v
          state.playhead = v
          player.seek(to: CMTime(seconds: v, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -334,7 +334,7 @@ index 563ee523..88b71228 100644
      func step(_ dir: Int) {
 diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
 new file mode 100644
-index 00000000..3c7c779f
+index 00000000..ba935908
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
 @@ -0,0 +1,151 @@
@@ -401,7 +401,7 @@ index 00000000..3c7c779f
 +        guard let first = await editorReady("rz_resume"), first.isReady else {
 +            note("FAIL open_and_move: the editor didn't open (\(String(describing: store.suite.editCurrent?.phase)))"); note("ALL DONE"); return
 +        }
-+        first.view { $0.zoom = 150; $0.tab = .audio; $0.safeArea = nil }
++        first.view { $0.zoom = 150; $0.tab = .audio; $0.preview.safeArea = false }
 +        first.binTab = .uploads
 +        first.seek(2.5)
 +        try? await Task.sleep(for: .seconds(2))   // the view is saved after a short pause
@@ -431,7 +431,7 @@ index 00000000..3c7c779f
 +            check("reopen_zoom", abs(s.state.zoom - 150) < 0.01, "zoom \(s.state.zoom)")
 +            check("reopen_tab", s.state.tab == .audio, "tab \(s.state.tab)")
 +            check("reopen_bin_uploads", s.binTab == .uploads, "bin \(s.binTab)")
-+            check("reopen_platform_view_off", s.state.safeArea == nil, "safe area \(String(describing: s.state.safeArea))")
++            check("reopen_platform_view_off", !s.state.preview.safeArea, "preview \(s.state.preview)")
 +            capture(dir.appendingPathComponent("mac_a_edit_resumed.png"))
 +        } else {
 +            note("FAIL reopen_last: Continue draft opened \(store.suite.editCurrent?.take.id ?? "nothing"), not the last edit")
@@ -490,10 +490,10 @@ index 00000000..3c7c779f
 +    }
 +}
 diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
-index f02e37a6..c89ac232 100644
+index efbd2208..979f49c2 100644
 --- a/mac/Muse/App/SnapshotRunner.swift
 +++ b/mac/Muse/App/SnapshotRunner.swift
-@@ -179,6 +179,7 @@ enum SnapshotRunner {
+@@ -181,6 +181,7 @@ enum SnapshotRunner {
              await fitCheck(store, dir: dir)
              await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
              await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
@@ -502,10 +502,10 @@ index f02e37a6..c89ac232 100644
              await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
              await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
 diff --git a/mac/Muse/Views/Edit/EditSuiteTimeline.swift b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
-index ae68d0a6..249a36c7 100644
+index 7be8a4d9..44ebf1c7 100644
 --- a/mac/Muse/Views/Edit/EditSuiteTimeline.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
-@@ -477,6 +477,22 @@ struct TimelineCanvas: View {
+@@ -480,6 +480,22 @@ struct TimelineCanvas: View {
              if !locked { session.view { $0.selection = id } }
          }
          .gesture(moveGesture(b, row: row, locked: locked))
@@ -528,7 +528,7 @@ index ae68d0a6..249a36c7 100644
          .overlay(alignment: .topTrailing) {
              if let id = b.itemId, let badge = MaskBadge(session.project.track(row.trackId)?.item(id)), w >= 36 {
                  maskBadge(badge, itemId: id, locked: locked).offset(x: x, y: 6)
-@@ -496,11 +512,18 @@ struct TimelineCanvas: View {
+@@ -499,11 +515,18 @@ struct TimelineCanvas: View {
              }
          }
          .accessibilityElement(children: .ignore)
@@ -549,7 +549,7 @@ index ae68d0a6..249a36c7 100644
      /// timeline (the owner's "oval", 2026-11-11). Click: select the clip and open "Mask & green screen".
      private func maskBadge(_ badge: MaskBadge, itemId: String, locked: Bool) -> some View {
 diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
-index cd05450a..b461df85 100644
+index 7d320904..a40a8958 100644
 --- a/mac/Muse/Views/Edit/EditSuiteView.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteView.swift
 @@ -10,6 +10,8 @@ struct EditSuiteView: View {
@@ -570,7 +570,7 @@ index cd05450a..b461df85 100644
                  }
                  .frame(maxWidth: .infinity, maxHeight: .infinity)
              } else if store.recreate.open {
-@@ -35,32 +37,68 @@ struct EditSuiteView: View {
+@@ -35,17 +37,44 @@ struct EditSuiteView: View {
                  case .recipes: LearnRecipesView()
                  }
              } else {
@@ -618,12 +618,13 @@ index cd05450a..b461df85 100644
      }
  
      private func open(_ id: String?) async {
+@@ -60,15 +89,24 @@ struct EditSuiteView: View {
+         }
          session?.close()
          session = nil
 +        store.suite.editCurrent = nil
          store.linkImport.deliverToEdit = nil
          guard let id else { return }
--        let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
 -        if attach != nil { store.suite.editAttach = nil }
 -        guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
 -            store.showToast("Only video takes can be edited")
@@ -632,7 +633,6 @@ index cd05450a..b461df85 100644
 +        if let r = resuming, r.id == id {
 +            made = await store.makeEditSuiteSession(resuming: r)
 +        } else {
-+            let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
 +            if attach != nil { store.suite.editAttach = nil }
 +            made = store.makeEditSuiteSession(takeId: id, attachSessionId: attach)
 +            if made == nil { store.showToast("Only video takes can be edited") }
@@ -647,7 +647,7 @@ index cd05450a..b461df85 100644
          store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
          await s.load()
          // The viewer's Split: the playhead where the take was when Split was pressed.
-@@ -73,18 +111,23 @@ struct EditSuiteView: View {
+@@ -81,18 +119,23 @@ struct EditSuiteView: View {
      private func close() {
          session?.close()
          session = nil
@@ -672,7 +672,7 @@ index cd05450a..b461df85 100644
  
      var body: some View {
          let takes = store.editSuiteTakes
-@@ -99,13 +142,19 @@ struct EditSuiteHome: View {
+@@ -107,13 +150,19 @@ struct EditSuiteHome: View {
                      SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
                  }
                  SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
@@ -696,7 +696,7 @@ index cd05450a..b461df85 100644
              if !edits.isEmpty {
                  SectionHeader("Edited versions")
                  grid(edits)
-@@ -115,6 +164,55 @@ struct EditSuiteHome: View {
+@@ -123,6 +172,55 @@ struct EditSuiteHome: View {
                  grid(renders)
              }
          }
@@ -752,7 +752,7 @@ index cd05450a..b461df85 100644
      }
  
      private func grid(_ list: [Take]) -> some View {
-@@ -428,3 +526,39 @@ struct EditSuiteEditor: View {
+@@ -443,3 +541,39 @@ struct EditSuiteEditor: View {
          }
      }
  }
@@ -794,10 +794,10 @@ index cd05450a..b461df85 100644
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
 new file mode 100644
-index 00000000..65540531
+index 00000000..2f143e4d
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,259 @@
 +import Foundation
 +
 +// Continue a draft (owner, 2026-11-12): clicking Edit reopens the last edit exactly where it was left. The owner's edits live
@@ -816,7 +816,7 @@ index 00000000..65540531
 +    /// timeline | captions
 +    public var mode: String?
 +    public var selection: String?
-+    /// Platform view (`EditSuite.SafeArea` raw value); "off" (or the server's null) = none.
++    /// The platform preview: a `PreviewSkin` raw value with the red box on; "off" (or the server's null) = the box off.
 +    public var safeArea: String?
 +    public var title: String?
 +    public var at: Double?
@@ -866,7 +866,7 @@ index 00000000..65540531
 +    /// Where the editor is now (the app adds the bin tab, the mode and the title it keeps itself).
 +    public func viewSnapshot(binTab: EditSuite.BinTab? = nil, mode: String? = nil, title: String? = nil) -> EditSessionView {
 +        EditSessionView(playhead: EditV2.r3(max(0, playhead.isFinite ? playhead : 0)), zoom: EditV2.r3(zoom), tab: tab.rawValue,
-+                        binTab: binTab?.rawValue, mode: mode, selection: selection, safeArea: safeArea?.rawValue ?? "off", title: title)
++                        binTab: binTab?.rawValue, mode: mode, selection: selection, safeArea: preview.safeArea ? preview.view.rawValue : "off", title: title)
 +    }
 +
 +    /// Puts the editor back where it was left. Anything the edit no longer has (a deleted clip, a playhead past the end, an
@@ -875,7 +875,11 @@ index 00000000..65540531
 +        if let p = v.playhead, p.isFinite { playhead = min(max(0, p), max(0, duration)) }
 +        if let z = v.zoom, z.isFinite { zoom = min(Self.zoomRange.upperBound, max(Self.zoomRange.lowerBound, z)) }
 +        if let s = v.tab, let tb = EditSuite.InspectorTab(rawValue: s) { tab = tb }
-+        if let s = v.safeArea { safeArea = s == "off" ? nil : (EditSuite.SafeArea(rawValue: s) ?? safeArea) }
++        // The platform preview (plans/edit-platform-preview.md): "off" turns the red box off, a view's name shows that view
++        // with the box on; anything else (an older app's value) keeps the preview as it is.
++        if let s = v.safeArea {
++            if s == "off" { preview.safeArea = false } else if let skin = PreviewSkin(rawValue: s) { preview = EditPreview(view: skin, safeArea: true) }
++        }
 +        if let sel = v.selection, project.tracks.contains(where: { $0.items.contains { $0.id == sel } }) { selection = sel }
 +    }
 +}
@@ -1054,10 +1058,10 @@ index 00000000..65540531
 +    }
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
-index 8ee7187b..7cb43e25 100644
+index 8c1415cc..8b8c3f2d 100644
 --- a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
 +++ b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
-@@ -144,16 +144,20 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
+@@ -146,16 +146,20 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
      public var online: [EditPresence]
      public var requests: [EditAppRequest]
      public var history: [EditHistoryEntry]?
@@ -1081,7 +1085,7 @@ index 8ee7187b..7cb43e25 100644
      public init(from d: Decoder) throws {
          let c = try d.container(keyedBy: CodingKeys.self)
          id = try c.decode(String.self, forKey: .id)
-@@ -169,6 +173,8 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
+@@ -171,6 +175,8 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
          online = (try? c.decode([EditPresence].self, forKey: .online)) ?? []
          requests = (try? c.decode([EditAppRequest].self, forKey: .requests)) ?? []
          history = try? c.decodeIfPresent([EditHistoryEntry].self, forKey: .history)
@@ -1158,7 +1162,7 @@ index 327a1f46..f3f8cc19 100644
      // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
 new file mode 100644
-index 00000000..1ff3ecda
+index 00000000..9cccf666
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
 @@ -0,0 +1,210 @@
@@ -1183,7 +1187,7 @@ index 00000000..1ff3ecda
 +        s.playhead = 2.25
 +        s.zoom = 140
 +        s.tab = .audio
-+        s.safeArea = .reels
++        s.preview = EditPreview(view: .reels, safeArea: true)
 +        let id = try XCTUnwrap(p.tracks.flatMap(\.items).last?.id)
 +        s.selection = id
 +        let v = s.viewSnapshot(binTab: .uploads, mode: "timeline", title: "Café cut")
@@ -1197,7 +1201,7 @@ index 00000000..1ff3ecda
 +        XCTAssertEqual(fresh.playhead, 2.25, accuracy: 0.001)
 +        XCTAssertEqual(fresh.zoom, 140)
 +        XCTAssertEqual(fresh.tab, .audio)
-+        XCTAssertEqual(fresh.safeArea, .reels)
++        XCTAssertEqual(fresh.preview, EditPreview(view: .reels, safeArea: true))
 +        XCTAssertEqual(fresh.selection, id)
 +        XCTAssertEqual(EditSuite.binTab(back), .uploads)
 +        XCTAssertTrue(v.samePlace(back))
@@ -1205,13 +1209,13 @@ index 00000000..1ff3ecda
 +
 +    func testPlatformViewOffIsRemembered() throws {
 +        var s = EditSuiteState(try fixture())
-+        s.safeArea = nil
++        s.preview.safeArea = false
 +        let v = s.viewSnapshot()
 +        XCTAssertEqual(v.safeArea, "off")
 +        var fresh = EditSuiteState(try fixture())
-+        XCTAssertNotNil(fresh.safeArea)
++        XCTAssertTrue(fresh.preview.safeArea)
 +        fresh.restore(v)
-+        XCTAssertNil(fresh.safeArea)
++        XCTAssertFalse(fresh.preview.safeArea)
 +        // The server keeps "off" as null.
 +        let fromServer = try JSONDecoder().decode(EditSessionView.self, from: Data(#"{"safeArea":null,"zoom":80}"#.utf8))
 +        XCTAssertEqual(fromServer.safeArea, "off")
@@ -1228,7 +1232,7 @@ index 00000000..1ff3ecda
 +        XCTAssertEqual(s.zoom, EditSuiteState.zoomRange.upperBound)
 +        XCTAssertEqual(s.tab, before.tab)
 +        XCTAssertEqual(s.selection, before.selection)
-+        XCTAssertEqual(s.safeArea, before.safeArea)
++        XCTAssertEqual(s.preview, before.preview)
 +        XCTAssertNil(EditSuite.binTab(EditSessionView(binTab: "nope")))
 +        s.restore(EditSessionView(playhead: -.infinity, zoom: .nan))
 +        XCTAssertEqual(s.zoom, EditSuiteState.zoomRange.upperBound)
