@@ -36,6 +36,8 @@ object MediaSniff {
         fun ascii(at: Int, n: Int): String? = if (b.size >= at + n) String(b, at, n, Charsets.ISO_8859_1) else null
         fun u(i: Int) = b[i].toInt() and 0xFF
         if (ascii(4, 4) == "ftyp") return Format.IsoMedia(ascii(8, 4) ?: "")
+        // An older QuickTime file starts with another top-level atom (no ftyp): a container whose tracks decide.
+        if (ascii(4, 4) in quickTimeAtoms) return Format.IsoMedia("qt  ")
         if (b.size >= 4 && u(0) == 0x89 && u(1) == 0x50 && u(2) == 0x4E && u(3) == 0x47) return Format.Png
         if (b.size >= 3 && u(0) == 0xFF && u(1) == 0xD8 && u(2) == 0xFF) return Format.Jpeg
         if (ascii(0, 4) == "RIFF" && ascii(8, 4) == "WAVE") return Format.Wav
@@ -51,11 +53,14 @@ object MediaSniff {
         return Format.Unknown
     }
 
+    private val quickTimeAtoms = setOf("moov", "mdat", "wide", "free", "skip", "pnot")
     private val heicBrands = setOf("heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1")
     private val audioBrands = setOf("M4A ", "M4B ", "M4P ")
-    private val videoExts = setOf("mp4", "mov", "m4v")
 
-    /** The verdict, from the format and (for an MP4 container) its tracks; the extension only when the bytes say nothing. */
+    /**
+     * The verdict, from the format and (for an MP4 container) its tracks. A name alone never makes a file usable (Mac
+     * bundle-10 run 617: a text file named .mp4 was taken): bytes that say nothing need real tracks read by the app.
+     */
     fun verdict(f: Format, fileExtension: String = "", hasVideo: Boolean? = null, hasAudio: Boolean? = null): Verdict? = when (f) {
         Format.Adts -> Verdict(Kind.AUDIO, "audio/aac", "aac")
         Format.Mp3 -> Verdict(Kind.AUDIO, "audio/mpeg", "mp3")
@@ -77,8 +82,13 @@ object MediaSniff {
                 else -> video
             }
         }
-        Format.Unknown -> fileExtension.lowercase().let { e ->
-            if (e in videoExts) Verdict(Kind.VIDEO, if (e == "mov") "video/quicktime" else "video/mp4", if (e == "mov") "mov" else "mp4") else null
+        Format.Unknown -> {
+            val mov = fileExtension.lowercase() == "mov"
+            when {
+                hasVideo == true -> Verdict(Kind.VIDEO, if (mov) "video/quicktime" else "video/mp4", if (mov) "mov" else "mp4")
+                hasAudio == true -> Verdict(Kind.AUDIO, "audio/mp4", "m4a")
+                else -> null
+            }
         }
     }
 }
