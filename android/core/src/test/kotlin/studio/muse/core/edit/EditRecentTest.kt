@@ -37,12 +37,14 @@ class EditRecentTest {
             RecentSession("es_2", "take_gone", updatedAt = 500, place = EditPlace(at = 3_000)), // left later than es_1 changed
             RecentSession("es_3", "take_a", status = "closed", updatedAt = 9_000),
             RecentSession("es_4", BLANK_SOURCE, updatedAt = 9_500, emptyBlank = true), // "New" pressed and left
+            // Left at 1 500, then a helper's result landed at 9 000 with no one there: still ranked by when it was left.
+            RecentSession("es_6", "take_b", updatedAt = 9_000, place = EditPlace(at = 1_500)),
         )
         val items = EditRecent.items(sessions, emptyList()) { titles[it] }
-        assertEquals(listOf("es_2", "es_1"), items.map { it.id })
+        assertEquals(listOf("es_2", "es_6", "es_1"), items.map { it.id })
         assertEquals(EditRecent.UNTITLED, items[0].title) // its take is gone: still listed
-        assertEquals("Café review", items[1].title)
-        assertEquals("es_1", items[1].sessionId)
+        assertEquals("Café review", items[2].title)
+        assertEquals("es_1", items[2].sessionId)
     }
 
     @Test fun thePhonesEntriesJoinTheList() {

@@ -510,6 +510,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     private val recentFile = EditRecentFile.of(app.filesDir)
     private var placeTracking = false
     private var lastSentPlace: studio.muse.core.edit.EditPlace? = null
+    private var lastSentProject: EditProject? = null
     /** A member's (or an unshared) edit kept on this phone: what the editor reopens instead of the take's saved edit. */
     private val localResume: EditProject? get() = resume?.takeIf { it.sessionId == null }?.let { r ->
         recentFile.load().firstOrNull { "local:${it.key}" == r.id }?.project?.let { runCatching { EditJson.parse(it) }.getOrNull() }
@@ -757,8 +758,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         // Kept here when no session shares it: a member's edit, or one whose take was deleted (it can't be shared any more).
         recentFile.save(studio.muse.core.edit.EditRecentEntry(takeId, sid, if (live == null) EditJson.encode(project) else null, place,
             u.title, System.currentTimeMillis()))
-        if (sid != null && lastSentPlace?.samePlace(place) != true) {
-            lastSentPlace = place
+        // The session's place is also "when the person last worked on it" (Recent edits' order): sent when the place moved
+        // or the edit itself changed.
+        if (sid != null && (lastSentPlace?.samePlace(place) != true || lastSentProject != project)) {
+            lastSentPlace = place; lastSentProject = project
             c.scope.launch { runCatching { c.repo.api.saveEditView(sid, place.toJson()) } }
         }
     }

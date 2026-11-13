@@ -102,7 +102,9 @@ object EditRecent {
         val out = LinkedHashMap<String, EditRecentItem>()
         for (s in sessions) {
             if (s.status != "open" || s.emptyBlank) continue
-            val at = maxOf(s.lastTouchedAt ?: 0, s.updatedAt, s.place?.at ?: 0)
+            // When the person last worked on it (the saved place); an edit no app has opened (Claude's) by its last change.
+            // A change landing later with no one there (a helper's result, Claude's note) doesn't move it up (run 604).
+            val at = s.place?.at?.takeIf { it > 0 } ?: maxOf(s.lastTouchedAt ?: 0, s.updatedAt)
             out[s.id] = EditRecentItem(s.id, s.takeId, s.id, title(s.place, s.takeId, takeTitle), at, s.place)
         }
         for (d in local) {

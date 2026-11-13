@@ -943,8 +943,9 @@ class FakeMuseApi(
         view = s.view, lastTouchedAt = editTouched(s),
     )
 
+    /** Like the server: when the person last worked on it (the view), else its last change. */
     private fun editTouched(s: FakeEditSession): Long =
-        maxOf(s.updatedAt, ((s.view?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0).toLong())
+        ((s.view?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0).toLong().takeIf { it > 0 } ?: s.updatedAt
 
     private fun editRow(id: String) = editSessions[id] ?: throw ApiException("not_found", "Edit session not found")
 
