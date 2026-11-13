@@ -56,6 +56,8 @@ public struct ClaudeChatSummary: Codable, Hashable, Sendable, Identifiable {
     public var messageCount: Int?
     /// Step 6b: the chat's own Claude model; nil = the person's default.
     public var model: String?
+    /// The chat's own effort level; nil = the person's last choice, else the model's default.
+    public var effort: String?
 
     public init(id: String, title: String? = nil, kind: String = "chat", page: ClaudePage? = nil, lastOn: String? = nil, updatedAt: Double = 0, messageCount: Int? = nil) {
         self.id = id; self.title = title; self.kind = kind; self.page = page; self.lastOn = lastOn; self.updatedAt = updatedAt; self.messageCount = messageCount
@@ -132,6 +134,14 @@ public struct ClaudeModelInfo: Codable, Hashable, Sendable, Identifiable {
     public var speed: String
     public var cost: String
     public var good: String
+    /// The effort levels the model takes, low to high (empty or missing: no effort setting, the picker hides).
+    public var efforts: [String]?
+    /// The model's own default level.
+    public var defaultEffort: String?
+
+    public init(id: String, name: String, speed: String, cost: String, good: String, efforts: [String]? = nil, defaultEffort: String? = nil) {
+        self.id = id; self.name = name; self.speed = speed; self.cost = cost; self.good = good; self.efforts = efforts; self.defaultEffort = defaultEffort
+    }
 }
 
 public struct ClaudeModelList: Codable, Hashable, Sendable {
@@ -139,4 +149,27 @@ public struct ClaudeModelList: Codable, Hashable, Sendable {
     /// This person's default (nil: the studio's).
     public var `default`: String?
     public var studioDefault: String?
+    /// The effort level this person picked last (chats without their own start from it).
+    public var defaultEffort: String?
+}
+
+/// Effort (Claude Code's `--effort`, the API's output_config.effort): how long Claude thinks. Higher thinks longer and
+/// uses more of the Claude plan.
+public enum ClaudeEffort {
+    public static let all = ["low", "medium", "high", "xhigh", "max"]
+    private static let names = ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"]
+    public static func name(_ e: String) -> String { names[e] ?? e }
+    public static func valid(_ e: String) -> Bool { all.contains(e) }
+
+    /// The levels a model takes, in order (unknown words dropped).
+    public static func levels(_ m: ClaudeModelInfo?) -> [String] { all.filter { (m?.efforts ?? []).contains($0) } }
+
+    /// The level a turn runs at: the chat's own, else the person's last choice, else the model's default. nil when the
+    /// model takes no effort setting (nothing is sent). A level the model doesn't take falls through to the next.
+    public static func resolve(_ m: ClaudeModelInfo?, own: String?, last: String?) -> String? {
+        let l = levels(m)
+        guard !l.isEmpty else { return nil }
+        for e in [own, last, m?.defaultEffort] { if let e, l.contains(e) { return e } }
+        return nil
+    }
 }

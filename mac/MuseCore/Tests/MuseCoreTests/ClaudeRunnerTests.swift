@@ -129,6 +129,35 @@ final class ClaudeRunnerTests: XCTestCase {
         XCTAssertEqual(Array(launcher.launches[1].arguments.suffix(2)), ["--resume", "5f1c2a9e-7d1b-4c1e-9a55-3c2f9b8e1d01"])
     }
 
+    /// Effort: the chat's pick goes to Claude Code on its next turn; without one, the last choice, else the model's default.
+    func testRelaySendsTheChatsEffort() async throws {
+        let api = FakeClaudeAPI()
+        let thread = try await api.thread(contextKind: "chat", contextId: "ct_effort")
+        let launcher = try scripted()
+        let sink = Sink()
+        let root = self.root!
+        let relay = ClaudeRelay(api: api, makeRunner: {
+            ClaudeTurnRunner(api: api, launcher: launcher, tokens: ClaudeTokenCache(), executable: "/x", root: root, environment: [:], flushInterval: 0.01)
+        }, onEvent: { sink.add($0, $1, $2) })
+        func effort(_ i: Int) -> String? {
+            let a = launcher.launches[i].arguments
+            return a.firstIndex(of: "--effort").map { a[$0 + 1] }
+        }
+        await relay.setEffortCatalog(try await api.claudeModels())
+        await relay.submit(threadId: thread.id, text: "one")
+        try await waitFor { sink.dones == 1 }
+        XCTAssertEqual(effort(0), "medium", "Opus 5.5's own default (the studio's model)")
+        await relay.setEffort(threadId: thread.id, "high")
+        await relay.submit(threadId: thread.id, text: "two")
+        try await waitFor { sink.dones == 2 }
+        XCTAssertEqual(effort(1), "high")
+        await relay.setEffort(threadId: thread.id, nil)
+        await relay.setLastEffort("max")
+        await relay.submit(threadId: thread.id, text: "three")
+        try await waitFor { sink.dones == 3 }
+        XCTAssertEqual(effort(2), "max")
+    }
+
     func testClaimRefusedTurnIsNotRun() async throws {
         let api = FakeClaudeAPI()
         api.claimError = "already_claimed"

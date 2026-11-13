@@ -81,12 +81,14 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
     public var chatId: String?
     /// Step 6b: the chat's own Claude model (Claude Code's --model); nil = the person's default.
     public var model: String?
+    /// The chat's own effort level (Claude Code's --effort); nil = the person's last choice, else the model's default.
+    public var effort: String?
 
     public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil, assistId: String? = nil, chatId: String? = nil) {
         self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId; self.assistId = assistId; self.chatId = chatId
     }
 
-    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId, chatId, model }
+    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId, chatId, model, effort }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         prompt = (try? c.decode(String.self, forKey: .prompt)) ?? ""
@@ -96,6 +98,7 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
         assistId = try? c.decodeIfPresent(String.self, forKey: .assistId)
         chatId = try? c.decodeIfPresent(String.self, forKey: .chatId)
         model = try? c.decodeIfPresent(String.self, forKey: .model)
+        effort = try? c.decodeIfPresent(String.self, forKey: .effort)
     }
 
     /// What Claude Code is started with (`--append-system-prompt`): the server's prompt plus the id it acts on.

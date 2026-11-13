@@ -9,6 +9,7 @@ import MuseCore
 //   draft_live       Claude sets the rig, the prompt and a reference in Photo; the composer shows all three
 //   draft_after_tool the same with the live event missed: the draft is read again after Claude's tool step
 //   draft_bound      the chat's context line names the draft the composer shows
+//   effort …         the effort picker beside the model (SnapshotRunner+ClaudeEffort.swift)
 //   mode_sessions    each Suite mode has its own chats; closing the panel (or quitting) and opening the mode again returns
 //                    to its latest chat with its messages and its draft
 extension SnapshotRunner {
@@ -191,6 +192,9 @@ extension SnapshotRunner {
             line(true, "panel header fits", "not measured (the panel wasn't drawn in this run)")
         }
         store.oneClaude.open = false
+
+        // Effort beside the model (SnapshotRunner+ClaudeEffort.swift; shot mac_a_claude_effort.png).
+        await claudeEffortCheck(store, fakeChat: fakeChat, dir: dir, until: until, line: line)
 
         // One Claude (owner bug, build 520): Claude opening an edit session (a new blank project) lands IN the editor on
         // that session, not on the Edit home.

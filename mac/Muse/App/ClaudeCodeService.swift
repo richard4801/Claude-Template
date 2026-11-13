@@ -351,6 +351,12 @@ final class ClaudeCodeService: ObservableObject {
     /// Step 6b: the person's default model and a chat's own, for the next Claude Code run (--model).
     func relayDefaultModel(_ m: String?) async { await relay?.setDefaultModel(m) }
     func relayChatModel(threadId: String, _ m: String?) async { await relay?.setModel(threadId: threadId, m) }
+    /// Effort (`--effort`): the models' levels and the person's last choice, and a chat's own pick.
+    func relayEffortCatalog(_ list: ClaudeModelList) async { await relay?.setEffortCatalog(list) }
+    func relayChatEffort(threadId: String, _ e: String?, last: String?) async {
+        await relay?.setEffort(threadId: threadId, e)
+        if e != nil { await relay?.setLastEffort(last) }
+    }
 
     func isRunning(threadId: String) -> Bool { relayState.running[threadId] != nil }
     func isAnsweringPhone(threadId: String) -> Bool { relayState.running[threadId]?.fromPhone == true }

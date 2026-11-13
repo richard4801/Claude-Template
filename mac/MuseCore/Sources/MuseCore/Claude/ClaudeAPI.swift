@@ -71,6 +71,8 @@ public protocol ClaudeAPI: Sendable {
     /// Step 6b: the models, this person's default; a chat's model; this person's default.
     func claudeModels() async throws -> ClaudeModelList
     func setChatModel(_ id: String, model: String?) async throws
+    /// The chat's effort level (nil: back to the last choice / the model's default). A pick is also the person's last choice.
+    func setChatEffort(_ id: String, effort: String?) async throws
     func setDefaultModel(_ model: String?) async throws
     /// Files on this Mac: Claude Code's questions waiting for this person, and their answer.
     func pendingPermissions() async throws -> [ClaudePermissionAsk]
@@ -109,6 +111,7 @@ public extension ClaudeAPI {
     func deleteMemory(_ id: String) async throws { throw ApiError("not_found", "This server has no Claude memory yet") }
     func claudeModels() async throws -> ClaudeModelList { throw ApiError("not_found", "This server has no model choice yet") }
     func setChatModel(_ id: String, model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
+    func setChatEffort(_ id: String, effort: String?) async throws { throw ApiError("not_found", "This server has no effort choice yet") }
     func setDefaultModel(_ model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
     func pendingPermissions() async throws -> [ClaudePermissionAsk] { [] }
     func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
@@ -253,6 +256,11 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule {
         try await call("PATCH", "v1/claude/memory/\(try ClaudeIds.check(id))", MemoryPin(pinned: pinned))
     }
+    private struct EffortPatch: Encodable {
+        var effort: String?
+        func encode(to e: Encoder) throws { var c = e.container(keyedBy: K.self); try c.encode(effort, forKey: .effort) } // null clears
+        enum K: String, CodingKey { case effort }
+    }
     private struct ModelPatch: Encodable {
         var model: String?
         func encode(to e: Encoder) throws { var c = e.container(keyedBy: K.self); try c.encode(model, forKey: .model) } // null clears
@@ -266,6 +274,9 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public func claudeModels() async throws -> ClaudeModelList { try await call("GET", "v1/claude/models") }
     public func setChatModel(_ id: String, model: String?) async throws {
         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(ModelPatch(model: model))))
+    }
+    public func setChatEffort(_ id: String, effort: String?) async throws {
+        _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(EffortPatch(effort: effort))))
     }
     public func pendingPermissions() async throws -> [ClaudePermissionAsk] {
         let list: ClaudePermissionList = try await call("GET", "v1/claude/permissions")

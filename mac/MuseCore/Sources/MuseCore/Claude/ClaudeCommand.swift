@@ -34,6 +34,8 @@ public struct ClaudeCommand: Hashable, Sendable {
     public var readDirectory: String?
     /// Step 6b: the Claude model for this chat (`--model`); nil = Claude Code's own default.
     public var model: String?
+    /// The chat's effort level (`--effort`: low, medium, high, xhigh, max); nil = Claude Code's own default.
+    public var effort: String?
     /// Files on this Mac, asking every time (see above).
     public var files = false
 
@@ -74,6 +76,7 @@ public struct ClaudeCommand: Hashable, Sendable {
         if let p = appendSystemPrompt, !p.isEmpty { a += ["--append-system-prompt", p] }
         if let resume, !resume.isEmpty { a += ["--resume", resume] }
         if let m = model, Self.validModel(m) { a += ["--model", m] }
+        if let e = effort, ClaudeEffort.valid(e) { a += ["--effort", e] }
         return a
     }
 
