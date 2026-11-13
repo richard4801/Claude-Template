@@ -1,0 +1,75 @@
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+index 5e82c050..eeb9d1ce 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
+@@ -841,7 +841,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+         val fmt = MediaSniff.format(head)
+         var hasVideo: Boolean? = null
+         var hasAudio: Boolean? = null
+-        if (fmt is MediaSniff.Format.IsoMedia) runCatching {
++        // A container, or bytes that say nothing (then only real tracks make it usable, never the name).
++        if (fmt is MediaSniff.Format.IsoMedia || fmt == MediaSniff.Format.Unknown) runCatching {
+             val x = android.media.MediaExtractor()
+             try {
+                 x.setDataSource(f.absolutePath)
+diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt b/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt
+index 6aa02941..2598553b 100644
+--- a/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt
++++ b/android/core/src/main/kotlin/studio/muse/core/edit/MediaSniff.kt
+@@ -36,6 +36,8 @@ object MediaSniff {
+         fun ascii(at: Int, n: Int): String? = if (b.size >= at + n) String(b, at, n, Charsets.ISO_8859_1) else null
+         fun u(i: Int) = b[i].toInt() and 0xFF
+         if (ascii(4, 4) == "ftyp") return Format.IsoMedia(ascii(8, 4) ?: "")
++        // An older QuickTime file starts with another top-level atom (no ftyp): a container whose tracks decide.
++        if (ascii(4, 4) in quickTimeAtoms) return Format.IsoMedia("qt  ")
+         if (b.size >= 4 && u(0) == 0x89 && u(1) == 0x50 && u(2) == 0x4E && u(3) == 0x47) return Format.Png
+         if (b.size >= 3 && u(0) == 0xFF && u(1) == 0xD8 && u(2) == 0xFF) return Format.Jpeg
+         if (ascii(0, 4) == "RIFF" && ascii(8, 4) == "WAVE") return Format.Wav
+@@ -51,11 +53,14 @@ object MediaSniff {
+         return Format.Unknown
+     }
+ 
++    private val quickTimeAtoms = setOf("moov", "mdat", "wide", "free", "skip", "pnot")
+     private val heicBrands = setOf("heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1")
+     private val audioBrands = setOf("M4A ", "M4B ", "M4P ")
+-    private val videoExts = setOf("mp4", "mov", "m4v")
+ 
+-    /** The verdict, from the format and (for an MP4 container) its tracks; the extension only when the bytes say nothing. */
++    /**
++     * The verdict, from the format and (for an MP4 container) its tracks. A name alone never makes a file usable (Mac
++     * bundle-10 run 617: a text file named .mp4 was taken): bytes that say nothing need real tracks read by the app.
++     */
+     fun verdict(f: Format, fileExtension: String = "", hasVideo: Boolean? = null, hasAudio: Boolean? = null): Verdict? = when (f) {
+         Format.Adts -> Verdict(Kind.AUDIO, "audio/aac", "aac")
+         Format.Mp3 -> Verdict(Kind.AUDIO, "audio/mpeg", "mp3")
+@@ -77,8 +82,13 @@ object MediaSniff {
+                 else -> video
+             }
+         }
+-        Format.Unknown -> fileExtension.lowercase().let { e ->
+-            if (e in videoExts) Verdict(Kind.VIDEO, if (e == "mov") "video/quicktime" else "video/mp4", if (e == "mov") "mov" else "mp4") else null
++        Format.Unknown -> {
++            val mov = fileExtension.lowercase() == "mov"
++            when {
++                hasVideo == true -> Verdict(Kind.VIDEO, if (mov) "video/quicktime" else "video/mp4", if (mov) "mov" else "mp4")
++                hasAudio == true -> Verdict(Kind.AUDIO, "audio/mp4", "m4a")
++                else -> null
++            }
+         }
+     }
+ }
+diff --git a/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt b/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt
+index ba822216..c930a684 100644
+--- a/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt
++++ b/android/core/src/test/kotlin/studio/muse/core/edit/EditAudioApprovalsTest.kt
+@@ -45,6 +45,10 @@ class EditAudioApprovalsTest {
+     @Test fun anUnreadableFileSaysWhyInOnePlainLine() {
+         assertNull(MediaSniff.verdict(MediaSniff.Format.Unknown, "pdf"))
+         assertNull("an .mp3 with no MPEG audio inside", MediaSniff.verdict(MediaSniff.Format.Unknown, "mp3"))
++        assertNull("a name alone never makes a file usable (Mac run 617)", MediaSniff.verdict(MediaSniff.format("not a video".toByteArray()), "mp4"))
++        assertNull(MediaSniff.verdict(MediaSniff.Format.Unknown, "mov", hasVideo = false, hasAudio = false))
++        assertEquals("video/quicktime", MediaSniff.verdict(MediaSniff.Format.Unknown, "mov", hasVideo = true)?.contentType)
++        assertEquals(MediaSniff.Format.IsoMedia("qt  "), MediaSniff.format(bytes(0, 0, 0, 8, *ascii("wide"))))
+         assertEquals("This file has no video or sound MUSE can read.", MediaSniff.UNREADABLE)
+         assertFalse(MediaSniff.UNREADABLE.contains("·"))
+     }
