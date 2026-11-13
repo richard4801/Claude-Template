@@ -605,6 +605,21 @@ final class EditSuiteSession {
         if added > 0 { binTab = .uploads }
     }
 
+    /// A video imported from a link while this edit is open (Uploads → Add → From a link): into Uploads like a file from
+    /// this Mac. The import's upload (`uploadId`, a video) is used as the asset's upload; the server's editor takes any
+    /// video upload of the studio. A link imported again shows the same upload, not a second tile.
+    func addLinkImport(_ r: LinkImportResult) -> Bool {
+        guard isReady, let up = r.uploadId, let c = r.clip, c.durationSec >= E.minClipSourceSec else { return false }
+        if project.assets.contains(where: { $0.upload == up }) { binTab = .uploads; return true }
+        let id = project.newId("v")
+        state.assetNames[id] = c.name
+        let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (c.durationSec * 1000).rounded(.down) / 1000,
+                        width: c.width > 0 ? c.width : nil, height: c.height > 0 ? c.height : nil, url: r.videoUrl)
+        guard edit({ $0.addToBin(a) }) else { return false }
+        binTab = .uploads
+        return true
+    }
+
     /// An upload from the bin onto the timeline: at the playhead ("+"), or where it was dropped (`at`, on row `lane`).
     func placeUpload(_ id: String, at: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) {
         if let at { seek(at) }

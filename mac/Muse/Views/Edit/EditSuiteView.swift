@@ -45,7 +45,7 @@ struct EditSuiteView: View {
             if openId == a.takeId { await open(a.takeId) } else { openId = a.takeId }
         }
         .onChange(of: takeId) { _, new in openId = new }
-        .onDisappear { session?.close() }
+        .onDisappear { session?.close(); store.linkImport.deliverToEdit = nil }
     }
 
     private func open(_ id: String?) async {
@@ -60,6 +60,7 @@ struct EditSuiteView: View {
         }
         session?.close()
         session = nil
+        store.linkImport.deliverToEdit = nil
         guard let id else { return }
         if attach != nil { store.suite.editAttach = nil }
         guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
@@ -68,6 +69,7 @@ struct EditSuiteView: View {
             return
         }
         session = s
+        store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
         await s.load()
         // The viewer's Split: the playhead where the take was when Split was pressed.
         if let at = store.suite.editAt {
@@ -79,6 +81,7 @@ struct EditSuiteView: View {
     private func close() {
         session?.close()
         session = nil
+        store.linkImport.deliverToEdit = nil
         openId = nil
         // Opened with Edit on a take (Result, Gallery): back there.
         if takeId != nil, store.editor != nil { store.closeEditor() }
