@@ -7,7 +7,7 @@ extension EditV2 {
     public static let maxJsonBytes = 256 * 1024
     /// Wave 1: a freeze frame lasts 0.1–30 s.
     public static let holdMinSec = 0.1, holdMaxSec = 30.0
-    public static let maxTracks = 16, maxItemsPerTrack = 300, maxItems = 600, maxAssets = 60, maxWords = 3000, maxKeyframes = 100
+    public static let maxTracks = 16, maxItemsPerTrack = 300, maxItems = 600, maxAssets = 400, maxWords = 3000, maxKeyframes = 100
     public static let minClipSourceSec = 0.1, minItemSec = 0.05, minOutputSec = 0.5, maxOutputSec = 600.0
     public static let minSpeed = 0.1, maxSpeed = 10.0, endSlackSec = 0.05, minTransitionSec = 0.1, maxTransitionSec = 2.0
     /// Speed curves render as this many equal source pieces (each at the curve's speed at its middle).
