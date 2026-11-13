@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
-index e60d2af..7aeccf1 100644
+index e60d2af9..7aeccf17 100644
 --- a/.github/workflows/mac.yml
 +++ b/.github/workflows/mac.yml
 @@ -192,6 +192,19 @@ jobs:
@@ -23,7 +23,7 @@ index e60d2af..7aeccf1 100644
        # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
        # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
 diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
-index 4de7e99..40ca13c 100644
+index 4de7e998..40ca13ce 100644
 --- a/mac/Muse/App/AppStore+OneClaude.swift
 +++ b/mac/Muse/App/AppStore+OneClaude.swift
 @@ -35,6 +35,8 @@ final class OneClaudeState {
@@ -154,7 +154,7 @@ index 4de7e99..40ca13c 100644
  
      /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.
 diff --git a/mac/Muse/App/ClaudeCodeService.swift b/mac/Muse/App/ClaudeCodeService.swift
-index da8afdc..a8054d8 100644
+index da8afdc8..a8054d88 100644
 --- a/mac/Muse/App/ClaudeCodeService.swift
 +++ b/mac/Muse/App/ClaudeCodeService.swift
 @@ -530,6 +530,8 @@ final class ClaudeCodeService: ObservableObject {
@@ -176,7 +176,7 @@ index da8afdc..a8054d8 100644
      }
 diff --git a/mac/Muse/App/SnapshotRunner+ClaudeChips.swift b/mac/Muse/App/SnapshotRunner+ClaudeChips.swift
 new file mode 100644
-index 0000000..4efaf07
+index 00000000..12061d53
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+ClaudeChips.swift
 @@ -0,0 +1,92 @@
@@ -235,7 +235,7 @@ index 0000000..4efaf07
 +            note("FAIL open_edit: the editor didn't open (\(String(describing: store.suite.editCurrent?.phase)))"); note("ALL DONE"); return
 +        }
 +        // No platform view (its safe-area chip would lead), no text, no captions, no music.
-+        s.view { $0.safeArea = nil }
++        s.view { $0.preview.safeArea = false }
 +        store.showOneClaude()
 +        _ = await wait(10) { store.oneClaude.chatId != nil }
 +        store.claudeChipsChanged(now: true)
@@ -273,7 +273,7 @@ index 0000000..4efaf07
 +    }
 +}
 diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
-index 13e51d6..b0b2a9c 100644
+index 13e51d63..b0b2a9c5 100644
 --- a/mac/Muse/App/SnapshotRunner.swift
 +++ b/mac/Muse/App/SnapshotRunner.swift
 @@ -184,6 +184,7 @@ enum SnapshotRunner {
@@ -285,7 +285,7 @@ index 13e51d6..b0b2a9c 100644
              await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
              await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
 diff --git a/mac/Muse/Views/Claude/ChatComposer.swift b/mac/Muse/Views/Claude/ChatComposer.swift
-index a123493..1e9a780 100644
+index a1234931..1e9a780f 100644
 --- a/mac/Muse/Views/Claude/ChatComposer.swift
 +++ b/mac/Muse/Views/Claude/ChatComposer.swift
 @@ -316,6 +316,7 @@ struct ChatComposerBar: View {
@@ -320,7 +320,7 @@ index a123493..1e9a780 100644
              }
              if let top { top }
 diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
-index 6cb9395..c2d335b 100644
+index 6cb93951..c2d335bd 100644
 --- a/mac/Muse/Views/Claude/OneClaudePanel.swift
 +++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
 @@ -57,6 +57,10 @@ struct OneClaudePanel: View {
@@ -335,11 +335,11 @@ index 6cb9395..c2d335b 100644
          .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
          .onChange(of: store.claudeJobProgress, initial: true) { _, p in
 diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
-index e6ef8fc..4827d65 100644
+index dbdcaaf9..11588903 100644
 --- a/mac/Muse/Views/Edit/EditSuiteView.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteView.swift
-@@ -395,7 +395,12 @@ struct EditSuiteEditor: View {
-         }
+@@ -399,7 +399,12 @@ struct EditSuiteEditor: View {
+         .onChange(of: SnapshotRunner.state.claudeTab) { _, tab in if tab != nil { showClaude = true } }
          // One Claude: Claude sees this edit (its take and live session).
          .onChange(of: session.liveConnected) { _, _ in reportClaudePage() }
 -        .onDisappear { store.oneClaude.viewPage = nil }
@@ -352,14 +352,14 @@ index e6ef8fc..4827d65 100644
          // Shortcuts are off while a text box has the cursor (owner bug 2026-11-11: typing in Claude chat played,
          // split or deleted clips). The table lives in MuseCore (EditShortcuts) with its tests.
          .onKeyPress(.space) { shortcut(.space) }
-@@ -488,6 +493,14 @@ struct EditSuiteEditor: View {
+@@ -492,6 +497,14 @@ struct EditSuiteEditor: View {
          return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
      }
  
 +    /// The edit as the live chips need it (ClaudeSuggestQuery.edit in MuseCore).
 +    private var claudeFacts: ClaudeSuggestQuery {
 +        var q = ClaudeSuggestQuery(page: nil)
-+        q.edit(project: session.state.project, selection: session.state.selection, safeArea: session.state.safeArea,
++        q.edit(project: session.state.project, selection: session.state.selection, preview: session.state.preview,
 +               unsaved: session.state.hasUnsavedChanges)
 +        return q
 +    }
@@ -368,7 +368,7 @@ index e6ef8fc..4827d65 100644
          var ids = ["takeId": session.take.id]
          if let s = session.live?.sessionId { ids["sessionId"] = s }
 diff --git a/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift b/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift
-index 57ff9fb..39d7e4e 100644
+index 57ff9fb2..39d7e4e3 100644
 --- a/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift
 +++ b/mac/Muse/Views/Suite/Composer/SuiteClaudePanel.swift
 @@ -11,6 +11,16 @@ import UniformTypeIdentifiers
@@ -412,7 +412,7 @@ index 57ff9fb..39d7e4e 100644
                             wrapOutgoing: { [store] text in store.suiteClaudeOutgoing(text) },
                             unwrapShown: SuiteAssistClaude.stripContext, sendShortcut: false)
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
-index bab45f0..db23a55 100644
+index bab45f00..db23a551 100644
 --- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
 @@ -86,6 +86,8 @@ public protocol ClaudeAPI: Sendable {
@@ -452,10 +452,10 @@ index bab45f0..db23a55 100644
      }
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeSuggest.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeSuggest.swift
 new file mode 100644
-index 0000000..9abe9b5
+index 00000000..ba9debf6
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeSuggest.swift
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,152 @@
 +import Foundation
 +
 +/// Live suggestion chips (owner request 2026-11-12): the chips over Claude's input follow what is on screen and what just
@@ -523,8 +523,9 @@ index 0000000..9abe9b5
 +    }
 +
 +    /// The open edit's facts: main clips, captions, the music and its marked beats, the selection, the platform view and
-+    /// the text outside its safe area (`EditSuite.SafeArea.insets`), unsaved changes.
-+    public mutating func edit(project p: EditV2.Project, selection: String?, safeArea: EditSuite.SafeArea?, unsaved: Bool) {
++    /// the text outside its safe area (the preview's red box, `EditSafeBox.zone`; nil or the box off = no view), unsaved
++    /// changes. Prod's platform preview replaced EditSuite.SafeArea with EditPreview (bundle-10 port).
++    public mutating func edit(project p: EditV2.Project, selection: String?, preview: EditPreview?, unsaved: Bool) {
 +        var clips = 0, captions = false, music: String?, beats = false, texts: [(String, Double, Double)] = []
 +        var kinds: [String: EditV2.TrackKind] = [:]
 +        for t in p.tracks {
@@ -542,9 +543,9 @@ index 0000000..9abe9b5
 +        self.beats = music == nil ? nil : beats
 +        self.blank = p.isBlank && clips == 0
 +        self.unsaved = unsaved
-+        self.view = safeArea?.rawValue
-+        if let s = safeArea {
-+            let i = s.insets
++        let shown = preview.flatMap { $0.safeArea ? $0.resolved(width: p.canvas.width, height: p.canvas.height) : nil }
++        self.view = shown?.view.rawValue
++        if let s = shown, let i = EditSafeBox.zone(s, width: p.canvas.width, height: p.canvas.height) {
 +            offSafe = texts.filter { $0.1 < i.left || $0.1 > 1 - i.right || $0.2 < i.top || $0.2 > 1 - i.bottom }.map { $0.0 }
 +        } else { offSafe = [] }
 +        if let sel = selection, let k = kinds[sel] {
@@ -589,7 +590,7 @@ index 0000000..9abe9b5
 +    static func demoSuggestions(_ q: ClaudeSuggestQuery) -> [ClaudeChip] {
 +        guard q.page == "edit", let clips = q.clips else { return fallback(page: q.page, tool: q.tool) }
 +        var out: [ClaudeChip] = []
-+        if let v = q.view, !q.offSafe.isEmpty, let s = EditSuite.SafeArea(rawValue: v) {
++        if let v = q.view, !q.offSafe.isEmpty, let s = PreviewSkin(rawValue: v) {
 +            out.append(ClaudeChip(label: "Fix the safe area", prompt: "In the \(s.label) view, my text \(q.offSafe.prefix(6).joined(separator: ", ")) sits outside the safe area (under the app's buttons). Move it inside the safe area with apply_edit_ops, keeping its look.", icon: "frame-corners"))
 +        }
 +        if q.blank == true, clips == 0 {
@@ -608,7 +609,7 @@ index 0000000..9abe9b5
 +    }
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
-index d0fded3..e0d58e5 100644
+index d0fded35..e0d58e5f 100644
 --- a/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
 @@ -25,6 +25,14 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
@@ -628,7 +629,7 @@ index d0fded3..e0d58e5 100644
          defer { lock.unlock() }
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeSuggestTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeSuggestTests.swift
 new file mode 100644
-index 0000000..9b70465
+index 00000000..3b7fec65
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeSuggestTests.swift
 @@ -0,0 +1,76 @@
@@ -654,14 +655,14 @@ index 0000000..9b70465
 +        return E.Project(sourceTakeId: "t1", canvas: E.Canvas(width: 1080, height: 1920, fps: 30), assets: [a], tracks: tracks)
 +    }
 +
-+    private func facts(_ p: E.Project, selection: String? = nil, safe: EditSuite.SafeArea? = nil, unsaved: Bool = false) -> ClaudeSuggestQuery {
++    private func facts(_ p: E.Project, selection: String? = nil, safe: EditPreview? = nil, unsaved: Bool = false) -> ClaudeSuggestQuery {
 +        var q = ClaudeSuggestQuery(page: ClaudePage(name: "edit", ids: ["sessionId": "es_1", "takeId": "t1"]), chatId: "ct_1")
-+        q.edit(project: p, selection: selection, safeArea: safe, unsaved: unsaved)
++        q.edit(project: p, selection: selection, preview: safe, unsaved: unsaved)
 +        return q
 +    }
 +
 +    func testEditFactsAndQueryString() {
-+        let q = facts(project(music: true), selection: "c1", safe: .tiktok, unsaved: true)
++        let q = facts(project(music: true), selection: "c1", safe: EditPreview(view: .tiktok, safeArea: true), unsaved: true)
 +        XCTAssertEqual(q.clips, 1)
 +        XCTAssertEqual(q.captions, false)
 +        XCTAssertEqual(q.musicId, "mus_1")
@@ -675,8 +676,8 @@ index 0000000..9b70465
 +    }
 +
 +    func testTextOutsideTheSafeArea() {
-+        XCTAssertEqual(facts(project(textAt: (0.5, 0.95)), safe: .tiktok).offSafe, ["txt_1"])
-+        XCTAssertEqual(facts(project(textAt: (0.5, 0.5)), safe: .tiktok).offSafe, [])
++        XCTAssertEqual(facts(project(textAt: (0.5, 0.95)), safe: EditPreview(view: .tiktok, safeArea: true)).offSafe, ["txt_1"])
++        XCTAssertEqual(facts(project(textAt: (0.5, 0.5)), safe: EditPreview(view: .tiktok, safeArea: true)).offSafe, [])
 +        XCTAssertEqual(facts(project(textAt: (0.5, 0.95)), safe: nil).offSafe, [])   // no platform view, nothing to fix
 +    }
 +

@@ -24,9 +24,16 @@ import { CHAT_REGISTRY } from './registry.js';
 export type LiveChip = Chip & { id: string; tools: string[]; why: string };
 
 /** Platform views (the Mac's EditSuite.SafeArea insets as canvas fractions: left, top, right, bottom). */
-export const SAFE_AREAS = { tiktok: [0.06, 0.12, 0.17, 0.2], reels: [0.05, 0.14, 0.15, 0.22], shorts: [0.05, 0.1, 0.16, 0.18] } as const;
-export type SafeView = keyof typeof SAFE_AREAS;
-const VIEW_NAMES: Record<SafeView, string> = { tiktok: 'TikTok', reels: 'Reels', shorts: 'Shorts' };
+/**
+ * Platform preview views (the apps' PreviewSkin raw values). The safe boxes (left, top, right, bottom as canvas fractions)
+ * are the Mac's defaults (PreviewLayouts); the server only uses them when the app didn't send `offSafe` itself. YouTube
+ * (desktop) has no box; Clean is no view.
+ */
+export const SAFE_VIEWS = ['tiktok', 'reels', 'shorts', 'facebook', 'youtube'] as const;
+export type SafeView = (typeof SAFE_VIEWS)[number];
+export const SAFE_AREAS: Partial<Record<SafeView, readonly [number, number, number, number]>> = {
+  tiktok: [0.03, 0.11, 0.17, 0.29], reels: [0.03, 0.1, 0.16, 0.3], shorts: [0.03, 0.09, 0.17, 0.3], facebook: [0.03, 0.1, 0.16, 0.28] };
+const VIEW_NAMES: Record<SafeView, string> = { tiktok: 'TikTok', reels: 'Reels', shorts: 'Shorts', facebook: 'Facebook', youtube: 'YouTube' };
 
 /** What the rules read. All optional: a fact nobody knows is simply not there. */
 export type Facts = {
@@ -79,9 +86,13 @@ export function editFacts(sessionId: string, p: M.EditProject): EditFacts {
     blank: p.sourceTakeId === 'blank' && mainClips === 0 };
 }
 
-/** Text whose centre sits outside the platform's safe area (under its buttons or captions). */
+const safeHint = (v: SafeView) => { const b = SAFE_AREAS[v]; return b ? ` (keep it at least ${Math.round(b[1] * 100)}% from the top and ${Math.round(b[3] * 100)}% from the bottom)` : ''; };
+
+/** Text whose centre sits outside the platform's safe area (under its buttons or captions); none for a view without a box. */
 export function outsideSafe(texts: EditFacts['texts'], view: SafeView): string[] {
-  const [l, t, r, b] = SAFE_AREAS[view];
+  const box = SAFE_AREAS[view];
+  if (!box) return [];
+  const [l, t, r, b] = box;
   return texts.filter(x => x.x < l || x.x > 1 - r || x.y < t || x.y > 1 - b).map(x => x.id);
 }
 
@@ -143,7 +154,7 @@ function candidates(f: Facts): Rule[] {
     const off = a.view ? (a.offSafe ?? outsideSafe(e.texts, a.view)) : [];
     if (a.view && off.length) add({ id: 'edit.safe', label: 'Fix the safe area', icon: 'frame-corners', tools: ['get_edit', 'apply_edit_ops'], prio: 90,
       why: `${off.length} text outside the ${VIEW_NAMES[a.view]} safe area`,
-      prompt: `In the ${VIEW_NAMES[a.view]} view, my text ${off.slice(0, 6).join(', ')} sits outside the safe area (under the app's buttons). Move it inside the safe area (keep it at least ${Math.round(SAFE_AREAS[a.view][1] * 100)}% from the top and ${Math.round(SAFE_AREAS[a.view][3] * 100)}% from the bottom) with apply_edit_ops, keeping its look.` });
+      prompt: `In the ${VIEW_NAMES[a.view]} view, my text ${off.slice(0, 6).join(', ')} sits outside the safe area (under the app's buttons). Move it inside the safe area${safeHint(a.view)} with apply_edit_ops, keeping its look.` });
     if (a.selId && (a.selKind === 'video' || a.selKind === 'image'))
       add({ id: 'edit.trimSel', label: 'Trim this clip', icon: 'scissors', tools: ['watch', 'apply_edit_ops'], prio: 76, why: 'a clip is selected',
         prompt: `Watch the selected clip ${a.selId} and trim it to its strongest part (apply_edit_ops). Tell me what you cut.` });
@@ -253,7 +264,8 @@ export const SuggestQuery = z.object({
   page: z.enum(PAGES).optional(), tool: z.string().regex(/^[a-z]{1,20}$/).optional(),
   sessionId: ID.optional(), assistId: ID.optional(), takeId: ID.optional(), referenceId: ID.optional(), chatId: ID.optional(),
   selKind: z.enum(['video', 'audio', 'text', 'image', 'caption']).optional(), selId: ID.optional(),
-  view: z.enum(['tiktok', 'reels', 'shorts', 'off']).optional(),
+  // The apps' preview skins; clean / off = no platform view.
+  view: z.enum([...SAFE_VIEWS, 'clean', 'off']).optional(),
   unsaved: z.enum(['0', '1']).optional(), overlap: z.enum(['0', '1']).optional(),
   imported: z.enum(['video', 'image', 'audio']).optional(), importedId: ID.optional(),
   // The open edit as the app sees it now (it wins over the server's copy, which can lag; a member's edit has none).
@@ -282,7 +294,7 @@ export type SuggestQuery = z.infer<typeof SuggestQuery>;
 export async function gatherFacts(ctx: Ctx, u: AuthUser, q: SuggestQuery, now = Date.now()): Promise<Facts> {
   const mine = new Set(CHAT_REGISTRY.filter(t => u.role === 'owner' || t.members).map(t => t.name));
   const f: Facts = { ...(q.page ? { page: q.page } : {}), ...(q.tool ? { tool: q.tool } : {}), can: t => mine.has(t),
-    app: { ...(q.selKind ? { selKind: q.selKind } : {}), ...(q.selId ? { selId: q.selId } : {}), ...(q.view && q.view !== 'off' ? { view: q.view } : {}),
+    app: { ...(q.selKind ? { selKind: q.selKind } : {}), ...(q.selId ? { selId: q.selId } : {}), ...(q.view && q.view !== 'off' && q.view !== 'clean' ? { view: q.view } : {}),
       unsaved: q.unsaved === '1', overlap: q.overlap === '1', ...(q.imported ? { imported: q.imported } : {}), ...(q.importedId ? { importedId: q.importedId } : {}),
       ...(q.offSafe ? { offSafe: q.offSafe.split(',') } : {}) } };
   const safe = async <T>(p: Promise<T>): Promise<T | undefined> => { try { return await p; } catch { return undefined; } };

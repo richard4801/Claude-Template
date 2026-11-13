@@ -243,3 +243,24 @@ describe('live chips: never impossible', () => {
     expect(labels({ page: 'suite', tool: 'swap', suite: { promptEmpty: true, hasCharacter: true, rigSet: false, hasClip: false, hasOutfit: false } })).not.toContain('Watch my clip');
   });
 });
+
+describe('live chips: every preview skin (Mac EditPreview, bundle-10)', () => {
+  it('Facebook and YouTube views are accepted; YouTube has no box; Clean is no view', async () => {
+    expect(outsideSafe(edit({ textAt: [0.5, 0.95] }).texts, 'facebook')).toEqual(['txt_1']);
+    expect(outsideSafe(edit({ textAt: [0.5, 0.95] }).texts, 'youtube')).toEqual([]);
+    // The app's own ids still drive the chip on a view the server has no box for.
+    const c = suggest({ can: all, page: 'edit', edit: edit(), app: { view: 'youtube', offSafe: ['txt_2'] } });
+    expect(c[0]!.prompt).toMatch(/YouTube view.*txt_2/);
+    const a = await makeApp();
+    try {
+      const { owner } = await people(a, 0);
+      for (const v of ['tiktok', 'reels', 'shorts', 'facebook', 'youtube', 'clean', 'off']) {
+        const r = await owner.req('GET', `/v1/claude/suggestions?page=edit&clips=1&captions=1&view=${v}&offSafe=txt_1`);
+        expect(r.status, v).toBe(200);
+        const labels = r.body.chips.map((x: any) => x.label);
+        if (v === 'clean' || v === 'off') expect(labels, v).not.toContain('Fix the safe area');
+        else expect(labels[0], v).toBe('Fix the safe area');
+      }
+    } finally { await a.close(); }
+  }, 60_000);
+});

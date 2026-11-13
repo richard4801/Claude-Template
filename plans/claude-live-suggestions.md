@@ -60,9 +60,12 @@ text into safe area" became "Fix the safe area" to stay within 4. Icons are Phos
 checks). The magic-wand icon is not used (design review).
 
 ## Patches (apps; NOT compiled for Mac in this session, there is no Swift here)
-- `plans/patches/claude-live-suggestions-mac.patch`. **Apply base:** `claude/mac-bundle-9` @4a01e2e1 (bundle-9 as
-  integrated), as Mac bundle-10's first patch; then `edit-audio-approvals-mac` (claude/edit-panels-clean) and
-  `edit-safe-warning-shots-mac` (claude/edit-platform-preview) apply after it with plain `git apply` (checked).
+- `plans/patches/claude-live-suggestions-mac.patch`: the integrator's port as applied in Mac bundle-10
+  (claude/mac-bundle-10 commit ac53fc45). **Apply base:** its parent 70caf99d (prod c34732ab + the run-613 fix). Ported
+  to prod's EditPreview: `edit(project:selection:preview:unsaved:)`; the view is the preview skin when its safe box is
+  on, and `offSafe` comes from `EditSafeBox.zone`. The server takes every skin (tiktok, reels, shorts, facebook, youtube;
+  clean/off = no view). This server change must be live before the bundle-10 Mac build: older servers answer 400 to
+  `view=clean|facebook|youtube`, and the app then shows its fixed chips.
   MuseCore `ClaudeSuggest.swift` (query, steady order, demo copy of the Edit rules) + tests; `ClaudeAPI.claudeSuggestions`;
   AppStore live refresh (debounced, after replies, jobs, composer); Edit reports its facts; Suite panel live chips;
   crossfade in ChatComposer. CI: new step "Claude live chips check" (`claude-chips-check.txt`, FAIL lines fail CI) with
