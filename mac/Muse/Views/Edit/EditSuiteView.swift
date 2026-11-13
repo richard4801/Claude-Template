@@ -108,7 +108,12 @@ struct EditSuiteView: View {
         session = s
         store.suite.editCurrent = s
         store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
-        await s.load()
+        // Owner bug, build 597 (open_page on Claude's 16:9 session while Edit was already on that take): the editAttach task
+        // calls open(), and clearing editAttach above restarts (cancels) that very task, so a load awaited here died half-way:
+        // the attach to Claude's session failed and the editor stayed on its local start (9:16, "New project", nothing live,
+        // dead controls). The load runs on its own task; if this view moved on meanwhile, the session it made is closed.
+        await Task { @MainActor in await s.load() }.value
+        guard session === s else { s.close(); return }
         // The viewer's Split: the playhead where the take was when Split was pressed.
         if let at = store.suite.editAt {
             store.suite.editAt = nil

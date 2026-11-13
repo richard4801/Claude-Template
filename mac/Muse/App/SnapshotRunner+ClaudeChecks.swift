@@ -205,6 +205,10 @@ extension SnapshotRunner {
             line(false, "open_page edit session", "couldn't make a blank session in demo mode")
         }
 
+        // Owner bug, build 597: open_page on Claude's 16:9 session WHILE Edit is already open on that take. The editAttach
+        // task's own open() cancelled it mid-load, so the editor stayed on its local copy (9:16, not live, dead buttons).
+        await openPageOnOpenTake(store, fakeMuse: fakeMuse, until: until, line: line)
+
         lines.append("ALL DONE")
         write()
     }

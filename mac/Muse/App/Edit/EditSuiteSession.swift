@@ -33,6 +33,8 @@ final class EditSuiteSession {
     /// One Claude: the edit session to join (Claude opened it) instead of opening the take's.
     var attachSessionId: String?
     private(set) var phase: Phase = .loading("Opening the video…")
+    /// The load ran on a cancelled task (it can't finish the attach to a live session then); review mode checks it.
+    private(set) var loadWasCancelled = false
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
     var mode: Mode = .timeline { didSet { viewChanged() } }
@@ -188,6 +190,8 @@ final class EditSuiteSession {
     /// Opens the take: a v2 version re-opens its project on its source, a v1 version its edit list (fromV1), anything else
     /// starts fresh on the take's own video.
     func load() async {
+        // Review mode (Claude chat check): a load whose task was cancelled half-way is the build-597 open_page bug.
+        defer { if Task.isCancelled { loadWasCancelled = true } }
         phase = .loading(isBlankStart ? "Starting a blank project…" : "Opening the video…")
         do {
             var project: E.Project
