@@ -1,0 +1,1 @@
+ALTER TABLE "edit_sessions" ADD COLUMN IF NOT EXISTS "view" jsonb;
