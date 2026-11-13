@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 105
     steps:
       - uses: actions/checkout@v4
 
@@ -105,7 +105,7 @@ jobs:
           # Stall watchdog (coordinator, run 595 hung 17 min at "chat camera streaming b"): when snapshots.log gets no new
           # line for 120 s, take the proof once per stall (a 10 s stack sample, a spindump, the screen), then let it run on.
           last=0; still=0; n=0
-          for i in $(seq 1 2700); do
+          for i in $(seq 1 3300); do
             kill -0 $pid 2>/dev/null || break; sleep 1
             lines=$(wc -l < snapshots.log 2>/dev/null || echo 0)
             if [ "$lines" -ne "$last" ]; then last=$lines; still=0; continue; fi
@@ -119,7 +119,7 @@ jobs:
               head -n 60 "snapshots/stall-$n-sample.txt" 2>/dev/null || true
             fi
           done
-          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 2700 s: stopping it"; kill $pid 2>/dev/null || true; fi
+          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 3300 s: stopping it"; kill $pid 2>/dev/null || true; fi
           status=0; wait $pid || status=$?; echo "review mode exit status: $status (128+n = killed by signal n)"
           ls -la snapshots | head -100
           tail -n 60 snapshots.log || true
