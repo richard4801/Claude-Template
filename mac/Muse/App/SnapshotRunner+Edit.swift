@@ -93,6 +93,8 @@ extension SnapshotRunner {
         await paidHelpersCheck(store, takeId: "rx_full", note: note)
         // Edit → Uploads as a media bin (owner 2026-11-12): empty and with six uploads, dark and light (SnapshotRunner+Uploads.swift).
         await uploadsShots(store, media: media, dir: dir, note: note)
+        // Owner issues 2026-11-12: a song that is raw AAC named .mp4, upload_local_file sound, another edit's Approve (SnapshotRunner+EditAudio.swift).
+        await editAudioApprovalsCheck(store, media: media, note: note)
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.go(.home)
         // Round 2's new screens (outfit full view, Settings, the model picker): every control pressed once.

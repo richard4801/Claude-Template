@@ -57,6 +57,21 @@ extension EditSuiteSession {
         EditSafeCheck.line(safeIssues, covers: EditSafeBox.covers(state.preview, width: project.canvas.width, height: project.canvas.height))
     }
 
+    /// Review mode only: word captions on the main clip, placed low (y 0.86) so they sit under TikTok's buttons and the
+    /// warning line shows (SnapshotRunner+EditSafeWarning.swift).
+    func reviewLowCaptions() {
+        guard SnapshotRunner.probing, let asset = project.mainClips.first?.asset else { return }
+        let words = ["I", "always", "order", "the", "same", "thing", "every", "time"].enumerated().map { i, w in
+            E.Word(text: w, startSec: 0.5 + Double(i) * 0.6, endSec: 0.5 + Double(i) * 0.6 + 0.5)
+        }
+        nextChangeLabel = "Review captions"
+        edit { s in
+            guard s.setCaptions(words: words, assetId: asset) else { return false }
+            s.changeCaptionStyle { $0.y = 0.86 }
+            return true
+        }
+    }
+
     /// "Move into the safe area": one undoable change that moves the captions (and their wrap width) and each text item
     /// just inside the box.
     func moveIntoSafeArea() {

@@ -86,6 +86,8 @@ public protocol ClaudeAPI: Sendable {
     /// Cards: Undo one row of a "What I changed" card; the page's quick-action chips.
     func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo
     func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip]
+    /// Live chips for what is on screen now (GET v1/claude/suggestions); the page's fixed chips from an older server.
+    func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip]
 }
 
 /// Older test doubles: an older server has no lists (`not_found`), which the app treats as "one chat per context".
@@ -117,6 +119,7 @@ public extension ClaudeAPI {
     func answerUiCall(_ id: String, _ answer: UiAnswer) async throws {}
     func undoCardRow(messageId: String, row: Int) async throws -> ClaudeCardUndo { throw ApiError("not_found", "This server can't undo from the chat yet") }
     func claudeChips(page: String?, tool: String?) async throws -> [ClaudeChip] { ClaudeChip.fallback(page: page, tool: tool) }
+    func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] { try await claudeChips(page: q.page, tool: q.tool) }
 }
 
 enum ClaudeIds {
@@ -312,6 +315,17 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
             return l.chips.isEmpty ? ClaudeChip.fallback(page: page, tool: tool) : l.chips
         } catch let e as ApiError where e.code == "offline" {
             return ClaudeChip.fallback(page: page, tool: tool) // no server now: this app's own copy (not_found: an older server, the caller decides)
+        }
+    }
+    public func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] {
+        do {
+            let l: ClaudeSuggestionList = try await call("GET", "v1/claude/suggestions?" + q.queryString)
+            if l.chips.isEmpty { return try await claudeChips(page: q.page, tool: q.tool) }
+            return l.chips
+        } catch let e as ApiError where e.code == "not_found" {
+            return try await claudeChips(page: q.page, tool: q.tool)   // an older server: the page's fixed chips
+        } catch let e as ApiError where e.code == "offline" {
+            return ClaudeChip.fallback(page: q.page, tool: q.tool)
         }
     }
     public func answerPermission(_ id: String, allow: Bool, message: String?) async throws {

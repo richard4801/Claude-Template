@@ -402,7 +402,8 @@ struct EditSuiteBin: View {
 
     private func chooseSong() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
+        // .mp4 too: a song can be an audio-only MP4 (ci_f99f93616ece); the file's content decides, not its name.
+        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio, .mpeg4Movie]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await session.importAudio(url, kind: .music) }

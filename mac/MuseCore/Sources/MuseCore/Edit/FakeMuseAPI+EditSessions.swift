@@ -221,7 +221,14 @@ extension FakeMuseAPI {
         try editOwner()
         // Like the server: when the person last worked on it (the view), else its last change.
         func touched(_ s: EditSession) -> Double { s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? (s.updatedAt ?? 0) }
-        return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted { touched($0) > touched($1) }
+        // Ties (the same millisecond, run 614's flaky EditRecentTests): the one someone worked on first, then by id, so the
+        // order never depends on the dictionary's.
+        return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted {
+            let (x, y) = (touched($0), touched($1))
+            if x != y { return x > y }
+            if ($0.view != nil) != ($1.view != nil) { return $0.view != nil }
+            return $0.id < $1.id
+        }
             .prefix(max(1, min(50, limit))).map { s in
                 var v = view(editSessions[s.id]!, history: false)
                 v.lastTouchedAt = touched(s)

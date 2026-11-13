@@ -4,6 +4,7 @@
 // Demo mode (no HTTP API) runs a scripted Claude Code stream against FakeClaudeAPI; a member never runs it.
 
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import MuseCore
@@ -366,7 +367,7 @@ final class ClaudeCodeService: ObservableObject {
         return s + url
     }
 
-    // MARK: Files on this Mac (ask every time)
+    // MARK: Files on this Mac (Allow once · Allow always · Deny)
 
     /// One approval card: Claude Code's question, the chat it belongs to and what the card says.
     struct FileAsk: Identifiable, Hashable {
@@ -394,7 +395,9 @@ final class ClaudeCodeService: ObservableObject {
             fileSettings = ClaudeFileSettings()
             return
         }
-        fileSettings = s
+        // Folders allowed per chat (before 2026-11-12) move to the one "Always allowed" list.
+        fileSettings = s.migrated(home: NSHomeDirectory())
+        if fileSettings != s { saveFileSettings() }
     }
 
     private func saveFileSettings() {
@@ -408,9 +411,49 @@ final class ClaudeCodeService: ObservableObject {
         if m == .off { for a in fileAsks { answerFile(a.id, .deny) } }
     }
 
-    func removeAllowedFolder(_ id: String) {
-        fileSettings.remove(id)
+    func removeAllowedFolder(_ folder: String) {
+        fileSettings.removeFolder(folder)
         saveFileSettings()
+    }
+
+    func removeCommandRule(_ id: String) {
+        fileSettings.removeRule(id)
+        saveFileSettings()
+    }
+
+    /// "Ask before anything": every rule stays on the list but none counts; open cards lose their "Allow always".
+    func setAskEverything(_ on: Bool) {
+        fileSettings.askEverything = on
+        saveFileSettings()
+        recheckFileAsks()
+    }
+
+    /// The verdict with this person's list, reading the Mac for folder arguments and an interpreter's script.
+    private func fileVerdict(_ a: ClaudePermissionAsk, cwd: String) -> ClaudeFileVerdict {
+        let s = fileSettings
+        return ClaudeFilePolicy.verdict(a, mode: s.mode, folders: s.activeFolders, cwd: cwd, home: NSHomeDirectory(),
+                                        rules: s.activeRules, askAll: s.askAll,
+                                        isDirectory: { p in var d: ObjCBool = false; return FileManager.default.fileExists(atPath: p, isDirectory: &d) && d.boolValue },
+                                        readScript: { p in
+                                            guard let n = (try? FileManager.default.attributesOfItem(atPath: p)[.size] as? NSNumber)?.intValue, n <= 512 * 1024 else { return nil }
+                                            return try? String(contentsOfFile: p, encoding: .utf8)
+                                        })
+    }
+
+    private static func cwd(_ threadId: String?) -> String {
+        ClaudeTurnRunner.defaultRoot.appendingPathComponent(threadId ?? "", isDirectory: true).path
+    }
+
+    /// After the list changed: open cards it now covers go through, the others show what they offer now.
+    private func recheckFileAsks() {
+        for a in fileAsks {
+            switch fileVerdict(a.ask, cwd: Self.cwd(a.threadId)) {
+            case .allow: answerFile(a.id, .allowOnce)
+            case .ask(let card) where card != a.card:
+                if let i = fileAsks.firstIndex(where: { $0.id == a.id }) { fileAsks[i] = FileAsk(ask: a.ask, threadId: a.threadId, card: card) }
+            default: break
+            }
+        }
     }
 
     /// The cards of one chat (a question this Mac can't place goes to the chat running here).
@@ -427,8 +470,8 @@ final class ClaudeCodeService: ObservableObject {
             }
             return
         }
-        let cwd = ClaudeTurnRunner.defaultRoot.appendingPathComponent(tid, isDirectory: true).path
-        switch ClaudeFilePolicy.verdict(a, mode: fileSettings.mode, folders: fileSettings.folders(chatId: tid), cwd: cwd, home: NSHomeDirectory()) {
+        let cwd = Self.cwd(tid)
+        switch fileVerdict(a, cwd: cwd) {
         case .allow where a.toolName == "Upload":
             await uploadLocal(a, cwd: cwd)
         case .allow:
@@ -440,23 +483,25 @@ final class ClaudeCodeService: ObservableObject {
         }
     }
 
-    /// The person's answer on a card. "Always" saves the folder for this chat (Settings → Claude lists it).
-    func answerFile(_ id: String, _ answer: ClaudePermissionAnswer, chatTitle: String? = nil) {
+    /// The person's answer on a card. "Allow always" saves the card's folder, or its command rule and the folders the
+    /// command reaches, for every chat on this Mac (Settings → Claude lists them); open cards it now covers go through.
+    func answerFile(_ id: String, _ answer: ClaudePermissionAnswer) {
         guard let a = fileAsks.first(where: { $0.id == id }) else { return }
         fileAsks.removeAll { $0.id == id }
-        if case .alwaysFolder(let folder) = answer, let tid = a.threadId, a.card.folder != nil {
-            fileSettings.allow(folder, chatId: tid, chatTitle: chatTitle)
-            saveFileSettings()
-            // Other questions of this chat in the same folder go through too.
-            for other in fileAsks where other.threadId == tid {
-                if let f = other.card.folder, ClaudeFilePolicy.inside(f, folder) || ClaudeFilePolicy.inside(other.card.detail, folder) { answerFile(other.id, .allowOnce) }
+        if answer == .always, !fileSettings.askAll, a.card.alwaysLabel != nil {
+            if let rule = a.card.rule {
+                fileSettings.allowRule(rule)
+                for f in a.card.ruleFolders { fileSettings.allowFolder(f) }
+            } else if let f = a.card.folder {
+                fileSettings.allowFolder(f)
             }
+            saveFileSettings()
+            recheckFileAsks()
         }
-        let allow: Bool
-        if case .deny = answer { allow = false } else { allow = true }
-        guard let api else { return }
+        let allow = answer != .deny
+        guard let api, !reviewAsks.contains(id) else { reviewAsks.remove(id); return }
         if allow, a.ask.toolName == "Upload" {
-            let cwd = ClaudeTurnRunner.defaultRoot.appendingPathComponent(a.threadId ?? "", isDirectory: true).path
+            let cwd = Self.cwd(a.threadId)
             Task { await uploadLocal(a.ask, cwd: cwd) }
             return
         }
@@ -464,7 +509,8 @@ final class ClaudeCodeService: ObservableObject {
     }
 
     /// upload_local_file, after the yes: the file goes up the chat's way (an image: presign, PUT, confirm, so the server
-    /// strips its metadata; a video as a clip with its length and size), and the upload goes back to Claude.
+    /// strips its metadata; a video as a clip with its length and size; a sound as an editor audio upload, ci_de89873ab1de),
+    /// and the upload goes back to Claude. A video or sound is read first: an .mp4 with sound only goes up as audio.
     private func uploadLocal(_ a: ClaudePermissionAsk, cwd: String) async {
         guard let api else { return }
         var raw = ""
@@ -474,24 +520,59 @@ final class ClaudeCodeService: ObservableObject {
         let name = url.lastPathComponent
         func fail(_ why: String) async { try? await api.answerPermission(a.id, allow: false, message: why) }
         guard !ClaudeFilePolicy.isSecret(path) else { return await fail(ClaudeFilePolicy.credentialRefusal) }
-        guard let type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+        guard var type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
         let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue
         guard let size else { return await fail("There's no file at \(path).") }
+        var file = url
+        if type.kind != .image {
+            // What it really is: an audio-only .mp4 is a sound; raw AAC named .mp4 is read through a copy named .aac.
+            let probed = await EditMediaProbe.probe(url)
+            guard let p = probed, let t = ClaudeFilePolicy.uploadType(sniffed: p.verdict) else { return await fail(MediaSniff.unreadable) }
+            type = t
+            file = p.url
+        }
         do {
-            let att: ClaudeAttachment
-            if type.video {
+            let result: ClaudeLocalUpload
+            switch type.kind {
+            case .video:
                 guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
-                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(url) else { return await fail("That video can't be read.") }
-                att = try await up.uploadClaudeVideo(url, meta: info.meta(name: name), contentType: type.mime, progress: nil)
-            } else {
+                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(file) else { return await fail(MediaSniff.unreadable) }
+                let att = try await up.uploadClaudeVideo(file, meta: info.meta(name: name), contentType: type.mime, progress: nil)
+                result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
+            case .audio:
+                guard size <= ClaudeFilePolicy.uploadAudioMaxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard let up = api as? any ClaudeAudioUploading else { return await fail("This server can't take sound from Claude yet.") }
+                // The server fills the file's link (an editor upload has no confirm step).
+                guard let d = try? await AVURLAsset(url: file).load(.duration).seconds, d.isFinite, d > 0 else { return await fail(MediaSniff.unreadable) }
+                let id = try await up.uploadClaudeAudio(file, contentType: type.mime)
+                result = ClaudeLocalUpload(uploadId: id, kind: type.resultKind, url: nil, name: name, durationSec: (d * 1000).rounded() / 1000)
+            case .image:
                 guard size <= SuiteClaudeAttachments.maxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
                 guard let up = api as? any ClaudeImageUploading else { return await fail("This server can't take images from Claude yet.") }
-                att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
+                let att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
+                result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
             }
-            try await api.finishUpload(a.id, ClaudeLocalUpload(uploadId: att.uploadId, kind: type.video ? "clip" : "image", url: att.url, name: name))
+            try await api.finishUpload(a.id, result)
         } catch {
             await fail("Couldn't upload \(name): \((error as? ApiError)?.message ?? error.localizedDescription)")
         }
+    }
+
+    /// Review mode (Mac CI): a card made from a question nobody asked; its answer goes nowhere.
+    private var reviewAsks: Set<String> = []
+    func reviewShowAsk(_ a: ClaudePermissionAsk, threadId: String) -> ClaudeFileVerdict {
+        let v = fileVerdict(a, cwd: Self.cwd(threadId))
+        if case .ask(let card) = v {
+            reviewAsks.insert(a.id)
+            fileAsks.removeAll { $0.id == a.id }
+            fileAsks.append(FileAsk(ask: a, threadId: threadId, card: card))
+        }
+        return v
+    }
+    /// Review mode: this person's list, set as a test needs it.
+    func reviewSetFileSettings(_ s: ClaudeFileSettings) {
+        fileSettings = s
+        saveFileSettings()
     }
 
     /// A stopped or finished turn: its open cards end as a no (nothing is done without an answer).
@@ -530,6 +611,8 @@ final class ClaudeCodeService: ObservableObject {
     // MARK: Claude's orb (one state machine, MuseCore ClaudeOrb): fed by real events only
 
     @Published private(set) var orb = ClaudeOrb()
+    /// Claude's finished turns in the open chat (live chips ask again after each reply).
+    @Published private(set) var turnsEnded = 0
     static var now: Double { Date().timeIntervalSinceReferenceDate }
 
     /// The open chat's stream (this Mac's own turns and other devices' turns).
@@ -540,6 +623,7 @@ final class ClaudeCodeService: ObservableObject {
         case .text, .assistant, .tool, .image: orb.chunk(at: now)
         case .done(let ok, _, _):
             orb.turnEnded(ok: ok, at: now)
+            turnsEnded &+= 1
             if !ok { orbErrorEnds() }
         }
     }

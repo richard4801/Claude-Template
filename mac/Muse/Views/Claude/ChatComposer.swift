@@ -316,6 +316,7 @@ struct ChatComposerBar: View {
     var chips: [ClaudeChip] = []
     var onPick: ((ChatAttachKind) -> Void)?
     @State private var height: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focus = 0
     @State private var focused = false
 
@@ -342,8 +343,11 @@ struct ChatComposerBar: View {
                             .disabled(busy || held)
                             .help(s.label)
                             .accessibilityLabel("Ask Claude: \(s.label)")
+                            .transition(.opacity)
                     }
                 }
+                // Live chips change with the screen: a short crossfade, none with Reduce Motion.
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: suggestions)
             }
             if !chips.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -360,8 +364,10 @@ struct ChatComposerBar: View {
                             .disabled(busy || held)
                             .help(c.prompt)
                             .accessibilityLabel("Ask Claude: \(c.label)")
+                            .transition(.opacity)
                         }
                     }
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: chips)
                 }
             }
             if let top { top }

@@ -102,6 +102,22 @@ extension FakeClaudeAPI: ClaudeImageUploading {
     }
 }
 
+/// upload_local_file: a sound from the Mac (ci_de89873ab1de), uploaded as an editor audio upload (POST
+/// /v1/editor/uploads/presign + PUT), so Edit and Claude's edit tools take it as an audio asset. → its upload id.
+public protocol ClaudeAudioUploading: Sendable {
+    func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String
+}
+extension HTTPClaudeAPI: ClaudeAudioUploading {
+    public func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String {
+        let http = HTTPMuseAPI(baseURL: baseURL)
+        if let tok = currentToken { await http.setToken(tok) }
+        return try await http.uploadEditorFile(file, contentType: contentType, purpose: nil, progress: nil)
+    }
+}
+extension FakeClaudeAPI: ClaudeAudioUploading {
+    public func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String { "up_" + shortId() }
+}
+
 /// Demo mode: nothing leaves this Mac; the video gets a made-up upload id.
 extension FakeClaudeAPI: ClaudeVideoUploading {
     public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment {

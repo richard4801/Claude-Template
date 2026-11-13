@@ -25,6 +25,14 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
 
     public init(now: @escaping () -> Double = { Date().timeIntervalSince1970 * 1000 }) { self.now = now }
 
+    /// Live chips (GET v1/claude/suggestions): the queries asked, for review-mode checks; answered by the demo copy of
+    /// the server's Edit rules.
+    public private(set) var suggestionQueries: [ClaudeSuggestQuery] = []
+    public func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] {
+        locked { suggestionQueries.append(q) }
+        return ClaudeChip.demoSuggestions(q)
+    }
+
     private func locked<T>(_ f: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -76,8 +84,25 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     /// The Suite's list key for a draft (set by tests and demo mode as the server reads it from the shared draft).
     public var suiteToolOf: @Sendable (String) async -> String = { _ in "shot" }
 
+    // One Claude's chats, as the server keeps them (bundle-10 run 621: the fake had none, so in demo mode the One Claude
+    // panel never opened a chat and the allow-always walk couldn't start). A chat's thread is contextKind "chat" on its id.
+    private var chatList: [ClaudeChatSummary] = []
+
+    public func chats(query: String?) async throws -> [ClaudeChatSummary] {
+        locked { chatList.sorted { $0.updatedAt > $1.updatedAt } }
+    }
+
+    public func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary {
+        locked {
+            let c = ClaudeChatSummary(id: nextId("cc"), page: page, updatedAt: now())
+            chatList.append(c)
+            return c
+        }
+    }
+
     private func thread(contextKind: String, contextId: String, new: Bool) async throws -> ClaudeThread {
-        guard ["camera", "edit", "recreate", "suite"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
+        // "chat": One Claude's own chats, as the server has them (bundle-10 run 620: the allow-always walk couldn't open one).
+        guard ["camera", "edit", "recreate", "suite", "chat"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
         // A recreate thread is on one of the owner's references (rx_…), else 404 (as the server).
         if contextKind == "recreate", !contextId.hasPrefix("rx_") { throw ApiError("not_found", "Reference not found") }
         var key = "\(contextKind):\(contextId)"

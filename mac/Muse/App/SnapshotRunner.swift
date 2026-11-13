@@ -184,7 +184,10 @@ enum SnapshotRunner {
             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
             await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
             await editBigCheck(store, dir: dir)   // Owner bugs, build 597: a 66-shot 16:9 edit opened by Claude, idle CPU, playback, Shape round trip
+            await claudeAllowCheck(store, dir: dir)   // Allow always (owner 2026-11-12): file, safe and dangerous cards, the list in Settings
+            await claudeChipsCheck(store, dir: dir)   // Live chips (owner 2026-11-12): Edit without vs with captions, different chips
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
+            await editSafeWarningShots(store, dir: dir)   // Edit's safe-area warning line on camera (SnapshotRunner+EditSafeWarning.swift)
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
             await chatShots(store, dir: dir)   // Claude chat on every surface, four themes, and the composer's fit (SnapshotRunner+Chat.swift)

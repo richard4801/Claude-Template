@@ -57,6 +57,10 @@ struct OneClaudePanel: View {
             Button("Cancel", role: .cancel) {}
         } message: { Text(OneClaudeDeleteAsk.keeps) }
         .onChange(of: store.claudePage) { _, _ in store.oneClaudePageChanged() }
+        // Live chips: after each Claude reply, when one of the person's jobs ends, when the Suite composer changes.
+        .onChange(of: service.turnsEnded) { _, _ in store.claudeChipsChanged() }
+        .onChange(of: store.claudeJobsEnded) { _, _ in store.claudeChipsChanged() }
+        .onChange(of: store.suite.composer) { _, _ in if store.screen == .suite { store.claudeChipsChanged() } }
         // Claude's orb (MuseCore ClaudeOrb) hears what waits for the person and the job Claude started.
         .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
         .onChange(of: store.claudeJobProgress, initial: true) { _, p in
@@ -246,6 +250,24 @@ struct OneClaudePanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
             .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+        }
+        // Paid helpers on any edit (ci_e546642a4026): here whichever edit is open, each naming its edit.
+        ForEach(o.editApprovals.items) { a in
+            let busy = o.answeringEdit.contains(a.id)
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Claude needs your go-ahead").scaled(t.scale.label, r.ink)
+                Text("Run \(a.pending.label) in “\(store.editApprovalName(a))”").scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: a.allowLabel, filled: true, disabled: busy) { Task { await store.answerEditApproval(a, approve: true) } }
+                    SuiteToolButton(title: "Not now", disabled: busy, plain: true) { Task { await store.answerEditApproval(a, approve: false) } }
+                }
+            }
+            .padding(Space.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(r.hairline))
+            .padding(.horizontal, Space.s4).padding(.top, Space.s3)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Claude asks to run \(a.pending.label) in \(store.editApprovalName(a))")
         }
         ClaudeEditNoticeLine()
         if let m = o.remembered, let text = m.text {

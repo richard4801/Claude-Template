@@ -11,6 +11,16 @@ import UniformTypeIdentifiers
 struct SuiteClaudePanel: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    @ObservedObject private var service: ClaudeCodeService = .shared
+
+    /// Live chips (owner 2026-11-12): the server's chips for this composer now; the fixed ones until they come or offline.
+    private var liveSuggestions: [RecreateClaude.Suggestion] {
+        guard !store.isDemo, let live = store.oneClaude.suiteChips, !live.isEmpty else { return SuiteAssistClaude.suggestions }
+        return live.map { RecreateClaude.Suggestion(label: $0.label, prompt: $0.prompt) }
+    }
+
+    /// What the chips depend on: the composer, the shared draft's revision, Claude's replies.
+    private struct ChipsKey: Hashable { var composer: ComposerDraft; var assist: String?; var revision: Int?; var turns: Int }
 
     var body: some View {
         let c = store.suite.claude
@@ -39,6 +49,13 @@ struct SuiteClaudePanel: View {
         .overlay(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, lineWidth: 1))
         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude panel") } }
         .accessibilityElement(children: .contain)
+        // Asked again ~1 s after the composer, the shared draft or Claude's last reply changes (the change cancels the wait).
+        .task(id: ChipsKey(composer: store.suite.composer, assist: store.suite.claude.assist?.id,
+                           revision: store.suite.claude.assist?.revision, turns: service.turnsEnded)) {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, !store.isDemo else { return }
+            await store.loadSuiteSuggestions()
+        }
         // Reference images dropped anywhere on the panel attach to the next message.
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
@@ -61,7 +78,7 @@ struct SuiteClaudePanel: View {
         } else if let a = c.assist {
             ClaudeChatView(contextKind: "suite", contextId: a.id, title: "Claude", showsHeader: false,
                            placeholder: "Describe the shot…",
-                           suggestions: SuiteAssistClaude.suggestions,
+                           suggestions: liveSuggestions,
                            emptyHint: SuiteClaudeWords.emptyHint,
                            wrapOutgoing: { [store] text in store.suiteClaudeOutgoing(text) },
                            unwrapShown: SuiteAssistClaude.stripContext, sendShortcut: false)

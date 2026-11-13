@@ -94,6 +94,8 @@ struct EditSuitePreview: View {
         .background(t.roles.canvas)
         // Review mode: the platform-preview shots set the view (never remembered).
         .onChange(of: SnapshotRunner.state.editPreview) { _, p in if let p { session.setPreview(p, remember: false) } }
+        // Review mode: word captions low on the frame, so the warning line shows (SnapshotRunner+EditSafeWarning.swift).
+        .onReceive(NotificationCenter.default.publisher(for: SnapshotRunner.reviewLowCaptions)) { _ in session.reviewLowCaptions() }
     }
 
     /// "Captions sit under TikTok's caption and buttons (0:01–0:09)." and the one fix.
@@ -101,12 +103,14 @@ struct EditSuitePreview: View {
         HStack(spacing: Space.s2) {
             Ph("warning", 14).foregroundStyle(Color(hex: 0xFF5A5F))
             Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
+                .fitProbe("safe warning line")
             Button("Move into the safe area") { session.moveIntoSafeArea() }
                 .buttonStyle(.plain)
                 .font(t.scale.caption.font.weight(.medium))
                 .foregroundStyle(t.roles.accent)
                 .fixedSize()
                 .help("Moves the captions and text just inside the red box (one change; Undo puts them back)")
+                .fitProbe("safe warning fix")
             Spacer(minLength: 0)
         }
         .frame(minHeight: 28)
