@@ -138,7 +138,7 @@ struct ContentSounds: View {
                 let packs = c.packs(.sfx)
                 let all: [(ContentPack, ContentItem)] = packs.flatMap { p in p.items.map { (p, $0) } }
                 let hits = all.filter { (category == nil || $0.1.category == category) && $0.1.matches(query) }
-                SuiteLabel("Sound effects", trailing: "\(all.count)")
+                SuiteLabel("Sound effects")
                 ContentSearchField(prompt: "Search sound effects", text: $query)
                 CategoryChips(categories: packs.flatMap { $0.categories ?? [] }, selection: $category)
                 if hits.isEmpty {

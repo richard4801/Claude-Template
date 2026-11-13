@@ -7,7 +7,8 @@ const ms = (name: string) => bigint(name, { mode: 'number' });
 export type EditorJobKind = 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats' | 'reverse' | 'stabilize' | 'translate' | 'slowmo' | 'separate' | 'cutout' | 'briefs' | 'objectswap' | 'restyle' | 'layers';
 export type EditorJobState = 'running' | 'done' | 'failed' | 'cancelled';
 /** What the job works on: a take of the studio, or an upload of the studio (with the duration the app measured). */
-export type EditorSource = { takeId?: string; uploadId?: string; durationSec: number };
+/** `range` (matte, layers, denoise): the window of it processed and priced, in source seconds (editor/range.ts). */
+export type EditorSource = { takeId?: string; uploadId?: string; durationSec: number; range?: { startSec: number; endSec: number } };
 
 export const editorJobs = pgTable('editor_jobs', {
   id: text('id').primaryKey(),
@@ -49,6 +50,8 @@ export const editSessions = pgTable('edit_sessions', {
   status: text('status').notNull().$type<'open' | 'closed'>().default('open'),
   /** Paid AI helpers Claude asked for, waiting for the owner in the app. */
   pending: jsonb('pending').$type<Record<string, unknown>[]>().notNull().default([]),
+  /** Where the editor was left (migration 0035): playhead, zoom, tabs, platform view, title, `at` (ms). Not history. */
+  view: jsonb('view').$type<Record<string, unknown>>(),
   updatedBy: text('updated_by').notNull(),
   createdAt: ms('created_at').notNull(),
   updatedAt: ms('updated_at').notNull(),

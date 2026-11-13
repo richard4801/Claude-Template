@@ -19,7 +19,7 @@ extension EditSuiteSession {
 
     /// Opens (or creates) the take's session and starts listening. Failing leaves the editor local (it says so once).
     func startLive() async {
-        guard isOwner, live == nil else { return }
+        guard isOwner, live == nil, !closed else { return }
         do {
             let sync: EditSessionSync
             if let id = attachSessionId {
@@ -81,7 +81,7 @@ extension EditSuiteSession {
         let presence = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true)
+                try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true, preview: self.state.preview)
                 try? await Task.sleep(nanoseconds: Self.presenceEvery)
             }
         }

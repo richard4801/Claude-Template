@@ -10,6 +10,7 @@ import { controlWords, stepOf } from '../src/claude/uiControl.js';
 import { registryByName } from '../src/claude/registry.js';
 import { shotBreakdown } from '../src/suite/breakdown.js';
 import { suiteOptions } from '../src/suite/assist.js';
+import { screenSettings } from '../src/suite/screen.js';
 import { demoModel, makeApp, people, type Client } from './helpers.js';
 
 const sum = (l: { usd: number }[]) => Math.round(l.reduce((a, x) => a + x.usd, 0) * 100) / 100;
@@ -68,6 +69,10 @@ describe('cards (unit)', () => {
     const card: ChangesCard = { kind: 'changes', title: 'What I changed', rows: [{ what: 'Outfit', to: 'Hoodie', undo: { kind: 'draft', assistId: 'sa', before: { outfitId: 'of_a' } } }] };
     expect(JSON.stringify(publicCard(card))).not.toContain('of_a');
     expect((publicCard(card) as any).rows[0]).toEqual({ what: 'Outfit', to: 'Hoodie', undoable: true });
+  });
+  it('the app\'s model label reaches Claude with the screen (the context strip and Claude name the model the same way)', () => {
+    expect(screenSettings({ tool: 'shot', request: { engineModel: 'seedance-2' }, settings: { modelLabel: 'Seedance 2.0 · Higgsfield' } } as any, 'shot'))
+      .toMatchObject({ model: 'seedance-2', modelLabel: 'Seedance 2.0 · Higgsfield' });
   });
   it('chips fit the page; the activity strip\'s steps read as words', () => {
     expect(chipsFor('suite', 'remix').map(c => c.label)).toEqual(['Watch my clip', 'Write the prompt', 'Check the price']);

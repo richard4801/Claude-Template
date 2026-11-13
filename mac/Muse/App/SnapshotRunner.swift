@@ -27,6 +27,8 @@ enum SnapshotRunner {
         var rigPanelOnScreen = false
         /// The Edit suite hides its media panel and inspector (the `_collapsed` layout shots).
         var editCollapsed = false
+        /// Edit's preview shows this view (the platform-preview shots; nil leaves it as it is).
+        var editPreview: EditPreview?
         /// Recreate's cost line and its primary (window space), for the fit check (SnapshotFrame).
         var recreateFrames: [String: CGRect] = [:]
         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
@@ -95,6 +97,7 @@ enum SnapshotRunner {
             // The composer screens need the suite's catalog (the demo draft picks its camera, light and look from it).
             await store.loadSuite()
             await store.loadEngines()   // the owner's models per purpose (WS6)
+            await hdrColourCheck(store, dir: dir)   // owner bug 2026-11-12: HDR export colour on every frame, first and on its own
             await streamCloseCheck(store, dir: dir)   // closing a chat mid-reply with a screen change must not freeze (SnapshotRunner+StreamClose.swift)
             let shots: [(String, @MainActor () -> Void)] = [
                 ("home", { store.go(.home) }),
@@ -179,11 +182,16 @@ enum SnapshotRunner {
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
+            await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
+            await editBigCheck(store, dir: dir)   // Owner bugs, build 597: a 66-shot 16:9 edit opened by Claude, idle CPU, playback, Shape round trip
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
             await chatShots(store, dir: dir)   // Claude chat on every surface, four themes, and the composer's fit (SnapshotRunner+Chat.swift)
             await scrollCheck(store, dir: dir)
+            // Last, so opening the floating panel on New Swap can't change the chat the other walks expect (run 591:
+            // claude_edit then showed an empty chat).
+            await claudePanelShots(store, dir: dir)   // the floating Claude panel: orb idle and thinking, the context strip filled
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
             capture(dir.appendingPathComponent("mac_a_signin.png"))
@@ -193,6 +201,7 @@ enum SnapshotRunner {
 
     /// The render's draft (design/direction/render.py `composer_mac`): @Demo in a café, 16:9, 8 s, 35 mm film with an
     /// anamorphic lens, window light, Golden warmth, UGC · Calm, and a #Dolly in. Options the catalog doesn't have stay Auto.
+
     static func fillDemoDraft(_ store: AppStore) {
         let cam = store.suite.camera
         func pick(_ list: [SuiteOption], _ words: [String]) -> String? {
@@ -331,7 +340,7 @@ enum SnapshotRunner {
             ("composer_feed_viewer", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
             // Swap: Camera, Light and Style are set by the clip, shown greyed with that reason.
-            ("composer_swap", { store.openTool(.swap) }),
+            ("composer_swap", { store.setSwapVariant(.classic); store.openTool(.swap) }),
             // Build step 3: a shot added to the queue (priced, nothing held) shows in the feed's "Queued" group.
             ("composer_queue", { store.openTool(.shot); fillDemoDraft(store)
                 if store.suite.queued.isEmpty { store.addShotToQueue() }
@@ -342,11 +351,27 @@ enum SnapshotRunner {
             ("composer_claude_attach", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(attach: true) }),
             // …and after "go": Claude's ask waits in the panel for the owner's confirmation (never approved here).
             ("composer_claude_ask", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(ask: true) }),
+            // The swap viewer fix (plans/swap-viewer-build.md; owner, build 582): the real views for the side-by-side with
+            // the approved mockups. A finished take on the Shot stage; the take viewer (a clean player: the platform layouts
+            // are Edit's since 2026-11-12, see the mac_editpreview_* shots); New Swap empty and with a clip.
+            ("stage_take", { store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
+                if let j = store.suiteTakes(photo: false).compactMap(\.jobId).first { store.rememberStage(j, tool: .shot) } }),
+            ("viewer_clean", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
+            ("newswap_empty", { store.suite.feedOpen = false; store.suite.viewerTakeId = nil
+                store.openTool(.swap); store.setSwapVariant(.remix); store.clip = nil; store.clipVideo = nil }),
+            ("newswap_filled", { store.suite.feedOpen = false; store.openTool(.swap); store.setSwapVariant(.remix)
+                store.suite.remix.backgroundOn = true; store.suite.remix.backgroundMode = .describe
+                store.suite.remix.backgroundWords = "A rooftop at golden hour, city lights behind her"
+                store.suite.remix.lookOn = true; store.suite.remix.lookWords = "Warmer, soft window light"
+                Task { await store.useSampleClip(bad: false, quiet: true) } }),
             ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
         ]
         await run([.c, .a, .b, .d], [(1280, 800), (1000, 700)], feedScreens)
+        // Back to the defaults after the swap viewer shots: the classic Swap.
+        store.setSwapVariant(.classic)
         // The last screen was the comparison: two takes were on screen (the demo has video takes).
         let compared = store.suiteComparing.count
         lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
@@ -395,7 +420,10 @@ enum SnapshotRunner {
         }
         let g = state.generateLabel ?? ""
         // The price is the last part: "Generate · $0.14", "Generate · Free", "Generate · —" while there is none yet.
-        if !g.contains(" · ") { out.append("CUT \(label) bar generate shows no price (\"\(g)\")") }
+        // New Swap with no clip yet (newswap_empty): a plain, disabled "Generate" is the approved mockup; its line says
+        // "The model and price show once a video is added". Every other bar must show a price.
+        let noClipYet = label.hasPrefix("newswap_empty") && g == "Generate"
+        if !g.contains(" · ") && !noClipYet { out.append("CUT \(label) bar generate shows no price (\"\(g)\")") }
         if out.isEmpty {
             let names = pills.map { String($0.key.dropFirst(5)) }.joined(separator: ", ")
             out.append("FITS \(label) bar \(pills.count) pills whole (\(names)), \"\(g)\"")
@@ -463,6 +491,19 @@ enum SnapshotRunner {
                 shot("\(theme.rawValue)_\(width)x\(height)_collapsed", "\(width)x\(height) \(theme.rawValue) collapsed")
                 state.editCollapsed = false
                 try? await Task.sleep(for: .seconds(0.5))
+                // Edit's platform preview (plans/edit-platform-preview.md): TikTok's chrome with its red box, and Clean,
+                // in the dark and light themes (`mac_editpreview_<theme>_<view>.png`).
+                if width == 1440 && (theme == .b || theme == .a) {
+                    for (view, tag) in [(PreviewSkin.tiktok, "tiktok"), (.clean, "clean")] {
+                        state.editPreview = EditPreview(view: view, safeArea: true)
+                        try? await Task.sleep(for: .seconds(1))
+                        capture(dir.appendingPathComponent("mac_editpreview_\(theme.rawValue)_\(tag).png"))
+                        let cut = truncatedLabels()
+                        lines.append(contentsOf: cut.isEmpty ? ["FITS edit preview \(tag) \(theme.rawValue) (\(fitProbes.count) labels)"]
+                                                             : cut.map { "CUT edit preview \(tag) \(theme.rawValue) \($0)" })
+                    }
+                    state.editPreview = nil
+                }
             }
             // The app now opens down to 960 pt (coordination item 8): Edit at 1000 × 700 for the record. INFO lines, not
             // CUT: the Edit layout plan's sizes are the three above.
@@ -473,6 +514,59 @@ enum SnapshotRunner {
                 let cut = truncatedLabels()
                 lines.append(cut.isEmpty ? "INFO edit 1000x700 c (\(fitProbes.count) labels whole)" : cut.map { "INFO edit 1000x700 c \($0)" }.joined(separator: "\n"))
             }
+            w.setFrame(original, display: true)
+            store.openEdit(takeId: nil)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        // Edit's View bar with the Claude panel open (owner review, run 587: "Safe area" showed as "S" and the fit was
+        // cut). TikTok view at 1280 × 800 and 1000 × 700, light and dark (`mac_editpreview_claude_<theme>_<w>x<h>.png`).
+        // The bar's own labels must be whole: a CUT line here fails the fit check.
+        // The bar's probes ("preview view", "preview view menu", "preview fit", "safe area"); the chips are fixed-size, so
+        // a bar too narrow for them shows the menu instead.
+        let barLabels = ["preview", "safe area"]
+        for theme in [ThemeID.a, .b] {
+            store.themeID = theme
+            state.editCollapsed = false
+            state.editPreview = nil
+            state.claudeTab = 0
+            state.chatSample = true   // the chat (its "+" row and composer) stands in for a live session, as in the panel shots
+            if !store.takes.contains(where: { $0.id == take.id }) { store.takes.insert(take, at: 0) }
+            store.openEdit(takeId: take.id)
+            try? await Task.sleep(for: .seconds(8))
+            state.editPreview = EditPreview(view: .tiktok, safeArea: true)
+            for (width, height) in [(1280, 800), (1000, 700)] {
+                NSLog("[snapshot] editpreview claude %dx%d %@", width, height, theme.rawValue)
+                w.setFrame(NSRect(x: original.minX, y: original.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                try? await Task.sleep(for: .seconds(1.5))
+                capture(dir.appendingPathComponent("mac_editpreview_claude_\(theme.rawValue)_\(width)x\(height).png"))
+                let bar = fitProbes.values.filter { p in barLabels.contains { p.name.hasPrefix($0) } }
+                let cut = truncatedLabels().filter { l in barLabels.contains { l.hasPrefix($0) } }
+                if bar.isEmpty {
+                    lines.append("CUT edit preview bar \(width)x\(height) \(theme.rawValue) with Claude: the View bar wasn't drawn")
+                } else if cut.isEmpty {
+                    lines.append("FITS edit preview bar \(width)x\(height) \(theme.rawValue) with Claude (\(bar.count) labels)")
+                } else {
+                    lines.append(contentsOf: cut.map { "CUT edit preview bar \(width)x\(height) \(theme.rawValue) with Claude \($0)" })
+                }
+                // The docked Claude panel (owner review, run 591: at 1000 × 700 it ran off the right edge): its header with
+                // the ✕, the tabs, the chat row with "+", and the composer with Send must be drawn and lie inside the window;
+                // the header's status and the tab labels must be whole.
+                state.probeTick += 1
+                try? await Task.sleep(for: .seconds(0.3))
+                let winW = w.contentLayoutRect.width
+                let panelKeys = ["edit claude panel", "edit claude header", "edit claude close", "edit claude tabs", "chat sessions", "chat composer"]
+                var panelCut: [String] = []
+                for key in panelKeys {
+                    guard let f = state.composerFrames[key], f.width > 0 else { panelCut.append("\(key) not drawn"); continue }
+                    if f.minX < -0.5 || f.maxX > winW + 0.5 { panelCut.append("\(key) at \(Int(f.minX))–\(Int(f.maxX)) of \(Int(winW)) pt") }
+                }
+                panelCut += truncatedLabels().filter { l in ["claude panel status", "segment Chat", "segment History", "segment Playbook"].contains { l.hasPrefix($0) } }
+                lines.append(contentsOf: panelCut.isEmpty ? ["FITS edit claude panel \(width)x\(height) \(theme.rawValue) (\(panelKeys.count) parts inside \(Int(winW)) pt)"]
+                                                         : panelCut.map { "CUT edit claude panel \(width)x\(height) \(theme.rawValue) \($0)" })
+            }
+            state.editPreview = nil
+            state.claudeTab = nil
+            state.chatSample = false
             w.setFrame(original, display: true)
             store.openEdit(takeId: nil)
             try? await Task.sleep(for: .seconds(1))
@@ -1005,6 +1099,9 @@ enum SnapshotRunner {
     /// Draws the window's content into a PNG. Also asks `screencapture` for the same window (`…_sc.png`), which
     /// includes layer-only content (video, some images) if the runner allows screen capture.
     static func capture(_ url: URL) {
+        // A heartbeat for mac.yml's stall watchdog (120 s without a log line = a stall; run 596 false-alarmed on a walk
+        // that only took pictures).
+        NSLog("[snapshot] shot %@", url.lastPathComponent)
         guard let window = mainWindow, let view = window.contentView else { return }
         view.layoutSubtreeIfNeeded()
         if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {

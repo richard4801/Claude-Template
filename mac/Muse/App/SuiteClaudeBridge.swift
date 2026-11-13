@@ -600,6 +600,9 @@ extension AppStore {
             inputs += SuiteScreen.inputs(suite.composerSlots.slots)
             request = shotRequest
         }
+        // The pinned model as the server labels it ("<Model> · <Provider>", the Model pill's words): Claude and the
+        // panel's context strip name it the same way.
+        if composerPinnedModel != nil { settings["modelLabel"] = .string(String(composerModelLabel.prefix(120))) }
         return SuiteScreen.json(tool: toolName, request: request, inputs: inputs, settings: settings, at: at)
     }
 

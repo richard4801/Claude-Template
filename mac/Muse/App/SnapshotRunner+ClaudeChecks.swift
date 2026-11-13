@@ -183,8 +183,10 @@ extension SnapshotRunner {
         store.oneClaude.open = true
         _ = await until(5) { SnapshotRunner.state.composerFrames["claude model line"] != nil }
         if let h = SnapshotRunner.state.composerFrames["claude header"], let ml = SnapshotRunner.state.composerFrames["claude model line"] {
-            line(h.width <= OneClaudePanel.width + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
-                 "header \(Int(h.width))×\(Int(h.height)), model line height \(Int(ml.height))")
+            // The panel floats and resizes (bundle-7): the header must fit the panel as drawn, not the old docked 380.
+            let panelWidth = SnapshotRunner.state.composerFrames["one claude panel"]?.width ?? CGFloat(FloatingClaudePanel.defaultWidth)
+            line(h.width <= panelWidth + 1 && ml.height <= 40 && h.height <= 140, "panel header fits",
+                 "header \(Int(h.width))×\(Int(h.height)) in a panel \(Int(panelWidth)) wide, model line height \(Int(ml.height))")
         } else {
             line(true, "panel header fits", "not measured (the panel wasn't drawn in this run)")
         }
@@ -194,12 +196,18 @@ extension SnapshotRunner {
         // that session, not on the Edit home.
         if let blank = try? await fakeMuse.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId, device: "check")) {
             store.performOneClaudeOpen(ClaudeUI(page: "edit", id: blank.id, label: "Blank edit"))
+            let opened = Date()
             let inEditor = await until(15) { store.screen == .edit && store.oneClaude.viewPage?.ids?["sessionId"] == blank.id }
-            line(inEditor, "open_page edit session", "the editor opened on Claude's session \(blank.id): \(inEditor) (page \(store.claudePage.line))")
+            line(inEditor, "open_page edit session", "the editor opened on Claude's session \(blank.id): \(inEditor) after "
+                 + String(format: "%.1f s", Date().timeIntervalSince(opened)) + " (page \(store.claudePage.line))")
             store.go(.home)
         } else {
             line(false, "open_page edit session", "couldn't make a blank session in demo mode")
         }
+
+        // Owner bug, build 597: open_page on Claude's 16:9 session WHILE Edit is already open on that take. The editAttach
+        // task's own open() cancelled it mid-load, so the editor stayed on its local copy (9:16, not live, dead buttons).
+        await openPageOnOpenTake(store, fakeMuse: fakeMuse, until: until, line: line)
 
         lines.append("ALL DONE")
         write()

@@ -10,7 +10,7 @@ import { uid } from '../lib/util.js';
 
 export type PermissionAsk = { id: string; toolName: string; input: Record<string, unknown>; toolUseId?: string; createdAt: number; expiresAt: number };
 type Pending = { ask: PermissionAsk; userId: string; resolve: (text: string) => void; timer: NodeJS.Timeout; upload?: boolean };
-export type UploadResult = { uploadId: string; kind: 'image' | 'clip'; url?: string; name?: string };
+export type UploadResult = { uploadId: string; kind: 'image' | 'clip' | 'audio'; url?: string; name?: string; durationSec?: number };
 
 /** An unanswered card ends the call after this long (Claude Code's own wait is raised past it on the Mac). */
 export const PERMISSION_WAIT_MS = 60 * 60 * 1000;
@@ -129,13 +129,13 @@ export const PERMISSION_TOOL = {
 /** upload_local_file (owner and members): a file on the person's Mac, uploaded after they say yes. */
 export const UPLOAD_TOOL = {
   name: 'upload_local_file', scope: 'assets:write', title: 'Upload a file from this Mac (asks first)',
-  description: 'Uploads a file from the person\'s Mac to MUSE after they approve it on a card ("Upload … to MUSE?"). Images (JPEG, PNG, WebP, HEIC, up to 10 MB) and videos (MP4, MOV, up to 500 MB). Returns {uploadId, kind, url} or {error}. Then use the uploadId: suite_add_reference for an image in the shot, watch for a video. Keys, passwords and tokens are never uploaded. Use it when the person names a file on their Mac; the path must be absolute or start with ~/.',
+  description: 'Uploads a file from the person\'s Mac to MUSE after they approve it on a card ("Upload … to MUSE?"). Images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 500 MB) and sound (MP3, M4A, AAC, WAV, or an MP4 with sound only, up to 200 MB; the Mac reads the file to tell). Returns {uploadId, kind: "image" | "clip" | "audio", url, durationSec?} or {error}. Then use the uploadId: suite_add_reference for an image in the shot, watch for a video; for a sound, apply_edit_ops {"op":"add_music","asset":{"upload":uploadId,"durationSec":durationSec}}, then auto_captions with that item\'s itemId to caption a song. Keys, passwords and tokens are never uploaded. Use it when the person names a file on their Mac; the path must be absolute or start with ~/.',
   inputSchema: { type: 'object', properties: { path: { type: 'string', maxLength: 1024, description: 'The file on the Mac (absolute, or ~/…)' },
-    purpose: { type: 'string', enum: ['reference', 'clip', 'chat'], description: 'What it is for (default chat)' } }, required: ['path'], additionalProperties: false },
+    purpose: { type: 'string', enum: ['reference', 'clip', 'audio', 'chat'], description: 'What it is for (default chat)' } }, required: ['path'], additionalProperties: false },
   run: async (env: { ctx: Ctx; user: AuthUser }, a: Record<string, unknown>) => {
     const path = typeof a.path === 'string' ? a.path.trim() : '';
     if (!path || !(path.startsWith('/') || path.startsWith('~/')) || path.length > 1024) throw badRequest('path: an absolute path on the Mac, or ~/…');
-    const purpose = a.purpose === 'reference' || a.purpose === 'clip' ? a.purpose : 'chat';
+    const purpose = a.purpose === 'reference' || a.purpose === 'clip' || a.purpose === 'audio' ? a.purpose : 'chat';
     const text = await permissionsOf(env.ctx).upload(env.user, path, purpose);
     return { mcpContent: [{ type: 'text', text }] };
   },

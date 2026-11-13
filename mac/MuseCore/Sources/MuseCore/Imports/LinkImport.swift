@@ -226,7 +226,8 @@ extension FakeMuseAPI: LinkImportAPI {
         guard check.allowed else { throw ApiError(check.code ?? "link_unsupported", check.reason ?? RecreateLinks.fallback) }
         var c = uploadClip(SampleData.sampleMeta, file: nil, progress: nil)
         c.name = name ?? LinkImport.name(title: nil, platform: check.platform) ?? c.name
-        let r = LinkImportResult(clip: c, sourceUrl: check.url, platform: check.platform)
+        // As on the server, an import carries its upload (Edit puts it in Uploads).
+        let r = LinkImportResult(clip: c, sourceUrl: check.url, platform: check.platform, uploadId: "up_import_\(c.id)")
         demoImports.removeAll { $0.clip?.id == c.id }
         demoImports.insert(r, at: 0)
         return r

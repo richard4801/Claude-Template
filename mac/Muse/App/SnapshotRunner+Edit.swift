@@ -91,6 +91,8 @@ extension SnapshotRunner {
         await controlsCheck(store, takeId: "rx_full", note: note)
         // Real AI editing (2026-11-08): paid helpers ask first with their price; the guardrails' answers show at the button.
         await paidHelpersCheck(store, takeId: "rx_full", note: note)
+        // Edit → Uploads as a media bin (owner 2026-11-12): empty and with six uploads, dark and light (SnapshotRunner+Uploads.swift).
+        await uploadsShots(store, media: media, dir: dir, note: note)
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.go(.home)
         // Round 2's new screens (outfit full view, Settings, the model picker): every control pressed once.
@@ -309,7 +311,9 @@ extension SnapshotRunner {
         let st = await ax.stats()
         note("AX nodes \(st.nodes), actionable \(st.actionable), error \(st.error), screen \(store.screen), sample: \(st.sample)")
         guard ready else { note("FAIL controls: the editor (\(editorMarker)) never appeared to accessibility on \(takeId)"); return }
-        let deny: Set<String> = ["Import", ".cube import", "Import video or picture", "Import picture", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
+        let deny: Set<String> = [".cube import",
+                                 // The media panel (owner 2026-11-12): its Add menus and the empty drop zone open file panels or the microphone.
+                                 "Add to Uploads", "Add a sticker", "Add a song from this Mac", "Add files from this Mac", "Stop recording the voice-over",
                                  "Back", "Close the editor", "Translate…",
                                  // The Claude chat's "+" opens a file panel (a modal that would stop the walk).
                                  "Attach images",

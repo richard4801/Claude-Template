@@ -37,8 +37,8 @@ struct NewSwapScreen: View {
             .frame(minHeight: 0, maxHeight: .infinity)
             .padding(.bottom, Space.s4)
             Rectangle().fill(t.roles.hairline).frame(height: 1)
-            ComposerBottomBar()
-                .padding(.top, Space.s3)
+            NewSwapBar()
+                .frame(height: 64)
                 .accessibilityIdentifier("newSwap.bottomBar")
         }
     }
@@ -53,6 +53,18 @@ struct NewSwapStage: View {
     @State private var showResult = false
     @State private var dropping = false
     @State private var replaceLibrary = false
+    @State private var replaceOpen = false
+
+    private func replaceItem(_ title: String, _ run: @escaping () -> Void) -> some View {
+        Button {
+            replaceOpen = false
+            run()
+        } label: {
+            Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading).padding(.horizontal, Space.s3).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 
     var body: some View {
         Group {
@@ -100,26 +112,35 @@ struct NewSwapStage: View {
                 Spacer(minLength: Space.s2)
                 Text("\(Take.clock(c.durationSec)), \(c.width) × \(c.height)").font(t.scale.caption.font).monospacedDigit()
                     .foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
-                Menu {
-                    Button("From the Library…") { replaceLibrary = true }
-                    Button("Upload a file…") { store.pickClip() }
-                    Button("Paste a link…") { store.openLinkImport(.swap) }
-                } label: {
-                    HStack(spacing: Space.s1) { Text("Replace").font(t.scale.label.font); Ph("caret-down", 12) }.foregroundStyle(t.roles.ink)
+                // A button with a popover, not a Menu (a menu label draws its icon unsized).
+                Button { replaceOpen.toggle() } label: {
+                    HStack(spacing: Space.s1) {
+                        Text("Replace").font(t.scale.label.font)
+                        Ph("caret-down", 12).frame(width: 14, height: 14)
+                    }
+                    .foregroundStyle(t.roles.ink)
+                    .padding(.horizontal, Space.s3).frame(height: 32)
+                    .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                    .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .buttonStyle(.plain).fixedSize()
                 .help("Use another video")
-                .popover(isPresented: $replaceLibrary, arrowEdge: .bottom) {
-                    NewSwapLibraryPicker { replaceLibrary = false }
-                        .environment(store)
-                        .environment(\.theme, PickerTheme.dark)
-                        .environment(\.colorScheme, .dark)
+                .popover(isPresented: $replaceOpen, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        replaceItem("From the Library…") { replaceLibrary = true }
+                        replaceItem("Upload a file…") { store.pickClip() }
+                        replaceItem("Paste a link…") { store.openLinkImport(.swap) }
+                    }
+                    .padding(.vertical, Space.s2).frame(width: 200)
+                    .environment(\.theme, t)
                 }
+                .sheet(isPresented: $replaceLibrary) { NewSwapLibrarySheet { replaceLibrary = false }.environment(store).environment(\.theme, t) }
             }
             .frame(maxWidth: 600)
             .frame(height: 32)
+            .padding(.top, Space.s2)
             TakeViewer(media: ViewerMedia(id: c.id, videoURL: store.clipVideo, poster: store.clipPoster, width: c.width, height: c.height, label: c.name),
-                       context: .source, autoplay: false, startMuted: true, previewControls: false)
+                       context: .source, autoplay: false, startMuted: true)
                 .id(c.id)
                 .frame(maxHeight: .infinity)
             NewSwapTrimmer(clip: c)
@@ -130,67 +151,97 @@ struct NewSwapStage: View {
 
 // MARK: The source (empty state)
 
+/// Before a video (approved mockup newswap-mac-empty): a centred drop zone with one line of what this is and the three
+/// ways in. Library opens a picker sheet; it never fills the stage.
 struct NewSwapSourcePicker: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
-    enum Tab: String, CaseIterable { case library = "Library", upload = "Upload", link = "Paste link" }
-    @State private var tab: Tab = .library
+    @State private var libraryOpen = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s4) {
-            VStack(alignment: .leading, spacing: Space.s1) {
+        VStack(spacing: Space.s4) {
+            VStack(spacing: Space.s1) {
                 Text("Add the video to remix").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
-                Text("Pick a take from your Library, upload a file, or paste a link. You can also drop a file anywhere here.")
-                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                Text("Drop a video here, or pick one. Then switch on what should change.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Picker("Source", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            HStack(spacing: Space.s2) {
+                source("From the Library", icon: "squares-four") { libraryOpen = true }
+                source("Upload a file", icon: "upload-simple") { store.pickClip() }
+                source("Paste a link", icon: "link") { store.openLinkImport(.swap) }
             }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            switch tab {
-            case .library: library
-            case .upload: upload
-            case .link: link
-            }
+            Text("MP4 or MOV. MUSE checks the clip after it arrives.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(Space.s6)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
+        .overlay(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+        .sheet(isPresented: $libraryOpen) { NewSwapLibrarySheet { libraryOpen = false }.environment(store).environment(\.theme, t) }
     }
 
-    private var library: some View {
+    private func source(_ title: String, icon: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            HStack(spacing: Space.s2) {
+                Ph(icon, 15).frame(width: 18, height: 18)
+                Text(title).font(t.scale.label.font).lineLimit(1).fixedSize()
+            }
+            .foregroundStyle(t.roles.ink)
+            .padding(.horizontal, Space.s3).frame(height: 36)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+}
+
+/// The Library as a sheet: finished video takes as 9:16 tiles with their length and name; one click uses it.
+struct NewSwapLibrarySheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var onDone: () -> Void
+
+    var body: some View {
         let list = store.extendableTakes
-        return Group {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            HStack {
+                Text("Pick a video from your Library").font(t.scale.title.font).foregroundStyle(t.roles.ink)
+                Spacer()
+                MButton("Cancel") { onDone() }.keyboardShortcut(.cancelAction)
+            }
             if list.isEmpty {
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    Text("No finished videos yet. Upload one, or paste a link.").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
-                    MButton("Upload a file…") { tab = .upload; store.pickClip() }
-                }
+                Text("No finished videos yet. Upload one, or paste a link.").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 120), spacing: Space.s4, alignment: .top)], alignment: .leading,
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(104), spacing: Space.s4, alignment: .top), count: 5), alignment: .leading,
                               spacing: Space.s5) {
                         ForEach(list) { item in
-                            Button { store.useTakeAsRemixSource(item.take) } label: { tile(item) }
-                                .buttonStyle(.plain)
-                                .help("Use \(item.take.caption)")
-                                .accessibilityLabel("Use \(item.take.caption)")
+                            Button {
+                                store.useTakeAsRemixSource(item.take)
+                                onDone()
+                            } label: { tile(item) }
+                            .buttonStyle(.plain)
+                            .help("Use \(item.take.caption)")
+                            .accessibilityLabel("Use \(item.take.caption)")
                         }
                     }
                     .padding(.vertical, 2)
                 }
             }
         }
+        .padding(Space.s5)
+        .frame(width: 5 * 104 + 4 * Space.s4 + 2 * Space.s5 + 16, height: 560)
+        .background(t.roles.canvas)
     }
 
     private func tile(_ item: ExtendTakeOption) -> some View {
-        let r = ViewerFrame.aspect(width: item.take.width, height: item.take.height, isVideo: true)
-        return VStack(alignment: .leading, spacing: Space.s1) {
-            Color.clear
-                .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                .overlay {
-                    // The take at its own shape inside the tile's 9:16 cell, centred on the page tone.
-                    MuseImage(ref: item.take.thumb).aspectRatio(r, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
-                }
+        VStack(alignment: .leading, spacing: Space.s1) {
+            MuseImage(ref: item.take.thumb)
+                .frame(width: 104, height: 185)
+                .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
                 .overlay(alignment: .bottomLeading) {
                     if let s = item.source.seconds {
                         Text(Take.clock(s)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
@@ -199,28 +250,86 @@ struct NewSwapSourcePicker: View {
                             .padding(Space.s2)
                     }
                 }
-            Text(item.take.caption).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+            Text(item.take.caption).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).frame(width: 104, alignment: .leading)
         }
         .contentShape(Rectangle())
     }
+}
 
-    private var upload: some View {
-        VStack(spacing: Space.s3) {
-            Text("Drop a video here, or").font(t.scale.body.font).foregroundStyle(t.roles.ink2)
-            MButton("Choose a file…") { store.pickClip() }
-            Text("MP4 or MOV. MUSE checks it after the upload.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-        }
-        .frame(maxWidth: .infinity, maxHeight: 280)
-        .background(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+// MARK: The bottom bar
+
+/// Approved mockup: Clip sound, the model (text, bordered, with a caret), why Auto picked it, then the length and
+/// resolution and Generate · $x. Nothing else: no quality pill, no prompt box.
+struct NewSwapBar: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    private var d: RemixDraft { store.suite.remix }
+    private var row: RemixModels.Row? { store.suite.remixModels?.models.first { d.engineModel == nil ? $0.auto : $0.model == d.engineModel } }
+    private var price: GeneratePrice { GeneratePrice.of(store.suite.remixEstimate) }
+    private var pricing: Bool { store.suite.remixEstimate == nil && store.suite.remixError == nil && store.remixRequest != nil }
+    private var canGenerate: Bool { store.suite.remixEstimate?.remix?.trim.needed != true && price.canGenerate }
+
+    private var label: String {
+        if store.clip == nil { return "Generate" }
+        if pricing { return "Generate · Pricing…" }
+        return price.buttonText
     }
 
-    private var link: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            Text("A link to a video on the web. MUSE downloads it and checks it, as with an upload.")
-                .font(t.scale.body.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-            MButton("Paste a link…") { store.openLinkImport(.swap) }
+    /// "10 s, 1080p": the part used and the model's resolution.
+    private var spec: String? {
+        guard let c = store.clip else { return nil }
+        let secs = d.range.map { $0.to - $0.from } ?? min(c.durationSec, row?.limits.maxSeconds ?? c.durationSec)
+        let res = row?.price.resolution
+        return ["\(Pricing.trimNum(secs)) s", res].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// The one line under the model: why Auto picked it, what's missing, or the price problem.
+    private var why: String {
+        if store.clip == nil { return "The model and price show once a video is added" }
+        if let m = d.missing { return m }
+        if let e = store.suite.remixError { return e }
+        if let p = price.problem { return p }
+        if d.engineModel == nil { return store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why ?? "" }
+        return row?.adaptedLine ?? row?.detail ?? ""
+    }
+
+    var body: some View {
+        HStack(spacing: Space.s3) {
+            Button { store.suite.remix.keepAudio.toggle() } label: {
+                HStack(spacing: Space.s2) {
+                    Ph(d.keepAudio ? "speaker-high" : "speaker-slash", 15).frame(width: 18, height: 18)
+                    Text("Clip sound").font(t.scale.label.font).lineLimit(1).fixedSize()
+                        .fitProbe("composer pill sound") // CI fit check: a wrapped or cut label is a CUT line
+                }
+                .foregroundStyle(d.keepAudio ? t.roles.ink : t.roles.ink2)
+                .padding(.horizontal, Space.s3).frame(height: 32)
+                .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).fixedSize()
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill sound") } } // CI fit check: the bar's pills
+            .help(d.keepAudio ? "The clip's own sound goes back on the take (click to turn off)" : "No sound from the clip (click to keep it)")
+            .accessibilityLabel(d.keepAudio ? "Clip sound on" : "Clip sound off")
+            RemixModelPill()
+                .padding(.horizontal, Space.s1)
+                .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                .fixedSize()
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill model") } }
+            Text(why).font(t.scale.caption.font).foregroundStyle(d.missing != nil ? t.roles.caution : t.roles.ink2)
+                .lineLimit(1).truncationMode(.tail)
+                .help(why)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(-1)
+            if let spec { Text(spec).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize() }
+            GenerateButton(label: label, accessibility: label, enabled: store.clip != nil && canGenerate, busy: store.suite.generating, height: 40) {
+                store.generateRemix()
+            }
+            .background { if SnapshotRunner.dir != nil { GenerateFrameProbe(label: label) } } // CI fit check: Generate on screen
+            .fixedSize()
+            .layoutPriority(2)
         }
-        .frame(maxWidth: 560, alignment: .leading)
+        .padding(.top, Space.s3)
     }
 }
 

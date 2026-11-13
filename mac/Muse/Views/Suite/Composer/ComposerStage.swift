@@ -26,20 +26,33 @@ struct ComposerStage: View {
         }
     }
 
+    /// A finished take on the stage: the take viewer sizes it to its own shape and puts its actions under it, so the stage
+    /// gives it the whole width (build 582: inside the tool's 9:16 box the actions were cut and the take squeezed out).
+    private var showsTake: Bool {
+        guard !store.suite.generating else { return false }
+        let job = pinned.flatMap { id in store.jobs.first { $0.id == id } } ?? store.stageJob(store.suite.composer.tool)
+        if case .ready = SuiteResultState.of(job) { return true }
+        return false
+    }
+
     var body: some View {
-        let width = ratio.map { maxPictureHeight * $0 }
+        let width = showsTake ? nil : ratio.map { maxPictureHeight * $0 }
         VStack(spacing: Space.s3) {
             Spacer(minLength: 0)
             Group {
-                if let r = ratio {
+                if showsTake {
+                    ComposerMediaPane(pinned: pinned)
+                        .frame(maxHeight: maxPictureHeight + ViewerActionRow.height + Space.s3 + 40)
+                } else if let r = ratio {
                     ComposerMediaPane(pinned: pinned).aspectRatio(r, contentMode: .fit)
                 } else {
                     ComposerMediaPane(pinned: pinned)
                 }
             }
-            .frame(maxWidth: width ?? .infinity, maxHeight: maxPictureHeight)
+            .frame(maxWidth: width ?? .infinity, maxHeight: showsTake ? maxPictureHeight + ViewerActionRow.height + Space.s3 + 40 : maxPictureHeight)
+            // The strip of this tool's takes: never narrower than its thumbnails need (build 582 cut it at the 9:16 width).
             ComposerTakesStrip(pinned: $pinned)
-                .frame(maxWidth: width ?? .infinity, alignment: .leading)
+                .frame(maxWidth: max(width ?? .infinity, 560), alignment: .center)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

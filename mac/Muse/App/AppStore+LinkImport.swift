@@ -24,6 +24,9 @@ final class LinkImportState {
     /// This studio's earlier imports (GET /v1/imports), to pick one again without a download.
     var recent: [LinkImportResult] = []
     @ObservationIgnored var task: Task<Void, Never>?
+    /// The open edit's Uploads (EditSuiteView sets it while an edit is open): an import started from Edit lands there.
+    /// Returns whether the edit took it.
+    @ObservationIgnored var deliverToEdit: ((LinkImportResult) -> Bool)?
 }
 
 extension AppStore {
@@ -215,7 +218,13 @@ extension AppStore {
             }
             Task { await forceReload() }
         case .edit:
-            showToast(r.clip.map { "Imported \($0.name). It's in Uploads." } ?? "Imported. It's in Uploads.")
+            // Into the open edit's Uploads (the import's upload is a video upload the editor takes as it is); without an
+            // open edit it's in the Library, and the toast says so.
+            if let deliver = linkImport.deliverToEdit, deliver(r) {
+                showToast(r.clip.map { "Imported \($0.name). It's in Uploads." } ?? "Imported. It's in Uploads.")
+            } else {
+                showToast(r.clip.map { "Imported \($0.name). It's in the Library." } ?? "Imported. It's in the Library.")
+            }
             Task { await forceReload() }
         }
     }

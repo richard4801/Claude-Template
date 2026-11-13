@@ -216,6 +216,30 @@ extension FakeMuseAPI {
         emitEdit(EditSessionEvent(sessionId: id, op: "closed"))
     }
 
+    /// Continue a draft: open sessions, the last worked on (changed or left) first, without history.
+    public func recentEditSessions(limit: Int) throws -> [EditSession] {
+        try editOwner()
+        // Like the server: when the person last worked on it (the view), else its last change.
+        func touched(_ s: EditSession) -> Double { s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? (s.updatedAt ?? 0) }
+        return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted { touched($0) > touched($1) }
+            .prefix(max(1, min(50, limit))).map { s in
+                var v = view(editSessions[s.id]!, history: false)
+                v.lastTouchedAt = touched(s)
+                return v
+            }
+    }
+
+    /// Where the editor was left (the server's clamps; `at` stamped here).
+    public func saveEditSessionView(sessionId id: String, _ v: EditSessionView) throws {
+        _ = try record(id)
+        var v = v
+        v.playhead = v.playhead.map { min(24 * 3600, max(0, $0)) }
+        v.zoom = v.zoom.map { min(2000, max(1, $0)) }
+        // Strictly later than the last change, so "left last" beats "changed last" even within one millisecond.
+        v.at = max(Double(nowMs()), (editSessions[id]?.session.updatedAt ?? 0) + 1)
+        editSessions[id]?.session.view = v
+    }
+
     // MARK: Claude's side (tests and demos)
 
     /// The stored session (revision, project, history, the app's answers).

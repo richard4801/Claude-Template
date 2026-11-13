@@ -116,6 +116,45 @@ extension SnapshotRunner {
                          note: note)
         note(store.clip != nil ? "DONE link_import swap source \(store.clip?.name ?? "")" : "FAIL link_import: no swap source after importing")
         store.closeLinkImport()
+        await linkToUploadsCheck(store, note: note)
+    }
+
+    /// Edit's media bin (owner 2026-11-12): a link imported while an edit is open lands in its Uploads as a video tile
+    /// (the import's own upload), "+" places it, and with no edit open the toast says the Library. Uses editCheck's 15 s
+    /// test video as the open edit's take.
+    static func linkToUploadsCheck(_ store: AppStore, note: (String) -> Void) async {
+        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        let raw: [String: Any] = ["id": "rx_link", "kind": "take", "title": "Link check", "videoUrl": long.absoluteString,
+                                  "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
+        guard FileManager.default.fileExists(atPath: long.path), let data = try? JSONSerialization.data(withJSONObject: raw),
+              let take = try? JSONDecoder().decode(Take.self, from: data) else { note("FAIL link_import edit: no test video"); return }
+        store.takes.removeAll { $0.id == take.id }
+        store.takes.insert(take, at: 0)
+        defer { store.takes.removeAll { $0.id == take.id } }
+        guard let s = store.makeEditSuiteSession(takeId: take.id) else { note("FAIL link_import edit: no editor session"); return }
+        await s.load()
+        defer { s.close(); store.linkImport.deliverToEdit = nil }
+        store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
+        func importOnce() async {
+            store.openLinkImport(.edit)
+            store.linkImport.text = demoImportLink
+            store.startLinkImport()
+            for _ in 0..<40 where store.linkImport.open || store.linkImport.fetching { try? await Task.sleep(for: .seconds(0.25)) }
+            store.closeLinkImport()
+        }
+        let before = s.uploads.count
+        await importOnce()
+        guard s.uploads.count == before + 1, let u = s.uploads.first, u.kind == .video else {
+            note("FAIL link_import edit: not in Uploads (\(s.uploads.count) uploads, was \(before))")
+            return
+        }
+        // The same link again: the same tile, not a second one.
+        await importOnce()
+        if s.uploads.count != before + 1 { note("FAIL link_import edit: importing the same link twice made \(s.uploads.count - before) tiles") }
+        let clips = s.project.mainClips.count
+        s.placeUpload(u.id)
+        if s.project.mainClips.count != clips + 1 { note("FAIL link_import edit: + didn't place the imported video") }
+        note("DONE link_import edit: \(u.name) in Uploads, placed with +")
     }
 
     static let demoImportLink = "https://www.tiktok.com/@muse.demo/video/7300000000000000000"

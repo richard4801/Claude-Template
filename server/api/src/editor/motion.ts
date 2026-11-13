@@ -140,6 +140,46 @@ export function findPeaks(m: MotionFrames, o: { minGapSec?: number; sensitivity?
   return kept.slice(0, o.max ?? 200).sort((a, b) => a.i - b.i).map(k => ({ t: round3(k.i / m.fps), strength: round3(k.v / top) }));
 }
 
+export type Impact = { t: number; strength: number; kind: 'start' | 'stop' | 'cut' };
+/**
+ * Impact frames (song_notes workflow): where motion STOPS sharply (a landing or contact: frames that moved, then the
+ * next few frames still; t is the frame where it comes to rest), where it STARTS suddenly (still frames, then movement;
+ * t is the first moving frame), and hard cuts. Moving = above the clip's baseline (median + k·MAD). Strength 0–1 within
+ * starts and stops (relative to the sharpest), the cut's own strength for cuts. At least 0.15 s between two of a kind.
+ */
+export function findImpacts(m: MotionFrames, o: { sensitivity?: number; cuts?: Cut[] } = {}): Impact[] {
+  const n = m.energy.length;
+  if (n < 4) return [];
+  const cuts = o.cuts ?? findCuts(m);
+  const cutFrames = new Set(cuts.flatMap(c => { const f = Math.round(c.t * m.fps); return [f - 1, f, f + 1]; }));
+  const e = Array.from(m.energy, (v, i) => (cutFrames.has(i) ? Math.min(m.energy[i - 2] ?? 0, m.energy[i + 2] ?? 0) : v));
+  // A clip may move half the time (a landing every second): "still" is its quietest frames (sensor noise, grain), and
+  // "moving" is a share of the way from there to its busy frames, not a deviation from the median.
+  const sorted = [...e].sort((a, b) => a - b), q = (f: number) => sorted[Math.min(n - 1, Math.floor(f * n))]!;
+  const still = q(0.1), busy = q(0.95);
+  const act = still + Math.max(0.003, 0.2 * (busy - still)) * ((o.sensitivity ?? 3) / 3);
+  const mx = (a: number, b: number) => { let v = 0; for (let k = Math.max(0, a); k <= Math.min(n - 1, b); k++) v = Math.max(v, e[k]!); return v; };
+  const quiet = (v: number, ref: number) => v - still <= 0.3 * (ref - still);
+  const cands: { i: number; v: number; kind: 'start' | 'stop' }[] = [];
+  for (let i = 1; i < n; i++) {
+    // stop at i: frames i-2..i moved, i+1..i+3 still (frame i is the last that differs from the one before it)
+    const pre = mx(i - 2, i), post = mx(i + 1, i + 3);
+    if (i + 1 < n && pre >= act && quiet(post, pre) && e[i]! - still >= 0.12 * (pre - still)) cands.push({ i, v: pre - post, kind: 'stop' });
+    // start at i: frames i-3..i-1 still, i..i+2 moved
+    const before = mx(i - 3, i - 1), after = mx(i, i + 2);
+    if (i >= 1 && after >= act && quiet(before, after) && e[i]! - still >= 0.3 * (after - still)) cands.push({ i, v: after - before, kind: 'start' });
+  }
+  const gap = Math.max(1, Math.round(0.15 * m.fps)), out: Impact[] = [];
+  for (const kind of ['start', 'stop'] as const) {
+    const list = cands.filter(c => c.kind === kind).sort((a, b) => b.v - a.v), kept: typeof list = [];
+    for (const c of list) if (kept.every(k => Math.abs(k.i - c.i) >= gap)) kept.push(c);
+    const top = kept[0]?.v ?? 1;
+    for (const k of kept) out.push({ t: round3(k.i / m.fps), strength: round3(k.v / top), kind });
+  }
+  for (const c of cuts) out.push({ t: c.t, strength: c.strength, kind: 'cut' });
+  return out.sort((a, b) => a.t - b.t);
+}
+
 /** The energy curve downsampled to at most `points` values (for drawing), 0–1 relative to its maximum. */
 export function energyCurve(m: MotionFrames, points = 120): { everySec: number; values: number[] } {
   const n = m.energy.length, step = Math.max(1, Math.ceil(n / points));

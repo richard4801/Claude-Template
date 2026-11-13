@@ -9,6 +9,9 @@ import { SUITE_TOOLS } from '../suite/mcpTools.js';
 import { CHAT_TOOLS } from './chatTools.js';
 import { WATCH_TOOLS } from './watch.js';
 import { LISTEN_TOOLS } from './listen.js';
+import { SONG_TOOLS } from './songNotes.js';
+import { SYNC_MAP_TOOLS } from './syncMap.js';
+import { SYNC_TOOLS } from '../editor/syncHits.js';
 import { ISSUE_TOOLS } from './issues.js';
 import { CARD_TOOLS } from './cards.js';
 import { APP_TOOLS } from './appTools.js';
@@ -39,6 +42,9 @@ export const CHAT_REGISTRY: ChatTool[] = [
   // Claude watches videos (plans/claude-video-vision.md Stage 1): free, studio-scoped, on every page.
   ...tag(WATCH_TOOLS, ['any'], () => true),
   ...tag(LISTEN_TOOLS, ['any'], () => true),
+  // Editing to individual notes (claude/songNotes.ts): song_notes and find_impacts are free reads, everyone, own studio.
+  ...tag(SONG_TOOLS, ['any'], () => true),
+  ...tag(SYNC_MAP_TOOLS, ['any'], () => true),
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
   // Chat cards (claude/cards.ts): a plan checklist and a clip's key moments, drawn as cards in the person's panel; free.
@@ -56,6 +62,7 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(SUITE_TOOLS, ['suite'], () => true),
   // Editing with Claude is the owner's (editor/sessions.ts owner()).
   ...tag(EDIT_TOOLS, ['edit', 'recreate'], () => false),
+  ...tag(SYNC_TOOLS, ['edit', 'recreate'], () => false),
   ...tag(RECREATE_TOOLS, ['recreate'], t => !OWNER_ONLY.has(t.name)),
 ];
 export const registryByName = new Map(CHAT_REGISTRY.map(t => [t.name, t]));

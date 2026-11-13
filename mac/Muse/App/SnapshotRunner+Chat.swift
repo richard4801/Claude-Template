@@ -66,7 +66,7 @@ extension SnapshotRunner {
             store.go(.home)
             state.overlay = "chat"
             try? await Task.sleep(for: .seconds(2.5))
-            lines.append(drawnLine("claude_camera", theme, needsReply: true))
+            lines.append(await drawnLineWaiting("claude_camera", theme, needsReply: true))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_camera.png"))
             // …mid-reply: a tool step running, bold text still arriving, Stop in place of Send.
             NSLog("[snapshot] chat camera streaming %@", theme.rawValue)
@@ -98,7 +98,7 @@ extension SnapshotRunner {
             }
             if !store.recreate.claudeOpen { store.toggleRecreateClaude() }
             try? await Task.sleep(for: .seconds(2.5))
-            lines.append(drawnLine("claude_recreate", theme, needsReply: true))
+            lines.append(await drawnLineWaiting("claude_recreate", theme, needsReply: true))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_recreate.png"))
             store.recreate.closeClaude()
             store.leaveRecreateReference()
@@ -113,7 +113,7 @@ extension SnapshotRunner {
                 if !store.takes.contains(where: { $0.id == take.id }) { store.takes.insert(take, at: 0) }
                 store.openEdit(takeId: take.id)
                 try? await Task.sleep(for: .seconds(7))
-                lines.append(drawnLine("claude_edit", theme, needsReply: true))
+                lines.append(await drawnLineWaiting("claude_edit", theme, needsReply: true))
                 capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_edit.png"))
                 state.claudeTab = nil
                 store.openEdit(takeId: nil)
@@ -128,7 +128,7 @@ extension SnapshotRunner {
             fillDemoDraft(store)
             store.showSuiteClaudeForReview()
             try? await Task.sleep(for: .seconds(2.5))
-            lines.append(drawnLine("claude_suite", theme, needsReply: true))
+            lines.append(await drawnLineWaiting("claude_suite", theme, needsReply: true))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_claude_suite.png"))
             // The demo reply finishes on its own (the first time slowly): wait for it, so it can't pull the next shots
             // back to the Suite.
@@ -229,6 +229,19 @@ extension SnapshotRunner {
     /// The screens in the window right now (each screen's ScreenProbe), sorted.
     static func screensInWindow() -> [String] {
         ScreenProbe.Probe.all.allObjects.filter { $0.window != nil }.map(\.name).sorted()
+    }
+
+    /// drawnLine, but waiting up to 5 s more for the chat to be drawn (run 596: claude_edit d 0 replies, claude_suite c no
+    /// composer, both fine in run 595). The line says how long it took, so a slow screen shows as a number, not a flake.
+    private static func drawnLineWaiting(_ screen: String, _ theme: ThemeID, needsReply: Bool) async -> String {
+        let start = Date()
+        var line = drawnLine(screen, theme, needsReply: needsReply)
+        while line.hasPrefix("CUT"), Date().timeIntervalSince(start) < 5 {
+            try? await Task.sleep(for: .seconds(0.25))
+            line = drawnLine(screen, theme, needsReply: needsReply)
+        }
+        let waited = Date().timeIntervalSince(start)
+        return waited >= 0.2 ? line + String(format: " (after +%.1f s)", waited) : line
     }
 
     /// The chat is up with its rows: a reply drawn (the sample's markdown), else CUT.

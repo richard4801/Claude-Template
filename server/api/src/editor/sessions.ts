@@ -2,6 +2,7 @@
 // EditProject v2 per take, shared by the owner's apps and Claude. Every change is a JSON Patch with its inverse, so
 // every change (Claude's too) is undoable; changes reach the apps as `edit` events. Owner only.
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
+import { newSafeIssues, previewOf, type EditPreview } from './safeArea.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -25,7 +26,9 @@ type Session = typeof editSessions.$inferSelect;
 type OpRow = typeof editOps.$inferSelect;
 export const SESSION_LIMITS = { historyKept: 500, historyShown: 60, presenceSec: 45, frameWaitMs: 12_000, claudeOpsPerMin: 120 } as const;
 
-export type Presence = { device: string; label: string; platform: 'android' | 'mac' | 'other'; canRender: boolean; at: number };
+export type Presence = { device: string; label: string; platform: 'android' | 'mac' | 'other'; canRender: boolean; at: number;
+  /** Edit's preview on that app: the view (Clean, TikTok …) and the red safe-area box (plans/edit-platform-preview.md). */
+  preview?: EditPreview };
 type Waiter = { resolve: (v: { uploadId: string } | null) => void; timer: NodeJS.Timeout };
 export type AppRequest = { id: string; kind: 'save' | 'export'; name?: string; preset?: Record<string, unknown>; device: string; status: 'sent' | 'done' | 'failed'; versionId?: string; error?: string; at: number };
 export type Pending = { id: string; kind: string; label: string; estimateUsd: number; args: Record<string, unknown>; status: 'waiting' | 'approved' | 'declined' | 'running' | 'done' | 'failed'; jobId?: string; createdAt: number };
@@ -63,8 +66,9 @@ export class EditSessions {
     return { id: s.id, takeId: s.takeId, baseVersionId: s.baseVersionId ?? undefined, revision: s.revision, project: s.project as M.EditProject,
       durationSec: M.durationSec(s.project as M.EditProject), status: s.status, updatedBy: s.updatedBy, updatedAt: s.updatedAt,
       pending: (s.pending as Pending[]).filter(p => p.status === 'waiting' || p.status === 'running'),
-      online: this.online(s.id).map(p => ({ device: p.device, label: p.label, platform: p.platform, canRender: p.canRender })),
-      requests: (this.requests.get(s.id) ?? []).slice(-10), ...(hist ? { history: hist } : {}) };
+      online: this.online(s.id).map(p => ({ device: p.device, label: p.label, platform: p.platform, canRender: p.canRender, ...(p.preview ? { preview: p.preview } : {}) })),
+      requests: (this.requests.get(s.id) ?? []).slice(-10), ...(s.view ? { view: s.view } : {}), lastTouchedAt: lastTouched(s),
+      ...(hist ? { history: hist } : {}) };
   }
   private emit(s: Session, ev: Record<string, unknown>) {
     void this.ctx.hub.emit(s.studioId, v => (v.role === 'owner' ? { type: 'edit', sessionId: s.id, ...ev } : null));
@@ -237,7 +241,9 @@ export class EditSessions {
     await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, project);
     const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · '), ...(b.meta ? { meta: b.meta } : {}) }); // label: a tool's own name for the change (workstream 1)
     const notice = (r.entry?.meta as { notice?: string } | null | undefined)?.notice;
+    const safe = newSafeIssues(s.project as M.EditProject, project, this.preview(id));
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project),
+      ...(safe ? { safeAreaWarnings: safe } : {}),
       ...(notice && r.entry ? { notice, undoEntryId: r.entry.id, tell: 'Say this to the person in one plain line (their app shows it with Undo; undo_edit with this entryId reverts exactly it).' } : {}) };
   }
   private limit(id: string) {
@@ -269,6 +275,25 @@ export class EditSessions {
     await this.row(u, id);
     return (await this.ctx.db.select().from(editOps).where(eq(editOps.sessionId, id)).orderBy(desc(editOps.id)).limit(Math.min(500, Math.max(1, limit)))).map(this.entryView);
   }
+  /**
+   * Where the editor was left (continue a draft): playhead, zoom, tabs, platform view, the project's name. Stored as is
+   * (cleaned), no revision and no history; `at` marks the session as the one last worked on.
+   */
+  async saveView(u: AuthUser, id: string, b: Record<string, unknown>) {
+    const s = await this.row(u, id);
+    const view = cleanView(b.view ?? b);
+    await this.ctx.db.update(editSessions).set({ view }).where(eq(editSessions.id, s.id));
+    return { ok: true, view };
+  }
+  /** Open sessions, the one last worked on (edited or looked at) first: the apps' "Recent edits". */
+  async recent(u: AuthUser, limit = 20) {
+    this.owner(u);
+    const rows = await this.ctx.db.select().from(editSessions).where(and(eq(editSessions.studioId, u.studioId), eq(editSessions.status, 'open')))
+      .orderBy(desc(editSessions.updatedAt)).limit(100);
+    // Sorted on when the person last worked on it (lastTouched), not on the last change from anyone.
+    const top = rows.sort((a, b) => lastTouched(b) - lastTouched(a)).slice(0, Math.min(50, Math.max(1, limit)));
+    return Promise.all(top.map(r => this.view(r, { history: false })));
+  }
   async close(u: AuthUser, id: string) {
     const s = await this.row(u, id);
     await this.ctx.db.update(editSessions).set({ status: 'closed', updatedAt: Date.now() }).where(eq(editSessions.id, s.id));
@@ -277,15 +302,17 @@ export class EditSessions {
   }
 
   // ------------------------------------------------------------------ apps online: presence, frames, save/export
-  touch(u: AuthUser, id: string, b: { device?: unknown; label?: unknown; platform?: unknown; canRender?: unknown }) {
+  touch(u: AuthUser, id: string, b: { device?: unknown; label?: unknown; platform?: unknown; canRender?: unknown; preview?: unknown }) {
     this.owner(u);
     if (typeof b.device !== 'string' || !b.device) throw badRequest('device: required');
     const m = this.presence.get(id) ?? new Map<string, Presence>();
     m.set(b.device, { device: b.device.slice(0, 40), label: typeof b.label === 'string' ? b.label.slice(0, 60) : b.device, platform: b.platform === 'android' || b.platform === 'mac' ? b.platform : 'other',
-      canRender: b.canRender !== false, at: Date.now() });
+      canRender: b.canRender !== false, at: Date.now(), ...(previewOf(b.preview) ? { preview: previewOf(b.preview)! } : {}) });
     this.presence.set(id, m);
     return { ok: true, online: this.online(id).length };
   }
+  /** The preview of the app the person used last (the freshest presence that sent one). */
+  preview(id: string): EditPreview | null { return this.online(id).filter(p => p.preview).sort((a, b) => b.at - a.at)[0]?.preview ?? null; }
   leave(id: string, device: string) { this.presence.get(id)?.delete(device); }
   renderer(id: string) { return this.online(id).filter(p => p.canRender).sort((a, b) => (a.platform === 'mac' ? -1 : 0) - (b.platform === 'mac' ? -1 : 0) || b.at - a.at)[0] ?? null; }
 
@@ -470,4 +497,29 @@ export class EditSessions {
     }
     return null;
   }
+}
+
+/**
+ * When the person last worked on the edit: the last time an app saved where its editor was (`view.at`, which the apps
+ * refresh while it's open and as it changes). An edit no app has opened yet (Claude's) counts by its last change. Changes
+ * that land later without anyone there (a paid helper's result, Claude's note) don't make an edit "the last one you were
+ * editing" (run 604).
+ */
+export const lastTouched = (s: Pick<Session, 'updatedAt' | 'view'>) => {
+  const at = Number((s.view as { at?: unknown } | null)?.at);
+  return Number.isFinite(at) && at > 0 ? at : s.updatedAt;
+};
+
+/** An app's editor view, kept to known fields of sane size (an older or newer app's extra fields are dropped). */
+export function cleanView(v: unknown): Record<string, unknown> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw badRequest('view: an object');
+  const o = v as Record<string, unknown>, out: Record<string, unknown> = {};
+  const num = (k: string, min: number, max: number) => { const n = Number(o[k]); if (o[k] !== undefined && o[k] !== null && Number.isFinite(n)) out[k] = Math.min(max, Math.max(min, n)); };
+  const str = (k: string, max: number) => { if (typeof o[k] === 'string' && o[k]) out[k] = (o[k] as string).slice(0, max); };
+  num('playhead', 0, 24 * 3600); num('zoom', 1, 2000);
+  str('tab', 40); str('binTab', 40); str('mode', 40); str('selection', 120); str('title', 120); str('device', 40);
+  // The platform view ("tiktok", …); null = none (kept, so "off" is remembered).
+  if (o.safeArea === null) out.safeArea = null; else str('safeArea', 40);
+  out.at = Date.now();
+  return out;
 }
