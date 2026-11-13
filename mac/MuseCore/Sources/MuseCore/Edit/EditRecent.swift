@@ -16,7 +16,7 @@ public struct EditSessionView: Codable, Hashable, Sendable {
     /// timeline | captions
     public var mode: String?
     public var selection: String?
-    /// Platform view (`EditSuite.SafeArea` raw value); "off" (or the server's null) = none.
+    /// The platform preview: a `PreviewSkin` raw value with the red box on; "off" (or the server's null) = the box off.
     public var safeArea: String?
     public var title: String?
     public var at: Double?
@@ -66,7 +66,7 @@ extension EditSuiteState {
     /// Where the editor is now (the app adds the bin tab, the mode and the title it keeps itself).
     public func viewSnapshot(binTab: EditSuite.BinTab? = nil, mode: String? = nil, title: String? = nil) -> EditSessionView {
         EditSessionView(playhead: EditV2.r3(max(0, playhead.isFinite ? playhead : 0)), zoom: EditV2.r3(zoom), tab: tab.rawValue,
-                        binTab: binTab?.rawValue, mode: mode, selection: selection, safeArea: safeArea?.rawValue ?? "off", title: title)
+                        binTab: binTab?.rawValue, mode: mode, selection: selection, safeArea: preview.safeArea ? preview.view.rawValue : "off", title: title)
     }
 
     /// Puts the editor back where it was left. Anything the edit no longer has (a deleted clip, a playhead past the end, an
@@ -75,7 +75,11 @@ extension EditSuiteState {
         if let p = v.playhead, p.isFinite { playhead = min(max(0, p), max(0, duration)) }
         if let z = v.zoom, z.isFinite { zoom = min(Self.zoomRange.upperBound, max(Self.zoomRange.lowerBound, z)) }
         if let s = v.tab, let tb = EditSuite.InspectorTab(rawValue: s) { tab = tb }
-        if let s = v.safeArea { safeArea = s == "off" ? nil : (EditSuite.SafeArea(rawValue: s) ?? safeArea) }
+        // The platform preview (plans/edit-platform-preview.md): "off" turns the red box off, a view's name shows that view
+        // with the box on; anything else (an older app's value) keeps the preview as it is.
+        if let s = v.safeArea {
+            if s == "off" { preview.safeArea = false } else if let skin = PreviewSkin(rawValue: s) { preview = EditPreview(view: skin, safeArea: true) }
+        }
         if let sel = v.selection, project.tracks.contains(where: { $0.items.contains { $0.id == sel } }) { selection = sel }
     }
 }

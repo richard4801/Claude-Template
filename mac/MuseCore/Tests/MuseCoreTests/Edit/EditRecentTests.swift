@@ -19,7 +19,7 @@ final class EditRecentTests: XCTestCase {
         s.playhead = 2.25
         s.zoom = 140
         s.tab = .audio
-        s.safeArea = .reels
+        s.preview = EditPreview(view: .reels, safeArea: true)
         let id = try XCTUnwrap(p.tracks.flatMap(\.items).last?.id)
         s.selection = id
         let v = s.viewSnapshot(binTab: .uploads, mode: "timeline", title: "Café cut")
@@ -33,7 +33,7 @@ final class EditRecentTests: XCTestCase {
         XCTAssertEqual(fresh.playhead, 2.25, accuracy: 0.001)
         XCTAssertEqual(fresh.zoom, 140)
         XCTAssertEqual(fresh.tab, .audio)
-        XCTAssertEqual(fresh.safeArea, .reels)
+        XCTAssertEqual(fresh.preview, EditPreview(view: .reels, safeArea: true))
         XCTAssertEqual(fresh.selection, id)
         XCTAssertEqual(EditSuite.binTab(back), .uploads)
         XCTAssertTrue(v.samePlace(back))
@@ -41,13 +41,13 @@ final class EditRecentTests: XCTestCase {
 
     func testPlatformViewOffIsRemembered() throws {
         var s = EditSuiteState(try fixture())
-        s.safeArea = nil
+        s.preview.safeArea = false
         let v = s.viewSnapshot()
         XCTAssertEqual(v.safeArea, "off")
         var fresh = EditSuiteState(try fixture())
-        XCTAssertNotNil(fresh.safeArea)
+        XCTAssertTrue(fresh.preview.safeArea)
         fresh.restore(v)
-        XCTAssertNil(fresh.safeArea)
+        XCTAssertFalse(fresh.preview.safeArea)
         // The server keeps "off" as null.
         let fromServer = try JSONDecoder().decode(EditSessionView.self, from: Data(#"{"safeArea":null,"zoom":80}"#.utf8))
         XCTAssertEqual(fromServer.safeArea, "off")
@@ -64,7 +64,7 @@ final class EditRecentTests: XCTestCase {
         XCTAssertEqual(s.zoom, EditSuiteState.zoomRange.upperBound)
         XCTAssertEqual(s.tab, before.tab)
         XCTAssertEqual(s.selection, before.selection)
-        XCTAssertEqual(s.safeArea, before.safeArea)
+        XCTAssertEqual(s.preview, before.preview)
         XCTAssertNil(EditSuite.binTab(EditSessionView(binTab: "nope")))
         s.restore(EditSessionView(playhead: -.infinity, zoom: .nan))
         XCTAssertEqual(s.zoom, EditSuiteState.zoomRange.upperBound)

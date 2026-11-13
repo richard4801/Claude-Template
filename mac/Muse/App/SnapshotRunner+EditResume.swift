@@ -61,7 +61,7 @@ extension SnapshotRunner {
         guard let first = await editorReady("rz_resume"), first.isReady else {
             note("FAIL open_and_move: the editor didn't open (\(String(describing: store.suite.editCurrent?.phase)))"); note("ALL DONE"); return
         }
-        first.view { $0.zoom = 150; $0.tab = .audio; $0.safeArea = nil }
+        first.view { $0.zoom = 150; $0.tab = .audio; $0.preview.safeArea = false }
         first.binTab = .uploads
         first.seek(2.5)
         try? await Task.sleep(for: .seconds(2))   // the view is saved after a short pause
@@ -91,7 +91,7 @@ extension SnapshotRunner {
             check("reopen_zoom", abs(s.state.zoom - 150) < 0.01, "zoom \(s.state.zoom)")
             check("reopen_tab", s.state.tab == .audio, "tab \(s.state.tab)")
             check("reopen_bin_uploads", s.binTab == .uploads, "bin \(s.binTab)")
-            check("reopen_platform_view_off", s.state.safeArea == nil, "safe area \(String(describing: s.state.safeArea))")
+            check("reopen_platform_view_off", !s.state.preview.safeArea, "preview \(s.state.preview)")
             capture(dir.appendingPathComponent("mac_a_edit_resumed.png"))
         } else {
             note("FAIL reopen_last: Continue draft opened \(store.suite.editCurrent?.take.id ?? "nothing"), not the last edit")
