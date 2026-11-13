@@ -336,7 +336,7 @@ struct ChatUserBubble: View {
                     .contextMenu {
                         Button("Copy") { ChatPasteboard.copy(text) }
                     }
-                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat bubble \(text.count)") } }
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat bubble \(text.count)", refreshOnProbe: false) } }
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -415,7 +415,7 @@ struct ChatAssistantText: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Claude: \(ChatMarkdown.plainText(blocks))")
         .accessibilityAction(named: "Copy") { ChatPasteboard.copy(text) }
-        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat reply \(text.count)") } }
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "chat reply \(text.count)", refreshOnProbe: false) } }
     }
 
     private func copy() {

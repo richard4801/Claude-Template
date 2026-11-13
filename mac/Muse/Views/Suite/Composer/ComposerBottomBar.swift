@@ -658,13 +658,16 @@ struct GenerateFrameProbe: View {
 /// that runs under "How is this priced?" or Generate (or off the window) from one drawn whole.
 struct ComposerBarFrame: View {
     var key: String
+    /// Also rewrite the last frame on each probe tick. Off for chat rows: a row the lazy transcript no longer lays out (scrolled
+    /// away) would rewrite a frame from an older window size (run 613: chat_long measured 1440-wide frames at 1000).
+    var refreshOnProbe = true
     var body: some View {
         GeometryReader { g in
             let f = g.frame(in: .global)
             Color.clear
                 .onAppear { set(f) }
                 .onChange(of: f) { _, v in set(v) }
-                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in set(f) }
+                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in if refreshOnProbe { set(f) } }
                 .onDisappear { SnapshotRunner.state.composerFrames[key] = nil }
         }
     }
