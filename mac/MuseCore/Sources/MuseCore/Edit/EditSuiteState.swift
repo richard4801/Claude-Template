@@ -1240,9 +1240,11 @@ public struct EditSuiteState: Sendable {
     @discardableResult
     public mutating func setRatio(_ r: EditSuite.Ratio, framing: [String: Double] = [:]) -> Bool {
         let fromRatio = export.ratio
-        let size = r.canvas(shortSide: export.resolution.rawValue)
+        // The canvas keeps its own resolution (run 604: a 1920×1080 edit opened over a 432×768 take came back 1280×720,
+        // because the export setting still held the first project's class).
+        let size = r.canvas(shortSide: min(project.canvas.width, project.canvas.height))
         // Straight back to the shape before the last switch, nothing else changed: exactly as it was.
-        if let m = shapeReturn, m.after == project, m.canvas.width == size.width, m.canvas.height == size.height {
+        if restoresShape(r), let m = shapeReturn {
             export.ratio = r
             let ok = apply { p in
                 var q = p
@@ -1293,7 +1295,8 @@ public struct EditSuiteState: Sendable {
         if ok {
             var keep: [String: E.Transform?] = [:]
             for c in before.mainClips { keep[c.id] = .some(c.transform) }
-            shapeReturn = ShapeReturn(canvas: before.canvas, transforms: keep, after: project)
+            shapeReturn = ShapeReturn(from: EditSuite.Ratio.nearest(width: before.canvas.width, height: before.canvas.height),
+                                      canvas: before.canvas, transforms: keep, after: project)
         } else {
             export.ratio = fromRatio
         }
@@ -1301,7 +1304,14 @@ public struct EditSuiteState: Sendable {
     }
 
     /// The last shape switch: what to put back when the next switch returns to the shape before it.
+    /// Switching to `r` puts the last switch back exactly (no face framing needed).
+    public func restoresShape(_ r: EditSuite.Ratio) -> Bool {
+        guard let m = shapeReturn else { return false }
+        return m.from == r && m.after == project
+    }
+
     public struct ShapeReturn: Sendable {
+        var from: EditSuite.Ratio
         var canvas: E.Canvas
         var transforms: [String: E.Transform?]
         var after: E.Project

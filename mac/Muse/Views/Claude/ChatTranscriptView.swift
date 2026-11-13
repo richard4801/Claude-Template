@@ -96,6 +96,7 @@ struct ChatTranscriptView: View {
     @State private var pinned = true
     @State private var showJump = false
     @State private var lastFrame: CGRect = .zero
+    @State private var followPending = false
     private static let endId = "chat_end"
 
     var body: some View {
@@ -160,14 +161,20 @@ struct ChatTranscriptView: View {
     private func follow(_ f: CGRect, viewport: CGFloat, proxy: ScrollViewProxy) {
         let distance = f.maxY - viewport
         let moved = abs(f.minY - lastFrame.minY) > 0.5
-        let grew = abs(f.height - lastFrame.height) > 0.5
+        // Only real growth (new text): the lazy stack re-estimating rows makes the height wobble both ways.
+        let grew = f.height > lastFrame.height + 0.5
         lastFrame = f
         if moved {
             let p = distance < 48
             if p != pinned { pinned = p }
-        } else if grew, pinned, distance > 1 {
-            // Only when the new text pushed the end out of view, so a scroll can't feed itself.
-            DispatchQueue.main.async { proxy.scrollTo(Self.endId, anchor: .bottom) }
+        } else if grew, pinned, distance > 1, !followPending {
+            // Only when the new text pushed the end out of view, and one scroll at a time (runs 595 and 604: a streaming
+            // reply scrolled, re-measured and scrolled again on every frame; the main thread never rested).
+            followPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                proxy.scrollTo(Self.endId, anchor: .bottom)
+                followPending = false
+            }
         }
         let j = !pinned && distance > 120
         if j != showJump { showJump = j }

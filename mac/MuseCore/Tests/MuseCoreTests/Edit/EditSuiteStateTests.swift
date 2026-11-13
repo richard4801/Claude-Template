@@ -347,6 +347,15 @@ final class EditSuiteStateTests: XCTestCase {
         XCTAssertNotEqual(s.project.mainClips[0].transform?.x, 0.667)
         XCTAssertTrue(s.setRatio(.landscape))
         XCTAssertEqual(s.project, start, "straight back: canvas and transforms exactly as they were")
+        // Run 604: the export setting held a smaller class than the canvas (a 1080p edit opened over a 720p take); a
+        // switch keeps the canvas's own resolution.
+        s.export.resolution = .p720
+        XCTAssertTrue(s.setRatio(.portrait))
+        XCTAssertEqual(s.project.canvas.width, 1080)
+        XCTAssertEqual(s.project.canvas.height, 1920)
+        XCTAssertTrue(s.restoresShape(.landscape))
+        XCTAssertTrue(s.setRatio(.landscape))
+        XCTAssertEqual(s.project, start)
         XCTAssertEqual(s.export.ratio, .landscape)
         assertValid(s)
 

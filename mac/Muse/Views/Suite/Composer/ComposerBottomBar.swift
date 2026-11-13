@@ -662,10 +662,14 @@ struct ComposerBarFrame: View {
         GeometryReader { g in
             let f = g.frame(in: .global)
             Color.clear
-                .onAppear { SnapshotRunner.state.composerFrames[key] = f }
-                .onChange(of: f) { _, v in SnapshotRunner.state.composerFrames[key] = v }
-                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in SnapshotRunner.state.composerFrames[key] = f }
+                .onAppear { set(f) }
+                .onChange(of: f) { _, v in set(v) }
+                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in set(f) }
                 .onDisappear { SnapshotRunner.state.composerFrames[key] = nil }
         }
+    }
+
+    private func set(_ f: CGRect) {
+        if SnapshotRunner.state.composerFrames[key] != f { SnapshotRunner.state.composerFrames[key] = f }
     }
 }

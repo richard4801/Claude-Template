@@ -37,6 +37,8 @@ final class EditSuiteSession {
     private(set) var loadWasCancelled = false
     /// close() ran: a load still running (it outlives the view) starts nothing live after it.
     @ObservationIgnored private(set) var closed = false
+    /// Face framing found per source moment ("asset@tenths"): nil when there is no face.
+    @ObservationIgnored private var faceCache: [String: Double?] = [:]
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
     var mode: Mode = .timeline { didSet { viewChanged() } }
@@ -858,8 +860,34 @@ final class EditSuiteSession {
     // MARK: Shape
 
     /// Changes the canvas shape; each clip is re-framed to keep the faces Vision finds in view.
+    /// Owner bug (build 597): face framing ran on all 66 clips one after another on every click (about 10 s each), so
+    /// Shape clicks queued up and landed minutes late. Switching straight back needs none (the transforms come back as
+    /// they were); otherwise each clip's face is found once per source moment and kept, four clips at a time.
     func setRatio(_ r: EditSuite.Ratio) async {
-        let framing = await EditSuiteMedia.framing(project, files: files)
+        if state.restoresShape(r) { edit { $0.setRatio(r) }; return }
+        var framing: [String: Double] = [:]
+        var todo: [(id: String, key: String, url: URL, t: Double)] = []
+        for c in project.mainClips {
+            guard let url = files[c.asset] else { continue }
+            let t = (c.inSec + c.outSec) / 2
+            let key = "\(c.asset)@\(Int((t * 10).rounded()))"
+            if let known = faceCache[key] { if let x = known { framing[c.id] = x } } else { todo.append((c.id, key, url, t)) }
+        }
+        await withTaskGroup(of: (String, String, Double?).self) { g in
+            var next = 0
+            while next < min(4, todo.count) {
+                let j = todo[next]; next += 1
+                g.addTask { (j.id, j.key, await EditSuiteMedia.faceCentreX(j.url, at: j.t)) }
+            }
+            while let (id, key, x) = await g.next() {
+                faceCache[key] = .some(x)
+                if let x { framing[id] = x }
+                if next < todo.count {
+                    let j = todo[next]; next += 1
+                    g.addTask { (j.id, j.key, await EditSuiteMedia.faceCentreX(j.url, at: j.t)) }
+                }
+            }
+        }
         edit { $0.setRatio(r, framing: framing) }
     }
 
